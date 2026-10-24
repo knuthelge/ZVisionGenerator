@@ -849,7 +849,7 @@ class WebRunner:
             mode="extend" if getattr(args, "extend_source", None) is not None else "i2v" if request.image_path else "t2v",
             low_memory=getattr(args, "low_memory", True),
             loras=loras,
-            **video_load_options(request.model_family, config, request.model_name or model_ref, upscale=bool(request.upscale)),
+            **video_load_options(request.model_family, config, request.model_name or model_ref, upscale=bool(request.upscale), quiet=True),
         )
         run_video_batch(
             backend=backend,

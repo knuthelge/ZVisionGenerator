@@ -69,6 +69,14 @@ class TestTailStart:
         assert _tail_start_seconds(240, 24.0, video_start=0.5) == pytest.approx((240 - 25) / 24 - 2.0 + 0.5)
 
 
+class TestTailStartWithFrames:
+    def test_the_wanted_frame_count_moves_the_start(self):
+        assert _tail_start_seconds(240, 24.0, frames=22) == pytest.approx((240 - 22) / 24 - 2.0)
+
+    def test_the_default_is_the_carry_length(self):
+        assert _tail_start_seconds(240, 24.0) == _tail_start_seconds(240, 24.0, frames=CARRY_FRAMES)
+
+
 class TestTailCommand:
     def test_reads_the_first_video_stream_as_raw_rgb_without_dropping_frames(self):
         command = _build_tail_command("clip.mp4", 3.5)
@@ -148,6 +156,40 @@ class TestReadTailFrames:
         assert frames.shape == (CARRY_FRAMES, HEIGHT, WIDTH, 3)
 
 
+class TestReadTailFramesCount:
+    """The ``frames`` argument sets how many frames at the end are kept."""
+
+    def test_keeps_the_last_22_frames_in_order(self):
+        popen = _popen_returning(b"".join(_frame(i) for i in range(30)))
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(video_tail.subprocess, "Popen", popen)
+            frames = _read_tail_frames("clip.mp4", width=WIDTH, height=HEIGHT, fps=24.0, frame_count=240, frames=22)
+        assert frames.shape == (22, HEIGHT, WIDTH, 3)
+        assert [int(frame[0, 0, 0]) for frame in frames] == list(range(8, 30))
+
+    def test_seeks_to_where_the_shorter_tail_starts(self):
+        popen = _popen_returning(b"".join(_frame(i) for i in range(22)))
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(video_tail.subprocess, "Popen", popen)
+            _read_tail_frames("clip.mp4", width=WIDTH, height=HEIGHT, fps=24.0, frame_count=240, frames=22)
+        command = popen.call_args_list[0].args[0]
+        assert command[command.index("-ss") + 1] == f"{_tail_start_seconds(240, 24.0, frames=22):.6f}"
+
+    def test_a_short_read_names_the_wanted_count(self):
+        popen = _popen_returning(_frame(1) * 3)
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(video_tail.subprocess, "Popen", popen)
+            with pytest.raises(RuntimeError, match="last 22 frames"):
+                _read_tail_frames("clip.mp4", width=WIDTH, height=HEIGHT, fps=24.0, frame_count=10, frames=22)
+
+    def test_the_source_wrapper_passes_the_count_on(self):
+        source = make_extend_source(width=WIDTH, height=HEIGHT, frame_count=10, has_audio=False)
+        popen = _popen_returning(b"".join(_frame(i) for i in range(22)))
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(video_tail.subprocess, "Popen", popen)
+            assert read_source_tail(source, frames=22).shape == (22, HEIGHT, WIDTH, 3)
+
+
 def _tail_of(path: Path) -> tuple[np.ndarray, ExtendSource]:
     probe = probe_video(path)
     source = build_extend_source(path, probe, None)
@@ -205,6 +247,15 @@ class TestRealTail:
         assert tail.shape == (25, probe.height, probe.width, 3)
         assert np.array_equal(tail, expected)
 
+    def test_the_last_22_frames_are_the_end_of_the_longer_tail(self, tmp_path):
+        clip = tmp_path / "long.mp4"
+        encode_frames(numbered_frames(200), clip, "-g", "12")
+        source = build_extend_source(clip, probe_video(clip), None)
+        tail = read_source_tail(source, frames=22)
+        assert tail.shape == (22, 32, 64, 3)
+        assert np.array_equal(tail, decode_frames(clip, 64, 32)[178:200])
+        assert np.array_equal(tail, read_source_tail(source)[-22:])
+
     def test_clip_shorter_than_the_carry_raises(self, tmp_path):
         clip = tmp_path / "tiny.mp4"
         encode_frames(numbered_frames(10), clip, "-g", "12")
@@ -249,6 +300,14 @@ class TestTailAudioCommand:
         assert (command[command.index("-ac") + 1], command[command.index("-ar") + 1]) == ("2", "16000")
 
 
+class TestTailAudioCommandWithFrames:
+    def test_the_shorter_tail_starts_later_and_lasts_less(self):
+        command = build_tail_audio_command(make_extend_source(frame_count=49, fps=24.0, video_start=0.5), 32000, frames=22)
+        assert command[command.index("-ss") + 1] == f"{0.5 + 27 / 24:.6f}"
+        assert command[command.index("-t") + 1] == f"{22 / 24:.6f}"
+        assert command[command.index("-ar") + 1] == "32000"
+
+
 @REAL
 class TestReadSourceTailAudio:
     def test_returns_the_tails_sound_from_its_position_in_the_file(self, tmp_path):
@@ -263,6 +322,16 @@ class TestReadSourceTailAudio:
         lead = round((1 - 23 / 24) * 16000)  # the tail starts at frame 23, before the tone starts at 1 s
         assert np.abs(samples[:, : lead - 80]).max() < 0.01
         assert np.abs(samples[:, lead + 160 :]).max() > 0.3  # the mono tone is upmixed to stereo at -3 dB
+
+    def test_a_22_frame_tail_is_the_end_of_the_25_frame_tail(self, tmp_path):
+        path = tmp_path / "clip.mov"
+        tone = "aevalsrc=0.5*sin(2*PI*440*t):s=44100:d=2"
+        raw = ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "64x32", "-r", "24", "-i", "-"]
+        ffmpeg("-f", "lavfi", "-i", tone, *raw, "-map", "1:v", "-map", "0:a", "-c:v", "libx264", "-c:a", "pcm_s16le", "-shortest", str(path), data=numbered_frames(48).tobytes())
+        source = build_extend_source(path, probe_video(path), None)
+        samples = read_source_tail_audio(source, 32000, frames=22)
+        assert samples.shape[0] == 2 and samples.dtype == np.float32
+        assert abs(samples.shape[1] - round(22 / 24 * 32000)) <= 32
 
     def test_a_clip_without_sound_is_an_error(self, tmp_path):
         path = tmp_path / "clip.mp4"

@@ -1567,6 +1567,7 @@ class TestVideoFamilyDispatch:
             "default_steps": 8,
             "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
             "extend_frame_step": 17,
+            "carry_frames": 22,
             "capabilities": {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": False},
             **preset,
         }

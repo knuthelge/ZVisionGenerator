@@ -43,6 +43,10 @@ describe('asset actions', () => {
     expect(referenceParams(makeAsset({ prompt: '' }), 'video')).toEqual({ workflow: 'img2vid', image_path: '/outputs/out/a.png' });
   });
 
+  it('makes an asset the last frame with its path alone: no text, no first frame', () => {
+    expect(referenceParams(makeAsset(), 'last')).toEqual({ workflow: 'img2vid', end_image_path: '/outputs/out/a.png' });
+  });
+
   it('clamps the aspect ratio and defaults to square without dimensions', () => {
     expect(assetAspect(makeAsset({ width: 1024, height: 512 }))).toBe(2);
     expect(assetAspect(makeAsset({ width: 4000, height: 500 }))).toBe(2);

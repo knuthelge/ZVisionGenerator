@@ -94,17 +94,18 @@ class TestModelQuantize:
         with pytest.raises(SystemExit):
             _build_parser().parse_args(["model", "-i", "x.safetensors", "--quantize", "6"])
 
-    def test_stored_quant_names_are_reserved(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("name", ["mine@q8", "mine@mlx-te4"])
+    def test_stored_quant_names_are_reserved(self, tmp_path, monkeypatch, name):
         from zvisiongenerator.converters.convert_checkpoint import _cmd_model
 
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "data"))
         dummy = tmp_path / "dummy.safetensors"
         dummy.write_bytes(b"fake")
-        args = SimpleNamespace(input=str(dummy), name="mine@q8", model_type="zimage", base_model="Tongyi-MAI/Z-Image-Turbo", copy=False, quantize=None)
+        args = SimpleNamespace(input=str(dummy), name=name, model_type="zimage", base_model="Tongyi-MAI/Z-Image-Turbo", copy=False, quantize=None)
 
         with pytest.raises(SystemExit):
             _cmd_model(args)
-        assert not (tmp_path / "data" / "models" / "mine@q8").exists()
+        assert not (tmp_path / "data" / "models" / name).exists()
 
     def test_store_quantized_copy_saves_next_to_the_model(self, tmp_path, monkeypatch):
         import json

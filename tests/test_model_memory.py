@@ -494,9 +494,17 @@ class TestLtxClipMemoryFitGolden:
     def test_a_family_without_an_estimate_gives_none_without_a_filesystem_lookup(self):
         finder = MagicMock(return_value=None)
 
-        result = clip_memory_fit("example/model", budget=self._BUDGET, find_local_dir=finder, env={}, family="h3", **self._CLIPS[0][0])
+        result = clip_memory_fit("example/model", budget=self._BUDGET, find_local_dir=finder, env={}, family="wan", **self._CLIPS[0][0])
 
         assert result is None
+        finder.assert_not_called()
+
+    @pytest.mark.parametrize("family", ["wan", "h3"])
+    def test_a_family_other_than_ltx_never_reaches_the_ltx_estimate_on_a_discrete_gpu(self, family):
+        finder = MagicMock(return_value=None)
+        budget = MemoryBudget(10 * _GIB, system_bytes=30 * _GIB)
+
+        assert clip_memory_fit("example/model", budget=budget, find_local_dir=finder, env={}, family=family, **self._CLIPS[0][0]) is None
         finder.assert_not_called()
 
     @pytest.mark.parametrize("family", _FAMILY_ARGS)
@@ -772,3 +780,70 @@ class TestClipMemoryFitOnCuda:
 
         assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=finder, model_name="not-ltx", app_config={}, **self._CLIP) is None
         finder.assert_not_called()
+
+
+class TestH3ClipMemoryFit:
+    """MiniMax H3 on unified memory: the family dispatch reaches the macOS estimate, without any file lookup."""
+
+    _BUDGET = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
+    _CLIP = {"width": 768, "height": 448, "frames": 124, "low_memory": False}
+
+    def test_the_reference_clip_is_estimated_without_looking_for_files(self):
+        finder = MagicMock(return_value=None)
+
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
+
+        assert fit == {"status": "fits", "required_gb": 15.0, "budget_gb": 24.0, "expected_seconds": 23 * 60}
+        finder.assert_not_called()
+
+    def test_the_forwards_set_the_time(self):
+        four = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", forwards=4, **self._CLIP)
+
+        assert four is not None and four["expected_seconds"] < 23 * 60
+
+    def test_an_image_mode_holds_the_vision_tower_while_the_prompt_is_encoded(self):
+        fit = clip_memory_fit("example/h3", budget=MemoryBudget(16 * _GIB, unified_bytes=24 * _GIB), family="h3", mode="i2v", **self._CLIP)
+
+        assert fit is not None
+        assert (fit["status"], fit["required_gb"]) == ("tight", 17.7)
+
+    def test_a_length_h3_cannot_take_has_no_estimate(self):
+        assert clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **{**self._CLIP, "frames": 121}) is None
+
+    def test_no_budget_has_no_estimate(self):
+        assert clip_memory_fit("example/h3", budget=None, family="h3", **self._CLIP) is None
+
+
+class TestH3CudaClipMemoryFit:
+    """MiniMax H3 on a discrete GPU: the family dispatch reaches the CUDA estimate, without any file lookup."""
+
+    _BUDGET = MemoryBudget(10 * _GIB, system_bytes=30 * _GIB)
+    _CLIP = {"width": 864, "height": 480, "frames": 124, "low_memory": True}
+
+    def test_the_clip_is_estimated_without_looking_for_files(self):
+        finder = MagicMock(return_value=None)
+
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, find_local_dir=finder, family="h3", **self._CLIP)
+
+        assert fit is not None
+        assert (fit["status"], fit["kind"], fit["resource"], fit["family"]) == ("fits", "discrete", "gpu", "h3")
+        assert abs(fit["expected_seconds"] - 276) <= 2
+        finder.assert_not_called()
+
+    def test_the_mode_forwards_and_loras_reach_the_estimate(self):
+        plain = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **self._CLIP)
+        tuned = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", mode="i2v", forwards=4, loras_bytes=_GIB, **self._CLIP)
+
+        assert plain is not None and tuned is not None
+        assert tuned["expected_seconds"] < plain["expected_seconds"]
+        assert tuned["required_gb"] >= plain["required_gb"]
+
+    def test_an_upscale_resolves_the_seedvr2_tier_from_the_config(self):
+        from zvisiongenerator.utils.config import load_config
+
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, app_config=load_config(), **{**self._CLIP, "width": 768, "height": 448})
+
+        assert fit is not None and fit["status"] != "too_large"
+
+    def test_an_upscale_with_a_config_without_seedvr2_has_no_estimate(self):
+        assert clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, app_config={"seedvr2": {}}, **self._CLIP) is None

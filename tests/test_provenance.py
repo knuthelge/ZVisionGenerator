@@ -404,6 +404,15 @@ class TestBuildVideoConfigPayload:
         assert payload["workflow"] == "img2vid" and payload["image_path"] == "/tmp/ref.png"
         assert set(payload) == {"schema", "workflow", "prompt", "model", "model_family", "seed", "steps", "width", "height", "ratio", "size", "frame_count", "image_path", "lora", "generation"}
 
+    def test_last_frame_is_recorded_only_when_set_and_read_back(self):
+        plain = build_video_config_payload(_make_video_request(image_path="/tmp/ref.png"), VideoWorkingArtifacts())
+        both = build_video_config_payload(_make_video_request(image_path="/tmp/ref.png", end_image_path="/tmp/end.png"), VideoWorkingArtifacts())
+
+        assert "end_image_path" not in plain
+        assert both["end_image_path"] == "/tmp/end.png"
+        assert recorded_settings(both).end_image_path == "/tmp/end.png"
+        assert recorded_settings(plain).end_image_path is None
+
     def test_enhanced_pair_payload_records_inputs_and_the_scene_apart_from_the_prompt(self):
         """Changed on purpose: an enhanced video records the user's input beside the enhanced scene so Reuse can offer both."""
         request = _make_video_request(prompt="a knight rides in", scene="A castle.")
@@ -731,12 +740,14 @@ class TestHomePathsArePortable:
             prompt="p",
             model_name="/home/me/.ziv/models/ltx",
             image_path="/home/me/ref.png",
+            end_image_path="/home/me/end.png",
             lora_paths=["/home/me/.ziv/loras/motion.safetensors"],
         )
 
         payload = build_video_config_payload(request, VideoWorkingArtifacts())
 
         assert "/home/me" not in json.dumps(payload)
+        assert payload["end_image_path"] == "~/end.png"
 
     def test_recorded_settings_expand_tilde_paths(self, monkeypatch):
         self._home(monkeypatch)
@@ -744,6 +755,7 @@ class TestHomePathsArePortable:
             {
                 "model": "~/.ziv/models/zit",
                 "image_path": "~/out/ref.png",
+                "end_image_path": "~/out/end.png",
                 "lora": "~/.ziv/loras/a.safetensors:0.7,~/.ziv/loras/b.safetensors:1",
                 "source": {"path": "~/out/p.png"},
             }
@@ -751,6 +763,7 @@ class TestHomePathsArePortable:
 
         assert settings.model == str(Path("/home/me")) + "/.ziv/models/zit"
         assert settings.image_path == str(Path("/home/me")) + "/out/ref.png"
+        assert settings.end_image_path == str(Path("/home/me")) + "/out/end.png"
         assert settings.lora == f"{Path('/home/me')}/.ziv/loras/a.safetensors:0.7,{Path('/home/me')}/.ziv/loras/b.safetensors:1"
         assert settings.source is not None and settings.source["path"] == str(Path("/home/me")) + "/out/p.png"
 

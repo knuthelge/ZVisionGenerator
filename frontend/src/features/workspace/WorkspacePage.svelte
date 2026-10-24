@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
   import { api, errorText } from '$lib/api/client';
-  import { draft, videoTimingFor } from '$lib/state/draft.svelte';
+  import { draft, extendStepFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { anyEnhancedUsed, enhancedPartUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { downloadStore, type DownloadRequestResult } from '$lib/state/downloads.svelte';
@@ -31,11 +31,11 @@
   import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, ModelStatusBadges, ReviewStage, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
   import { failureToastText, isReviewing } from '$lib/state/jobView';
-  import { jobSettingsPrefill } from '$lib/state/jobSettings';
+  import { first, jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { appliedPreset, presetDiffersFrom, presetSettingsFromDraft } from '$lib/state/presets';
   import { presetsStore } from '$lib/state/presets.svelte';
-  import { extendGuard, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
+  import { extendGuard, extendModelSupport, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
@@ -54,7 +54,7 @@
   import { pendingChips, settingsChips, type ChipKey } from './settingsChips';
   import { Sheet } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { settingDefaultsFor } from '$lib/state/draft.svelte';
+  import { settingDefaultsFor, stepOptionsFor } from '$lib/state/draft.svelte';
   import { framesToSeconds, roundSeconds } from '$lib/state/videoDuration';
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
@@ -105,6 +105,8 @@
   const generateError = $derived(submitError?.draft === draft.state ? submitError.message : null);
   let formEl = $state<HTMLFormElement | undefined>(undefined);
   let imageFile = $state<File | null>(null);
+  // The image uploaded as the last frame; like `imageFile`, it is not draft state and goes out on submit only.
+  let endImageFile = $state<File | null>(null);
   let lightboxOpen = $state(false);
   let lightboxIndex = $state(0);
   let lightboxMode = $state<'history' | 'completed-output'>('history');
@@ -127,7 +129,7 @@
   const CLI_CAVEAT_NOTES: Record<CliCaveat, string> = {
     negative_prompt: 'The CLI takes negative prompts only from a prompts file, so it was left out.',
     prompt_options: 'The CLI runs every prompt in the file, not only the chosen ones.',
-    uploaded_image: 'The uploaded reference image is named by file name; replace it with its path.',
+    uploaded_image: 'An uploaded image is named by file name; replace it with its path.',
   };
   const OUTPUT_GAP_PX = 12;
   const MIN_OUTPUT_CELL_PX = 160;
@@ -276,6 +278,19 @@
       ? (galleryStore.assets.find((asset) => asset.file_path === draft.state.referenceImagePath)?.url ?? null)
       : null
   );
+  // The last-frame slot exists for Image to Video on a model that can end a clip on an image.
+  const showEndImage = $derived(context !== null && workspaceCapabilities(context, draft.state).showEndImage);
+  const endPreviewUrl = $derived(
+    showEndImage && draft.state.endImagePath
+      ? (galleryStore.assets.find((asset) => asset.file_path === draft.state.endImagePath)?.url ?? null)
+      : null
+  );
+  // A pending upload belongs to the slot: when the slot goes (another workflow or model), so does the upload.
+  $effect(() => {
+    if (!showEndImage) endImageFile = null;
+  });
+  // The asset menus offer the last frame only while its slot is showing.
+  const referenceTargets = $derived<readonly ReferenceTarget[] | undefined>(showEndImage ? ['image', 'video', 'last'] : undefined);
   // Keep the preview occupied until the latest image has painted. Videos show at once:
   // some browsers load nothing until play is pressed, so no load event is guaranteed.
   const latestLoading = $derived(
@@ -379,6 +394,7 @@
       modelLabel: selectedModel?.label ?? s.model,
       modelDownloaded: selectedModel?.downloaded !== false,
       referenceName: imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : null),
+      endReferenceName: endImageFile?.name ?? (s.endImagePath ? fileName(s.endImagePath) : null),
       sourceName: s.extendSourcePath ? fileName(s.extendSourcePath) : null,
       memoryWarn: memoryStatus === 'tight' || memoryStatus === 'too_large',
       presetName: activePreset?.name ?? null,
@@ -568,10 +584,12 @@
 
   /** Refill the form from the settings a job was submitted with. */
   function loadJobSettings(settings: JobSettings, message: string): void {
-    const { params, patch } = jobSettingsPrefill(settings, draft.state.enhanceSettingsVideo?.partsByWorkflow);
+    const step = context ? extendStepFor(context, first(settings, 'model') ?? draft.state.model) : undefined;
+    const { params, patch } = jobSettingsPrefill(settings, draft.state.enhanceSettingsVideo?.partsByWorkflow, step);
     applyPrefill(params);
     draft.patch(patch);
     imageFile = null;
+    endImageFile = null;
     addToast(message, 'success');
   }
 
@@ -617,6 +635,7 @@
   function reuseAsset(asset: GalleryAsset): void {
     applyPrefill(reuseParams(asset));
     imageFile = null;
+    endImageFile = null;
     closeLightbox();
     addToast(`Loaded settings from ${asset.filename}`, 'success');
   }
@@ -646,9 +665,11 @@
       draft.loadFromUrl(params, context);
       draft.saveDraft();
     } else applyPrefill(params, { keepSettings: true });
-    imageFile = null;
+    // The last frame takes only the path: the first frame, the text and the workflow stay as they are.
+    if (target === 'last') endImageFile = null;
+    else imageFile = null;
     closeLightbox();
-    addToast(`${asset.filename} is now the reference image`, 'success');
+    addToast(`${asset.filename} is now the ${target === 'last' ? 'last frame' : 'reference image'}`, 'success');
   }
 
   /** Make a video the source of an extension; its recorded scene and prompt fill the boxes once the server has described it. */
@@ -714,6 +735,7 @@
       galleryStore.removeAssets([asset]);
       // A reference pointing at the deleted file would fail the next run.
       if (asset.file_path && draft.state.referenceImagePath === asset.file_path) draft.update('referenceImagePath', null);
+      if (asset.file_path && draft.state.endImagePath === asset.file_path) draft.update('endImagePath', null);
       addToast('Deleted', 'success');
     } catch {
       addToast('Delete failed', 'error');
@@ -800,8 +822,8 @@
       return;
     }
     const caps = workspaceCapabilities(context, state);
-    const { frameAlignment } = videoTimingFor(context, state.model);
-    clipMemory.watch(clipMemoryRequest(state, { frameAlignment, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale }));
+    const { frameRule } = videoTimingFor(context, state.model);
+    clipMemory.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps: stepOptionsFor(context, state.model) !== null }));
   });
 
   onMount(() => {
@@ -971,6 +993,8 @@
     if (imageFile && (draft.state.workflow === 'img2img' || draft.state.workflow === 'img2vid')) {
       formData.set('image_file', imageFile);
     }
+    // The last frame goes only while its slot is showing; an upload wins over the typed path, as for the first frame.
+    if (endImageFile && showEndImage) formData.set('end_image_file', endImageFile);
     // Sync lora string
     formData.set('lora', formatLoraString(loraChips));
     // Each part with Enhanced text is sent enhanced and the other as written (never in JSON-caption, file, or auto-enhance mode).
@@ -1007,7 +1031,7 @@
 
   /** Whether an extension may start now; any other workflow always may. */
   function currentExtendGuard(): ExtendGuard {
-    return extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath));
+    return extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendModelSupport(context, draft.state.model));
   }
 
   /** Tell the user why an extension cannot start and bring them to the source's path field; false when nothing stands in the way. */
@@ -1379,6 +1403,7 @@
                   onextend={extendAsset}
                   onupscale={upscaleAsset}
                   {referenceUnavailable}
+                  {referenceTargets}
                   ondelete={deleteWorkspaceAsset}
                 />
                 {@render assetMeta(output)}
@@ -1406,7 +1431,8 @@
                       onreference={useAsReference}
                       onextend={extendAsset}
                       onupscale={upscaleAsset}
-                  {referenceUnavailable}
+                      {referenceUnavailable}
+                      {referenceTargets}
                       ondelete={deleteWorkspaceAsset}
                     />
                   {/each}
@@ -1470,6 +1496,7 @@
               onextend={extendAsset}
               onupscale={upscaleAsset}
               {referenceUnavailable}
+              {referenceTargets}
               ondelete={deleteWorkspaceAsset}
             />
             {@render assetMeta(latest)}
@@ -1524,6 +1551,7 @@
           onextend={extendAsset}
           onupscale={upscaleAsset}
           {referenceUnavailable}
+          {referenceTargets}
           ondelete={deleteWorkspaceAsset}
         />
       {/if}
@@ -1547,8 +1575,12 @@
             quantizeOptions={supportsQuantize ? quantizeOptions : null}
             {imageFile}
             {referencePreviewUrl}
+            {endImageFile}
+            {endPreviewUrl}
             lastSeed={galleryStore.assets[0]?.seed ?? null}
             onImageFileChange={(f) => { imageFile = f; submitError = null; }}
+            onEndImageFileChange={(f) => { endImageFile = f; submitError = null; }}
+            onUseLatestAsEndFrame={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, 'last'); activeChip = null; }}
             onModelChange={switchModel}
             onUseLatestAsReference={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
             onclose={() => { activeChip = null; }}
@@ -1589,7 +1621,7 @@
             <ActionMenu open={generateMenuOpen} anchor={generateButton} label="Generate" items={generateMenuItems} onclose={() => { generateMenuOpen = false; }} />
           </div>
           <div class="composer-pane" hidden={!composerOpen}>
-            {#if context}<ComposePane {context} {busy} jobsActive={jobStore.jobsActive} />{/if}
+            {#if context}<ComposePane {context} {busy} jobsActive={jobStore.jobsActive} endImagePending={endImageFile !== null} />{/if}
             <div class="composer-foot">
               <button type="button" class="ui-btn" onclick={() => { composerOpen = false; }}>Done</button>
               <button type="submit" class="ui-btn ui-btn-primary ui-btn-main" disabled={compactSubmitDisabled}><Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}</button>
@@ -1629,8 +1661,11 @@
           submitError={generateError}
           {imageFile}
           {referencePreviewUrl}
+          {endImageFile}
+          {endPreviewUrl}
           lastSeed={galleryStore.assets[0]?.seed ?? null}
           onImageFileChange={(f) => { imageFile = f; submitError = null; }}
+          onEndImageFileChange={(f) => { endImageFile = f; submitError = null; }}
         />
       </Sheet>
     </div>
@@ -1647,8 +1682,11 @@
         submitError={generateError}
         {imageFile}
         {referencePreviewUrl}
+        {endImageFile}
+        {endPreviewUrl}
         lastSeed={galleryStore.assets[0]?.seed ?? null}
         onImageFileChange={(f) => { imageFile = f; submitError = null; }}
+        onEndImageFileChange={(f) => { endImageFile = f; submitError = null; }}
         oncopycli={copyCliCommand}
       />
       {@render stage()}
@@ -1681,6 +1719,7 @@
   onreference={useAsReference}
   onextend={extendAsset}
   {referenceUnavailable}
+  {referenceTargets}
   onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}
 />

@@ -260,6 +260,7 @@ def run_video_batch(
                         skip_signal,
                     ),
                     image_path=getattr(args, "image_path", None),
+                    end_image_path=getattr(args, "end_image_path", None),
                     upscale=getattr(args, "upscale", None),
                     upscale_steps=getattr(args, "upscale_steps", None),
                     review=(

@@ -5880,3 +5880,263 @@ describe('WorkspacePage settings presets', () => {
     });
   });
 });
+
+describe('WorkspacePage last frame', () => {
+  const END_CONTROLS = ['end_image', 'end_image_clear', 'end_image_path'];
+
+  /** A context with two video models: MiniMax H3 (has a last frame) and LTX (hides the last-frame controls). */
+  function lastFrameContext(assets: GalleryAsset[] = [], withEnhancer = false): WorkspaceContext {
+    const context = makeContext({
+      history_assets: assets,
+      video_models: [{ id: 'h3', label: 'MiniMax H3', type: 'video' }, { id: 'ltx-8', label: 'ltx-8', type: 'video' }],
+      current_video_model: 'h3',
+      video_model_defaults: {
+        h3: makeVideoDefaults({ hidden_controls: ['low_memory'] }),
+        'ltx-8': makeVideoDefaults({ hidden_controls: END_CONTROLS }),
+      },
+    });
+    const { definitions } = context.workflow_contract;
+    definitions.img2vid.visible_controls = [...definitions.img2vid.visible_controls, 'end_image', 'end_image_path', 'end_image_clear'];
+    for (const workflow of ['txt2img', 'img2img', 'txt2vid'] as const) definitions[workflow].clear_fields = [...definitions[workflow].clear_fields, 'end_image_path'];
+    if (withEnhancer) {
+      definitions.img2vid.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
+      context.prompt_enhancer = {
+        matrix: {
+          axes: [{ key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] }],
+          defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' },
+        },
+        model: 'owner/llm', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, error: null,
+      };
+    }
+    return context;
+  }
+
+  async function mountLastFrame(assets: GalleryAsset[] = [], workflow: 'img2vid' | 'txt2vid' = 'img2vid', withEnhancer = false): Promise<void> {
+    draft.update('workflow', workflow);
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage(assets));
+    await mountWorkspace(lastFrameContext(assets, withEnhancer));
+    draft.update('model', 'h3');
+    await settle();
+  }
+
+  beforeEach(() => {
+    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-1' } as JobContext);
+    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('reference_image'));
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test-image') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    window.location.hash = '#/workspace';
+  });
+
+  const endPath = () => target.querySelector('input[name="end_image_path"]') as HTMLInputElement | null;
+  const submit = async (): Promise<FormData> => {
+    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).value = 'a prompt';
+    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    return workspaceApiMocks.submitGenerate.mock.calls.at(-1)![0];
+  };
+  async function upload(inputId: string, name: string): Promise<File> {
+    const input = target.querySelector(`#${inputId}`) as HTMLInputElement;
+    const file = new File(['img'], name, { type: 'image/png' });
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    return file;
+  }
+
+  it('offers a Last frame slot beside the first frame for a model that has one', async () => {
+    await mountLastFrame();
+
+    expect(endPath()).not.toBeNull();
+    expect(target.querySelector('#ws-end-image-file')).not.toBeNull();
+    expect(target.querySelector('#ws-image-label')?.textContent).toContain('First frame');
+    expect(target.querySelector('#ws-end-image-label')?.textContent).toContain('Last frame');
+  });
+
+  it('leaves the reference picker alone, and offers no slot, for a model without a last frame', async () => {
+    await mountLastFrame();
+    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ltx-8');
+    await settle();
+
+    expect(endPath()).toBeNull();
+    expect(target.querySelector('#ws-end-image-file')).toBeNull();
+    expect(target.querySelector('#ws-image-label')?.textContent).toContain('Image');
+    expect(target.querySelector('input[name="image_path"]')).not.toBeNull();
+  });
+
+  it('submits a typed last-frame path with the first frame', async () => {
+    await mountLastFrame();
+    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+    await settle();
+
+    const submitted = await submit();
+
+    expect(submitted.get('image_path')).toBe('/in/start.png');
+    expect(submitted.get('end_image_path')).toBe('/in/end.png');
+    expect(submitted.has('end_image_file')).toBe(false);
+  });
+
+  it('submits an uploaded last frame as end_image_file, apart from the first frame', async () => {
+    await mountLastFrame();
+    const file = await upload('ws-end-image-file', 'end.png');
+
+    const submitted = await submit();
+
+    expect(submitted.get('end_image_file')).toBe(file);
+    expect(submitted.has('image_file')).toBe(false);
+  });
+
+  it('shows the pair in the section summary', async () => {
+    await mountLastFrame();
+    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+    await settle();
+
+    expect(target.querySelector('[data-section="reference"] .inspector-summary')?.textContent).toBe('start.png → end.png');
+  });
+
+  it('clears a chosen path and a pending upload when the model switches to one without a last frame', async () => {
+    await mountLastFrame();
+    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+    await upload('ws-end-image-file', 'end.png');
+
+    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ltx-8');
+    await settle();
+    const submitted = await submit();
+
+    expect(draft.state.endImagePath).toBeNull();
+    expect(submitted.has('end_image_path')).toBe(false);
+    expect(submitted.has('end_image_file')).toBe(false);
+    expect(submitted.get('image_path')).toBe('/in/start.png');
+  });
+
+  it('clears the last frame when the workflow changes to one without the slot', async () => {
+    await mountLastFrame();
+    draft.update('endImagePath', '/in/end.png');
+    await upload('ws-end-image-file', 'end.png');
+
+    draft.update('workflow', 'txt2vid');
+    await settle();
+    const submitted = await submit();
+
+    expect(endPath()).toBeNull();
+    expect(submitted.has('end_image_path')).toBe(false);
+    expect(submitted.has('end_image_file')).toBe(false);
+  });
+
+  it('clears only the last frame with its Clear button', async () => {
+    await mountLastFrame();
+    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+    await settle();
+
+    (target.querySelector('button[aria-label="Clear last frame"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state.endImagePath).toBeNull();
+    expect(draft.state.referenceImagePath).toBe('/in/start.png');
+  });
+
+  describe('from the history strip', () => {
+    const asset = makeAsset({ id: 'out/end.png', url: '/media/out/end.png', filename: 'end.png', file_path: '/outputs/out/end.png', prompt: 'a red fox' });
+    const menuFor = async (): Promise<NodeListOf<Element>> => {
+      const tile = target.querySelector(`#ws-history-shell article[aria-label="${asset.filename}"]`) as HTMLElement;
+      (tile.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+      flushSync();
+      return document.querySelectorAll('[role="menu"] [data-action^="reference-"]');
+    };
+
+    it('offers For last frame and sets only the last frame, leaving the text and the first frame', async () => {
+      await mountLastFrame([asset]);
+      draft.patch({ referenceImagePath: '/in/start.png', prompt: 'my action' });
+      await settle();
+
+      const actions = Array.from(await menuFor()).map((el) => el.getAttribute('data-action'));
+      (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect(actions).toEqual(['reference-image', 'reference-video', 'reference-last-frame']);
+      expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/end.png', referenceImagePath: '/in/start.png', prompt: 'my action', scene: '' });
+      expect(toasts.some((toast) => toast.message === 'end.png is now the last frame')).toBe(true);
+      expect(target.querySelector(`[data-section="reference"] img[src="${asset.url}"]`)).not.toBeNull();
+    });
+
+    it('does not offer it for a model without a last frame, or outside Image to Video', async () => {
+      await mountLastFrame([asset], 'txt2vid');
+
+      expect(Array.from(await menuFor()).map((el) => el.getAttribute('data-action'))).toEqual(['reference-image', 'reference-video']);
+    });
+
+    it('clears the last frame when its asset is deleted', async () => {
+      await mountLastFrame([asset]);
+      galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+      await menuFor();
+      (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
+      await settle();
+      expect(draft.state.endImagePath).toBe('/outputs/out/end.png');
+
+      await menuFor();
+      (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
+      await settle();
+      await answerConfirm(true);
+
+      expect(draft.state.endImagePath).toBeNull();
+    });
+  });
+
+  it('tells the enhancer about the last frame, and only while the slot is showing', async () => {
+    enhanceApiMocks.enhancePrompt.mockResolvedValue(undefined);
+    await mountLastFrame([], 'img2vid', true);
+    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png', prompt: 'a fox' });
+    await settle();
+    const enhanceWithShortcut = async (): Promise<void> => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, bubbles: true, cancelable: true }));
+      await settle();
+    };
+    await enhanceWithShortcut();
+
+    expect(enhanceApiMocks.enhancePrompt.mock.calls.at(-1)?.[0]).toMatchObject({ context: { reference_image: true, end_image: true } });
+
+    draft.update('endImagePath', null);
+    await settle();
+    await enhanceWithShortcut();
+
+    expect(enhanceApiMocks.enhancePrompt.mock.calls.at(-1)?.[0]).toMatchObject({ context: { end_image: false } });
+  });
+
+  it('copies the CLI command with --end-image', async () => {
+    const writeText = mockClipboard();
+    await mountLastFrame();
+    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png', prompt: 'a fox' });
+    await settle();
+
+    (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
+    await settle();
+
+    expect(writeText.mock.calls[0]?.[0]).toContain('--image /in/start.png --end-image /in/end.png');
+  });
+});
+
+describe('WorkspacePage Video summary', () => {
+  it('leaves Low memory out of the summary when the model has no such control', async () => {
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test-image') });
+    draft.update('workflow', 'txt2vid');
+    const context = makeContext({ video_model_defaults: { 'ltx-8': makeVideoDefaults({ hidden_controls: ['low_memory'], low_memory: true }) } });
+    await mountWorkspace(context);
+    draft.update('lowMemory', true);
+    await settle();
+
+    const summary = target.querySelector('[data-section="video"] .inspector-summary')?.textContent ?? '';
+    expect(target.querySelector('#ws-low-memory')).toBeNull();
+    expect(summary).toContain('Audio');
+    expect(summary).not.toContain('Low memory');
+  });
+
+  it('keeps Low memory in the summary when the model has the control', async () => {
+    draft.update('workflow', 'txt2vid');
+    await mountWorkspace(makeContext());
+    draft.update('lowMemory', true);
+    await settle();
+
+    expect(target.querySelector('[data-section="video"] .inspector-summary')?.textContent).toContain('Low memory');
+  });
+});

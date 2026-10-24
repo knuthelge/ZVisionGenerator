@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { describeUpscale } from './assetDetails';
+import type { GalleryAsset } from '$lib/types';
+
+import { assetDetailSections, describeUpscale } from './assetDetails';
 
 describe('describeUpscale', () => {
   it('leads with the factor and names the method, model and softness of a SeedVR2 upscale', () => {
@@ -15,5 +17,24 @@ describe('describeUpscale', () => {
   it('describes files recorded without a method by the factor and settings alone', () => {
     expect(describeUpscale({ factor: 2, denoise: 0.4 })).toBe('2× · denoise 0.4');
     expect(describeUpscale(undefined)).toBe('');
+  });
+});
+
+describe('assetDetailSections', () => {
+  const clip = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => ({
+    id: 'out/c.mp4', url: '/media/out/c.mp4', thumbnail_url: '/media/out/c.mp4', filename: 'c.mp4', created_at: '2026-10-03T12:00:00Z',
+    workflow: 'img2vid', prompt: 'a fox', model: 'h3', media_type: 'video', reuse_workspace_url: '', ...overrides,
+  });
+  const labels = (asset: GalleryAsset) => assetDetailSections(asset).generation.map((fact) => fact.label);
+
+  it('lists the last frame after the reference, by file name', () => {
+    const asset = clip({ image_path: '/in/start.png', end_image_path: '/in/end.png' });
+    const generation = assetDetailSections(asset).generation;
+    expect(labels(asset).indexOf('Last frame')).toBe(labels(asset).indexOf('Reference') + 1);
+    expect(generation.find((fact) => fact.label === 'Last frame')?.value).toBe('end.png');
+  });
+
+  it('leaves the last frame out of a clip without one', () => {
+    expect(labels(clip({ image_path: '/in/start.png', end_image_path: null }))).not.toContain('Last frame');
   });
 });

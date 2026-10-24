@@ -2,25 +2,46 @@
   import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
   import { ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { draft, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { downloadStore } from '$lib/state/downloads.svelte';
   import { galleryStore } from '$lib/state/gallery.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
-  import { memoryFitNote } from '$lib/state/memoryFit';
+  import { clipTimeNote, memoryFitNote } from '$lib/state/memoryFit';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
-  import { extendGuard, extendSourceFacts } from '$lib/state/extend';
+  import { extendGuard, extendModelSupport, extendSourceFacts } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { defaultExtendFrames, durationSpec, EXTEND_FRAME_STEP, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
   import type { ModelOption, WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
-  import { rangeFill, SPEC } from './settingsSpec';
+  import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import type { ChipKey } from './settingsChips';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { sheetDrag } from '$lib/actions/sheetDrag';
   import { fly } from 'svelte/transition';
+
+  /** What an image picker shows and does: the first frame and the last frame use the same one. */
+  interface ImagePickerOptions {
+    /** The chip that opens the picker; keys its file input. */
+    slot: ChipKey;
+    preview: string | null;
+    previewAlt: string;
+    name: string | null;
+    emptyText: string;
+    clearLabel: string;
+    onclear: () => void;
+    onfile: (file: File | null) => void;
+    onbrowse: () => void;
+    onlatest: () => void;
+    pathId: string;
+    placeholder: string;
+    path: string | null;
+    onpath: (text: string) => void;
+    onpick: (path: string) => void;
+    help?: string;
+  }
 
   interface Props {
     key: ChipKey;
@@ -34,6 +55,12 @@
     referencePreviewUrl: string | null;
     lastSeed: number | null;
     onImageFileChange: (file: File | null) => void;
+    /** The last frame: an uploaded image, the preview of a known path, and the changes the page keeps. */
+    endImageFile?: File | null;
+    endPreviewUrl?: string | null;
+    onEndImageFileChange?: (file: File | null) => void;
+    /** Make the latest output the last frame. */
+    onUseLatestAsEndFrame?: () => void;
     /** Pick a model: the page re-hydrates the defaults for it. */
     onModelChange: (model: string) => void;
     /** Make the latest output the reference image. */
@@ -41,17 +68,19 @@
     onclose: () => void;
   }
 
-  let { key, context, busy, models, quantizeOptions, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, onModelChange, onUseLatestAsReference, onclose }: Props = $props();
+  let { key, context, busy, models, quantizeOptions, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, onUseLatestAsEndFrame = () => {}, onModelChange, onUseLatestAsReference, onclose }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
   const defaults = $derived(settingDefaultsFor(context, { workflow: s.workflow, model: s.model }));
   const TITLES: Record<ChipKey, string> = {
     seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', strength: 'Image strength', seed: 'Seed', runs: 'Batch size',
-    reference: 'Reference image', source: 'Source video', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', model: 'Model',
+    reference: 'Reference image', endReference: 'Last frame', source: 'Source video', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', model: 'Model',
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
+  // With a last frame beside it, the reference image is the first frame.
+  const title = $derived(key === 'reference' && caps.showEndImage ? 'First frame' : TITLES[key]);
   /** The settings a popover's Reset puts back; none for the ones that have no default (model, LoRAs, files). */
   const RESET_KEYS: Partial<Record<ChipKey, SettingKey[]>> = {
     seconds: ['frameCount'], steps: ['steps'], guidance: ['guidance'], strength: ['referenceImageStrength'], seed: ['seed'], runs: ['runs'],
@@ -90,26 +119,37 @@
 
   // --- Length ---
   const timing = $derived(videoTimingFor(context, s.model));
-  const secondsSpec = $derived(durationSpec(timing.fps, timing.frameAlignment));
+  const secondsSpec = $derived(durationSpec(timing.fps, timing.frameRule));
   const shownSeconds = $derived(roundSeconds(framesToSeconds(s.frameCount, timing.fps)));
   const clipNote = $derived(memoryFitNote(clipMemory.fit, 'clip'));
+  const clipTime = $derived(clipTimeNote(clipMemory.fit));
 
   function setSeconds(seconds: number | null): void {
-    if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameAlignment));
+    if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
+  }
+
+  // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
+  const stepOptions = $derived(caps.isImageMode ? null : stepOptionsFor(context, s.model));
+  const stepsRange = $derived(stepOptions ? stepsSpec(stepOptions) : SPEC.steps);
+
+  function setSteps(steps: number): void {
+    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : steps);
   }
 
   // --- Extend ---
   const info = $derived(draft.extendSource);
   const sourceFps = $derived(info?.fps ?? null);
-  const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, EXTEND_FRAME_STEP) : { step: 0.1, min: 0.1 });
+  const extendStep = $derived(extendStepFor(context, s.model));
+  const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, { alignment: extendStep }) : { step: 0.1, min: 0.1 });
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
-  const extendDefault = $derived(sourceFps ? defaultExtendFrames(sourceFps) : null);
+  const extendDefault = $derived(sourceFps ? defaultExtendFrames(sourceFps, extendStep) : null);
   const extendMemoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
-  const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath)));
+  const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
+  const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath), extendModelSupport(context, s.model)));
 
   function setExtendSeconds(seconds: number | null): void {
-    if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps));
+    if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps, extendStep));
   }
 
   // --- Seed ---
@@ -138,25 +178,46 @@
     draft.update('loraString', formatLoraString(loraChips.map((chip) => (chip.name === name ? { name, weight } : chip))));
   }
 
-  // --- Reference ---
+  // --- Reference and last frame ---
+  // Both pick an image the same ways; each has its own upload, preview and server browser.
   const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : null));
+  const endName = $derived(endImageFile?.name ?? (s.endImagePath ? fileName(s.endImagePath) : null));
   let browsing = $state(false);
-  let fileInput = $state<HTMLInputElement | null>(null);
+  let browsingEnd = $state(false);
+  // The hidden file input of each picker, by the chip key that opens it.
+  let fileInputs = $state<Partial<Record<ChipKey, HTMLInputElement | null>>>({});
   let filePreviewUrl = $state<string | null>(null);
-  // Forget a browsed file once it stops being the reference, so choosing it again fires a change.
+  let endFilePreviewUrl = $state<string | null>(null);
+  // Forget a browsed file once it stops being the image, so choosing it again fires a change.
   $effect(() => {
-    if (!imageFile && fileInput) fileInput.value = '';
+    const input = fileInputs.reference;
+    if (!imageFile && input) input.value = '';
+  });
+  $effect(() => {
+    const input = fileInputs.endReference;
+    if (!endImageFile && input) input.value = '';
   });
   $effect(() => {
     const url = imageFile ? URL.createObjectURL(imageFile) : null;
     filePreviewUrl = url;
     return () => { if (url) URL.revokeObjectURL(url); };
   });
+  $effect(() => {
+    const url = endImageFile ? URL.createObjectURL(endImageFile) : null;
+    endFilePreviewUrl = url;
+    return () => { if (url) URL.revokeObjectURL(url); };
+  });
   const referencePreview = $derived(filePreviewUrl ?? referencePreviewUrl);
+  const endPreview = $derived(endFilePreviewUrl ?? endPreviewUrl);
 
   function chooseImagePath(path: string): void {
     onImageFileChange(null);
     draft.update('referenceImagePath', path);
+  }
+
+  function chooseEndImagePath(path: string): void {
+    onEndImageFileChange(null);
+    draft.update('endImagePath', path);
   }
 
   // --- Source video ---
@@ -191,10 +252,28 @@
   const selectedModel = $derived(models.find((model) => model.id === s.model) ?? null);
 </script>
 
-<div class="setting-popover ui-sheet" use:sheetDrag={{ onclose }} in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={TITLES[key]} data-testid="setting-popover" data-key={key}>
+{#snippet imagePicker(p: ImagePickerOptions)}
+  <div class="pop-ref">
+    <span class="pop-thumb">{#if p.preview}<img src={p.preview} alt={p.previewAlt}>{:else}<Icon name="reference" size={20} />{/if}</span>
+    <span class="pop-item-text" class:muted={!p.name}>{p.name ?? p.emptyText}</span>
+    {#if p.name}<button type="button" class="ui-btn ui-btn-icon" aria-label={p.clearLabel} onclick={p.onclear}><Icon name="close" size={16} /></button>{/if}
+  </div>
+  <div class="pop-list">
+    <button type="button" class="pop-item" onclick={() => fileInputs[p.slot]?.click()}><Icon name="upload" size={16} />Choose from this device<small>photos or files</small></button>
+    <input bind:this={fileInputs[p.slot]} type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={(e) => p.onfile(e.currentTarget.files?.[0] ?? null)}>
+    <button type="button" class="pop-item" onclick={p.onbrowse}><Icon name="folder" size={16} />Browse the server<small>output and reference folders</small></button>
+    {#if galleryStore.assets[0]?.media_type === 'image'}
+      <button type="button" class="pop-item" onclick={p.onlatest}><Icon name="film" size={16} />Use the latest output</button>
+    {/if}
+  </div>
+  <PathInput id={p.pathId} purpose="reference_image" class="ui-field pop-path" placeholder={p.placeholder} value={p.path ?? ''} oninput={p.onpath} onpick={p.onpick} />
+  {#if p.help}<p class="ui-help">{p.help}</p>{/if}
+{/snippet}
+
+<div class="setting-popover ui-sheet" use:sheetDrag={{ onclose }} in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
   <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
   <div class="ui-sheet-head" data-sheet-handle>
-    <h3 class="ui-area-label">{TITLES[key]}</h3>
+    <h3 class="ui-area-label">{title}</h3>
     <span class="ui-sheet-end">
       {#if resetKeys.length}
         <button type="button" class="ui-btn" disabled={!canReset} onclick={reset}><Icon name="reset" size={12} />Reset</button>
@@ -204,8 +283,8 @@
   </div>
   <div class="pop-body">
     {#if key === 'steps'}
-      <InspectorNumber ariaLabel="Steps" value={s.steps} {...SPEC.steps} stepper size="lg" onchange={(v) => v !== null && draft.update('steps', v)} />
-      <input class="ui-range pop-range" type="range" aria-label="Steps" {...SPEC.steps} value={s.steps} style:--fill={rangeFill(s.steps, SPEC.steps)} oninput={(e) => draft.update('steps', Number(e.currentTarget.value))}>
+      <InspectorNumber ariaLabel="Steps" value={s.steps} {...stepsRange} stepper size="lg" onchange={(v) => v !== null && setSteps(v)} />
+      <input class="ui-range pop-range" type="range" aria-label="Steps" {...stepsRange} value={s.steps} style:--fill={rangeFill(s.steps, stepsRange)} oninput={(e) => setSteps(Number(e.currentTarget.value))}>
     {:else if key === 'guidance'}
       <InspectorNumber ariaLabel="Guidance" value={s.guidance} {...SPEC.guidance} stepper size="lg" onchange={(v) => v !== null && draft.update('guidance', v)} />
       <input class="ui-range pop-range" type="range" aria-label="Guidance" {...SPEC.guidance} value={s.guidance} style:--fill={rangeFill(s.guidance, SPEC.guidance)} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
@@ -223,10 +302,12 @@
         <input class="ui-range pop-range" type="range" aria-label="Clip length" min={secondsSpec.min} max={secondsSpec.max} step={secondsSpec.step} value={shownSeconds} style:--fill={rangeFill(shownSeconds, { min: secondsSpec.min ?? 0, max: secondsSpec.max })} oninput={(e) => setSeconds(Number(e.currentTarget.value))}>
       {/if}
       <p class="ui-help">{s.frameCount} frames at {timing.fps} fps.</p>
+      {#if clipTime}<p class="ui-help">{clipTime}</p>{/if}
       {#if clipNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{clipNote.text}</p>{/if}
     {:else if key === 'extendSeconds'}
       <InspectorNumber ariaLabel="Extend by, in seconds" value={shownExtendSeconds} {...extendSecondsSpec} stepper size="lg" commitOnly disabled={sourceFps === null} onchange={setExtendSeconds} />
       <p class="ui-help">{sourceFps === null ? 'Choose a video to extend first.' : extendLength ? `Total ${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames${s.extendFrames !== null ? ` · +${s.extendFrames} new` : ''}` : ''}</p>
+      {#if extendTime}<p class="ui-help">{extendTime}</p>{/if}
       {#if extendMemoryNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{extendMemoryNote.text}</p>{/if}
       {#if extendDefault !== null && s.extendFrames !== extendDefault}
         <button type="button" class="ui-btn" onclick={() => draft.update('extendFrames', extendDefault)}>Back to the default length</button>
@@ -320,21 +401,24 @@
         {/if}
       {/if}
     {:else if key === 'reference'}
-      <div class="pop-ref">
-        <span class="pop-thumb">{#if referencePreview}<img src={referencePreview} alt="Reference preview">{:else}<Icon name="reference" size={20} />{/if}</span>
-        <span class="pop-item-text" class:muted={!referenceName}>{referenceName ?? 'No reference yet'}</span>
-        {#if referenceName}<button type="button" class="ui-btn ui-btn-icon" aria-label="Clear reference image" onclick={() => { onImageFileChange(null); draft.update('referenceImagePath', null); }}><Icon name="close" size={16} /></button>{/if}
-      </div>
-      <div class="pop-list">
-        <button type="button" class="pop-item" onclick={() => fileInput?.click()}><Icon name="upload" size={16} />Choose from this device<small>photos or files</small></button>
-        <input bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={(e) => onImageFileChange(e.currentTarget.files?.[0] ?? null)}>
-        <button type="button" class="pop-item" onclick={() => { browsing = true; }}><Icon name="folder" size={16} />Browse the server<small>output and reference folders</small></button>
-        {#if galleryStore.assets[0]?.media_type === 'image'}
-          <button type="button" class="pop-item" onclick={onUseLatestAsReference}><Icon name="film" size={16} />Use the latest output</button>
-        {/if}
-      </div>
-      <PathInput id="ws-pop-image-path" purpose="reference_image" class="ui-field pop-path" placeholder="/path/to/reference.png" value={s.referenceImagePath ?? ''} oninput={(text) => draft.update('referenceImagePath', text || null)} onpick={chooseImagePath} />
+      {@render imagePicker({
+        slot: 'reference', preview: referencePreview, previewAlt: 'Reference preview', name: referenceName, emptyText: 'No reference yet', clearLabel: 'Clear reference image',
+        onclear: () => { onImageFileChange(null); draft.update('referenceImagePath', null); },
+        onfile: onImageFileChange, onbrowse: () => { browsing = true; },
+        onlatest: onUseLatestAsReference, pathId: 'ws-pop-image-path', placeholder: '/path/to/reference.png', path: s.referenceImagePath,
+        onpath: (text) => draft.update('referenceImagePath', text || null), onpick: chooseImagePath,
+      })}
       <PathBrowser bind:open={browsing} purpose="reference_image" initialPath={s.referenceImagePath} onchoose={chooseImagePath} />
+    {:else if key === 'endReference'}
+      {@render imagePicker({
+        slot: 'endReference', preview: endPreview, previewAlt: 'Last frame preview', name: endName, emptyText: 'No last frame', clearLabel: 'Clear last frame',
+        onclear: () => { onEndImageFileChange(null); draft.update('endImagePath', null); },
+        onfile: onEndImageFileChange, onbrowse: () => { browsingEnd = true; },
+        onlatest: onUseLatestAsEndFrame, pathId: 'ws-pop-end-image-path', placeholder: '/path/to/last-frame.png', path: s.endImagePath,
+        onpath: (text) => draft.update('endImagePath', text || null), onpick: chooseEndImagePath,
+        help: 'Optional. The clip ends on this image; different scenes dissolve into each other.',
+      })}
+      <PathBrowser bind:open={browsingEnd} purpose="reference_image" initialPath={s.endImagePath} onchoose={chooseEndImagePath} />
     {:else if key === 'source'}
       <div class="pop-ref">
         <span class="pop-thumb">{#if sourceThumbUrl}<video src={sourceThumbUrl} muted preload="metadata" aria-hidden="true"></video>{:else}<Icon name="film" size={20} />{/if}</span>

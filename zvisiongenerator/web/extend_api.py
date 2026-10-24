@@ -5,11 +5,11 @@ from __future__ import annotations
 import functools
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, supports_video_audio, supports_video_extend
 from zvisiongenerator.core.video_types import ExtendSource
-from zvisiongenerator.utils.config import video_family
+from zvisiongenerator.utils.config import load_config, video_family
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.paths import resolve_model_path
@@ -21,8 +21,10 @@ from zvisiongenerator.utils.video_extend import (
     extend_step,
     inspect_extend_source,
     recorded_prompts,
+    require_extend_family,
     require_extend_source,
     resolve_extend_frames,
+    with_family_problems,
     window_frames,
 )
 from zvisiongenerator.utils.video_model_detect import detect_video_model
@@ -31,6 +33,8 @@ from zvisiongenerator.web.gallery import output_media_url
 from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.path_browser import SOURCE_VIDEO_EXTENSIONS
 
+if TYPE_CHECKING:
+    from zvisiongenerator.core.video_family import VideoFamily
 
 EXTEND_UNAVAILABLE_MESSAGE = "Extending a video is not available on this platform."
 
@@ -114,12 +118,12 @@ def requested_extend_frames(frames: int | None, seconds: float | None, fps: floa
     return resolve_extend_frames(frames=frames, seconds=seconds, fps=fps, strict=True, step=step)[0]
 
 
-def _resolve_video_model(model: str | None, web_config: WebUiConfig) -> tuple[str, str] | None:
+def _resolve_video_model(model: str | None, app_config: dict[str, Any]) -> tuple[str, str] | None:
     """Return the resolved path and the family of the video model picked as *model*, or ``None`` when it does not resolve."""
     if model is None:
         return None
     try:
-        resolved = resolve_model_path(model, aliases=web_config.app_config.get("model_aliases", {}), platform_key=sys.platform)
+        resolved = resolve_model_path(model, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
     except KeyError, ValueError:
         return None
     return resolved, detect_video_model(resolved).family
@@ -145,17 +149,14 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Pa
     recorded_model = inspection.recorded.model if inspection.recorded is not None else None
     fps = probe.fps if probe is not None else 0.0
     memory_model = model or (recorded_model if recorded_model in web_config.video_model_options else None) or preferred_option(web_config.default_models.video, web_config.video_model_options)
-    resolved_model = _resolve_video_model(memory_model, web_config)
-    family = resolved_model[1] if resolved_model is not None else None
-    extend_frames = (
-        None
-        if requested_frames is None and fps <= 0
-        else resolve_extend_frames(frames=requested_frames, seconds=None, fps=fps, strict=False, step=extend_step(video_family(web_config.app_config, family) if family is not None else None))[0]
-    )
-    window = window_frames(extend_frames) if extend_frames is not None else None
+    resolved_model = _resolve_video_model(memory_model, web_config.app_config)
+    family = video_family(web_config.app_config, resolved_model[1]) if resolved_model is not None else None
+    inspection = with_family_problems(inspection, family)
+    extend_frames = None if requested_frames is None and fps <= 0 else resolve_extend_frames(frames=requested_frames, seconds=None, fps=fps, strict=False, step=extend_step(family))[0]
+    window = window_frames(extend_frames, family) if extend_frames is not None else None
     memory_fit = None
-    if inspection.source is not None and window is not None:
-        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, window, low_memory is not False, web_config)
+    if inspection.source is not None and extend_frames is not None:
+        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, extend_frames, low_memory is not False, web_config)
     frame_count = probe.frame_count if probe is not None else None
     return {
         "path": str(path),
@@ -187,19 +188,48 @@ def _source_duration(probe: Any, fps: float, frame_count: int | None) -> float |
     return probe.duration if probe is not None else None
 
 
-def _extend_memory_fit(resolved_model: tuple[str, str] | None, model: str | None, source: ExtendSource, window: int, low_memory: bool, web_config: WebUiConfig) -> dict[str, Any] | None:
-    """Return how an extension window fits this machine's memory (``status``, ``required_gb``, ``budget_gb``), or ``None`` when unknown."""
+def _extend_memory_fit(resolved_model: tuple[str, str] | None, model: str | None, source: ExtendSource, extend_frames: int, low_memory: bool, web_config: WebUiConfig) -> dict[str, Any] | None:
+    """Return how an extension window fits this machine's memory (``status``, ``required_gb``, ``budget_gb``, and an estimated ``expected_seconds`` for H3), or ``None`` when unknown.
+
+    The window is what the model generates: the carried frames plus *extend_frames*. H3 runs its default steps, as the request names none.
+    """
     budget = memory_budget()
     if resolved_model is None or budget is None:
         return None
-    # LTX is the only family that extends today, whatever the model's own detection says.
+    family = resolved_model[1]
+    description = video_family(web_config.app_config, family)
+    window = window_frames(extend_frames, description)
     return clip_memory_fit(
-        resolved_model[0], width=source.width, height=source.height, frames=window, low_memory=low_memory, budget=budget, model_name=model, app_config=web_config.app_config, family="ltx"
+        resolved_model[0],
+        width=source.width,
+        height=source.height,
+        frames=window,
+        low_memory=low_memory,
+        budget=budget,
+        model_name=model,
+        app_config=web_config.app_config,
+        family=family,
+        mode="extend",
+        forwards=description.default_steps if description is not None else 8,
     )
+
+
+def _model_family(model: str | None) -> VideoFamily | None:
+    """Return the description of the family of the video model picked as *model*, or ``None`` when none is named, it does not resolve or its family has no description.
+
+    Reads the plain config: the model inventory is not scanned.
+    """
+    if model is None:
+        return None
+    config = load_config()
+    resolved = _resolve_video_model(model, config)
+    return video_family(config, resolved[1]) if resolved is not None else None
 
 
 def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext:
     """Build the rewrite context of an extension from the source clip's own file and the request's length and audio.
+
+    The optional ``context.model`` names the video model, whose family sets the step the length is a multiple of and the frames the window carries.
 
     Raises:
         ValueError: If extending is unavailable, the source cannot be used or the length is invalid.
@@ -209,5 +239,8 @@ def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext
     source = load_source_video(raw["source_video"], key="context.source_video")
     extend_frames = json_field(raw, "extend_frames", int, "an integer", name="context.extend_frames")
     seconds = json_field(raw, "extend_seconds", (int, float), "a number", name="context.extend_seconds")
-    frames = requested_extend_frames(extend_frames, None if seconds is None else float(seconds), source.fps)
-    return extend_enhance_context(source, frames, no_audio=not (raw.get("audio") is True and supports_video_audio()), prompt=prompt)
+    model = json_field(raw, "model", str, "a string", name="context.model")
+    family = _model_family(model)
+    require_extend_family(source, family)
+    frames = requested_extend_frames(extend_frames, None if seconds is None else float(seconds), source.fps, step=extend_step(family))
+    return extend_enhance_context(source, frames, no_audio=not (raw.get("audio") is True and supports_video_audio()), prompt=prompt, family=family)

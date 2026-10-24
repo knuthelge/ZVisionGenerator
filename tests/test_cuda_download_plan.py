@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -19,11 +20,16 @@ from zvisiongenerator.backends.cuda.download_plan import (
     SEPARATE_TRANSFORMER_IGNORE,
     TRANSFORMERS_ALLOW_PATTERNS,
     enhancer_download_plan,
+    h3_download_plan,
     image_download_plan,
     video_download_plan,
     video_repo_ignore,
 )
+from zvisiongenerator.backends.cuda.video.h3 import sources as h3_sources
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils import hf_snapshot
+from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.h3_preset import h3_preset
 
 _LISTINGS = json.loads((Path(__file__).parent / "fixtures" / "diffusers_repo_listings.json").read_text(encoding="utf-8"))
 KLEIN = "black-forest-labs/FLUX.2-klein-9B"
@@ -347,6 +353,94 @@ def test_repo_dir_downloads_with_the_shared_ignore_constant(monkeypatch: pytest.
 
 
 # --- enhancer ---
+
+
+H3_REF = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+H3_PRESET = h3_preset(load_config())
+SEEDVR2_TARGET = DownloadTarget("owner/seedvr2-weights", None, ("weights.safetensors",))
+
+
+def test_h3_plan_is_the_repository_the_text_encoder_and_the_lora() -> None:
+    plan = h3_download_plan(H3_REF, H3_PRESET)
+
+    assert plan == (
+        DownloadTarget("MiniMaxAI/MiniMax-H3", "42ed227ee7df40d41602854ae760620d6eb651fe", H3_PRESET.repo_allow, H3_PRESET.repo_ignore),
+        DownloadTarget("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "48cfc6496841742a77892646c15a7f3e8da44348", H3_PRESET.text_encoder.files),
+        DownloadTarget("lightx2v/Minimax-h3-Turbo", "30f485ed874aa44c8183348ad361c5eabad318da", ("minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors",)),
+    )
+
+
+def test_h3_plan_takes_the_presets_revision_for_a_reference_without_one() -> None:
+    (repo, *_rest) = h3_download_plan("MiniMaxAI/MiniMax-H3", H3_PRESET)
+
+    assert repo.revision == H3_PRESET.revision
+
+
+def test_h3_plan_keeps_the_revision_of_the_reference() -> None:
+    (repo, *_rest) = h3_download_plan("MiniMaxAI/MiniMax-H3@other", H3_PRESET)
+
+    assert repo.revision == "other"
+
+
+def test_h3_plan_for_a_local_folder_has_no_repository_target(tmp_path: Path) -> None:
+    plan = h3_download_plan(str(tmp_path), H3_PRESET)
+
+    assert [target.repo_id for target in plan] == ["unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo"]
+
+
+@pytest.mark.parametrize("upscale", [False, True])
+def test_h3_plan_adds_the_seedvr2_targets_only_with_upscale(upscale: bool) -> None:
+    plan = h3_download_plan(H3_REF, H3_PRESET, upscale=upscale, seedvr2_targets=lambda: (SEEDVR2_TARGET,))
+
+    assert (SEEDVR2_TARGET in plan) is upscale
+    assert plan[:3] == h3_download_plan(H3_REF, H3_PRESET)
+
+
+def test_h3_plan_with_upscale_plans_the_seedvr2_tier_of_this_machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import zvisiongenerator.backends as backends_module
+    from zvisiongenerator.backends.cuda import download_plan as plan_module
+    from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS
+
+    monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=FP8_WEIGHTS))
+    monkeypatch.setattr(backends_module, "accelerator_memory_budget_or_none", lambda: None)
+    monkeypatch.setattr(plan_module, "get_ziv_data_dir", lambda: tmp_path)
+
+    plan = h3_download_plan(H3_REF, H3_PRESET, upscale=True)
+
+    seedvr2 = plan[3:]
+    assert seedvr2, "the video upscale needs SeedVR2 weights"
+    files = {name for target in seedvr2 for name in target.allow_patterns or ()}
+    assert files <= {name for pair in FP8_WEIGHTS.files.values() for _repo, name in pair}
+
+
+def test_h3_plan_with_upscale_and_no_seedvr2_engine_adds_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import zvisiongenerator.backends as backends_module
+
+    monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: None)
+
+    assert h3_download_plan(H3_REF, H3_PRESET, upscale=True) == h3_download_plan(H3_REF, H3_PRESET)
+
+
+def test_h3_plan_downloads_what_the_backend_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each plan target is the (repo, revision, allow, ignore) the runtime snapshot call uses, or the two diverge."""
+    monkeypatch.setattr(hf_snapshot, "cached_snapshot_dirs", lambda repo_id, revision: [])
+    calls: list[dict[str, Any]] = []
+
+    def download(**kwargs: Any) -> str:
+        calls.append(kwargs)
+        folder = tmp_path / kwargs["repo_id"].replace("/", "--")
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in kwargs.get("allow_patterns") or ():
+            if "*" not in name:
+                (folder / name).write_bytes(b"x")
+        (folder / "model_index.json").write_text("{}")
+        return str(folder)
+
+    h3_sources.resolve_files(H3_REF, H3_PRESET, snapshot_download=download)
+
+    runtime = [(call["repo_id"], call["revision"], tuple(call["allow_patterns"]), tuple(call.get("ignore_patterns") or ()) or None) for call in calls]
+    planned = [(target.repo_id, target.revision, target.allow_patterns, target.ignore_patterns) for target in h3_download_plan(H3_REF, H3_PRESET)]
+    assert planned == runtime
 
 
 def test_enhancer_plan_uses_transformers_patterns() -> None:

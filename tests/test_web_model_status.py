@@ -126,14 +126,126 @@ class TestDescribeLtxStatusGolden:
         assert status == {"downloaded": False, "memory_fit": None}
 
 
+class TestH3Status:
+    """MiniMax H3 is downloaded when every target of its plan is on disk; on unified memory it gets an estimate."""
+
+    _UNIFIED = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
+
+    @pytest.fixture
+    def darwin(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "darwin")
+
+    @staticmethod
+    def _status(present, *, budget=_UNIFIED, **extra):
+        from zvisiongenerator.utils.config import load_config
+
+        return describe_model_status(
+            "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe",
+            kind="video",
+            budget=budget,
+            find_local_dir=lambda reference: None,
+            model_name="h3",
+            app_config=load_config(),
+            family="h3",
+            target_present=present,
+            **extra,
+        )
+
+    def test_macos_checks_the_three_targets_of_the_mac_plan(self, darwin):
+        seen = []
+
+        def present(target):
+            seen.append((target.repo_id, target.revision))
+            return True
+
+        status = self._status(present)
+
+        assert status["downloaded"] is True
+        assert [repo for repo, _revision in seen] == ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "MiniMaxAI/MiniMax-H3", "lightx2v/Minimax-h3-Turbo"]
+
+    @pytest.mark.parametrize("missing", ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "MiniMaxAI/MiniMax-H3", "lightx2v/Minimax-h3-Turbo"])
+    def test_one_absent_target_is_not_downloaded_and_has_no_estimate(self, darwin, missing):
+        status = self._status(lambda target: target.repo_id != missing)
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+    def test_macos_estimates_the_reference_clip(self, darwin):
+        status = self._status(lambda target: True)
+
+        assert status["memory_fit"] == {
+            "kind": "unified",
+            "budget_gb": 24.0,
+            "by_quantize": {"none": {"status": "fits", "required_gb": 15.0}},
+            "note": model_status.H3_ESTIMATE_NOTE,
+        }
+
+    def test_a_small_budget_is_classified(self, darwin):
+        status = self._status(lambda target: True, budget=MemoryBudget(9 * _GIB, unified_bytes=16 * _GIB))
+
+        assert status["memory_fit"]["by_quantize"]["none"] == {"status": "too_large", "required_gb": 15.0}
+
+    def test_a_discrete_gpu_estimates_the_reference_clip(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+        seen = []
+
+        status = self._status(lambda target: (seen.append(target.repo_id), True)[1], budget=MemoryBudget(10 * _GIB, system_bytes=30 * _GIB))
+
+        assert status["downloaded"] is True
+        assert status["memory_fit"] == {
+            "kind": "discrete",
+            "budget_gb": 10.0,
+            "system_budget_gb": 30.0,
+            "by_quantize": {"none": {"status": "fits", "required_gb": 7.2, "system_gb": 17.8}},
+            "note": "Estimated for a 5 s clip at 768x448. The Workspace checks the size and length you choose.",
+        }
+        assert seen == ["MiniMaxAI/MiniMax-H3", "unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo"]
+
+    def test_the_status_agrees_with_the_backends_offline_resolution(self, darwin, tmp_path, monkeypatch):
+        """SC-10: the same cache decides ``downloaded`` and whether the backend would download."""
+        import huggingface_hub.constants
+
+        from zvisiongenerator.backends.mac.h3_video import resolve_mlx_files
+        from zvisiongenerator.downloads.plans import video_plan
+        from zvisiongenerator.utils import model_files
+        from zvisiongenerator.utils.config import load_config
+        from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
+
+        cache = tmp_path / "cache"
+        monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
+        monkeypatch.setattr(model_files, "huggingface_cache_dir", lambda: cache)
+        config = load_config()
+        ref = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+
+        def no_network(**_kwargs):
+            raise AssertionError("downloaded")
+
+        def resolves() -> bool:
+            try:
+                resolve_mlx_files(ref, h3_mlx_preset(config), lora=h3_turbo_lora(config)[0], snapshot_download=no_network)
+            except AssertionError:
+                return False
+            return True
+
+        def status() -> bool:
+            return describe_model_status(ref, kind="video", budget=self._UNIFIED, find_local_dir=lambda reference: None, model_name="h3", app_config=config, family="h3")["downloaded"]
+
+        assert (status(), resolves()) == (False, False)
+        plan = video_plan(ref, family="h3", config=config, model_name="h3", upscale=False)
+        for target in plan:
+            for name in target.allow_patterns:
+                path = cache / f"models--{target.repo_id.replace('/', '--')}" / "snapshots" / target.revision / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x")
+        assert (status(), resolves()) == (True, True)
+        (cache / "models--MiniMaxAI--MiniMax-H3" / "snapshots" / "42ed227ee7df40d41602854ae760620d6eb651fe" / "FL2VA" / "audio_vae" / "model.safetensors").unlink()
+        assert (status(), resolves()) == (False, False)
+
+
 class TestDescribeModelStatus:
-    def test_another_video_family_is_downloaded_with_its_folder_and_has_no_estimate(self, tmp_path):
-        pack = _make_mlx_pack(tmp_path, bundled=False)
-
-        status = describe_model_status("owner/h3", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/h3": pack}), family="h3")
-
-        assert status == {"downloaded": True, "memory_fit": None}
-
     def test_missing_model_is_not_downloaded_and_has_no_estimate(self):
         status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({}))
 

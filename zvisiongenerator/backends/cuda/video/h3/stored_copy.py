@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.block_streaming import move_outside, stream_blocks
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
-from zvisiongenerator.backends.cuda.quant import empty_diffusers_model, fill_weights, nf4_linear_names, nf4_storage_format, pack_nf4, place_nf4, swap_in_linear4bit
+from zvisiongenerator.backends.cuda.quant import dequantized_tensors, empty_diffusers_model, fill_weights, nf4_linear_names, nf4_storage_format, pack_nf4, place_nf4, swap_in_linear4bit
 from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, shard_files
 from zvisiongenerator.utils.stored_quant import ensure_stored_copy, file_identities
@@ -195,9 +195,8 @@ def _empty_model(config: dict[str, Any], dtype: torch.dtype) -> Any:
 
 
 def _source_tensors(shards: Iterable[Path], wanted: Callable[[str], bool] | None = None) -> Iterator[tuple[str, torch.Tensor]]:
-    """Yield ``(name, tensor)`` of every shard in turn."""
-    for path in shards:
-        yield from iter_tensors(path, wanted)
+    """Yield ``(name, tensor)`` of every shard in turn, scaled FP8 weights multiplied out into bfloat16."""
+    yield from dequantized_tensors(shards, wanted)
 
 
 def _adaln_tensor_names(storage: dict[str, Any]) -> set[str]:

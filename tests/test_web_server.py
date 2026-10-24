@@ -1960,6 +1960,7 @@ def test_submit_video_job_refuses_review_where_the_platform_cannot_pause(monkeyp
     [
         ("upscale_review", {"upscale": "2", "review": "on"}, "LTX distilled model can't pause for review before upscaling on this platform."),
         ("i2v", {"image_path": "ref.png"}, "LTX distilled model does not support image-to-video. Pick another video model."),
+        ("end_frame", {"image_path": "ref.png", "end_image_path": "end.png"}, "LTX distilled model does not support a last-frame image. Pick another video model."),
     ],
 )
 def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, tmp_path, capability, form, message):
@@ -1970,7 +1971,7 @@ def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, t
     web_config.app_config["video_model_presets"] = {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], capability: False}}}
     submitted: list[dict[str, object]] = []
     _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
-    monkeypatch.setattr(web_server, "_resolve_reference_image", lambda _form, _output_dir: form.get("image_path"))
+    monkeypatch.setattr(web_server, "_resolve_reference_image", lambda _form, _output_dir, path_key="image_path": form.get(path_key))
 
     with pytest.raises(ValueError) as refused:
         web_server._submit_video_job({"model": "ltx-8", "prompt": "a lake", **form}, web_config)
@@ -2440,9 +2441,85 @@ def test_submitted_settings_keep_every_text_field_and_replace_an_upload_with_its
     upload = UploadFile(file=io.BytesIO(b"png"), filename="ref.png")
     form = FormData([("prompt", "a lake"), ("prompt_option_id", "a:0"), ("prompt_option_id", "a:1"), ("steps", "8"), ("image_file", upload)])
 
-    settings = web_server._submitted_settings(form, image_path="/out/.web_uploads/ref.png")
+    settings = web_server._submitted_settings(form, uploads={"image_path": "/out/.web_uploads/ref.png"})
 
     assert settings == {"prompt": "a lake", "prompt_option_id": ["a:0", "a:1"], "steps": "8", "image_path": "/out/.web_uploads/ref.png"}
+
+
+def test_submitted_settings_record_each_upload_under_its_own_path_setting():
+    """A first and a last frame uploaded together are each restored by Load settings and Retry."""
+    from starlette.datastructures import FormData, UploadFile
+
+    first = UploadFile(file=io.BytesIO(b"png"), filename="a.png")
+    last = UploadFile(file=io.BytesIO(b"png"), filename="b.png")
+    form = FormData([("prompt", "a lake"), ("image_file", first), ("end_image_file", last), ("end_image_path", "/typed/end.png")])
+
+    settings = web_server._submitted_settings(form, uploads={"image_path": "/out/a.png", "end_image_path": "/out/b.png"})
+
+    assert settings == {"prompt": "a lake", "end_image_path": "/out/b.png", "image_path": "/out/a.png"}
+
+
+def test_submitted_settings_keep_a_typed_last_frame_path_when_nothing_was_uploaded():
+    settings = web_server._submitted_settings({"image_path": "/in/a.png", "end_image_path": "/in/b.png"}, uploads={"image_path": "/in/a.png", "end_image_path": "/in/b.png"})
+
+    assert settings == {"image_path": "/in/a.png", "end_image_path": "/in/b.png"}
+
+
+def _h3_like_config(web_config) -> None:
+    ltx = load_config()["video_model_presets"]["ltx"]
+    web_config.app_config["video_model_presets"] = {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], "end_frame": True}}}
+
+
+def test_submit_video_job_takes_a_typed_last_frame_path(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path / "out")
+    _h3_like_config(web_config)
+    first, last = tmp_path / "first.png", tmp_path / "last.png"
+    _write_png(first)
+    _write_png(last)
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
+
+    response = web_server._submit_video_job({"workflow": "img2vid", "model": "ltx-8", "prompt": "a lake", "image_path": str(first), "end_image_path": str(last)}, web_config)
+
+    assert submitted[0]["args"].end_image_path == str(last.resolve())
+    assert submitted[0]["request"].end_image_path == str(last.resolve())
+    assert response["context"]["settings"]["end_image_path"] == str(last)
+
+
+def test_submit_video_job_saves_an_uploaded_last_frame_and_records_it_in_the_job_settings(monkeypatch, tmp_path):
+    """An end_image_file wins over a typed path, and the job's settings name the saved file so Retry works."""
+    from starlette.datastructures import FormData, UploadFile
+
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path / "out")
+    _h3_like_config(web_config)
+    first = tmp_path / "first.png"
+    _write_png(first)
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
+    upload = UploadFile(file=io.BytesIO(first.read_bytes()), filename="last.png")
+    form = FormData([("workflow", "img2vid"), ("model", "ltx-8"), ("prompt", "a lake"), ("image_path", str(first)), ("end_image_path", "/not/used.png"), ("end_image_file", upload)])
+
+    response = web_server._submit_video_job(form, web_config)
+
+    saved = submitted[0]["args"].end_image_path
+    assert Path(saved).parent == tmp_path / "out" / ".web_uploads"
+    assert Path(saved).is_file()
+    assert response["context"]["settings"]["end_image_path"] == saved
+    assert response["context"]["settings"]["image_path"] == str(first)
+
+
+def test_submit_video_job_refuses_a_last_frame_without_a_first_frame(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    _h3_like_config(web_config)
+    last = tmp_path / "last.png"
+    _write_png(last)
+    _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=[])
+
+    with pytest.raises(ValueError, match="needs a first-frame reference image"):
+        web_server._submit_video_job({"workflow": "txt2vid", "model": "ltx-8", "prompt": "a lake", "end_image_path": str(last)}, web_config)
 
 
 def test_submit_image_job_queues_with_its_public_context(monkeypatch, tmp_path):
@@ -2692,6 +2769,35 @@ def test_inspect_route_surfaces_a_problem_code_with_a_message(clip, probe, confi
     assert payload["memory_fit"] is None
 
 
+def test_inspect_route_flags_a_30_fps_source_for_h3_only(clip, monkeypatch):
+    from zvisiongenerator.utils.config import load_config
+
+    clip.probe = {"r_frame_rate": "30/1", "avg_frame_rate": "30/1"}
+    config = _make_web_config()
+    config.app_config = load_config()
+    monkeypatch.setattr(web_server, "load_web_config", lambda: config)
+    monkeypatch.setattr(extend_api_module, "resolve_model_path", lambda model, **_: "MiniMaxAI/MiniMax-H3" if model == "h3" else "Lightricks/ltx")
+
+    h3 = _inspect({"path": str(clip.path), "model": "h3"}).json()
+    ltx = _inspect({"path": str(clip.path), "model": "ltx-8"}).json()
+
+    assert [problem["code"] for problem in h3["problems"]] == ["frame_rate"]
+    assert "24 fps" in h3["problems"][0]["message"]
+    assert h3["memory_fit"] is None
+    assert ltx["problems"] == []
+
+
+def test_inspect_route_passes_a_24_fps_source_for_h3(clip, monkeypatch):
+    from zvisiongenerator.utils.config import load_config
+
+    config = _make_web_config()
+    config.app_config = load_config()
+    monkeypatch.setattr(web_server, "load_web_config", lambda: config)
+    monkeypatch.setattr(extend_api_module, "resolve_model_path", lambda model, **_: "MiniMaxAI/MiniMax-H3")
+
+    assert _inspect({"path": str(clip.path), "model": "h3"}).json()["problems"] == []
+
+
 def test_inspect_route_reports_a_file_that_is_not_a_video_without_facts(clip, monkeypatch):
     def _no_video(_path):
         raise ValueError(video_extend_module.NO_VIDEO_STREAM)
@@ -2746,6 +2852,19 @@ def test_inspect_route_snaps_the_length_to_whole_latent_frames(clip, requested, 
     assert (payload["extend_frames"], payload["window_frames"]) == (expected, 25 + expected)
 
 
+def test_inspect_route_gives_h3_a_window_of_its_22_frame_tail(clip, monkeypatch):
+    from zvisiongenerator.utils.config import load_config
+
+    config = _make_web_config()
+    config.app_config = load_config()
+    monkeypatch.setattr(web_server, "load_web_config", lambda: config)
+    monkeypatch.setattr(extend_api_module, "resolve_model_path", lambda model, **_: "MiniMaxAI/MiniMax-H3")
+
+    payload = _inspect({"path": str(clip.path), "extend_frames": 34, "model": "h3"}).json()
+
+    assert (payload["extend_frames"], payload["window_frames"]) == (34, 22 + 34)
+
+
 def test_inspect_route_defaults_to_two_seconds_at_the_source_frame_rate(clip):
     clip.probe = {"r_frame_rate": "30000/1001", "avg_frame_rate": "30000/1001"}
 
@@ -2776,6 +2895,8 @@ def test_inspect_route_adds_the_memory_fit_of_the_window(clip, monkeypatch):
         "budget": MemoryBudget(24 * 2**30),
         "model_name": "ltx-8",
         "family": "ltx",
+        "mode": "extend",
+        "forwards": 8,
     }
 
 
@@ -3193,6 +3314,8 @@ def test_memory_fit_route_checks_the_aligned_clip_against_the_budget(clip_fit):
         "budget": MemoryBudget(24 * 2**30, unified_bytes=32 * 2**30),
         "model_name": "ltx-8",
         "family": "ltx",
+        "mode": "t2v",
+        "forwards": 8,
     }
 
 

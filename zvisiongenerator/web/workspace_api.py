@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio
+from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio, video_capabilities
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
@@ -22,7 +22,9 @@ from zvisiongenerator.utils.config import (
     smart_enhancer_model,
     smart_unavailable,
     video_companion_repos,
+    video_family,
 )
+from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
@@ -39,6 +41,7 @@ from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resol
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label
+from zvisiongenerator.utils.video_extend import extend_step
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, row_download_needed
@@ -48,6 +51,7 @@ from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, res
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target, used_repo_ids
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
+from zvisiongenerator.web.workspace_contract import END_FRAME_CONTROLS, hidden_video_controls
 
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.target import DownloadTarget
@@ -700,21 +704,33 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
     except Exception:
         family = _resolve_video_bootstrap_family(app_config, None)
     defaults = resolve_video_defaults(family, app_config, {"ratio": ratio, "size": size})
+    described = video_family(app_config, detected_family) if detected_family else None
+    capabilities = video_capabilities(app_config, detected_family) if detected_family else None
+    frame_count = defaults["num_frames"]
+    if described is not None:
+        frame_count = align_frames(frame_count, described.frame_rule)
+    frame_rule = described.frame_rule.to_json() if described is not None else {"alignment": frame_alignment, "offset": 1, "round": "nearest"}
     return {
         "ratio": defaults.get("ratio", ratio),
         "size": defaults.get("size", size),
         "steps": defaults["steps"],
         "width": defaults["width"],
         "height": defaults["height"],
-        "frame_count": defaults["num_frames"],
+        "frame_count": frame_count,
         "audio": True,
         "low_memory": True,
         "supports_i2v": supports_i2v,
         "supports_quantize": False,
         "quantize": None,
-        "max_steps": _default_video_max_steps(app_config, family),
+        "max_steps": described.max_steps if described is not None else _default_video_max_steps(app_config, family),
         "fps": fps,
         "frame_alignment": frame_alignment,
+        "frame_rule": frame_rule,
+        # A family the config does not describe keeps every capability but the opt-in last frame.
+        "hidden_controls": hidden_video_controls(capabilities) if capabilities is not None else sorted(END_FRAME_CONTROLS),
+        "supports_extend": capabilities.extend if capabilities is not None else True,
+        "step_options": list(described.step_options) if described is not None and described.step_options else None,
+        "extend_frame_step": extend_step(described),
         "upscale": _video_bootstrap_upscale(),
         "enhance_max_words": resolve_enhance_ceiling(app_config, family=family, mode="video"),
         "family": detected_family,

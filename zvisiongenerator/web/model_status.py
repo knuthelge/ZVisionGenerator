@@ -6,6 +6,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.downloads.presence import target_present_offline
+from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils.h3_memory import estimate_h3_cuda_clip_memory, h3_mlx_clip_fit
 from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder, ltx_mlx_text_encoder_repo
 from zvisiongenerator.utils.model_memory import (
     GIB,
@@ -25,8 +28,12 @@ NO_QUANTIZE_KEY = "none"
 UNIFIED_MEMORY = "unified"
 DISCRETE_MEMORY = "discrete"
 VIDEO_ESTIMATE_NOTE = "Estimated for a 5 s clip at 768x448. The Workspace checks the size and length you choose."
+H3_ESTIMATE_NOTE = "Estimated for a 5 s clip at 768x448 from the text. The Workspace checks the size and length you choose."
 # The clip the badge is estimated for: 5 s at 24 fps, no upscale.
 _REFERENCE_CLIP = {"width": 768, "height": 448, "frames": 121}
+# The same for MiniMax H3, whose lengths are 17 * n + 5 frames (124 is 5 s), at its default 8 forwards.
+_H3_REFERENCE_CLIP = {"width": 768, "height": 448, "frames": 124}
+_H3_REFERENCE_FORWARDS = 8
 
 
 def describe_model_status(
@@ -39,6 +46,7 @@ def describe_model_status(
     model_name: str | None = None,
     app_config: dict[str, Any] | None = None,
     family: str | None = None,
+    target_present: Callable[[DownloadTarget], bool] = target_present_offline,
 ) -> dict[str, Any]:
     """Return the ``downloaded`` flag and ``memory_fit`` summary for one inventory model.
 
@@ -50,7 +58,8 @@ def describe_model_status(
         find_local_dir: Resolver for fully downloaded model directories.
         model_name: The name the model is picked by (``ltx-4``); on CUDA it sets a video model's quantize level.
         app_config: The loaded config, for the same.
-        family: A video model's family (``"ltx"``); ``None`` is LTX. Only LTX has a memory estimate.
+        family: A video model's family (``"ltx"`` or ``"h3"``); ``None`` is LTX. LTX and H3 have a memory estimate.
+        target_present: Tells whether one download target is fully on disk; MiniMax H3 is downloaded when every target of its plan is.
 
     Returns:
         ``{"downloaded": bool, "memory_fit": dict | None}``. ``memory_fit`` holds ``kind`` (``"unified"`` on
@@ -63,7 +72,10 @@ def describe_model_status(
     model_dir = find_local_dir(resolved_path)
     text_encoder_dir = None
     ltx_video = kind == "video" and family in (None, "ltx")
-    if ltx_video and model_dir is not None and is_ltx_mlx_layout(model_dir):
+    h3_video = kind == "video" and family == "h3"
+    if h3_video:
+        downloaded = _h3_downloaded(resolved_path, model_name, app_config, target_present)
+    elif ltx_video and model_dir is not None and is_ltx_mlx_layout(model_dir):
         if ltx_mlx_bundled_text_encoder(model_dir) is not None:
             downloaded = True  # An LTX-2.5 pack carries its own Gemma 4; it never needs the Gemma 3 repo.
         else:
@@ -73,7 +85,9 @@ def describe_model_status(
         downloaded = model_dir is not None
 
     memory_fit = None
-    if downloaded and model_dir is not None and budget is not None and (kind == "image" or ltx_video):
+    if h3_video and downloaded and budget is not None:
+        memory_fit = _h3_memory_fit(budget)
+    elif downloaded and model_dir is not None and budget is not None and (kind == "image" or ltx_video):
         levels = (None, *quantize_options)
         if budget.system_bytes is not None:
             memory_fit = _cuda_image_memory_fit(model_dir, levels, budget) if kind == "image" else _cuda_video_memory_fit(resolved_path, budget, find_local_dir, model_name, app_config)
@@ -82,6 +96,43 @@ def describe_model_status(
         else:
             memory_fit = _unified_image_memory_fit(model_dir, levels, budget.gpu_bytes)
     return {"downloaded": downloaded, "memory_fit": memory_fit}
+
+
+def _h3_downloaded(resolved_path: str, model_name: str | None, app_config: dict[str, Any] | None, target_present: Callable[[DownloadTarget], bool]) -> bool:
+    """Return whether every download of MiniMax H3's plan on this platform is on disk (a plan that cannot be made counts as not downloaded)."""
+    from zvisiongenerator.downloads.plans import video_plan
+    from zvisiongenerator.utils.config import load_config
+
+    plan = video_plan(resolved_path, family="h3", config=app_config if app_config is not None else load_config(), model_name=model_name or resolved_path, upscale=False)
+    return plan is not None and all(target_present(target) for target in plan)
+
+
+def _h3_memory_fit(budget: MemoryBudget) -> dict[str, Any] | None:
+    """Return MiniMax H3's memory fit for the reference clip: the GPU and system memory on CUDA, unified memory on Apple Silicon."""
+    return _h3_cuda_memory_fit(budget) if budget.system_bytes is not None else _h3_mlx_memory_fit(budget)
+
+
+def _h3_cuda_memory_fit(budget: MemoryBudget) -> dict[str, Any]:
+    estimate = estimate_h3_cuda_clip_memory(**_H3_REFERENCE_CLIP)
+    return {
+        "kind": DISCRETE_MEMORY,
+        "budget_gb": _to_gb(budget.gpu_bytes),
+        "system_budget_gb": _to_gb(budget.system_bytes or 0),
+        "by_quantize": {NO_QUANTIZE_KEY: _cuda_fit(estimate, budget, classify=classify_ltx_cuda_memory_fit)},
+        "note": VIDEO_ESTIMATE_NOTE,
+    }
+
+
+def _h3_mlx_memory_fit(budget: MemoryBudget) -> dict[str, Any] | None:
+    fit = h3_mlx_clip_fit(**_H3_REFERENCE_CLIP, budget=budget, forwards=_H3_REFERENCE_FORWARDS)
+    if fit is None:
+        return None
+    return {
+        "kind": UNIFIED_MEMORY,
+        "budget_gb": fit["budget_gb"],
+        "by_quantize": {NO_QUANTIZE_KEY: {"status": fit["status"], "required_gb": fit["required_gb"]}},
+        "note": H3_ESTIMATE_NOTE,
+    }
 
 
 def _unified_image_memory_fit(model_dir: Path, levels: tuple[int | None, ...], budget_bytes: int) -> dict[str, Any] | None:

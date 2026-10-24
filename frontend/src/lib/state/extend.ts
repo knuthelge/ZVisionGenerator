@@ -1,4 +1,4 @@
-import type { DraftState, ExtendSourceInfo } from '$lib/types';
+import type { DraftState, ExtendSourceInfo, WorkspaceContext } from '$lib/types';
 import { submittedPair } from './promptEnhance';
 
 /** Form fields that choose the size or length of a non-extend clip; an extension takes both from its source. */
@@ -65,18 +65,37 @@ export const CHOOSE_SOURCE_NOTE = 'Choose a video to extend.';
 /** Generate's reason when the source was read and cannot be extended. */
 export const REJECTED_SOURCE_NOTE = "This video can't be extended. See Source video.";
 
+/** Whether the chosen video model can extend a clip, with the name the note calls it by. */
+export interface ExtendModelSupport {
+  supported: boolean;
+  label: string;
+}
+
+/** Return what the workspace knows about the model's ability to extend, or null when it knows nothing (the model then is not blocked). */
+export function extendModelSupport(ctx: WorkspaceContext | null, model: string): ExtendModelSupport | null {
+  const defaults = ctx?.video_model_defaults?.[model];
+  if (!ctx || !defaults) return null;
+  return { supported: defaults.supports_extend !== false, label: ctx.video_models.find((entry) => entry.id === model)?.label ?? model };
+}
+
 /** Whether the chosen source lets an extension start, and the reason shown when it does not. */
 export interface ExtendGuard {
-  /** `ok`: usable (or not an extension); `none`: nothing usable chosen; `checking`: waiting for the server; `rejected`: read but not extendable. */
-  kind: 'ok' | 'none' | 'checking' | 'rejected';
+  /** `ok`: usable (or not an extension); `unsupported`: the model cannot extend; `none`: nothing usable chosen; `checking`: waiting for the server; `rejected`: read but not extendable. */
+  kind: 'ok' | 'unsupported' | 'none' | 'checking' | 'rejected';
   blocked: boolean;
   /** The reason to show; null while checking (a note would only flicker) and when not blocked. */
   note: string | null;
 }
 
-/** Decide whether Generate may run for an extension, from the chosen path, what the server said about it and the inspection status. */
-export function extendGuard(state: Pick<DraftState, 'workflow' | 'extendSourcePath'>, info: ExtendSourceInfo | null, status: ExtendSourceStatus): ExtendGuard {
+/** Decide whether Generate may run for an extension, from the model, the chosen path, what the server said about it and the inspection status. */
+export function extendGuard(
+  state: Pick<DraftState, 'workflow' | 'extendSourcePath'>,
+  info: ExtendSourceInfo | null,
+  status: ExtendSourceStatus,
+  model: ExtendModelSupport | null = null,
+): ExtendGuard {
   if (state.workflow !== 'extend') return { kind: 'ok', blocked: false, note: null };
+  if (model && !model.supported) return { kind: 'unsupported', blocked: true, note: `${model.label} can't extend a clip. Pick another video model.` };
   if (!state.extendSourcePath || status === 'not_found') return { kind: 'none', blocked: true, note: CHOOSE_SOURCE_NOTE };
   if (status === 'failed') return { kind: 'rejected', blocked: true, note: REJECTED_SOURCE_NOTE };
   if (info === null) return { kind: 'checking', blocked: true, note: null };
@@ -88,6 +107,7 @@ export function extendGuard(state: Pick<DraftState, 'workflow' | 'extendSourcePa
 export function extendEnhanceHint(guard: ExtendGuard): string | null {
   if (guard.kind === 'none') return 'Choose a video to extend first.';
   if (guard.kind === 'rejected') return 'Choose a video that can be extended first.';
+  if (guard.kind === 'unsupported') return 'Choose a video model that can extend first.';
   return null;
 }
 

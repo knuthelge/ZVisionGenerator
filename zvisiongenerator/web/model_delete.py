@@ -3,7 +3,7 @@
 Deletes act only on what the user picked. A converted model's folder is removed with its links, never the
 HuggingFace files those links point to; a HuggingFace download is removed from the cache while its alias
 stays in config, so the model can be downloaded again. Either way the model's stored quants
-(``<name>@q4`` / ``<name>@q8``) go too, since nothing else uses them. When aliases share one download (``ltx-4``
+(``<name>@q4`` / ``<name>@q8``, and the text-encoder copy ``<name>@mlx-te4`` of H3 on macOS) go too, since nothing else uses them. When aliases share one download (``ltx-4``
 and ``ltx-8`` on Windows/Linux), deleting one removes only its own stored quants while another still has some.
 """
 
@@ -64,7 +64,8 @@ def model_delete_target(
         path = models_dir / entry.name
         return DeleteTarget("installed", path, stored_quants=stored_quants) if _is_direct_child(path, models_dir) else None
     repo = parse_huggingface_repo_reference(entry.resolved_path)
-    if repo is None or find_local_dir(entry.resolved_path) is None:
+    # H3 on macOS downloads only parts of its repository, so no complete model folder exists; what is in the cache counts.
+    if repo is None or (find_local_dir(entry.resolved_path) is None and not (entry.family == "h3" and huggingface_cache_repo_dir(repo.repo_id).is_dir())):
         return None
     users = tuple(name for name in sharing if stored_quant_dirs_for(models_dir, name))
     if users:

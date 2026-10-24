@@ -35,6 +35,10 @@ _LTX2_PIPELINES = ("LTX2Pipeline", "LTX2ImageToVideoPipeline")
 _GEMMA4_PREFIX = "Gemma4"
 # Components of an LTX-2 ``model_index.json`` that the app never loads, so they need no weights on disk.
 LTX2_UNLOADED_COMPONENTS: Final[frozenset[str]] = frozenset({"processor", "prompt_enhancer", "duration_head", "diffusion_decoder"})
+# Components of a MiniMax H3 modular ``model_index.json`` that the app never loads: it encodes prompts with its own NF4
+# Qwen3-VL (a separate repo) and never builds the ``transformer_ref`` reference copy.
+H3_UNLOADED_COMPONENTS: Final[frozenset[str]] = frozenset({"text_encoder", "transformer_ref"})
+_H3_PIPELINE = "MiniMaxH3ModularPipeline"
 _SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d+)-of-(?P<total>\d+)\.safetensors$")
 # Diffusers precision variants (e.g. ``diffusion_pytorch_model.fp16.safetensors``, optionally sharded).
 _VARIANT_RE = re.compile(r"\.(?:fp16|bf16|fp32|fp8)(?:-\d+-of-\d+)?\.safetensors$")
@@ -177,16 +181,21 @@ def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = Non
 
 
 def weighted_components(model_dir: Path) -> tuple[str, ...] | None:
-    """Return the weight-bearing component folders from ``model_index.json``, or ``None`` without a readable index."""
+    """Return the weight-bearing component folders from ``model_index.json``, or ``None`` without a readable index.
+
+    An entry is ``[library, class]``; diffusers modular pipelines append a third element (the component spec).
+    """
     index = _read_model_index(model_dir)
     if index is None:
         return None
-    skipped = LTX2_UNLOADED_COMPONENTS if index.get("_class_name") in _LTX2_PIPELINES else frozenset()
-    return tuple(
-        name
-        for name, spec in index.items()
-        if not name.startswith("_") and name not in skipped and isinstance(spec, list) and len(spec) == 2 and all(spec) and not any(hint in str(spec[1]) for hint in _WEIGHTLESS_CLASS_HINTS)
-    )
+    class_name = index.get("_class_name")
+    skipped = LTX2_UNLOADED_COMPONENTS if class_name in _LTX2_PIPELINES else H3_UNLOADED_COMPONENTS if class_name == _H3_PIPELINE else frozenset()
+    return tuple(name for name, spec in index.items() if not name.startswith("_") and name not in skipped and _is_weighted_spec(spec))
+
+
+def _is_weighted_spec(spec: object) -> bool:
+    """Return whether a ``model_index.json`` entry names a library and a class that is not a weightless helper."""
+    return isinstance(spec, list) and 2 <= len(spec) <= 3 and all(isinstance(part, str) and part for part in spec[:2]) and not any(hint in spec[1] for hint in _WEIGHTLESS_CLASS_HINTS)
 
 
 def _read_model_index(model_dir: Path) -> dict | None:
@@ -199,6 +208,12 @@ def _read_model_index(model_dir: Path) -> dict | None:
     except OSError, ValueError:
         return None
     return index if isinstance(index, dict) else None
+
+
+def is_h3_model_dir(model_dir: Path) -> bool:
+    """Return whether *model_dir*'s ``model_index.json`` declares a MiniMax H3 pipeline."""
+    index = _read_model_index(model_dir)
+    return index is not None and index.get("_class_name") == _H3_PIPELINE
 
 
 def is_krea2_model(model_dir: Path) -> bool:

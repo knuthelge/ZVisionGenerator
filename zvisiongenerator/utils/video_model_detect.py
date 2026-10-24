@@ -1,6 +1,6 @@
 """Video model type detection.
 
-Detects video model family (LTX) from model path or HuggingFace
+Detects video model family (LTX, MiniMax H3) from model path or HuggingFace
 repo ID using prefix matching, and local folders by their contents.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from zvisiongenerator.utils.model_files import is_ltx_model_dir
+from zvisiongenerator.utils.model_files import is_h3_model_dir, is_ltx_model_dir
 from zvisiongenerator.utils.paths import is_explicit_local_path, parse_huggingface_repo_reference
 
 
@@ -17,12 +17,12 @@ from zvisiongenerator.utils.paths import is_explicit_local_path, parse_huggingfa
 class VideoModelInfo:
     """Metadata about a detected video model."""
 
-    family: str  # "ltx" | "unknown"
-    backend: str  # "ltx" — which VideoBackend to use
+    family: str  # "ltx" | "h3" | "unknown"
+    backend: str  # "ltx" | "h3" — which VideoBackend to use
     supports_i2v: bool
     default_fps: int
-    frame_alignment: int  # LTX: 8 (frames = 8k+1)
-    resolution_alignment: int  # LTX: 32
+    frame_alignment: int  # LTX: 8 (frames = 8k+1); H3: 17 (frames = 17k+5)
+    resolution_alignment: int  # LTX and H3: 32
 
 
 # Prefix → (family, backend, supports_i2v, default_fps, frame_alignment, resolution_alignment)
@@ -32,6 +32,8 @@ _VIDEO_MODEL_MAP: dict[str, tuple[str, str, bool, int, int, int]] = {
     "lightricks/ltx-video": ("ltx", "ltx", True, 24, 8, 32),
     "unsloth/ltx-2.5": ("ltx", "ltx", True, 24, 8, 32),
     "marcelofso/ltx-2.5-mlx": ("ltx", "ltx", True, 24, 8, 32),
+    "minimaxai/minimax-h3": ("h3", "h3", True, 24, 17, 32),
+    "unsloth/minimax-h3": ("h3", "h3", True, 24, 17, 32),
 }
 
 
@@ -100,9 +102,14 @@ def detect_video_model(model_path: str) -> VideoModelInfo:
     if repo_reference is not None and configured_default and repo_reference.repo_id.lower() == configured_default.strip().lower():
         return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
 
-    # A local folder counts as LTX when its path says so, or by its contents (e.g. a converted fine-tune).
-    if _looks_like_local_model_path(normalized_model_path) and ("ltx" in normalized_lower or is_ltx_model_dir(Path(normalized_model_path).expanduser())):
-        return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+    # A local folder counts as H3 by its contents (checked first: an H3 folder's path may well contain "ltx"), and as LTX
+    # when its path says so, or by its contents (e.g. a converted fine-tune).
+    if _looks_like_local_model_path(normalized_model_path):
+        folder = Path(normalized_model_path).expanduser()
+        if is_h3_model_dir(folder):
+            return VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=24, frame_alignment=17, resolution_alignment=32)
+        if "ltx" in normalized_lower or is_ltx_model_dir(folder):
+            return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
 
     return VideoModelInfo(
         family="unknown",

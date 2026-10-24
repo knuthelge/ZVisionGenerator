@@ -309,6 +309,14 @@ class TestEnhanceEndpoint:
         assert job["context"] == EnhanceContext(audio=True, seconds=97 / 24, orientation="portrait", reference_image=True)
         assert (job["settings"].sound, job["settings"].note) == (("ambient",), "at dusk")
 
+    def test_context_last_frame_is_a_strict_boolean(self):
+        def parsed(value):
+            return web_server._validate_enhance_body({"prompt": "a fox", "mode": "video", "context": {"reference_image": True, "end_image": value}})["context"]
+
+        assert parsed(True).end_image is True
+        assert parsed("yes").end_image is False
+        assert web_server._validate_enhance_body({"prompt": "a fox", "mode": "video", "context": {"reference_image": True}})["context"].end_image is False
+
     def test_context_audio_is_off_when_video_has_no_audio_track(self, monkeypatch):
         monkeypatch.setattr(web_server, "supports_video_audio", lambda: False)
         body = {"prompt": "a fox", "mode": "video", "context": {"frames": 97, "fps": 24, "audio": True}}

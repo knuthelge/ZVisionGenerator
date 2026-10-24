@@ -285,6 +285,84 @@ def test_models_payload_describes_what_each_delete_removes(layout):
     assert delete_info(_image_entry("missing", "alias", "org/missing")) is None
 
 
+class TestMacH3Delete:
+    """MiniMax H3 on macOS downloads parts of three repositories and keeps a text-encoder copy beside the model."""
+
+    _REF = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+
+    @pytest.fixture
+    def h3(self, layout, monkeypatch):
+        from zvisiongenerator.utils.config import load_config
+
+        monkeypatch.setattr("sys.platform", "darwin")
+        for repo in ("MiniMaxAI--MiniMax-H3", "water1234--MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v--Minimax-h3-Turbo"):
+            _touch(layout.hub / f"models--{repo}" / "snapshots" / "abc" / "part.json")
+        _touch(layout.models_dir / "h3@mlx-te4" / "model-00001-of-00001.safetensors")
+        _touch(layout.models_dir / "h3@mlx-te4" / "ziv-quant.json")
+        entry = VideoInventoryEntry(name="h3", family="h3", supports_i2v=True, source="alias", resolved_path=self._REF)
+        layout.entry, layout.config = entry, load_config()
+        return layout
+
+    def test_deleting_h3_removes_its_downloads_and_the_text_encoder_copy(self, h3):
+        scope = delete_scope(h3.entry, (h3.entry,), h3.config)
+        target = model_delete_target(h3.entry, h3.models_dir, **scope)
+
+        assert target is not None and target.kind == "huggingface"
+        assert [path.name for path in target.stored_quants] == ["h3@mlx-te4"]
+        assert {path.name for path in target.companions} == {"models--water1234--MiniMax-H3-MLX-Argus-Calibrated-INT8", "models--lightx2v--Minimax-h3-Turbo"}
+
+        delete_model(target)
+
+        assert not (h3.models_dir / "h3@mlx-te4").exists()
+        assert not (h3.hub / "models--MiniMaxAI--MiniMax-H3").exists()
+        assert not (h3.hub / "models--water1234--MiniMax-H3-MLX-Argus-Calibrated-INT8").exists()
+        assert not (h3.hub / "models--lightx2v--Minimax-h3-Turbo").exists()
+        assert (h3.hub / "models--org--other").is_dir()
+        assert (h3.models_dir / "custom").is_dir()
+
+    def test_the_models_payload_names_the_copy_among_what_is_removed(self, h3):
+        from zvisiongenerator.web.workspace_api import _delete_info_resolver
+
+        delete_info = _delete_info_resolver(h3.models_dir, inventory=(h3.entry,), app_config=h3.config)
+
+        info = delete_info(h3.entry)
+        assert info is not None
+        assert (info["kind"], info["stored_quants"]) == ("huggingface", ["h3@mlx-te4"])
+
+    def test_the_copy_counts_towards_the_disk_size_unless_it_is_a_row_of_its_own(self, h3):
+        from zvisiongenerator.web.workspace_api import _disk_size_resolver
+
+        os.truncate(h3.models_dir / "h3@mlx-te4" / "model-00001-of-00001.safetensors", 14_000_000_000)
+
+        assert _disk_size_resolver(h3.models_dir, listed={"h3"}, app_config=h3.config)(h3.entry) == "14.0 GB"
+        assert _disk_size_resolver(h3.models_dir, listed={"h3", "h3@mlx-te4"}, app_config=h3.config)(h3.entry) == "1 KB"
+
+    def test_a_model_never_downloaded_is_not_deletable(self, h3):
+        shutil.rmtree(h3.hub / "models--MiniMaxAI--MiniMax-H3")
+
+        assert model_delete_target(h3.entry, h3.models_dir, **delete_scope(h3.entry, (h3.entry,), h3.config)) is None
+
+    def test_an_installed_h3_folder_is_removed_with_its_copy(self, h3):
+        _touch(h3.models_dir / "h3-local" / "FL2VA" / "model_index.json")
+        _touch(h3.models_dir / "h3-local@mlx-te4" / "ziv-quant.json")
+        entry = VideoInventoryEntry(name="h3-local", family="h3", supports_i2v=True, source="installed", resolved_path=str(h3.models_dir / "h3-local"))
+
+        target = model_delete_target(entry, h3.models_dir)
+        assert target is not None
+        delete_model(target)
+
+        assert not (h3.models_dir / "h3-local").exists()
+        assert not (h3.models_dir / "h3-local@mlx-te4").exists()
+        assert (h3.models_dir / "h3@mlx-te4").is_dir()
+
+    def test_the_copy_itself_has_no_stored_quants_of_its_own(self, h3):
+        entry = VideoInventoryEntry(name="h3@mlx-te4", family="h3", supports_i2v=True, source="installed", resolved_path=str(h3.models_dir / "h3@mlx-te4"))
+
+        target = model_delete_target(entry, h3.models_dir)
+
+        assert target is not None and target.stored_quants == ()
+
+
 class TestSeedvr2DeleteTarget:
     def test_a_stored_copy_is_the_target(self, layout):
         copy = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, MLX_WEIGHTS)

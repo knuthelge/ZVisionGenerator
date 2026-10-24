@@ -9,8 +9,9 @@ from pathlib import Path
 import pytest
 
 from zvisiongenerator.backends.mac import download_plan as mac_plan
-from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS, enhancer_download_plan, image_download_plan, video_download_plan
+from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS, enhancer_download_plan, h3_mlx_download_plan, image_download_plan, video_download_plan
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils import hf_snapshot
 
 GEMMA = "mlx-community/gemma-3-12b-it-4bit"
 
@@ -161,3 +162,159 @@ def test_module_imports_nothing_heavy() -> None:
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
 
     assert result.returncode == 0, result.stderr
+
+
+# --- MiniMax H3 ---
+
+
+H3_REF = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+
+
+@pytest.fixture(scope="module")
+def h3_config() -> dict:
+    from zvisiongenerator.utils.config import load_config
+
+    return load_config()
+
+
+@pytest.fixture
+def h3_plan_inputs(h3_config: dict):
+    from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
+
+    return h3_mlx_preset(h3_config), h3_turbo_lora(h3_config)[0]
+
+
+def test_h3_plan_is_the_int8_transformer_the_fl2va_components_and_the_lora(h3_plan_inputs) -> None:
+    preset, lora = h3_plan_inputs
+
+    transformer, components, turbo = h3_mlx_download_plan(H3_REF, preset, lora)
+
+    assert (transformer.repo_id, transformer.revision) == ("water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "70505b09c80e298e684d798d8e0f946937dcfad4")
+    assert transformer.allow_patterns == preset.transformer.files
+    assert (components.repo_id, components.revision) == ("MiniMaxAI/MiniMax-H3", "42ed227ee7df40d41602854ae760620d6eb651fe")
+    assert components.allow_patterns == preset.components.files
+    assert turbo == DownloadTarget("lightx2v/Minimax-h3-Turbo", "30f485ed874aa44c8183348ad361c5eabad318da", ("minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors",))
+
+
+def test_h3_plan_lists_every_file_literally(h3_plan_inputs) -> None:
+    from zvisiongenerator.downloads.target import is_literal
+
+    plan = h3_mlx_download_plan(H3_REF, *h3_plan_inputs)
+
+    assert all(target.allow_patterns and all(is_literal(name) for name in target.allow_patterns) for target in plan)
+    assert all(target.ignore_patterns is None and target.local_dir is None for target in plan)
+
+
+def test_h3_plan_for_a_local_folder_has_no_component_target(tmp_path: Path, h3_plan_inputs) -> None:
+    plan = h3_mlx_download_plan(str(tmp_path), *h3_plan_inputs)
+
+    assert [target.repo_id for target in plan] == ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo"]
+
+
+def test_h3_plan_for_a_local_folder_with_a_transformer_has_no_transformer_target(tmp_path: Path, h3_plan_inputs) -> None:
+    (tmp_path / "FL2VA" / "transformer").mkdir(parents=True)
+    (tmp_path / "FL2VA" / "transformer" / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+
+    plan = h3_mlx_download_plan(str(tmp_path), *h3_plan_inputs)
+
+    assert [target.repo_id for target in plan] == ["lightx2v/Minimax-h3-Turbo"]
+
+
+def test_h3_plan_takes_the_presets_components_whatever_the_reference_revision(h3_plan_inputs) -> None:
+    (_transformer, components, _lora) = h3_mlx_download_plan("MiniMaxAI/MiniMax-H3@other", *h3_plan_inputs)
+
+    assert components.revision == "42ed227ee7df40d41602854ae760620d6eb651fe"
+
+
+def test_h3_plan_downloads_what_the_backend_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, h3_plan_inputs) -> None:
+    """Each plan target is the (repo, revision, allow) the runtime snapshot call uses, or the two diverge."""
+    from zvisiongenerator.backends.mac import h3_video
+
+    preset, lora = h3_plan_inputs
+    monkeypatch.setattr(hf_snapshot, "cached_snapshot_dirs", lambda repo_id, revision: [])
+    calls: list[dict] = []
+
+    def download(**kwargs) -> str:
+        calls.append(kwargs)
+        folder = tmp_path / kwargs["repo_id"].replace("/", "--")
+        for name in kwargs["allow_patterns"]:
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(b"x")
+        return str(folder)
+
+    h3_video.resolve_mlx_files(H3_REF, preset, lora=lora, snapshot_download=download)
+
+    runtime = {(call["repo_id"], call["revision"], tuple(call["allow_patterns"])) for call in calls}
+    planned = {(target.repo_id, target.revision, target.allow_patterns) for target in h3_mlx_download_plan(H3_REF, preset, lora)}
+    assert len(calls) == len(planned) == 3
+    assert planned == runtime
+
+
+class TestH3PlanPresence:
+    """The plan reads as present exactly when the backend resolves its files without the network (SC-10, macOS)."""
+
+    @pytest.fixture
+    def cache(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        import huggingface_hub.constants
+
+        from zvisiongenerator.utils import model_files
+
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache_dir))
+        monkeypatch.setattr(model_files, "huggingface_cache_dir", lambda: cache_dir)
+        return cache_dir
+
+    @staticmethod
+    def _snapshot(cache: Path, target: DownloadTarget) -> Path:
+        return cache / f"models--{target.repo_id.replace('/', '--')}" / "snapshots" / (target.revision or "main")
+
+    def _download(self, cache: Path, target: DownloadTarget) -> None:
+        for name in target.allow_patterns or ():
+            path = self._snapshot(cache, target) / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x")
+
+    @staticmethod
+    def _resolves_offline(preset, lora) -> bool:
+        from zvisiongenerator.backends.mac.h3_video import resolve_mlx_files
+
+        def no_network(**_kwargs):
+            raise AssertionError("downloaded")
+
+        try:
+            resolve_mlx_files(H3_REF, preset, lora=lora, snapshot_download=no_network)
+        except AssertionError:
+            return False
+        return True
+
+    def test_nothing_is_present_before_the_download(self, cache: Path, h3_plan_inputs) -> None:
+        from zvisiongenerator.downloads.presence import target_present_offline
+
+        plan = h3_mlx_download_plan(H3_REF, *h3_plan_inputs)
+
+        assert [target_present_offline(target) for target in plan] == [False, False, False]
+        assert self._resolves_offline(*h3_plan_inputs) is False
+
+    def test_the_downloaded_plan_is_present_and_resolves_offline(self, cache: Path, h3_plan_inputs) -> None:
+        from zvisiongenerator.downloads.presence import target_present_offline
+
+        plan = h3_mlx_download_plan(H3_REF, *h3_plan_inputs)
+        for target in plan:
+            self._download(cache, target)
+
+        assert [target_present_offline(target) for target in plan] == [True, True, True]
+        assert self._resolves_offline(*h3_plan_inputs) is True
+
+    @pytest.mark.parametrize(
+        ("index", "missing"), [(0, "model-00008-of-00008.safetensors"), (1, "FL2VA/text_encoder/model-00014-of-00014.safetensors"), (2, "minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors")]
+    )
+    def test_one_missing_file_makes_its_target_absent_and_the_backend_download(self, cache: Path, h3_plan_inputs, index: int, missing: str) -> None:
+        from zvisiongenerator.downloads.presence import target_present_offline
+
+        plan = h3_mlx_download_plan(H3_REF, *h3_plan_inputs)
+        for target in plan:
+            self._download(cache, target)
+        (self._snapshot(cache, plan[index]) / missing).unlink()
+
+        assert [target_present_offline(target) for target in plan] == [position != index for position in range(3)]
+        assert self._resolves_offline(*h3_plan_inputs) is False

@@ -17,7 +17,7 @@ const state = {
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
   return {
     caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null, extendChanged: false,
-    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, referenceName: null, sourceName: null, memoryWarn: false,
+    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, referenceName: null, endReferenceName: null, sourceName: null, memoryWarn: false,
     presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
   };
@@ -49,6 +49,24 @@ describe('settingsChips', () => {
     const keys = settingsChips(facts({ caps: extend, extendSeconds: 3, sourceName: 'harbour.mp4' })).map((chip) => chip.key);
     expect(keys.slice(0, 2)).toEqual(['preset', 'extendSeconds']);
     expect(keys).toContain('source');
+  });
+
+  it('adds a Last chip after the reference chip only where the model has a last frame, and calls the reference First then', () => {
+    const video = { ...imageCaps, isImageMode: false, showRefImage: true, showFrameCount: true, showGuidance: false, showImageUpscale: false } as WorkspaceCapabilities;
+    const withoutLast = settingsChips(facts({ caps: video, seconds: 5, referenceName: 'start.png' }));
+    expect(withoutLast.map((chip) => chip.key)).not.toContain('endReference');
+    expect(withoutLast.find((chip) => chip.key === 'reference')).toMatchObject({ label: 'Reference', value: 'start.png', on: true });
+
+    const withLast = settingsChips(facts({ caps: { ...video, showEndImage: true } as WorkspaceCapabilities, seconds: 5, referenceName: 'start.png', endReferenceName: 'end.png' }));
+    const keys = withLast.map((chip) => chip.key);
+    expect(keys.indexOf('endReference')).toBe(keys.indexOf('reference') + 1);
+    expect(withLast.find((chip) => chip.key === 'reference')).toMatchObject({ label: 'First', value: 'start.png' });
+    expect(withLast.find((chip) => chip.key === 'endReference')).toMatchObject({ label: 'Last', value: 'end.png', on: true });
+  });
+
+  it('shows an empty Last chip as none and off', () => {
+    const caps = { ...imageCaps, isImageMode: false, showRefImage: true, showEndImage: true } as WorkspaceCapabilities;
+    expect(settingsChips(facts({ caps })).find((chip) => chip.key === 'endReference')).toMatchObject({ value: 'none', on: false });
   });
 
   it('shows values, the changed flag and the on state', () => {

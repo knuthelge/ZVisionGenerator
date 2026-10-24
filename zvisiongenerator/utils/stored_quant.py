@@ -4,6 +4,10 @@ A model installed as ``<models dir>/<name>`` gets its quantized copy at ``<model
 The copy holds the backend's saved weights plus the detection files ``detect_image_model`` reads, and a
 manifest recording what it was made from, so a changed source or backend format makes it stale.
 
+The macOS MiniMax H3 backend keeps a 4-bit text-encoder copy next to its model as ``<name>@mlx-te<bits>``. It is
+not an image quant, but it follows the same rules: it belongs to its model, is never listed as a model of its own
+and is removed with it.
+
 It also holds the write-once routine the video backend's prepared copies use (:func:`ensure_stored_copy`): a copy is
 written into a hidden partial folder, marked complete by its manifest, and renamed into place.
 """
@@ -44,13 +48,15 @@ __all__ = [
     "stored_quant_name",
     "stored_quant_bits",
     "sweep_stale_partials",
+    "text_encoder_copy_name",
     "write_manifest",
 ]
 
 MANIFEST_NAME = "ziv-quant.json"
 STORED_QUANT_BITS = (4, 8)
 _MANIFEST_VERSION = 1
-_NAME_PATTERN = re.compile(r"^(?P<base>.+)@q(?P<bits>4|8)$")
+_NAME_PATTERN = re.compile(r"^(?P<base>.+)@(?:q|mlx-te)(?P<bits>4|8)$")
+_COPY_PREFIXES = ("q", "mlx-te")
 # Files detect_image_model needs (family, distillation, Klein size) that backends may not save with the weights.
 # The source's model_index.json always wins; a component config a backend wrote (e.g. with its quantization
 # settings) is kept.
@@ -60,6 +66,13 @@ _DETECTION_DIRS = ("scheduler",)
 # A running save writes to its partial folder at least every few minutes; one with nothing written for an hour
 # was left by an interrupted process.
 _STALE_PARTIAL_SECONDS = 60 * 60
+# A Hugging Face cache blob is named by its git (40 hex digits) or LFS sha256 (64) content hash.
+_CONTENT_HASH_NAME = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def text_encoder_copy_name(name: str, bits: int) -> str:
+    """Return the folder name of *name*'s macOS text-encoder copy at *bits*, e.g. ``h3@mlx-te4``."""
+    return f"{name}@mlx-te{bits}"
 
 
 def stored_quant_name(name: str, bits: int) -> str:
@@ -68,7 +81,7 @@ def stored_quant_name(name: str, bits: int) -> str:
 
 
 def parse_stored_quant_name(name: str) -> tuple[str, int] | None:
-    """Return ``(base name, bits)`` when *name* is a stored-quant folder name, else ``None``."""
+    """Return ``(base name, bits)`` when *name* is a stored-quant or text-encoder-copy folder name, else ``None``."""
     match = _NAME_PATTERN.match(name)
     return (match["base"], int(match["bits"])) if match else None
 
@@ -79,10 +92,11 @@ def stored_quant_dir(source_dir: Path, bits: int) -> Path:
 
 
 def stored_quant_dirs_for(models_dir: Path, name: str) -> tuple[Path, ...]:
-    """Return the existing stored quants of the model picked as *name* (installed model or alias)."""
+    """Return the existing stored quants and text-encoder copies of the model picked as *name* (installed model or alias)."""
     if parse_stored_quant_name(name) is not None:
         return ()
-    return tuple(path for bits in STORED_QUANT_BITS if (path := models_dir / stored_quant_name(name, bits)).is_dir())
+    names = [f"{name}@{prefix}{bits}" for prefix in _COPY_PREFIXES for bits in STORED_QUANT_BITS]
+    return tuple(path for copy in names if (path := models_dir / copy).is_dir())
 
 
 def source_fingerprint(source_dir: Path) -> dict[str, int]:
@@ -227,9 +241,28 @@ def _last_write(folder: Path) -> float:
 
 
 def file_identities(paths: Iterable[Path]) -> list[dict[str, Any]]:
-    """Return each file's identity for a manifest: the resolved file's name and its size in bytes."""
-    files = [Path(os.path.realpath(path)) for path in paths]
-    return [{"name": path.name, "bytes": path.stat().st_size} for path in files]
+    """Return each file's identity for a manifest, resolving links first.
+
+    A Hugging Face cache blob is named by the hash of its content, so its name and size identify it. Any other file
+    (a local folder's, say) could be replaced by different weights of the same name and size, so its identity also
+    records the modification time and the inode: a changed or swapped file no longer matches. Reading the file's
+    bytes to hash them is avoided on purpose, the files being tens of gigabytes.
+    """
+    identities: list[dict[str, Any]] = []
+    for path in (Path(os.path.realpath(path)) for path in paths):
+        stat = path.stat()
+        identity: dict[str, Any] = {"name": path.name, "bytes": stat.st_size}
+        if not _is_cache_blob(path):
+            identity |= {"mtime_ns": stat.st_mtime_ns, "inode": stat.st_ino}
+        identities.append(identity)
+    return identities
+
+
+def _is_cache_blob(path: Path) -> bool:
+    """Return whether the resolved *path* is a Hugging Face cache blob: named by its content hash, under ``blobs/`` (or ``blobs/<first two hex digits>/``)."""
+    if _CONTENT_HASH_NAME.fullmatch(path.name) is None:
+        return False
+    return path.parent.name == "blobs" or (path.parent.parent.name == "blobs" and path.parent.name == path.name[:2])
 
 
 def ensure_stored_copy(target: Path, manifest: dict[str, Any], write: Callable[[Path], None], *, reuse: Iterable[Path] = (), flush: bool = False) -> Path:

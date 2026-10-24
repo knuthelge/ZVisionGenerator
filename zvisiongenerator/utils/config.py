@@ -19,8 +19,9 @@ from typing import Any, Final
 import yaml
 
 from zvisiongenerator.core.video_family import FrameRule, VideoCapabilities, VideoFamily
+from zvisiongenerator.utils.h3_preset import h3_preset
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.paths import get_ziv_data_dir, split_huggingface_revision
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
 from zvisiongenerator.utils.upscale import max_megapixels
 
@@ -278,7 +279,7 @@ def video_family(config: dict[str, Any], family: str) -> VideoFamily | None:
 
     Raises:
         ValueError: If a required key (``label``, ``default_steps``, ``frame_rule``, ``capabilities``,
-            ``extend_frame_step``) is missing or a value is malformed; the message names the key path.
+            ``extend_frame_step``, ``carry_frames``) is missing or a value is malformed; the message names the key path.
     """
     preset = (config.get("video_model_presets") or {}).get(family)
     if preset is None:
@@ -286,7 +287,7 @@ def video_family(config: dict[str, Any], family: str) -> VideoFamily | None:
     base = f"video_model_presets.{family}"
     if not isinstance(preset, dict):
         raise ValueError(f"{base} must be a mapping.")
-    for key in ("label", "default_steps", "frame_rule", "capabilities", "extend_frame_step"):
+    for key in ("label", "default_steps", "frame_rule", "capabilities", "extend_frame_step", "carry_frames"):
         if key not in preset:
             raise ValueError(f"{base}.{key} is required.")
     label = preset["label"]
@@ -306,7 +307,21 @@ def video_family(config: dict[str, Any], family: str) -> VideoFamily | None:
         step_options=_step_options(preset.get("step_options"), max_steps, f"{base}.step_options"),
         default_frames=_default_frames(preset.get("default_frames"), frame_rule, f"{base}.default_frames"),
         extend_frame_step=_positive_int(preset["extend_frame_step"], f"{base}.extend_frame_step"),
+        carry_frames=_positive_int(preset["carry_frames"], f"{base}.carry_frames"),
+        default_upscale_steps=_default_upscale_steps(preset.get("upscale"), default_steps, f"{base}.upscale"),
+        extend_fps=None if preset.get("extend_fps") is None else _positive_int(preset["extend_fps"], f"{base}.extend_fps"),
     )
+
+
+def _default_upscale_steps(value: Any, default_steps: int, path: str) -> int:
+    """Return ``default_upscale_steps`` from a family's ``upscale`` block, or *default_steps* when it has none."""
+    if value is None:
+        return default_steps
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be a mapping.")
+    if "default_upscale_steps" not in value:
+        return default_steps
+    return _positive_int(value["default_upscale_steps"], f"{path}.default_upscale_steps")
 
 
 def _positive_int(value: Any, path: str) -> int:
@@ -841,14 +856,20 @@ def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale:
     return options
 
 
-def video_load_options(family: str, config: dict[str, Any], model_name: str | None, *, upscale: bool) -> dict[str, Any]:
+def video_load_options(family: str, config: dict[str, Any], model_name: str | None, *, upscale: bool, quiet: bool = False) -> dict[str, Any]:
     """Return the configured keyword arguments the video backend of *family* takes in ``load_model`` for the model picked as *model_name*.
+
+    *quiet* marks a run with no terminal (the web runner): a backend that prints its own progress turns it off.
 
     Raises:
         ValueError: If *family* has no load options, or its entries are malformed (see :func:`ltx_load_options`).
     """
     if family == "ltx":
         return ltx_load_options(config, model_name, upscale=upscale)
+    if family == "h3":
+        from zvisiongenerator.backends import h3_load_options
+
+        return {**h3_load_options(config, model_name, quiet=quiet), **({"upscale": True} if upscale else {})}
     raise ValueError(f"No video load options for model family '{family}'.")
 
 
@@ -856,7 +877,27 @@ def video_companion_repos(family: str, config: dict[str, Any], repo_id: str) -> 
     """Return the other Hugging Face repos the video backend of *family* downloads beside *repo_id* (none for a family without companions)."""
     if family == "ltx":
         return ltx_companion_repos(config, repo_id)
+    if family == "h3":
+        return h3_companion_repos(config, repo_id)
     return ()
+
+
+def h3_companion_repos(config: dict[str, Any], repo_id: str) -> tuple[str, ...]:
+    """Return the other Hugging Face repos the H3 backend downloads beside *repo_id*.
+
+    That is the text encoder and the turbo LoRA on Windows and Linux, and the INT8 transformer and the turbo LoRA on
+    macOS. These are listed when *repo_id* is the configured H3 repository (at any revision), otherwise none. The SeedVR2 weights
+    of the upscale are shared with the image upscaler and are not companions.
+
+    Raises:
+        ValueError: If the H3 entry of *config* is malformed.
+    """
+    from zvisiongenerator.backends import h3_companion_repo_ids
+
+    preset = h3_preset(config)
+    if split_huggingface_revision(repo_id)[0] != preset.repo:
+        return ()
+    return tuple(dict.fromkeys(companion for companion in h3_companion_repo_ids(config) if companion != preset.repo))
 
 
 def model_reference(repo: str, revision: str | None) -> str:

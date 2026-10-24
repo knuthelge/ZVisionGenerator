@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["ANY_FRAMES", "FrameRule", "SettledSteps", "VideoCapabilities", "VideoFamily", "settle_video_steps"]
+__all__ = ["ANY_FRAMES", "UNDESCRIBED_UPSCALE_STEPS", "FrameRule", "SettledSteps", "VideoCapabilities", "VideoFamily", "settle_video_steps"]
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,9 @@ class FrameRule:
 
 # The rule of a model with no family description: every count is valid except 1, which moves to 2.
 ANY_FRAMES = FrameRule(1, 1, "nearest")
+
+# The steps of an upscaled clip of a model with no family description.
+UNDESCRIBED_UPSCALE_STEPS = 8
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,9 @@ class VideoFamily:
         step_options: The only step counts it offers (ascending), or ``None`` for any.
         default_frames: The frame count of a clip when none is given, or ``None`` to take the size table's.
         extend_frame_step: The step between the lengths an extension can add.
+        carry_frames: The frames of the source's end an extension carries into its window (the window is these plus the new frames).
+        default_upscale_steps: The steps of an upscaled clip when none are given.
+        extend_fps: The one frame rate an extension source must run at, or ``None`` when the family extends a clip at its own rate.
     """
 
     name: str
@@ -76,6 +82,9 @@ class VideoFamily:
     step_options: tuple[int, ...] | None
     default_frames: int | None
     extend_frame_step: int
+    carry_frames: int
+    default_upscale_steps: int
+    extend_fps: int | None = None
 
 
 @dataclass(frozen=True)

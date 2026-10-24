@@ -24,6 +24,8 @@ export interface WorkspaceCapabilities {
   enhancer: PromptEnhancerContract | null;
   enhanceMaxWords: number;
   showRefImage: boolean;
+  /** Image to Video on a model that can end a clip on a given image: the Last frame slot. */
+  showEndImage: boolean;
   showDimensions: boolean;
   showRuns: boolean;
   showFrameCount: boolean;
@@ -51,8 +53,11 @@ export interface WorkspaceCapabilities {
 /** Derive control visibility from the backend workflow contract and the current model's capability flags. */
 export function workspaceCapabilities(context: WorkspaceContext | null, state: DraftState): WorkspaceCapabilities {
   const definition = context?.workflow_contract.definitions[state.workflow];
-  const visible = new Set(definition?.visible_controls ?? []);
   const isImageMode = definition?.mode === 'image';
+  const videoDefaults = context?.video_model_defaults?.[state.model] as VideoModelDefaults | undefined;
+  // A video model that lacks a control (low memory, upscale, ...) does not show it, whatever the workflow offers.
+  const hidden = new Set(isImageMode ? [] : (videoDefaults?.hidden_controls ?? []));
+  const visible = new Set((definition?.visible_controls ?? []).filter((control) => !hidden.has(control)));
   const imageDefaults = isImageMode
     ? ((context?.image_model_defaults?.[state.model] ?? context?.defaults) as ImageModelDefaults | undefined)
     : undefined;
@@ -62,7 +67,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   const supportsScheduler = imageDefaults?.supports_scheduler ?? true;
   const supportsNegativePrompt = isImageMode && (imageDefaults?.supports_negative_prompt ?? false);
   const enhancer = context?.prompt_enhancer ?? null;
-  const videoDefaults = context?.video_model_defaults?.[state.model] as VideoModelDefaults | undefined;
+  const showRefImage = (visible.has('reference_image') || visible.has('reference_image_path')) && supportsImg2img;
   const showImageUpscale = isImageMode && visible.has('image_upscale_enabled') && supportsUpscale;
 
   return {
@@ -86,7 +91,8 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     enhanceMaxWords: (isImageMode ? imageDefaults?.enhance_max_words : videoDefaults?.enhance_max_words)
       ?? enhancer?.default_max_words
       ?? 300,
-    showRefImage: (visible.has('reference_image') || visible.has('reference_image_path')) && supportsImg2img,
+    showRefImage,
+    showEndImage: (visible.has('end_image') || visible.has('end_image_path')) && showRefImage,
     showDimensions: visible.has('ratio') || visible.has('size') || visible.has('custom_dimensions'),
     showRuns: visible.has('runs'),
     showFrameCount: visible.has('frame_count'),

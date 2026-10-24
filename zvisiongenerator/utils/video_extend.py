@@ -27,6 +27,8 @@ CARRY_FRAMES = 25
 # New frames come in steps of one latent frame.
 EXTEND_FRAME_STEP = 8
 DEFAULT_EXTEND_SECONDS = 2.0
+# How far a source's frame rate may stray from a family's ``extend_fps`` (the backends' own check uses the same).
+EXTEND_FPS_TOLERANCE = 1e-3
 # Sample rate of the generated audio.
 AUDIO_SAMPLE_RATE = 48000
 # Sound of the carried frames kept before the new part, to fill a source track that ends short of its video.
@@ -62,9 +64,14 @@ class ExtendInspection:
     source: ExtendSource | None
 
 
-def window_frames(extend_frames: int) -> int:
-    """Return the frames generated for an extension: the carried frames plus the new ones (25 + 8n)."""
-    return CARRY_FRAMES + extend_frames
+def window_frames(extend_frames: int, family: VideoFamily | None = None) -> int:
+    """Return the frames generated for an extension: the carried frames plus the new ones (LTX: 25 + 8n).
+
+    Args:
+        extend_frames: The new frames.
+        family: The model's family, whose ``carry_frames`` are carried; ``None`` carries the LTX frames.
+    """
+    return (family.carry_frames if family is not None else CARRY_FRAMES) + extend_frames
 
 
 def extend_audio_output(source: ExtendSource, *, no_audio: bool) -> bool:
@@ -152,7 +159,7 @@ def resolve_extend_frames(
     return resolved, f"{seconds_name} {seconds:g} is {seconds * fps:g} frames at {fps:g} fps; using {resolved} frames ({resolved / fps:.2f} s)."
 
 
-def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio: bool, prompt: str | None = None) -> EnhanceContext:
+def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio: bool, prompt: str | None = None, family: VideoFamily | None = None) -> EnhanceContext:
     """Return the rewrite context of an extension: the generation window, the source's prompt and the new frames.
 
     Args:
@@ -161,12 +168,13 @@ def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio
         no_audio: Whether the job asked for no sound; a silent source has none either way.
         prompt: The user's prompt template, to tell whether it is still a legacy source's own prompt. Left out, nothing is
             known about it, and callers set ``prompt_is_original`` for each prompt later.
+        family: The model's family, which sets the carried frames of the window (``None``: the LTX frames).
     """
     return enhance_context(
         mode="video",
         width=source.width,
         height=source.height,
-        frames=window_frames(extend_frames),
+        frames=window_frames(extend_frames, family),
         fps=source.fps,
         audio=extend_audio_output(source, no_audio=no_audio),
         reference_image=False,
@@ -178,13 +186,16 @@ def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio
     )
 
 
-def apply_extend_args(args: argparse.Namespace, source: ExtendSource, extend_frames: int) -> None:
-    """Set the arguments the extend workflow reads: the source, the new frames, the source's displayed size and frame rate, and the window length."""
+def apply_extend_args(args: argparse.Namespace, source: ExtendSource, extend_frames: int, family: VideoFamily | None = None) -> None:
+    """Set the arguments the extend workflow reads: the source, the new frames, the source's displayed size and frame rate, and the window length.
+
+    The window is the family's carried frames plus the new ones (``None``: the LTX frames).
+    """
     args.extend_source = source
     args.extend_frames = extend_frames
     args.width, args.height = source.width, source.height
     args.fps = source.fps
-    args.num_frames = window_frames(extend_frames)
+    args.num_frames = window_frames(extend_frames, family)
 
 
 def _require_positive_finite(value: float, label: str) -> None:
@@ -263,6 +274,38 @@ def extend_source_problems(probe: VideoProbe, recorded: RecordedSettings | None,
     if probe.has_audio and not audio_ok:
         problems.append(ExtendProblem("unreadable_audio", "The video's audio track could not be decoded."))
     return problems
+
+
+def extend_family_problems(fps: float, family: VideoFamily | None) -> list[ExtendProblem]:
+    """List why a clip at *fps* cannot be extended by *family*; an empty list means the family takes its frame rate.
+
+    A family that pins the rate (``extend_fps``) takes only that rate, within the tolerance the backends apply; a clip whose
+    rate could not be read is already reported by ``extend_source_problems``.
+    """
+    if family is None or family.extend_fps is None or fps <= 0 or abs(fps - family.extend_fps) <= EXTEND_FPS_TOLERANCE:
+        return []
+    return [ExtendProblem("frame_rate", f"The video runs at {fps:g} fps; {family.label} extends {family.extend_fps} fps clips only.")]
+
+
+def with_family_problems(inspection: ExtendInspection, family: VideoFamily | None) -> ExtendInspection:
+    """Return *inspection* with the problems *family* adds; a clip with any problem has no source."""
+    if inspection.probe is None:
+        return inspection
+    added = extend_family_problems(inspection.probe.fps, family)
+    if not added:
+        return inspection
+    return ExtendInspection(inspection.probe, inspection.recorded, (*inspection.problems, *added), None)
+
+
+def require_extend_family(source: ExtendSource, family: VideoFamily | None) -> None:
+    """Raise unless *family* extends a clip at the frame rate of *source*.
+
+    Raises:
+        ValueError: If the clip's frame rate is not the one the family extends; the message says which.
+    """
+    problems = extend_family_problems(source.fps, family)
+    if problems:
+        raise ValueError(f"{source.path.name} cannot be extended: " + " ".join(problem.message for problem in problems))
 
 
 def build_extend_source(path: str | Path, probe: VideoProbe, recorded: RecordedSettings | None) -> ExtendSource:

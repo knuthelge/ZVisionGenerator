@@ -52,7 +52,7 @@ ziv-image -m my-model -p prompts.yaml -r 3
 
 ### Video Generation
 
-Use `MODEL` below as `ltx-4`, `ltx-8` (4-bit or 8-bit) or `ltx25-4` (LTX-2.5, 4-bit), all available on every platform.
+Use `MODEL` below as `ltx-4`, `ltx-8` (4-bit or 8-bit), `ltx25-4` (LTX-2.5, 4-bit) or `h3` (MiniMax H3), all available on every platform.
 
 ```bash
 # Text-to-video with LTX (4-bit)
@@ -68,6 +68,8 @@ ziv-video -m MODEL -p prompts.yaml -r 3
 ### Choosing a Video Model
 
 `ltx-4` needs the least memory; `ltx-8` is closer to the full model. On Windows and Linux, `ltx-4` needs about 20 GB of system memory and `ltx-8` about 27 GB, and `ltx25-4`, the newer LTX-2.5 at 4-bit, about 21 GB. On macOS, `ltx25-4` downloads about 30.5 GB and needs no preparing. The first run of each takes a while to download and prepare the model (on Windows and Linux `ltx25-4` downloads about 71 GB). See the [Video Guide](guides/video.md#ltx-constraints).
+
+`h3` is MiniMax H3, a much larger model that is stronger on dynamic scenes and adds first and last frame (`--end-image`). A 5 s clip takes about 5 minutes on an RTX 3080 10 GB, and is estimated at about 23 minutes on a Mac (not yet tested on one). The download is about 98 GB on Windows and Linux and about 107 GB on macOS, and Windows and Linux need about 18 GB of free system memory. See the [Video Guide](guides/video.md#minimax-h3).
 
 ### Model & LoRA Management
 

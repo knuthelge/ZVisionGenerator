@@ -19,7 +19,7 @@ from zvisiongenerator.backends import prompt_enhancer_session, release_accelerat
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
 from zvisiongenerator.utils.prompt_compose import expand_random_choices, is_original_prompt
-from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.config import model_reference, video_family
 from zvisiongenerator.utils.enhance_record import enhancer_tier
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
@@ -39,6 +39,7 @@ from zvisiongenerator.utils.video_extend import extend_enhance_context
 if TYPE_CHECKING:
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
+    from zvisiongenerator.core.video_family import VideoFamily
     from zvisiongenerator.utils.interactive import SkipSignal
 
 __all__ = ["plan_iterations", "run_preflight"]
@@ -196,7 +197,8 @@ def run_preflight(
         return JobPlan(iterations, cancelled=True)
     pause = _make_pause(control, mode=mode, total_iterations=total_iterations, progress_callback=progress_callback)
     caption = mode == "image" and getattr(args, "enhance_format", None) == "json"
-    rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode), caption=caption)
+    family = video_family(config, model_family) if video and model_family else None
+    rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode, family=family), caption=caption)
 
     def _on_phase(phase: str) -> None:
         _print_enhancer_phase(phase)
@@ -260,17 +262,18 @@ def _rewrite_all(
     return tuple(planned), False
 
 
-def _job_context(args: argparse.Namespace, *, mode: str) -> EnhanceContext:
-    """Return the rewrite context for a job from its arguments (frame size or ratio, frames, fps, audio, reference image).
+def _job_context(args: argparse.Namespace, *, mode: str, family: VideoFamily | None = None) -> EnhanceContext:
+    """Return the rewrite context for a job from its arguments (frame size or ratio, frames, fps, audio, reference image, last frame).
 
     A video job that extends a clip (``args.extend_source``) describes the generation window: the source's displayed
     size and frame rate, the carried plus new frames, and the new frames and the source's prompt for the extend modes.
-    ``prompt_is_original`` depends on each prompt and is set per iteration (see ``_iteration_context``).
+    ``prompt_is_original`` depends on each prompt and is set per iteration (see ``_iteration_context``). The family
+    sets how many frames an extension carries.
     """
     no_audio = getattr(args, "no_audio", True)
     source = getattr(args, "extend_source", None) if mode == "video" else None
     if source is not None:
-        return extend_enhance_context(source, args.extend_frames, no_audio=no_audio)
+        return extend_enhance_context(source, args.extend_frames, no_audio=no_audio, family=family)
     return enhance_context(
         mode=mode,
         width=getattr(args, "width", None),
@@ -280,6 +283,7 @@ def _job_context(args: argparse.Namespace, *, mode: str) -> EnhanceContext:
         fps=getattr(args, "fps", None),
         audio=not no_audio,
         reference_image=bool(getattr(args, "image_path", None)),
+        end_image=bool(getattr(args, "end_image_path", None)),
     )
 
 

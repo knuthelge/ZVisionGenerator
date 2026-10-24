@@ -190,3 +190,115 @@ describe('SettingPopover LoRA list', () => {
   });
 });
 
+describe('SettingPopover last frame', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  const videoContext = (hidden: string[]): WorkspaceContext => ({
+    workflow_contract: {
+      values: ['img2vid'],
+      definitions: {
+        img2vid: {
+          mode: 'video',
+          visible_controls: ['reference_image', 'reference_image_path', 'end_image', 'end_image_path', 'end_image_clear'],
+          clear_fields: [],
+        },
+      },
+    },
+    image_model_defaults: {},
+    video_model_defaults: { h3: { hidden_controls: hidden } },
+    defaults: null,
+    loras: [],
+    prompt_sources: [],
+    scheduler_options: [],
+  }) as unknown as WorkspaceContext;
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+    draft.patch({ workflow: 'img2vid', model: 'h3' });
+    Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await unmount(app);
+      app = null;
+    }
+    target.remove();
+    delete (Element.prototype as Partial<Element>).animate;
+  });
+
+  function open(key: 'reference' | 'endReference', hidden: string[] = [], props: Record<string, unknown> = {}): void {
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: {
+        key, context: videoContext(hidden), busy: false, models: [], quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
+        onImageFileChange: vi.fn(), onModelChange: vi.fn(), onUseLatestAsReference: vi.fn(), onclose: vi.fn(), ...props,
+      },
+    }));
+  }
+
+  const popover = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement;
+
+  it('picks the last frame by typing or pasting a path, and submits no field of its own', () => {
+    open('endReference');
+
+    const input = target.querySelector('#ws-pop-end-image-path') as HTMLInputElement;
+    input.value = '/in/end.png';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(draft.state.endImagePath).toBe('/in/end.png');
+    expect(input.getAttribute('name')).toBeNull();
+    expect(popover().getAttribute('data-key')).toBe('endReference');
+  });
+
+  it('shows the chosen last frame by name and clears it without touching the first frame', () => {
+    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+    const onEndImageFileChange = vi.fn();
+    open('endReference', [], { onEndImageFileChange });
+
+    expect(popover().textContent).toContain('end.png');
+    (popover().querySelector('button[aria-label="Clear last frame"]') as HTMLButtonElement).click();
+    flushSync();
+
+    expect(draft.state.endImagePath).toBeNull();
+    expect(draft.state.referenceImagePath).toBe('/in/start.png');
+    expect(onEndImageFileChange).toHaveBeenCalledWith(null);
+  });
+
+  it('offers no Clear while the last frame is empty', () => {
+    open('endReference');
+
+    expect(popover().querySelector('button[aria-label="Clear last frame"]')).toBeNull();
+    expect(popover().textContent).toContain('No last frame');
+  });
+
+  it('hands an uploaded image to the last-frame callback, not the first frame', () => {
+    const onImageFileChange = vi.fn();
+    const onEndImageFileChange = vi.fn();
+    open('endReference', [], { onImageFileChange, onEndImageFileChange });
+
+    const input = popover().querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['x'], 'end.png', { type: 'image/png' });
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(onEndImageFileChange).toHaveBeenCalledWith(file);
+    expect(onImageFileChange).not.toHaveBeenCalled();
+  });
+
+  it('names the first-frame popover First frame only while the model has a last frame', () => {
+    open('reference');
+    const withSlot = popover().getAttribute('aria-label');
+    void unmount(app!);
+    app = null;
+    target.replaceChildren();
+    open('reference', ['end_image', 'end_image_path', 'end_image_clear']);
+
+    expect(withSlot).toBe('First frame');
+    expect(popover().getAttribute('aria-label')).toBe('Reference image');
+  });
+});

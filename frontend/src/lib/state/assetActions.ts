@@ -1,8 +1,8 @@
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
 import type { AssetUpscaleFactor, GalleryAsset, JobWorkflow, UpscaleFactor, UpscaleMethod, Workflow } from '$lib/types';
 
-/** Which generation a reference image feeds. */
-export type ReferenceTarget = 'image' | 'video';
+/** Which generation a reference image feeds: an image, a video's first frame, or a video's last frame. */
+export type ReferenceTarget = 'image' | 'video' | 'last';
 
 /** Callbacks for the actions every asset surface offers; an absent callback hides its action. */
 export interface AssetActionHandlers {
@@ -57,6 +57,7 @@ export interface DeleteOptions {
 const REFERENCE_WORKFLOWS: Record<ReferenceTarget, Workflow> = {
   image: 'img2img',
   video: 'img2vid',
+  last: 'img2vid',
 };
 
 const FALLBACK_REASON_TEXT: Record<string, string> = {
@@ -84,10 +85,12 @@ export function canUseAsReference(asset: GalleryAsset): boolean {
  * Return the workspace prefill params that make an asset the reference image, carrying its prompt.
  *
  * For a video the prompt describes what the first frame shows, so it fills the Scene and leaves the Action for what happens;
- * for an image it is the prompt.
+ * for an image it is the prompt. A last frame is not the opening scene, so it carries no text.
  */
 export function referenceParams(asset: GalleryAsset, target: ReferenceTarget): Record<string, string> {
-  const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: asset.file_path ?? '' };
+  const path = asset.file_path ?? '';
+  if (target === 'last') return { workflow: REFERENCE_WORKFLOWS[target], end_image_path: path };
+  const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: path };
   if (asset.prompt) params[target === 'video' ? 'scene' : 'prompt'] = asset.prompt;
   return params;
 }

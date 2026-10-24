@@ -47,6 +47,8 @@
     deletingIds?: ReadonlySet<string>;
     /** Reference targets the current model can't use, with the reason. */
     referenceUnavailable?: Partial<Record<ReferenceTarget, string>>;
+    /** The reference targets the menu offers; absent offers an image and a video. */
+    referenceTargets?: readonly ReferenceTarget[];
     /** Called when the viewer nears the end of the list, so a paged source can load more. */
     onnearend?: () => void;
     onclose: () => void;
@@ -62,6 +64,7 @@
     setLabel = '',
     deletingIds = new Set<string>(),
     referenceUnavailable = {},
+    referenceTargets = undefined,
     onnearend,
     onclose,
     onnavigate,
@@ -112,7 +115,7 @@
   });
 
   const referenceItems = $derived<ActionMenuEntry[]>(
-    asset && onreference ? referenceEntries(asset, onreference, referenceUnavailable) : []
+    asset && onreference ? referenceEntries(asset, onreference, referenceUnavailable, referenceTargets) : []
   );
 
   const upscaleItems = $derived<ActionMenuEntry[]>(
@@ -130,7 +133,7 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
   const moreItems = $derived.by<ActionMenuEntry[]>(() => {
     if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable);
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable, referenceTargets);
     if (!asset.prompt) return entries;
     const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(asset.prompt!) };
     // Copy the prompt sits with Reuse at the top, before the first separator.

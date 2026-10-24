@@ -35,6 +35,36 @@ class TestDetectVideoModel:
         assert info.frame_alignment == expected_frame_align
         assert info.resolution_alignment == expected_res_align
 
+    @pytest.mark.parametrize(
+        "model_path",
+        [
+            "MiniMaxAI/MiniMax-H3",
+            "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe",
+            "unsloth/MiniMax-H3",
+        ],
+    )
+    def test_minimax_h3_repos(self, model_path):
+        info = detect_video_model(model_path)
+        assert (info.family, info.backend, info.supports_i2v, info.default_fps, info.frame_alignment, info.resolution_alignment) == ("h3", "h3", True, 24, 17, 32)
+        assert is_known_video_repo(model_path) is True
+
+    @pytest.mark.parametrize("folder_name", ["h3-local", "my-ltx-style-h3"])
+    def test_a_local_h3_folder_is_h3_even_when_its_path_says_ltx(self, tmp_path, folder_name):
+        model_dir = tmp_path / folder_name
+        model_dir.mkdir()
+        (model_dir / "model_index.json").write_text(json.dumps({"_class_name": "MiniMaxH3ModularPipeline"}), encoding="utf-8")
+
+        info = detect_video_model(str(model_dir))
+
+        assert (info.family, info.backend, info.frame_alignment) == ("h3", "h3", 17)
+
+    def test_an_h3_folder_below_an_ltx_named_parent_is_h3(self, tmp_path):
+        model_dir = tmp_path / "ltx-collection" / "minimax"
+        model_dir.mkdir(parents=True)
+        (model_dir / "model_index.json").write_text(json.dumps({"_class_name": "MiniMaxH3ModularPipeline"}), encoding="utf-8")
+
+        assert detect_video_model(str(model_dir)).family == "h3"
+
     @pytest.mark.parametrize("model_path", ["some/random-model", "stable-diffusion/v2", "Lightricks/LTX-2.3-13B", "dg845/LTX-2.3-Diffusers", ""])
     def test_unknown_models(self, model_path):
         info = detect_video_model(model_path)

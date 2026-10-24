@@ -2,8 +2,8 @@ import { extendPrefillFor } from './extend';
 import { keepInstalledLoras, modelLoraFamily } from './loras';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
-import { alignFrameCount, defaultExtendFrames, snapExtendFrames } from './videoDuration';
-import type { DraftState, ExtendSourceInfo, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
+import type { DraftState, ExtendSourceInfo, FrameRule, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -42,6 +42,7 @@ const DEFAULT_DRAFT: DraftState = {
   loraString: '',
   lorasByFamily: {},
   referenceImagePath: null,
+  endImagePath: null,
   referenceImageStrength: 0,
   frameCount: 0,
   fps: 24,
@@ -103,6 +104,7 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   source_video: 'source_video',
   extend_frames: 'extend_length',
   image_path: 'reference_image_path',
+  end_image_path: 'end_image_path',
   negative_prompt: 'negative_prompt',
   scheduler: 'scheduler',
 };
@@ -111,6 +113,7 @@ const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> =
   negative_prompt: { negativePrompt: '' },
   guidance: { guidance: DEFAULT_DRAFT.guidance },
   image_path: { referenceImagePath: null },
+  end_image_path: { endImagePath: null },
   image_strength: { referenceImageStrength: DEFAULT_DRAFT.referenceImageStrength },
   quantize: { quantize: null },
   frames: { frameCount: DEFAULT_DRAFT.frameCount },
@@ -169,7 +172,7 @@ function _applyVideoDefaults(state: DraftState, defaults: VideoModelDefaults): D
     width: defaults.width,
     height: defaults.height,
     // A configured default may be off the model's grid; align it so Reset matches what the server generates.
-    frameCount: alignFrameCount(defaults.frame_count, defaults.frame_alignment ?? 1),
+    frameCount: alignFrames(defaults.frame_count, _frameRuleOf(defaults)),
     audio: defaults.audio,
     lowMemory: defaults.low_memory,
     videoUpscaleEnabled: defaults.upscale.enabled,
@@ -244,14 +247,44 @@ function _swapFamilyLoras(ctx: WorkspaceContext, state: DraftState, fromModel: s
   };
 }
 
+/** The frame counts a video model accepts: its family's rule, else `frame_alignment * k + 1` rounded to the nearest. */
+function _frameRuleOf(defaults: VideoModelDefaults | undefined): FrameRule {
+  return defaults?.frame_rule ?? { alignment: defaults?.frame_alignment ?? 1, offset: 1, round: 'nearest' };
+}
+
+/** Return a video model's defaults, falling back to the default video model's. */
+function _videoDefaultsOf(ctx: WorkspaceContext, model: string): VideoModelDefaults | undefined {
+  return ctx.video_model_defaults?.[model] ?? ctx.video_defaults;
+}
+
 /**
- * Return a video model's frame rate and frame alignment, falling back to the default video model's.
+ * Return a video model's frame rate and frame rule, falling back to the default video model's.
  *
  * @param sourceFps An extension's frame rate is its source's: when given, it replaces the model's.
  */
-export function videoTimingFor(ctx: WorkspaceContext, model: string, sourceFps: number | null = null): { fps: number; frameAlignment: number } {
-  const defaults = ctx.video_model_defaults?.[model] ?? ctx.video_defaults;
-  return { fps: sourceFps ?? defaults?.fps ?? 24, frameAlignment: defaults?.frame_alignment ?? 1 };
+export function videoTimingFor(ctx: WorkspaceContext, model: string, sourceFps: number | null = null): { fps: number; frameRule: FrameRule } {
+  const defaults = _videoDefaultsOf(ctx, model);
+  return { fps: sourceFps ?? defaults?.fps ?? 24, frameRule: _frameRuleOf(defaults) };
+}
+
+/** Return the step between the lengths a video model can extend by (8 when it does not say). */
+export function extendStepFor(ctx: WorkspaceContext, model: string): number {
+  return _videoDefaultsOf(ctx, model)?.extend_frame_step ?? EXTEND_FRAME_STEP;
+}
+
+/** Return the only step counts a video model offers, or null when it takes any count. */
+export function stepOptionsFor(ctx: WorkspaceContext, model: string): number[] | null {
+  const options = _videoDefaultsOf(ctx, model)?.step_options;
+  return options && options.length > 0 ? options : null;
+}
+
+/** Move a step count to the nearest offered one (the higher on a tie), as the server does. */
+export function snapSteps(steps: number, options: number[]): number {
+  return options.reduce((best, option) => {
+    const distance = Math.abs(option - steps);
+    const bestDistance = Math.abs(best - steps);
+    return distance < bestDistance || (distance === bestDistance && option > best) ? option : best;
+  });
 }
 
 /** Apply a workflow's cleared fields and then the model's defaults to a state. */
@@ -386,8 +419,18 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftS
     // A kept or restored count may predate snapping; show the count the server will generate.
     const timing = videoTimingFor(ctx, model, _sourceFps(workflow));
     nextState.fps = timing.fps;
-    // An extension has no clip length of its own: its new frames (`extendFrames`) stay multiples of 8, not 8k+1.
-    if (workflow !== 'extend') nextState.frameCount = alignFrameCount(nextState.frameCount, timing.frameAlignment);
+    // An extension has no clip length of its own: its new frames (`extendFrames`) stay multiples of the model's step, not its frame rule.
+    if (workflow !== 'extend') nextState.frameCount = alignFrames(nextState.frameCount, timing.frameRule);
+    // Settings of controls the model does not have are cleared, and the steps move to one it offers.
+    const video = modelDefaults as VideoModelDefaults | null;
+    const hidden = new Set(video?.hidden_controls ?? []);
+    if (hidden.has('video_upscale_enabled')) nextState.videoUpscaleEnabled = false;
+    if (hidden.has('video_upscale_review')) nextState.videoUpscaleReview = false;
+    if (hidden.has('low_memory') && video) nextState.lowMemory = video.low_memory;
+    // The last frame is an Image to Video setting of the model: switching to one without it drops the image.
+    if (hidden.has('end_image_path')) nextState.endImagePath = null;
+    if (video?.step_options?.length) nextState.steps = snapSteps(nextState.steps, video.step_options);
+    if (workflow === 'extend' && nextState.extendFrames !== null) nextState.extendFrames = snapExtendFrames(nextState.extendFrames, extendStepFor(ctx, model));
   } else {
     const imageDefaults = modelDefaults as ImageModelDefaults | null;
     nextState = {
@@ -491,8 +534,8 @@ export const draft = {
     }
     if (params.extend_frames && canApply('extend_frames')) {
       const frames = Number(params.extend_frames);
-      // A multiple of 8, not 8k+1: the new frames are not a clip length.
-      if (Number.isFinite(frames)) prefill.extendFrames = snapExtendFrames(frames);
+      // A multiple of the model's step, not of its frame rule: the new frames are not a clip length.
+      if (Number.isFinite(frames)) prefill.extendFrames = snapExtendFrames(frames, ctx ? extendStepFor(ctx, prefill.model ?? _draft.model) : EXTEND_FRAME_STEP);
     }
     if (reusesText && canApply('prompt')) {
       prefill.prompt = params.prompt ?? '';
@@ -536,8 +579,8 @@ export const draft = {
     if (params.height && canApply('height')) prefill.height = Number(params.height);
     if (params.frames && canApply('frames')) {
       // Show the count the server will generate, not one it would re-align.
-      const alignment = ctx ? videoTimingFor(ctx, prefill.model ?? _draft.model).frameAlignment : 1;
-      prefill.frameCount = alignFrameCount(Number(params.frames), alignment);
+      const rule = ctx ? videoTimingFor(ctx, prefill.model ?? _draft.model).frameRule : { alignment: 1, offset: 1, round: 'nearest' as const };
+      prefill.frameCount = alignFrames(Number(params.frames), rule);
     }
     // A named but blank list clears the LoRAs: a reused job runs with exactly its source's.
     if (params.lora !== undefined && canApply('lora')) prefill.loraString = params.lora;
@@ -549,6 +592,7 @@ export const draft = {
       prefill.quantize = supported && params.quantize !== '' && ctx.quantize_options.includes(level) ? level : null;
     }
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
+    if (params.end_image_path && canApply('end_image_path')) prefill.endImagePath = params.end_image_path;
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
     if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;
     // A reused preset the current model does not offer keeps the current preset size instead.
@@ -652,7 +696,7 @@ export const draft = {
       extendSourcePath: s.extendSourcePath,
       missingSourceVideo: s.missingSourceVideo,
       extendPrefill: s.extendPrefill,
-      extendFrames: _extendSource?.fps ? defaultExtendFrames(_extendSource.fps) : s.extendFrames,
+      extendFrames: _extendSource?.fps ? defaultExtendFrames(_extendSource.fps, extendStepFor(ctx, s.model)) : s.extendFrames,
     };
     this.hydrateFromContext(ctx, s.model);
     // Restore prompt inputs after hydration, which re-applies the default prompt source.

@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 
 from zvisiongenerator.utils import model_files
-from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS, cached_snapshot_dirs, find_local_model_dir, has_complete_weights, ltx2_text_encoder_class
+from zvisiongenerator.utils.model_files import (
+    H3_UNLOADED_COMPONENTS,
+    LTX2_UNLOADED_COMPONENTS,
+    cached_snapshot_dirs,
+    find_local_model_dir,
+    has_complete_weights,
+    ltx2_text_encoder_class,
+)
 
 
 def _touch(path: Path, content: str = "x") -> Path:
@@ -265,6 +272,90 @@ class TestLtx2TextEncoderClass:
 
     def test_the_unloaded_components_are_the_four_the_app_never_reads(self):
         assert LTX2_UNLOADED_COMPONENTS == frozenset({"processor", "prompt_enhancer", "duration_head", "diffusion_decoder"})
+
+
+_H3_SHARDS = {"transformer": 3, "vae": 1, "transformer_ref": 2, "text_encoder": 5}
+
+
+def _write_h3_index(model_dir: Path, class_name: str = "MiniMaxH3ModularPipeline") -> None:
+    """Write a modular-pipeline ``model_index.json`` whose entries carry a third (component spec) element."""
+    spec = {"pretrained_model_name_or_path": "owner/h3"}
+    index = {
+        "_class_name": class_name,
+        "text_encoder": ["transformers", "Qwen3VLForConditionalGeneration", spec],
+        "tokenizer": ["transformers", "Qwen2Tokenizer", spec],
+        "transformer": ["diffusers", "MiniMaxH3Transformer", spec],
+        "transformer_ref": ["diffusers", "MiniMaxH3Transformer", spec],
+        "vae": ["diffusers", "AutoencoderKLMiniMaxH3", spec],
+        "scheduler": ["diffusers", "MiniMaxH3Scheduler", spec],
+    }
+    _touch(model_dir / "model_index.json", json.dumps(index))
+
+
+def _write_h3_snapshot(model_dir: Path) -> None:
+    """Lay out a complete H3 snapshot: sharded transformer, single-file vae, and the components the app skips."""
+    _write_h3_index(model_dir)
+    for component, shards in _H3_SHARDS.items():
+        _touch(model_dir / component / "config.json")
+        if shards == 1:
+            _touch(model_dir / component / "diffusion_pytorch_model.safetensors")
+            continue
+        for shard in range(1, shards + 1):
+            _touch(model_dir / component / f"model-{shard:05d}-of-{shards:05d}.safetensors")
+    _touch(model_dir / "scheduler" / "scheduler_config.json")
+    _touch(model_dir / "tokenizer" / "tokenizer.json")
+
+
+class TestH3ModelIndex:
+    def test_three_element_entries_count_as_weighted_components(self, tmp_path):
+        _write_h3_snapshot(tmp_path)
+
+        assert set(model_files.weighted_components(tmp_path) or ()) == {"transformer", "vae"}
+
+    def test_a_complete_snapshot_is_complete(self, tmp_path):
+        _write_h3_snapshot(tmp_path)
+
+        assert has_complete_weights(tmp_path) is True
+
+    def test_a_missing_transformer_shard_is_incomplete(self, tmp_path):
+        _write_h3_snapshot(tmp_path)
+        (tmp_path / "transformer" / "model-00002-of-00003.safetensors").unlink()
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_the_index_alone_is_incomplete(self, tmp_path):
+        _write_h3_index(tmp_path)
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_a_partial_text_encoder_and_a_missing_reference_transformer_are_ignored(self, tmp_path):
+        _write_h3_snapshot(tmp_path)
+        (tmp_path / "text_encoder" / "model-00005-of-00005.safetensors").unlink()
+        for path in (tmp_path / "transformer_ref").glob("*.safetensors"):
+            path.unlink()
+
+        assert has_complete_weights(tmp_path) is True
+
+    def test_another_pipeline_keeps_the_components_the_h3_pipeline_skips(self, tmp_path):
+        _write_h3_index(tmp_path, class_name="OtherModularPipeline")
+
+        assert {"text_encoder", "transformer_ref"} <= set(model_files.weighted_components(tmp_path) or ())
+
+    def test_the_unloaded_components_are_the_two_the_app_never_reads(self):
+        assert H3_UNLOADED_COMPONENTS == frozenset({"text_encoder", "transformer_ref"})
+
+    @pytest.mark.parametrize("entry", [["diffusers"], ["diffusers", "Model", {}, "extra"], ["diffusers", ""], [None, "Model", {}], [None, None, None], "diffusers"])
+    def test_malformed_entries_are_not_weighted(self, tmp_path, entry):
+        _touch(tmp_path / "model_index.json", json.dumps({"_class_name": "OtherPipeline", "unet": entry}))
+
+        assert model_files.weighted_components(tmp_path) == ()
+
+    def test_weightless_three_element_entries_are_not_weighted(self, tmp_path):
+        spec = {"pretrained_model_name_or_path": "owner/h3"}
+        index = {"_class_name": "OtherPipeline", "tokenizer": ["transformers", "Qwen2Tokenizer", spec], "scheduler": ["diffusers", "FlowMatchScheduler", spec]}
+        _touch(tmp_path / "model_index.json", json.dumps(index))
+
+        assert model_files.weighted_components(tmp_path) == ()
 
 
 class TestFindLocalModelDir:

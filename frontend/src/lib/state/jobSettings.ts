@@ -1,9 +1,9 @@
 import { enhanceSettingsKey, prettyCaption, restoredEnhanceSettings, reusedEnhance, workflowMode } from './promptEnhance';
 import type { DraftState, EnhancedSource, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
-import { snapExtendFrames } from './videoDuration';
+import { EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
-const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'source_video', 'extend_frames'] as const;
+const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'end_image_path', 'source_video', 'extend_frames'] as const;
 
 export interface JobSettingsPrefill {
   /** Applied like a reuse URL: workflow and model first, so their defaults load before the values. */
@@ -51,8 +51,9 @@ function enhanceRecord(value: string | undefined, workflow: Workflow): Pick<Enha
  * Turn the form fields a job was submitted with back into workspace state, so the form can be refilled from it.
  *
  * @param rememberedParts The Rewrite choice the draft remembers for each video workflow; the job's own workflow takes the job's.
+ * @param extendStep The step between the lengths the job's model can extend by.
  */
-export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: EnhanceSettings['partsByWorkflow']): JobSettingsPrefill {
+export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: EnhanceSettings['partsByWorkflow'], extendStep: number = EXTEND_FRAME_STEP): JobSettingsPrefill {
   const params: Record<string, string> = {};
   for (const key of PREFILL_KEYS) {
     const value = first(settings, key);
@@ -99,7 +100,7 @@ export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: Enha
     const frames = numberOrNull(first(settings, 'extend_frames'));
     patch.extendPrefill = { path: source ?? '', scene: '', prompt: '' };
     // The Enhanced pair was made for this source and length, so it is current (as loadFromUrl records for a Reuse).
-    if (patch.enhancedFrom) patch.enhancedFrom = { ...patch.enhancedFrom, sourceVideoPath: source, extendFrames: frames === null ? null : snapExtendFrames(frames) };
+    if (patch.enhancedFrom) patch.enhancedFrom = { ...patch.enhancedFrom, sourceVideoPath: source, extendFrames: frames === null ? null : snapExtendFrames(frames, extendStep) };
   }
   if (jsonPrompt !== undefined) patch.jsonPrompt = jsonPrompt;
   if (promptSource === 'file') {

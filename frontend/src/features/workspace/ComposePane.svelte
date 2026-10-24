@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
   import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts } from '$lib/state/promptEnhance';
-  import { isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
+  import { extendModelSupport, isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { Icon } from '$lib/components/atoms';
@@ -18,11 +18,13 @@
     busy: boolean;
     /** A job is running or queued. */
     jobsActive?: boolean;
+    /** A last-frame image is uploaded and not yet submitted; the enhancer counts it as a last frame. */
+    endImagePending?: boolean;
     /** Fold the sidebar into its strip; no button is shown when absent. */
     oncollapse?: () => void;
   }
 
-  let { context, busy, jobsActive = false, oncollapse }: Props = $props();
+  let { context, busy, jobsActive = false, endImagePending = false, oncollapse }: Props = $props();
 
   /** Remember the loaded prompts file; an unchanged file is not written again. */
   function setPromptFileLoaded(loaded: DraftState['promptFileLoaded']): void {
@@ -331,7 +333,9 @@
         variant="inline"
         {busy}
         {jobsActive}
+        endImage={caps.showEndImage && (s.endImagePath !== null || endImagePending)}
         jsonCapable={caps.supportsJsonPrompt}
+        extendSupport={extendModelSupport(context, s.model)}
         maxWords={caps.enhanceMaxWords}
         onstart={() => { activeTab = 'enhanced'; noticeText = null; }}
       />

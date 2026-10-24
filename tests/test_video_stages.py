@@ -318,6 +318,19 @@ class TestImageToVideoStage:
         assert arts.video_path == Path("/tmp/i2v.mp4")
         backend.image_to_video.assert_called_once()
 
+    def test_the_end_image_reaches_the_backend_only_when_set(self):
+        backend = MagicMock()
+        backend.image_to_video.return_value = Path("/tmp/i2v.mp4")
+        arts = VideoWorkingArtifacts()
+        arts.filename = "i2v.mp4"
+
+        image_to_video_stage(_req(backend=backend, image_path="/tmp/first.png", end_image_path="/tmp/last.png"), arts)
+        image_to_video_stage(_req(backend=backend, image_path="/tmp/first.png"), arts)
+
+        with_end, without_end = backend.image_to_video.call_args_list
+        assert with_end.kwargs["end_image"] == "/tmp/last.png"
+        assert "end_image" not in without_end.kwargs
+
     def test_backend_returns_none_fails(self):
         backend = MagicMock()
         backend.image_to_video.return_value = None

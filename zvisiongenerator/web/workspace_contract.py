@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from zvisiongenerator.core.video_family import VideoCapabilities
 
 
 CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "txt2vid", "img2vid", "extend")
@@ -69,7 +72,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "supports_reference_image": False,
         "requires_reference_image": False,
         "requires_source_video": False,
-        "clear_fields": ["image_path", "image_strength", "frames", "audio", "low_memory"],
+        "clear_fields": ["image_path", "end_image_path", "image_strength", "frames", "audio", "low_memory"],
     },
     "img2img": {
         "mode": "image",
@@ -114,7 +117,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         "supports_reference_image": True,
         "requires_reference_image": True,
         "requires_source_video": False,
-        "clear_fields": ["frames", "audio", "low_memory"],
+        "clear_fields": ["end_image_path", "frames", "audio", "low_memory"],
     },
     "txt2vid": {
         "mode": "video",
@@ -152,6 +155,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "negative_prompt",
             "guidance",
             "image_path",
+            "end_image_path",
             "image_strength",
             "quantize",
             "sharpen_enabled",
@@ -187,6 +191,9 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "reference_image",
             "reference_image_path",
             "reference_image_clear",
+            "end_image",
+            "end_image_path",
+            "end_image_clear",
             "ratio",
             "size",
             "custom_dimensions",
@@ -254,6 +261,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "negative_prompt",
             "guidance",
             "image_path",
+            "end_image_path",
             "image_strength",
             "quantize",
             "sharpen_enabled",
@@ -278,6 +286,33 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         ],
     },
 }
+
+
+# The controls of the last-frame slot. Only a family that declares ``end_frame`` offers them.
+END_FRAME_CONTROLS = ("end_image", "end_image_path", "end_image_clear")
+
+# The workflow controls a video family loses when it lacks a capability, by capability name.
+_CONTROLS_WITHOUT_CAPABILITY = {
+    "lora": ("loras",),
+    "upscale": ("video_upscale_enabled", "video_upscale_factor", "video_upscale_review"),
+    "upscale_review": ("video_upscale_review",),
+    "low_memory": ("low_memory",),
+    "audio": ("audio",),
+    "end_frame": END_FRAME_CONTROLS,
+}
+
+
+def hidden_video_controls(capabilities: VideoCapabilities) -> list[str]:
+    """Return the workflow controls a video model does not have, sorted, from what it cannot do.
+
+    Args:
+        capabilities: What the family can do on this platform.
+
+    Returns:
+        Control ids as they appear in ``visible_controls``; empty when the family can do everything.
+    """
+    hidden = {control for name, controls in _CONTROLS_WITHOUT_CAPABILITY.items() if not getattr(capabilities, name) for control in controls}
+    return sorted(hidden)
 
 
 def canonicalize_workflow(value: Any, *, fallback: str | None = None) -> str | None:

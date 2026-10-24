@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DraftState, ExtendSourceInfo } from '$lib/types';
+import type { DraftState, ExtendSourceInfo, WorkspaceContext } from '$lib/types';
 import sourceFixture from '../../../../tests/fixtures/extend_source_response.json';
 import {
-  CHOOSE_SOURCE_NOTE, REJECTED_SOURCE_NOTE, extendEnhanceHint, extendGuard, extendPrefillFor, extendSourceFacts, extendSourceUsable,
+  CHOOSE_SOURCE_NOTE, REJECTED_SOURCE_NOTE, extendEnhanceHint, extendGuard, extendModelSupport, extendPrefillFor, extendSourceFacts, extendSourceUsable,
   finalizeSceneFields, isOriginalLegacyPrompt,
 } from './extend';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
@@ -139,6 +139,33 @@ describe('extendGuard', () => {
   it('lets a usable source through, whether or not it is being checked again', () => {
     expect(extendGuard(extending, sceneSource(), 'ready')).toEqual({ kind: 'ok', blocked: false, note: null });
     expect(extendGuard(extending, sceneSource(), 'checking').blocked).toBe(false);
+  });
+
+  it('passes a model that can extend', () => {
+    expect(extendGuard(extending, sceneSource(), 'ready', { supported: true, label: 'MiniMax H3' })).toEqual({ kind: 'ok', blocked: false, note: null });
+  });
+
+  it('blocks a model that cannot extend, whatever the source', () => {
+    const guard = extendGuard(extending, sceneSource(), 'ready', { supported: false, label: 'Wan' });
+    expect(guard).toEqual({ kind: 'unsupported', blocked: true, note: "Wan can't extend a clip. Pick another video model." });
+    expect(extendGuard({ workflow: 'extend', extendSourcePath: null }, null, 'idle', { supported: false, label: 'Wan' }).kind).toBe('unsupported');
+    expect(extendEnhanceHint(guard)).toBe('Choose a video model that can extend first.');
+  });
+
+  it('never blocks another workflow for the model', () => {
+    expect(extendGuard({ workflow: 'txt2vid', extendSourcePath: null }, null, 'idle', { supported: false, label: 'Wan' }).blocked).toBe(false);
+  });
+
+  it('reads whether the model extends from the workspace', () => {
+    const context = {
+      video_models: [{ id: 'h3', label: 'MiniMax H3', type: 'video' }, { id: 'wan', label: 'Wan', type: 'video' }],
+      video_model_defaults: { h3: { supports_extend: true }, wan: { supports_extend: false }, old: {} },
+    } as unknown as WorkspaceContext;
+    expect(extendModelSupport(context, 'h3')).toEqual({ supported: true, label: 'MiniMax H3' });
+    expect(extendModelSupport(context, 'wan')).toEqual({ supported: false, label: 'Wan' });
+    expect(extendModelSupport(context, 'old')).toEqual({ supported: true, label: 'old' });
+    expect(extendModelSupport(context, 'unknown')).toBeNull();
+    expect(extendModelSupport(null, 'h3')).toBeNull();
   });
 
   it('words the Enhance hint for each way an extension can be stuck', () => {

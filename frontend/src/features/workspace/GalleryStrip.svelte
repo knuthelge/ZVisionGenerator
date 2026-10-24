@@ -11,6 +11,8 @@
     loading?: boolean;
     deletingIds?: ReadonlySet<string>;
     referenceUnavailable?: Partial<Record<ReferenceTarget, string>>;
+    /** The reference targets each tile's menu offers; absent offers an image and a video. */
+    referenceTargets?: readonly ReferenceTarget[];
     totalCount?: number | null;
     hasMore?: boolean;
     loadingMore?: boolean;
@@ -22,6 +24,7 @@
     loading = false,
     deletingIds = new Set<string>(),
     referenceUnavailable = {},
+    referenceTargets = undefined,
     totalCount = null,
     hasMore = false,
     loadingMore = false,
@@ -103,7 +106,7 @@
       {:else}
         {#each assets as asset (asset.id)}
           <div role="listitem" class="strip-item" style="height: {TILE_HEIGHT_PX}px; width: {Math.round(TILE_HEIGHT_PX * assetAspect(asset))}px">
-            <AssetTile {asset} density="compact" deleting={deletingIds.has(asset.id)} {referenceUnavailable} class="h-full w-full" {...handlers} />
+            <AssetTile {asset} density="compact" deleting={deletingIds.has(asset.id)} {referenceUnavailable} {referenceTargets} class="h-full w-full" {...handlers} />
           </div>
         {/each}
         {#if hasMore}

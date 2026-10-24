@@ -488,6 +488,20 @@ class TestMessages:
         assert _rule(image, "A reference image supplies the subject and layout") is not None
         assert "reference image" not in _system(EnhanceSettings()) and "first frame" not in _system(EnhanceSettings(), mode="video")
 
+    def test_a_last_frame_swaps_the_video_rule_for_the_two_frame_rule(self):
+        both = _system(EnhanceSettings(), mode="video", context=EnhanceContext(reference_image=True, end_image=True))
+
+        assert _rule(both, "The first and last frames are supplied as images") is not None
+        assert _rule(both, "The first frame is supplied as an image") is None
+
+    def test_a_last_frame_changes_nothing_without_a_first_frame_or_for_images(self):
+        assert "last frames" not in _system(EnhanceSettings(), mode="video", context=EnhanceContext(end_image=True))
+        assert "last frames" not in _system(EnhanceSettings(), context=EnhanceContext(reference_image=True, end_image=True))
+
+    def test_the_factory_sets_the_last_frame_for_video_only(self):
+        assert enhance_context(mode="video", reference_image=True, end_image=True).end_image is True
+        assert enhance_context(mode="image", reference_image=True, end_image=True).end_image is False
+
 
 # ── Hygiene ─────────────────────────────────────────────────────────────────
 

@@ -7,7 +7,7 @@ export type CliCaveat =
   | 'negative_prompt'
   /** The CLI runs every prompt in the file, and only some of them were chosen. */
   | 'prompt_options'
-  /** The reference image was uploaded from the browser; the command names the uploaded file, not its path. */
+  /** The first or last frame was uploaded from the browser; the command names the uploaded file, not its path. */
   | 'uploaded_image';
 
 export interface CliCommand {
@@ -168,6 +168,12 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   const imagePath = isExtend ? undefined : upload ?? text(settings, 'image_path');
   if (upload !== undefined) caveats.push('uploaded_image');
   flag('--image', imagePath);
+  // The last frame follows the same rule; the CLI takes it only with a first frame, and the server refuses it otherwise.
+  if (isVideo && !isExtend) {
+    const endUpload = text(settings, 'end_image_file');
+    if (endUpload !== undefined && !caveats.includes('uploaded_image')) caveats.push('uploaded_image');
+    flag('--end-image', endUpload ?? text(settings, 'end_image_path'));
+  }
   if (!isVideo && imagePath !== undefined) flag('--image-strength', text(settings, 'image_strength'));
 
   if (isVideo) {

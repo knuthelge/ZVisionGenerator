@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed } from './promptEnhance';
 import { presetDiffers } from './presets';
-import { changedSettings, draft, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, videoTimingFor } from './draft.svelte';
+import { changedSettings, draft, extendStepFor, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
 import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults } from '$lib/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -426,11 +426,11 @@ describe('draft store', () => {
     it('takes fps and alignment together from the default video model for a model without defaults', () => {
       const ctx = makeContext({ video_defaults: makeVideoDefaults({ fps: 30, frame_alignment: 8 }) });
 
-      expect(videoTimingFor(ctx, 'unknown-video')).toEqual({ fps: 30, frameAlignment: 8 });
-      expect(videoTimingFor(ctx, 'ltx-v-0.9')).toEqual({ fps: 24, frameAlignment: 1 });
+      expect(videoTimingFor(ctx, 'unknown-video')).toEqual({ fps: 30, frameRule: { alignment: 8, offset: 1, round: 'nearest' } });
+      expect(videoTimingFor(ctx, 'ltx-v-0.9')).toEqual({ fps: 24, frameRule: { alignment: 1, offset: 1, round: 'nearest' } });
       // A source's frame rate replaces the model's, and the alignment stays the model's.
-      expect(videoTimingFor(ctx, 'ltx-v-0.9', 30)).toEqual({ fps: 30, frameAlignment: 1 });
-      expect(videoTimingFor(ctx, 'ltx-v-0.9', null)).toEqual({ fps: 24, frameAlignment: 1 });
+      expect(videoTimingFor(ctx, 'ltx-v-0.9', 30)).toEqual({ fps: 30, frameRule: { alignment: 1, offset: 1, round: 'nearest' } });
+      expect(videoTimingFor(ctx, 'ltx-v-0.9', null)).toEqual({ fps: 24, frameRule: { alignment: 1, offset: 1, round: 'nearest' } });
     });
 
     it('uses preferredModel when it is valid for the current workflow', () => {
@@ -1629,6 +1629,152 @@ describe('hydrateFromContext – keepChangedSettings', () => {
 
       expect(draft.state.frameCount).toBe(49);
     });
+
+    describe('a family with its own rules', () => {
+      const H3_RULE = { alignment: 17, offset: 5, round: 'up' as const };
+      const familyContext = (h3: Partial<VideoModelDefaults> = {}): WorkspaceContext => {
+        const ctx = makeContext({
+          video_models: [{ id: 'ltx-2', label: 'LTX 2', type: 'video' }, { id: 'h3', label: 'MiniMax H3', type: 'video' }],
+          video_model_defaults: {
+            'ltx-2': makeVideoDefaults({ steps: 8, max_steps: 8, frame_alignment: 8 }),
+            h3: makeVideoDefaults({ steps: 8, max_steps: 8, frame_count: 124, frame_alignment: 17, frame_rule: H3_RULE, step_options: [4, 8], extend_frame_step: 17, hidden_controls: ['low_memory'], ...h3 }),
+          },
+          current_video_model: 'ltx-2',
+        });
+        ctx.workflow_contract.values = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
+        return ctx;
+      };
+
+      it('reads the frame rule and the extend step of the model', () => {
+        const ctx = familyContext();
+
+        expect(videoTimingFor(ctx, 'h3')).toEqual({ fps: 24, frameRule: H3_RULE });
+        expect(extendStepFor(ctx, 'h3')).toBe(17);
+        expect(extendStepFor(ctx, 'ltx-2')).toBe(8);
+        expect(stepOptionsFor(ctx, 'h3')).toEqual([4, 8]);
+        expect(stepOptionsFor(ctx, 'ltx-2')).toBeNull();
+      });
+
+      it('moves a kept frame count to the next count of the new rule', () => {
+        const ctx = familyContext();
+        draft.hydrateFromContext(ctx, 'ltx-2');
+        draft.update('frameCount', 121);
+
+        switchTo(ctx, 'h3');
+
+        expect(draft.state.frameCount).toBe(124);
+      });
+
+      it('moves the steps to an offered count (the higher on a tie)', () => {
+        const ctx = familyContext();
+        draft.hydrateFromContext(ctx, 'ltx-2');
+        draft.update('steps', 6);
+
+        switchTo(ctx, 'h3');
+
+        expect(draft.state.steps).toBe(8);
+      });
+
+      it('clears the low-memory and upscale settings the model lacks', () => {
+        const ctx = familyContext({ hidden_controls: ['low_memory', 'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'] });
+        draft.hydrateFromContext(ctx, 'ltx-2');
+        draft.patch({ lowMemory: false, videoUpscaleEnabled: true, videoUpscaleReview: true });
+
+        switchTo(ctx, 'h3');
+
+        expect(draft.state.lowMemory).toBe(true);
+        expect(draft.state.videoUpscaleEnabled).toBe(false);
+        expect(draft.state.videoUpscaleReview).toBe(false);
+      });
+
+      it('leaves those settings alone for a model that has the controls', () => {
+        const ctx = familyContext();
+        draft.hydrateFromContext(ctx, 'ltx-2');
+        draft.patch({ lowMemory: false, videoUpscaleEnabled: true });
+
+        draft.hydrateFromContext(ctx, 'ltx-2', { keepSettings: true });
+
+        expect(draft.state.lowMemory).toBe(false);
+        expect(draft.state.videoUpscaleEnabled).toBe(true);
+      });
+
+      it('aligns a reused frame count to the rule of the reused model', () => {
+        const ctx = familyContext();
+        draft.hydrateFromContext(ctx, 'h3');
+
+        draft.loadFromUrl({ model: 'h3', frames: '125' }, ctx);
+
+        expect(draft.state.frameCount).toBe(141);
+      });
+
+      describe('the last frame', () => {
+        const END_CONTROLS = ['end_image', 'end_image_clear', 'end_image_path'];
+        // LTX hides the last-frame controls, H3 keeps them; the contract clears the image when a workflow without the slot opens.
+        const lastFrameContext = (): WorkspaceContext => {
+          const ctx = familyContext();
+          ctx.video_model_defaults['ltx-2'] = { ...ctx.video_model_defaults['ltx-2'] as VideoModelDefaults, hidden_controls: END_CONTROLS };
+          const { definitions } = ctx.workflow_contract;
+          definitions.img2vid.visible_controls = [...definitions.img2vid.visible_controls, 'end_image', 'end_image_path', 'end_image_clear'];
+          definitions.txt2vid.clear_fields = [...definitions.txt2vid.clear_fields, 'end_image_path'];
+          definitions.img2img.clear_fields = [...definitions.img2img.clear_fields, 'end_image_path'];
+          return ctx;
+        };
+
+        beforeEach(() => draft.update('workflow', 'img2vid'));
+
+        it('starts empty', () => {
+          expect(draft.state.endImagePath).toBeNull();
+        });
+
+        it('keeps a chosen last frame on a model that has the slot', () => {
+          const ctx = lastFrameContext();
+          draft.hydrateFromContext(ctx, 'h3');
+          draft.update('endImagePath', '/in/end.png');
+
+          draft.hydrateFromContext(ctx, 'h3', { keepSettings: true });
+
+          expect(draft.state.endImagePath).toBe('/in/end.png');
+        });
+
+        it('drops the last frame when the model changes to one without the slot', () => {
+          const ctx = lastFrameContext();
+          draft.hydrateFromContext(ctx, 'h3');
+          draft.update('endImagePath', '/in/end.png');
+
+          switchTo(ctx, 'ltx-2');
+
+          expect(draft.state.endImagePath).toBeNull();
+        });
+
+        it('drops the last frame when the workflow changes to one that has no slot', () => {
+          const ctx = lastFrameContext();
+          draft.hydrateFromContext(ctx, 'h3');
+          draft.update('endImagePath', '/in/end.png');
+
+          draft.onWorkflowChange('txt2vid', ctx);
+
+          expect(draft.state.endImagePath).toBeNull();
+        });
+
+        it('reuses a recorded last frame with the model that made it', () => {
+          const ctx = lastFrameContext();
+          draft.hydrateFromContext(ctx, 'h3');
+
+          draft.loadFromUrl({ workflow: 'img2vid', model: 'h3', image_path: '/in/start.png', end_image_path: '/in/end.png' }, ctx);
+
+          expect([draft.state.referenceImagePath, draft.state.endImagePath]).toEqual(['/in/start.png', '/in/end.png']);
+        });
+
+        it('ignores a last frame in a reuse URL for a workflow without the slot', () => {
+          const ctx = lastFrameContext();
+          draft.hydrateFromContext(ctx, 'h3');
+
+          draft.loadFromUrl({ workflow: 'txt2vid', end_image_path: '/in/end.png' }, ctx);
+
+          expect(draft.state.endImagePath).toBeNull();
+        });
+      });
+    });
   });
 });
 
@@ -1673,7 +1819,7 @@ describe('applyPreset', () => {
   const MARKED: Partial<DraftState> = {
     workflow: 'img2img', promptSource: 'file', prompt: 'a prompt', scene: 'a scene', jsonPromptEnabled: true, jsonPrompt: '{"a":1}', negativePrompt: 'blurry',
     promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one', 'two'], promptFileLoaded: { path: '/prompts/set.yaml', count: 2 },
-    seed: 42, referenceImagePath: '/refs/ref.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
+    seed: 42, referenceImagePath: '/refs/ref.png', endImagePath: '/refs/end.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
     enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],

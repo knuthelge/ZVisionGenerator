@@ -475,6 +475,24 @@ class TestVideoQuit:
         assert events[-1]["type"] == "batch_completed"
 
 
+class TestEndImageBatch:
+    """An end image in the arguments reaches each run's request."""
+
+    @pytest.mark.parametrize(("end_image", "expected"), [("/tmp/last.png", "/tmp/last.png"), (None, None)])
+    def test_request_carries_the_end_image(self, end_image, expected):
+        requests = []
+        workflow = MagicMock()
+        workflow.run.side_effect = lambda request, artifacts: requests.append(request) or StageOutcome.success
+        args = _make_video_args(image_path="/tmp/first.png", end_image_path=end_image)
+        prompts = {"default": [("a dog", None)]}
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 10**9}}
+
+        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+
+        (request,) = requests
+        assert (request.image_path, request.end_image_path) == ("/tmp/first.png", expected)
+
+
 class TestExtendBatch:
     """Verify an extension job builds its request from the extend arguments and plans each run with its own seed."""
 

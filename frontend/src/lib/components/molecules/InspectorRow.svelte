@@ -8,6 +8,8 @@
     label: string;
     /** Id of the input the label focuses. */
     forId?: string;
+    /** Id of the label itself, for a group that names itself by it (`aria-labelledby`). */
+    labelId?: string;
     /** Makes the label draggable to change a number. */
     scrubber?: ScrubOptions;
     /** The value differs from the model default. */
@@ -19,7 +21,7 @@
     children: Snippet;
   }
 
-  let { label, forId, scrubber, changed = false, onreset, sub = false, children }: Props = $props();
+  let { label, forId, labelId, scrubber, changed = false, onreset, sub = false, children }: Props = $props();
 </script>
 
 <div class="inspector-row" class:sub data-changed={changed}>
@@ -29,11 +31,11 @@
   {/snippet}
   {#if scrubber && !layout.coarse}
     <!-- A finger scrolls when it drags, so touch screens get steppers in the field instead of a scrubbable label. -->
-    <label for={forId} class="inspector-label" class:scrubbable={!scrubber.disabled} title="Drag to change" use:scrub={scrubber}>
+    <label id={labelId} for={forId} class="inspector-label" class:scrubbable={!scrubber.disabled} title="Drag to change" use:scrub={scrubber}>
       {@render labelText()}
     </label>
   {:else}
-    <svelte:element this={forId ? 'label' : 'span'} for={forId} class="inspector-label">
+    <svelte:element this={forId ? 'label' : 'span'} id={labelId} for={forId} class="inspector-label">
       {@render labelText()}
     </svelte:element>
   {/if}

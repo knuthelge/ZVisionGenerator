@@ -703,3 +703,55 @@ class TestHistoryReplacement:
         assert captured["total_iterations"] == 12
         assert (captured["mode"], captured["role"], captured["model"]) == (mode, "enhancer", "a/enhancer")
         assert captured["targets"] == (DownloadTarget("a/enhancer", "rev"),)
+
+
+class TestMacH3VideoJob:
+    """A MiniMax H3 job on macOS plans the Mac downloads and loads with options the MLX backend accepts."""
+
+    _REF = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+
+    @pytest.fixture
+    def run_job(self, monkeypatch):
+        from zvisiongenerator.backends.mac import h3_video
+        from zvisiongenerator.utils.config import load_config
+
+        _stub_request_job(monkeypatch)
+        monkeypatch.setattr("sys.platform", "darwin")
+        planned: list = []
+        from zvisiongenerator.downloads.plans import video_plan as real_plan
+
+        monkeypatch.setattr(web_runner_module, "video_plan", lambda *a, **kw: (planned.append(real_plan(*a, **kw)), None)[1])
+        backend = h3_video.H3MlxVideoBackend()
+        loaded: list = []
+        monkeypatch.setattr(h3_video, "resolve_mlx_files", lambda *_a, **_kw: SimpleNamespace(lora_file="turbo.safetensors"))
+        monkeypatch.setattr(h3_video, "_turbo_rank", lambda _path: 4)
+        monkeypatch.setattr(h3_video, "ensure_text_encoder_copy", lambda models_dir, name, *_a: (loaded.append(name), models_dir / name)[1])
+        monkeypatch.setattr(web_runner_module, "get_video_backend", lambda _family: backend)
+        monkeypatch.setattr(
+            web_runner_module,
+            "run_video_batch",
+            lambda *, model, progress_callback, **_kw: (loaded.append(model), progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1}))[1],
+        )
+
+        def run(*, image_path=None, extend=False, upscale=None) -> tuple[list, list]:
+            runner = _runner()
+            try:
+                request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="h3", model_name="h3", image_path=image_path, upscale=upscale)
+                args = _make_video_args(extend_source=object() if extend else None)
+                job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config=load_config(), args=args, model_ref=self._REF)
+                snapshot = _wait_for_status(runner, job_id, "completed")
+                assert snapshot["status"] == "completed", snapshot
+            finally:
+                runner.shutdown()
+            return planned, loaded
+
+        return run
+
+    @pytest.mark.parametrize(("kwargs", "mode"), [({}, "t2v"), ({"image_path": "frame.png"}, "i2v"), ({"extend": True}, "extend")])
+    def test_each_mode_loads_quietly_with_what_the_mlx_backend_needs(self, run_job, kwargs, mode):
+        planned, loaded = run_job(**kwargs)
+
+        assert [target.repo_id for target in planned[0]] == ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "MiniMaxAI/MiniMax-H3", "lightx2v/Minimax-h3-Turbo"]
+        assert loaded[0] == "h3"
+        model = loaded[1]
+        assert (model.mode, model.verbose, model.turbo_lora_alpha) == (mode, False, 0.0625 * 4)

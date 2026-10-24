@@ -550,7 +550,7 @@ def _cmd_model(args):
     else:
         model_name = input_path.stem.removesuffix(".safetensors")
     if parse_stored_quant_name(model_name) is not None:
-        print(f"Error: Model name '{model_name}' is reserved for stored quants (<name>@q4 / <name>@q8). Choose another name.", file=sys.stderr)
+        print(f"Error: Model name '{model_name}' is reserved for stored quants (<name>@q4 / <name>@q8 / <name>@mlx-te4). Choose another name.", file=sys.stderr)
         sys.exit(1)
     if args.model_type == LTX_MODEL_TYPE:
         _cmd_ltx(args, input_path, output_dir, model_name)

@@ -23,6 +23,12 @@ describe('jobSettingsPrefill', () => {
     });
   });
 
+  it('carries a submitted last frame as a prefill param, like the first frame', () => {
+    const { params } = jobSettingsPrefill({ mode: 'video', workflow: 'img2vid', model: 'h3', prompt: 'a', image_path: '/in/start.png', end_image_path: '/out/.web_uploads/end.png' });
+
+    expect(params).toMatchObject({ workflow: 'img2vid', image_path: '/in/start.png', end_image_path: '/out/.web_uploads/end.png' });
+  });
+
   it('keeps a blank LoRA list so loading a job without LoRAs clears them', () => {
     const { params } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'zit', lora: '', steps: '' });
 

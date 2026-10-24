@@ -111,3 +111,68 @@ def test_unsupported_platform_raises_runtime_error(monkeypatch: pytest.MonkeyPat
         backends.video_download_plan("owner/ltx", family="ltx")
     with pytest.raises(RuntimeError, match="freebsd"):
         backends.enhancer_download_plan("owner/llm", None)
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_cuda_platforms_dispatch_h3_to_the_cuda_h3_planner(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
+    monkeypatch.setattr(backends.sys, "platform", platform)
+    seen: list[tuple[str, object, bool]] = []
+    monkeypatch.setattr(cuda_plan, "h3_download_plan", lambda model_ref, preset, *, upscale=False: (seen.append((model_ref, preset, upscale)), ())[1])
+    preset = object()
+
+    assert backends.h3_download_plan("owner/h3", preset, upscale=True) == ()
+    assert seen == [("owner/h3", preset, True)]
+
+
+def test_a_platform_without_an_h3_backend_has_no_h3_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "freebsd")
+
+    with pytest.raises(RuntimeError, match="MiniMax H3"):
+        backends.h3_download_plan("owner/h3", object())
+
+
+def test_macos_dispatches_h3_to_the_mlx_planner_with_the_lora(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "darwin")
+    seen: list[tuple[str, object, object]] = []
+    sentinel = (DownloadTarget("o/r"),)
+    monkeypatch.setattr(mac_plan, "h3_mlx_download_plan", lambda model_ref, preset, lora: (seen.append((model_ref, preset, lora)), sentinel)[1])
+    preset, lora = object(), object()
+
+    assert backends.h3_download_plan("owner/h3", preset, upscale=True, lora=lora) == sentinel
+    assert seen == [("owner/h3", preset, lora)]
+
+
+def test_macos_h3_plan_needs_the_lora(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "darwin")
+
+    with pytest.raises(ValueError, match="turbo LoRA"):
+        backends.h3_download_plan("owner/h3", object())
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_the_cuda_platforms_register_the_h3_video_backend(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
+    monkeypatch.setattr(backends.sys, "platform", platform)
+
+    assert backends.video_family_available("h3") is True
+    assert backends.video_family_available("ltx") is True
+
+
+def test_macos_registers_the_mlx_h3_video_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "darwin")
+    monkeypatch.setattr(backends, "VIDEO_BACKENDS", {})
+
+    assert backends.video_family_available("h3") is True
+    assert backends.get_video_backend("h3").name == "h3"
+
+
+def test_get_video_backend_builds_the_h3_backend_on_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    from zvisiongenerator.backends.cuda.video.h3.backend import H3VideoBackend
+
+    monkeypatch.setattr(backends.sys, "platform", "linux")
+    monkeypatch.setattr(backends, "VIDEO_BACKENDS", {})
+
+    backend = backends.get_video_backend("h3")
+
+    assert isinstance(backend, H3VideoBackend)
+    assert backend.name == "h3"
+    assert backends.get_video_backend("h3") is backend

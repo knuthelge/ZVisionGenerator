@@ -29,12 +29,40 @@ class TestNames:
         assert sq.parse_stored_quant_name("atlas@q8") == ("atlas", 8)
         assert sq.parse_stored_quant_name("my@model@q4") == ("my@model", 4)
 
-    @pytest.mark.parametrize("name", ["atlas", "atlas@q6", "atlas@q8x", "@q8", "atlas-q8"])
+    @pytest.mark.parametrize("name", ["atlas", "atlas@q6", "atlas@q8x", "@q8", "atlas-q8", "atlas@mlx-te6", "atlas@mlx-te4x", "@mlx-te4", "atlas@mlx-q4", "atlas@te4"])
     def test_other_names_are_not_stored_quants(self, name):
         assert sq.parse_stored_quant_name(name) is None
 
+    def test_the_macos_text_encoder_copy_name_round_trips(self):
+        assert sq.text_encoder_copy_name("h3", 4) == "h3@mlx-te4"
+        assert sq.parse_stored_quant_name("h3@mlx-te4") == ("h3", 4)
+        assert sq.parse_stored_quant_name("my@model@mlx-te8") == ("my@model", 8)
+
     def test_stored_quant_dir_is_a_sibling(self, tmp_path):
         assert sq.stored_quant_dir(tmp_path / "models" / "atlas", 4) == tmp_path / "models" / "atlas@q4"
+
+
+class TestStoredQuantDirsFor:
+    def test_lists_the_quants_and_the_text_encoder_copy_of_a_model(self, tmp_path):
+        for name in ("h3@q4", "h3@q8", "h3@mlx-te4", "other@q4", "other@mlx-te4", "h3x@mlx-te4"):
+            (tmp_path / name).mkdir()
+
+        assert {path.name for path in sq.stored_quant_dirs_for(tmp_path, "h3")} == {"h3@q4", "h3@q8", "h3@mlx-te4"}
+
+    def test_the_text_encoder_copy_alone_is_found(self, tmp_path):
+        (tmp_path / "h3@mlx-te4").mkdir()
+
+        assert sq.stored_quant_dirs_for(tmp_path, "h3") == (tmp_path / "h3@mlx-te4",)
+
+    def test_a_missing_copy_is_not_listed_and_a_file_is_not_a_folder(self, tmp_path):
+        (tmp_path / "h3@mlx-te4").write_text("x")
+
+        assert sq.stored_quant_dirs_for(tmp_path, "h3") == ()
+
+    def test_a_copy_has_no_copies_of_its_own(self, tmp_path):
+        (tmp_path / "h3@mlx-te4@q4").mkdir()
+
+        assert sq.stored_quant_dirs_for(tmp_path, "h3@mlx-te4") == ()
 
 
 class TestManifest:
@@ -326,6 +354,8 @@ class TestEnsureStoredCopy:
 
 
 class TestFileIdentities:
+    _SHA256 = "cd625eb8fb67fb0921e955952c9b718307c93d6656f7eadf1bfd8064aeeabf1d"
+
     def test_a_symlink_records_the_resolved_name_and_size(self, tmp_path):
         real = tmp_path / "real-name.safetensors"
         real.write_bytes(b"1234567")
@@ -334,4 +364,62 @@ class TestFileIdentities:
         plain = tmp_path / "plain.safetensors"
         plain.write_bytes(b"01")
 
-        assert sq.file_identities([link, plain]) == [{"name": "real-name.safetensors", "bytes": 7}, {"name": "plain.safetensors", "bytes": 2}]
+        identities = sq.file_identities([link, plain])
+
+        assert [(identity["name"], identity["bytes"]) for identity in identities] == [("real-name.safetensors", 7), ("plain.safetensors", 2)]
+
+    @pytest.mark.parametrize("layout", [("blobs",), ("blobs", _SHA256[:2])], ids=["flat", "sharded"])
+    def test_a_hub_cache_blob_keeps_the_name_and_size_identity_manifests_already_hold(self, tmp_path, layout):
+        blob_dir = tmp_path.joinpath("hub", *layout)
+        blob_dir.mkdir(parents=True)
+        blob = blob_dir / self._SHA256
+        blob.write_bytes(b"weights")
+        snapshot = tmp_path / "hub" / "models--org--repo" / "snapshots" / "rev" / "transformer"
+        snapshot.mkdir(parents=True)
+        (snapshot / "shard.safetensors").symlink_to(blob)
+
+        # The exact entries older manifests recorded (no extra keys), so a copy made from the cache stays current.
+        assert sq.file_identities([snapshot / "shard.safetensors"]) == [{"name": self._SHA256, "bytes": 7}]
+
+    def test_a_cache_blob_identity_does_not_depend_on_the_file_timestamp(self, tmp_path):
+        (tmp_path / "blobs").mkdir()
+        blob = tmp_path / "blobs" / self._SHA256
+        blob.write_bytes(b"weights")
+        before = sq.file_identities([blob])
+        os.utime(blob, ns=(1, 1))
+
+        assert sq.file_identities([blob]) == before
+
+    def test_a_hash_named_file_outside_a_blobs_folder_is_a_local_file(self, tmp_path):
+        local = tmp_path / self._SHA256
+        local.write_bytes(b"weights")
+
+        assert set(sq.file_identities([local])[0]) == {"name", "bytes", "mtime_ns", "inode"}
+
+    def test_a_local_file_records_its_modification_time_and_inode(self, tmp_path):
+        local = tmp_path / "shard.safetensors"
+        local.write_bytes(b"1234")
+        stat = local.stat()
+
+        assert sq.file_identities([local]) == [{"name": "shard.safetensors", "bytes": 4, "mtime_ns": stat.st_mtime_ns, "inode": stat.st_ino}]
+
+    def test_a_local_file_replaced_by_one_of_the_same_name_and_size_is_a_different_identity(self, tmp_path):
+        stock = tmp_path / "stock" / "shard.safetensors"
+        tuned = tmp_path / "tuned" / "shard.safetensors"
+        for path, content in ((stock, b"AAAA"), (tuned, b"BBBB")):
+            path.parent.mkdir()
+            path.write_bytes(content)
+            os.utime(path, ns=(10**18, 10**18))
+
+        # Same name, size and timestamp: only the inode tells them apart.
+        assert sq.file_identities([stock]) != sq.file_identities([tuned])
+
+    def test_rewriting_a_local_file_in_place_changes_its_identity(self, tmp_path):
+        local = tmp_path / "shard.safetensors"
+        local.write_bytes(b"AAAA")
+        os.utime(local, ns=(10**18, 10**18))
+        before = sq.file_identities([local])
+        local.write_bytes(b"BBBB")
+        os.utime(local, ns=(2 * 10**18, 2 * 10**18))
+
+        assert sq.file_identities([local]) != before

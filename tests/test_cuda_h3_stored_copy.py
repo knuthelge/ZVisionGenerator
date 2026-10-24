@@ -250,6 +250,85 @@ def test_ensure_writes_h3_q4_with_its_manifest_and_a_second_ensure_writes_nothin
     assert not list(models.glob(".*.partial"))
 
 
+def _fine_tune(sources: _Sources, root: Path) -> list[Path]:
+    """Return shards with the names, shapes, dtypes and byte sizes of *sources*' but other values (a same-layout fine-tune)."""
+    root.mkdir()
+    shards = []
+    for shard in sources.shards:
+        tensors = load_file(str(shard))
+        path = root / shard.name
+        save_file({name: tensor + 1 if tensor.is_floating_point() else tensor for name, tensor in tensors.items()}, str(path))
+        assert path.stat().st_size == shard.stat().st_size
+        shards.append(path)
+    return shards
+
+
+def test_a_local_fine_tune_with_the_stock_names_and_sizes_rebuilds_the_copy(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _spy_writes(monkeypatch)
+    models = sources.root / "models"
+    tuned = _fine_tune(sources, sources.root / "tuned")
+
+    _ensure(sources, models)
+    ensure_copy(models, tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
+    assert len(calls) == 2
+    name = "transformer_blocks.1.attn.to_q.weight"
+    tuned_weight = next(tensors[name] for shard in tuned if name in (tensors := load_file(str(shard))))
+    stored = _stored(models / COPY_NAME)[name]
+    assert torch.equal(stored, tuned_weight.to(stored.dtype))
+    assert not torch.equal(stored, sources.model.state_dict()[name].to(stored.dtype))
+
+    ensure_copy(models, tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
+    assert len(calls) == 2
+
+
+def test_a_copy_made_from_hub_cache_files_stays_current_under_its_old_manifest(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _spy_writes(monkeypatch)
+    cache = sources.root / "hub"
+    (cache / "blobs").mkdir(parents=True)
+    snapshot = cache / "models--org--h3" / "snapshots" / "rev"
+    snapshot.mkdir(parents=True)
+    shards, legacy_sources = [], []
+    for number, shard in enumerate((*sources.shards, sources.turbo)):
+        blob = cache / "blobs" / f"{number:x}".rjust(64, "a")
+        blob.write_bytes(shard.read_bytes())
+        link = snapshot / shard.name
+        link.symlink_to(blob)
+        shards.append(link)
+        legacy_sources.append({"name": blob.name, "bytes": blob.stat().st_size})
+    *model_shards, turbo = shards
+    models = sources.root / "models"
+    legacy = {
+        "layout": 1,
+        "family": "h3",
+        "bits": 4,
+        "format": _NF4_FORMAT,
+        "sources": legacy_sources,
+        "lora_scale": _SCALE,
+        "fold_keys": [list(key) for key in _ALL_KEYS],
+    }
+    (models / COPY_NAME).mkdir(parents=True)
+    (models / COPY_NAME / MANIFEST_NAME).write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
+
+    assert copy_manifest(model_shards, turbo, _SCALE, _ALL_KEYS) == legacy
+    ensure_copy(models, model_shards, sources.config, turbo, _SCALE, _ALL_KEYS, "cpu")
+    assert calls == []
+
+
+def test_a_scaled_fp8_weight_is_stored_multiplied_by_its_scale(sources: _Sources, recorder: _Recorder) -> None:
+    name = "transformer_blocks.1.attn.to_q.weight"
+    shape = tuple(sources.model.state_dict()[name].shape)
+    shard = next(path for path in sources.shards if name in load_file(str(path)))
+    tensors = load_file(str(shard))
+    tensors[name] = torch.full(shape, 2.0).to(torch.float8_e4m3fn)
+    tensors[f"{name}_scale"] = torch.tensor(0.5)
+    save_file(tensors, str(shard))
+
+    stored = _stored(_write(sources, sources.root / "copy"))
+
+    assert torch.equal(stored[name], torch.ones(shape, dtype=torch.bfloat16))
+    assert f"{name}_scale" not in stored
+
+
 def test_a_changed_key_union_or_scale_rebuilds(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _spy_writes(monkeypatch)
     models = sources.root / "models"

@@ -4,7 +4,7 @@ import type { DraftState, Workflow } from '$lib/types';
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
   | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'strength' | 'seed' | 'runs'
-  | 'reference' | 'source' | 'size' | 'audio' | 'loras' | 'upscale' | 'model';
+  | 'reference' | 'endReference' | 'source' | 'size' | 'audio' | 'loras' | 'upscale' | 'model';
 
 export interface SettingChip {
   key: ChipKey;
@@ -40,6 +40,8 @@ export interface ChipFacts {
   modelDownloaded: boolean;
   /** The reference image's name, or null. */
   referenceName: string | null;
+  /** The last frame's name, or null. */
+  endReferenceName: string | null;
   /** Extend: the source clip's name, or null. */
   sourceName: string | null;
   /** The clip or extension may not fit memory. */
@@ -70,7 +72,9 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
     caps.showI2IStrength ? { key: 'strength', label: 'Strength', value: fmt(s.referenceImageStrength), changed: f.changed('referenceImageStrength') } : null,
     caps.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
     caps.showRuns ? { key: 'runs', label: 'Batch', value: `×${s.runs}`, changed: f.changed('runs') } : null,
-    caps.showRefImage ? { key: 'reference', label: 'Reference', value: f.referenceName ?? 'none', changed: false, on: f.referenceName !== null } : null,
+    // With a last frame beside it, the reference image is the first frame.
+    caps.showRefImage ? { key: 'reference', label: caps.showEndImage ? 'First' : 'Reference', value: f.referenceName ?? 'none', changed: false, on: f.referenceName !== null } : null,
+    caps.showEndImage ? { key: 'endReference', label: 'Last', value: f.endReferenceName ?? 'none', changed: false, on: f.endReferenceName !== null } : null,
     caps.showSourceVideo ? { key: 'source', label: 'Source', value: f.sourceName ?? 'none', changed: false, on: f.sourceName !== null, warn: s.missingSourceVideo } : null,
     caps.showDimensions ? { key: 'size', label: '', value: `${f.width}×${f.height}`, changed: f.changed('ratio', 'size', 'dimensionMode') } : null,
     caps.showAudio || caps.showLowMemory || caps.showVideoUpscale

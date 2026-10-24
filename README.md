@@ -16,7 +16,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 ## Features
 
 - **Image generation** — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 (FP8 on macOS/MLX, NF4 on Windows and Linux)
-- **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases across macOS, Windows, and Linux
+- **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases and MiniMax H3 (first and last frame, Extend) across macOS, Windows, and Linux
 - **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
 - **Prompt system** — YAML prompt files with variables, structured prompts, snippets, and batch runs
 - **Model store** — central `~/.ziv/` directory with bare-name resolution and HuggingFace fallback
@@ -32,9 +32,9 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
-| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
+| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`, untested on a Mac, no upscale) |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`) |
+| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`) |
 
 ## Installation
 
@@ -56,7 +56,7 @@ uv sync
 
 > Video generation requires [ffmpeg](https://ffmpeg.org/). On Windows and Linux, image and video generation require an RTX 20-series (Turing) or newer NVIDIA GPU, including RTX 50-series, with NVIDIA driver 580 or newer, so that CUDA is available to PyTorch.
 
-> Video uses `ltx-4` (4-bit), `ltx-8` (8-bit) or `ltx25-4` (LTX-2.5, 4-bit) on every platform. On Windows and Linux they need about 20 GB, 27 GB and 21 GB of system memory. See the [Video Guide](docs/guides/video.md).
+> Video uses `ltx-4` (4-bit), `ltx-8` (8-bit), `ltx25-4` (LTX-2.5, 4-bit) or `h3` (MiniMax H3) on every platform. On Windows and Linux they need about 20 GB, 27 GB, 21 GB and 18 GB of system memory. MiniMax H3 is a 98 GB download (107 GB on macOS). See the [Video Guide](docs/guides/video.md).
 
 ## Quick Start
 

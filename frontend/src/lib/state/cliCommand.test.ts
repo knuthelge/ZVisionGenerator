@@ -99,6 +99,23 @@ describe('cliCommand', () => {
     expect(caveats).toEqual(['uploaded_image']);
   });
 
+  it('names the last frame after the first, for video only', () => {
+    const video = { mode: 'video', workflow: 'img2vid', prompt: 'a', image_path: '/in/start.png', end_image_path: '/in/end.png' };
+
+    expect(cliCommand(video).command).toBe('ziv video --prompt a --image /in/start.png --end-image /in/end.png');
+    expect(cliCommand({ ...video, workflow: 'extend', source_video: '/in/c.mp4' }).command).not.toContain('--end-image');
+    expect(cliCommand({ mode: 'image', prompt: 'a', end_image_path: '/in/end.png' }).command).not.toContain('--end-image');
+  });
+
+  it('names an uploaded last frame over a typed path and reports it once', () => {
+    const { command, caveats } = cliCommand({ mode: 'video', prompt: 'a', image_path: '/in/start.png', end_image_path: '/in/old.png', end_image_file: 'my end.png' });
+    expect(command).toBe("ziv video --prompt a --image /in/start.png --end-image 'my end.png'");
+    expect(caveats).toEqual(['uploaded_image']);
+
+    const both = cliCommand({ mode: 'video', prompt: 'a', image_file: 'first.png', end_image_file: 'last.png' });
+    expect(both.caveats).toEqual(['uploaded_image']);
+  });
+
   it('serializes auto-enhance options to the SPEC grammar, with motion only for video', () => {
     const settings = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting', 'camera'], length: 'longer', motion: ['action'] };
 

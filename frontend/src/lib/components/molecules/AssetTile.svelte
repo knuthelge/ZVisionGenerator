@@ -16,6 +16,8 @@
     deleting?: boolean;
     /** Reference targets the current model can't use, with the reason. */
     referenceUnavailable?: Partial<Record<ReferenceTarget, string>>;
+    /** The reference targets the menu offers; absent offers an image and a video. */
+    referenceTargets?: readonly ReferenceTarget[];
     eager?: boolean;
     onmediaload?: () => void;
     class?: string;
@@ -28,6 +30,7 @@
     onselect,
     deleting = false,
     referenceUnavailable = {},
+    referenceTargets = undefined,
     eager = false,
     onmediaload,
     onpreview,
@@ -44,7 +47,7 @@
 
   const isVideo = $derived(asset.media_type === 'video');
   const canReuse = $derived(asset.has_reusable_config === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable));
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable, referenceTargets));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   // The stage shows the full-resolution file; small tiles use the thumbnail.

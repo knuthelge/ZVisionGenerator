@@ -14,12 +14,14 @@ from conftest import make_extend_source, make_probe
 
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils import video_extend
+from zvisiongenerator.utils.config import load_config, video_family
 from zvisiongenerator.utils.paths import collapse_home
 from zvisiongenerator.utils.provenance import RecordedSettings
 from zvisiongenerator.utils.video_extend import (
     AUDIO_FADE_SAMPLES,
     AUDIO_SAMPLE_RATE,
     CARRY_FRAMES,
+    ExtendInspection,
     ExtendProblem,
     apply_extend_args,
     build_extend_source,
@@ -27,16 +29,19 @@ from zvisiongenerator.utils.video_extend import (
     audio_lead_samples,
     cut_window_audio,
     extend_audio_output,
+    extend_family_problems,
     extend_frames_from_seconds,
     extend_source_problems,
     inspect_extend_source,
     load_extend_source,
     extend_enhance_context,
     recorded_prompts,
+    require_extend_family,
     resolve_extend_frames,
     snap_extend_frames,
     window_audio_cut,
     window_frames,
+    with_family_problems,
 )
 
 
@@ -117,6 +122,62 @@ class TestExtendSourceProblems:
         problems = extend_source_problems(_probe(width=500, coded_width=500, field_order="tt", color_trc="smpte2084"), None)
 
         assert sorted(_codes(problems)) == ["hdr", "interlaced", "off_grid"]
+
+
+class TestExtendFamilyProblems:
+    @pytest.fixture(scope="class")
+    def h3(self):
+        return video_family(load_config(), "h3")
+
+    @pytest.fixture(scope="class")
+    def ltx(self):
+        return video_family(load_config(), "ltx")
+
+    def test_an_h3_source_at_30_fps_gives_a_frame_rate_problem(self, h3):
+        (problem,) = extend_family_problems(30.0, h3)
+
+        assert problem.code == "frame_rate"
+        assert "30 fps" in problem.message and "24 fps" in problem.message and "MiniMax H3" in problem.message
+
+    @pytest.mark.parametrize("fps", [24.0, 24.0005, 23.9995])
+    def test_an_h3_source_at_24_fps_passes(self, h3, fps):
+        assert extend_family_problems(fps, h3) == []
+
+    @pytest.mark.parametrize("fps", [24.002, 23.976, 25.0])
+    def test_an_h3_source_off_24_fps_beyond_the_tolerance_is_refused(self, h3, fps):
+        assert _codes(extend_family_problems(fps, h3)) == ["frame_rate"]
+
+    @pytest.mark.parametrize("fps", [24.0, 30.0, 29.97, 60.0])
+    def test_ltx_extends_a_clip_at_its_own_rate(self, ltx, fps):
+        assert extend_family_problems(fps, ltx) == []
+
+    def test_a_model_without_a_description_and_an_unreadable_rate_add_nothing(self, h3):
+        assert extend_family_problems(30.0, None) == []
+        assert extend_family_problems(0.0, h3) == []
+
+    def test_the_inspection_of_a_30_fps_source_loses_its_source_and_keeps_its_probe(self, h3):
+        probe = _probe(r_frame_rate="30/1", avg_frame_rate="30/1")
+        inspection = ExtendInspection(probe, None, (), build_extend_source("clip.mp4", probe, None))
+
+        checked = with_family_problems(inspection, h3)
+
+        assert _codes(list(checked.problems)) == ["frame_rate"]
+        assert checked.source is None and checked.probe is probe
+        assert with_family_problems(inspection, None) is inspection
+        assert with_family_problems(ExtendInspection(None, None, (ExtendProblem("unreadable", "x"),), None), h3).problems == (ExtendProblem("unreadable", "x"),)
+
+    def test_a_30_fps_source_is_required_to_be_24_fps_by_h3_only(self, h3, ltx):
+        source = make_extend_source(fps=30.0, fps_text="30/1")
+
+        with pytest.raises(ValueError, match="clip.mp4 cannot be extended: .*24 fps clips only"):
+            require_extend_family(source, h3)
+        require_extend_family(source, ltx)
+        require_extend_family(make_extend_source(), h3)
+
+    def test_the_h3_rate_is_the_one_the_backends_check(self, h3):
+        from zvisiongenerator.utils.h3_memory import H3_FPS
+
+        assert h3.extend_fps == H3_FPS == 24
 
 
 class TestRecordedPrompts:
@@ -421,6 +482,10 @@ class TestWindowArithmetic:
     def test_window_frames_add_the_carry(self, extend, expected):
         assert window_frames(extend) == expected
 
+    @pytest.mark.parametrize(("family", "extend", "expected"), [("ltx", 16, 41), ("h3", 17, 39), ("h3", 34, 56)])
+    def test_window_frames_add_the_carry_of_the_family(self, family, extend, expected):
+        assert window_frames(extend, video_family(load_config(), family)) == expected
+
     def test_the_carry_fills_whole_latent_frames(self):
         assert carry_latent_frames() == 4
 
@@ -468,6 +533,20 @@ class TestWindowArithmetic:
 
         assert (args.extend_source, args.extend_frames) == (source, 48)
         assert (args.width, args.height, args.fps, args.num_frames) == (256, 512, 30.0, 73)
+
+    @pytest.mark.parametrize(("family", "extend", "window"), [("ltx", 16, 41), ("h3", 17, 39)])
+    def test_apply_extend_args_sizes_the_window_by_the_family(self, family, extend, window):
+        args = argparse.Namespace(width=704, height=448, fps=24, num_frames=121)
+
+        apply_extend_args(args, _source(), extend, video_family(load_config(), family))
+
+        assert args.num_frames == window
+
+    def test_the_rewrite_context_spans_the_window_of_the_family(self):
+        context = extend_enhance_context(_source(), 17, no_audio=False, family=video_family(load_config(), "h3"))
+
+        assert context.seconds == pytest.approx(39 / 24)
+        assert context.new_seconds == pytest.approx(17 / 24)
 
     @pytest.mark.parametrize(
         ("extend", "fps", "expected"),

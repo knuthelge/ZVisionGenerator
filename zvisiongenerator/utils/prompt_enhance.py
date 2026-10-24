@@ -362,7 +362,7 @@ class EnhanceSettings:
 
 @dataclass(frozen=True)
 class EnhanceContext:
-    """Facts about the job that shape a rewrite: audio track, clip length, frame shape and reference image.
+    """Facts about the job that shape a rewrite: audio track, clip length, frame shape, reference image and last frame.
 
     The last five fields describe extending an existing clip. ``seconds`` is then the whole window (the carried
     frames plus the new ones) and ``new_seconds`` the part the new action fills. ``previous`` is the source's
@@ -374,6 +374,7 @@ class EnhanceContext:
     seconds: float | None = None
     orientation: str | None = None
     reference_image: bool = False
+    end_image: bool = False
     extends: bool = False
     previous: str | None = None
     extract_from: str | None = None
@@ -458,6 +459,7 @@ def enhance_context(
     fps: float | None = None,
     audio: bool = False,
     reference_image: bool = False,
+    end_image: bool = False,
     extends: bool = False,
     previous: str | None = None,
     extract_from: str | None = None,
@@ -470,6 +472,7 @@ def enhance_context(
 
     Args:
         frames: The clip's frame count; when *extends*, the whole window (carried plus new frames).
+        end_image: Whether the clip also ends on a supplied image (video only; the rewrite then knows both frames are fixed).
         extends: Whether the job extends an existing video (video only); the fields below apply only then.
         previous: The source video's recorded prompt, "what just happened".
         extract_from: The source's prompt when it was recorded without a scene.
@@ -490,6 +493,7 @@ def enhance_context(
         extract_from=extract_from if extending else None,
         prompt_is_original=extending and prompt_is_original,
         new_seconds=new_frames / fps if extending and new_frames and fps else None,
+        end_image=video and end_image,
     )
 
 
@@ -879,7 +883,12 @@ def context_rules(mode: str, context: EnhanceContext, *, pace: str = KEEP) -> li
     """Return the rules for the reference image, frame shape and clip length (how much action fits depends on *pace*)."""
     rules: list[str] = []
     if context.reference_image:
-        if mode == "video":
+        if mode == "video" and context.end_image:
+            rules.append(
+                "The first and last frames are supplied as images. Describe the motion, camera movement and changes that lead from the first to the last; "
+                "refer to the subject briefly, don't add appearance details the images show, and don't invent a different ending."
+            )
+        elif mode == "video":
             rules.append(
                 "The first frame is supplied as an image. Describe the motion, camera movement and changes over time; "
                 "refer to the subject briefly and don't add appearance details the image already shows."

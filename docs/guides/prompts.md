@@ -258,7 +258,7 @@ The enhancer also knows the job's shape:
 
 - **Frame:** portrait, landscape or square, from the ratio or size, so the composition fits the frame.
 - **Clip length (video):** one continuous action for clips up to 5 seconds, two or three beats up to 10 seconds, so the action fits the clip.
-- **Starting image:** for image-to-video, the rewrite describes motion and change instead of appearance, which the first frame already shows. For img2img it mentions the subject only briefly. The enhancer does not see the image itself.
+- **Starting image:** for image-to-video, the rewrite describes motion and change instead of appearance, which the first frame already shows. For img2img it mentions the subject only briefly. The enhancer does not see the image itself. When an image-to-video clip also has a last frame, the rewrite describes the change that leads from the first image to the last and does not invent a different ending.
 
 ### Scene and Action (Video)
 

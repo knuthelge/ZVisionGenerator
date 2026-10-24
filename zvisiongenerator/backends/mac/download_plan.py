@@ -8,12 +8,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.model_files import is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder, ltx_mlx_text_encoder_repo
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
-__all__ = ["MLX_LM_ALLOW_PATTERNS", "enhancer_download_plan", "image_download_plan", "video_download_plan"]
+if TYPE_CHECKING:
+    from zvisiongenerator.utils.h3_preset import H3MlxPreset, HubFiles
+
+__all__ = ["MLX_LM_ALLOW_PATTERNS", "enhancer_download_plan", "h3_mlx_download_plan", "image_download_plan", "video_download_plan"]
 
 # Mirror of mlx-lm 0.32.0 ``mlx_lm.utils.DEFAULT_ALLOW_PATTERNS``, the files ``mlx_lm.load`` downloads for a repo.
 MLX_LM_ALLOW_PATTERNS: tuple[str, ...] = (
@@ -109,6 +113,32 @@ def video_download_plan(
         return ()
     model = DownloadTarget(reference.repo_id, reference.revision)
     return (model,) if text_encoder_bundled else (model, gemma)
+
+
+def h3_mlx_download_plan(model_ref: str, preset: "H3MlxPreset", lora: "HubFiles") -> tuple[DownloadTarget, ...]:
+    """Return the downloads of the MiniMax H3 model on macOS: the INT8 transformer, the ``FL2VA`` components and the turbo LoRA.
+
+    Every target lists its files literally and is the ``(repo_id, revision, allow_patterns)`` the backend's own file
+    resolution downloads with, so a target reads as present exactly when the backend finds its files without the
+    network. A local H3 folder carries its own components, so it needs no component target; one that carries a
+    transformer needs no transformer target either, because the backend loads that one (or refuses it) and never
+    falls back to the preset's.
+
+    Args:
+        model_ref: A local H3 folder or a Hugging Face ``owner/repo[@revision]`` reference; a reference takes the
+            preset's component files, whatever its revision.
+        preset: The macOS preset.
+        lora: The turbo LoRA's repository and file.
+    """
+    from zvisiongenerator.backends.mac.h3_video import local_transformer_dirs
+
+    local = Path(model_ref).expanduser()
+    is_hub = not local.is_dir() and parse_huggingface_repo_reference(model_ref) is not None
+    targets = [] if not is_hub and local_transformer_dirs(local) else [DownloadTarget(preset.transformer.repo_id, preset.transformer.revision, preset.transformer.files)]
+    if is_hub:
+        targets.append(DownloadTarget(preset.components.repo_id, preset.components.revision, preset.components.files))
+    targets.append(DownloadTarget(lora.repo_id, lora.revision, lora.files))
+    return tuple(targets)
 
 
 def enhancer_download_plan(repo: str, revision: str | None) -> tuple[DownloadTarget, ...]:

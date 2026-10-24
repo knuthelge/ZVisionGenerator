@@ -1,19 +1,20 @@
 <script lang="ts">
-  import { draft, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
-  import { rangeFill, SPEC } from './settingsSpec';
+  import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
-  import { ActionBar, InspectorRow, InspectorSection, PathBrowser, PathInput, Select } from '$lib/components/molecules';
+  import { ActionBar, InspectorRow, InspectorSection, Select } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { extendGuard } from '$lib/state/extend';
+  import { extendGuard, extendModelSupport } from '$lib/state/extend';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
-  import { MEMORY_FIT_CONSEQUENCES, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
+  import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
+  import ReferenceSlot from './ReferenceSlot.svelte';
   import SourceVideoSection from './SourceVideoSection.svelte';
-  import { defaultExtendFrames, durationSpec, EXTEND_FRAME_STEP, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
 
   interface Props {
     context: WorkspaceContext;
@@ -29,6 +30,11 @@
     /** Seed of the most recent output, reused when the seed gets locked. */
     lastSeed: number | null;
     onImageFileChange: (file: File | null) => void;
+    /** An image uploaded as the last frame (Image to Video, on a model that has one). */
+    endImageFile?: File | null;
+    /** Preview for a last-frame path that points at a known asset. */
+    endPreviewUrl?: string | null;
+    onEndImageFileChange?: (file: File | null) => void;
     /** Copy the CLI command for the current settings; the button is hidden without it. */
     oncopycli?: () => void;
     /** Off: the footer closes the pane (`ondone`) instead of generating, where another button owns Generate. */
@@ -36,7 +42,7 @@
     ondone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, oncopycli, submit = true, ondone }: Props = $props();
+  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, oncopycli, submit = true, ondone }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -58,28 +64,39 @@
   // --- Duration -------------------------------------------------------------
   // The clip length is edited in seconds but submitted as frames, snapped to a count the model accepts.
   const timing = $derived(videoTimingFor(context, model));
-  const secondsSpec = $derived(durationSpec(timing.fps, timing.frameAlignment));
+  const secondsSpec = $derived(durationSpec(timing.fps, timing.frameRule));
   const shownSeconds = $derived(roundSeconds(framesToSeconds(s.frameCount, timing.fps)));
 
   function setSeconds(seconds: number | null): void {
-    if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameAlignment));
+    if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
+  }
+
+  // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
+  const stepOptions = $derived(caps.isImageMode ? null : stepOptionsFor(context, model));
+  const stepsRange = $derived(stepOptions ? stepsSpec(stepOptions) : SPEC.steps);
+
+  function setSteps(steps: number): void {
+    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : steps);
   }
 
   // --- Extend: the length of the new frames (the source itself is chosen in SourceVideoSection) ---
   const info = $derived(draft.extendSource);
   const sourceStatus = $derived(extendInspection.statusFor(s.extendSourcePath));
-  const sourceGuard = $derived(extendGuard(s, info, sourceStatus));
+  const sourceGuard = $derived(extendGuard(s, info, sourceStatus, extendModelSupport(context, model)));
   const sourceFps = $derived(info?.fps ?? null);
   const silentSource = $derived(s.workflow === 'extend' && info?.has_audio === false);
-  const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, EXTEND_FRAME_STEP) : { step: 0.1, min: 0.1 });
+  const extendStep = $derived(extendStepFor(context, model));
+  const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, { alignment: extendStep }) : { step: 0.1, min: 0.1 });
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
-  const extendDefaultFrames = $derived(sourceFps ? defaultExtendFrames(sourceFps) : null);
+  const extendDefaultFrames = $derived(sourceFps ? defaultExtendFrames(sourceFps, extendStep) : null);
   const memoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
   const clipNote = $derived(memoryFitNote(clipMemory.fit, 'clip'));
+  const clipTime = $derived(clipTimeNote(clipMemory.fit));
+  const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
 
   function setExtendSeconds(seconds: number | null): void {
-    if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps));
+    if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps, extendStep));
   }
 
   const dimensionSpec = $derived<NumberSpec>({ step: caps.dimensionStep, min: caps.dimensionMin, max: caps.dimensionMax ?? undefined });
@@ -161,7 +178,7 @@
   const videoSummary = $derived(
     [
       s.audio && !silentSource ? 'Audio' : null,
-      s.lowMemory ? 'Low memory' : null,
+      caps.showLowMemory && s.lowMemory ? 'Low memory' : null,
       caps.showVideoUpscale && s.videoUpscaleEnabled ? `${s.videoUpscaleFactor}× upscale` : null,
       videoUpscaleReviewOn ? 'Review' : null,
     ]
@@ -175,47 +192,10 @@
   }
 
   // --- Reference image ------------------------------------------------------
-  let dragOver = $state(false);
-  let filePreviewUrl = $state<string | null>(null);
-
-  // Revoke the previous object URL whenever the file changes or the pane unmounts.
-  $effect(() => {
-    const url = imageFile ? URL.createObjectURL(imageFile) : null;
-    filePreviewUrl = url;
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  });
-
-  let fileInput = $state<HTMLInputElement | null>(null);
-
-  // Forget a browsed file once it stops being the reference, so choosing it again fires a change.
-  $effect(() => {
-    if (!imageFile && fileInput) fileInput.value = '';
-  });
-
-  const referencePreview = $derived(filePreviewUrl ?? referencePreviewUrl);
   const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : ''));
-
-  let browsingImage = $state(false);
-
-  /** Take a host path as the reference, replacing an uploaded file. */
-  function chooseImagePath(path: string): void {
-    onImageFileChange(null);
-    draft.update('referenceImagePath', path);
-  }
-
-  function clearImage(): void {
-    onImageFileChange(null);
-    draft.update('referenceImagePath', null);
-  }
-
-  function handleDrop(event: DragEvent): void {
-    event.preventDefault();
-    dragOver = false;
-    const file = event.dataTransfer?.files[0] ?? null;
-    if (file && file.type.startsWith('image/')) onImageFileChange(file);
-  }
+  const endName = $derived(endImageFile?.name ?? (s.endImagePath ? fileName(s.endImagePath) : ''));
+  // The summary reads "start.png → end.png" once both are set, and the first alone (or None) otherwise.
+  const referenceSummary = $derived(caps.showEndImage && endName ? `${referenceName || 'None'} → ${endName}` : referenceName || 'None');
 
   // --- Footer ---------------------------------------------------------------
   const promptFileMode = $derived(s.promptSource === 'file');
@@ -238,6 +218,10 @@
   <p class="row-hint ui-help-warning memory-note" data-testid={testid} data-status={note.status} title="{note.text}&#10;{MEMORY_FIT_CONSEQUENCES.unified[note.status]}">
     <Icon name="alert" size={12} />{note.text}
   </p>
+{/snippet}
+
+{#snippet timeNoteLine(text: string, testid: string)}
+  <p class="row-hint" data-testid={testid}>{text}</p>
 {/snippet}
 
 <section class="settings-pane" aria-labelledby="ws-settings-title">
@@ -304,6 +288,7 @@
           <input type="hidden" name="frames" value={s.frameCount}>
         </InspectorRow>
         <div aria-live="polite">
+          {#if clipTime}{@render timeNoteLine(clipTime, 'clip-time-note')}{/if}
           {#if clipNote}{@render memoryNoteLine(clipNote, 'clip-memory-note')}{/if}
         </div>
       {/if}
@@ -323,13 +308,14 @@
           <span class="extend-total" data-testid="extend-total">{extendLength ? `${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames` : '—'}</span>
         </InspectorRow>
         <div aria-live="polite">
+          {#if extendTime}{@render timeNoteLine(extendTime, 'extend-time-note')}{/if}
           {#if memoryNote}{@render memoryNoteLine(memoryNote, 'extend-memory-note')}{/if}
         </div>
       {/if}
       {#if caps.showSteps}
-        <InspectorRow label="Steps" forId="ws-steps" scrubber={scrubber(s.steps, SPEC.steps, (v) => draft.update('steps', v))} changed={changed('steps')} onreset={() => reset('steps')}>
-          <InspectorNumber id="ws-steps" name="steps" value={s.steps} {...SPEC.steps} onchange={(v) => v !== null && draft.update('steps', v)} />
-          <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...SPEC.steps} value={s.steps} style:--fill={rangeFill(s.steps, SPEC.steps)} oninput={(e) => draft.update('steps', Number(e.currentTarget.value))}>
+        <InspectorRow label="Steps" forId="ws-steps" scrubber={scrubber(s.steps, stepsRange, setSteps)} changed={changed('steps')} onreset={() => reset('steps')}>
+          <InspectorNumber id="ws-steps" name="steps" value={s.steps} {...stepsRange} onchange={(v) => v !== null && setSteps(v)} />
+          <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...stepsRange} value={s.steps} style:--fill={rangeFill(s.steps, stepsRange)} oninput={(e) => setSteps(Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showGuidance}
@@ -387,46 +373,38 @@
     </InspectorSection>
 
     {#if caps.showRefImage}
-      <InspectorSection id="reference" title="Reference image" summary={referenceName || 'None'} active={Boolean(referenceName)}>
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="reference-drop"
-          data-dragover={dragOver}
-          ondragover={(e) => { e.preventDefault(); dragOver = true; }}
-          ondragleave={() => { dragOver = false; }}
-          ondrop={handleDrop}
-        >
-          <InspectorRow label="Image">
-            <div class="reference-thumb">
-              {#if referencePreview}
-                <img src={referencePreview} alt="Reference preview">
-              {:else}
-                <Icon name="reference" size={16} />
-              {/if}
-            </div>
-            <span class="reference-name" title={referenceName}>{referenceName || 'Browse or drop'}</span>
-            <button id="ws-image-browse" type="button" class="ui-btn ui-btn-row" title="Browse for an image" aria-label="Browse for a reference image" onclick={() => { browsingImage = true; }}><Icon name="folder" size={14} /></button>
-            <!-- No name: the chosen file is attached on submit only while it is the reference (see WorkspacePage). -->
-            <input id="ws-image-file" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={(e) => onImageFileChange(e.currentTarget.files?.[0] ?? null)}>
-            <label for="ws-image-file" class="ui-btn ui-btn-row" title="Upload an image from this device" aria-label="Upload a reference image from this device"><Icon name="upload" size={14} /></label>
-            <button type="button" class="ui-btn ui-btn-row" aria-label="Clear reference image" title="Clear" onclick={clearImage}><Icon name="close" size={14} /></button>
-          </InspectorRow>
-          <InspectorRow label="Path" forId="ws-image-path">
-            <PathInput
-              id="ws-image-path"
-              name="image_path"
-              purpose="reference_image"
-              class="inspector-text"
-              plain
-              placeholder="/path/to/reference.png"
-              value={s.referenceImagePath ?? ''}
-              oninput={(text) => draft.update('referenceImagePath', text || null)}
-              onpick={chooseImagePath}
-            />
-          </InspectorRow>
-        </div>
+      <InspectorSection id="reference" title="Reference image" summary={referenceSummary} active={Boolean(referenceName || (caps.showEndImage && endName))}>
+        <ReferenceSlot
+          idBase="ws-image"
+          label={caps.showEndImage ? 'First frame' : 'Image'}
+          names={{ browse: 'Browse for a reference image', upload: 'Upload a reference image from this device', clear: 'Clear reference image', preview: 'Reference preview' }}
+          pathName="image_path"
+          placeholder="/path/to/reference.png"
+          emptyText="Browse or drop"
+          path={s.referenceImagePath}
+          file={imageFile}
+          previewUrl={referencePreviewUrl}
+          onfilechange={onImageFileChange}
+          onpathchange={(path) => draft.update('referenceImagePath', path)}
+        />
+        {#if caps.showEndImage}
+          <ReferenceSlot
+            idBase="ws-end-image"
+            label="Last frame"
+            names={{ browse: 'Browse for a last-frame image', upload: 'Upload a last-frame image from this device', clear: 'Clear last frame', preview: 'Last frame preview' }}
+            pathName="end_image_path"
+            placeholder="/path/to/last-frame.png"
+            emptyText="Optional"
+            emptyMuted
+            path={s.endImagePath}
+            file={endImageFile}
+            previewUrl={endPreviewUrl}
+            onfilechange={onEndImageFileChange}
+            onpathchange={(path) => draft.update('endImagePath', path)}
+          />
+          {#if endName}<p class="row-hint">The clip ends on this image; different scenes dissolve into each other.</p>{/if}
+        {/if}
       </InspectorSection>
-      <PathBrowser bind:open={browsingImage} purpose="reference_image" initialPath={s.referenceImagePath} onchoose={chooseImagePath} />
     {/if}
 
     {#if showPostprocess}
@@ -681,12 +659,6 @@
   .memory-note { display: flex; align-items: flex-start; gap: 4px; }
   .memory-note :global(svg) { margin-top: 2px; }
   .extend-total { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-secondary); }
-
-  .reference-drop { border-radius: var(--radius-sm); }
-  .reference-drop[data-dragover='true'] { outline: 2px dashed var(--color-primary-main); outline-offset: -2px; }
-  .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
-  .reference-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
 
   .settings-footer { flex: none; padding: 10px 12px; }
   .footer-note { margin-bottom: 8px; }

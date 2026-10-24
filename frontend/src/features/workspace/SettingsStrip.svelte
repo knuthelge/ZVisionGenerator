@@ -51,7 +51,7 @@
       >
         {#if chip.key === 'preset'}<Icon name="list" size={14} />{/if}
         {#if chip.key === 'model'}<Icon name="cube" size={14} />{/if}
-        {#if chip.key === 'reference'}<Icon name="reference" size={14} />{/if}
+        {#if chip.key === 'reference' || chip.key === 'endReference'}<Icon name="reference" size={14} />{/if}
         {#if chip.key === 'source'}<Icon name="film" size={14} />{/if}
         {#if chip.label}<span class="setchip-k">{chip.label}</span>{/if}
         <span class="setchip-v" class:on={chip.on}>{chip.value}</span>

@@ -1,5 +1,5 @@
-import type { ClipMemoryFit, DraftState, MemoryFitStatus, MemoryKind } from '$lib/types';
-import { alignFrameCount } from './videoDuration';
+import type { ClipMemoryFit, DraftState, FrameRule, MemoryFitStatus, MemoryKind } from '$lib/types';
+import { alignFrames } from './videoDuration';
 
 /** What each fit level means in practice on each kind of memory; fits needs no explanation. */
 export const MEMORY_FIT_CONSEQUENCES: Record<MemoryKind, Partial<Record<MemoryFitStatus, string>>> = {
@@ -43,6 +43,8 @@ const DISCRETE_CONSEQUENCE: Record<'gpu' | 'system', Record<MemoryNote['status']
     too_large: 'Expect the job to be stopped for lack of memory. A shorter or smaller clip does not help; ltx-4 needs less than ltx-8, and Upscale adds about 4 GB.',
   },
 };
+/** MiniMax H3's system-memory too-large consequence: the advice about LTX levels and Upscale does not apply to it. */
+const H3_SYSTEM_TOO_LARGE = 'Expect the job to be stopped for lack of memory. A shorter or smaller clip does not help; close other apps.';
 /** System memory is about the model, not the clip, so its note does not lead with the size and length. */
 const SYSTEM_LEAD = 'The model needs';
 
@@ -52,9 +54,17 @@ export function memoryFitNote(fit: ClipMemoryFit | null, context: MemoryFitConte
   if (fit.kind === 'discrete') {
     const resource = fit.resource ?? 'gpu';
     const lead = resource === 'system' ? SYSTEM_LEAD : LEAD[context][fit.status];
-    return { status: fit.status, text: `${lead} ~${fit.required_gb} GB of ${fit.budget_gb} GB of ${DISCRETE_RESOURCE[resource]}. ${DISCRETE_CONSEQUENCE[resource][fit.status]}` };
+    const consequence = fit.family === 'h3' && resource === 'system' && fit.status === 'too_large' ? H3_SYSTEM_TOO_LARGE : DISCRETE_CONSEQUENCE[resource][fit.status];
+    return { status: fit.status, text: `${lead} ~${fit.required_gb} GB of ${fit.budget_gb} GB of ${DISCRETE_RESOURCE[resource]}. ${consequence}` };
   }
   return { status: fit.status, text: `${LEAD[context][fit.status]} ~${fit.required_gb} GB of ${fit.budget_gb} GB. ${CONSEQUENCE[fit.status]}` };
+}
+
+/** The estimated generation time of a clip or an extension, in whole minutes and labelled as an estimate; null where the server has none. */
+export function clipTimeNote(fit: ClipMemoryFit | null): string | null {
+  const seconds = fit?.expected_seconds;
+  if (seconds === undefined || !(seconds > 0)) return null;
+  return `About ${Math.max(1, Math.round(seconds / 60))} min (estimated).`;
 }
 
 /** The fields of `POST /api/video/memory-fit`: what the video job form submits for size and length. */
@@ -71,15 +81,21 @@ export interface ClipMemoryRequest {
   low_memory: boolean;
   /** The upscale factor, or null when the clip is not upscaled. */
   upscale: number | null;
+  /** Present (true) for an Image to Video clip, whose keyframe costs memory and time. */
+  image?: boolean;
+  /** The steps the job would run, for a model that offers the control. */
+  steps?: number;
 }
 
 /** Which video controls the model offers, as they decide what the job form submits. */
 export interface ClipMemoryControls {
-  frameAlignment: number;
+  frameRule: FrameRule;
   /** The Low memory toggle is shown; without it the server's default (on) applies. */
   lowMemory: boolean;
   /** The Upscale toggle is shown. */
   upscale: boolean;
+  /** The model offers a choice of step counts, which set its time; the steps are sent only then. */
+  steps?: boolean;
 }
 
 /**
@@ -102,8 +118,10 @@ export function clipMemoryRequest(state: DraftState, controls: ClipMemoryControl
   return {
     model: state.model,
     ...size,
-    frames: alignFrameCount(state.frameCount, controls.frameAlignment),
+    frames: alignFrames(state.frameCount, controls.frameRule),
     low_memory: controls.lowMemory ? state.lowMemory : true,
     upscale: controls.upscale && state.videoUpscaleEnabled ? state.videoUpscaleFactor : null,
+    ...(state.workflow === 'img2vid' ? { image: true } : {}),
+    ...(controls.steps && state.steps > 0 ? { steps: state.steps } : {}),
   };
 }

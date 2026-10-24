@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DraftState } from '$lib/types';
 
-import { clipMemoryRequest, memoryFitNote, type ClipMemoryControls } from './memoryFit';
+import { clipMemoryRequest, clipTimeNote, memoryFitNote, type ClipMemoryControls } from './memoryFit';
 
 function draftState(overrides: Partial<DraftState> = {}): DraftState {
   return {
@@ -11,7 +11,7 @@ function draftState(overrides: Partial<DraftState> = {}): DraftState {
   } as DraftState;
 }
 
-const CONTROLS: ClipMemoryControls = { frameAlignment: 8, lowMemory: true, upscale: true };
+const CONTROLS: ClipMemoryControls = { frameRule: { alignment: 8, offset: 1, round: 'nearest' }, lowMemory: true, upscale: true };
 
 describe('memoryFitNote', () => {
   it.each(['clip', 'extension'] as const)('carries the status and the memory figures of a tight and a too-large %s', (context) => {
@@ -33,13 +33,45 @@ describe('memoryFitNote', () => {
     expect(system?.status).toBe('tight');
   });
 
+  it.each(['clip', 'extension'] as const)('keeps the LTX advice for LTX and drops it for MiniMax H3 when system memory is too small in a %s', (context) => {
+    const ltx = memoryFitNote({ status: 'too_large', required_gb: 38, budget_gb: 30, kind: 'discrete', resource: 'system' }, context);
+    const h3 = memoryFitNote({ status: 'too_large', required_gb: 38, budget_gb: 30, kind: 'discrete', resource: 'system', family: 'h3' }, context);
+
+    expect(ltx?.text).toContain('ltx-4 needs less than ltx-8');
+    expect(h3?.text).not.toMatch(/ltx|Upscale adds/i);
+    expect(h3?.text).toMatch(/\b38\b.*\b30\b.*system/);
+  });
+
   it.each(['clip', 'extension'] as const)('has nothing to say about a %s that fits or is unknown', (context) => {
     expect(memoryFitNote({ status: 'fits', required_gb: 10, budget_gb: 24 }, context)).toBeNull();
     expect(memoryFitNote(null, context)).toBeNull();
   });
 });
 
+describe('clipTimeNote', () => {
+  it('rounds the estimate to whole minutes and labels it as estimated', () => {
+    expect(clipTimeNote({ status: 'fits', required_gb: 9, budget_gb: 10, expected_seconds: 277 })).toBe('About 5 min (estimated).');
+    expect(clipTimeNote({ status: 'tight', required_gb: 9, budget_gb: 10, kind: 'discrete', expected_seconds: 1380 })).toBe('About 23 min (estimated).');
+  });
+
+  it('never says less than a minute', () => {
+    expect(clipTimeNote({ status: 'fits', required_gb: 9, budget_gb: 10, expected_seconds: 20 })).toBe('About 1 min (estimated).');
+  });
+
+  it('has nothing to say without an estimate', () => {
+    expect(clipTimeNote({ status: 'fits', required_gb: 9, budget_gb: 10 })).toBeNull();
+    expect(clipTimeNote(null)).toBeNull();
+  });
+});
+
 describe('clipMemoryRequest', () => {
+  it('tells an Image to Video clip from a Text to Video clip and sends the steps only for a model that offers them', () => {
+    expect(clipMemoryRequest(draftState({ workflow: 'img2vid', steps: 4 }), { ...CONTROLS, steps: true })).toMatchObject({ image: true, steps: 4 });
+    const text = clipMemoryRequest(draftState({ steps: 4 }), CONTROLS);
+    expect(text).not.toHaveProperty('image');
+    expect(text).not.toHaveProperty('steps');
+  });
+
   it('asks for what the job form submits: the model, a preset size, the frames, low memory and upscale', () => {
     expect(clipMemoryRequest(draftState(), CONTROLS)).toEqual({ model: 'ltx-8', ratio: '16:9', size: 'm', frames: 121, low_memory: true, upscale: null });
   });
@@ -58,7 +90,8 @@ describe('clipMemoryRequest', () => {
 
   it('sends the frame count the job would use', () => {
     expect(clipMemoryRequest(draftState({ frameCount: 100 }), CONTROLS)?.frames).toBe(97);
-    expect(clipMemoryRequest(draftState({ frameCount: 100 }), { ...CONTROLS, frameAlignment: 1 })?.frames).toBe(100);
+    expect(clipMemoryRequest(draftState({ frameCount: 100 }), { ...CONTROLS, frameRule: { alignment: 1, offset: 1, round: 'nearest' } })?.frames).toBe(100);
+    expect(clipMemoryRequest(draftState({ frameCount: 125 }), { ...CONTROLS, frameRule: { alignment: 17, offset: 5, round: 'up' } })?.frames).toBe(141);
   });
 
   it('sends the upscale factor only while the toggle is on and offered', () => {

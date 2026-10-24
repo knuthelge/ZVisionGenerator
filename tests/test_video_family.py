@@ -71,6 +71,32 @@ def test_server_refuses_fewer_than_one_step():
         web_server._normalize_video_steps(args, load_config(), _LTX_INFO)
 
 
+def _config_with_h3_upscale(steps: int) -> dict:
+    config = load_config()
+    config["video_model_presets"]["h3"]["upscale"] = {"default_upscale_steps": steps}
+    config["video_model_presets"]["ltx"]["upscale"] = {"default_upscale_steps": 6}
+    return config
+
+
+@pytest.mark.parametrize(("family", "expected"), [("h3", 4), ("ltx", 6)])
+def test_the_default_upscale_steps_come_from_the_models_own_family(family, expected):
+    config = _config_with_h3_upscale(4)
+    info = VideoModelInfo(family=family, backend=family, supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+    cli_args = argparse.Namespace(upscale=2, steps=None)
+    server_args = argparse.Namespace(upscale=2, steps=None)
+
+    _resolve_upscale_steps(cli_args, config, family, steps_explicitly_set=False)
+    web_server._normalize_video_steps(server_args, config, info)
+
+    # H3 offers 4 and 8 steps, LTX is capped at 8: the family's default is settled by its own rules.
+    assert (cli_args.steps, cli_args.upscale_steps) == (server_args.steps, server_args.upscale_steps) == (expected, expected)
+
+
+def test_a_family_without_an_upscale_block_upscales_at_its_default_steps():
+    assert video_family(load_config(), "h3").default_upscale_steps == 8
+    assert video_family(load_config(), "ltx").default_upscale_steps == 8
+
+
 # ---------------------------------------------------------------------------
 # G7: what the LTX Web UI defaults and the extend length arithmetic give
 # ---------------------------------------------------------------------------
@@ -101,6 +127,12 @@ def test_ltx_workspace_defaults_are_unchanged(model):
         "upscale": {"enabled": False, "factor": 2, "steps": None},
         "enhance_max_words": 300,
         "family": "ltx",
+        "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"},
+        # LTX has no last frame, so the three end-image controls are the only ones its Workspace hides.
+        "hidden_controls": ["end_image", "end_image_clear", "end_image_path"],
+        "supports_extend": True,
+        "step_options": None,
+        "extend_frame_step": 8,
     }
 
 
@@ -142,6 +174,7 @@ def _h3_block() -> dict:
         "default_frames": 124,
         "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
         "extend_frame_step": 17,
+        "carry_frames": 22,
         "capabilities": {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": False},
         "platform_capabilities": {"darwin": {"upscale": False, "upscale_review": False}},
     }
@@ -163,6 +196,9 @@ def test_the_packaged_ltx_family_is_described_literally():
         step_options=None,
         default_frames=None,
         extend_frame_step=8,
+        carry_frames=25,
+        default_upscale_steps=8,
+        extend_fps=None,
     )
 
 
@@ -192,7 +228,16 @@ def test_a_full_family_block_parses():
         step_options=(4, 8),
         default_frames=124,
         extend_frame_step=17,
+        carry_frames=22,
+        default_upscale_steps=8,
+        extend_fps=None,
     )
+
+
+def test_extend_fps_is_read_from_the_block_and_the_packaged_families_declare_it():
+    assert video_family(_config_with({**_h3_block(), "extend_fps": 24}), "h3").extend_fps == 24
+    assert video_family(load_config(), "h3").extend_fps == 24
+    assert video_family(load_config(), "ltx").extend_fps is None
 
 
 def _without(key: str):
@@ -214,11 +259,17 @@ def _with(path: str, value):
 @pytest.mark.parametrize(
     ("block", "path"),
     [
-        *[(_without(key), key) for key in ("label", "default_steps", "frame_rule", "capabilities", "extend_frame_step")],
+        *[(_without(key), key) for key in ("label", "default_steps", "frame_rule", "capabilities", "extend_frame_step", "carry_frames")],
         (_with("label", " "), "label"),
         (_with("default_steps", 0), "default_steps"),
         (_with("max_steps", "8"), "max_steps"),
         (_with("extend_frame_step", True), "extend_frame_step"),
+        (_with("carry_frames", 0), "carry_frames"),
+        (_with("extend_fps", 0), "extend_fps"),
+        (_with("extend_fps", "24"), "extend_fps"),
+        (_with("extend_fps", True), "extend_fps"),
+        (_with("upscale", [8]), "upscale"),
+        (_with("upscale", {"default_upscale_steps": 0}), "upscale.default_upscale_steps"),
         (_with("frame_rule.alignment", 0), "frame_rule.alignment"),
         (_with("frame_rule.offset", -1), "frame_rule.offset"),
         (_with("frame_rule.round", "down"), "frame_rule.round"),
@@ -295,3 +346,13 @@ def test_without_a_family_nothing_is_capped():
 def test_any_frames_is_the_rule_of_an_undescribed_model():
     assert ANY_FRAMES == FrameRule(1, 1, "nearest")
     assert ANY_FRAMES.to_json() == {"alignment": 1, "offset": 1, "round": "nearest"}
+
+
+def test_the_carried_frames_match_what_the_backends_carry():
+    from zvisiongenerator.utils.h3_memory import H3_TAIL_FRAMES
+    from zvisiongenerator.utils.video_extend import CARRY_FRAMES
+
+    config = load_config()
+
+    assert video_family(config, "ltx").carry_frames == CARRY_FRAMES == 25
+    assert video_family(config, "h3").carry_frames == H3_TAIL_FRAMES == 22

@@ -169,6 +169,42 @@ class TestVideoPlan:
         with pytest.raises(ValueError, match="transformer"):
             video_plan("owner/ltx", family="ltx", config=config, model_name="ltx", upscale=False)
 
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_h3_is_planned_from_its_preset_by_the_h3_planner(self, monkeypatch, upscale):
+        from zvisiongenerator.utils.config import load_config
+        from zvisiongenerator.utils.h3_preset import h3_preset
+
+        config = load_config()
+        target = DownloadTarget("owner/h3")
+        h3_backend = _patch_backend(monkeypatch, "h3_download_plan", (target,))
+        ltx_backend = _patch_backend(monkeypatch, "video_download_plan", ())
+
+        plan = video_plan("MiniMaxAI/MiniMax-H3@rev", family="h3", config=config, model_name="h3", upscale=upscale)
+
+        assert plan == (target,)
+        h3_backend.assert_called_once_with("MiniMaxAI/MiniMax-H3@rev", h3_preset(config), upscale=upscale)
+        ltx_backend.assert_not_called()
+
+    def test_h3_on_macos_is_planned_from_the_mlx_preset_and_the_turbo_lora(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.utils.config import load_config
+        from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
+
+        monkeypatch.setattr(backends.sys, "platform", "darwin")
+        config = load_config()
+
+        plan = video_plan("MiniMaxAI/MiniMax-H3@rev", family="h3", config=config, model_name="h3", upscale=False)
+
+        assert [target.repo_id for target in plan] == ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "MiniMaxAI/MiniMax-H3", "lightx2v/Minimax-h3-Turbo"]
+        assert plan[0].allow_patterns == h3_mlx_preset(config).transformer.files
+        assert plan[2].allow_patterns == h3_turbo_lora(config)[0].files
+
+    def test_a_malformed_h3_preset_propagates(self, monkeypatch):
+        _patch_backend(monkeypatch, "h3_download_plan", ())
+
+        with pytest.raises(ValueError, match="video_model_presets.h3"):
+            video_plan("MiniMaxAI/MiniMax-H3", family="h3", config={}, model_name="h3", upscale=False)
+
     def test_network_errors_cannot_be_planned(self, monkeypatch):
         _patch_backend(monkeypatch, "video_download_plan", side_effect=httpx.ConnectError("down"))
 

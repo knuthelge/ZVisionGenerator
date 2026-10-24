@@ -133,8 +133,15 @@ describe('sound, direction and context', () => {
 
   it('describes the video job', () => {
     const video = state({ workflow: 'img2vid', ratio: '9:16', dimensionMode: 'ratio', width: 704, height: 448, frameCount: 97, fps: 24, audio: true });
-    expect(enhanceContext(video)).toEqual({ ratio: '9:16', width: null, height: null, frames: 97, fps: 24, audio: true, reference_image: true });
+    expect(enhanceContext(video)).toEqual({ ratio: '9:16', width: null, height: null, frames: 97, fps: 24, audio: true, reference_image: true, end_image: false });
     expect(hasAudio(video)).toBe(true);
+  });
+
+  it('tells the enhancer about a last frame for a video job only', () => {
+    const video = state({ workflow: 'img2vid', frameCount: 97, fps: 24 });
+    expect(enhanceContext(video, true, null, true).end_image).toBe(true);
+    expect(enhanceContext(video).end_image).toBe(false);
+    expect(enhanceContext(state({ workflow: 'img2img' }), true, null, true).end_image).toBe(false);
   });
 
   it('has no audio where the video backend writes none', () => {
@@ -145,7 +152,7 @@ describe('sound, direction and context', () => {
 
   it('describes the image job without video facts', () => {
     const image = state({ workflow: 'txt2img', ratio: '2:3', dimensionMode: 'custom', width: 1024, height: 576, frameCount: 97, fps: 24, audio: true });
-    expect(enhanceContext(image)).toEqual({ ratio: '2:3', width: 1024, height: 576, frames: null, fps: null, audio: false, reference_image: false });
+    expect(enhanceContext(image)).toEqual({ ratio: '2:3', width: 1024, height: 576, frames: null, fps: null, audio: false, reference_image: false, end_image: false });
   });
 });
 
@@ -338,14 +345,20 @@ describe('scene and prompt pair', () => {
 describe('extend', () => {
   const extending = (overrides: Partial<DraftState> = {}) => state({
     workflow: 'extend', prompt: '', scene: '', audio: true, fps: 24, frameCount: 97, ratio: '16:9', dimensionMode: 'ratio', width: 848, height: 480,
-    extendSourcePath: '/clips/walk.mp4', extendFrames: 48, ...overrides,
+    extendSourcePath: '/clips/walk.mp4', extendFrames: 48, model: 'ltx-2.3', ...overrides,
   });
 
   it('describes the job by its source and new frames, with no frame shape or reference image', () => {
     expect(enhanceContext(extending())).toEqual({
       ratio: null, width: null, height: null, frames: null, fps: null, audio: true, reference_image: false,
-      source_video: '/clips/walk.mp4', extend_frames: 48,
+      source_video: '/clips/walk.mp4', extend_frames: 48, model: 'ltx-2.3',
     });
+  });
+
+  it('names the selected video model so the server applies its extend step', () => {
+    expect(enhanceContext(extending({ model: 'h3-turbo', extendFrames: 51 }))).toMatchObject({ model: 'h3-turbo', extend_frames: 51 });
+    expect(enhanceContext(extending({ model: '' })).model).toBeNull();
+    expect(enhanceContext(state({ workflow: 'txt2vid', model: 'h3-turbo' }))).not.toHaveProperty('model');
   });
 
   it('has no audio where the backend writes none or the source is silent', () => {

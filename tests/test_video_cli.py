@@ -11,6 +11,7 @@ import pytest
 from conftest import make_extend_source
 from huggingface_hub.errors import GatedRepoError
 
+from zvisiongenerator import video_cli
 from zvisiongenerator.core.video_family import FrameRule
 from zvisiongenerator.utils.alignment import align_frames, align_resolution
 from zvisiongenerator.utils.config import load_config
@@ -18,7 +19,11 @@ from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser
 
-_LTX_FAMILY = {key: value for key, value in load_config()["video_model_presets"]["ltx"].items() if key in ("label", "default_steps", "max_steps", "frame_rule", "extend_frame_step", "capabilities")}
+_LTX_FAMILY = {
+    key: value
+    for key, value in load_config()["video_model_presets"]["ltx"].items()
+    if key in ("label", "default_steps", "max_steps", "frame_rule", "extend_frame_step", "carry_frames", "capabilities")
+}
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +266,38 @@ class TestVideoCliExecution:
         backend.load_model.assert_called_once()
         call = backend.load_model.call_args
         assert "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5" in (*call.args, *call.kwargs.values())
+
+    @pytest.mark.parametrize("with_image", [False, True])
+    def test_main_loads_h3_on_macos_with_options_the_mlx_backend_accepts(self, monkeypatch, tmp_path, with_image):
+        import zvisiongenerator.video_cli as video_cli
+        from zvisiongenerator.backends.mac import h3_video
+        from zvisiongenerator.utils.config import load_config
+        from zvisiongenerator.utils.model_memory import MemoryBudget
+
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "ziv"))
+        monkeypatch.setattr(video_cli, "load_config", load_config)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+        monkeypatch.setattr(video_cli.sys, "platform", "darwin")
+        monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(24 * 1024**3, unified_bytes=32 * 1024**3))
+        monkeypatch.setattr(h3_video, "resolve_mlx_files", lambda *_a, **_kw: MagicMock(lora_file="turbo.safetensors"))
+        monkeypatch.setattr(h3_video, "_turbo_rank", lambda _path: 4)
+        monkeypatch.setattr(h3_video, "ensure_text_encoder_copy", lambda models_dir, name, *_a: models_dir / name)
+        loaded = []
+        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: h3_video.H3MlxVideoBackend())
+        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
+        monkeypatch.setattr(video_cli, "run_video_batch", lambda *, model, **_kw: loaded.append(model))
+        argv = ["ziv-video", "-m", "h3", "--prompt", "a dog", "-o", str(tmp_path)]
+        if with_image:
+            image = tmp_path / "first.png"
+            image.write_bytes(b"x")
+            argv += ["--image", str(image)]
+
+        with patch("sys.argv", argv):
+            video_cli.main()
+
+        (model,) = loaded
+        assert (model.mode, model.verbose) == ("i2v" if with_image else "t2v", True)
+        assert model.turbo_lora_alpha == 0.0625 * 4
 
     def test_main_reports_backend_load_errors_via_parser_error(self, monkeypatch, tmp_path):
         import zvisiongenerator.video_cli as video_cli
@@ -1224,3 +1261,226 @@ def test_a_clip_limited_by_system_memory_points_at_the_model_not_the_clip(monkey
 
     assert len(caught) == 1
     assert "--frames" not in str(caught[0].message)
+
+
+class TestVideoCliH3:
+    """MiniMax H3 on the CLI: ``--end-image``, the 17k+5 frame rule, and refusals only for what a family lacks."""
+
+    _H3 = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=24, frame_alignment=17, resolution_alignment=32)
+
+    @pytest.fixture(autouse=True)
+    def _linux(self, monkeypatch):
+        import zvisiongenerator.backends as backends_module
+
+        monkeypatch.setattr(backends_module.sys, "platform", "linux")
+
+    def _main(self, monkeypatch, tmp_path, argv, *, family="h3", **options):
+        info = self._H3 if family == "h3" else VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+        return _run_cli(monkeypatch, tmp_path, argv, backend=MagicMock(), config=load_config(), detect=lambda _model: info, **options)
+
+    def _images(self, tmp_path):
+        from PIL import Image
+
+        paths = []
+        for name in ("first.png", "last.png"):
+            path = tmp_path / name
+            Image.new("RGB", (8, 8)).save(path)
+            paths.append(str(path))
+        return paths
+
+    def test_parser_end_image_option(self):
+        args = _build_video_parser().parse_args(["-m", "h3", "--image", "a.png", "--end-image", "b.png"])
+        assert (args.image_path, args.end_image_path) == ("a.png", "b.png")
+        assert _build_video_parser().parse_args(["-m", "h3"]).end_image_path is None
+
+    def test_an_end_image_without_an_image_is_refused(self, monkeypatch, tmp_path, capsys):
+        _first, last = self._images(tmp_path)
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--end-image", last])
+
+        assert "--end-image needs --image" in capsys.readouterr().err
+
+    def test_a_missing_end_image_file_is_refused(self, monkeypatch, tmp_path, capsys):
+        first, _last = self._images(tmp_path)
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--image", first, "--end-image", str(tmp_path / "gone.png")])
+
+        assert "End image file not found" in capsys.readouterr().err
+
+    def test_a_family_without_the_capability_refuses_the_end_image(self, monkeypatch, tmp_path, capsys):
+        first, last = self._images(tmp_path)
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--image", first, "--end-image", last], family="ltx")
+
+        assert "does not support a last-frame image" in capsys.readouterr().err
+
+    def test_an_extension_refuses_the_end_image(self, monkeypatch, tmp_path, capsys):
+        first, last = self._images(tmp_path)
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--image", first, "--end-image", last])
+
+        assert "cannot be used with --extend" in capsys.readouterr().err
+
+    def test_an_h3_extension_of_a_30_fps_source_is_refused_before_preflight_and_the_model(self, monkeypatch, tmp_path, capsys):
+        backend = MagicMock()
+        preflight = MagicMock()
+        monkeypatch.setattr(video_cli, "run_preflight", preflight)
+        source = _cli_source(fps=30.0, fps_text="30/1")
+
+        with pytest.raises(SystemExit, match="2"):
+            _run_cli(monkeypatch, tmp_path, ["-m", "h3", "--extend", "clip.mp4", "--prompt", "a lake"], backend=backend, config=load_config(), detect=lambda _model: self._H3, source=source)
+
+        assert "30 fps" in capsys.readouterr().err
+        preflight.assert_not_called()
+        backend.load_model.assert_not_called()
+
+    def test_an_h3_extension_of_a_24_fps_source_reaches_the_batch(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--extend", "clip.mp4", "--prompt", "a lake"], source=_cli_source())
+
+        assert captured["args"].extend_frames is not None
+
+    def test_an_ltx_extension_of_a_30_fps_source_reaches_the_batch(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--extend", "clip.mp4", "--prompt", "a lake"], family="ltx", source=_cli_source(fps=30.0, fps_text="30/1"))
+
+        assert captured["args"].extend_frames is not None
+
+    def test_h3_on_macos_refuses_an_upscale_before_the_enhancer_and_the_model(self, monkeypatch, tmp_path, capsys):
+        import zvisiongenerator.backends as backends_module
+
+        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
+        backend = MagicMock()
+        preflight = MagicMock()
+        monkeypatch.setattr(video_cli, "run_preflight", preflight)
+
+        with pytest.raises(SystemExit, match="2"):
+            _run_cli(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--upscale", "2"], backend=backend, config=load_config(), detect=lambda _model: self._H3)
+
+        assert "MiniMax H3 can't upscale a clip on this platform." in capsys.readouterr().err
+        preflight.assert_not_called()
+        backend.load_model.assert_not_called()
+
+    def test_h3_with_an_upscale_on_cuda_reaches_the_batch(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--upscale", "2"])
+
+        assert captured["args"].upscale == 2
+
+    @pytest.mark.parametrize(("family", "extend_frames", "window"), [("h3", "17", 39), ("ltx", "16", 41)])
+    def test_an_extension_records_the_window_of_its_family(self, monkeypatch, tmp_path, family, extend_frames, window):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "h3" if family == "h3" else "ltx-8", "--extend-frames", extend_frames], family=family)
+
+        assert (captured["args"].extend_frames, captured["args"].num_frames) == (int(extend_frames), window)
+        assert captured["memory"].call_args.kwargs["frames"] == window
+
+    def test_h3_with_both_images_reaches_the_batch(self, monkeypatch, tmp_path):
+        first, last = self._images(tmp_path)
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--image", first, "--end-image", last])
+
+        args = captured["args"]
+        assert (args.image_path, args.end_image_path, args.model_family) == (first, last, "h3")
+        load = captured["backend"].load_model.call_args
+        assert load.kwargs["mode"] == "i2v"
+        assert load.kwargs["preset"].repo == "MiniMaxAI/MiniMax-H3"
+        assert "upscale" not in load.kwargs
+
+    def test_h3_without_an_end_image_leaves_it_unset(self, monkeypatch, tmp_path):
+        first, _last = self._images(tmp_path)
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--image", first])
+
+        assert captured["args"].end_image_path is None
+
+    def test_the_upscale_is_passed_to_the_h3_load(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--upscale", "2"])
+
+        assert captured["backend"].load_model.call_args.kwargs["upscale"] is True
+
+    def test_frames_follow_the_17k_plus_5_rule(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake"])
+
+        assert captured["args"].num_frames == 56  # the patched defaults give 49: up to the next 17k+5
+
+    def test_extend_frames_are_multiples_of_17(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "h3", "--extend-frames", "40"])
+
+        assert captured["args"].extend_frames == 34
+
+
+class TestEstimatedTimeLine:
+    """The H3 run prints its estimated time, labelled as estimated, on a discrete and on a unified budget."""
+
+    _DISCRETE = MemoryBudget(10 * 1024**3, system_bytes=30 * 1024**3)
+    _UNIFIED = MemoryBudget(24 * 1024**3, unified_bytes=32 * 1024**3)
+
+    def _args(self, **overrides):
+        import argparse
+
+        values = dict(
+            model="MiniMaxAI/MiniMax-H3",
+            upscale=None,
+            model_name="h3",
+            model_family="h3",
+            width=864,
+            height=480,
+            num_frames=124,
+            low_memory=True,
+            steps=8,
+            image_path=None,
+            extend_source=None,
+            lora_paths=None,
+        )
+        values.update(overrides)
+        return argparse.Namespace(**values)
+
+    def _run(self, monkeypatch, budget, args):
+        monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: budget)
+        video_cli._warn_if_too_large(args, load_config(), extending=args.extend_source is not None)
+
+    def test_the_line_names_the_size_the_frames_and_the_estimated_minutes(self, monkeypatch, capsys):
+        self._run(monkeypatch, self._DISCRETE, self._args())
+
+        assert capsys.readouterr().out.strip() == "MiniMax H3 at 864x480, 124 frames: estimated 5 min (excludes the one-time weight preparation)."
+
+    def test_a_unified_budget_prints_the_line_too(self, monkeypatch, capsys):
+        self._run(monkeypatch, self._UNIFIED, self._args(width=768, height=448))
+
+        assert capsys.readouterr().out.strip() == "MiniMax H3 at 768x448, 124 frames: estimated 23 min (excludes the one-time weight preparation)."
+
+    def test_the_mode_and_steps_change_the_estimate(self, monkeypatch, capsys):
+        self._run(monkeypatch, self._DISCRETE, self._args(steps=4, image_path="a.png"))
+
+        assert "estimated 4 min" in capsys.readouterr().out
+
+    def test_an_extension_estimates_the_window_in_num_frames(self, monkeypatch, capsys):
+        self._run(monkeypatch, self._DISCRETE, self._args(extend_source=make_extend_source(), extend_frames=34, num_frames=56))
+
+        assert "864x480, 56 frames" in capsys.readouterr().out
+
+    def test_the_clip_fit_is_asked_with_the_mode_and_steps_of_the_run(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: self._DISCRETE)
+        monkeypatch.setattr(video_cli, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+
+        video_cli._clip_fit(self._args(steps=4, image_path="a.png"), {}, upscale=False)
+        video_cli._clip_fit(self._args(extend_source=make_extend_source(), extend_frames=34, num_frames=56), {}, upscale=False)
+        video_cli._clip_fit(self._args(model_family="ltx", steps=8), {}, upscale=False)
+
+        assert [(call["mode"], call["forwards"], call["frames"]) for call in calls] == [("i2v", 4, 124), ("extend", 8, 56), ("t2v", 8, 124)]
+
+    def test_ltx_prints_no_time_line(self, monkeypatch, capsys):
+        monkeypatch.setattr(video_cli, "clip_memory_fit", lambda *_a, **_k: {"status": "fits", "required_gb": 8.0, "budget_gb": 10.0})
+
+        self._run(monkeypatch, self._DISCRETE, self._args(model_family="ltx"))
+
+        assert capsys.readouterr().out == ""
+
+    def test_the_system_warning_of_h3_has_no_ltx_advice(self, monkeypatch):
+        with pytest.warns(UserWarning) as caught:
+            self._run(monkeypatch, MemoryBudget(10 * 1024**3, system_bytes=16 * 1024**3), self._args())
+
+        assert "system memory" in str(caught[0].message)
+        assert "ltx" not in str(caught[0].message)

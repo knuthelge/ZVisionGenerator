@@ -237,17 +237,20 @@ class TestEnsurePrepared:
 
 
 class TestPreparedManifestBytes:
-    """The manifest of a prepared copy is pinned byte for byte: a change would make every installed copy look stale and rebuild it."""
+    """The manifest of a prepared copy made from Hugging Face cache files is pinned byte for byte: a change would make every installed copy look stale and rebuild it."""
+
+    _BLOB = "cd625eb8fb67fb0921e955952c9b718307c93d6656f7eadf1bfd8064aeeabf1d"
+    _OTHER_BLOB = "6d948ca9be609363a9adc0a829aa4c43d0edce94694704327ede5f571ce3d258"
 
     def _sources(self, tmp_path):
-        (tmp_path / "store").mkdir()
-        real = tmp_path / "store" / "real-name.safetensors"
+        (tmp_path / "blobs").mkdir()
+        real = tmp_path / "blobs" / self._BLOB
         real.write_bytes(b"1234567")
         link = tmp_path / "link.safetensors"
         link.symlink_to(real)
-        plain = tmp_path / "plain.safetensors"
-        plain.write_bytes(b"0123456789a")
-        return [link, plain]
+        other = tmp_path / "blobs" / self._OTHER_BLOB
+        other.write_bytes(b"0123456789a")
+        return [link, other]
 
     @pytest.mark.parametrize(
         ("bits", "storage_format"),
@@ -266,17 +269,37 @@ class TestPreparedManifestBytes:
             f'  "format": "{storage_format}",\n'
             '  "sources": [\n'
             "    {\n"
-            '      "name": "real-name.safetensors",\n'
+            f'      "name": "{self._BLOB}",\n'
             '      "bytes": 7\n'
             "    },\n"
             "    {\n"
-            '      "name": "plain.safetensors",\n'
+            f'      "name": "{self._OTHER_BLOB}",\n'
             '      "bytes": 11\n'
             "    }\n"
             "  ]\n"
             "}\n"
         )
         assert (target / MANIFEST_NAME).read_bytes() == expected.encode("utf-8")
+
+
+class TestLocalSourceManifest:
+    def test_a_local_source_records_when_it_was_written_so_a_same_size_replacement_rebuilds(self, tmp_path):
+        source = tmp_path / "ltx.safetensors"
+        source.write_bytes(b"AAAA")
+        writes = []
+
+        def write(folder):
+            writes.append(folder)
+            (folder / "w").write_text("x")
+
+        weights.ensure_prepared(tmp_path / "copy", [source], 8, write)
+        weights.ensure_prepared(tmp_path / "copy", [source], 8, write)
+        replacement = tmp_path / "replacement.safetensors"
+        replacement.write_bytes(b"BBBB")
+        replacement.rename(source)
+        weights.ensure_prepared(tmp_path / "copy", [source], 8, write)
+
+        assert len(writes) == 2
 
 
 class TestTransformerWeights:

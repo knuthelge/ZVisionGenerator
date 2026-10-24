@@ -41,7 +41,7 @@ from zvisiongenerator.converters.convert_checkpoint import LTX_MODEL_TYPE, MODEL
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
-from zvisiongenerator.core.video_family import settle_video_steps
+from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
@@ -86,7 +86,7 @@ from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
-from zvisiongenerator.utils.video_extend import apply_extend_args, extend_step
+from zvisiongenerator.utils.video_extend import apply_extend_args, extend_step, require_extend_family
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
@@ -592,6 +592,7 @@ def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> Enha
         fps=_positive("fps"),
         audio=raw.get("audio") is True and supports_video_audio(),
         reference_image=raw.get("reference_image") is True,
+        end_image=raw.get("end_image") is True,
     )
 
 
@@ -717,9 +718,12 @@ def _public_job_context(
     runs: int,
     meta: str,
     output_dir: str,
-    image_path: str | None,
+    uploads: dict[str, str | None],
 ) -> dict[str, Any]:
-    """Build the public context a job carries from submission on (shown in snapshots and the queue)."""
+    """Build the public context a job carries from submission on (shown in snapshots and the queue).
+
+    ``uploads`` maps each path setting (``image_path``, ``end_image_path``) to the file the job uses for it.
+    """
     requested_workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback=_default_workflow_for_mode(mode))
     workflow = _canonicalize_workflow(job_type, fallback=requested_workflow)
     return {
@@ -732,14 +736,19 @@ def _public_job_context(
         "meta": meta,
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": output_dir,
-        "settings": _submitted_settings(form, image_path=image_path),
+        "settings": _submitted_settings(form, uploads=uploads),
     }
 
 
-def _submitted_settings(form: Any, *, image_path: str | None) -> dict[str, str | list[str]]:
-    """Return the submitted text fields verbatim (repeated fields as lists); an upload becomes its saved path."""
+def _submitted_settings(form: Any, *, uploads: dict[str, str | None]) -> dict[str, str | list[str]]:
+    """Return the submitted text fields verbatim (repeated fields as lists); an upload becomes its saved path.
+
+    Args:
+        form: The submitted form.
+        uploads: Each path setting (such as ``image_path``) mapped to the file the job uses for it. An entry is recorded
+            only when the form carries the matching upload field (``image_file`` for ``image_path``).
+    """
     settings: dict[str, str | list[str]] = {}
-    uploaded = False
     # Starlette's FormData repeats a key per value; plain mappings (tests, internal callers) have one item per key.
     items = form.multi_items() if hasattr(form, "multi_items") else form.items()
     for key, value in items:
@@ -747,15 +756,15 @@ def _submitted_settings(form: Any, *, image_path: str | None) -> dict[str, str |
             settings[key] = [str(item) for item in value]
             continue
         if not isinstance(value, str):
-            uploaded = uploaded or _is_uploaded_file(value)
             continue
         if key not in settings:
             settings[key] = value
             continue
         existing = settings[key]
         settings[key] = [*existing, value] if isinstance(existing, list) else [existing, value]
-    if uploaded and image_path:
-        settings["image_path"] = image_path
+    for path_key, saved_path in uploads.items():
+        if saved_path and _is_uploaded_file(form.get(_upload_field(path_key))):
+            settings[path_key] = saved_path
     return settings
 
 
@@ -1119,7 +1128,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         runs=args.runs,
         meta=f"{args.ratio} · {args.size} · {args.steps} steps",
         output_dir=args.output,
-        image_path=args.image_path,
+        uploads={"image_path": args.image_path},
     )
     supported_controls = image_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_image_request_job(
@@ -1153,6 +1162,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     ratio, size = (None, None) if extend else _video_ratio_and_size(form, web_config)
     output_dir = _resolve_output_dir(web_config.output_dir)
     image_path = None if extend else _resolve_reference_image(form, output_dir)
+    end_image_path = None if extend else _resolve_reference_image(form, output_dir, path_key="end_image_path")
     # The source is checked again here: the file may have changed since the Workspace inspected it.
     source = load_source_video(_optional_text(form, "source_video"), key="source_video") if extend else None
     audio_enabled = _checkbox(form, "audio", default=True) and supports_video_audio()
@@ -1169,6 +1179,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         prompt_input=_optional_text(form, "prompt_input"),
         prompts_file=None,
         image_path=image_path,
+        end_image_path=end_image_path,
         ratio=ratio,
         size=size,
         width=None if extend else _optional_int(form, "width"),
@@ -1196,12 +1207,22 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     args.enhance_record = _enhance_record_from_form(form, mode="video", app_config=app_config)
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
         raise ValueError("Image-to-video requires a reference image.")
+    if end_image_path is not None and image_path is None:
+        raise ValueError("A last-frame image needs a first-frame reference image.")
     _validate_video_args(args)
 
     resolved_model, model_info = resolve_video_model(app_config, model_name)
     if image_path and not model_info.supports_i2v:
         raise ValueError(f"Model '{model_name}' does not support image-to-video.")
-    refusal = unsupported_video_request(app_config, model_info.family, image=image_path is not None, extend=extend, review=review_enabled(args))
+    refusal = unsupported_video_request(
+        app_config,
+        model_info.family,
+        image=image_path is not None,
+        extend=extend,
+        review=review_enabled(args),
+        end_image=end_image_path is not None,
+        upscale=bool(args.upscale),
+    )
     if refusal is not None:
         raise ValueError(refusal)
 
@@ -1209,10 +1230,13 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     if source is not None:
         # The window keeps the source's size and frame rate; no resolution or frame alignment applies.
         args.steps = clip_defaults(app_config, model_info, steps=args.steps)["steps"]
+        family = video_family(app_config, model_info.family)
+        require_extend_family(source, family)
         apply_extend_args(
             args,
             source,
-            requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps, step=extend_step(video_family(app_config, model_info.family))),
+            requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps, step=extend_step(family)),
+            family,
         )
     else:
         clip = resolve_video_clip(app_config, model_info, ratio=args.ratio, size=args.size, steps=args.steps, width=args.width, height=args.height, frames=args.frames, upscale=bool(args.upscale))
@@ -1234,6 +1258,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         seed=args.seed or 0,
         steps=args.steps,
         image_path=image_path,
+        end_image_path=end_image_path,
         upscale=args.upscale,
         upscale_steps=args.upscale_steps,
         no_audio=args.no_audio,
@@ -1259,7 +1284,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         runs=args.runs,
         meta=meta,
         output_dir=args.output,
-        image_path=image_path,
+        uploads={"image_path": image_path, "end_image_path": end_image_path},
     )
     supported_controls = video_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_video_request_job(
@@ -1453,25 +1478,30 @@ def _optional_path(form: Any, key: str) -> str | None:
 def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[str, Any]:
     """Build the ``POST /api/video/memory-fit`` response: the size and length a video job would use, and how that clip fits memory.
 
-    The size and length resolve exactly as in a Text to Video or Image to Video job. ``memory_fit`` is ``None`` when
-    this machine has no unified-memory budget or the model is not a downloaded LTX MLX model with its text encoder.
+    The size and length resolve exactly as in a Text to Video or Image to Video job. ``image`` (an Image to Video clip,
+    which holds a keyframe) and ``steps`` (settled by the model's step rules) refine MiniMax H3's estimate; LTX ignores
+    both. ``memory_fit`` is ``None`` when this machine has no memory budget or the model has no estimate: an LTX model
+    that is not a downloaded MLX model with its text encoder, or a MiniMax H3 clip size it cannot take. MiniMax H3
+    adds ``expected_seconds``, an estimate of the generation time.
 
     Raises:
-        ValueError: If the body, model, ratio, size or upscale is invalid.
+        ValueError: If the body, model, ratio, size, steps or upscale is invalid.
     """
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object.")
     for key in ("model", "ratio", "size"):
         json_field(payload, key, str, "a string")
-    width, height, frames, upscale = (json_field(payload, key, int, "a positive integer", minimum=1) for key in ("width", "height", "frames", "upscale"))
+    width, height, frames, upscale, steps = (json_field(payload, key, int, "a positive integer", minimum=1) for key in ("width", "height", "frames", "upscale", "steps"))
     low_memory = json_field(payload, "low_memory", bool, "a boolean")
+    image = json_field(payload, "image", bool, "a boolean")
 
     app_config = web_config.app_config
     model_name = _video_model_name(payload, web_config)
     ratio, size = _video_ratio_and_size(payload, web_config)
     require_upscale_factor(upscale)
     resolved_model, model_info = resolve_video_model(app_config, model_name)
-    clip = resolve_video_clip(app_config, model_info, ratio=ratio, size=size, steps=None, width=width, height=height, frames=frames, upscale=bool(upscale), quiet=True)
+    clip = resolve_video_clip(app_config, model_info, ratio=ratio, size=size, steps=steps, width=width, height=height, frames=frames, upscale=bool(upscale), quiet=True)
+    forwards = _settled_video_steps(clip.steps, bool(upscale), app_config, model_info).steps
     memory_fit = clip_memory_fit(
         resolved_model,
         width=clip.width,
@@ -1483,6 +1513,8 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
         model_name=model_name,
         app_config=app_config,
         family=model_info.family,
+        mode="i2v" if image else "t2v",
+        forwards=forwards or 8,
     )
     return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
 
@@ -1495,11 +1527,23 @@ def _required_path(form: Any, key: str) -> str:
     return value
 
 
-def _resolve_reference_image(form: Any, output_dir: str) -> str | None:
-    uploaded_file = form.get("image_file")
+def _upload_field(path_key: str) -> str:
+    """Return the form field that uploads the file a path field names (``image_path`` -> ``image_file``)."""
+    return f"{path_key.removesuffix('_path')}_file"
+
+
+def _resolve_reference_image(form: Any, output_dir: str, *, path_key: str = "image_path") -> str | None:
+    """Return the reference image a form carries: an upload (saved under the output folder) wins over a typed path.
+
+    Args:
+        form: The submitted form.
+        output_dir: The output folder uploads are saved under.
+        path_key: The path field to read; its upload field is derived from it (``end_image_path`` -> ``end_image_file``).
+    """
+    uploaded_file = form.get(_upload_field(path_key))
     if _is_uploaded_file(uploaded_file):
         return _save_uploaded_reference_image(uploaded_file, output_dir)
-    return _optional_path(form, "image_path")
+    return _optional_path(form, path_key)
 
 
 def _is_uploaded_file(value: Any) -> bool:
@@ -1657,17 +1701,17 @@ def _video_ratio_and_size(form: Any, web_config: WebUiConfig) -> tuple[str, str]
     return ratio, _resolve_video_size(form, web_config, ratio)
 
 
+def _settled_video_steps(steps: int | None, upscale: bool, config: dict[str, Any], model_info: VideoModelInfo) -> SettledSteps:
+    """Settle the requested *steps* of a video job by the upscale and the model family's step rules."""
+    family = video_family(config, model_info.family)
+    return settle_video_steps(steps, upscale=upscale, family=family, default_upscale_steps=family.default_upscale_steps if family is not None else UNDESCRIBED_UPSCALE_STEPS)
+
+
 def _normalize_video_steps(args: argparse.Namespace, config: dict[str, Any], model_info: VideoModelInfo) -> None:
     """Settle the step counts of a video job: upscale steps and the model family's step rules (silently)."""
     if args.steps is not None and args.steps < 1:
         raise ValueError("Steps must be at least 1.")
-    upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
-    settled = settle_video_steps(
-        args.steps,
-        upscale=bool(args.upscale),
-        family=video_family(config, model_info.family),
-        default_upscale_steps=upscale_cfg.get("default_upscale_steps", 8),
-    )
+    settled = _settled_video_steps(args.steps, bool(args.upscale), config, model_info)
     args.steps = settled.steps
     args.upscale_steps = settled.upscale_steps
 

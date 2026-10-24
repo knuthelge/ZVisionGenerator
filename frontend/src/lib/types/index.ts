@@ -41,6 +41,8 @@ export interface GalleryAsset {
   size?: string | null;
   frame_count?: number | null;
   image_path?: string | null;
+  /** The image a first-and-last-frame clip ends on; absent or null for other assets. */
+  end_image_path?: string | null;
   /** Absolute path of the asset file on the host; lets the asset become a reference image. */
   file_path?: string;
   seed?: number | null;
@@ -98,6 +100,10 @@ export interface ClipMemoryFit {
   kind?: MemoryKind;
   /** Discrete GPUs only: the memory the figures are about, whichever is closer to its limit. */
   resource?: 'gpu' | 'system';
+  /** MiniMax H3 on a discrete GPU only: the model family, whose advice differs from LTX's. */
+  family?: 'h3';
+  /** MiniMax H3 only: the estimated generation time, in seconds. */
+  expected_seconds?: number;
 }
 
 /** What `POST /api/video/memory-fit` reports: the size and length a video job would use, and how that clip fits memory. */
@@ -327,10 +333,14 @@ export interface EnhanceContext {
   fps: number | null;
   audio: boolean;
   reference_image: boolean;
+  /** The clip also ends on a supplied last-frame image. */
+  end_image?: boolean;
   /** Extend only: the video being continued; the server reads its size, frame rate and recorded text. */
   source_video?: string | null;
-  /** Extend only: the new frames, a multiple of 8. */
+  /** Extend only: the new frames, a multiple of the video model's extend step. */
   extend_frames?: number | null;
+  /** Extend only: the selected video model, whose family sets the extend step; absent or null means the LTX step. */
+  model?: string | null;
 }
 
 export interface EnhanceAxis {
@@ -645,6 +655,13 @@ export interface ImageModelDefaults {
   size_variant?: string | null;
 }
 
+/** The frame counts a video family accepts: `alignment * k + offset` for `k >= 1`; `round` picks how another count moves to one. */
+export interface FrameRule {
+  alignment: number;
+  offset: number;
+  round: 'nearest' | 'up';
+}
+
 export interface VideoModelDefaults {
   ratio: string;
   size: string;
@@ -659,8 +676,18 @@ export interface VideoModelDefaults {
   quantize: number | null;
   max_steps: number | null;
   fps: number;
-  /** Valid frame counts are `frame_alignment * k + 1`; 1 means any count. */
+  /** Valid frame counts are `frame_alignment * k + 1`; 1 means any count. Superseded by `frame_rule` when that is sent. */
   frame_alignment?: number;
+  /** The family's frame counts; absent: `frame_alignment * k + 1`, rounded to the nearest. */
+  frame_rule?: FrameRule;
+  /** Workflow controls this model does not have (`low_memory`, `video_upscale_enabled`, ...); they are not shown. */
+  hidden_controls?: string[];
+  /** The model can extend a clip; absent: it can. */
+  supports_extend?: boolean;
+  /** The only step counts the model offers (ascending); null or absent: any count up to `max_steps`. */
+  step_options?: number[] | null;
+  /** An extension adds frames in multiples of this; absent: 8. */
+  extend_frame_step?: number;
   upscale: UpscaleDefaults;
   enhance_max_words?: number;
   /** The detected model family; null when it could not be detected. */
@@ -764,6 +791,8 @@ export interface DraftState {
   /** LoRAs last chosen for each model family (keyed `model:<id>` when the family is unknown); `loraString` holds the current family's. */
   lorasByFamily: Record<string, string>;
   referenceImagePath: string | null;
+  /** Image to Video: the image the clip ends on; null when the model has no last frame or none is chosen. */
+  endImagePath: string | null;
   referenceImageStrength: number;
   frameCount: number;
   fps: number;

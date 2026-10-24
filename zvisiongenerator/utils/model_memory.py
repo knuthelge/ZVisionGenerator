@@ -379,6 +379,9 @@ def clip_memory_fit(
     model_name: str | None = None,
     app_config: dict[str, Any] | None = None,
     family: str = "ltx",
+    mode: str = "t2v",
+    forwards: int = 8,
+    loras_bytes: int = 0,
 ) -> dict[str, Any] | None:
     """Check a clip against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
 
@@ -388,20 +391,27 @@ def clip_memory_fit(
         height: Output height in pixels, as aligned for the job.
         frames: Output frame count, as aligned for the job (an extension window carries its carried frames).
         low_memory: Whether the pipeline frees Gemma before loading the transformer.
-        upscale: Whether the clip is upscaled 2x.
+        upscale: Whether the clip is upscaled 2x (for H3, with SeedVR2; *width* and *height* are the enlarged size).
         budget: The accelerator's memory budget, or ``None`` when unknown.
         find_local_dir: Locates a downloaded model directory.
         env: The environment to read the decode budget from; the process environment when omitted.
         model_name: The name the model was picked by (``ltx-4``), which sets the quantize level on a discrete GPU.
         app_config: The loaded config, which sets that level and names the single-file transformer (discrete GPU only).
-        family: The model's video family; only LTX has an estimate.
+        family: The model's video family; LTX and H3 have an estimate.
+        mode: H3 only: ``"t2v"``, ``"i2v"`` or ``"extend"``; the image modes cost more memory and time (a keyframe, or an extension's tail).
+        forwards: H3 only: the transformer forwards of the run, which set the estimated time.
+        loras_bytes: H3 on a discrete GPU only: the total size of the user LoRA files.
 
     Returns:
-        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when no memory budget is known, the family has no estimate or the model is not a
+        ``{"status", "required_gb", "budget_gb"}`` (H3 adds ``"expected_seconds"``, an estimate in seconds), or ``None`` when no memory budget is known, the family has no estimate or the model is not a
         downloaded LTX model with its text encoder (bundled in the pack, or the Gemma 3 repo). On a discrete GPU (CUDA) it adds ``"kind": "discrete"`` and
         ``"resource"`` (``"gpu"`` or ``"system"``): the memory the numbers are about, whichever is closer to its limit.
     """
-    if budget is None or not budget.gpu_bytes or family != "ltx":
+    if budget is None or not budget.gpu_bytes:
+        return None
+    if family == "h3":
+        return _h3_clip_fit(width, height, frames, budget, mode=mode, forwards=forwards, upscale=upscale, loras_bytes=loras_bytes, app_config=app_config)
+    if family != "ltx":
         return None
     if budget.system_bytes is not None:
         return _cuda_clip_fit(
@@ -428,6 +438,23 @@ def clip_memory_fit(
     if required is None:
         return None
     return {"status": classify_memory_fit(required, budget.gpu_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget.gpu_bytes / GIB, 1)}
+
+
+def _h3_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget, *, mode: str, forwards: int, upscale: bool, loras_bytes: int, app_config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Check an H3 clip against the budget, or return ``None`` when it has no estimate (a canvas or length H3 cannot take, or a config without the SeedVR2 tiers)."""
+    from zvisiongenerator.utils.h3_memory import h3_clip_fit, h3_mlx_clip_fit, h3_seedvr2_tier
+
+    try:
+        if budget.system_bytes is None:
+            return h3_mlx_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode)
+        tier = None
+        if upscale:
+            from zvisiongenerator.utils.config import load_config
+
+            tier = h3_seedvr2_tier(app_config or load_config(), budget)
+        return h3_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, loras_bytes=loras_bytes, upscale=upscale, seedvr2_tier=tier)
+    except ValueError:
+        return None
 
 
 def ltx_cuda_system_memory(
@@ -474,6 +501,17 @@ def _cuda_clip_fit(
     if system is None:
         return None
     estimate = estimate_ltx_cuda_clip_memory(system, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale)
+    return discrete_clip_fit(estimate, budget)
+
+
+def discrete_clip_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> dict[str, Any]:
+    """Summarise a video clip's CUDA *estimate* against a discrete GPU's *budget*: the status and the memory closer to its limit.
+
+    Weights beyond system memory are ``too_large``, like the LTX backend refuses them (:func:`classify_ltx_cuda_memory_fit`).
+
+    Returns:
+        ``{"status", "required_gb", "budget_gb", "kind": "discrete", "resource"}``, with ``resource`` ``"gpu"`` or ``"system"``.
+    """
     # Report the memory that is closer to its limit, so the note's numbers explain its status.
     system_budget = budget.system_bytes or 0
     resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes

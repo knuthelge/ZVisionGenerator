@@ -113,29 +113,31 @@ Platform-aware aliases:
 
 - `ltx-4` and `ltx-8` (4-bit and 8-bit LTX-2.3) on every platform. On Windows and Linux they need about 20 GB and 27 GB of system memory.
 - `ltx25-4` (4-bit LTX-2.5) on every platform. On Windows and Linux it needs about 21 GB of system memory; on macOS it downloads about 30.5 GB with its own text encoder. Extend uses the deterministic sampler (see the [Video Guide](../guides/video.md#ltx-25)).
+- `h3` (MiniMax H3) on every platform, with the exceptions in the [Video Guide](../guides/video.md#minimax-h3): no `--upscale` on macOS. It downloads about 98 GB on Windows and Linux and about 107 GB on macOS.
 
 | Argument | Default | Description |
 |---|---|---|
-| `-m`, `--model` | *(required)* | Model alias, local path, or supported/configured LTX HuggingFace repo ID. With `--extend`, defaults to the source video's model |
+| `-m`, `--model` | *(required)* | Model alias, local path, or supported/configured LTX or MiniMax H3 HuggingFace repo ID. With `--extend`, defaults to the source video's model |
 | `--prompt` | `None` | Inline prompt, the action: what happens; overrides `--prompts-file`. May be empty when `--scene` or `--extend` is given |
 | `--scene` | `None` | Scene: who and where, look, style, camera. Sent before the prompt. Alone it makes a scene-only run; with a prompt file it fills entries that have no `scene:` of their own. With `--extend` it defaults to the source video's recorded scene |
 | `-p`, `--prompts-file` | `prompts.yaml` | YAML prompt file path |
 | `--extend SRC` | `None` | Continue the video `SRC`: generate what happens next and append it, writing a new file (the source is not changed). See [Extending a video](#extending-a-video) |
-| `--extend-seconds S` | `2` | Length to add with `--extend`, in seconds at the source's frame rate, rounded to a multiple of 8 frames. Exclusive with `--extend-frames` |
-| `--extend-frames N` | from `--extend-seconds` | Frames to add with `--extend`, rounded to a multiple of 8 (minimum 8). Exclusive with `--extend-seconds` |
-| `--image` | `None` | Input image for image-to-video |
+| `--extend-seconds S` | `2` | Length to add with `--extend`, in seconds at the source's frame rate, rounded to a multiple of the model's extension step: 8 frames for LTX, 17 for MiniMax H3. Exclusive with `--extend-frames` |
+| `--extend-frames N` | from `--extend-seconds` | Frames to add with `--extend`, rounded to a multiple of the extension step (8 for LTX, 17 for MiniMax H3; minimum one step). Exclusive with `--extend-seconds` |
+| `--image` | `None` | Input image for image-to-video: the first frame |
+| `--end-image` | `None` | Last-frame image: the clip runs from `--image` to it. Needs `--image` and a model that supports it (MiniMax H3) |
 | `-W`, `--width` | model-aware | Video width (LTX: auto-aligned to 32px, 64px with `--upscale`) |
 | `-H`, `--height` | model-aware | Video height (LTX: auto-aligned to 32px, 64px with `--upscale`) |
-| `--frames` | model-aware | Number of frames (LTX: auto-aligned to 8k+1) |
+| `--frames` | model-aware | Number of frames (LTX: auto-aligned to 8k+1, default 121; MiniMax H3: 17k+5, default 124, another count moves up to the next) |
 | `--ratio` | `16:9` | Aspect ratio preset (16:9, 9:16, 1:1) |
 | `-s`, `--size` | `s` | Size preset (`xs`, `s`, `m`, `l`, `xl`) |
-| `--steps` | model-aware | Inference steps (LTX: up to 8; on Windows/Linux, fewer than 8 keeps the end of the distilled schedule) |
+| `--steps` | model-aware | Inference steps (LTX: up to 8; on Windows/Linux, fewer than 8 keeps the end of the distilled schedule. MiniMax H3: `4` or `8`, default 8; another count moves to the nearest, a tie to 8) |
 | `--seed` | `None` (random) | Seed for reproducible video generation |
-| `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX. On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` turns that off too |
-| `--upscale` | disabled | Upscale factor: `2` only. Renders at half size, upsamples the latents 2×, then refines at full size, so the output keeps the requested size. On Windows/Linux the first use downloads the 2× upsampler (about 1 GB) |
+| `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX (MiniMax H3 always streams its blocks). On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` turns that off too |
+| `--upscale` | disabled | Upscale factor: `2` only. Renders at half size, upsamples the latents 2×, then refines at full size, so the output keeps the requested size. On Windows/Linux the first use downloads the 2× upsampler (about 1 GB). MiniMax H3 renders at half size and enlarges the frames with SeedVR2 instead (Windows and Linux only; the first use downloads the SeedVR2 model) |
 | `--review` | `False` | Pause after each small render to approve (`y`) or discard (`n`) the upscale. Needs `--upscale` and a terminal |
 | `--audio` / `--no-audio` | enabled | Include or strip audio in video output |
-| `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5`. Windows/Linux require diffusers-compatible LTX LoRA adapters. |
+| `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5`. Windows/Linux require diffusers-compatible LTX LoRA adapters; `h3` takes MiniMax H3 LoRAs |
 | `-r`, `--runs` | `1` | Number of batch runs |
 | `-o`, `--output` | `.` | Output directory |
 | `--format` | `mp4` | Output format |
@@ -148,6 +150,7 @@ Operational notes:
 
 - Video generation requires `ffmpeg` on every platform. If it is missing, `ziv-video` offers to install it with Homebrew or MacPorts (macOS), `winget` (Windows), or `apt`, `dnf` or `pacman` (Linux), and asks before running anything. On Windows, open a new terminal afterwards so `PATH` picks it up. On Fedora, `dnf install ffmpeg` needs RPM Fusion enabled.
 - Windows and Linux video generation are CUDA-only.
+- MiniMax H3 prints its estimated time when a job starts. The first run on Windows and Linux builds a 4-bit copy of the transformer (about 4 min); on macOS it converts the text encoder once. The estimate leaves this out.
 - On Windows and Linux a model that cannot fit in system memory stops before loading, and the first run of each model takes a while to download and prepare it.
 
 ### Extending a video
@@ -167,7 +170,9 @@ Defaults taken from the source when you do not pass them:
 - **LoRAs:** the LoRAs it was made with that still exist; missing ones are skipped with a warning. `--lora` replaces them.
 - **Prompt:** none, so the extension continues naturally. A video recorded with a single prompt and no scene (made before scenes existed) keeps that prompt when you pass none, with quoted lines dropped while it is unchanged; if `--prompt` still equals it, a warning says to change it to what happens next.
 
-Options refused with `--extend`, since the extension keeps the source's size and takes its own length: `--image`, `--upscale`, `--ratio`, `--size`, `--width`, `--height` and `--frames`. `--extend-seconds` and `--extend-frames` need `--extend`. In a prompt file, every entry needs a `prompt`, which is the action that follows the source. `--no-audio` leaves the result without sound, and a silent source gives a silent result. When the extension may not fit in memory, a warning is printed and the run continues.
+MiniMax H3 extends 24 fps sources whose width and height are multiples of 32, and carries the source's last 22 frames into the new part (on macOS it continues from the last frame instead).
+
+Options refused with `--extend`, since the extension keeps the source's size and takes its own length: `--image`, `--end-image`, `--upscale`, `--ratio`, `--size`, `--width`, `--height` and `--frames`. `--extend-seconds` and `--extend-frames` need `--extend`. In a prompt file, every entry needs a `prompt`, which is the action that follows the source. `--no-audio` leaves the result without sound, and a silent source gives a silent result. When the extension may not fit in memory, a warning is printed and the run continues.
 
 ## `ziv-model model` — Checkpoint Conversion
 

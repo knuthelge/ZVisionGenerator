@@ -35,6 +35,7 @@ __all__ = [
     "checkpoint_config",
     "connector_tensors",
     "connectors_status",
+    "dequantized",
     "distillation",
     "file_order",
     "inspect_checkpoint",
@@ -232,7 +233,7 @@ def _hashes(checkpoint: LtxCheckpoint, wanted: dict[str, str]) -> dict[str, str]
     import torch
 
     return {
-        wanted[name]: hashlib.sha256(_dequantized(tensor, None).to(torch.bfloat16).contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
+        wanted[name]: hashlib.sha256(dequantized(tensor, None).to(torch.bfloat16).contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
         for name, tensor in iter_tensors(checkpoint.path, wanted.__contains__)
     }
 
@@ -338,10 +339,10 @@ def _tensors(checkpoint: LtxCheckpoint, wanted: dict[str, str]) -> Iterator[tupl
     scale_values = {scales[name]: tensor for name, tensor in iter_tensors(checkpoint.path, scales.__contains__)}
     for name, tensor in iter_tensors(checkpoint.path, files.__contains__):
         normalized = files[name]
-        yield normalized, _dequantized(tensor, scale_values.get(normalized))
+        yield normalized, dequantized(tensor, scale_values.get(normalized))
 
 
-def _dequantized(tensor: torch.Tensor, scale: torch.Tensor | None) -> torch.Tensor:
+def dequantized(tensor: torch.Tensor, scale: torch.Tensor | None) -> torch.Tensor:
     """Return *tensor* times its FP8 *scale* in bfloat16, or an unscaled FP8 tensor cast to bfloat16; other dtypes as they are."""
     import torch
 

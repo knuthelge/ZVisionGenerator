@@ -91,8 +91,9 @@ class VideoGenerationRequest:
     steps: int = 8
     step_callback: Callable[[dict[str, Any]], None] | None = None
 
-    # I2V params
+    # I2V params: the first-frame image, and for a family with last-frame support the image the clip ends on
     image_path: str | None = None
+    end_image_path: str | None = None
 
     # Upscale params
     upscale: int | None = None

@@ -15,12 +15,13 @@ _ALL_ON = {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "ups
 
 def _config(**platform_capabilities: dict[str, bool]) -> dict:
     """Return a config describing an ``ltx`` family and an ``h3`` family with the given platform overlays."""
-    ltx = {"label": "LTX", "default_steps": 8, "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"}, "extend_frame_step": 8, "capabilities": _ALL_ON}
+    ltx = {"label": "LTX", "default_steps": 8, "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"}, "extend_frame_step": 8, "carry_frames": 25, "capabilities": _ALL_ON}
     h3 = {
         "label": "MiniMax H3",
         "default_steps": 8,
         "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
         "extend_frame_step": 17,
+        "carry_frames": 22,
         "capabilities": _ALL_ON,
         "platform_capabilities": platform_capabilities,
     }
@@ -48,11 +49,12 @@ def factories(monkeypatch):
 
 
 class TestRegistryShape:
-    def test_every_supported_platform_maps_ltx_to_a_factory(self):
+    def test_every_supported_platform_maps_its_families_to_factories(self):
         assert set(backends_module._VIDEO_BACKENDS_MAP) == {"darwin", "win32", "linux"}
-        for by_family in backends_module._VIDEO_BACKENDS_MAP.values():
-            assert set(by_family) == {"ltx"}
-            assert callable(by_family["ltx"])
+        expected = {"darwin": {"ltx", "h3"}, "win32": {"ltx", "h3"}, "linux": {"ltx", "h3"}}
+        for platform, by_family in backends_module._VIDEO_BACKENDS_MAP.items():
+            assert set(by_family) == expected[platform]
+            assert all(callable(factory) for factory in by_family.values())
 
     def test_video_backends_is_a_dict_by_family(self):
         assert isinstance(backends_module.VIDEO_BACKENDS, dict)
@@ -168,3 +170,36 @@ class TestVideoCapabilities:
         capabilities = backends_module.video_capabilities(_config(), "ltx")
 
         assert capabilities == VideoCapabilities(**{**_ALL_ON, "audio": False, "extend": False, "upscale_review": False})
+
+
+class TestMacH3Registration:
+    """MiniMax H3 is served on macOS by the MLX backend, with no upscale (the shipped config's overlay)."""
+
+    def test_the_darwin_factory_builds_the_mlx_backend(self):
+        from zvisiongenerator.backends.mac.h3_video import H3MlxVideoBackend
+
+        backend = backends_module._VIDEO_BACKENDS_MAP["darwin"]["h3"]()
+
+        assert isinstance(backend, H3MlxVideoBackend)
+        assert backend.name == "h3"
+
+    def test_get_video_backend_creates_it_on_macos(self, monkeypatch):
+        from zvisiongenerator.backends.mac.h3_video import H3MlxVideoBackend
+
+        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
+
+        assert isinstance(backends_module.get_video_backend("h3"), H3MlxVideoBackend)
+        assert backends_module.video_family_available("h3") is True
+
+    def test_the_shipped_capabilities_on_macos_hide_upscale_and_review(self, monkeypatch):
+        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
+        capabilities = backends_module.video_capabilities(load_config(), "h3")
+
+        assert capabilities == VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=False, upscale_review=False, lora=True, audio=True, low_memory=False)
+
+    def test_the_ltx_capabilities_on_macos_are_unchanged(self, monkeypatch):
+        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
+        capabilities = backends_module.video_capabilities(load_config(), "ltx")
+
+        assert capabilities is not None
+        assert capabilities.upscale is True and capabilities.upscale_review is True

@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.video.h3.decode import PIXEL_MEAN, PIXEL_STD, _weight_files
-from zvisiongenerator.utils.h3_memory import H3_AUDIO_CHANNELS, h3_audio_latents, h3_latent_frames
+from zvisiongenerator.backends.cuda.video.runtime import fit_image
+from zvisiongenerator.utils.h3_memory import H3_AUDIO_CHANNELS, H3_TAIL_FRAMES, h3_audio_latents, h3_latent_frames
 
 if TYPE_CHECKING:
     import numpy as np
@@ -40,7 +41,7 @@ __all__ = [
 ]
 
 KEYFRAME_ENCODE_SEED = 42  # the seed the released model samples every conditioning posterior under
-TAIL_FRAMES = 22  # an extension carries 17 * 1 + 5 frames of the source, the smallest valid clip
+TAIL_FRAMES = H3_TAIL_FRAMES  # an extension carries 17 * 1 + 5 frames of the source, the smallest valid clip
 TAIL_LATENT_FRAMES = h3_latent_frames(TAIL_FRAMES)  # 7
 TAIL_AUDIO_LATENTS = h3_audio_latents(TAIL_FRAMES)  # 37 per channel
 _ENCODER_PREFIXES = ("encoder.", "quant_conv.")
@@ -81,9 +82,7 @@ def fit_keyframe(image: Image.Image, width: int, height: int) -> Image.Image:
 
     The crop is the one LTX image conditioning uses; an image already at the target size comes back unchanged.
     """
-    from PIL import Image, ImageOps
-
-    return ImageOps.fit(image.convert("RGB"), (width, height), method=Image.Resampling.BILINEAR, centering=(0.5, 0.5))
+    return fit_image(image.convert("RGB"), width, height)
 
 
 def _check_canvas(encoder: Any, width: int, height: int) -> None:

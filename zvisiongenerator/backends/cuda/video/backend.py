@@ -20,6 +20,8 @@ from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
 from zvisiongenerator.backends.cuda.video import sampler as _sampler
 from zvisiongenerator.backends.cuda.video.image_crf import recompress
+from zvisiongenerator.backends.cuda.video.runtime import configure_torch_runtime as _configure_torch_runtime
+from zvisiongenerator.backends.cuda.video.runtime import fit_image as _fit_image
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS
@@ -231,17 +233,6 @@ def _validate_cuda(runtime: _RuntimeDependencies) -> None:
     """Ensure the current runtime has an NVIDIA CUDA device available."""
 
     require_cuda(runtime.torch, f"The {_platform_label()} diffusers video backend")
-
-
-def _configure_torch_runtime(torch: Any) -> None:
-    """Apply the same lightweight CUDA tuning used by the image diffusers backend."""
-    from zvisiongenerator.backends.cuda.memory import configure_allocator
-
-    configure_allocator()
-    if hasattr(torch, "backends") and hasattr(torch.backends, "cudnn"):
-        torch.backends.cudnn.benchmark = True
-    if hasattr(torch, "set_float32_matmul_precision"):
-        torch.set_float32_matmul_precision("high")
 
 
 def _select_torch_dtype(torch: Any) -> Any:
@@ -669,17 +660,6 @@ def _preview_small_render(model: _LoadedVideoModel, pipeline: Any, stage1: Any, 
                 component.to("cpu")
             model.runtime.torch.cuda.empty_cache()
         review(path)
-
-
-def _fit_image(image: Any, width: int, height: int) -> Any:
-    """Scale *image* to cover *width* × *height* with its aspect ratio kept, and crop the overflow from the center.
-
-    The diffusers pipeline would otherwise stretch the image to the video's size; the macOS pipeline crops the same way.
-    """
-
-    from PIL import Image, ImageOps
-
-    return ImageOps.fit(image, (width, height), method=Image.Resampling.BILINEAR, centering=(0.5, 0.5))
 
 
 def _make_generator(torch: Any, seed: int | None) -> Any | None:

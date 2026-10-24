@@ -12,7 +12,8 @@ export function assetMenuEntries(
   asset: GalleryAsset,
   handlers: AssetActionHandlers,
   deleting = false,
-  referenceUnavailable: Partial<Record<ReferenceTarget, string>> = {}
+  referenceUnavailable: Partial<Record<ReferenceTarget, string>> = {},
+  referenceTargets: readonly ReferenceTarget[] = DEFAULT_REFERENCE_TARGETS
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
   const { onreuse, onreference, onextend, onupscale, ondelete } = handlers;
@@ -26,7 +27,7 @@ export function assetMenuEntries(
   if (onreference && canUseAsReference(asset)) {
     entries.push(
       { kind: 'heading', label: 'Use as reference' },
-      ...referenceEntries(asset, onreference, referenceUnavailable),
+      ...referenceEntries(asset, onreference, referenceUnavailable, referenceTargets),
       { kind: 'separator' }
     );
   }
@@ -90,20 +91,30 @@ function plainTitle(option: AssetUpscaleFactor, downloadSizeLabel: string | null
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
-/** Build the "use as reference" items; a target the current model can't use is disabled with its reason. */
+/** The reference targets every surface offers unless it is told the workspace has a last-frame slot too. */
+export const DEFAULT_REFERENCE_TARGETS: readonly ReferenceTarget[] = ['image', 'video'];
+
+/**
+ * Build the "use as reference" items for *targets*; a target the current model can't use is disabled with its reason.
+ *
+ * With a last-frame target on offer, the video item reads as the first frame so the pair is clear.
+ */
 export function referenceEntries(
   asset: GalleryAsset,
   onreference: NonNullable<AssetActionHandlers['onreference']>,
-  unavailable: Partial<Record<ReferenceTarget, string>> = {}
+  unavailable: Partial<Record<ReferenceTarget, string>> = {},
+  targets: readonly ReferenceTarget[] = DEFAULT_REFERENCE_TARGETS
 ): ActionMenuEntry[] {
-  const targets: { target: ReferenceTarget; id: string; label: string }[] = [
-    { target: 'image', id: 'reference-image', label: 'For image (img2img)' },
-    { target: 'video', id: 'reference-video', label: 'For video (img2vid)' },
-  ];
-  return targets.map(({ target, id, label }) => ({
+  const hasLast = targets.includes('last');
+  const labels: Record<ReferenceTarget, string> = {
+    image: 'For image (img2img)',
+    video: hasLast ? 'For first frame (img2vid)' : 'For video (img2vid)',
+    last: 'For last frame (img2vid)',
+  };
+  return targets.map((target) => ({
     kind: 'item' as const,
-    id,
-    label,
+    id: `reference-${target === 'last' ? 'last-frame' : target}`,
+    label: labels[target],
     disabled: Boolean(unavailable[target]),
     title: unavailable[target],
     onselect: () => onreference(asset, target),

@@ -12,6 +12,7 @@ from conftest import make_extend_source
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus
 from zvisiongenerator.core.video_types import ExtendSource
+from zvisiongenerator.utils.config import load_config, video_family
 from zvisiongenerator.preflight import _iteration_context, _job_context, plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, entry_scene
@@ -525,6 +526,21 @@ class TestVideoExtend:
         assert context.orientation == "landscape"
         assert context.reference_image is False
         assert context.audio is True
+
+    def test_context_spans_the_window_of_the_family(self):
+        family = video_family(load_config(), "h3")
+
+        context = _job_context(self._extend_args(extend_frames=17, num_frames=39), mode="video", family=family)
+
+        assert context.seconds == pytest.approx(39 / 24)
+        assert context.new_seconds == pytest.approx(17 / 24)
+
+    def test_context_knows_about_a_last_frame(self):
+        with_both = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=True, image_path="a.png", end_image_path="b.png"), mode="video")
+        without = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=True, image_path="a.png"), mode="video")
+
+        assert (with_both.reference_image, with_both.end_image) == (True, True)
+        assert (without.reference_image, without.end_image) == (True, False)
 
     def test_other_jobs_do_not_extend(self):
         context = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=False), mode="video")

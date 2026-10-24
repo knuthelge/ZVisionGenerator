@@ -190,6 +190,135 @@ class TestPinnedLtx25Target:
         assert target_present_offline(self._TARGET) is False
 
 
+_H3_PATTERNS = ("model_index.json", "scheduler/*", "tokenizer/*", "transformer/*.safetensors", "vae/*.safetensors")
+
+
+class TestH3ModularTarget:
+    def _index(self, snapshot: Path) -> None:
+        spec = {"pretrained_model_name_or_path": "owner/h3"}
+        index = {
+            "_class_name": "MiniMaxH3ModularPipeline",
+            "text_encoder": ["transformers", "Qwen3VLForConditionalGeneration", spec],
+            "transformer": ["diffusers", "MiniMaxH3Transformer", spec],
+            "transformer_ref": ["diffusers", "MiniMaxH3Transformer", spec],
+            "vae": ["diffusers", "AutoencoderKLMiniMaxH3", spec],
+        }
+        _touch(snapshot / "model_index.json", json.dumps(index))
+
+    def test_an_index_only_snapshot_is_absent(self, cache):
+        self._index(_snapshot(cache))
+
+        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_H3_PATTERNS)) is False
+
+    def test_the_snapshot_without_the_skipped_components_is_present(self, cache):
+        snapshot = _snapshot(cache)
+        self._index(snapshot)
+        for shard in (1, 2):
+            _touch(snapshot / "transformer" / f"model-0000{shard}-of-00002.safetensors")
+        _touch(snapshot / "vae" / "diffusion_pytorch_model.safetensors")
+
+        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_H3_PATTERNS)) is True
+
+    def test_a_missing_transformer_shard_is_absent(self, cache):
+        snapshot = _snapshot(cache)
+        self._index(snapshot)
+        _touch(snapshot / "transformer" / "model-00001-of-00002.safetensors")
+        _touch(snapshot / "vae" / "diffusion_pytorch_model.safetensors")
+
+        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_H3_PATTERNS)) is False
+
+
+class TestCudaH3PlanPresence:
+    """SC-10: after a fake download of the H3 plan, every target reads as present offline; a missing file makes its target absent."""
+
+    _COMPONENTS = {
+        "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
+        "audio_scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
+        "tokenizer": ["transformers", "Qwen2Tokenizer"],
+        "processor": ["transformers", "Qwen3VLProcessor"],
+        "text_encoder": ["transformers", "Qwen3VLForConditionalGeneration"],
+        "transformer_ref": ["diffusers", "MiniMaxH3Transformer"],
+        "transformer": ["diffusers", "MiniMaxH3Transformer"],
+        "vae": ["diffusers", "AutoencoderKLMiniMaxH3"],
+        "audio_vae": ["diffusers", "AutoencoderKLMiniMaxH3Audio"],
+    }
+    _SHARDS = {"transformer": 3, "vae": 1, "audio_vae": 1}
+
+    @pytest.fixture
+    def plan(self, cache, monkeypatch) -> tuple[DownloadTarget, ...]:
+        import huggingface_hub.constants
+
+        from zvisiongenerator.backends.cuda.download_plan import h3_download_plan
+        from zvisiongenerator.utils.config import load_config
+        from zvisiongenerator.utils.h3_preset import h3_preset
+
+        monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
+        preset = h3_preset(load_config())
+        targets = h3_download_plan(f"{preset.repo}@{preset.revision}", preset)
+        for target in targets:
+            self._download(cache, target)
+        return targets
+
+    def _download(self, cache: Path, target: DownloadTarget) -> None:
+        """Lay out what ``snapshot_download`` would leave for *target* in the Hub cache."""
+        snapshot = _snapshot(cache, target.repo_id, target.revision or "main")
+        patterns = target.allow_patterns or ()
+        if not any("*" in pattern for pattern in patterns):
+            for name in patterns:
+                _touch(snapshot / name)
+            return
+        _touch(snapshot / "model_index.json", json.dumps({"_class_name": "MiniMaxH3ModularPipeline", **self._COMPONENTS}))
+        for component in self._COMPONENTS:
+            if component in ("text_encoder", "transformer_ref"):
+                continue  # filtered out by the plan's ignore patterns
+            _touch(snapshot / component / "config.json")
+        for component, shards in self._SHARDS.items():
+            names = ["diffusion_pytorch_model.safetensors"] if shards == 1 else [f"diffusion_pytorch_model-{n:05d}-of-{shards:05d}.safetensors" for n in range(1, shards + 1)]
+            for name in names:
+                _touch(snapshot / component / name)
+
+    def test_the_downloaded_plan_is_present_target_by_target(self, plan):
+        assert len(plan) == 3
+        assert [target_present_offline(target) for target in plan] == [True, True, True]
+
+    def test_nothing_is_present_before_the_download(self, cache, monkeypatch):
+        import huggingface_hub.constants
+
+        from zvisiongenerator.backends.cuda.download_plan import h3_download_plan
+        from zvisiongenerator.utils.config import load_config
+        from zvisiongenerator.utils.h3_preset import h3_preset
+
+        monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
+        preset = h3_preset(load_config())
+
+        assert [target_present_offline(target) for target in h3_download_plan(preset.repo, preset)] == [False, False, False]
+
+    def test_a_missing_repository_shard_makes_the_repository_absent(self, cache, plan):
+        repo = plan[0]
+        (_snapshot(cache, repo.repo_id, repo.revision) / "transformer" / "diffusion_pytorch_model-00003-of-00003.safetensors").unlink()
+
+        assert [target_present_offline(target) for target in plan] == [False, True, True]
+
+    def test_a_missing_text_encoder_shard_makes_the_text_encoder_absent(self, cache, plan):
+        text_encoder = plan[1]
+        (_snapshot(cache, text_encoder.repo_id, text_encoder.revision) / "model-00004-of-00005.safetensors").unlink()
+
+        assert [target_present_offline(target) for target in plan] == [True, False, True]
+
+    def test_a_missing_lora_makes_the_lora_absent(self, cache, plan):
+        lora = plan[2]
+        (_snapshot(cache, lora.repo_id, lora.revision) / (lora.allow_patterns or ("",))[0]).unlink()
+
+        assert [target_present_offline(target) for target in plan] == [True, True, False]
+
+    def test_a_download_at_another_revision_does_not_count(self, cache, plan):
+        for target in plan:
+            snapshot = _snapshot(cache, target.repo_id, target.revision or "main")
+            snapshot.rename(snapshot.with_name("0" * 40))
+
+        assert [target_present_offline(target) for target in plan] == [False, False, False]
+
+
 class TestGlobCacheTargets:
     def test_instant_components_present_without_transformer_weights(self, cache):
         _components_snapshot(_snapshot(cache))

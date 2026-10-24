@@ -66,13 +66,18 @@ def instant_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) -
 def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_name: str | None, upscale: bool) -> tuple[DownloadTarget, ...] | None:
     """Return the targets a video model needs with the configured companions, or ``None`` when the plan cannot be made now.
 
+    MiniMax H3 plans its repository, text encoder and turbo LoRA, plus the SeedVR2 weights of the video upscale.
+
     Raises:
-        ValueError: If the ``video_model_presets.ltx.diffusers`` config entries are malformed.
+        ValueError: If the ``video_model_presets`` config entries of the family are malformed.
     """
     from zvisiongenerator import backends
     from zvisiongenerator.utils.config import ltx_version, video_load_options
 
     options = video_load_options(family, config, model_name, upscale=upscale)
+    if family == "h3":
+        lora = {"lora": options["lora"]} if "lora" in options else {}  # macOS lists the turbo LoRA from the load options
+        return _offline_as_none(lambda: backends.h3_download_plan(model_ref, options["preset"], upscale=upscale, **lora))
     return _offline_as_none(
         lambda: backends.video_download_plan(
             model_ref,

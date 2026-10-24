@@ -107,6 +107,9 @@ model_aliases:
     darwin: "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
     win32: "${video_model_presets.ltx.versions.ltx25.diffusers.default_repo}"
     linux: "${video_model_presets.ltx.versions.ltx25.diffusers.default_repo}"
+  # MiniMax H3 (video_model_presets.h3): the same pinned repository on every platform. Windows/Linux stream it from a
+  # stored 4-bit copy; macOS runs the MLX port from the INT8 transformer under mlx below.
+  h3: "${video_model_presets.h3.repo_ref}"
   zit: "Tongyi-MAI/Z-Image-Turbo"
   # klein9b: ungated mirror of black-forest-labs/FLUX.2-klein-9B, weights checked by sha256.
   klein9b: "unsloth/FLUX.2-klein-9B"
@@ -180,6 +183,8 @@ model_labels:
     name: "LTX-2.3 4-bit"
   ltx25-4:
     name: "LTX-2.5 4-bit"
+  h3:
+    name: "MiniMax H3"
 
 # First-run dialog: the model it preselects. large_model is for machines with at least min_memory_gb of memory
 # (unified memory on Apple Silicon, VRAM on a CUDA card); every other machine gets small_model.
@@ -302,6 +307,8 @@ video_model_presets:
     frame_rule: { alignment: 8, offset: 1, round: nearest }
     # An extension adds frames in multiples of this.
     extend_frame_step: 8
+    # The frames of the source's end an extension carries into its window (4 latent frames); the window is these plus the new frames.
+    carry_frames: 25
     capabilities: { i2v: true, end_frame: false, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true }
     diffusers:
       # Distilled LTX 2.3 in diffusers format, used on Windows/Linux (8 steps, guidance 1.0). Distilled checkpoints only.
@@ -351,6 +358,85 @@ video_model_presets:
           image_crf: 18 # i2v conditioning image, re-compressed before the fit
           sampler: euler_ancestral # upstream distilled sampler; step noise from seed + 10000 / + 20000
 
+  # MiniMax H3: 17-frame blocks, distilled to 4 or 8 steps by the turbo LoRA below. Valid frame counts are 17k+5 (22, 39,
+  # ... 124 is 5 s); a count between two moves up to the next one, and there is no length cap.
+  h3:
+    label: "MiniMax H3"
+    repo_ref: "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+    default_steps: 8
+    max_steps: 8
+    step_options: [4, 8] # both run from the one stored copy (it holds the fold tables of both schedules)
+    default_frames: 124 # 5 s at 24 fps
+    frame_rule: { alignment: 17, offset: 5, round: up }
+    extend_frame_step: 17
+    extend_fps: 24 # an Extend source must run at 24 fps
+    carry_frames: 22 # 17 * 1 + 5, the smallest valid clip
+    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: false }
+    platform_capabilities:
+      darwin: { upscale: false, upscale_review: false }
+    diffusers: # Windows/Linux
+      # The main repository is downloaded without the parts the app never loads (it encodes prompts with the separate text encoder below).
+      repo_allow: ["model_index.json", "LICENSE", "scheduler/*", "audio_scheduler/*", "transformer/*", "vae/*", "audio_vae/*", "tokenizer/*", "processor/*"]
+      repo_ignore: ["text_encoder/*", "transformer_ref/*", "FL2VA/*", "Ref2VA/*", "assets/*", "docs/*", "scripts/*"]
+      # Qwen3-VL 32B Instruct, NF4: the first four of five weight shards hold the 50 layers the model reads.
+      text_encoder:
+        repo: "unsloth/Qwen3-VL-32B-Instruct-bnb-4bit@48cfc6496841742a77892646c15a7f3e8da44348"
+        files: ["config.json", "model.safetensors.index.json", "model-00001-of-00005.safetensors", "model-00002-of-00005.safetensors", "model-00003-of-00005.safetensors", "model-00004-of-00005.safetensors"]
+        layers: 50
+      # The 8-step turbo LoRA, merged into the stored copy. Its scale replaces alpha/rank and is never multiplied by it.
+      lora:
+        repo: "lightx2v/Minimax-h3-Turbo@30f485ed874aa44c8183348ad361c5eabad318da"
+        filename: "minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors"
+        scale: 0.0625
+      schedules:
+        8: { forwards: 8, video_shift: 6.0, audio_shift: 3.0 }
+        4: { forwards: 4, video_shift: 6.0, audio_shift: 3.0 }
+      attention: sdpa
+      ffn_chunk_tokens: 4096 # rows per feed-forward call; bounds its temporaries so long and large clips fit the GPU, at no cost in time
+    mlx: # macOS: every file is listed, so a download is checked file by file
+      # The INT8 transformer (Argus-calibrated); the 8-step turbo LoRA of the diffusers block is applied unfused at run time.
+      transformer:
+        repo: "water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8@70505b09c80e298e684d798d8e0f946937dcfad4"
+        files: ["config.json", "quant_config.json", "model.safetensors.index.json", "model-00001-of-00008.safetensors", "model-00002-of-00008.safetensors", "model-00003-of-00008.safetensors", "model-00004-of-00008.safetensors", "model-00005-of-00008.safetensors", "model-00006-of-00008.safetensors", "model-00007-of-00008.safetensors", "model-00008-of-00008.safetensors"]
+      # The FL2VA parts of repo_ref the pipeline loads: tokenizer, processor, both VAEs and shards 1-11 and 14 of the text encoder.
+      components:
+        files:
+          - "FL2VA/model_index.json"
+          - "FL2VA/tokenizer/merges.txt"
+          - "FL2VA/tokenizer/tokenizer.json"
+          - "FL2VA/tokenizer/tokenizer_config.json"
+          - "FL2VA/tokenizer/vocab.json"
+          - "FL2VA/processor/chat_template.json"
+          - "FL2VA/processor/merges.txt"
+          - "FL2VA/processor/preprocessor_config.json"
+          - "FL2VA/processor/tokenizer.json"
+          - "FL2VA/processor/tokenizer_config.json"
+          - "FL2VA/processor/video_preprocessor_config.json"
+          - "FL2VA/processor/vocab.json"
+          - "FL2VA/video_vae/config.json"
+          - "FL2VA/video_vae/source/config.json"
+          - "FL2VA/video_vae/source/model.safetensors"
+          - "FL2VA/audio_vae/config.json"
+          - "FL2VA/audio_vae/config.yaml"
+          - "FL2VA/audio_vae/metadata.json"
+          - "FL2VA/audio_vae/model.safetensors"
+          - "FL2VA/text_encoder/config.json"
+          - "FL2VA/text_encoder/model.safetensors.index.json"
+          - "FL2VA/text_encoder/model-00001-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00002-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00003-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00004-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00005-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00006-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00007-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00008-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00009-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00010-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00011-of-00014.safetensors"
+          - "FL2VA/text_encoder/model-00014-of-00014.safetensors"
+      # The text encoder is converted once to this 4-bit form and kept next to the model as <name>@mlx-te4.
+      text_encoder: { bits: 4, group_size: 64, layers: 50 }
+
 # --- Prompt enhancer (local LLM) ---
 
 prompt_enhancer:
@@ -399,7 +485,7 @@ prompt_enhancer:
 ui:
   startup_view: workspace
   gallery_page_size: 12
-  output_dir: ~/.ziv/outputs
+  output_dir: null  # unset: <data dir>/outputs, i.e. ~/.ziv/outputs or $ZIV_DATA_DIR/outputs
   default_models:
     image: klein9b
     video: ltx-8

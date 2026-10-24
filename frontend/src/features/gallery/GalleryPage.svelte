@@ -372,6 +372,9 @@
     if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.referenceImagePath)) {
       draft.update('referenceImagePath', null);
     }
+    if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.endImagePath)) {
+      draft.update('endImagePath', null);
+    }
     const visibleIds = new Set(assets.map((asset) => asset.id));
     selected = new Set(
       Array.from(selected).filter((id) => !deletedIds.has(id) && visibleIds.has(id))

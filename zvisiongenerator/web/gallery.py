@@ -91,6 +91,8 @@ class GalleryAsset:
     source_video: str | None = None
     extend_frames: int | None = None
     upscaled: bool = False
+    # The image a first-and-last-frame clip ends on.
+    end_image_path: str | None = None
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
@@ -278,6 +280,9 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
                 reuse_params["frames"] = str(asset.frame_count)
         if WORKFLOW_DEFINITIONS[resolved_workflow]["requires_reference_image"] and asset.reference_image_path is not None:
             reuse_params["image_path"] = asset.reference_image_path
+            # The last frame travels with its first frame, so a Reuse that falls back to text-to-video drops both.
+            if resolved_workflow == "img2vid" and asset.end_image_path is not None:
+                reuse_params["end_image_path"] = asset.end_image_path
         if asset.negative_prompt and workflow_mode(resolved_workflow) == "image":
             reuse_params["negative_prompt"] = asset.negative_prompt
         if asset.scheduler and workflow_mode(resolved_workflow) == "image":
@@ -306,6 +311,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "source_video": asset.source_video,
         "extend_frames": asset.extend_frames,
         "image_path": asset.reference_image_path,
+        "end_image_path": asset.end_image_path,
         "file_path": asset.filesystem_path,
         "seed": asset.seed,
         "steps": asset.steps,
@@ -489,6 +495,7 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -
         size=metadata["size"],
         frame_count=metadata["frame_count"],
         reference_image_path=metadata["reference_image_path"],
+        end_image_path=metadata["end_image_path"],
         lora=metadata["lora"],
         has_reusable_config=metadata["has_reusable_config"],
         negative_prompt=metadata["negative_prompt"],
@@ -542,6 +549,7 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "size": recorded.size,
         "frame_count": recorded.frame_count,
         "reference_image_path": recorded.image_path,
+        "end_image_path": recorded.end_image_path,
         "lora": recorded.lora,
         "has_reusable_config": bool(config),
         "negative_prompt": recorded.negative_prompt,

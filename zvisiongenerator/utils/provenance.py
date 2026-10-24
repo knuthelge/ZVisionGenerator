@@ -76,7 +76,7 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     """Build the config payload embedded in a saved video.
 
     The top-level keys are the reusable settings (schema, workflow, prompt, model, family, seed, steps,
-    dimensions, frame count, reference image, LoRAs); ``generation`` records time, upscale, audio and format.
+    dimensions, frame count, reference image, last frame (``end_image_path``, only when set), LoRAs); ``generation`` records time, upscale, audio and format.
     An auto-enhanced prompt replaces the template prompt so the asset records what rendered. The prompt is the
     action alone; the scene is recorded apart as ``scene`` (omitted when there is none), and ``scene_input`` and
     ``prompt_input`` keep the user's own text when the scene or prompt was enhanced.
@@ -112,6 +112,8 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
             }
         ),
     }
+    if request.end_image_path:
+        payload["end_image_path"] = _portable_path(request.end_image_path)
     if extend is not None:
         payload["source_video"] = _portable_path(str(extend.source.path))
         payload["extend_frames"] = extend.frames
@@ -253,6 +255,8 @@ class RecordedSettings:
     size: str | None = None
     frame_count: int | None = None
     image_path: str | None = None
+    # The image a video clip ends on (a first-and-last-frame clip).
+    end_image_path: str | None = None
     image_strength: float | None = None
     # Video scene as generated, and the user's own scene and prompt when the recorded ones were enhanced.
     scene: str | None = None
@@ -289,6 +293,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         size=optional_text(config.get("size")),
         frame_count=optional_int(config.get("frame_count")),
         image_path=_local_path(optional_text(config.get("image_path"))),
+        end_image_path=_local_path(optional_text(config.get("end_image_path"))),
         image_strength=optional_float(config.get("image_strength")),
         scene=optional_text(config.get("scene")),
         scene_input=optional_text(config.get("scene_input")),

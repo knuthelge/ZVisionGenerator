@@ -310,6 +310,16 @@ class TestListVideoModels:
 
         assert [entry.name for entry in list_video_models(tmp_path)] == ["my-ltx-model"]
 
+    def test_skips_the_text_encoder_copy_of_the_macos_h3_model(self, tmp_path: Path):
+        models_dir = tmp_path / "models"
+        copy = models_dir / "h3@mlx-te4"
+        copy.mkdir(parents=True)
+        (copy / "model_index.json").write_text('{"_class_name": "MiniMaxH3ModularPipeline"}', encoding="utf-8")
+        (models_dir / "h3-local").mkdir()
+        (models_dir / "h3-local" / "model_index.json").write_text('{"_class_name": "MiniMaxH3ModularPipeline"}', encoding="utf-8")
+
+        assert [entry.name for entry in list_video_models(tmp_path)] == ["h3-local"]
+
     @patch("zvisiongenerator.converters.list_assets.detect_video_model")
     def test_skips_unknown_family(self, mock_detect, tmp_path: Path):
         """Dirs classified as unknown by detect_video_model are skipped."""

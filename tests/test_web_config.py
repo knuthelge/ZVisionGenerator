@@ -11,6 +11,7 @@ from zvisiongenerator.web import config_contract as config_contract_module
 from zvisiongenerator.web import config as web_config_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 
 
@@ -666,3 +667,36 @@ def test_gallery_api_reports_a_seedvr2_copy_stored_after_the_server_started(monk
 
     assert (before["downloaded"], before["download_size_label"]) == (False, "17.0 GB")
     assert (after["downloaded"], after["download_size_label"]) == (True, None)
+
+
+def test_default_output_dir_follows_ziv_data_dir(monkeypatch, tmp_path):
+    """The shipped config leaves ui.output_dir unset so outputs live under the data dir."""
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("ZIV_DATA_DIR", str(data_dir))
+
+    ui_config = load_config()["ui"]
+
+    assert ui_config["output_dir"] is None
+    assert config_contract_module.resolve_output_dir(ui_config["output_dir"]) == data_dir / "outputs"
+
+
+def test_default_output_dir_is_home_ziv_outputs_without_data_dir_env(monkeypatch, tmp_path):
+    monkeypatch.delenv("ZIV_DATA_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    ui_config = load_config()["ui"]
+
+    assert config_contract_module.resolve_output_dir(ui_config["output_dir"]) == tmp_path / ".ziv" / "outputs"
+
+
+def test_explicit_user_output_dir_wins_over_ziv_data_dir(monkeypatch, tmp_path):
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("ZIV_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    data_dir.mkdir()
+
+    for chosen in (tmp_path / "chosen", "~/.ziv/outputs"):
+        (data_dir / "config.yaml").write_text(f"ui:\n  output_dir: {chosen}\n", encoding="utf-8")
+        expected = Path(chosen).expanduser()
+
+        assert config_contract_module.resolve_output_dir(load_config()["ui"]["output_dir"]) == expected

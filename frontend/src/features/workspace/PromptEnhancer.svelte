@@ -9,7 +9,7 @@
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
   import { enhancePrompt } from '$lib/api/promptEnhance';
-  import { extendEnhanceHint, extendGuard } from '$lib/state/extend';
+  import { extendEnhanceHint, extendGuard, type ExtendModelSupport } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { EnhanceChoice, EnhanceOptions, EnhanceRewrite, InspectorRow } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
@@ -60,6 +60,10 @@
     statusText?: string | null;
     /** Called when an enhancement starts, so the Enhanced tab can come forward. */
     onstart?: () => void;
+    /** Whether the chosen video model can extend a clip; an extension waits for a model that can. */
+    extendSupport?: ExtendModelSupport | null;
+    /** The clip also ends on a last-frame image, so the rewrite must not invent a different ending. */
+    endImage?: boolean;
     /** The image model takes JSON captions, so the popover offers Write as: Text or JSON. */
     jsonCapable?: boolean;
   }
@@ -70,6 +74,8 @@
     busy,
     jobsActive = false,
     jsonCapable = false,
+    endImage = false,
+    extendSupport = null,
     maxWords,
     enhancing = $bindable(false),
     streamingText = $bindable(''),
@@ -91,7 +97,7 @@
   const sourceHasAudio = $derived(draft.state.workflow === 'extend' ? (draft.extendSource?.has_audio ?? null) : null);
   const audio = $derived(hasAudio(draft.state, audioSupported, sourceHasAudio));
   // An extension needs a source it can read before any text can be written for it.
-  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
+  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendSupport));
   const tier = $derived(effectiveTier(draft.state, contract));
   const format = $derived(effectiveFormat(draft.state, jsonCapable));
   const caption = $derived(format === 'json');
@@ -165,7 +171,7 @@
           mode,
           settings: settingsPayload(requested, mode, audio),
           max_words: maxWords,
-          context: enhanceContext(draft.state, audioSupported, sourceHasAudio),
+          context: enhanceContext(draft.state, audioSupported, sourceHasAudio, endImage),
           ...(runTier === 'smart' ? { enhance_model: 'smart' as const } : {}),
           ...(runCaption ? { format: 'json' as const } : {}),
         },

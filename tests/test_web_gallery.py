@@ -818,6 +818,29 @@ def test_reuse_of_an_image_names_its_quantize_level_even_when_there_is_none(tmp_
     assert params["quantize"] == expected
 
 
+def test_a_first_and_last_frame_clip_reuses_both_images_and_lists_the_last_frame(tmp_path):
+    payload, params = _video_reuse(tmp_path, {"workflow": "img2vid", "image_path": "/in/start.png", "end_image_path": "/in/end.png"})
+
+    assert params["workflow"] == "img2vid"
+    assert (params["image_path"], params["end_image_path"]) == ("/in/start.png", "/in/end.png")
+    assert payload["end_image_path"] == "/in/end.png"
+
+
+def test_reuse_drops_the_last_frame_with_its_missing_first_frame(tmp_path):
+    payload, params = _video_reuse(tmp_path, {"workflow": "img2vid", "end_image_path": "/in/end.png"})
+
+    assert params["workflow"] == "txt2vid"
+    assert "image_path" not in params and "end_image_path" not in params
+    assert payload["end_image_path"] == "/in/end.png"
+
+
+def test_a_clip_without_a_last_frame_reuses_none(tmp_path):
+    payload, params = _video_reuse(tmp_path, {"workflow": "img2vid", "image_path": "/in/start.png"})
+
+    assert payload["end_image_path"] is None
+    assert "end_image_path" not in params
+
+
 def test_reuse_of_a_video_leaves_quantize_to_the_model_alias(tmp_path):
     _payload, params = _video_reuse(tmp_path, {"prompt": "A knight rides in.", "generation": {"quantize": 8}})
 

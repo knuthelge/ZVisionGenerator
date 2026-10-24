@@ -156,6 +156,8 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
     print(f"  Prompt: {prompt_one_line[:100]}{'...' if len(prompt_one_line) > 100 else ''}")
     output_path = str(Path(request.output_dir) / artifacts.filename)
     kwargs = _upscale_kwargs(request, artifacts)
+    if request.end_image_path is not None:
+        kwargs["end_image"] = request.end_image_path
     t0 = time.monotonic()
     result = request.backend.image_to_video(
         model=request.model,

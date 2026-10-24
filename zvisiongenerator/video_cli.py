@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review
-from zvisiongenerator.core.video_family import ANY_FRAMES, settle_video_steps
+from zvisiongenerator.core.video_family import ANY_FRAMES, UNDESCRIBED_UPSCALE_STEPS, settle_video_steps
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.app_log import setup_logging
@@ -20,13 +20,14 @@ from zvisiongenerator.utils.config import load_config, resolve_video_defaults, s
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
+from zvisiongenerator.utils.h3_memory import h3_lora_bytes
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.downloads import describe_refusal
 from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompts import inspect_prompts_file
-from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, extend_step, load_extend_source, resolve_extend_frames
+from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, extend_step, load_extend_source, require_extend_family, resolve_extend_frames
 from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
@@ -42,6 +43,7 @@ _DEFAULT_PROMPTS_FILE = "prompts.yaml"
 # Options that choose a size or a frame count; an extension keeps the source's size and takes its own length.
 _EXTEND_REFUSED_OPTIONS = (
     ("image_path", "--image", "an extension continues the source video, not an image"),
+    ("end_image_path", "--end-image", "an extension continues the source video, not an image"),
     ("upscale", "--upscale", "an extension is generated at the source's size"),
     ("ratio", "--ratio", "an extension keeps the source video's size"),
     ("size", "--size", "an extension keeps the source video's size"),
@@ -74,7 +76,7 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         type=str,
         default=None,
         metavar="SRC",
-        help="Continue the video SRC: generate what happens next and append it, writing a new file. The prompt may be empty. macOS only.",
+        help="Continue the video SRC: generate what happens next and append it, writing a new file. The prompt may be empty.",
     )
     extend_length = parser.add_mutually_exclusive_group()
     extend_length.add_argument(
@@ -89,14 +91,19 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="N",
-        help=f"Frames to add with --extend, rounded to a multiple of {EXTEND_FRAME_STEP} (minimum {EXTEND_FRAME_STEP}).",
+        help=f"Frames to add with --extend, rounded to a multiple of the model's extension step ({EXTEND_FRAME_STEP} for LTX, 17 for MiniMax H3; at least one step).",
     )
-    parser.add_argument("--image", dest="image_path", type=str, default=None, help="Input image for image-to-video.")
+    parser.add_argument("--image", dest="image_path", type=str, default=None, help="Input image for image-to-video: the first frame.")
+    parser.add_argument(
+        "--end-image", dest="end_image_path", type=str, default=None, help="Last-frame image: the clip runs from --image to it. Needs --image and a model that supports it (MiniMax H3)."
+    )
     parser.add_argument("--ratio", type=str, default=None, help="Aspect ratio for generated video (e.g. 16:9, 9:16, 1:1).")
     parser.add_argument("-s", "--size", type=str, default=None, help="Resolution scale (e.g. s, m, l). Default from config.")
     parser.add_argument("-W", "--width", type=int, default=None, help="Override video width. LTX: must be divisible by 32.")
     parser.add_argument("-H", "--height", type=int, default=None, help="Override video height. LTX: must be divisible by 32.")
-    parser.add_argument("--frames", type=int, default=None, help="Number of frames. LTX: must follow 8k+1 pattern (9,17,...,97,121).")
+    parser.add_argument(
+        "--frames", type=int, default=None, help="Number of frames. LTX: must follow 8k+1 pattern (9,17,...,97,121). MiniMax H3: 17k+5 (22,39,...,124); another count moves up to the next."
+    )
     parser.add_argument("--steps", type=int, default=None, help="Inference steps.")
     parser.add_argument("--seed", type=int, default=None, help="Random seed (omit for random).")
     parser.add_argument("-o", "--output", type=str, default=".", help="Output directory.")
@@ -117,12 +124,12 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
 
 def _resolve_upscale_steps(args: argparse.Namespace, config: dict[str, Any], model_family: str, *, steps_explicitly_set: bool) -> None:
     """Apply video upscale step defaults and the model family's step rules to parsed args."""
-    upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
+    family = video_family(config, model_family)
     settled = settle_video_steps(
         args.steps if steps_explicitly_set or not args.upscale else None,
         upscale=bool(args.upscale),
-        family=video_family(config, model_family),
-        default_upscale_steps=upscale_cfg.get("default_upscale_steps", 8),
+        family=family,
+        default_upscale_steps=family.default_upscale_steps if family is not None else UNDESCRIBED_UPSCALE_STEPS,
     )
     if settled.note:
         warnings.warn(settled.note, stacklevel=2)
@@ -221,36 +228,63 @@ def _warn_if_still_original_prompt(prompt: str | None, source: ExtendSource) -> 
         warnings.warn("Still the original prompt. Change it to what happens next.", stacklevel=2)
 
 
+def _fit_mode(args: argparse.Namespace) -> str:
+    """Return the generation mode the arguments ask for: ``extend``, ``i2v`` or ``t2v``."""
+    if getattr(args, "extend_source", None) is not None:
+        return "extend"
+    return "i2v" if getattr(args, "image_path", None) else "t2v"
+
+
+def _fit_frames(args: argparse.Namespace) -> int:
+    """Return the frames the memory estimate covers: the clip, or an extension's window (``num_frames`` holds either)."""
+    return args.num_frames
+
+
 def _clip_fit(args: argparse.Namespace, config: dict[str, Any], *, upscale: bool) -> dict[str, Any] | None:
-    """Return how the run's clip fits this machine's memory (``status``, ``required_gb``, ``budget_gb``), or ``None`` when unknown."""
+    """Return how the run's clip fits this machine's memory (``status``, ``required_gb``, ``budget_gb``, and an estimated ``expected_seconds`` for H3), or ``None`` when unknown."""
     return clip_memory_fit(
         args.model,
         width=args.width,
         height=args.height,
-        frames=args.num_frames,
+        frames=_fit_frames(args),
         low_memory=args.low_memory,
         upscale=upscale,
         budget=accelerator_memory_budget_or_none(),
         model_name=getattr(args, "model_name", None),
         app_config=config,
         family=getattr(args, "model_family", "ltx"),
+        mode=_fit_mode(args),
+        forwards=getattr(args, "steps", None) or 8,
+        loras_bytes=h3_lora_bytes(getattr(args, "lora_paths", None) or ()),
     )
 
 
+def _print_estimated_time(args: argparse.Namespace, fit: dict[str, Any]) -> None:
+    """Print the estimated time of an H3 run, when the fit carries one."""
+    seconds = fit.get("expected_seconds")
+    if seconds is None:
+        return
+    print(f"MiniMax H3 at {args.width}x{args.height}, {_fit_frames(args)} frames: estimated {max(1, round(seconds / 60))} min (excludes the one-time weight preparation).")
+
+
 def _warn_if_too_large(args: argparse.Namespace, config: dict[str, Any], *, extending: bool) -> None:
-    """Warn when the clip, or the window of an extension, may not fit in memory; the run continues either way."""
+    """Print an H3 run's estimated time, and warn when the clip, or the window of an extension, may not fit in memory; the run continues either way."""
     fit = _clip_fit(args, config, upscale=bool(args.upscale))
-    if fit is None or fit["status"] == "fits":
+    if fit is None:
+        return
+    _print_estimated_time(args, fit)
+    if fit["status"] == "fits":
         return
     if fit.get("resource") == "system":
         # The weights, not the clip, are what fill system memory: a shorter or smaller clip does not help.
+        advice = " ltx-4 needs less than ltx-8, and --upscale adds about 4 GB." if getattr(args, "model_family", "ltx") == "ltx" else ""
         warnings.warn(
-            f"The model needs about {fit['required_gb']:g} GB of system memory; this machine has {fit['budget_gb']:g} GB ({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail. ltx-4 needs less than ltx-8, and --upscale adds about 4 GB.",
+            f"The model needs about {fit['required_gb']:g} GB of system memory; this machine has {fit['budget_gb']:g} GB ({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail.{advice}",
             stacklevel=2,
         )
         return
     if extending:
-        subject = f"The {args.num_frames}-frame extension window"
+        subject = f"The {_fit_frames(args)}-frame extension window"
         advice = "Use --extend-seconds or --extend-frames for a shorter extension"
     else:
         subject = f"At {args.width}x{args.height}, {args.num_frames} frames this clip"
@@ -288,7 +322,7 @@ def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.N
 def _unknown_video_model_guidance() -> str:
     """Return guidance for unknown video model selections."""
 
-    return "Use a supported LTX model: 'ltx-4' or 'ltx-8' (or 'ltx25-4'), a converted LTX model (ziv model model --model-type ltx-2.3), known LTX repo prefixes, supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
+    return "Use a supported video model: 'h3' (MiniMax H3), or an LTX model: 'ltx-4' or 'ltx-8' (or 'ltx25-4'), a converted LTX model (ziv model model --model-type ltx-2.3), known LTX repo prefixes, supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
 
 
 def main(*, prog: str = "ziv-video") -> None:
@@ -305,7 +339,9 @@ def main(*, prog: str = "ziv-video") -> None:
     if args.steps is not None and args.steps < 1:
         parser.error("--steps must be at least 1")
     if args.upscale is not None and args.upscale != 2:
-        parser.error("--upscale only supports factor 2 (LTX spatial upscaler)")
+        parser.error("--upscale only supports factor 2")
+    if args.end_image_path is not None and args.image_path is None:
+        parser.error("--end-image needs --image: the clip runs from the first-frame image to the last-frame image.")
     if args.review and args.upscale is None:
         parser.error("--review needs --upscale: without an upscale there is no half-size render to review.")
     if args.review and not supports_video_upscale_review():
@@ -318,6 +354,8 @@ def main(*, prog: str = "ziv-video") -> None:
     # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
     if args.image_path:
         args.image_path = str(Path(args.image_path).expanduser())
+    if args.end_image_path:
+        args.end_image_path = str(Path(args.end_image_path).expanduser())
     if args.extend_path is not None:
         args.extend_path = str(Path(args.extend_path).expanduser())
     args.output = str(Path(args.output).expanduser())
@@ -380,15 +418,30 @@ def main(*, prog: str = "ziv-video") -> None:
 
     args.model_family = model_info.family
     try:
-        refusal = unsupported_video_request(config, model_info.family, image=args.image_path is not None, extend=source is not None, review=bool(args.review))
+        refusal = unsupported_video_request(
+            config,
+            model_info.family,
+            image=args.image_path is not None,
+            extend=source is not None,
+            review=bool(args.review),
+            end_image=args.end_image_path is not None,
+            upscale=bool(args.upscale),
+        )
     except ValueError as e:
         parser.error(str(e))
     if refusal is not None:
         parser.error(refusal)
+    if source is not None:
+        try:
+            require_extend_family(source, video_family(config, model_info.family))
+        except ValueError as e:
+            parser.error(str(e))
 
     # Validate --image file exists
     if args.image_path and not os.path.isfile(args.image_path):
         parser.error(f"Image file not found: {args.image_path}")
+    if args.end_image_path and not os.path.isfile(args.end_image_path):
+        parser.error(f"End image file not found: {args.end_image_path}")
 
     # Validate T2V-only model with --image
     if args.image_path and not model_info.supports_i2v:
@@ -448,7 +501,7 @@ def main(*, prog: str = "ziv-video") -> None:
         )
         if note:
             warnings.warn(note, stacklevel=2)
-        apply_extend_args(args, source, extend_frames)
+        apply_extend_args(args, source, extend_frames, video_family(config, model_info.family))
     else:
         args.width = defaults["width"]
         args.height = defaults["height"]

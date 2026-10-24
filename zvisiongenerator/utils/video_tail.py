@@ -21,15 +21,16 @@ if TYPE_CHECKING:
 TAIL_MARGIN_SECONDS = 2.0
 
 
-def _tail_start_seconds(frame_count: int, fps: float, video_start: float = 0.0) -> float:
-    """Return where to start reading so the last ``CARRY_FRAMES`` frames are in the stream; 0.0 means from the beginning.
+def _tail_start_seconds(frame_count: int, fps: float, video_start: float = 0.0, frames: int = CARRY_FRAMES) -> float:
+    """Return where to start reading so the last *frames* frames are in the stream; 0.0 means from the beginning.
 
     Args:
         frame_count: Frames in the clip.
         fps: Frames per second.
         video_start: Seconds from the start of the file (ffmpeg's input ``-ss`` timeline) to the first video frame.
+        frames: How many frames at the end are wanted.
     """
-    return max(0.0, video_start + (frame_count - CARRY_FRAMES) / fps - TAIL_MARGIN_SECONDS)
+    return max(0.0, video_start + (frame_count - frames) / fps - TAIL_MARGIN_SECONDS)
 
 
 def _build_tail_command(path: str | Path, start: float) -> list[str]:
@@ -53,8 +54,9 @@ def _read_tail_frames(
     fps: float,
     frame_count: int,
     video_start: float = 0.0,
+    frames: int = CARRY_FRAMES,
 ) -> np.ndarray:
-    """Return the last ``CARRY_FRAMES`` frames of a clip as a uint8 array of shape ``(CARRY_FRAMES, height, width, 3)``.
+    """Return the last *frames* frames of a clip as a uint8 array of shape ``(frames, height, width, 3)``.
 
     Frames are streamed through a ring buffer, so a long clip is never held in memory. When the seek lands too late
     and the read comes up short, the clip is read again from the beginning.
@@ -66,23 +68,24 @@ def _read_tail_frames(
         fps: Frames per second.
         frame_count: Frames in the clip.
         video_start: Seconds from the start of the file to the first video frame.
+        frames: How many frames at the end to return.
 
     Raises:
-        RuntimeError: If ffmpeg fails, a frame has the wrong byte count, or the clip has fewer than ``CARRY_FRAMES`` frames.
+        RuntimeError: If ffmpeg fails, a frame has the wrong byte count, or the clip has fewer than *frames* frames.
     """
     import numpy as np
 
-    start = _tail_start_seconds(frame_count, fps, video_start)
+    start = _tail_start_seconds(frame_count, fps, video_start, frames)
     for seek in (start, 0.0) if start > 0 else (0.0,):
-        ring = deque(_stream_frames(_build_tail_command(path, seek), width, height), maxlen=CARRY_FRAMES)
-        if len(ring) >= CARRY_FRAMES:
+        ring = deque(_stream_frames(_build_tail_command(path, seek), width, height), maxlen=frames)
+        if len(ring) >= frames:
             return np.stack([np.frombuffer(frame, dtype=np.uint8).reshape(height, width, 3) for frame in ring])
-    raise RuntimeError(f"Could not read the last {CARRY_FRAMES} frames of {path}: found only {len(ring)}.")
+    raise RuntimeError(f"Could not read the last {frames} frames of {path}: found only {len(ring)}.")
 
 
-def read_source_tail(source: ExtendSource) -> np.ndarray:
-    """Return the last ``CARRY_FRAMES`` frames of an extend source at its displayed size (see ``_read_tail_frames``)."""
-    return _read_tail_frames(source.path, width=source.width, height=source.height, fps=source.fps, frame_count=source.frame_count, video_start=source.video_start)
+def read_source_tail(source: ExtendSource, frames: int = CARRY_FRAMES) -> np.ndarray:
+    """Return the last *frames* frames of an extend source at its displayed size (see ``_read_tail_frames``)."""
+    return _read_tail_frames(source.path, width=source.width, height=source.height, fps=source.fps, frame_count=source.frame_count, video_start=source.video_start, frames=frames)
 
 
 def _stream_frames(command: list[str], width: int, height: int) -> Iterator[bytes]:
@@ -112,25 +115,25 @@ def _stream_frames(command: list[str], width: int, height: int) -> Iterator[byte
             raise tool_error("ffmpeg could not read the video's frames", stderr.read())
 
 
-def build_tail_audio_command(source: ExtendSource, sample_rate: int) -> list[str]:
-    """Build the ffmpeg command that writes the sound under a clip's last ``CARRY_FRAMES`` frames as stereo float32 PCM.
+def build_tail_audio_command(source: ExtendSource, sample_rate: int, frames: int = CARRY_FRAMES) -> list[str]:
+    """Build the ffmpeg command that writes the sound under a clip's last *frames* frames as stereo float32 PCM.
 
     The read starts at the tail's own position in the file and lasts as long as the tail, resampled to *sample_rate*.
     """
-    start = source.video_start + (source.frame_count - CARRY_FRAMES) / source.fps
-    duration = CARRY_FRAMES / source.fps
+    start = source.video_start + (source.frame_count - frames) / source.fps
+    duration = frames / source.fps
     return ["ffmpeg", "-v", "error", "-ss", f"{start:.6f}", "-i", str(source.path), "-t", f"{duration:.6f}", "-map", "0:a:0", "-f", "f32le", "-ac", "2", "-ar", str(sample_rate), "-"]
 
 
-def read_source_tail_audio(source: ExtendSource, sample_rate: int) -> np.ndarray:
-    """Return the sound under a clip's last ``CARRY_FRAMES`` frames as float32 of shape ``(2, samples)`` at *sample_rate*.
+def read_source_tail_audio(source: ExtendSource, sample_rate: int, frames: int = CARRY_FRAMES) -> np.ndarray:
+    """Return the sound under a clip's last *frames* frames as float32 of shape ``(2, samples)`` at *sample_rate*.
 
     Raises:
         RuntimeError: If ffmpeg fails or the clip has no sound at its end.
     """
     import numpy as np
 
-    result = subprocess.run(build_tail_audio_command(source, sample_rate), capture_output=True, check=False)
+    result = subprocess.run(build_tail_audio_command(source, sample_rate, frames), capture_output=True, check=False)
     if result.returncode != 0:
         raise tool_error("ffmpeg could not read the video's audio", result.stderr)
     samples = np.frombuffer(result.stdout[: len(result.stdout) // 8 * 8], dtype=np.float32).reshape(-1, 2).T.copy()

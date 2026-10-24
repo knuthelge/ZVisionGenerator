@@ -112,6 +112,12 @@ class TestPlan:
         stored.mkdir()
         assert plan_image_model_load(str(stored), 4, models_dir=models_dir, backend_format=FORMAT) == LoadPlan(str(stored), None)
 
+    def test_a_selected_text_encoder_copy_is_not_quantized_again(self, models_dir):
+        copy = models_dir / "h3@mlx-te4"
+        copy.mkdir()
+
+        assert plan_image_model_load(str(copy), 4, models_dir=models_dir, backend_format=FORMAT) == LoadPlan(str(copy), None)
+
     def test_current_stored_quant_is_used(self, models_dir):
         source = _make_source(models_dir)
         stored = models_dir / "atlas@q8"
@@ -123,6 +129,20 @@ class TestPlan:
     def test_missing_stored_quant_is_created(self, models_dir):
         source = _make_source(models_dir)
         assert plan_image_model_load(str(source), 4, models_dir=models_dir, backend_format=FORMAT) == LoadPlan(str(source), 4, create=models_dir / "atlas@q4", source=source)
+
+
+class TestPlainNames:
+    @pytest.mark.parametrize("name", ["zit", "my-model", "h3"])
+    def test_a_folder_name_can_carry_a_stored_quant(self, name):
+        from zvisiongenerator.image_model_loader import _is_plain_name
+
+        assert _is_plain_name(name) is True
+
+    @pytest.mark.parametrize("name", ["", "..", "org/repo", "zit@q8", "h3@mlx-te4"])
+    def test_a_path_or_a_stored_quant_name_cannot(self, name):
+        from zvisiongenerator.image_model_loader import _is_plain_name
+
+        assert _is_plain_name(name) is False
 
 
 class TestAliasPlan:

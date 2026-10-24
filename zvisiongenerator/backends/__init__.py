@@ -6,7 +6,7 @@ import functools
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from zvisiongenerator.core.video_family import VideoCapabilities
 
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
     from zvisiongenerator.downloads.target import DownloadTarget
+    from zvisiongenerator.utils.h3_preset import H3MlxPreset, H3Preset, HubFiles
     from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
 
 __all__ = [
@@ -33,6 +34,9 @@ __all__ = [
     "get_prompt_enhancer_session",
     "get_seedvr2_upscaler",
     "get_video_backend",
+    "h3_companion_repo_ids",
+    "h3_download_plan",
+    "h3_load_options",
     "image_download_plan",
     "release_accelerator_memory",
     "supports_seedvr2",
@@ -111,11 +115,23 @@ def _create_diffusers_video_backend() -> "VideoBackend":
     return DiffusersVideoBackend()
 
 
+def _create_h3_video_backend() -> "VideoBackend":
+    from zvisiongenerator.backends.cuda.video.h3.backend import H3VideoBackend
+
+    return H3VideoBackend()
+
+
+def _create_h3_mlx_video_backend() -> "VideoBackend":
+    from zvisiongenerator.backends.mac.h3_video import H3MlxVideoBackend
+
+    return H3MlxVideoBackend()
+
+
 # Per platform, the video backend factory of each model family.
 _VIDEO_BACKENDS_MAP: dict[str, dict[str, Callable[[], "VideoBackend"]]] = {
-    "darwin": {"ltx": _create_ltx_video_backend},
-    "win32": {"ltx": _create_diffusers_video_backend},
-    "linux": {"ltx": _create_diffusers_video_backend},
+    "darwin": {"ltx": _create_ltx_video_backend, "h3": _create_h3_mlx_video_backend},
+    "win32": {"ltx": _create_diffusers_video_backend, "h3": _create_h3_video_backend},
+    "linux": {"ltx": _create_diffusers_video_backend, "h3": _create_h3_video_backend},
 }
 
 
@@ -130,7 +146,7 @@ def get_video_backend(family: str) -> "VideoBackend":
     """Get the video backend of a model family on this platform, created on first use.
 
     Args:
-        family: Model family ("ltx").
+        family: Model family ("ltx" or "h3").
 
     Returns:
         The video backend instance for that family.
@@ -394,6 +410,65 @@ def video_download_plan(
         repo_ignore=repo_ignore,
         text_encoder_bundled=text_encoder_bundled,
     )
+
+
+def h3_download_plan(model_ref: str, preset: "H3Preset | H3MlxPreset", *, upscale: bool = False, lora: "HubFiles | None" = None) -> "tuple[DownloadTarget, ...]":
+    """Return the downloads this platform's MiniMax H3 backend needs for *model_ref*.
+
+    Windows and Linux list the repository, the text encoder and the turbo LoRA, plus SeedVR2 with *upscale*. macOS lists
+    the INT8 transformer, the ``FL2VA`` components and the turbo LoRA *lora*; it has no upscale.
+
+    Raises:
+        RuntimeError: On a platform without an H3 backend.
+        ValueError: On macOS without *lora*.
+    """
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.mac.download_plan import h3_mlx_download_plan
+
+        if lora is None:
+            raise ValueError("The MiniMax H3 download plan on macOS needs the turbo LoRA (lora=).")
+        return h3_mlx_download_plan(model_ref, cast("H3MlxPreset", preset), lora)
+    if sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.cuda.download_plan import h3_download_plan as plan
+
+        return plan(model_ref, cast("H3Preset", preset), upscale=upscale)
+    raise RuntimeError(f"MiniMax H3 is not available on this platform ({sys.platform}).")
+
+
+def h3_companion_repo_ids(config: dict[str, Any]) -> tuple[str, ...]:
+    """Return the Hugging Face repos, besides the main one, that this platform's MiniMax H3 backend downloads.
+
+    Windows and Linux download the text encoder and the turbo LoRA; macOS downloads the INT8 transformer and the turbo LoRA.
+
+    Raises:
+        ValueError: If the H3 entry of *config* is malformed.
+    """
+    if sys.platform == "darwin":
+        from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
+
+        return (h3_mlx_preset(config).transformer.repo_id, h3_turbo_lora(config)[0].repo_id)
+    from zvisiongenerator.utils.h3_preset import h3_preset
+
+    preset = h3_preset(config)
+    return (preset.text_encoder.repo_id, preset.lora.repo_id)
+
+
+def h3_load_options(config: dict[str, Any], model_name: str | None, *, quiet: bool = False) -> dict[str, Any]:
+    """Return the keyword arguments this platform's MiniMax H3 backend takes in ``load_model`` beyond the mode and LoRAs.
+
+    Windows and Linux take the model name and the CUDA preset. macOS takes the model name, the MLX preset and the turbo
+    LoRA; with *quiet* (a run with no terminal, such as the web runner) the fork's progress output is off.
+
+    Raises:
+        ValueError: If the H3 entry of *config* is malformed.
+    """
+    if sys.platform == "darwin":
+        from zvisiongenerator.utils.h3_preset import h3_mlx_load_options
+
+        return {**h3_mlx_load_options(config, model_name), **({"verbose": False} if quiet else {})}
+    from zvisiongenerator.utils.h3_preset import h3_load_options as cuda_load_options
+
+    return cuda_load_options(config, model_name)
 
 
 def enhancer_download_plan(repo: str, revision: str | None) -> "tuple[DownloadTarget, ...]":

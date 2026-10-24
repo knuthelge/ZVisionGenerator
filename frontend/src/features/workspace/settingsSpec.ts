@@ -18,6 +18,16 @@ export const SPEC = {
   loraWeight: { step: 0.1, min: -10, max: 10 },
 } satisfies Record<string, NumberSpec>;
 
+/**
+ * The Steps bounds of a model that offers only some step counts (`[4, 8]` is 4 to 8 in steps of 4), or the usual bounds.
+ *
+ * @param options The model's offered step counts, ascending.
+ */
+export function stepsSpec(options: readonly number[] | null | undefined): { step: number; min: number; max: number } {
+  if (!options || options.length === 0) return SPEC.steps;
+  return { step: options.length > 1 ? options[1] - options[0] : 1, min: options[0], max: options[options.length - 1] };
+}
+
 /** How far along its range a slider value sits, as a CSS percentage for the filled part of the track. */
 export function rangeFill(value: number, spec: { min: number; max: number }): string {
   const share = (value - spec.min) / (spec.max - spec.min);

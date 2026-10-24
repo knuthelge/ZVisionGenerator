@@ -175,13 +175,15 @@ export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, a
 }
 
 /**
- * The job facts an on-demand enhancement needs: frame shape, clip length, audio and reference image.
+ * The job facts an on-demand enhancement needs: frame shape, clip length, audio, reference image and last frame.
  *
- * An extension names its source and new frames instead; the server reads the source's size, frame rate and recorded text.
+ * An extension names its source, new frames and video model instead; the server reads the source's size, frame rate and recorded text,
+ * and the model's family sets the step the new frames are a multiple of.
  *
  * @param sourceHasAudio Extend only: whether the source has audio, when known.
+ * @param endImage Whether the clip also ends on a last-frame image (chosen, or uploaded and pending).
  */
-export function enhanceContext(state: DraftState, audioSupported = true, sourceHasAudio: boolean | null = null): EnhanceContext {
+export function enhanceContext(state: DraftState, audioSupported = true, sourceHasAudio: boolean | null = null, endImage = false): EnhanceContext {
   if (state.workflow === 'extend') {
     return {
       ratio: null,
@@ -193,6 +195,7 @@ export function enhanceContext(state: DraftState, audioSupported = true, sourceH
       reference_image: false,
       source_video: state.extendSourcePath,
       extend_frames: state.extendFrames,
+      model: state.model || null,
     };
   }
   const video = workflowMode(state.workflow) === 'video';
@@ -205,6 +208,7 @@ export function enhanceContext(state: DraftState, audioSupported = true, sourceH
     fps: video ? state.fps : null,
     audio: hasAudio(state, audioSupported),
     reference_image: state.workflow === 'img2img' || state.workflow === 'img2vid',
+    end_image: video && endImage,
   };
 }
 
