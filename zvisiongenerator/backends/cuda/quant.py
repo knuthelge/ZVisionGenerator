@@ -31,14 +31,13 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends.cuda.memory import release_memory
 from zvisiongenerator.utils.file_links import link_tree
 from zvisiongenerator.utils.page_cache import drop_cached_files
-from zvisiongenerator.utils.safetensors_stream import iter_tensors, read_header
+from zvisiongenerator.utils.safetensors_stream import iter_tensors
 
 if TYPE_CHECKING:
     import torch
 
 __all__ = [
     "cast_to_fp8",
-    "dequantized_tensors",
     "empty_diffusers_model",
     "fill_weights",
     "kept_in_compute_dtype",
@@ -319,64 +318,6 @@ def _weight_files(component_dir: Path) -> list[Path]:
         return [component_dir / name for name in sorted(set(weight_map.values()))]
     single = component_dir / "diffusion_pytorch_model.safetensors"
     return [single] if single.is_file() else sorted(component_dir.glob("*.safetensors"))
-
-
-def dequantized_tensors(paths: Iterable[Path], wanted: Callable[[str], bool] | None = None) -> Iterator[tuple[str, torch.Tensor]]:
-    """Yield ``(name, tensor)`` of the safetensors files *paths* with scaled FP8 weights multiplied out, in file order.
-
-    Scaled-FP8 checkpoints store a weight as float8 next to a ``<module>.weight_scale`` (or ``scale_weight``) tensor; the
-    real weight is the product, so a plain dtype cast would leave it off by the scale. Each such weight is yielded in
-    bfloat16 and the scale tensors and the ``input_scale`` / ``comfy_quant`` metadata are left out. An FP8 weight with no
-    scale is cast to bfloat16, and every other tensor is yielded as it is. The scale is looked up across all of *paths*,
-    so a weight and its scale may sit in different shards.
-
-    Args:
-        paths: The files of one checkpoint.
-        wanted: Accepts the names to yield (a weight's, not its scale's); every name when ``None``.
-
-    Raises:
-        ValueError: When a ``comfy_quant`` entry names a format other than FP8, a scale belongs to a weight that is not
-            FP8, or a scale is neither one value per tensor nor one per output row.
-    """
-    from zvisiongenerator.converters.convert_checkpoint import FP8_AUX_SUFFIXES, FP8_WEIGHT_SCALE_SUFFIXES
-    from zvisiongenerator.converters.ltx_checkpoint import dequantized
-
-    files = list(paths)
-    metadata = (*FP8_WEIGHT_SCALE_SUFFIXES, *FP8_AUX_SUFFIXES)
-    headers = {path: read_header(path)[1] for path in files}
-    scale_names = {f"{name.rsplit('.', 1)[0]}.weight": name for header in headers.values() for name in header if name.endswith(FP8_WEIGHT_SCALE_SUFFIXES)}
-    for path in files:
-        _require_fp8_formats(path, [name for name in headers[path] if name.endswith(".comfy_quant")])
-    scales = {name: tensor for path in files for name, tensor in iter_tensors(path, set(scale_names.values()).__contains__)}
-
-    def _accepted(name: str) -> bool:
-        return not name.endswith(metadata) and (wanted is None or wanted(name))
-
-    for path in files:
-        for name, tensor in iter_tensors(path, _accepted):
-            scale = scales.get(scale_names.get(name, ""))
-            yield name, dequantized(tensor, None if scale is None else _row_scale(name, tensor, scale))
-
-
-def _require_fp8_formats(path: Path, names: list[str]) -> None:
-    """Raise when one of the ``comfy_quant`` tensors *names* of *path* declares a quantization other than FP8."""
-    for name, tensor in iter_tensors(path, set(names).__contains__):
-        quant_format = json.loads(bytes(tensor.tolist()).decode()).get("format")
-        if quant_format not in ("float8_e4m3fn", "float8_e5m2"):
-            raise ValueError(f"{name} in {path.name} is quantized as {quant_format!r}; only scaled FP8 weights can be read.")
-
-
-def _row_scale(name: str, weight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    """Return *scale* shaped to multiply the FP8 *weight* *name*: a single value, or one value per output row as a column."""
-    import torch
-
-    if weight.dtype not in (torch.float8_e4m3fn, torch.float8_e5m2):
-        raise ValueError(f"{name} has a quantization scale but is {weight.dtype}, not FP8; it cannot be read.")
-    if scale.numel() == 1:
-        return scale.reshape(())
-    if weight.ndim == 2 and scale.numel() == weight.shape[0]:
-        return scale.reshape(-1, 1)
-    raise ValueError(f"The scale of {name} has shape {list(scale.shape)} for a weight of shape {list(weight.shape)}; only per-tensor and per-row FP8 scales are supported.")
 
 
 def nf4_storage_format() -> str:
