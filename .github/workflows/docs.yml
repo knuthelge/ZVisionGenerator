@@ -2,13 +2,8 @@ name: Deploy Docs
 
 on:
   push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - "zensical.toml"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/docs.yml"
+    # Final releases only (v0.13.0); pre-release tags (v0.13.0b1, v0.13.0rc1) do not match.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 permissions:

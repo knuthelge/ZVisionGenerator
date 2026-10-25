@@ -1,6 +1,6 @@
 # Writing docs
 
-These docs are Markdown files in `docs/`, built with [Zensical](https://zensical.org/) from `zensical.toml` and published to GitHub Pages on every push to `main`.
+These docs are Markdown files in `docs/`, built with [Zensical](https://zensical.org/) from `zensical.toml` and published to GitHub Pages when a final release tag is pushed (see [Releasing](releasing.md)). Pre-release tags do not publish docs; run the Deploy Docs workflow by hand to publish between releases.
 
 ```bash
 make docs-serve   # live preview on localhost:8000
