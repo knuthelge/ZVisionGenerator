@@ -37,12 +37,12 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
 | [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 | [Prompt enhancer: model hints, worked examples and a local judge](prompt-enhancer-hints.md) | Proposed | Split out of v3: per-model `enhance_hint` lines from config, one worked example per rewrite mode, and a local judge that ranks bench runs 1 to 5; each measured on the bench |
-| [Documentation for v1](docs-v1.md) | In progress | Zensical replaces MkDocs first; then a four-section site (Web UI, CLI, Concepts, Developer) with hand-written CLI and config references kept complete by tests, and screenshots |
 
 ## Archive
 
 | Proposal | Status | Summary |
 |---|---|---|
+| [Documentation for v1](archive/docs-v1.md) | Done (unreleased) | Zensical replaces MkDocs; a four-section site (Web UI, CLI, Concepts, Developer) with hand-written CLI and config references kept complete by tests, screenshots taken from a throwaway Web UI, a Home hero and a dark site style |
 | [One Gallery, and a viewer that feels native on every device](archive/one-gallery.md) | Done (unreleased) | One gallery store behind the strip, the stage, the Gallery page and the viewer, one route, the strip called Gallery; the viewer on the overlay stack, growing out of its tile and back, a phone pager with a pull-to-close, a swipe-up details sheet, tap-to-hide chrome and a hold menu, right-click menus with a mouse, and a panel over the page on a computer and an iPad |
 | [Stable frames: the frame first, pages remember, anchors do not move](archive/stable-frames.md) | Done (unreleased) | Every page draws its complete frame before its data arrives (placeholder chips, disabled page actions, placeholder tiles), remembers what it loaded across visits and refreshes it behind the frame, and keeps its anchors in place; Back closes the innermost overlay, and grid tiles show only ⋯ on touch with Reuse leading the menu |
 | [Named presets, and a LoRA picker sorted by model](archive/settings-presets.md) | Done (unreleased) | UI-only presets of every Workspace selection, saved as files in the `presets` folder and applied from the Workspace toolbar (first chip on a phone); the Add LoRA menu lists LoRAs made for the selected model first, from a cached, header-only family detection. CLI `--preset`, Copy CLI preset mode, provenance, trigger words, previews, sidecar files and prompt style text dropped |

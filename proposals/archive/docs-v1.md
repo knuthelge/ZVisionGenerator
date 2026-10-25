@@ -1,6 +1,6 @@
 # Documentation for v1: Web UI, CLI, Concepts and Developer
 
-**Status:** In progress (2026-10-22)
+**Status:** Done (unreleased, 2026-10-25). Shipped in c99d830 to 642c197: Zensical, the four-section site, the reference tests, 14 screenshots, the Home hero, the dark theme and section banners.
 
 ## Problem
 
@@ -75,7 +75,7 @@ Material for MkDocs has been in maintenance mode since November 2025: 9.7 was it
 4. **Restructure and fill the gaps.** Done: the four sections are written, with every gap in the audit covered. The content was rewritten as it moved, since most of it needed it.
 5. **Screenshots.** Done for 14 shots with `scripts/docs_screenshots.py` (`make docs-screenshots`) against a throwaway Web UI with its own data folder and Hugging Face cache, verified before capture. The three video shots were dropped for v1; they can come back once the screenshot environment has a video model.
 6. **Drift guards.** Done: `tests/test_docs_reference.py` fails when a CLI option, a config section or a user-facing config key is missing from the reference.
-7. **Fresh-eyes pass.** Follow both tutorials from a clean install on macOS, Windows and Linux.
+7. **Fresh-eyes pass.** Done: both tutorials followed from a clean install on macOS, Windows and Linux.
 
 ### 4. Screenshots: placeholders now, a script later
 
