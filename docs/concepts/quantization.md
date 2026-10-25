@@ -25,7 +25,7 @@ Video uses the same idea through its two models: `ltx-4` and `ltx-8` are LTX-2.3
 
 ## Stored quants
 
-The first time a model runs at `q8` or `q4`, its quantized weights are saved in `~/.ziv/models/` as `<name>@q8` or `<name>@q4`, for example `zit@q8`. Later jobs load that copy instead of quantizing again, so they start faster and never briefly need the unquantized model's memory.
+The first time a model runs at `q8` or `q4`, its quantized weights are saved in `~/.ziv/models/` as `<name>@q8` or `<name>@q4`, for example `zit@q8`. Later jobs load that copy instead of quantizing again, so they start faster. On Windows and Linux they also never briefly need the unquantized model's memory.
 
 The first job shows *Saving a q8 copy…* and takes longer: about 20–30 seconds on macOS, a few minutes on Windows and Linux. The copy needs roughly half (`q8`) or a quarter (`q4`) of the model's disk space.
 

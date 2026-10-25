@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from unittest.mock import MagicMock, call
 
 import pytest
 
-from zvisiongenerator.backends.mac.memory import BUFFER_CACHE_LIMIT_BYTES, apply_buffer_cache_policy, materialize_weights, memory_size_bytes, mlx_cache_limit
+from zvisiongenerator.backends.mac import memory
+from zvisiongenerator.backends.mac.memory import (
+    BUFFER_CACHE_LIMIT_BYTES,
+    apply_buffer_cache_policy,
+    load_resident,
+    materialize_weights,
+    memory_size_bytes,
+    mlx_cache_limit,
+)
 
 
 @pytest.fixture
@@ -53,12 +62,16 @@ class TestMemorySizeBytes:
 
 
 class TestBufferCachePolicy:
-    def test_materialize_weights_evaluates_the_model_parameters(self, mx):
+    def test_materialize_weights_evaluates_each_parameter_array_separately(self, mx, monkeypatch):
+        first, second, third = object(), object(), object()
+        fake_utils = MagicMock(tree_flatten=MagicMock(return_value=[("a.weight", first), ("a.bias", second), ("b.weight", third)]))
+        monkeypatch.setitem(sys.modules, "mlx.utils", fake_utils)
         model = MagicMock()
 
         materialize_weights(model)
 
-        mx.eval.assert_called_once_with(model.parameters.return_value)
+        fake_utils.tree_flatten.assert_called_once_with(model.parameters.return_value)
+        assert mx.eval.call_args_list == [call(first), call(second), call(third)]
 
     def test_policy_caps_the_cache_then_clears_it(self, mx):
         apply_buffer_cache_policy()
@@ -66,7 +79,8 @@ class TestBufferCachePolicy:
         assert [c[0] for c in mx.method_calls] == ["set_cache_limit", "clear_cache"]
         mx.set_cache_limit.assert_called_once_with(BUFFER_CACHE_LIMIT_BYTES)
 
-    def test_materializing_precedes_the_policy_when_both_run(self, mx):
+    def test_materializing_precedes_the_policy_when_both_run(self, mx, monkeypatch):
+        monkeypatch.setitem(sys.modules, "mlx.utils", MagicMock(tree_flatten=MagicMock(return_value=[("w", object())])))
         materialize_weights(MagicMock())
         apply_buffer_cache_policy()
 
@@ -74,3 +88,47 @@ class TestBufferCachePolicy:
 
     def test_buffer_cache_limit_is_four_gib(self):
         assert BUFFER_CACHE_LIMIT_BYTES == 4 * 1024**3
+
+
+class TestLoadResident:
+    @pytest.fixture
+    def order(self, monkeypatch):
+        """Record the cache-limit block and the materialize and policy calls, in order, on one mock."""
+        recorder = MagicMock()
+
+        @contextlib.contextmanager
+        def scope(limit):
+            recorder.enter(limit)
+            try:
+                yield
+            finally:
+                recorder.exit()
+
+        monkeypatch.setattr(memory, "mlx_cache_limit", scope)
+        monkeypatch.setattr(memory, "materialize_weights", recorder.materialize)
+        monkeypatch.setattr(memory, "apply_buffer_cache_policy", recorder.policy)
+        return recorder
+
+    def test_builds_and_materializes_with_the_cache_disabled_then_applies_the_policy(self, order):
+        build = order.build
+
+        loaded = load_resident(build)
+
+        assert loaded is build.return_value
+        assert order.mock_calls == [call.enter(0), call.build(), call.materialize(build.return_value), call.exit(), call.policy()]
+
+    def test_restores_the_cache_limit_and_skips_the_policy_when_the_build_fails(self, order):
+        order.build.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            load_resident(order.build)
+
+        assert order.mock_calls == [call.enter(0), call.build(), call.exit()]
+
+    def test_restores_the_cache_limit_and_skips_the_policy_when_materializing_fails(self, order):
+        order.materialize.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            load_resident(order.build)
+
+        assert order.mock_calls == [call.enter(0), call.build(), call.materialize(order.build.return_value), call.exit()]

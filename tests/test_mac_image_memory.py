@@ -20,8 +20,7 @@ def image_mac(monkeypatch):
     # load_model sets mflux's process-wide precision from mx; restore it so the fake never leaks into other tests.
     monkeypatch.setattr(module.ModelConfig, "precision", module.ModelConfig.precision)
     monkeypatch.setattr(module, "mx", fake_mx)
-    monkeypatch.setattr(module, "materialize_weights", MagicMock(name="materialize_weights"))
-    monkeypatch.setattr(module, "apply_buffer_cache_policy", MagicMock(name="apply_buffer_cache_policy"))
+    monkeypatch.setattr(module, "load_resident", MagicMock(name="load_resident", side_effect=lambda build: build()))
     return module, fake_mx
 
 
@@ -37,15 +36,37 @@ def _load_zimage(module, monkeypatch, *, quantize=None):
     return backend, model
 
 
-def test_load_model_materializes_weights_then_applies_the_buffer_cache_policy(image_mac, monkeypatch):
+def test_load_model_builds_and_upcasts_the_vae_inside_load_resident(image_mac, monkeypatch):
     module, _mx = image_mac
     order = MagicMock()
-    order.attach_mock(module.materialize_weights, "materialize")
-    order.attach_mock(module.apply_buffer_cache_policy, "policy")
+    info = module.ImageModelInfo(family="zimage", is_distilled=False, size=None)
+    monkeypatch.setattr(module, "detect_image_model", lambda _path: info)
+    constructor = MagicMock(name="ZImageTurbo")
+    upcast = MagicMock(name="upcast")
+    order.attach_mock(constructor, "build")
+    order.attach_mock(upcast, "upcast")
 
-    _backend, model = _load_zimage(module, monkeypatch, quantize=8)
+    def load_resident(build):
+        order.resident_enter()
+        loaded = build()
+        order.resident_exit(loaded)
+        return loaded
 
-    assert order.mock_calls == [call.materialize(model), call.policy()]
+    monkeypatch.setattr(module, "load_resident", load_resident)
+    monkeypatch.setattr(module, "_upcast_model_weights", upcast)
+    monkeypatch.setattr(module.ModelConfig, "z_image", MagicMock(return_value="cfg"))
+    monkeypatch.setattr(module, "ZImageTurbo", constructor)
+
+    model, _info = module.MfluxBackend().load_model("/models/zit", quantize=8)
+
+    built = constructor.return_value
+    assert model is built
+    assert order.mock_calls == [
+        call.resident_enter(),
+        call.build(quantize=8, model_path="/models/zit", model_config="cfg"),
+        call.upcast(built, ["vae"]),
+        call.resident_exit(built),
+    ]
 
 
 @pytest.mark.parametrize("skipped", [False, True])

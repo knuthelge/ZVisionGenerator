@@ -49,10 +49,7 @@ class MfluxSeedVR2Upscaler:
         from mflux.models.seedvr2 import SeedVR2
 
         _use_bfloat16_precision()
-        loaded = SeedVR2(quantize=quantize, model_path=model_path, model_config=getattr(ModelConfig, factory)())
-        memory_mac.materialize_weights(loaded)
-        memory_mac.apply_buffer_cache_policy()
-        return loaded
+        return memory_mac.load_resident(lambda: SeedVR2(quantize=quantize, model_path=model_path, model_config=getattr(ModelConfig, factory)()))
 
     def save_model(self, model: Any, path: Path) -> None:
         """Write the loaded model's transformer and VAE weights to *path*."""

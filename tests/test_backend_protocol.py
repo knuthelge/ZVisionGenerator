@@ -389,6 +389,7 @@ class TestIdeogram4MfluxBackend:
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
             monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
+            monkeypatch.setattr(image_mac_module, "load_resident", lambda build: build())
             monkeypatch.setattr(image_mac_module.ModelConfig, "ideogram4_fp8", MagicMock(return_value="ideogram4-config"))
             ideogram_ctor = MagicMock(return_value=MagicMock())
             monkeypatch.setattr(image_mac_module, "Ideogram4", ideogram_ctor)
@@ -697,6 +698,7 @@ class TestIdeogram4MfluxBackend:
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
             monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
+            monkeypatch.setattr(image_mac_module, "load_resident", lambda build: build())
             monkeypatch.setattr(image_mac_module.ModelConfig, "z_image", MagicMock(return_value="zimage-config"))
             zimage_ctor = MagicMock(return_value=generate_model)
             monkeypatch.setattr(image_mac_module, "ZImageTurbo", zimage_ctor)
@@ -741,8 +743,7 @@ class TestKrea2MfluxBackend:
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
             monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
-            monkeypatch.setattr(image_mac_module, "materialize_weights", MagicMock())
-            monkeypatch.setattr(image_mac_module, "apply_buffer_cache_policy", MagicMock())
+            monkeypatch.setattr(image_mac_module, "load_resident", lambda build: build())
             krea2_ctor = MagicMock(return_value=MagicMock())
             monkeypatch.setattr(image_mac_module, "Krea2", krea2_ctor)
 

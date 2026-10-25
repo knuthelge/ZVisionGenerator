@@ -30,7 +30,7 @@ from mlx import nn
 from mlx.utils import tree_map
 
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
-from zvisiongenerator.backends.mac.memory import apply_buffer_cache_policy, materialize_weights
+from zvisiongenerator.backends.mac.memory import load_resident
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.progress_events import preview_milestone_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
@@ -354,54 +354,56 @@ class MfluxBackend:
             lora_kwargs["lora_paths"] = lora_paths
             lora_kwargs["lora_scales"] = lora_weights
 
-        if model_info.family == "flux2_klein":
-            if model_info.size is None:
-                raise ValueError("Could not determine Klein model size. Specify the model explicitly or check the model files.")
-            if model_info.is_distilled:
-                config = ModelConfig.flux2_klein_4b() if model_info.size == "4b" else ModelConfig.flux2_klein_9b()
-            else:
-                config = ModelConfig.flux2_klein_base_4b() if model_info.size == "4b" else ModelConfig.flux2_klein_base_9b()
+        def build() -> Any:
+            """Construct the family's model and upcast the requested weights."""
+            if model_info.family == "flux2_klein":
+                if model_info.size is None:
+                    raise ValueError("Could not determine Klein model size. Specify the model explicitly or check the model files.")
+                if model_info.is_distilled:
+                    config = ModelConfig.flux2_klein_4b() if model_info.size == "4b" else ModelConfig.flux2_klein_9b()
+                else:
+                    config = ModelConfig.flux2_klein_base_4b() if model_info.size == "4b" else ModelConfig.flux2_klein_base_9b()
 
-            model = Flux2Klein(
-                quantize=quantize,
-                model_path=model_path,
-                model_config=config,
-                **lora_kwargs,
-            )
-        elif model_info.family == "zimage":
-            model = ZImageTurbo(
-                quantize=quantize,
-                model_path=model_path,
-                model_config=ModelConfig.z_image(),
-                **lora_kwargs,
-            )
-        elif model_info.family == "ideogram4":
-            # Ideogram 4 Instant: the FP8 transformer, quantized to q4/q8 when asked; no unconditional transformer.
-            with _instant_ideogram4():
-                model = Ideogram4(
+                model = Flux2Klein(
                     quantize=quantize,
                     model_path=model_path,
-                    model_config=ModelConfig.ideogram4_fp8(),
+                    model_config=config,
                     **lora_kwargs,
                 )
-        elif model_info.family == "krea2":
-            model = Krea2(
-                quantize=quantize,
-                model_path=model_path,
-                model_config=_krea2_turbo_config(),
-                **lora_kwargs,
-            )
-        else:
-            raise ValueError(f"Model family '{model_info.family}' is not supported by the mflux backend. Supported families: zimage, flux2_klein, ideogram4, krea2")
+            elif model_info.family == "zimage":
+                model = ZImageTurbo(
+                    quantize=quantize,
+                    model_path=model_path,
+                    model_config=ModelConfig.z_image(),
+                    **lora_kwargs,
+                )
+            elif model_info.family == "ideogram4":
+                # Ideogram 4 Instant: the FP8 transformer, quantized to q4/q8 when asked; no unconditional transformer.
+                with _instant_ideogram4():
+                    model = Ideogram4(
+                        quantize=quantize,
+                        model_path=model_path,
+                        model_config=ModelConfig.ideogram4_fp8(),
+                        **lora_kwargs,
+                    )
+            elif model_info.family == "krea2":
+                model = Krea2(
+                    quantize=quantize,
+                    model_path=model_path,
+                    model_config=_krea2_turbo_config(),
+                    **lora_kwargs,
+                )
+            else:
+                raise ValueError(f"Model family '{model_info.family}' is not supported by the mflux backend. Supported families: zimage, flux2_klein, ideogram4, krea2")
 
-        if precision == "float32":
-            _upcast_model_weights(model, ["transformer", "text_encoder", "vae"])
-        else:
-            # Even in bfloat16 mode, upcast VAE for better color gradients
-            _upcast_model_weights(model, ["vae"])
+            if precision == "float32":
+                _upcast_model_weights(model, ["transformer", "text_encoder", "vae"])
+            else:
+                # Even in bfloat16 mode, upcast VAE for better color gradients
+                _upcast_model_weights(model, ["vae"])
+            return model
 
-        materialize_weights(model)
-        apply_buffer_cache_policy()
+        model = load_resident(build)
 
         self._model_info = model_info
         return model, model_info

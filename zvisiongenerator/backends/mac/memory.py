@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 # Freed buffers MLX may keep for reuse. Its default (the whole memory limit) let the cache grow to 16-29 GB
@@ -57,14 +57,18 @@ def mlx_cache_limit(limit: int) -> Iterator[None]:
 
 
 def materialize_weights(model: Any) -> None:
-    """Evaluate every parameter once so the weights stay resident.
+    """Evaluate every parameter, one array at a time, so the weights stay resident.
 
     mflux loads weights lazily; unevaluated, every generation rebuilds them from the safetensors
     files (and quantizes them again), costing tens of seconds and a near-bf16 memory peak per image.
+    Evaluating array by array keeps the peak near the final weights; one batched evaluation of the
+    whole tree holds noticeably more memory while it runs.
     """
     import mlx.core as mx
+    from mlx.utils import tree_flatten
 
-    mx.eval(model.parameters())
+    for _, parameter in tree_flatten(model.parameters()):
+        mx.eval(parameter)
 
 
 def apply_buffer_cache_policy() -> None:
@@ -73,3 +77,24 @@ def apply_buffer_cache_policy() -> None:
 
     mx.set_cache_limit(BUFFER_CACHE_LIMIT_BYTES)
     mx.clear_cache()
+
+
+def load_resident[T](build: Callable[[], T]) -> T:
+    """Build a model with MLX's buffer cache disabled, keep its weights resident, then cap the cache.
+
+    ``build`` and the weight evaluation run with the buffer cache at 0, so freed buffers (the bf16
+    originals while quantizing) return to the system instead of piling up beside the model. The cache
+    policy is applied after the previous limit is restored. When ``build`` or the evaluation raises,
+    the previous limit is restored and the policy is not applied.
+
+    Args:
+        build: Callable that constructs and returns the model.
+
+    Returns:
+        The model ``build`` returned, with every parameter evaluated.
+    """
+    with mlx_cache_limit(0):
+        model = build()
+        materialize_weights(model)
+    apply_buffer_cache_policy()
+    return model

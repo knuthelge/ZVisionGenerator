@@ -66,8 +66,7 @@ def seedvr2_mac(monkeypatch):
     monkeypatch.setattr(ModelConfig, "precision", "other")
     seedvr2_class = MagicMock(name="SeedVR2")
     monkeypatch.setattr(mflux_seedvr2, "SeedVR2", seedvr2_class)
-    monkeypatch.setattr(module.memory_mac, "materialize_weights", MagicMock(name="materialize_weights"))
-    monkeypatch.setattr(module.memory_mac, "apply_buffer_cache_policy", MagicMock(name="apply_buffer_cache_policy"))
+    monkeypatch.setattr(module.memory_mac, "load_resident", MagicMock(name="load_resident", side_effect=lambda build: build()))
     return module, seedvr2_class, ModelConfig
 
 
@@ -93,13 +92,13 @@ class TestMfluxSeedVR2Upscaler:
 
         assert seedvr2_class.call_args.kwargs["model_config"] == model_config.seedvr2_3b()
 
-    def test_load_model_keeps_weights_resident_then_applies_the_cache_policy(self, seedvr2_mac):
+    def test_load_model_builds_the_model_through_load_resident(self, seedvr2_mac):
         module, seedvr2_class, _model_config = seedvr2_mac
 
-        module.MfluxSeedVR2Upscaler().load_model("seedvr2-3b", quantize=8, model_path="/m")
+        loaded = module.MfluxSeedVR2Upscaler().load_model("seedvr2-3b", quantize=8, model_path="/m")
 
-        module.memory_mac.materialize_weights.assert_called_once_with(seedvr2_class.return_value)
-        module.memory_mac.apply_buffer_cache_policy.assert_called_once_with()
+        module.memory_mac.load_resident.assert_called_once()
+        assert loaded is seedvr2_class.return_value
 
     def test_load_model_sets_bfloat16_precision(self, seedvr2_mac):
         import mlx.core as mx
