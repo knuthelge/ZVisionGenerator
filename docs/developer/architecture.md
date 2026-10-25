@@ -69,8 +69,7 @@ The server is FastAPI. It serves the built Svelte app from `web/static/app/` and
 | Models, LoRAs, stored quants | `~/.ziv/models/`, `~/.ziv/loras/` | `utils/paths.py`, `utils/stored_quant.py` |
 | Hugging Face downloads | The Hugging Face cache | `downloads/`, `utils/hf_cache.py` |
 | User settings | `~/.ziv/config.yaml` | `utils/config.py`, `web/config_contract.py` |
-| Gallery and LoRA index | `~/.ziv/ziv.sqlite3` | `utils/app_db.py`, `web/gallery_index.py`, `web/lora_index.py`. See [App database](app-database.md) |
+| Gallery and LoRA index, job log | `~/.ziv/ziv.sqlite3` | `utils/app_db.py`, `web/gallery_index.py`, `web/lora_index.py`, `web/job_log.py`. See [App database](app-database.md) |
 | Presets | `~/.ziv/presets/` | `web/presets.py`. See [Settings presets](web-server.md#settings-presets) |
-| Job log | `~/.ziv/jobs.jsonl` | `web/job_log.py` |
 | Error logs | `~/.ziv/logs/` | `utils/app_log.py` |
 | Settings of each output | Inside the PNG or MP4 | `utils/provenance.py` |

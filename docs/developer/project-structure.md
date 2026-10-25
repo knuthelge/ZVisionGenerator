@@ -179,7 +179,7 @@ zvisiongenerator/
 │   ├── gallery_index.py           Gallery component of the app database: facts read from gallery files, reconciled with the folder on each listing
 │   ├── instances.py               Record running Web UI servers for --background and --background-stop
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
-│   ├── job_log.py                 Persisted log of finished jobs: entry builder, filters, paging and the capped JSON-lines store
+│   ├── job_log.py                 Job log component of the app database: entry builder, filters, paging and the `jobs_entries` store
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
 │   ├── lora_index.py              LoRA component of the app database: the cached family of each LoRA file, detected from its header when first seen
 │   ├── lora_fit.py                Size the LoRAs a Web UI memory estimate covers (MiniMax H3 only), resolved as a job resolves them

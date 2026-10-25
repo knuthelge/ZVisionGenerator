@@ -50,8 +50,7 @@ Raise `ValueError`, `FileNotFoundError` or `RuntimeError` with a descriptive mes
 
 ### Fixtures that protect your data
 
-- `_isolated_app_db` (autouse) points the app database at a per-test folder, so no test touches the real `ziv.sqlite3`. Files a test creates are under 2 seconds old, and the gallery index never persists those; to test caching, backdate them with `os.utime` (or pass `clock=` to `GalleryIndex`) and count reader calls.
-- An autouse fixture points `job_log.get_ziv_data_dir` at a temporary folder, so no test writes the real job log.
+- `_isolated_app_db` (autouse) points the app database at a per-test folder, so no test touches the real `ziv.sqlite3`, the job log included. Files a test creates are under 2 seconds old, and the gallery index never persists those; to test caching, backdate them with `os.utime` (or pass `clock=` to `GalleryIndex`) and count reader calls.
 - `_presets_in_tmp` (autouse) points the presets folder at a temporary data folder, so no test reads or writes the real `~/.ziv/presets`.
 - Never run the real memory cleanup: patch `zvisiongenerator.preflight.release_accelerator_memory` (and `zvisiongenerator.web.web_runner.release_accelerator_memory` for web jobs), or pass `release_memory=` to `run_preflight`.
 

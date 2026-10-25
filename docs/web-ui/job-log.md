@@ -26,4 +26,4 @@ A row shows the workflow, the model, the first line of the prompt, how long the 
 
 ## What is kept
 
-The log is kept on disk in `jobs.jsonl` in the [data folder](../concepts/data-folder.md#job-log), so it survives a restart. Jobs removed from the queue before they started are not recorded.
+The log is kept in the app database in the [data folder](../concepts/data-folder.md#job-log), so it survives a restart. Entries stay until you delete them or clear the log. Jobs removed from the queue before they started are not recorded.

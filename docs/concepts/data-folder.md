@@ -11,8 +11,7 @@ Everything the app keeps lives in one folder, `~/.ziv/`. It survives an update, 
 ├── logs/            The error log of each command
 ├── run/             Running Web UI servers
 ├── config.yaml      Your settings
-├── jobs.jsonl       The Web UI's job log
-└── ziv.sqlite3      The Web UI's app database
+└── ziv.sqlite3      The Web UI's app database: the Gallery index and the job log
 ```
 
 Models downloaded from Hugging Face, such as the built-in aliases, are kept in the Hugging Face cache (`~/.cache/huggingface/hub` by default), which other tools share.
@@ -66,14 +65,16 @@ Attach the log when you [report a bug](troubleshooting.md#report-a-problem).
 
 ## Job log
 
-The Web UI keeps a record of finished jobs, with the reason each failed, in `jobs.jsonl`. Unlike the error log it is kept across restarts. Past 2000 jobs, only the newest 1500 are kept. Clear it with **Clear log** in the [Job log](../web-ui/job-log.md), or delete the file while the server is stopped.
+The Web UI keeps a record of finished jobs, with the reason each failed, in the [app database](#app-database). Unlike the error log it is kept across restarts, and entries are kept until you remove them with **Delete** or **Clear log** in the [Job log](../web-ui/job-log.md).
+
+A `jobs.jsonl` file left in the data folder by an earlier version is no longer used; delete it when you like. Jobs recorded in it are not carried over.
 
 ## App database
 
-`ziv.sqlite3` holds the Gallery index: what was read from each file in the output folder, so the Gallery opens fast after a restart. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` sit beside it.
+`ziv.sqlite3` holds the Gallery index and the [job log](#job-log). The Gallery index is what was read from each file in the output folder, so the Gallery opens fast after a restart. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` sit beside it.
 
-- It rebuilds itself, so deleting it while the server is stopped is safe; the next Gallery load reads every file once.
+- The Gallery index rebuilds itself, so deleting the database while the server is stopped is safe for the Gallery; the next Gallery load reads every file once. The job log is not rebuilt, so deleting the database also clears it.
 - Files you delete, in the app or in the folder, are never shown.
 - Files the CLI writes to the output folder are picked up on the next load.
 - Several Web UIs, even different versions, can share it.
-- If it's ever found damaged, it is moved aside as `ziv.sqlite3.corrupt-<date>-<time>` and a new one is started. Delete those copies when you don't need them.
+- If it's ever found damaged, it is moved aside as `ziv.sqlite3.corrupt-<date>-<time>` and a new one is started with an empty job log; the old jobs stay in that copy. Delete those copies when you don't need them.

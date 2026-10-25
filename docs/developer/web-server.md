@@ -14,17 +14,17 @@ Downloads started from the Models page take a second path: `DownloadLane` (`web/
 
 ## Job log
 
-`web/job_log.py` keeps a log of finished jobs in `jobs.jsonl` in the ZIV data directory, one JSON object per line, oldest first. `WebRunner` takes it as the `job_log` argument and writes nothing without one.
+`web/job_log.py` is the `jobs` component of the [app database](app-database.md): one row per finished job in `jobs_entries_v1`, ordered by `seq`. `server.py` builds it as `JobLog(app_db.app_db_path)`. `WebRunner` takes it as the `job_log` argument and writes nothing without one.
 
 - **Which jobs.** Only image, video and upscale jobs that started (`started_at` is set) are logged. A job removed from the queue never started, and `dummy` jobs are not generation jobs, so neither is logged.
-- **Once only.** A job is logged when it first reaches a terminal status (`completed_at` still unset). A later terminal event changes the in-memory status but writes no second line, so the log keeps the first outcome.
+- **Once only.** A job is logged when it first reaches a terminal status (`completed_at` still unset). A later terminal event changes the in-memory status but writes no second entry, so the log keeps the first outcome.
 - **Where the write happens.** `_publish_event` copies the plain facts of the job under `record.lock` and writes last, after the subscriber fan-out and the release of the claim, holding no lock. Every logged terminal is published on the worker thread, so the write never blocks the event loop; the routes of the log are plain `def` and run in the threadpool. If a future change logs queue removals, the write must move off the loop.
 - **Failures never reach the job.** Building the entry and writing it share one `try/except Exception` that only emits a `UserWarning`, so the terminal event, the claim release and the next queued job do not depend on the log.
 - **Partial failures.** The record counts `generation_finished` events with `status: "failed"` (`failed_runs`) and keeps the last reason. A job that still ends `completed` or `cancelled` keeps that status, and the `failed` filter of `GET /api/jobs/log` matches it through `failed_runs`.
-- **Storage.** Every change (append, delete, clear) reads the file, edits the entries and replaces it with `write_text_atomic` under one lock, so a reader never sees a partial line. Lines that are blank, not JSON, not an object or without a string `job_id` are skipped on read and dropped on the next rewrite. Past 2000 entries only the newest 1500 are kept.
-- **Best effort.** Two `ziv ui` servers on one data directory race on the rewrite and can lose an entry. A server stopped while a job runs may exit before the worker writes that job's line.
-- **Routes.** `GET /api/jobs/log` (50 per page, newest first, `status` filter), `DELETE /api/jobs/log/{job_id}` and `DELETE /api/jobs/log` are declared before the `/api/jobs/{job_id}/...` routes. A file system error from the store is a 500 with a `detail`.
-- **Tests.** An autouse fixture in `tests/conftest.py` points `job_log.get_ziv_data_dir` at a temporary directory, so no test writes the real log.
+- **Storage.** Each row holds `job_id` and the entry's JSON text as `json.dumps(entry, ensure_ascii=False, default=str)` wrote it, so a listing returns what was written (key order, `100.0`). A listing reads every row and filters and pages with `page_entries` / `matches_status`. Each operation uses its own connection, writes run in `app_db.transaction`, and there is no lock. Rows are never trimmed; they stay until `delete` or `clear` removes them.
+- **Best effort.** Two `ziv ui` servers on one data directory share the table safely. A server stopped while a job runs may exit before the worker writes that job's entry. A damaged database is quarantined whole and the log restarts empty, with the old rows kept in the `.corrupt-*` file.
+- **Routes.** `GET /api/jobs/log` (50 per page, newest first, `status` filter), `DELETE /api/jobs/log/{job_id}` and `DELETE /api/jobs/log` are declared before the `/api/jobs/{job_id}/...` routes. Every storage failure, and a jobs schema newer than this ziv, reaches the routes as `JobLogError` and becomes a 500 with `Could not read or write the job log: <reason>`.
+- **Tests.** The autouse `_isolated_app_db` fixture points the app database, and so the job log, at a temporary directory.
 
 ## Video upscale jobs
 
