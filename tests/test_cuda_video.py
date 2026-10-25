@@ -530,7 +530,7 @@ def test_load_model_rejects_missing_cuda(monkeypatch):
 
 @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
 def test_missing_cuda_error_asks_for_a_driver_update_only_for_cuda_13_builds(monkeypatch, cuda_version, expects_hint):
-    from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+    from zvisiongenerator.backends.cuda.driver import CUDA_INSTALL_COMMAND, cuda_driver_hint
 
     backend = DiffusersVideoBackend()
     monkeypatch.setattr(
@@ -538,10 +538,11 @@ def test_missing_cuda_error_asks_for_a_driver_update_only_for_cuda_13_builds(mon
         lambda: _make_runtime(torch=_FakeTorch(cuda_available=False, cuda_version=cuda_version)),
     )
 
-    with pytest.raises(RuntimeError, match="CUDA is not available") as excinfo:
+    with pytest.raises(RuntimeError, match="CUDA") as excinfo:
         backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v")
 
     assert (cuda_driver_hint(False, "13.0") in str(excinfo.value)) is expects_hint
+    assert (CUDA_INSTALL_COMMAND in str(excinfo.value)) is (cuda_version is None)
 
 
 def test_load_model_prefers_runtime_classes_and_configures_pipeline(monkeypatch):

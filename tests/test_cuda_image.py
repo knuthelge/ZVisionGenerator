@@ -219,19 +219,20 @@ class TestLoadModelCudaCheck:
 
 
 class TestLoadModelDriverHint:
-    """The CUDA error asks for a newer driver only when this PyTorch build uses CUDA 13 or newer."""
+    """The CUDA error asks for a newer driver only for a CUDA 13 build, and for a reinstall when the build has no CUDA."""
 
     @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
     def test_hint_follows_the_cuda_version_of_the_build(self, win_backend_no_cuda, cuda_version, expects_hint):
-        from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+        from zvisiongenerator.backends.cuda.driver import CUDA_INSTALL_COMMAND, cuda_driver_hint
 
         mod, torch_mod, _ = win_backend_no_cuda
         torch_mod.version.cuda = cuda_version
 
-        with pytest.raises(RuntimeError, match="CUDA is not available") as excinfo:
+        with pytest.raises(RuntimeError, match="CUDA") as excinfo:
             mod.DiffusersBackend().load_model("fake-model-path")
 
         assert (cuda_driver_hint(False, "13.0") in str(excinfo.value)) is expects_hint
+        assert (CUDA_INSTALL_COMMAND in str(excinfo.value)) is (cuda_version is None)
 
 
 class TestIdeogram4:

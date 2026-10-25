@@ -20,7 +20,7 @@
 On every platform:
 
 - Python 3.14 or newer.
-- [uv](https://docs.astral.sh/uv/). The package can't be installed with pip, because some of its dependencies need uv's resolver.
+- [uv](https://docs.astral.sh/uv/). Every command here uses it, and a checkout needs it: uv's resolver is what picks the CUDA build of PyTorch there.
 - Disk space for models: an image model is a 16–36 GB download, and a video model up to about 107 GB (MiniMax H3 on macOS). The [Models](concepts/models.md) page lists each one's size.
 
 ## Install
@@ -30,6 +30,18 @@ uv tool install z-vision-generator
 ```
 
 This puts the commands on your path: `ziv`, `ziv-ui`, `ziv-image`, `ziv-video` and `ziv-model`.
+
+!!! warning "Windows: add PyTorch's CUDA index"
+
+    PyPI's PyTorch for Windows has no CUDA, so an install from PyPI alone ends with "CUDA is not available" even on an NVIDIA GPU. Point uv at PyTorch's CUDA index as well:
+
+    ```bash
+    uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match
+    ```
+
+    The index strategy lets uv take PyTorch from that index and everything else from PyPI at its newest version.
+
+    Linux gets a CUDA build from PyPI and needs no extra index. macOS has no CUDA and needs none.
 
 ??? note "Other ways to install"
 

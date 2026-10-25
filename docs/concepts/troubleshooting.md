@@ -2,9 +2,9 @@
 
 ## Installing and starting
 
-### `pip install` fails
+### Installed with pip
 
-The package can't be installed with pip. Install with [uv](https://docs.astral.sh/uv/): `uv tool install z-vision-generator`. Some dependencies need uv's resolver.
+The docs and the error messages assume [uv](https://docs.astral.sh/uv/): `uv tool install z-vision-generator`. A pip install from PyPI resolves the same packages, but a checkout needs uv, whose resolver picks the CUDA build of PyTorch.
 
 ### `ziv ui` says Web UI packages are missing
 
@@ -23,6 +23,8 @@ Start it with `ziv ui --host local` and use the network address it prints. To re
 ### "CUDA is not available"
 
 Generation on Windows and Linux needs an NVIDIA GPU that PyTorch can see; there is no CPU fallback. Check that `nvidia-smi` lists your GPU. When the message mentions the driver, install NVIDIA driver 580 or newer.
+
+When the message says the installed PyTorch has no CUDA, the install came from PyPI alone, whose Windows PyTorch is CPU-only. The message shows the install command with PyTorch's CUDA index, as does [the Install page](../install.md).
 
 The prompt enhancer does run on the CPU without CUDA, but slowly.
 

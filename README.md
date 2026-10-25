@@ -31,14 +31,16 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 ## Install
 
-Requires Python 3.14+, [uv](https://docs.astral.sh/uv/) (pip is not supported), and [ffmpeg](https://ffmpeg.org/) for video. On Windows and Linux: an RTX 20-series or newer NVIDIA GPU with driver 580 or newer.
+Requires Python 3.14+, [uv](https://docs.astral.sh/uv/), and [ffmpeg](https://ffmpeg.org/) for video. On Windows and Linux: an RTX 20-series or newer NVIDIA GPU with driver 580 or newer.
 
 ```bash
 uv tool install z-vision-generator
 ziv ui
 ```
 
-The Web UI opens in your browser and offers to download an image model picked for your machine. See [Install](https://knuthelge.github.io/ZVisionGenerator/install/) for the details.
+On Windows, add PyTorch's CUDA index to the install command; PyPI's PyTorch for Windows has no CUDA. See [Install](https://knuthelge.github.io/ZVisionGenerator/install/) for the command and the details.
+
+The Web UI opens in your browser and offers to download an image model picked for your machine.
 
 ## Quick start
 
