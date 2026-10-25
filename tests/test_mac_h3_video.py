@@ -10,7 +10,6 @@ import re
 import sys
 import types
 import wave
-import weakref
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -136,43 +135,31 @@ def _provider_key_pattern() -> re.Pattern[str]:
 # ---- Fake minimax_h3_mlx and mlx -------------------------------------------------------------------------------------
 
 
-class _FakeEncoder:
-    """The fork's text encoder: ``encode`` returns ``(embeddings, tags)``."""
-
-    def __init__(self, events: list) -> None:
-        self.events = events
-
-    def encode(self, prompt: str, images: list | None = None) -> tuple[str, str]:
-        self.events.append("encode")
-        return ("embeds", "tags")
-
-
 def _grid(count: int) -> int:
     """Round *count* up to the 17 * n + 5 grid, as the fork does."""
     return max(0, -(-(count - 5) // 17)) * 17 + 5
 
 
-class _FakePipeline:
-    """Stands in for ``MiniMaxH3Pipeline``: reads ``self.text_encoder`` once, as the fork does, then returns a clip."""
+def _clip(env: SimpleNamespace, frames: int, height: int, width: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return a fake clip: frame *k* is filled with ``k % 256`` and the audio is a ramp of ``k / 100000``."""
+    video = np.stack([np.full((height, width, 3), index % 256, dtype=np.uint8) for index in range(frames)])
+    samples = round(frames / 24 * env.sample_rate)
+    audio = np.tile((np.arange(samples, dtype=np.float32) / 100000)[None], (2, 1))
+    return video, audio
 
-    def __init__(self, env: SimpleNamespace, encoder: _FakeEncoder) -> None:
+
+class _FakePipeline:
+    """Stands in for the fork's low-memory ``MiniMaxH3Pipeline``: records its call and returns a clip."""
+
+    def __init__(self, env: SimpleNamespace) -> None:
         self.env = env
-        self.text_encoder = encoder
 
     def __call__(self, prompt: str, **kwargs: Any) -> SimpleNamespace:
         env = self.env
         env.calls.append({"prompt": prompt, **kwargs})
-        env.encoder_type = type(self.text_encoder)
-        self.text_encoder.encode(prompt, kwargs.get("images"))
-        env.encoder_alive_while_denoising = env.encoder_ref() is not None
-        env.events.append("denoise")
         if env.fail_in_call:
             raise RuntimeError("out of memory")
-        frames = _grid(round(kwargs["duration_seconds"] * 24))
-        height, width = kwargs["height"], kwargs["width"]
-        video = np.stack([np.full((height, width, 3), index % 256, dtype=np.uint8) for index in range(frames)])
-        samples = round(frames / 24 * env.sample_rate)
-        audio = np.tile((np.arange(samples, dtype=np.float32) / 100000)[None], (2, 1))
+        video, audio = _clip(env, _grid(round(kwargs["duration_seconds"] * 24)), kwargs["height"], kwargs["width"])
         return SimpleNamespace(video=video, audio=audio, sample_rate=env.sample_rate)
 
 
@@ -180,17 +167,14 @@ class _FakePipeline:
 def env(tmp_path, monkeypatch):
     """Fake ``minimax_h3_mlx`` (pipeline and converter) and ``mlx.core`` in ``sys.modules``, plus the files a load resolves."""
     state = SimpleNamespace(
-        events=[],
         calls=[],
+        staged=[],
         loads=[],
         converts=[],
         limits=[],
         released=0,
         sample_rate=32000,
         fail_in_call=False,
-        encoder_ref=lambda: None,
-        encoder_alive_while_denoising=None,
-        encoder_type=None,
         tmp=tmp_path,
     )
 
@@ -198,9 +182,7 @@ def env(tmp_path, monkeypatch):
         @classmethod
         def from_pretrained(cls, **kwargs: Any) -> _FakePipeline:
             state.loads.append(kwargs)
-            encoder = _FakeEncoder(state.events)
-            state.encoder_ref = weakref.ref(encoder)
-            return _FakePipeline(state, encoder)
+            return _FakePipeline(state)
 
     def convert(source: Path, output: Path, *, bits: int, group_size: int, num_layers: int) -> dict:
         state.converts.append((source, output, bits, group_size, num_layers))
@@ -212,8 +194,6 @@ def env(tmp_path, monkeypatch):
         return {}
 
     mx = types.ModuleType("mlx.core")
-    mx.eval = lambda *args: state.events.append("eval") or state.limits.append(("eval", args))
-    mx.clear_cache = lambda: state.events.append("clear_cache")
     mx.set_cache_limit = lambda value: state.limits.append(("cache", value)) or 111
     mx.set_memory_limit = lambda value: state.limits.append(("memory", value)) or 222
     mlx = types.ModuleType("mlx")
@@ -227,6 +207,17 @@ def env(tmp_path, monkeypatch):
     for name, module in (("mlx", mlx), ("mlx.core", mx), ("minimax_h3_mlx", package), ("minimax_h3_mlx.pipeline", pipeline_module), ("minimax_h3_mlx.quantize_text_encoder", quantize_module)):
         monkeypatch.setitem(sys.modules, name, module)
 
+    def generate_conditioned(**kwargs: Any) -> tuple[np.ndarray, np.ndarray, int]:
+        state.staged.append(kwargs)
+        if state.fail_in_call:
+            raise RuntimeError("out of memory")
+        total = kwargs["schedule"].forwards
+        for done in range(1, total + 1):
+            kwargs["step_callback"](done, total)
+        video, audio = _clip(state, _grid(kwargs["frames"]), kwargs["height"], kwargs["width"])
+        return video, audio, state.sample_rate
+
+    monkeypatch.setattr(h3_video, "generate_conditioned", generate_conditioned)
     state.files = _make_files(tmp_path)
     monkeypatch.setattr(h3_video, "resolve_mlx_files", lambda *_a, **_k: state.files)
     monkeypatch.setattr(h3_video, "release_memory", lambda: setattr(state, "released", state.released + 1))
@@ -593,6 +584,16 @@ class TestConvertedFolder:
         assert model.text_encoder_dir.name == "h3@mlx-te4"
         assert model.files.text_encoder_source == stock.text_encoder_source  # stock's files, so stock's copy stays current
 
+    def test_the_staged_image_path_passes_no_adapter(self, env, written, tmp_path, monkeypatch):
+        stock = _make_files(tmp_path / "stock")
+        monkeypatch.setattr(h3_video, "snapshot_with", lambda files, download: stock.fl2va_dir.parent)
+        model, _ = H3MlxVideoBackend().load_model(self._converted(tmp_path), mode="i2v", preset=PRESET, lora=LORA, lora_scale=TURBO_SCALE, models_dir=env.tmp / "models")
+        H3MlxVideoBackend().image_to_video(model, _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+
+        call = env.staged[0]
+        assert (call["turbo_lora_path"], call["turbo_lora_alpha"], call["turbo_lora_scale"]) == (None, None, 1.0)
+        assert call["text_encoder_dir"].name == "h3@mlx-te4"
+
     def test_a_folder_converted_on_windows_or_linux_is_refused(self, env, tmp_path):
         with pytest.raises(RuntimeError):
             H3MlxVideoBackend().load_model(self._converted(tmp_path, "nf4-folded"), preset=PRESET, lora=LORA, lora_scale=TURBO_SCALE, models_dir=env.tmp / "models")
@@ -624,8 +625,6 @@ class TestTextToVideo:
         assert call["duration_seconds"] == pytest.approx(124 / 24)
         assert call["num_inference_steps"] == 9
         assert (call["seed"], call["height"], call["width"]) == (7, 32, 64)
-        assert call["images"] is None
-        assert call["keyframe_anchors"] == ()
 
     @pytest.mark.parametrize(("steps", "expected"), [(4, 5), (8, 9)])
     def test_the_sigma_grid_has_one_point_more_than_the_forwards(self, env, written, tmp_path, steps, expected):
@@ -643,10 +642,9 @@ class TestTextToVideo:
         assert written.wav == (2, 32000, round(22 / 24 * 32000))
         assert [p.name for p in output.parent.iterdir()] == ["out.mp4"]
 
-    def test_the_text_encoder_is_left_alone_without_images(self, env, written, tmp_path):
+    def test_runs_the_fork_pipeline_not_the_staged_path(self, env, written, tmp_path):
         H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-        assert env.encoder_type is _FakeEncoder
-        assert "clear_cache" not in env.events
+        assert len(env.loads) == 1 and env.staged == []
 
     def test_progress_fires_at_the_start_and_the_end(self, env, written, tmp_path):
         events = []
@@ -679,29 +677,26 @@ class TestTextToVideo:
 
 
 class TestImageToVideo:
-    def test_loads_for_images_and_replaces_the_text_encoder_with_the_one_shot_proxy(self, env, written, tmp_path):
+    def test_runs_the_staged_path_with_the_models_files_and_the_clip_settings(self, env, written, tmp_path):
         model = _load(env, mode="i2v")
         H3MlxVideoBackend().image_to_video(model, _image(tmp_path / "a.png", (100, 50)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
 
-        kwargs = env.loads[0]
-        assert (kwargs["low_memory"], kwargs["load_vision"], kwargs["stream_blocks"]) == (False, True, True)
-        assert env.encoder_type is h3_video._OneShotTextEncoder
-
-    def test_encodes_once_evaluates_drops_the_encoder_and_clears_the_cache_before_denoising(self, env, written, tmp_path):
-        model = _load(env, mode="i2v")
-        H3MlxVideoBackend().image_to_video(model, _image(tmp_path / "a.png", (100, 50)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-
-        assert env.events == ["encode", "eval", "clear_cache", "denoise"]
-        assert env.encoder_alive_while_denoising is False
-        assert env.encoder_ref() is None
+        assert env.loads == []
+        call = env.staged[0]
+        assert call["fl2va_dir"] == env.files.fl2va_dir
+        assert call["transformer_dir"] == env.files.transformer_dir
+        assert call["text_encoder_dir"] == env.tmp / "models" / "h3@mlx-te4"
+        assert (call["turbo_lora_path"], call["turbo_lora_alpha"], call["turbo_lora_scale"]) == (env.files.lora_file, TURBO_SCALE * TURBO_RANK, 1.0)
+        assert call["schedule"] == PRESET.schedules[8]
+        assert (call["prompt"], call["width"], call["height"], call["frames"], call["seed"], call["verbose"]) == ("a fox", 64, 32, 22, 7, True)
 
     def test_passes_one_fitted_first_frame_with_its_anchor(self, env, written, tmp_path):
         model = _load(env, mode="i2v")
         H3MlxVideoBackend().image_to_video(model, _image(tmp_path / "a.png", (100, 50)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
 
-        call = env.calls[0]
+        call = env.staged[0]
         assert [image.size for image in call["images"]] == [(64, 32)]
-        assert call["keyframe_anchors"] == ("first",)
+        assert list(call["anchors"]) == ["first"]
 
     def test_the_image_is_centre_cropped_not_stretched(self, env, written, tmp_path):
         wide = Image.new("RGB", (128, 32), (0, 0, 255))
@@ -709,7 +704,7 @@ class TestImageToVideo:
         wide.save(tmp_path / "wide.png")
         H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), str(tmp_path / "wide.png"), "a fox", 32, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
 
-        fitted = np.asarray(env.calls[0]["images"][0])
+        fitted = np.asarray(env.staged[0]["images"][0])
         assert fitted.shape == (32, 32, 3)
         assert (fitted[:, 4:28, 0] > 200).all() and (fitted[:, 4:28, 2] < 60).all()
 
@@ -719,54 +714,39 @@ class TestImageToVideo:
             model, _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), end_image=_image(tmp_path / "b.png", (32, 64), (0, 0, 255))
         )
 
-        call = env.calls[0]
-        assert call["keyframe_anchors"] == ("first", "last")
+        call = env.staged[0]
+        assert list(call["anchors"]) == ["first", "last"]
         assert [image.size for image in call["images"]] == [(64, 32), (64, 32)]
+
+    def test_progress_runs_from_zero_to_the_forward_count_in_every_image_mode_step(self, env, written, tmp_path):
+        events = []
+        H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 4, str(tmp_path / "out.mp4"), step_callback=events.append)
+
+        assert events == [{"phase": "video_generate", "current_step": step, "total_steps": 4} for step in range(5)]
 
     def test_a_model_loaded_for_text_to_video_refuses_images(self, env, written, tmp_path):
         with pytest.raises(ValueError, match="text-to-video"):
             H3MlxVideoBackend().image_to_video(_load(env, mode="t2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-        assert env.loads == []
+        assert env.loads == [] and env.staged == []
 
     def test_upscale_is_refused(self, env, written, tmp_path):
         with pytest.raises(ValueError, match="upscale"):
             H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), stage1_steps=4)
 
-    def test_the_limits_are_left_alone_in_image_modes(self, env, written, tmp_path):
+    def test_the_mlx_limits_are_set_for_the_run_and_restored(self, env, written, tmp_path):
         H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-        assert [limit for limit in env.limits if limit[0] in ("cache", "memory")] == []
+        assert env.limits == [("cache", 0), ("memory", 16_000_000_000), ("cache", 111), ("memory", 222)]
 
+    def test_a_failure_restores_the_limits_releases_memory_and_still_raises(self, env, written, tmp_path):
+        env.fail_in_call = True
+        with pytest.raises(RuntimeError, match="out of memory"):
+            H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+        assert env.limits[-2:] == [("cache", 111), ("memory", 222)]
+        assert env.released == 1
 
-class TestOneShotProxy:
-    def test_the_second_encode_raises(self):
-        events = []
-        mx = SimpleNamespace(eval=lambda outputs: events.append(("eval", outputs)), clear_cache=lambda: events.append("clear_cache"))
-        proxy = h3_video._OneShotTextEncoder(_FakeEncoder(events), mx)
-
-        assert proxy.encode("a fox", None) == ("embeds", "tags")
-        with pytest.raises(RuntimeError, match="one encode"):
-            proxy.encode("a fox", None)
-        assert events == ["encode", ("eval", ("embeds", "tags")), "clear_cache"]
-
-    def test_the_encoder_is_dropped_even_when_it_fails(self):
-        class Failing:
-            def encode(self, prompt, images=None):
-                raise ValueError("bad prompt")
-
-        cleared = []
-        mx = SimpleNamespace(eval=lambda outputs: None, clear_cache=lambda: cleared.append(True))
-        encoder = Failing()
-        reference = weakref.ref(encoder)
-        proxy = h3_video._OneShotTextEncoder(encoder, mx)
-        del encoder
-
-        with pytest.raises(ValueError, match="bad prompt"):
-            proxy.encode("a fox")
-        gc.collect()
-        assert reference() is None
-        assert cleared == [True]
-        with pytest.raises(RuntimeError, match="one encode"):
-            proxy.encode("a fox")
+    def test_releases_memory_after_a_clip(self, env, written, tmp_path):
+        H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+        assert env.released == 1
 
 
 # ---- Extend ----------------------------------------------------------------------------------------------------------
@@ -790,7 +770,7 @@ class TestExtend:
         segment, segment_dir, _ = _extend(env, tmp_path, written, monkeypatch, extend_frames=51)
 
         # 52 frames are asked for: the next clip length on the 17n + 5 grid is 56; frame 0 repeats the anchor and is dropped.
-        assert env.calls[0]["duration_seconds"] == pytest.approx(56 / 24)
+        assert env.staged[0]["frames"] == 56
         assert written.frames.shape == (51, 32, 64, 3)
         assert [int(frame[0, 0, 0]) for frame in written.frames] == list(range(1, 52))
         assert segment == ExtendSegment(video_path=segment_dir / "segment.mp4", audio_path=segment_dir / "segment.wav", lead_samples=0)
@@ -798,20 +778,17 @@ class TestExtend:
     @pytest.mark.parametrize(("extend", "window"), [(17, 22), (34, 39), (51, 56), (68, 73)])
     def test_the_window_is_the_next_grid_length_above_extend_plus_one(self, env, written, tmp_path, monkeypatch, extend, window):
         _extend(env, tmp_path, written, monkeypatch, extend_frames=extend)
-        assert round(env.calls[0]["duration_seconds"] * 24) == window
+        assert env.staged[0]["frames"] == window
         assert written.frames.shape[0] == extend
 
-    def test_pins_the_last_source_frame_as_the_first_anchor_in_the_image_mode_pipeline(self, env, written, tmp_path, monkeypatch):
+    def test_pins_the_last_source_frame_as_the_first_anchor_on_the_staged_path(self, env, written, tmp_path, monkeypatch):
         _, _, tail = _extend(env, tmp_path, written, monkeypatch)
 
-        call = env.calls[0]
-        assert call["keyframe_anchors"] == ("first",)
+        call = env.staged[0]
+        assert list(call["anchors"]) == ["first"]
         assert (call["height"], call["width"], call["seed"]) == (32, 64, 3)
         assert np.array_equal(np.asarray(call["images"][0]), tail[-1])
-        kwargs = env.loads[0]
-        assert (kwargs["low_memory"], kwargs["load_vision"]) == (False, True)
-        assert env.encoder_type is h3_video._OneShotTextEncoder
-        assert env.events == ["encode", "eval", "clear_cache", "denoise"]
+        assert env.loads == []
 
     def test_the_audio_is_cut_to_the_new_frames_and_written_at_the_joins_rate(self, env, written, tmp_path, monkeypatch):
         _, segment_dir, _ = _extend(env, tmp_path, written, monkeypatch, extend_frames=51)
@@ -837,10 +814,10 @@ class TestExtend:
         assert "64x32" in command and "24/1" in command
         assert any("setparams=colorspace=bt709" in part for part in command)
 
-    def test_progress_fires_at_the_start_and_the_end(self, env, written, tmp_path, monkeypatch):
+    def test_progress_fires_at_the_start_and_after_every_step(self, env, written, tmp_path, monkeypatch):
         events = []
         _extend(env, tmp_path, written, monkeypatch, callback=events.append)
-        assert [event["current_step"] for event in events] == [0, 1]
+        assert [(event["current_step"], event["total_steps"]) for event in events] == [(step, 8) for step in range(9)]
 
     @pytest.mark.parametrize("extend", [0, 8, 18, -17])
     def test_extend_frames_must_be_a_positive_multiple_of_17(self, env, written, tmp_path, monkeypatch, extend):
@@ -1098,6 +1075,16 @@ class TestLoadWithUserLoras:
 SHIPPED_LOAD_ARGUMENTS = {"sigma_shift_video": 6.0, "sigma_shift_audio": 3.0, "turbo_lora_scale": 1.0, "stream_blocks": True, "memory_limit_gb": 16.0}
 
 
+def _shipped_schedules() -> dict[int, H3Schedule]:
+    from zvisiongenerator.utils.config import load_config
+    from zvisiongenerator.utils.h3_preset import h3_mlx_load_options
+
+    return h3_mlx_load_options(load_config(), "h3")["preset"].schedules
+
+
+SHIPPED_SCHEDULES = _shipped_schedules()
+
+
 def _shipped_load(env: SimpleNamespace, mode: str) -> Any:
     """Load the model from the options the packaged config produces on macOS, as a real run does."""
     from zvisiongenerator.utils.config import load_config
@@ -1123,19 +1110,14 @@ class TestSettingsFromThePreset:
             "seed": 7,
             "height": 32,
             "width": 64,
-            "images": None,
-            "keyframe_anchors": (),
             "verbose": True,
         }
 
     def test_image_to_video_gets_the_shipped_arguments(self, env, written, tmp_path):
         H3MlxVideoBackend().image_to_video(_shipped_load(env, "i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 124, 7, 4, str(tmp_path / "out.mp4"))
 
-        loaded = env.loads[0]
-        assert {key: loaded[key] for key in SHIPPED_LOAD_ARGUMENTS} == SHIPPED_LOAD_ARGUMENTS
-        assert (loaded["low_memory"], loaded["load_vision"]) == (False, True)
-        call = env.calls[0]
-        assert (call["duration_seconds"], call["num_inference_steps"], call["keyframe_anchors"]) == (124 / 24, 5, ("first",))
+        call = env.staged[0]
+        assert (call["frames"], call["schedule"], call["turbo_lora_scale"], list(call["anchors"])) == (124, SHIPPED_SCHEDULES[4], 1.0, ["first"])
         assert [image.size for image in call["images"]] == [(64, 32)]
 
     def test_extend_gets_the_shipped_arguments(self, env, written, tmp_path, monkeypatch):
@@ -1146,10 +1128,8 @@ class TestSettingsFromThePreset:
 
         H3MlxVideoBackend().extend_video(_shipped_load(env, "extend"), source, "the fox stops", extend_frames=51, seed=3, steps=8, segment_dir=segment_dir, audio_output=False)
 
-        loaded = env.loads[0]
-        assert {key: loaded[key] for key in SHIPPED_LOAD_ARGUMENTS} == SHIPPED_LOAD_ARGUMENTS
-        call = env.calls[0]
-        assert (call["duration_seconds"], call["num_inference_steps"], call["keyframe_anchors"]) == (56 / 24, 9, ("first",))
+        call = env.staged[0]
+        assert (call["frames"], call["schedule"], call["turbo_lora_scale"], list(call["anchors"])) == (56, SHIPPED_SCHEDULES[8], 1.0, ["first"])
         assert (call["seed"], call["height"], call["width"]) == (3, 32, 64)
 
     def test_a_changed_shift_reaches_the_pipeline(self, env, written, tmp_path):
@@ -1178,7 +1158,7 @@ class TestSettingsFromThePreset:
         model = _load(env, mode="extend", preset=dataclasses.replace(PRESET, frame_rule=FrameRule(8, 1, "up")))
         H3MlxVideoBackend().extend_video(model, source, "p", extend_frames=17, seed=3, steps=8, segment_dir=segment_dir, audio_output=False)
 
-        assert round(env.calls[0]["duration_seconds"] * 24) == 25
+        assert env.staged[0]["frames"] == 25
 
     @pytest.mark.parametrize("steps", [0, 1, 6, 12])
     def test_steps_outside_the_schedules_are_refused_before_a_pipeline_is_built(self, env, written, tmp_path, steps):

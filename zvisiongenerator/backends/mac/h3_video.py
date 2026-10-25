@@ -8,14 +8,14 @@ What this module adds around the fork's pipeline:
   (:func:`ensure_text_encoder_copy`).
 * LoRAs. The fork takes one adapter of one rank, so user LoRAs are combined with the turbo LoRA into one rank-concatenated
   adapter (:func:`combine_loras`); with none, the turbo file is passed straight through.
-* A one-shot text-encoder proxy for the image modes, which frees the encoder before denoising.
+* The image modes (image-to-video, first and last frame, Extend) run through :mod:`~zvisiongenerator.backends.mac.h3_staged`,
+  which holds one component in memory at a time; text-to-video runs the fork's low-memory pipeline.
 * Extend as image-to-video from the source's last frame.
 """
 
 from __future__ import annotations
 
 import contextlib
-import gc
 import json
 import os
 import re
@@ -27,6 +27,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from zvisiongenerator.backends.mac.h3_staged import generate_conditioned
 from zvisiongenerator.backends.mac.memory import release_memory
 from zvisiongenerator.core.video_family import FrameRule
 from zvisiongenerator.core.video_types import ExtendSegment
@@ -88,7 +89,7 @@ _Slot = tuple[str, int, str]
 class _H3MlxModel:
     """The handle ``load_model`` returns: the resolved files and the settings every clip is made with.
 
-    The pipeline itself is built per clip, because the image modes drop the text encoder after encoding.
+    The pipeline (text-to-video) or the staged components (image modes) are built per clip.
     """
 
     files: H3MlxFiles
@@ -439,52 +440,16 @@ def _slot_shapes() -> dict[_Slot, tuple[int, int]]:
     return {(family, index, projection): shape for family, count in counts.items() for index in range(count) for projection, shape in projections.items()}
 
 
-# ---- The one-shot text encoder --------------------------------------------------------------------------------------
-
-
-class _OneShotTextEncoder:
-    """Stands in for the pipeline's text encoder: encodes once, then frees the real encoder before denoising.
-
-    The fork's image path keeps the encoder and its vision tower resident for the whole clip. The pipeline reads
-    ``self.text_encoder`` exactly once (tests/test_h3_mlx_contract.py pins it), so after that single encode nothing needs it.
-    """
-
-    def __init__(self, encoder: Any, mx: Any) -> None:
-        self._encoder = encoder
-        self._mx = mx
-
-    def encode(self, prompt: str, images: list | None = None) -> Any:
-        """Encode the request, materialize the result, and drop the real encoder.
-
-        Raises:
-            RuntimeError: If the encoder was already used.
-        """
-        encoder, self._encoder = self._encoder, None
-        if encoder is None:
-            raise RuntimeError("The MiniMax H3 text encoder is released after its one encode.")
-        try:
-            outputs = encoder.encode(prompt, images)
-            self._mx.eval(outputs)
-        finally:
-            del encoder
-            gc.collect()
-            self._mx.clear_cache()
-        return outputs
-
-
 # ---- Pipeline runs --------------------------------------------------------------------------------------------------
 
 
 @contextlib.contextmanager
-def _process_limits(mx: Any, *, low_memory: bool) -> Iterator[None]:
+def _process_limits(mx: Any) -> Iterator[None]:
     """Put the MLX cache and memory limits the fork's low-memory mode sets in place, and restore the previous ones after.
 
     The fork sets them process-wide and never restores them, which would leave a web server's later image jobs with no buffer
-    cache and a 16 GB ceiling.
+    cache and a 16 GB ceiling. The staged image modes run under the same limits.
     """
-    if not low_memory:
-        yield
-        return
     previous_cache = mx.set_cache_limit(0)
     previous_memory = mx.set_memory_limit(int(MEMORY_LIMIT_GB * 1e9))
     try:
@@ -509,8 +474,8 @@ def _converted(folder: Path) -> bool:
     return manifest is not None
 
 
-def _load_pipeline(model: _H3MlxModel, schedule: H3Schedule, *, low_memory: bool) -> Any:
-    """Build the fork's pipeline for one clip, with the sigma shifts of *schedule*."""
+def _load_pipeline(model: _H3MlxModel, schedule: H3Schedule) -> Any:
+    """Build the fork's low-memory text-to-video pipeline for one clip, with the sigma shifts of *schedule*."""
     from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline
 
     return MiniMaxH3Pipeline.from_pretrained(
@@ -523,8 +488,8 @@ def _load_pipeline(model: _H3MlxModel, schedule: H3Schedule, *, low_memory: bool
         sigma_shift_video=schedule.video_shift,
         sigma_shift_audio=schedule.audio_shift,
         stream_blocks=True,
-        low_memory=low_memory,
-        load_vision=not low_memory,
+        low_memory=True,
+        load_vision=False,
         memory_limit_gb=MEMORY_LIMIT_GB,
         verbose=model.verbose,
     )
@@ -541,10 +506,10 @@ def _schedule(model: _H3MlxModel, steps: int) -> H3Schedule:
     return model.schedules[steps]
 
 
-def _progress(callback: Callable[[dict[str, Any]], None] | None, current: int) -> None:
-    """Report the clip as one step: the fork's denoise loop has no hook, so only its start and end are visible."""
+def _progress(callback: Callable[[dict[str, Any]], None] | None, current: int, total: int) -> None:
+    """Report *current* of *total* steps."""
     if callback is not None:
-        callback({"phase": _PROGRESS_PHASE, "current_step": current, "total_steps": 1})
+        callback({"phase": _PROGRESS_PHASE, "current_step": current, "total_steps": total})
 
 
 def _generate(
@@ -560,7 +525,10 @@ def _generate(
     anchors: Sequence[str] = (),
     step_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> _Clip:
-    """Run the fork's pipeline for one clip and release everything it held.
+    """Make one clip and release everything it held.
+
+    Text-to-video runs the fork's low-memory pipeline, which has no step hook, so it reports its start and end. With images the
+    staged path reports every denoise step.
 
     Raises:
         ValueError: If images are given to a model loaded for text-to-video, or the preset has no schedule for *steps*.
@@ -570,17 +538,34 @@ def _generate(
     import mlx.core as mx
     import numpy as np
 
-    low_memory = model.mode == "t2v"
-    if images and low_memory:
+    if images and model.mode == "t2v":
         raise ValueError("This MiniMax H3 model was loaded for text-to-video; reload it for image-to-video to use images.")
-    _progress(step_callback, 0)
-    pipe = proxy = None
+    pipe = None
     try:
-        with _process_limits(mx, low_memory=low_memory):
-            pipe = _load_pipeline(model, schedule, low_memory=low_memory)
-            if not low_memory:
-                proxy = _OneShotTextEncoder(pipe.text_encoder, mx)
-                pipe.text_encoder = proxy
+        with _process_limits(mx):
+            if images:
+                _progress(step_callback, 0, schedule.forwards)
+                video, audio, sample_rate = generate_conditioned(
+                    fl2va_dir=model.files.fl2va_dir,
+                    transformer_dir=model.files.transformer_dir,
+                    text_encoder_dir=model.text_encoder_dir,
+                    turbo_lora_path=model.turbo_lora_path,
+                    turbo_lora_alpha=model.turbo_lora_alpha,
+                    turbo_lora_scale=model.turbo_lora_scale,
+                    schedule=schedule,
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    frames=frames,
+                    seed=seed,
+                    images=images,
+                    anchors=anchors,
+                    step_callback=lambda current, total: _progress(step_callback, current, total),
+                    verbose=model.verbose,
+                )
+                return _Clip(video=video, audio=audio, sample_rate=sample_rate)
+            _progress(step_callback, 0, 1)
+            pipe = _load_pipeline(model, schedule)
             result = pipe(
                 prompt,
                 duration_seconds=frames / H3_FPS,
@@ -588,16 +573,14 @@ def _generate(
                 seed=seed,
                 height=height,
                 width=width,
-                images=list(images) or None,
-                keyframe_anchors=tuple(anchors),
                 verbose=model.verbose,
             )
-        clip = _Clip(video=np.asarray(result.video), audio=np.asarray(result.audio), sample_rate=int(result.sample_rate))
-        del result
+            clip = _Clip(video=np.asarray(result.video), audio=np.asarray(result.audio), sample_rate=int(result.sample_rate))
+            del result
     finally:
-        pipe = proxy = None
+        pipe = None
         release_memory()
-    _progress(step_callback, 1)
+    _progress(step_callback, 1, 1)
     return clip
 
 
@@ -663,7 +646,8 @@ class H3MlxVideoBackend:
                 may carry an MLX INT8 transformer, which replaces the preset's (see :func:`local_int8_transformer`).
             **kwargs:
                 mode: ``"t2v"`` (default), ``"i2v"`` or ``"extend"``. Text-to-video streams the text encoder and loads no
-                    vision tower; the image modes keep the vision tower and drop the encoder after it encodes.
+                    vision tower; the image modes encode the keyframes and the prompt, denoise and decode in stages, each
+                    loading one component and dropping it before the next.
                 preset: The ``H3MlxPreset`` (required): its files, its frame rule and its sigma schedules, which also set the
                     allowed ``steps``.
                 lora: The turbo LoRA's ``HubFiles`` (required).
@@ -791,7 +775,7 @@ class H3MlxVideoBackend:
             seed: Random seed.
             steps: Transformer forwards.
             output_path: Path to save the video.
-            step_callback: Receives a progress event when the clip starts and when it ends.
+            step_callback: Receives a progress event when the clip starts and after every denoise step.
             **kwargs: ``end_image``, the last frame's path; ``stage1_steps`` and ``review`` are refused.
 
         Returns:
@@ -836,7 +820,7 @@ class H3MlxVideoBackend:
             steps: Transformer forwards; a step count of the preset's schedules.
             segment_dir: Existing directory that receives ``segment.mp4`` and, with audio, ``segment.wav``.
             audio_output: Whether to write the new part's sound (only when the clip has any).
-            step_callback: Receives a progress event when the clip starts and when it ends.
+            step_callback: Receives a progress event when the clip starts and after every denoise step.
 
         Returns:
             The generated segment: its video and, with audio, a 48 kHz WAV that starts at the new part.

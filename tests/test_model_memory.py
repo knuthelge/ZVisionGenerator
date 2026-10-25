@@ -804,11 +804,15 @@ class TestH3ClipMemoryFit:
 
         assert four is not None and four["expected_seconds"] < 23 * 60
 
-    def test_an_image_mode_holds_the_vision_tower_while_the_prompt_is_encoded(self):
-        fit = clip_memory_fit("example/h3", app_config=_CONFIG, budget=MemoryBudget(16 * _GIB, unified_bytes=24 * _GIB), family="h3", mode="i2v", **self._CLIP)
+    def test_an_image_mode_needs_more_than_text_to_video_at_a_small_clip(self):
+        clip = {**self._CLIP, "width": 576, "height": 320, "frames": 73}
+        budget = MemoryBudget(int(12.8 * _GIB), unified_bytes=24 * _GIB)
 
-        assert fit is not None
-        assert (fit["status"], fit["required_gb"]) == ("tight", 17.7)
+        text = clip_memory_fit("example/h3", app_config=_CONFIG, budget=budget, family="h3", **clip)
+        image = clip_memory_fit("example/h3", app_config=_CONFIG, budget=budget, family="h3", mode="i2v", **clip)
+
+        assert text is not None and image is not None
+        assert (text["status"], image["status"], image["required_gb"]) == ("fits", "tight", 14.2)
 
     def test_a_length_h3_cannot_take_has_no_estimate(self):
         assert clip_memory_fit("example/h3", app_config=_CONFIG, budget=self._BUDGET, family="h3", **{**self._CLIP, "frames": 121}) is None

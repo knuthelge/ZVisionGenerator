@@ -65,6 +65,7 @@ zvisiongenerator/
 │   └── mac/                       macOS (MLX)
 │       ├── download_plan.py       Hugging Face downloads the mflux image, MLX video and mlx-lm enhancer backends need (no mflux import until planning)
 │       ├── h3_converted.py        Write a converted MiniMax H3 folder (8-bit MLX transformer) from a fine-tune
+│       ├── h3_staged.py           MiniMax H3 image modes (MLX): keyframe, vision, prompt, denoise and decode phases that each load one component and drop it before the next
 │       ├── h3_video.py            MiniMax H3 video backend (MLX): file resolution, the 4-bit text-encoder copy, LoRA combining and Extend around the vendored port
 │       ├── image.py               Image backend (mflux)
 │       ├── image_preview.py       Cheap latent → RGB live previews for the mflux backend

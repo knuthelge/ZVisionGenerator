@@ -53,7 +53,7 @@ To fit a clip: make it shorter, use a smaller size, and keep **Low memory** on.
 
 === "macOS"
 
-    The estimate was measured with `ltx-4` on a 32 GB Mac, for clips up to about 10 s at 704×448, and is extrapolated beyond that; `ltx25-4` is estimated from its file sizes on the same basis. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. The MiniMax H3 estimate comes from the MLX port's measurements on an M4 Pro, ignores LoRAs, and hasn't been checked on a Mac.
+    The estimate was measured with `ltx-4` on a 32 GB Mac, for clips up to about 10 s at 704×448, and is extrapolated beyond that; `ltx25-4` is estimated from its file sizes on the same basis. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. The MiniMax H3 estimate ignores LoRAs. For text to video it comes from the MLX port's measurements on an M4 Pro; for image to video, first and last frame and Extend, from runs on a Mac with 32 GB of memory.
 
 === "Windows and Linux"
 

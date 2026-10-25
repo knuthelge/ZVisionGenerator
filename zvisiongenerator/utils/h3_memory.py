@@ -63,12 +63,14 @@ H3_REFINE_FORWARDS = 2  # forwards of that schedule's tail
 H3_REFINE_WINDOW_LATENT_FRAMES = 22  # 73 frames
 H3_REFINE_OVERLAP_LATENT_FRAMES = 7
 
-# macOS (MLX) estimates, from the fork's M4 Pro measurements; they are estimates until recalibrated on a Mac.
+# macOS (MLX) estimates: text-to-video from the fork's M4 Pro measurements, the image modes' conditioning phase from a Mac M5 with 32 GB.
 _MLX_IMAGE_MODES = ("i2v", "extend")
 _MLX_REFERENCE_ROWS = 12_946  # 768x448 at 124 frames: text, audio and video rows
 _MLX_REFERENCE_BYTES = 15 * GIB  # peak of a text-to-video run at the reference rows
 _MLX_BYTES_PER_ROW = 160 * 1024  # growth of the denoise peak per sequence row
-_MLX_LOAD_PHASE_BYTES = int((14.5 + 1.7 + 1.5) * GIB)  # image modes load: 4-bit text encoder + vision, static DiT, VAEs
+# The conditioning phase of the image modes (keyframe encode, vision tower, prompt encode) peaks at 14.2 GiB, measured on a Mac M5
+# with 32 GB at 576x320 and 768x448, 73 frames; the 4-bit text encoder sets it.
+_MLX_LOAD_PHASE_BYTES = int(14.2 * GIB)
 _MLX_FIXED_SECONDS = 240  # load, text encode, decode and mux
 _MLX_REFERENCE_SECONDS = 23 * 60  # the fork's time at the reference clip and 8 forwards
 _MLX_REFERENCE_FORWARDS = 8
@@ -221,9 +223,9 @@ def estimate_h3_mlx_clip_memory(width: int, height: int, frames: int, *, mode: s
     """Estimate the peak unified memory, in bytes, of an H3 clip on macOS.
 
     The denoise phase peaks at 15.0 GiB for the reference clip (12,946 rows) and grows by 160 KiB per further row.
-    Text-to-video streams the text encoder, so that is its peak. The image modes keep the 4-bit text encoder and the
-    vision tower resident until the encode (the load phase, 17.7 GiB with the static transformer and the VAEs), and
-    drop the encoder before the denoise phase, which then also holds the keyframe rows. The peak is the larger of the two.
+    Text-to-video streams the text encoder, so that is its peak. The image modes run in stages, each holding one
+    component: the conditioning phase (keyframe encode, vision tower and prompt encode) peaks at 14.2 GiB, and the
+    denoise phase also holds the keyframe rows. The peak is the larger of the two.
 
     Raises:
         ValueError: If *mode* is unknown, or the canvas or frame count is invalid.

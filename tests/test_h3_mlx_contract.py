@@ -1,4 +1,4 @@
-"""Pin the vendored MiniMax H3 MLX fork that the macOS H3 backend will call.
+"""Pin the vendored MiniMax H3 MLX fork that the macOS H3 backend calls.
 
 The fork needs MLX, which Linux does not have, so almost everything here reads the vendored source as a syntax tree
 without importing it. A failure after ``make update-h3-mlx`` means the fork changed a name, a signature or a behaviour
@@ -115,23 +115,13 @@ def test_from_pretrained_is_a_classmethod() -> None:
 
 def test_call_takes_the_arguments_the_backend_passes() -> None:
     parameters = _parameters(_function(_pipeline_class(), "__call__"))
-    expected = {"prompt", "duration_seconds", "num_inference_steps", "seed", "images", "keyframe_anchors", "height", "width", "verbose"}
+    expected = {"prompt", "duration_seconds", "num_inference_steps", "seed", "height", "width", "verbose"}
     assert expected <= set(parameters)
     assert parameters["prompt"] is None, "prompt is required"
 
 
-def test_call_reads_the_text_encoder_exactly_once() -> None:
-    """The one-shot encoder proxy relies on a single read of ``self.text_encoder`` inside ``__call__``."""
-    call = _function(_pipeline_class(), "__call__")
-    reads = [
-        node
-        for node in ast.walk(call)
-        if isinstance(node, ast.Attribute) and node.attr == "text_encoder" and isinstance(node.value, ast.Name) and node.value.id == "self" and isinstance(node.ctx, ast.Load)
-    ]
-    assert len(reads) == 1
-
-
 def test_low_memory_mode_refuses_images() -> None:
+    """The reason image modes run through the staged path in ``h3_staged`` instead of the low-memory pipeline."""
     call = _function(_pipeline_class(), "__call__")
     guards = [
         node
@@ -152,6 +142,119 @@ def test_generation_result_fields() -> None:
     result = _class(_tree("pipeline.py"), "GenerationResult")
     fields = [node.target.id for node in result.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)]
     assert fields == ["video", "audio", "sample_rate", "fps", "seconds_per_step", "total_seconds", "block_cache_stats"]
+
+
+# ---- Staged image path -----------------------------------------------------------------------------------------------
+# ``h3_staged`` composes these pieces of the fork; each pin is a name, a signature or a ``self`` read it depends on.
+
+
+def _self_reads(function: ast.FunctionDef) -> set[str]:
+    """Return the attributes *function* reads from ``self``."""
+    return {node.attr for node in ast.walk(function) if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "self" and isinstance(node.ctx, ast.Load)}
+
+
+def _self_writes(function: ast.FunctionDef) -> set[str]:
+    return {node.attr for node in ast.walk(function) if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "self" and isinstance(node.ctx, ast.Store)}
+
+
+@pytest.mark.parametrize(
+    ("name", "reads"),
+    [
+        ("_row_timestep_plan", set()),
+        ("_encode_keyframes", {"_dit_config", "_video_config", "video_vae"}),
+        ("_decode_video", {"_dit_config", "_video_config", "video_vae"}),
+        ("_decode_audio", {"_audio_config", "audio_vae"}),
+    ],
+)
+def test_the_pipeline_methods_the_staged_path_calls_read_only_the_attributes_it_supplies(name: str, reads: set[str]) -> None:
+    assert _self_reads(_function(_pipeline_class(), name)) == reads
+
+
+@pytest.mark.parametrize(
+    ("name", "parameters"),
+    [
+        ("_row_timestep_plan", ["layout", "video_timesteps", "audio_timesteps"]),
+        ("_encode_keyframes", ["images", "height", "width"]),
+        ("_decode_video", ["rows", "num_latent_frames", "latent_height", "latent_width"]),
+        ("_decode_audio", ["rows", "num_audio_latents"]),
+    ],
+)
+def test_the_pipeline_methods_the_staged_path_calls_keep_their_signatures(name: str, parameters: list[str]) -> None:
+    assert list(_parameters(_function(_pipeline_class(), name))) == parameters
+
+
+def test_the_keyframe_constants() -> None:
+    packing = _tree("packing.py")
+    assert ast.literal_eval(_assigned(packing, "KEYFRAME_ENCODE_SEED")) == 42
+    assert ast.literal_eval(_assigned(packing, "KEYFRAME_NOISE_AUG")) == 0.999
+
+
+def _module_function(module: str, name: str) -> ast.FunctionDef:
+    return _function(_tree(module), name)
+
+
+@pytest.mark.parametrize(
+    ("module", "name", "parameters"),
+    [
+        ("packing.py", "build_packed_sequence", ["text_token_tags", "num_latent_frames", "latent_height", "latent_width", "num_audio_latents", "patch_size", "keyframe_anchors"]),
+        ("packing.py", "patchify_video_latents", ["latents", "patch_size"]),
+        ("packing.py", "align_num_frames", ["num_frames"]),
+        ("packing.py", "video_latent_num_frames", ["num_frames"]),
+        ("packing.py", "audio_latent_num_frames", ["num_frames"]),
+        ("load.py", "load_video_vae", ["model_dir", "strict"]),
+        ("load.py", "load_audio_vae", ["model_dir", "strict"]),
+        ("load.py", "read_video_vae_config", ["model_dir"]),
+        ("load.py", "read_audio_vae_config", ["model_dir"]),
+        (
+            "streaming.py",
+            "load_streaming_dit",
+            ["model_dir", "turbo_lora_path", "turbo_lora_alpha", "turbo_lora_scale", "block_load_mode", "stream_block_group_size", "verbose"],
+        ),
+    ],
+)
+def test_the_functions_the_staged_path_calls_keep_their_signatures(module: str, name: str, parameters: list[str]) -> None:
+    assert list(_parameters(_module_function(module, name))) == parameters
+
+
+def test_the_modulation_cache_builds_from_a_block_provider() -> None:
+    cache = _class(_tree("adaln.py"), "ModulationCache")
+    assert list(_parameters(_function(cache, "build_streaming"))) == ["dit", "block_provider", "timesteps", "dtype"]
+
+
+def test_the_scheduler_surface() -> None:
+    scheduler = _class(_tree("scheduler.py"), "MiniMaxH3Scheduler")
+    assert list(_parameters(_function(scheduler, "__init__"))) == ["shift"]
+    assert list(_parameters(_function(scheduler, "set_timesteps"))) == ["num_inference_steps", "sigmas"]
+    assert list(_parameters(_function(scheduler, "scale_noise"))) == ["sample", "timestep", "noise"]
+    assert list(_parameters(_function(scheduler, "step"))) == ["model_output", "timestep", "sample"]
+
+
+def test_the_transformer_call_takes_the_packed_arguments_in_order() -> None:
+    call = _function(_class(_tree("dit.py"), "MiniMaxH3DiT"), "__call__")
+    parameters = list(_parameters(call))
+    assert parameters[:10] == ["video_latents", "audio_latents", "text_embeds", "timestep", "timestep_indices", "token_tags", "position_ids", "video_indices", "audio_indices", "text_indices"]
+    assert {"modulation_cache", "block_provider"} <= set(parameters)
+
+
+def test_the_text_encoder_surface() -> None:
+    encoder = _class(_tree("text_encoder.py"), "MiniMaxH3TextEncoder")
+    assert {"model_dir", "load_vision", "tokenizer_dir", "processor_dir", "stream_layers"} <= set(_parameters(_function(encoder, "__init__")))
+    assert list(_parameters(_function(encoder, "build_request"))) == ["prompt", "images"]
+    assert list(_parameters(_function(encoder, "_hidden_states"))) == ["input_ids", "position_ids", "inputs_embeds", "visual_pos_masks", "deepstack_visual_embeds"]
+    assert {"language", "image_token_id", "_processor"} <= _self_writes(_function(encoder, "__init__"))
+
+
+def test_the_text_encoder_uses_a_preset_processor_instead_of_loading_its_own() -> None:
+    """The staged path seeds ``_processor`` with the PIL image processor, since the default loader needs torchvision."""
+    getter = _function(_class(_tree("text_encoder.py"), "MiniMaxH3TextEncoder"), "processor")
+    source = ast.unparse(getter)
+    assert "if self._processor is None" in source and source.rstrip().endswith("return self._processor")
+
+
+def test_build_request_reads_the_processors_image_processor() -> None:
+    request = ast.unparse(_function(_class(_tree("text_encoder.py"), "MiniMaxH3TextEncoder"), "build_request"))
+    assert "self.processor.image_processor(images=images, return_tensors='np')" in request
+    assert "self.processor.image_processor.merge_size" in request
 
 
 # ---- Turbo LoRA ------------------------------------------------------------------------------------------------------
@@ -329,3 +432,87 @@ def test_imported_converter_signature() -> None:
     from minimax_h3_mlx.quantize_text_encoder import convert
 
     assert list(inspect.signature(convert).parameters) == ["source", "output", "bits", "group_size", "num_layers"]
+
+
+def test_imported_staged_path_dependencies() -> None:
+    pytest.importorskip("mlx.core")
+    import inspect
+
+    from minimax_h3_mlx.load import load_audio_vae, load_video_vae, read_audio_vae_config, read_video_vae_config
+    from minimax_h3_mlx.packing import KEYFRAME_ENCODE_SEED, KEYFRAME_NOISE_AUG, build_packed_sequence
+    from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline
+    from minimax_h3_mlx.streaming import load_streaming_dit
+
+    assert (KEYFRAME_ENCODE_SEED, KEYFRAME_NOISE_AUG) == (42, 0.999)
+    for function, module, name in (
+        (load_video_vae, "load.py", "load_video_vae"),
+        (load_audio_vae, "load.py", "load_audio_vae"),
+        (read_video_vae_config, "load.py", "read_video_vae_config"),
+        (read_audio_vae_config, "load.py", "read_audio_vae_config"),
+        (build_packed_sequence, "packing.py", "build_packed_sequence"),
+        (load_streaming_dit, "streaming.py", "load_streaming_dit"),
+    ):
+        assert list(inspect.signature(function).parameters) == list(_parameters(_module_function(module, name)))
+    for name in ("_row_timestep_plan", "_encode_keyframes", "_decode_video", "_decode_audio"):
+        assert list(inspect.signature(getattr(MiniMaxH3Pipeline, name)).parameters)[1:] == list(_parameters(_function(_pipeline_class(), name)))
+
+
+def test_mlx_vlm_vision_sanitize_moves_the_patch_embedding_to_the_mlx_layout_and_keeps_that_layout() -> None:
+    """The text-encoder copy holds the checkpoint's PyTorch conv layout; ``VisionModel.sanitize`` converts it at load time."""
+    mx = pytest.importorskip("mlx.core")
+    pytest.importorskip("mlx_vlm")
+    import inspect
+
+    from mlx_vlm.models.qwen3_vl.config import VisionConfig
+    from mlx_vlm.models.qwen3_vl.vision import VisionModel
+
+    assert list(inspect.signature(VisionModel.sanitize).parameters) == ["self", "weights"]
+    assert isinstance(inspect.getattr_static(VisionConfig, "from_dict"), classmethod)
+    # sanitize reads no model state.
+    torch_layout = mx.zeros((8, 3, 2, 16, 16))
+    key = "patch_embed.proj.weight"
+    (moved,) = VisionModel.sanitize(None, {key: torch_layout}).values()
+    assert moved.shape == (8, 2, 16, 16, 3)
+    (kept,) = VisionModel.sanitize(None, {key: moved}).values()
+    assert kept.shape == (8, 2, 16, 16, 3)
+
+
+def test_mlx_vlm_rope_index_and_vision_call_signatures() -> None:
+    pytest.importorskip("mlx.core")
+    pytest.importorskip("mlx_vlm")
+    import inspect
+
+    from mlx_vlm.models.qwen3_vl.language import LanguageModel
+    from mlx_vlm.models.qwen3_vl.vision import VisionModel
+
+    assert list(inspect.signature(LanguageModel.get_rope_index).parameters) == ["self", "input_ids", "image_grid_thw", "video_grid_thw", "attention_mask"]
+    assert list(inspect.signature(VisionModel.__call__).parameters)[:3] == ["self", "hidden_states", "grid_thw"]
+
+
+def test_the_pil_image_processor_loads_without_torchvision_and_reads_keyframes(tmp_path: Path) -> None:
+    """The release's processor config names the fast class, which needs torchvision; ``backend="pil"`` picks the PIL class."""
+    pytest.importorskip("transformers")
+    pytest.importorskip("PIL")
+    import json
+
+    from PIL import Image
+    from transformers import AutoImageProcessor
+
+    config = {
+        "size": {"longest_edge": 16777216, "shortest_edge": 65536},
+        "patch_size": 16,
+        "temporal_patch_size": 2,
+        "merge_size": 2,
+        "image_mean": [0.5, 0.5, 0.5],
+        "image_std": [0.5, 0.5, 0.5],
+        "processor_class": "Qwen3VLProcessor",
+        "image_processor_type": "Qwen2VLImageProcessorFast",
+    }
+    (tmp_path / "preprocessor_config.json").write_text(json.dumps(config), encoding="utf-8")
+
+    processor = AutoImageProcessor.from_pretrained(str(tmp_path), backend="pil")
+    processed = processor(images=[Image.new("RGB", (576, 320), (10, 20, 30))], return_tensors="np")
+
+    assert processor.merge_size == 2
+    assert processed["image_grid_thw"].tolist() == [[1, 20, 36]]
+    assert processed["pixel_values"].shape == (20 * 36, 3 * 2 * 16 * 16)

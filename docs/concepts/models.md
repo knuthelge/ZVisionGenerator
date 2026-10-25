@@ -103,16 +103,16 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 - **Sizes:** the same presets as LTX, in multiples of 32 (64 with upscaling). `xl` is above the size the model was trained on.
 - **Extend** works from 24 fps clips whose size is a multiple of 32. See [Extending a video](video.md#extending-a-video).
 - **LoRAs** must be MiniMax H3 LoRAs. See [LoRAs](loras.md).
-- **The first image-to-video run can be slow** on a machine with little free system memory, because the text encoder's vision tower loads then.
+- **Some H3 checkpoints don't follow the start image.** A few community checkpoints ignore the start image in image to video, first and last frame and Extend. If a converted model does, use stock `h3` for those modes.
 
 === "macOS"
 
-    MiniMax H3 on macOS does everything above except upscale. It is built on a port to MLX and **hasn't been run on a Mac yet**, so its figures are estimates.
+    MiniMax H3 on macOS does everything above except upscale. It is built on a port to MLX. Image to video, first and last frame and Extend run in stages, with one component in memory at a time, and their figures were measured on a Mac with 32 GB of memory; the other figures are estimates.
 
     - **Download and first use:** about 107 GB. The first run converts the text encoder once into a 4-bit copy of about 15 GB (`h3@mlx-te4`).
-    - **Memory and time:** a 5 s clip at `s` is estimated at about 15 GiB and 23 minutes with 8 steps, 14 minutes with 4. At `l` it is about 18 GiB and 77 minutes. Image to video at `s` peaks at about 17.7 GiB while the prompt and image are encoded. A Mac with 32 GB is the target.
+    - **Memory and time:** a 5 s clip at `s` is estimated at about 15 GiB and 23 minutes with 8 steps, 14 minutes with 4. At `l` it is about 18 GiB and 77 minutes. The image modes need about the same as text to video: a 3 s image-to-video clip at `s` with 8 steps took about 10 minutes and peaked at about 14 GiB with no swapping, and is estimated at about 14 minutes. First and last frame and Extend peak at about the same, and a LoRA adds about 1.5 GiB. A Mac with 32 GB is the target.
     - **Extend** continues from the source's last frame alone, so the seam is weaker than on Windows and Linux.
-    - **No upscale or review**, and a job shows its phases but no step counter.
+    - **No upscale or review.** Image to video, first and last frame and Extend show a step counter and stop at a step boundary; text to video shows its phases but no step counter, and **Quit** takes effect between clips.
     - **A local folder** given to `-m` can carry its own INT8 transformer in the MLX port's layout. A folder with a bf16 transformer is refused; [convert](../cli/models.md#minimax-h3-video-fine-tunes) a fine-tune instead.
 
 === "Windows and Linux"

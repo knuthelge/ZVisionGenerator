@@ -186,16 +186,15 @@ class TestMacMemory:
         assert estimate_h3_mlx_clip_memory(512, 288, 22) < 15 * GIB
 
     @pytest.mark.parametrize("mode", ["i2v", "extend"])
-    def test_an_image_mode_is_the_load_phase_when_that_is_larger(self, mode):
-        # text encoder + vision 14.5, static transformer 1.7, VAEs 1.5
-        assert estimate_h3_mlx_clip_memory(768, 448, 124, mode=mode) == pytest.approx(17.7 * GIB, abs=1)
+    def test_an_image_mode_is_the_conditioning_phase_when_that_is_larger(self, mode):
+        assert estimate_h3_mlx_clip_memory(576, 320, 73, mode=mode) == pytest.approx(14.2 * GIB, abs=1)
 
     @pytest.mark.parametrize("mode", ["i2v", "extend"])
     def test_an_image_mode_is_the_denoise_phase_with_its_keyframe_when_that_is_larger(self, mode):
         rows = h3_sequence_rows(1920, 1088, 243, keyframes=1)
         denoise = 15 * GIB + 160 * 1024 * (rows - 12_946)
 
-        assert denoise > 17.7 * GIB
+        assert denoise > 14.2 * GIB
         assert estimate_h3_mlx_clip_memory(1920, 1088, 243, mode=mode) == denoise
 
     def test_an_image_mode_never_needs_less_than_text_to_video(self):
@@ -232,12 +231,12 @@ class TestMacMemory:
         ("gpu_gib", "mode", "status", "required_gb"),
         [
             (24, "t2v", "fits", 15.0),
-            (24, "i2v", "fits", 17.7),
+            (24, "i2v", "fits", 15.1),
             (16, "t2v", "fits", 15.0),
             (13, "t2v", "tight", 15.0),
             (9, "t2v", "too_large", 15.0),
-            (16, "i2v", "tight", 17.7),
-            (11, "extend", "too_large", 17.7),
+            (13, "i2v", "tight", 15.1),
+            (9, "extend", "too_large", 15.1),
         ],
     )
     def test_the_fit_classifies_against_the_gpu_working_set(self, gpu_gib, mode, status, required_gb):
@@ -246,10 +245,10 @@ class TestMacMemory:
         assert fit == {"status": status, "required_gb": required_gb, "budget_gb": float(gpu_gib), "expected_seconds": estimate_h3_mlx_seconds(768, 448, 124, forwards=8, mode=mode)}
 
     def test_an_image_mode_can_be_tight_where_text_to_video_fits(self):
-        budget = MemoryBudget(16 * GIB, unified_bytes=24 * GIB)
+        budget = MemoryBudget(int(12.8 * GIB), unified_bytes=24 * GIB)
 
-        assert h3_mlx_clip_fit(768, 448, 124, budget, forwards=8)["status"] == "fits"
-        assert h3_mlx_clip_fit(768, 448, 124, budget, forwards=8, mode="i2v")["status"] == "tight"
+        assert h3_mlx_clip_fit(576, 320, 73, budget, forwards=8)["status"] == "fits"
+        assert h3_mlx_clip_fit(576, 320, 73, budget, forwards=8, mode="i2v")["status"] == "tight"
 
     @pytest.mark.parametrize("budget", [None, MemoryBudget(0), MemoryBudget(10 * GIB, system_bytes=30 * GIB)])
     def test_there_is_no_fit_without_a_unified_budget(self, budget):
