@@ -7,7 +7,7 @@ from zvisiongenerator.downloads.child import ChildResult, child_env, run_in_chil
 from zvisiongenerator.downloads.ensure import DETACHED, READY, STOPPED, UNCHECKED, DownloadReport, ensure_downloaded
 from zvisiongenerator.downloads.flights import DownloadFlights, Flight
 from zvisiongenerator.downloads.hub_access import LOGIN_SOURCE, TOKEN_ENV_VARS, describe_refusal, refusal_message, token_source
-from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_model_downloaded, video_plan
 from zvisiongenerator.downloads.presence import remove_partial_files, target_present_offline
 from zvisiongenerator.downloads.progress import ByteCounts, SpeedMeter, make_byte_sink, progress_from_counts
 from zvisiongenerator.downloads.space import SpaceNeed, space_need
@@ -47,5 +47,6 @@ __all__ = [
     "space_need",
     "target_present_offline",
     "token_source",
+    "video_model_downloaded",
     "video_plan",
 ]

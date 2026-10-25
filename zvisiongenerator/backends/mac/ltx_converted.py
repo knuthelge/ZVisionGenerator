@@ -10,7 +10,8 @@ A converted folder has the layout of dgrauet's MLX folders (``dgrauet/ltx-2.3-ml
 - ``connector.safetensors``: linked from the MLX folder when the checkpoint's text connectors equal stock's or it has
   none; otherwise written from the checkpoint (the names map one to one, under ``connector.``).
 - ``embedded_config.json``: the checkpoint's own ``config`` metadata in stock's spelling, or stock's when it has none.
-- the VAEs, vocoder, upsamplers and their configs, linked from the MLX folder of the same level.
+- the VAEs, vocoder, upsampler and their configs (and, for LTX-2.5, the text encoder and duration head), linked from
+  the pinned MLX pack of the same level: every file of its list but the transformer.
 - the folder manifest (:mod:`zvisiongenerator.utils.ltx_converted`), written last.
 
 The transformer is written one tensor at a time into a single file whose header is written first, so the
@@ -19,7 +20,6 @@ conversion never holds more than one tensor of it.
 
 from __future__ import annotations
 
-import fnmatch
 import json
 import math
 from collections.abc import Callable, Iterable
@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.converters.ltx_checkpoint import CHECKPOINT_PREFIX, checkpoint_config, connector_tensors, connectors_status, file_order, transformer_tensors
 from zvisiongenerator.utils.file_links import link_or_copy
+from zvisiongenerator.utils.h3_preset import HubFiles
+from zvisiongenerator.utils.hf_snapshot import pack_for_reference, snapshot_download, snapshot_with
 from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 from zvisiongenerator.utils.safetensors_stream import SingleFileWriter, TensorFile
 
@@ -42,40 +44,6 @@ __all__ = ["convert", "write_converted"]
 TRANSFORMER_FILE = "transformer-distilled.safetensors"
 _CONNECTOR_FILE = "connector.safetensors"
 _EMBEDDED_CONFIG = "embedded_config.json"
-# What the converted folder links from the MLX folder of its level, by LTX version. Never a transformer file.
-_BASE_FILES = {
-    "2.3": (
-        "audio_vae.safetensors",
-        "vae_decoder.safetensors",
-        "vae_encoder.safetensors",
-        "vocoder.safetensors",
-        "config.json",
-        "quantize_config.json",
-        "split_model.json",
-        "spatial_upscaler_*",
-        "temporal_upscaler_*",
-    ),
-    # LTX-2.5 packs bundle the Gemma 4 text encoder and its tokenizer files, two VAE pairs and the duration head.
-    # quantize_config.json only marks which parts are quantized; the bits are read from the weights' shapes.
-    "2.5": (
-        "audio_vae.safetensors",
-        "vae_decoder_*.safetensors",
-        "vae_encoder_*.safetensors",
-        "vocoder.safetensors",
-        "duration_head.safetensors",
-        "text_encoder.safetensors",
-        "text_encoder_config.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "chat_template.jinja",
-        "generation_config.json",
-        "processor_config.json",
-        "quantize_config.json",
-        "split_model.json",
-        "spatial_upscaler_*",
-        "temporal_upscaler_*",
-    ),
-}
 _GROUP_SIZE = 64
 _STORAGE = "mlx-affine-g64"
 _MLX_PREFIX = "transformer."
@@ -106,23 +74,29 @@ def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[
     *models_dir* is unused: an MLX folder shares no component with other models' folders.
 
     Raises:
+        ValueError: When the level's ``mlx_base`` names no pinned pack (its repo, with or without the revision, is pinned nowhere in the config).
         RuntimeError: When the MLX folder can't be downloaded.
     """
     import torch
 
     from zvisiongenerator.backends.mac.memory import mlx_cache_limit
-    from zvisiongenerator.utils.config import ltx_mlx_base_repo
+    from zvisiongenerator.utils.config import ltx_mlx_base_repo, ltx_mlx_packs
 
     del models_dir
+    base_ref = ltx_mlx_base_repo(config, bits, version)
+    pack = pack_for_reference(ltx_mlx_packs(config), base_ref)
+    if pack is None:
+        raise ValueError(f"video_model_presets.ltx mlx_base '{base_ref}' must be pinned (owner/repo@revision) to convert a checkpoint from it.")
     report("connectors", 0, 1)
     # Connectors that differ from stock's, or are quantized and can't be compared, are kept: a fine-tune may have trained them.
     own_connectors = connectors_status(checkpoint) in ("changed", "unknown")
     report("download", 0, 1)
-    base_dir = _base_dir(ltx_mlx_base_repo(config, bits, version), checkpoint.version)
+    base = HubFiles(pack.repo_id, pack.revision, _base_files(pack))
+    base_dir = _base_dir(base)
     merge_device = torch.device("mps") if torch.backends.mps.is_available() else None
     # No MLX buffer cache: each tensor is quantized once, and cached buffers would add up to the whole transformer.
     with mlx_cache_limit(0):
-        write_converted(checkpoint, target, bits, base_dir=base_dir, own_connectors=own_connectors, lora=lora, quantize=_mlx_quantize, merge_device=merge_device, report=report)
+        write_converted(checkpoint, target, bits, base_dir=base_dir, base_files=base.files, own_connectors=own_connectors, lora=lora, quantize=_mlx_quantize, merge_device=merge_device, report=report)
 
 
 def write_converted(
@@ -131,6 +105,7 @@ def write_converted(
     bits: int,
     *,
     base_dir: Path,
+    base_files: Iterable[str],
     own_connectors: bool,
     lora: Path | None,
     quantize: Quantize,
@@ -144,6 +119,7 @@ def write_converted(
         target: The folder to write (a partial folder; the caller moves it into place).
         bits: 4 or 8.
         base_dir: The MLX folder of that level the other components come from.
+        base_files: The files of *base_dir* a converted folder takes: the pack's files but its transformer.
         own_connectors: Write the checkpoint's own text connectors, with stock's for any group it lacks, instead of linking stock's.
         lora: Lightricks' distilled LoRA to merge in, or ``None``.
         quantize: Quantizes one block weight (``mx.quantize`` at groups of 64).
@@ -161,7 +137,7 @@ def write_converted(
     report("components", 0, 1)
     stock_config = json.loads((base_dir / _EMBEDDED_CONFIG).read_text(encoding="utf-8"))
     (target / _EMBEDDED_CONFIG).write_text(json.dumps(embedded_config(checkpoint_config(checkpoint), stock_config), indent=2) + "\n", encoding="utf-8")
-    _link_components(base_dir, target, checkpoint.version)
+    _link_components(base_dir, target, base_files)
     block_matrices, transformer_rest = _transformer_elements(checkpoint)
     write_converted_ltx(
         target,
@@ -311,26 +287,32 @@ def _transformer_elements(checkpoint: LtxCheckpoint) -> tuple[int, int]:
     return blocks, rest
 
 
-def _link_components(base_dir: Path, target: Path, version: str) -> None:
-    """Hard-link the LTX-*version* MLX folder's components in ``_BASE_FILES`` into *target*, copying where a link is impossible."""
-    for source in sorted(base_dir.iterdir()):
-        if source.is_file() and any(fnmatch.fnmatchcase(source.name, pattern) for pattern in _BASE_FILES[version]):
-            link_or_copy(source, target / source.name)
+def _link_components(base_dir: Path, target: Path, base_files: Iterable[str]) -> None:
+    """Hard-link the *base_files* of the MLX folder *base_dir* into *target*, copying where a link is impossible.
+
+    The converter writes ``embedded_config.json`` and the connector itself, so they are not linked here.
+    """
+    for name in base_files:
+        if name not in (_EMBEDDED_CONFIG, _CONNECTOR_FILE):
+            link_or_copy(base_dir / name, target / name)
 
 
-def _base_dir(reference: str, version: str) -> Path:
-    """Return the local folder of the LTX-*version* MLX repo *reference* (``repo`` or ``repo@revision``) with the files a converted folder takes from it, downloading what is missing.
+def _base_files(pack: HubFiles) -> tuple[str, ...]:
+    """Return the files of *pack* a converted folder takes: all but its transformer."""
+    return tuple(name for name in pack.files if not name.startswith("transformer"))
+
+
+def _base_dir(base: HubFiles) -> Path:
+    """Return the local folder holding the *base* files of a pinned MLX pack, downloading what is missing.
 
     Raises:
-        RuntimeError: When they can't be downloaded.
+        RuntimeError: When they can't be downloaded, or the revision lacks one.
     """
-    from huggingface_hub import snapshot_download
-
-    from zvisiongenerator.utils.paths import split_huggingface_revision
-
-    repo, revision = split_huggingface_revision(reference)
-    patterns = [*_BASE_FILES[version], _EMBEDDED_CONFIG, _CONNECTOR_FILE]
     try:
-        return Path(snapshot_download(repo, revision=revision, allow_patterns=patterns))
+        folder = snapshot_with(base, snapshot_download)
     except Exception as exc:  # noqa: BLE001 - any download failure stops the conversion with one message
-        raise RuntimeError(f"Converting needs the VAEs, vocoder and configs of {repo}, which couldn't be downloaded: {exc}") from exc
+        raise RuntimeError(f"Converting needs the VAEs, vocoder and configs of {base.repo_id}, which couldn't be downloaded: {exc}") from exc
+    missing = [name for name in base.files if not (folder / name).is_file()]
+    if missing:
+        raise RuntimeError(f"Converting needs {', '.join(missing)} of {base.repo_id}@{base.revision}, which it doesn't have.")
+    return folder

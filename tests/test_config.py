@@ -16,6 +16,8 @@ from zvisiongenerator.utils.config import (
     ltx_diffusers_quantize,
     ltx_latent_upsampler_source,
     ltx_load_options,
+    ltx_mlx_packs,
+    ltx_mlx_text_encoder,
     ltx_transformer_source,
     ltx_version,
     model_capabilities,
@@ -27,8 +29,9 @@ from zvisiongenerator.utils.config import (
     video_load_options,
     video_preset,
 )
+from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-from zvisiongenerator.utils.paths import resolve_model_path
+from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 
 
 _SEEDVR2_BLOCK = {
@@ -1211,7 +1214,7 @@ class TestLtxLoadOptions:
     }
 
     def test_options_carry_the_level_and_the_transformer_source(self):
-        assert ltx_load_options(self._CONFIG, "ltx-4", upscale=False) == {"quantize": 4, "transformer_source": ("org/ltx", "ltx.safetensors"), "model_name": "ltx-4"}
+        assert ltx_load_options(self._CONFIG, "ltx-4", upscale=False) == {"quantize": 4, "transformer_source": ("org/ltx", "ltx.safetensors"), "model_name": "ltx-4", "mlx_packs": {}}
 
     def test_upscale_adds_the_upsampler(self):
         options = ltx_load_options(self._CONFIG, "other", upscale=True)
@@ -1364,8 +1367,10 @@ class TestPackagedLtx25Config:
 
     def test_the_ltx_2_3_aliases_labels_and_family_block_are_unchanged(self, monkeypatch, tmp_path):
         config = _packaged_config(monkeypatch, tmp_path)
-        assert config["model_aliases"]["ltx-8"] == {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": _LTX23_REPO, "linux": _LTX23_REPO}
-        assert config["model_aliases"]["ltx-4"] == {"darwin": "dgrauet/ltx-2.3-mlx-q4", "win32": _LTX23_REPO, "linux": _LTX23_REPO}
+        mlx_base = config["video_model_presets"]["ltx"]["mlx_base"]
+        assert config["model_aliases"]["ltx-8"] == {"darwin": mlx_base["q8"], "win32": _LTX23_REPO, "linux": _LTX23_REPO}
+        assert config["model_aliases"]["ltx-4"] == {"darwin": mlx_base["q4"], "win32": _LTX23_REPO, "linux": _LTX23_REPO}
+        assert config["model_aliases"]["ltx25-4"]["darwin"] == config["video_model_presets"]["ltx"]["versions"]["ltx25"]["mlx_base"]["q4"]
         assert config["model_labels"]["ltx-8"] == {"name": "LTX-2.3 8-bit"}
         assert config["model_labels"]["ltx-4"] == {"name": "LTX-2.3 4-bit"}
         family = config["video_model_presets"]["ltx"]
@@ -1398,6 +1403,8 @@ class TestLtxVersionAwareAccessors:
             "image_crf": 18,
             "upscale": True,
             "latent_upsampler": _LTX25_UPSAMPLER,
+            "mlx_packs": ltx_mlx_packs(config),
+            "mlx_text_encoder": ltx_mlx_text_encoder(config),
         }
 
     def test_ltx25_4_load_options_without_upscale_have_no_upsampler(self, monkeypatch, tmp_path):
@@ -1411,7 +1418,7 @@ class TestLtxVersionAwareAccessors:
         """2.3 guard: the options of ``ltx-4`` and ``ltx-8`` carry no version key."""
         config = _packaged_config(monkeypatch, tmp_path)
         bits = {"ltx-4": 4, "ltx-8": 8}[name]
-        plain = {"quantize": bits, "transformer_source": _LTX23_TRANSFORMER, "model_name": name}
+        plain = {"quantize": bits, "transformer_source": _LTX23_TRANSFORMER, "model_name": name, "mlx_packs": ltx_mlx_packs(config), "mlx_text_encoder": ltx_mlx_text_encoder(config)}
 
         assert ltx_load_options(config, name, upscale=False) == plain
         assert ltx_load_options(config, name, upscale=True) == {**plain, "upscale": True, "latent_upsampler": _LTX23_UPSAMPLER}
@@ -1511,12 +1518,12 @@ class TestLtxVersionAwareAccessors:
     def test_a_version_without_the_new_keys_adds_none(self):
         config = _versioned(diffusers={"quantize": {"alias-v": 4}})
 
-        assert ltx_load_options(config, "alias-v", upscale=False) == {"quantize": 4, "transformer_source": ("org/ltx", "ltx.safetensors"), "model_name": "alias-v"}
+        assert ltx_load_options(config, "alias-v", upscale=False) == {"quantize": 4, "transformer_source": ("org/ltx", "ltx.safetensors"), "model_name": "alias-v", "mlx_packs": {}}
 
     def test_a_null_new_key_is_unset(self):
         config = _versioned(diffusers={"sampler": None, "image_crf": None, "repo_ignore": None})
 
-        assert set(ltx_load_options(config, "alias-v", upscale=False)) == {"quantize", "transformer_source", "model_name"}
+        assert set(ltx_load_options(config, "alias-v", upscale=False)) == {"quantize", "transformer_source", "model_name", "mlx_packs"}
 
     def test_image_crf_zero_and_the_bounds_are_valid(self):
         for crf in (0, 51):
@@ -1684,3 +1691,86 @@ class TestResolveVideoDefaultsGolden:
 
     def test_a_family_without_a_preset_gets_eight_steps(self):
         assert resolve_video_defaults("unknown", {}, {}) == {"steps": 8, "width": 768, "height": 448, "num_frames": 121, "ratio": "16:9", "size": "s"}
+
+
+class TestLtxMlxPacks:
+    """The pinned MLX packs and the Gemma 3 reference macOS LTX downloads and loads from."""
+
+    _PIN = "a" * 40
+
+    def _config(self, **block):
+        return {"video_model_presets": {"ltx": block}}
+
+    def test_a_pinned_base_is_a_pack_of_its_blocks_files(self):
+        config = self._config(mlx_base={"q4": f"o/p@{self._PIN}", "q8": f"o/q@{self._PIN}"}, mlx_files=["t.safetensors", "c.json"])
+
+        assert ltx_mlx_packs(config) == {
+            f"o/p@{self._PIN}": HubFiles("o/p", self._PIN, ("t.safetensors", "c.json")),
+            f"o/q@{self._PIN}": HubFiles("o/q", self._PIN, ("t.safetensors", "c.json")),
+        }
+
+    def test_an_unpinned_base_is_skipped_and_needs_no_file_list(self):
+        assert ltx_mlx_packs(self._config(mlx_base={"q4": "o/p", "q8": "o/q"})) == {}
+        assert ltx_mlx_packs({}) == {}
+
+    def test_a_version_block_has_its_own_files(self):
+        config = self._config(
+            mlx_base={"q4": f"o/p@{self._PIN}"},
+            mlx_files=["a"],
+            versions={"v": {"aliases": ["x"], "mlx_base": {"q4": f"o/v@{self._PIN}", "q8": f"o/v@{self._PIN}"}, "mlx_files": ["b"]}},
+        )
+
+        assert ltx_mlx_packs(config) == {f"o/p@{self._PIN}": HubFiles("o/p", self._PIN, ("a",)), f"o/v@{self._PIN}": HubFiles("o/v", self._PIN, ("b",))}
+
+    @pytest.mark.parametrize("files", [None, [], [""], "a", ["a", 3]])
+    def test_a_pinned_base_needs_a_valid_file_list(self, files):
+        config = self._config(mlx_base={"q4": f"o/p@{self._PIN}"}, **({} if files is None else {"mlx_files": files}))
+
+        with pytest.raises(ValueError, match="mlx_files"):
+            ltx_mlx_packs(config)
+
+    @pytest.mark.parametrize("bases", ["o/p", {"q4": ""}, {"q4": 3}])
+    def test_a_malformed_base_is_refused(self, bases):
+        with pytest.raises(ValueError, match="mlx_base"):
+            ltx_mlx_packs(self._config(mlx_base=bases, mlx_files=["a"]))
+
+    def test_one_reference_with_two_file_lists_is_refused(self):
+        config = self._config(mlx_base={"q4": f"o/p@{self._PIN}"}, mlx_files=["a"], versions={"v": {"aliases": ["x"], "mlx_base": {"q4": f"o/p@{self._PIN}"}, "mlx_files": ["b"]}})
+
+        with pytest.raises(ValueError, match="other files"):
+            ltx_mlx_packs(config)
+
+    def test_the_text_encoder_is_a_repo_reference(self):
+        assert ltx_mlx_text_encoder(self._config(mlx_text_encoder=f" o/gemma@{self._PIN} ")) == f"o/gemma@{self._PIN}"
+        for value in (None, "", 3, "/local/folder"):
+            with pytest.raises(ValueError, match="mlx_text_encoder"):
+                ltx_mlx_text_encoder(self._config(mlx_text_encoder=value))
+        with pytest.raises(ValueError, match="mlx_text_encoder"):
+            ltx_mlx_text_encoder({})
+
+    def test_the_options_carry_the_text_encoder_only_when_configured(self):
+        assert "mlx_text_encoder" not in ltx_load_options(self._config(), "ltx-4", upscale=False)
+        assert ltx_load_options(self._config(mlx_text_encoder="o/gemma"), "ltx-4", upscale=False)["mlx_text_encoder"] == "o/gemma"
+
+    def test_the_packaged_packs_are_pinned_with_their_files(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+        ltx = config["video_model_presets"]["ltx"]
+
+        packs = ltx_mlx_packs(config)
+
+        assert set(packs) == {ltx["mlx_base"]["q4"], ltx["mlx_base"]["q8"], ltx["versions"]["ltx25"]["mlx_base"]["q4"]}
+        assert all(len(pack.revision) == 40 for pack in packs.values())
+        assert packs[ltx["mlx_base"]["q4"]].files == tuple(ltx["mlx_files"])
+        assert packs[ltx["versions"]["ltx25"]["mlx_base"]["q4"]].files == tuple(ltx["versions"]["ltx25"]["mlx_files"])
+        assert parse_huggingface_repo_reference(ltx_mlx_text_encoder(config)).revision is not None  # type: ignore[union-attr]
+
+    def test_the_macos_aliases_are_the_pinned_bases(self, monkeypatch, tmp_path):
+        """The aliases read the packs' references, so an alias, the plan and the run cannot name different revisions."""
+        config = _packaged_config(monkeypatch, tmp_path)
+        ltx = config["video_model_presets"]["ltx"]
+        aliases = config["model_aliases"]
+
+        assert aliases["ltx-4"]["darwin"] == ltx["mlx_base"]["q4"]
+        assert aliases["ltx-8"]["darwin"] == ltx["mlx_base"]["q8"]
+        assert aliases["ltx25-4"]["darwin"] == ltx["versions"]["ltx25"]["mlx_base"]["q4"]
+        assert all(alias["darwin"] in ltx_mlx_packs(config) for alias in (aliases["ltx-4"], aliases["ltx-8"], aliases["ltx25-4"]))

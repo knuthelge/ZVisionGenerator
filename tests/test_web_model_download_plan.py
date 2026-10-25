@@ -33,10 +33,11 @@ _CONFIG = {
     },
     "video_model_presets": {
         "ltx": {
+            "mlx_text_encoder": "owner/gemma",
             "diffusers": {
                 "transformer": {"repo": "owner/ltx-transformer", "filename": "t.safetensors"},
                 "latent_upsampler": {"repo": "owner/ltx-up", "filename": "u.safetensors"},
-            }
+            },
         }
     },
 }

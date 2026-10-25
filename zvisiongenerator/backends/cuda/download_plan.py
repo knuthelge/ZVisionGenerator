@@ -6,7 +6,7 @@ Nothing heavy is imported at module level: no torch, diffusers or transformers.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +15,7 @@ from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
 
 if TYPE_CHECKING:
-    from zvisiongenerator.utils.h3_preset import H3Preset
+    from zvisiongenerator.utils.h3_preset import H3Preset, HubFiles
 
 __all__ = [
     "DIFFUSERS_IGNORE",
@@ -132,6 +132,8 @@ def video_download_plan(
     upscale: bool = False,
     repo_ignore: Sequence[str] = (),
     text_encoder_bundled: bool = False,
+    mlx_packs: Mapping[str, HubFiles] | None = None,
+    mlx_text_encoder: str | None = None,
 ) -> tuple[DownloadTarget, ...]:
     """Return the downloads of the LTX diffusers model *model_ref*: the repo, the single-file transformer and the latent upsampler.
 
@@ -148,8 +150,10 @@ def video_download_plan(
         upscale: Whether the run uses the two-stage upscale.
         repo_ignore: Extra patterns the repo download skips.
         text_encoder_bundled: Ignored (the macOS planner uses it to leave Gemma 3 out).
+        mlx_packs: Ignored (macOS only).
+        mlx_text_encoder: Ignored (macOS only).
     """
-    del family, text_encoder_bundled
+    del family, text_encoder_bundled, mlx_packs, mlx_text_encoder
     if Path(model_ref).expanduser().is_dir():
         return ()
     reference = parse_huggingface_repo_reference(model_ref)

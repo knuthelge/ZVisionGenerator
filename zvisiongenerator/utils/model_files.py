@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
 
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
-# Used only when ltx-pipelines-mlx cannot be imported to read its own ``gemma_model_id`` default.
-_LTX_MLX_TEXT_ENCODER_FALLBACK = "mlx-community/gemma-3-12b-it-4bit"
 _LTX_MLX_MARKER = "connector.safetensors"
 _LTX_MLX_TRANSFORMER = "transformer.safetensors"
 _LTX_MLX_DISTILLED_GLOB = "transformer-distilled-*.safetensors"
@@ -43,27 +41,6 @@ _SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d+)-of-(?P<total>\d+)\.safet
 # Diffusers precision variants (e.g. ``diffusion_pytorch_model.fp16.safetensors``, optionally sharded).
 _VARIANT_RE = re.compile(r"\.(?:fp16|bf16|fp32|fp8)(?:-\d+-of-\d+)?\.safetensors$")
 
-_ltx_mlx_text_encoder_repo: str | None = None
-
-
-def ltx_mlx_text_encoder_repo() -> str:
-    """Return the Gemma repo ltx-pipelines-mlx encodes prompts with (its ``gemma_model_id`` default).
-
-    The value read from the pipeline is cached; the fallback is not, so a transient import failure is retried.
-    """
-    global _ltx_mlx_text_encoder_repo
-    if _ltx_mlx_text_encoder_repo is None:
-        try:
-            from ltx_pipelines_mlx import BasePipeline
-
-            default = inspect.signature(BasePipeline.__init__).parameters["gemma_model_id"].default
-        except Exception:  # noqa: BLE001 - the MLX pipeline is unavailable off macOS; fall back to the known default
-            return _LTX_MLX_TEXT_ENCODER_FALLBACK
-        if not isinstance(default, str) or not default:
-            return _LTX_MLX_TEXT_ENCODER_FALLBACK
-        _ltx_mlx_text_encoder_repo = default
-    return _ltx_mlx_text_encoder_repo
-
 
 def is_ltx_mlx_layout(model_dir: Path) -> bool:
     """Return whether *model_dir* uses the single-file LTX MLX layout (separate Gemma text encoder)."""
@@ -93,6 +70,12 @@ def ltx_mlx_transformer_file(model_dir: Path) -> Path | None:
         return versioned[-1]
     unversioned = model_dir / _LTX_MLX_DISTILLED_UNVERSIONED
     return unversioned if unversioned.is_file() else None
+
+
+def ltx_mlx_files_bundle_text_encoder(files: Iterable[str]) -> bool:
+    """Return whether the file list *files* of an LTX MLX pack carries its own text encoder (the weights and their config)."""
+    names = set(files)
+    return _LTX_MLX_BUNDLED_ENCODER_WEIGHTS in names and _LTX_MLX_BUNDLED_ENCODER_CONFIG in names
 
 
 def ltx_mlx_bundled_text_encoder(model_dir: Path) -> Path | None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -440,11 +440,14 @@ def video_download_plan(
     upscale: bool = False,
     repo_ignore: Sequence[str] = (),
     text_encoder_bundled: bool = False,
+    mlx_packs: Mapping[str, HubFiles] | None = None,
+    mlx_text_encoder: str | None = None,
 ) -> "tuple[DownloadTarget, ...]":
     """Return the downloads this platform's video backend needs for *model_ref* (empty for a local folder).
 
-    macOS lists the model repo at its revision and, unless *text_encoder_bundled* (a model whose pack carries its own
-    text encoder), the Gemma 3 text encoder; Windows and Linux list the diffusers repo (without the
+    macOS lists the model repo at its revision (a pinned pack of *mlx_packs*, by repo id, as just its files) and,
+    unless the model bundles its own text encoder (a pack whose files include one, or *text_encoder_bundled* for
+    another model), the *mlx_text_encoder* Gemma 3 text encoder; Windows and Linux list the diffusers repo (without the
     *repo_ignore* patterns), the single-file *transformer_source* and, with *upscale*, the *latent_upsampler*
     (each a ``(repo_id[@revision], filename)`` pair).
 
@@ -465,6 +468,8 @@ def video_download_plan(
         upscale=upscale,
         repo_ignore=repo_ignore,
         text_encoder_bundled=text_encoder_bundled,
+        mlx_packs=mlx_packs,
+        mlx_text_encoder=mlx_text_encoder,
     )
 
 

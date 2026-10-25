@@ -12,78 +12,122 @@ from zvisiongenerator.backends.mac import download_plan as mac_plan
 from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS, enhancer_download_plan, h3_mlx_download_plan, image_download_plan, video_download_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils import hf_snapshot
+from zvisiongenerator.utils.h3_preset import HubFiles
 
-GEMMA = "mlx-community/gemma-3-12b-it-4bit"
+PIN = "a1" * 20
+GEMMA_REF = "mlx-community/gemma-3-12b-it-4bit@" + "c3" * 20
+PACK = HubFiles("o/pack", PIN, ("transformer.safetensors", "connector.safetensors", "embedded_config.json"))
+PACKS = {f"o/pack@{PIN}": PACK}
+BUNDLED_PACK = HubFiles("o/bundled", PIN, ("transformer.safetensors", "text_encoder.safetensors", "text_encoder_config.json"))
+BUNDLED_PACKS = {f"o/bundled@{PIN}": BUNDLED_PACK}
 
 
 @pytest.fixture
-def gemma(monkeypatch: pytest.MonkeyPatch) -> DownloadTarget:
-    monkeypatch.setattr(mac_plan, "ltx_mlx_text_encoder_repo", lambda: GEMMA)
-    return DownloadTarget(GEMMA, allow_patterns=MLX_LM_ALLOW_PATTERNS)
+def gemma() -> DownloadTarget:
+    return DownloadTarget("mlx-community/gemma-3-12b-it-4bit", "c3" * 20, MLX_LM_ALLOW_PATTERNS)
+
+
+def _plan(model_ref: str, **kwargs):
+    return video_download_plan(model_ref, family="ltx", mlx_packs=PACKS, mlx_text_encoder=GEMMA_REF, **kwargs)
 
 
 # --- video ---
 
 
-def test_video_plan_repo_id_is_the_whole_repo_then_gemma(gemma: DownloadTarget) -> None:
-    plan = video_download_plan("dgrauet/ltx-2.3-mlx-q4", family="ltx")
+def test_video_plan_pinned_pack_is_its_literal_files_at_its_revision_then_gemma(gemma: DownloadTarget) -> None:
+    plan = _plan(f"o/pack@{PIN}")
 
-    assert plan == (DownloadTarget("dgrauet/ltx-2.3-mlx-q4"), gemma)
-    assert plan[0].allow_patterns is None
+    assert plan == (DownloadTarget("o/pack", PIN, PACK.files), gemma)
     assert plan[0].ignore_patterns is None
 
 
+def test_video_plan_gemma_is_the_pinned_reference_with_the_mlx_lm_files(gemma: DownloadTarget) -> None:
+    assert gemma.revision == "c3" * 20 and _plan(f"o/pack@{PIN}")[1] == gemma
+
+
+def test_video_plan_other_repo_is_the_whole_repo_then_gemma(gemma: DownloadTarget) -> None:
+    plan = _plan("dgrauet/ltx-2.3-mlx-q4")
+
+    assert plan == (DownloadTarget("dgrauet/ltx-2.3-mlx-q4"), gemma)
+    assert plan[0].allow_patterns is None
+
+
+def test_video_plan_keeps_the_revision_of_a_reference_that_is_no_pack(gemma: DownloadTarget) -> None:
+    assert _plan("o/p@" + "b2" * 20) == (DownloadTarget("o/p", "b2" * 20), gemma)
+
+
 def test_video_plan_ignores_diffusers_arguments(gemma: DownloadTarget) -> None:
-    plan = video_download_plan("dgrauet/ltx-2.3-mlx-q4", family="ltx", transformer_source=("a/b", "c"), latent_upsampler=("d/e", "f"), upscale=True)
+    plan = _plan(f"o/pack@{PIN}", transformer_source=("a/b", "c"), latent_upsampler=("d/e", "f"), upscale=True, repo_ignore=("LTX-2.5-*.safetensors", "samples/*"))
 
-    assert plan == (DownloadTarget("dgrauet/ltx-2.3-mlx-q4"), gemma)
+    assert plan == (DownloadTarget("o/pack", PIN, PACK.files), gemma)
 
 
-def test_video_plan_ignores_the_repo_ignore_patterns(gemma: DownloadTarget) -> None:
-    plan = video_download_plan("dgrauet/ltx-2.3-mlx-q4", family="ltx", repo_ignore=("LTX-2.5-*.safetensors", "samples/*"))
+def test_video_plan_bundled_flag_leaves_gemma_out_of_a_model_that_is_no_pack() -> None:
+    assert _plan("o/p", text_encoder_bundled=True) == (DownloadTarget("o/p"),)
 
-    assert plan == (DownloadTarget("dgrauet/ltx-2.3-mlx-q4"), gemma)
+
+def test_video_plan_pack_listing_its_own_text_encoder_is_the_pack_alone() -> None:
+    plan = video_download_plan(f"o/bundled@{PIN}", family="ltx", mlx_packs=BUNDLED_PACKS, mlx_text_encoder=GEMMA_REF)
+
+    assert plan == (DownloadTarget("o/bundled", PIN, BUNDLED_PACK.files),)
+
+
+def test_video_plan_pack_files_decide_gemma_not_the_bundled_flag(gemma: DownloadTarget) -> None:
+    flagged = _plan(f"o/pack@{PIN}", text_encoder_bundled=True)
+    unflagged = video_download_plan("o/bundled", family="ltx", mlx_packs=BUNDLED_PACKS, mlx_text_encoder=GEMMA_REF, text_encoder_bundled=False)
+
+    assert flagged == (DownloadTarget("o/pack", PIN, PACK.files), gemma)
+    assert unflagged == (DownloadTarget("o/bundled", PIN, BUNDLED_PACK.files),)
+
+
+@pytest.mark.parametrize("model_ref", ["o/pack", "O/Pack", f"O/PACK@{PIN}", f"o/pack@{PIN}"])
+def test_video_plan_pack_by_its_repo_id_is_its_pinned_files_whatever_the_case_or_pin(model_ref: str, gemma: DownloadTarget) -> None:
+    assert _plan(model_ref) == (DownloadTarget("o/pack", PIN, PACK.files), gemma)
+
+
+def test_video_plan_pack_at_another_revision_is_the_whole_repo_at_that_revision(gemma: DownloadTarget) -> None:
+    plan = _plan("o/pack@" + "b2" * 20)
+
+    assert plan == (DownloadTarget("o/pack", "b2" * 20), gemma)
+    assert plan[0].allow_patterns is None
 
 
 def test_video_plan_local_mlx_layout_needs_only_gemma(tmp_path: Path, gemma: DownloadTarget) -> None:
     (tmp_path / "connector.safetensors").write_bytes(b"")
 
-    assert video_download_plan(str(tmp_path), family="ltx") == (gemma,)
+    assert _plan(str(tmp_path)) == (gemma,)
 
 
-def test_video_plan_local_bundled_pack_needs_nothing(tmp_path: Path, gemma: DownloadTarget) -> None:
+def test_video_plan_local_bundled_pack_needs_nothing(tmp_path: Path) -> None:
     (tmp_path / "connector.safetensors").write_bytes(b"")
     (tmp_path / "text_encoder.safetensors").write_bytes(b"")
     (tmp_path / "text_encoder_config.json").write_text("{}")
 
-    assert video_download_plan(str(tmp_path), family="ltx") == ()
+    assert _plan(str(tmp_path)) == ()
 
 
-def test_video_plan_local_layout_with_bundled_flag_needs_nothing(tmp_path: Path, gemma: DownloadTarget) -> None:
+def test_video_plan_local_layout_with_bundled_flag_needs_nothing(tmp_path: Path) -> None:
     (tmp_path / "connector.safetensors").write_bytes(b"")
 
-    assert video_download_plan(str(tmp_path), family="ltx", text_encoder_bundled=True) == ()
+    assert _plan(str(tmp_path), text_encoder_bundled=True) == ()
 
 
-def test_video_plan_keeps_the_revision_of_a_pinned_reference(gemma: DownloadTarget) -> None:
-    pin = "o/p@" + "a1" * 20
-
-    assert video_download_plan(pin, family="ltx") == (DownloadTarget("o/p", "a1" * 20), gemma)
+def test_video_plan_other_local_folder_is_empty(tmp_path: Path) -> None:
+    assert _plan(str(tmp_path)) == ()
 
 
-def test_video_plan_bundled_text_encoder_is_the_model_alone(gemma: DownloadTarget) -> None:
-    pin = "o/p@" + "a1" * 20
-
-    assert video_download_plan(pin, family="ltx", text_encoder_bundled=True) == (DownloadTarget("o/p", "a1" * 20),)
-    assert video_download_plan("o/p", family="ltx", text_encoder_bundled=True) == (DownloadTarget("o/p"),)
+def test_video_plan_not_a_repo_id_is_empty() -> None:
+    assert _plan("/missing/model") == ()
 
 
-def test_video_plan_other_local_folder_is_empty(tmp_path: Path, gemma: DownloadTarget) -> None:
-    assert video_download_plan(str(tmp_path), family="ltx") == ()
+@pytest.mark.parametrize("text_encoder", [None, "", "/local/gemma"])
+def test_video_plan_needing_gemma_needs_its_reference(text_encoder: str | None) -> None:
+    with pytest.raises(ValueError, match="Gemma 3"):
+        video_download_plan(f"o/pack@{PIN}", family="ltx", mlx_packs=PACKS, mlx_text_encoder=text_encoder)
 
 
-def test_video_plan_not_a_repo_id_is_empty(gemma: DownloadTarget) -> None:
-    assert video_download_plan("/missing/model", family="ltx") == ()
+def test_video_plan_without_gemma_needs_no_reference() -> None:
+    assert video_download_plan(f"o/bundled@{PIN}", family="ltx", mlx_packs=BUNDLED_PACKS) == (DownloadTarget("o/bundled", PIN, BUNDLED_PACK.files),)
 
 
 # --- enhancer ---

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,7 +46,9 @@ from ltx_pipelines_mlx.utils.samplers import denoise_loop, euler_ancestral_denoi
 from ltx_pipelines_mlx.utils.stepwise import StepwisePreview  # noqa: E402
 
 
-from zvisiongenerator.utils.model_files import ltx_mlx_bundled_text_encoder, ltx_mlx_video_decoder_file  # noqa: E402
+from ltx_pipelines_mlx.ti2vid_two_stages import TI2VidTwoStagesPipeline  # noqa: E402
+from zvisiongenerator.utils.config import load_config, ltx_mlx_packs, ltx_mlx_text_encoder_repo_id  # noqa: E402
+from zvisiongenerator.utils.model_files import ltx_mlx_bundled_text_encoder, ltx_mlx_transformer_file, ltx_mlx_upsampler_file, ltx_mlx_video_decoder_file  # noqa: E402
 
 
 def _params(fn) -> dict[str, inspect.Parameter]:
@@ -336,3 +339,79 @@ class TestExtendShapes:
 
         assert tokens.shape == (1, 4 * 14 * 22, 128)
         assert dims == (4, 14, 22)
+
+
+class TestPinnedPackFilesContract:
+    """Every file-selection decision of the vendored loader, taken on a folder of exactly a pack's listed files, lands on a listed file.
+
+    The packs are downloaded as just those files, so a name the loader picks that is not listed would be a missing file at run time.
+    """
+
+    @pytest.fixture
+    def packs(self):
+        return ltx_mlx_packs(load_config())
+
+    @staticmethod
+    def _folder(root, files):
+        for name in files:
+            (root / name).write_text("{}" if name.endswith(".json") else "")
+        return root
+
+    @pytest.fixture(params=["ltx-4", "ltx-8", "ltx25-4"])
+    def pack(self, request, tmp_path, packs):
+        config = load_config()
+        reference = config["model_aliases"][request.param]["darwin"]
+        files = packs[reference].files
+        return SimpleNamespace(alias=request.param, files=files, folder=self._folder(tmp_path, files), bundled=request.param == "ltx25-4")
+
+    def test_the_transformer_is_a_listed_file(self, pack):
+        folder = pack.folder
+        plain = folder / "transformer.safetensors"
+        chosen = plain if plain.exists() else BasePipeline._resolve_safetensors(folder, "transformer-distilled")  # the choice _base.py's load makes
+
+        assert chosen.name in pack.files
+        assert ltx_mlx_transformer_file(folder) == chosen
+        assert sum(name.startswith("transformer") for name in pack.files) == 1
+
+    def test_the_video_decoder_and_encoder_are_listed_files(self, pack):
+        decoder, encoder = _video_vae_names(pack.folder)
+
+        assert {f"{decoder}.safetensors", f"{encoder}.safetensors"} <= set(pack.files)
+        assert ltx_mlx_video_decoder_file(pack.folder).name == f"{decoder}.safetensors"
+        assert ImageConditioner(pack.folder).encoder_path.name == f"{encoder}.safetensors"
+
+    def test_the_audio_and_connector_files_are_listed(self, pack):
+        assert {"audio_vae.safetensors", "vocoder.safetensors", "connector.safetensors"} <= set(pack.files)
+
+    def test_the_spatial_upsampler_and_its_config_are_listed_files(self, pack):
+        pipeline = SimpleNamespace(model_dir=pack.folder, _is_25=pack.bundled, _resolve_safetensors=BasePipeline._resolve_safetensors)
+
+        weights = TI2VidTwoStagesPipeline._resolve_upsampler_path(pipeline)
+
+        assert weights.name in pack.files
+        assert f"{weights.stem}_config.json" in pack.files
+        assert ltx_mlx_upsampler_file(pack.folder) == weights
+
+    def test_the_text_encoder_is_bundled_exactly_for_the_ltx25_pack(self, pack):
+        kind = encoder_configurator.select_text_encoder(pack.folder)
+
+        assert kind == ("gemma4" if pack.bundled else "gemma3")
+        assert (ltx_mlx_bundled_text_encoder(pack.folder) is not None) is pack.bundled
+        if pack.bundled:
+            assert {"text_encoder.safetensors", "text_encoder_config.json", "tokenizer.json", "tokenizer_config.json"} <= set(pack.files)
+
+    def test_the_model_config_is_a_listed_file(self, pack):
+        assert "embedded_config.json" in pack.files  # LTXModelConfig reads it before config.json
+
+    def test_the_ltx25_pack_lists_its_duration_head(self, pack):
+        assert ("duration_head.safetensors" in pack.files) is pack.bundled
+
+    def test_the_configured_gemma_3_is_the_pipelines_default(self):
+        default = inspect.signature(BasePipeline.__init__).parameters["gemma_model_id"].default
+
+        assert ltx_mlx_text_encoder_repo_id(load_config()) == default
+        assert inspect.signature(DistilledPipeline.__init__).parameters["gemma_model_id"].default == default
+
+    def test_both_pipelines_take_the_text_encoder_folder(self):
+        _assert_params(BasePipeline.__init__, "gemma_model_id")
+        _assert_params(DistilledPipeline.__init__, "gemma_model_id")

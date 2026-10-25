@@ -18,9 +18,19 @@ import pytest
 
 from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.backends.mac.video import LtxVideoBackend, _drop_leading_frames, _generation_scope, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
+from zvisiongenerator.backends.mac.video import (
+    LtxVideoBackend,
+    _drop_leading_frames,
+    _generation_scope,
+    _LOW_RAM_THRESHOLD_BYTES,
+    _LtxModel,
+    _resolve_model_dir,
+    _TwoStageProgress,
+    _use_low_ram_streaming,
+)
 from zvisiongenerator.core.video_types import ExtendSegment, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
 from zvisiongenerator.workflows import build_video_workflow
@@ -688,6 +698,93 @@ class TestLoadModel:
 
         classes.base.assert_called_once_with(model_dir="owner/repo@abc123", low_memory=True, low_ram_streaming=False)
         find.assert_not_called()
+        download.assert_not_called()
+
+    def _pack_folder(self, root, *, bundled):
+        folder = root / "pack"
+        folder.mkdir()
+        (folder / "connector.safetensors").write_bytes(b"")
+        if bundled:
+            (folder / "text_encoder.safetensors").write_bytes(b"")
+            (folder / "text_encoder_config.json").write_text("{}")
+        return folder
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_a_2_3_folder_gets_the_gemma_3_folder_as_its_text_encoder(self, classes, monkeypatch, tmp_path, upscale):
+        pack = self._pack_folder(tmp_path, bundled=False)
+        gemma = tmp_path / "gemma"
+        gemma.mkdir()
+        find = MagicMock(return_value=gemma)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", find)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model(str(pack), upscale=upscale, mlx_text_encoder="owner/gemma@" + "c" * 40)
+
+        ctor = classes.distilled if upscale else classes.base
+        ctor.assert_called_once_with(model_dir=str(pack), low_memory=True, low_ram_streaming=False, gemma_model_id=str(gemma))
+        find.assert_called_once_with("owner/gemma@" + "c" * 40)
+
+    def test_the_gemma_3_revision_is_downloaded_with_the_mlx_lm_patterns_when_it_is_not_cached(self, classes, monkeypatch, tmp_path):
+        from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS
+
+        pack = self._pack_folder(tmp_path, bundled=False)
+        download = MagicMock(return_value=str(tmp_path / "gemma"))
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", MagicMock(return_value=None))
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video._snapshot_download", download)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model(str(pack), mlx_text_encoder="owner/gemma@" + "c" * 40)
+
+        download.assert_called_once_with(repo_id="owner/gemma", revision="c" * 40, allow_patterns=list(MLX_LM_ALLOW_PATTERNS))
+        assert classes.base.call_args.kwargs["gemma_model_id"] == str(tmp_path / "gemma")
+
+    def test_an_unpinned_reference_to_a_pack_repo_gets_the_pinned_pack_folder_and_the_pinned_gemma_3(self, classes, monkeypatch, tmp_path):
+        pin = "d" * 40
+        pack = HubFiles("owner/pack", pin, ("connector.safetensors",))
+        folder = self._pack_folder(tmp_path, bundled=False)
+        gemma = tmp_path / "gemma"
+        gemma.mkdir()
+        monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [folder])
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", MagicMock(return_value=gemma))
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("Owner/Pack", mlx_packs={f"owner/pack@{pin}": pack}, mlx_text_encoder="owner/gemma@" + "c" * 40)
+
+        classes.base.assert_called_once_with(model_dir=str(folder), low_memory=True, low_ram_streaming=False, gemma_model_id=str(gemma))
+
+    def test_a_2_5_folder_with_its_own_text_encoder_gets_no_gemma_3(self, classes, monkeypatch, tmp_path):
+        pack = self._pack_folder(tmp_path, bundled=True)
+        find, download = MagicMock(), MagicMock()
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", find)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video._snapshot_download", download)
+        classes.base.return_value.model_dir = pack
+        classes.is_ltx25_pack.return_value = True
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model(str(pack), mlx_text_encoder="owner/gemma@" + "c" * 40)
+
+        classes.base.assert_called_once_with(model_dir=str(pack), low_memory=True, low_ram_streaming=False)
+        find.assert_not_called()
+        download.assert_not_called()
+
+    def test_without_a_configured_text_encoder_the_pipeline_default_applies(self, classes, tmp_path):
+        pack = self._pack_folder(tmp_path, bundled=False)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model(str(pack))
+
+        classes.base.assert_called_once_with(model_dir=str(pack), low_memory=True, low_ram_streaming=False)
+
+    def test_a_pinned_pack_is_resolved_to_its_listed_files_and_gets_the_gemma_3_folder(self, classes, monkeypatch, tmp_path):
+        pack_files = HubFiles("owner/pack", "d" * 40, ("connector.safetensors", "transformer-distilled-1.1.safetensors"))
+        snapshot = self._pack_folder(tmp_path, bundled=False)
+        (snapshot / "transformer-distilled-1.1.safetensors").write_bytes(b"")
+        gemma = tmp_path / "gemma"
+        gemma.mkdir()
+        monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [snapshot])
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", MagicMock(return_value=gemma))
+        download = MagicMock()
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video._snapshot_download", download)
+        reference = "owner/pack@" + "d" * 40
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model(reference, mlx_packs={reference: pack_files}, mlx_text_encoder="owner/gemma@" + "c" * 40)
+
+        classes.base.assert_called_once_with(model_dir=str(snapshot), low_memory=True, low_ram_streaming=False, gemma_model_id=str(gemma))
         download.assert_not_called()
 
     def test_a_2_3_pack_is_recorded_as_not_ltx25(self, classes):
@@ -1614,3 +1711,91 @@ class TestDropLeadingFrames:
 
     def test_carry_longer_than_the_clip_yields_nothing(self):
         assert list(_drop_leading_frames(_chunks([16, 9]), _CARRY + 1)) == []
+
+
+class TestResolveModelDir:
+    """A pinned MLX pack resolves to exactly its listed files at its revision; other references resolve as before."""
+
+    _PIN = "d" * 40
+    _PACK = HubFiles("owner/pack", _PIN, ("a.safetensors", "b.json"))
+    _PACKS = {f"owner/pack@{_PIN}": _PACK}
+
+    @staticmethod
+    def _snapshot(root, *names):
+        root.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (root / name).write_bytes(b"x")
+        return root
+
+    def test_a_cached_snapshot_with_every_listed_file_needs_no_download(self, monkeypatch, tmp_path):
+        snapshot = self._snapshot(tmp_path / "snap", "a.safetensors", "b.json", "unlisted.bin")
+        seen = []
+        monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: (seen.append((repo, revision)), [snapshot])[1])
+        download, find = MagicMock(), MagicMock()
+
+        resolved = _resolve_model_dir(f"owner/pack@{self._PIN}", packs=self._PACKS, download=download, find_local_dir=find)
+
+        assert resolved == str(snapshot)
+        assert seen == [("owner/pack", self._PIN)]
+        download.assert_not_called()
+        find.assert_not_called()
+
+    def test_a_missing_listed_file_downloads_just_the_listed_files_at_the_pin(self, monkeypatch, tmp_path):
+        partial = self._snapshot(tmp_path / "partial", "a.safetensors")
+        full = self._snapshot(tmp_path / "full", "a.safetensors", "b.json")
+        monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [partial])
+        download = MagicMock(return_value=str(full))
+
+        resolved = _resolve_model_dir(f"owner/pack@{self._PIN}", packs=self._PACKS, download=download)
+
+        assert resolved == str(full)
+        download.assert_called_once_with(repo_id="owner/pack", revision=self._PIN, allow_patterns=["a.safetensors", "b.json"])
+
+    def test_a_revision_without_a_listed_file_is_an_error_naming_the_revision_and_the_file(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [])
+        download = MagicMock(return_value=str(self._snapshot(tmp_path / "snap", "a.safetensors")))
+
+        with pytest.raises(FileNotFoundError, match=f"owner/pack@{self._PIN}.*b.json"):
+            _resolve_model_dir(f"owner/pack@{self._PIN}", packs=self._PACKS, download=download)
+
+    def test_a_pinned_reference_that_is_no_pack_is_the_complete_snapshot_or_a_download(self, tmp_path):
+        find = MagicMock(return_value=tmp_path)
+        download = MagicMock(return_value=str(tmp_path / "dl"))
+
+        assert _resolve_model_dir("o/r@abc", packs=self._PACKS, find_local_dir=find, download=download) == str(tmp_path)
+        find.return_value = None
+        assert _resolve_model_dir("o/r@abc", packs=self._PACKS, find_local_dir=find, download=download) == str(tmp_path / "dl")
+        download.assert_called_once_with(repo_id="o/r", revision="abc")
+
+    @pytest.mark.parametrize("reference", ["owner/pack", "Owner/PACK", f"OWNER/pack@{_PIN}"])
+    def test_a_reference_to_a_pack_repo_resolves_to_the_pack_whatever_its_case_or_pin(self, monkeypatch, tmp_path, reference):
+        full = self._snapshot(tmp_path / "full", "a.safetensors", "b.json")
+        monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [])
+        download, find = MagicMock(return_value=str(full)), MagicMock()
+
+        resolved = _resolve_model_dir(reference, packs=self._PACKS, download=download, find_local_dir=find)
+
+        assert resolved == str(full)
+        download.assert_called_once_with(repo_id="owner/pack", revision=self._PIN, allow_patterns=["a.safetensors", "b.json"])
+        find.assert_not_called()
+
+    def test_a_pack_repo_at_another_revision_is_no_pack_and_downloads_that_revision_whole(self, tmp_path):
+        find = MagicMock(return_value=None)
+        download = MagicMock(return_value=str(tmp_path))
+
+        assert _resolve_model_dir("owner/pack@" + "e" * 40, packs=self._PACKS, find_local_dir=find, download=download) == str(tmp_path)
+        download.assert_called_once_with(repo_id="owner/pack", revision="e" * 40)
+
+    def test_an_unpinned_reference_to_no_pack_and_a_folder_come_back_unchanged(self, tmp_path):
+        download = MagicMock()
+
+        assert _resolve_model_dir("owner/other", packs=self._PACKS, download=download) == "owner/other"
+        assert _resolve_model_dir(str(tmp_path), packs=self._PACKS, download=download) == str(tmp_path)
+        download.assert_not_called()
+
+    def test_a_download_limited_to_patterns_asks_the_hub_for_just_those(self, tmp_path):
+        download = MagicMock(return_value=str(tmp_path))
+
+        _resolve_model_dir("o/r@abc", packs={}, find_local_dir=MagicMock(return_value=None), download=download, allow_patterns=("*.json", "model*.safetensors"))
+
+        download.assert_called_once_with(repo_id="o/r", revision="abc", allow_patterns=["*.json", "model*.safetensors"])

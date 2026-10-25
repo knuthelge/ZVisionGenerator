@@ -67,14 +67,16 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 
 | Model | Alias | Download | Needs | Can do |
 |---|---|---|---|---|
-| LTX-2.3 4-bit | `ltx-4` | — | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale |
-| LTX-2.3 8-bit | `ltx-8` | — | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same |
-| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 30.5 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same |
+| LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale |
+| LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same |
+| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same |
 | MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | Also a last frame, and 4 or 8 steps. No upscale on macOS |
 
 All of them make video with sound, from a prompt or a starting image, and can [extend](video.md#extending-a-video) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](video.md).
 
 You can also convert an [LTX-2.3 or LTX-2.5 fine-tune](../cli/models.md#ltx-23-and-ltx-25-video-fine-tunes) or a [MiniMax H3 fine-tune](../cli/models.md#minimax-h3-video-fine-tunes) into a model you pick by name.
+
+On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed revisions, from ungated repositories, so no Hugging Face account is needed. Each figure includes the 8.1 GB Gemma 3 text encoder, which the two share, and nothing is prepared afterwards.
 
 ### LTX-2.5
 
@@ -82,7 +84,7 @@ You can also convert an [LTX-2.3 or LTX-2.5 fine-tune](../cli/models.md#ltx-23-a
 
 === "macOS"
 
-    The download is about 30.5 GB and holds the model with its own Gemma 4 text encoder; nothing is prepared afterwards. A 5 s clip at `s` with **Low memory** is estimated at about 15 GiB.
+    The download is about 28.8 GB and holds the model with its own Gemma 4 text encoder; nothing is prepared afterwards. A 5 s clip at `s` with **Low memory** is estimated at about 15 GiB.
 
 === "Windows and Linux"
 

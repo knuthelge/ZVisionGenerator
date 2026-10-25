@@ -9,7 +9,7 @@ import httpx
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
-from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_model_downloaded, video_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, write_build_record
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SEEDVR2_MIXED_REPO, SEEDVR2_REPO
@@ -144,6 +144,8 @@ class TestVideoPlan:
             upscale=True,
             repo_ignore=(),
             text_encoder_bundled=False,
+            mlx_packs={},
+            mlx_text_encoder=None,
         )
 
     def test_the_versions_repo_ignore_is_passed_to_the_backend(self, monkeypatch):
@@ -392,14 +394,12 @@ class TestThroughTheRealDispatch:
 
     @staticmethod
     def _darwin_config(monkeypatch, tmp_path):
-        from zvisiongenerator.backends.mac import download_plan as mac_plan
         from zvisiongenerator.utils import config as config_module
         from zvisiongenerator.utils.config import load_config
 
         monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
         monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
         monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "darwin")
-        monkeypatch.setattr(mac_plan, "ltx_mlx_text_encoder_repo", lambda: "owner/gemma3")
         return load_config()
 
     def test_a_macos_version_alias_plans_no_gemma_3_and_keeps_its_revision(self, monkeypatch, tmp_path):
@@ -409,28 +409,124 @@ class TestThroughTheRealDispatch:
 
         assert video_plan(pin, family="ltx", config=config, model_name="ltx-ver", upscale=False) == (DownloadTarget("owner/ltx25-mlx", "d" * 40),)
 
-    def test_the_macos_ltx25_plan_is_the_pinned_mirror_alone_with_upscale(self, monkeypatch, tmp_path):
+    def test_the_macos_ltx25_plan_is_the_pinned_packs_files_alone_with_upscale(self, monkeypatch, tmp_path):
         config = self._darwin_config(monkeypatch, tmp_path)
         pin = config["model_aliases"]["ltx25-4"]["darwin"]
+        files = tuple(config["video_model_presets"]["ltx"]["versions"]["ltx25"]["mlx_files"])
 
         assert pin == "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
-        assert video_plan(pin, family="ltx", config=config, model_name="ltx25-4", upscale=True) == (DownloadTarget("MarceloFSO/ltx-2.5-mlx-q4-fast", "281bf05bd23207d6feef708fc2e270f84ba992b5"),)
+        for upscale in (False, True):
+            assert video_plan(pin, family="ltx", config=config, model_name="ltx25-4", upscale=upscale) == (
+                DownloadTarget("MarceloFSO/ltx-2.5-mlx-q4-fast", "281bf05bd23207d6feef708fc2e270f84ba992b5", files),
+            )
 
     @pytest.mark.parametrize("name", ["ltx-4", "ltx-8"])
-    def test_the_macos_ltx_2_3_plan_is_the_repo_then_gemma_3(self, monkeypatch, tmp_path, name):
-        """2.3 guard: the packaged ``ltx-4`` and ``ltx-8`` Mac plans are the whole repo with no revision, then Gemma 3."""
+    def test_the_macos_ltx_2_3_plan_is_the_pinned_packs_files_then_the_pinned_gemma_3(self, monkeypatch, tmp_path, name):
         from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS
+        from zvisiongenerator.utils.config import ltx_mlx_text_encoder
+        from zvisiongenerator.utils.paths import split_huggingface_revision
 
         config = self._darwin_config(monkeypatch, tmp_path)
-        repo = config["model_aliases"][name]["darwin"]
+        ref = config["model_aliases"][name]["darwin"]
+        repo, revision = split_huggingface_revision(ref)
+        gemma_repo, gemma_revision = split_huggingface_revision(ltx_mlx_text_encoder(config))
+        files = tuple(config["video_model_presets"]["ltx"]["mlx_files"])
 
+        assert revision is not None and gemma_revision is not None
         for upscale in (False, True):
-            assert video_plan(repo, family="ltx", config=config, model_name=name, upscale=upscale) == (
-                DownloadTarget(repo),
-                DownloadTarget("owner/gemma3", None, MLX_LM_ALLOW_PATTERNS, None, None),
+            assert video_plan(ref, family="ltx", config=config, model_name=name, upscale=upscale) == (
+                DownloadTarget(repo, revision, files),
+                DownloadTarget(gemma_repo, gemma_revision, MLX_LM_ALLOW_PATTERNS),
             )
+
+    def test_a_custom_alias_or_unpinned_reference_to_the_ltx25_pack_plans_the_pinned_files_without_gemma_3(self, monkeypatch, tmp_path):
+        """The pack's own file list says it bundles its text encoder; version membership of the picked name does not matter."""
+        config = self._darwin_config(monkeypatch, tmp_path)
+        pin = config["model_aliases"]["ltx25-4"]["darwin"]
+        repo, revision = pin.split("@")
+        files = tuple(config["video_model_presets"]["ltx"]["versions"]["ltx25"]["mlx_files"])
+
+        for ref in (pin, repo, repo.upper()):
+            for name in ("my-custom-ltx", ref):
+                assert video_plan(ref, family="ltx", config=config, model_name=name, upscale=False) == (DownloadTarget(repo, revision, files),)
+
+    @pytest.mark.parametrize("name", ["ltx-4", "ltx-8"])
+    def test_an_unpinned_or_upper_case_reference_to_an_ltx_2_3_pack_plans_its_pinned_files(self, monkeypatch, tmp_path, name):
+        config = self._darwin_config(monkeypatch, tmp_path)
+        repo, revision = config["model_aliases"][name]["darwin"].split("@")
+        files = tuple(config["video_model_presets"]["ltx"]["mlx_files"])
+
+        for ref in (repo, repo.upper()):
+            plan = video_plan(ref, family="ltx", config=config, model_name=ref, upscale=False)
+
+            assert plan is not None and plan[0] == DownloadTarget(repo, revision, files)
+            assert len(plan) == 2  # then the pinned Gemma 3
+
+    def test_a_pack_repo_pinned_to_another_revision_is_planned_whole_at_that_revision(self, monkeypatch, tmp_path):
+        config = self._darwin_config(monkeypatch, tmp_path)
+        repo = config["model_aliases"]["ltx-4"]["darwin"].split("@")[0]
+
+        plan = video_plan(f"{repo}@{'e' * 40}", family="ltx", config=config, model_name="ltx-4", upscale=False)
+
+        assert plan is not None and plan[0] == DownloadTarget(repo, "e" * 40)
+
+    def test_the_macos_pack_plan_lists_only_files_the_app_loads(self, monkeypatch, tmp_path):
+        """No whole-repo target: the packs hold other transformers, LoRAs and upsamplers that must not be downloaded."""
+        config = self._darwin_config(monkeypatch, tmp_path)
+
+        for name in ("ltx-4", "ltx-8", "ltx25-4"):
+            plan = video_plan(config["model_aliases"][name]["darwin"], family="ltx", config=config, model_name=name, upscale=True)
+
+            assert plan is not None and all(target.revision and target.allow_patterns for target in plan)
+            assert len([pattern for pattern in plan[0].allow_patterns if pattern.startswith("transformer")]) == 1
 
     def test_the_enhancer_plan_uses_the_transformers_patterns(self):
         from zvisiongenerator.backends.cuda.download_plan import TRANSFORMERS_ALLOW_PATTERNS
 
         assert enhancer_plan("owner/llm", "rev") == (DownloadTarget("owner/llm", "rev", TRANSFORMERS_ALLOW_PATTERNS),)
+
+
+class TestVideoModelDownloaded:
+    _CONFIG = {"video_model_presets": {"ltx": {"diffusers": {"transformer": {"repo": "owner/ltx-transformer", "filename": "t.safetensors"}}}}}
+
+    def _plan(self, monkeypatch, targets):
+        monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", lambda *args, **kwargs: targets)
+
+    def test_it_is_true_when_every_target_of_the_plan_is_present(self, monkeypatch):
+        first, second = DownloadTarget("o/a", "r", ("x",)), DownloadTarget("o/b")
+        self._plan(monkeypatch, (first, second))
+        seen = []
+
+        assert video_model_downloaded("o/a", family="ltx", config=self._CONFIG, model_name="ltx", target_present=lambda target: (seen.append(target), True)[1])
+        assert seen == [first, second]
+
+    def test_one_missing_target_is_not_downloaded(self, monkeypatch):
+        self._plan(monkeypatch, (DownloadTarget("o/a"), DownloadTarget("o/b")))
+
+        assert not video_model_downloaded("o/a", family="ltx", config=self._CONFIG, model_name="ltx", target_present=lambda target: target.repo_id == "o/a")
+
+    def test_a_plan_that_cannot_be_made_is_not_downloaded(self, monkeypatch):
+        self._plan(monkeypatch, None)
+
+        assert not video_model_downloaded("o/a", family="ltx", config=self._CONFIG, model_name="ltx", target_present=lambda target: True)
+
+    def test_an_empty_plan_of_an_existing_folder_is_downloaded(self, monkeypatch, tmp_path):
+        self._plan(monkeypatch, ())
+
+        assert video_model_downloaded(str(tmp_path), family="ltx", config=self._CONFIG, model_name="ltx", target_present=lambda target: False)
+
+    @pytest.mark.parametrize("reference", ["{root}/deleted", "~/ziv-deleted-model", "./deleted", "models/deleted", "deleted"])
+    def test_a_local_path_that_is_no_folder_is_not_downloaded(self, monkeypatch, tmp_path, reference):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        self._plan(monkeypatch, ())
+
+        assert not video_model_downloaded(reference.format(root=tmp_path), family="ltx", config=self._CONFIG, model_name="ltx", target_present=lambda target: True)
+
+    def test_a_folder_that_was_deleted_is_not_downloaded(self, monkeypatch, tmp_path):
+        self._plan(monkeypatch, ())
+        folder = tmp_path / "model"
+        folder.mkdir()
+        folder.rmdir()
+
+        assert not video_model_downloaded(str(folder), family="ltx", config=self._CONFIG, model_name="ltx", target_present=lambda target: True)

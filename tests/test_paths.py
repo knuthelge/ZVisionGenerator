@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from zvisiongenerator.utils.paths import (
+    canonical_model_name,
     collapse_home,
     display_basename,
     display_stem,
@@ -415,3 +416,43 @@ class TestSplitHuggingfaceRevision:
         from zvisiongenerator.utils.paths import split_huggingface_revision
 
         assert split_huggingface_revision(value) == (value, None)
+
+
+class TestCanonicalModelName:
+    _PIN = "b" * 40
+    _ALIASES = {
+        "ltx-4": {"darwin": f"dgrauet/ltx-2.3-mlx-q4@{_PIN}", "win32": "org/diffusers", "linux": "org/diffusers"},
+        "ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "org/diffusers", "linux": "org/diffusers"},
+        "h3": f"org/h3@{_PIN}",
+        "gated": {"darwin": {"message": "not on macOS"}},
+        "folder": "ideo",
+    }
+
+    def _name(self, name, platform_key="darwin"):
+        return canonical_model_name(name, aliases=self._ALIASES, platform_key=platform_key)  # type: ignore[arg-type]
+
+    def test_a_repo_of_one_alias_is_that_alias(self):
+        assert self._name("dgrauet/ltx-2.3-mlx-q4") == "ltx-4"
+        assert self._name("dgrauet/ltx-2.3-mlx-q8") == "ltx-8"
+        assert self._name("org/h3") == "h3"
+
+    def test_the_repo_id_matches_in_any_letter_case(self):
+        assert self._name("DGrauet/LTX-2.3-MLX-Q4") == "ltx-4"
+        assert self._name(f"dgrauet/LTX-2.3-mlx-q4@{self._PIN}") == "ltx-4"
+        assert self._name("ORG/H3") == "h3"
+
+    def test_its_own_revision_is_accepted_and_another_is_not(self):
+        assert self._name(f"dgrauet/ltx-2.3-mlx-q4@{self._PIN}") == "ltx-4"
+        assert self._name("dgrauet/ltx-2.3-mlx-q4@other") == "dgrauet/ltx-2.3-mlx-q4@other"
+        assert self._name(f"dgrauet/ltx-2.3-mlx-q8@{self._PIN}") == f"dgrauet/ltx-2.3-mlx-q8@{self._PIN}"  # that alias has no revision to match
+
+    def test_a_repo_that_two_aliases_resolve_to_stays_a_repo(self):
+        assert self._name("org/diffusers", "win32") == "org/diffusers"
+
+    def test_the_platform_picks_the_aliases_repo(self):
+        assert self._name("dgrauet/ltx-2.3-mlx-q4", "win32") == "dgrauet/ltx-2.3-mlx-q4"
+        assert self._name("org/h3", "win32") == "h3"
+
+    @pytest.mark.parametrize("name", ["ltx-4", "/models/ltx", "./local", "unknown/repo", "single", "ideo"])
+    def test_anything_else_comes_back_unchanged(self, name):
+        assert self._name(name) == name

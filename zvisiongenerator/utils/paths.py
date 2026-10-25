@@ -222,6 +222,32 @@ def resolve_model_path(
     return stripped
 
 
+def canonical_model_name(
+    name: str,
+    *,
+    aliases: AliasMap,
+    platform_key: str,
+) -> str:
+    """Return the alias that *name* names on *platform_key*, or *name* unchanged.
+
+    A Hugging Face reference whose repo id is, in any letter case, the resolved repo of exactly one alias, with no
+    revision or that alias's revision, is that alias: the same model, reached by its repo id. Anything else (a local
+    path, an alias name, a repo that no alias or several aliases resolve to, another revision) is returned as given.
+    """
+    reference = parse_huggingface_repo_reference(name)
+    if reference is None:
+        return name
+    matches: list[str] = []
+    for alias, value in aliases.items():
+        try:
+            target = parse_huggingface_repo_reference(resolve_alias(value, platform_key))
+        except ValueError:
+            continue
+        if target is not None and target.repo_id.casefold() == reference.repo_id.casefold() and reference.revision in (None, target.revision):
+            matches.append(alias)
+    return matches[0] if len(matches) == 1 else name
+
+
 def _is_bare_name(value: str) -> bool:
     """Return whether *value* is a plain folder name: no separators, home prefix or repo-id shape."""
     return bool(value) and value not in {".", ".."} and not any(char in value for char in "/\\:~")

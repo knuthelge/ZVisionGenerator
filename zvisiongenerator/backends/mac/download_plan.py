@@ -1,17 +1,18 @@
 """Plan the Hugging Face downloads of the macOS (mflux, MLX) image, video and enhancer backends without loading them.
 
 Nothing heavy is imported at module level: mflux's weight definitions are imported inside
-:func:`image_download_plan`, and the Gemma repo name comes from a lazy lookup.
+:func:`image_download_plan`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.model_files import is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder, ltx_mlx_text_encoder_repo
+from zvisiongenerator.utils.hf_snapshot import pack_for_reference
+from zvisiongenerator.utils.model_files import is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder, ltx_mlx_files_bundle_text_encoder
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
 if TYPE_CHECKING:
@@ -82,15 +83,21 @@ def video_download_plan(
     upscale: bool = False,
     repo_ignore: Sequence[str] = (),
     text_encoder_bundled: bool = False,
+    mlx_packs: Mapping[str, HubFiles] | None = None,
+    mlx_text_encoder: str | None = None,
 ) -> tuple[DownloadTarget, ...]:
-    """Return the downloads of the LTX MLX model *model_ref*: its whole repo at its revision, then the Gemma 3 text encoder repo.
+    """Return the downloads of the LTX MLX model *model_ref*: its files at its revision, then the Gemma 3 text encoder.
 
-    The vendored loader downloads the model repo without patterns, and ``mlx_lm`` fetches Gemma 3 at the first
-    prompt encode, so the plan brings Gemma 3 forward. A model in an LTX version block (LTX-2.5) bundles its Gemma 4
-    text encoder in the pack, so the loader never fetches Gemma 3 for it and the plan leaves it out
-    (*text_encoder_bundled*). A local folder in the LTX MLX layout needs only Gemma 3, unless it carries its own
-    text encoder or *text_encoder_bundled* is set, and then it needs nothing; any other local folder needs
-    nothing. The diffusers-only arguments are ignored.
+    A reference to a pinned pack of *mlx_packs* (:func:`~zvisiongenerator.utils.hf_snapshot.pack_for_reference`: its
+    repo id in any letter case, with or without its pinned revision) lists exactly the files the app loads from it, at
+    its pinned revision, so the plan is the same file set the backend resolves and reads as present exactly when the
+    backend finds them without the network. Any other repo reference downloads its whole repo at its own revision, as the
+    vendored loader does. Gemma 3 (*mlx_text_encoder*) is planned as well because ``mlx_lm`` would fetch it at the
+    first prompt encode, unless the model bundles its Gemma 4 text encoder: a pack does when its file list carries
+    one (LTX-2.5), any other model when *text_encoder_bundled* is set, and then the loader never fetches Gemma 3 for it.
+    A local folder in the LTX MLX layout needs only Gemma 3, unless it carries its own text encoder or
+    *text_encoder_bundled* is set, and then it needs nothing; any other local folder needs nothing. The
+    diffusers-only arguments are ignored.
 
     Args:
         model_ref: A local path or a Hugging Face ``owner/repo[@revision]`` reference.
@@ -99,20 +106,42 @@ def video_download_plan(
         latent_upsampler: Ignored (diffusers only).
         upscale: Ignored (diffusers only).
         repo_ignore: Ignored (diffusers only).
-        text_encoder_bundled: Whether the model's pack bundles its text encoder, so Gemma 3 is not needed.
+        text_encoder_bundled: Whether a model that is no pack of *mlx_packs* bundles its text encoder, so Gemma 3 is not needed.
+        mlx_packs: The pinned MLX packs, each with the files the app loads.
+        mlx_text_encoder: The Gemma 3 text encoder reference, which a plan that needs Gemma 3 requires.
+
+    Raises:
+        ValueError: If the plan needs Gemma 3 and *mlx_text_encoder* is not a Hugging Face repo reference.
     """
     del family, transformer_source, latent_upsampler, upscale, repo_ignore
-    gemma = DownloadTarget(ltx_mlx_text_encoder_repo(), allow_patterns=MLX_LM_ALLOW_PATTERNS)
     local = Path(model_ref).expanduser()
     if local.is_dir():
         if not is_ltx_mlx_layout(local) or text_encoder_bundled or ltx_mlx_bundled_text_encoder(local) is not None:
             return ()
-        return (gemma,)
+        return (_gemma_target(mlx_text_encoder),)
     reference = parse_huggingface_repo_reference(model_ref)
     if reference is None:
         return ()
-    model = DownloadTarget(reference.repo_id, reference.revision)
-    return (model,) if text_encoder_bundled else (model, gemma)
+    pack = pack_for_reference(mlx_packs or {}, model_ref)
+    if pack is not None:
+        model = DownloadTarget(pack.repo_id, pack.revision, pack.files)
+        bundled = ltx_mlx_files_bundle_text_encoder(pack.files)
+    else:
+        model = DownloadTarget(reference.repo_id, reference.revision)
+        bundled = text_encoder_bundled
+    return (model,) if bundled else (model, _gemma_target(mlx_text_encoder))
+
+
+def _gemma_target(text_encoder: str | None) -> DownloadTarget:
+    """Return the download of the Gemma 3 text encoder reference *text_encoder*, with the files ``mlx_lm`` loads.
+
+    Raises:
+        ValueError: If *text_encoder* is not a Hugging Face repo reference.
+    """
+    reference = parse_huggingface_repo_reference(text_encoder) if text_encoder is not None else None
+    if reference is None:
+        raise ValueError(f"The Gemma 3 text encoder must be a Hugging Face repo reference, got {text_encoder!r}.")
+    return DownloadTarget(reference.repo_id, reference.revision, MLX_LM_ALLOW_PATTERNS)
 
 
 def h3_mlx_download_plan(model_ref: str, preset: "H3MlxPreset", lora: "HubFiles") -> tuple[DownloadTarget, ...]:

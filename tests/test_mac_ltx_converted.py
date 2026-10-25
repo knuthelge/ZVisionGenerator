@@ -21,6 +21,17 @@ from zvisiongenerator.utils.safetensors_stream import read_header
 
 P = "model.diffusion_model."
 _STOCK_CONFIG = {"transformer": {"num_layers": 48, "text_encoder_norm_type": "per_token_rms"}, "vae": {"a": 1}}
+# The files of the stand-in MLX pack (its transformer included) and the ones of them a converted folder takes.
+_PACK_FILES = (
+    "transformer-distilled-1.1.safetensors",
+    "connector.safetensors",
+    "vae_decoder.safetensors",
+    "vocoder.safetensors",
+    "spatial_upscaler_x2_v1_1.safetensors",
+    "embedded_config.json",
+    "config.json",
+)
+_BASE_FILES = tuple(name for name in _PACK_FILES if not name.startswith("transformer"))
 
 
 def _tensors() -> dict[str, torch.Tensor]:
@@ -51,7 +62,7 @@ def _checkpoint(tmp_path: Path, *, connectors: dict[str, torch.Tensor] | None = 
 
 
 def _base(tmp_path: Path) -> Path:
-    """Return a stand-in MLX folder: its components, a transformer and LoRA that must never be linked, and stock's config."""
+    """Return a stand-in MLX folder: its components, and files outside the pack's list (a transformer, a LoRA, a second upsampler) that must never be linked, and stock's config."""
     base = tmp_path / "base"
     base.mkdir()
     for name in ("vae_decoder.safetensors", "vocoder.safetensors", "config.json", "spatial_upscaler_x2_v1_1.safetensors"):
@@ -59,7 +70,13 @@ def _base(tmp_path: Path) -> Path:
     save_file(
         {f"connector.{name}": torch.full((2,), 9.0, dtype=torch.bfloat16) for name in ("video_embeddings_connector.weight", "text_embedding_projection.weight")}, str(base / "connector.safetensors")
     )
-    for name in ("transformer-distilled-1.1.safetensors", "transformer-dev.safetensors", "ltx-2.3-22b-distilled-lora-384.safetensors"):
+    for name in (
+        "transformer-distilled-1.1.safetensors",
+        "transformer-dev.safetensors",
+        "ltx-2.3-22b-distilled-lora-384.safetensors",
+        "spatial_upscaler_x1_5_v1_0.safetensors",
+        "vae_encoder_av.safetensors",
+    ):
         (base / name).write_bytes(b"never linked")
     (base / "embedded_config.json").write_text(json.dumps(_STOCK_CONFIG))
     return base
@@ -76,7 +93,7 @@ def _quantize(weight: torch.Tensor, bits: int) -> tuple[np.ndarray, np.ndarray, 
 def _write(tmp_path: Path, checkpoint: ltx_checkpoint.LtxCheckpoint, *, bits: int = 4, own_connectors: bool = False) -> Path:
     target = tmp_path / "out"
     target.mkdir()
-    write_converted(checkpoint, target, bits, base_dir=_base(tmp_path), own_connectors=own_connectors, lora=None, quantize=_quantize, merge_device=None, report=lambda *_: None)
+    write_converted(checkpoint, target, bits, base_dir=_base(tmp_path), base_files=_BASE_FILES, own_connectors=own_connectors, lora=None, quantize=_quantize, merge_device=None, report=lambda *_: None)
     return target
 
 
@@ -198,6 +215,13 @@ def test_stocks_config_is_used_when_the_checkpoint_has_none(tmp_path):
     assert embedded_config(None, _STOCK_CONFIG) == _STOCK_CONFIG
 
 
+_PIN = "f" * 40
+
+
+def _pinned_config(**extra) -> dict:
+    return {"video_model_presets": {"ltx": {"mlx_base": {"q4": f"org/base@{_PIN}"}, "mlx_files": list(_PACK_FILES), **extra}}}
+
+
 @pytest.mark.parametrize(("status", "own"), [("changed", True), ("unknown", True), ("stock", False), ("absent", False)])
 def test_changed_and_quantized_connectors_are_kept_and_stock_ones_linked(monkeypatch, tmp_path, status, own):
     import contextlib
@@ -205,15 +229,112 @@ def test_changed_and_quantized_connectors_are_kept_and_stock_ones_linked(monkeyp
 
     seen: dict = {}
     monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: status)
-    monkeypatch.setattr(ltx_converted, "_base_dir", lambda repo, version: tmp_path)
+    monkeypatch.setattr(ltx_converted, "_base_dir", lambda base: tmp_path)
     monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(own=kwargs["own_connectors"]))
     monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
 
-    ltx_converted.convert(
-        SimpleNamespace(version="2.3"), tmp_path, 4, config={"video_model_presets": {"ltx": {"mlx_base": {"q4": "org/base"}}}}, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None
-    )
+    ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=_pinned_config(), version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
 
     assert seen == {"own": own}
+
+
+def test_the_base_is_the_pinned_packs_files_but_its_transformer(monkeypatch, tmp_path):
+    import contextlib
+    from types import SimpleNamespace
+
+    seen: dict = {}
+    monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: "stock")
+    monkeypatch.setattr(ltx_converted, "_base_dir", lambda base: (seen.update(base=base), tmp_path)[1])
+    monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(files=kwargs["base_files"]))
+    monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
+
+    ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=_pinned_config(), version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
+
+    assert (seen["base"].repo_id, seen["base"].revision, seen["base"].files) == ("org/base", _PIN, _BASE_FILES)
+    assert seen["files"] == _BASE_FILES
+
+
+def test_an_unpinned_base_of_a_repo_pinned_elsewhere_converts_from_that_pack(monkeypatch, tmp_path):
+    import contextlib
+    from types import SimpleNamespace
+
+    seen: dict = {}
+    monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: "stock")
+    monkeypatch.setattr(ltx_converted, "_base_dir", lambda base: (seen.update(base=base), tmp_path)[1])
+    monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(files=kwargs["base_files"]))
+    monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
+    config = _pinned_config()
+    config["video_model_presets"]["ltx"]["mlx_base"] = {"q4": "Org/Base", "q8": f"org/base@{_PIN}"}
+
+    ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=config, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
+
+    assert (seen["base"].repo_id, seen["base"].revision, seen["base"].files) == ("org/base", _PIN, _BASE_FILES)
+    assert seen["files"] == _BASE_FILES
+
+
+def test_an_unpinned_base_cannot_convert(tmp_path):
+    from types import SimpleNamespace
+
+    config = {"video_model_presets": {"ltx": {"mlx_base": {"q4": "org/base"}}}}
+
+    with pytest.raises(ValueError, match="pinned"):
+        ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=config, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
+
+
+def test_the_packaged_packs_give_a_base_without_a_transformer_for_both_versions():
+    from zvisiongenerator.utils.config import load_config, ltx_mlx_base_repo, ltx_mlx_packs
+
+    config = load_config()
+    for version in (None, "ltx25"):
+        pack = ltx_mlx_packs(config)[ltx_mlx_base_repo(config, 4, version)]
+        base = ltx_converted._base_files(pack)
+
+        assert base and not any(name.startswith("transformer") for name in base)
+        assert {"embedded_config.json", "connector.safetensors"} <= set(base)  # read from the base, written or linked by the converter
+        assert set(base) == set(pack.files) - {name for name in pack.files if name.startswith("transformer")}
+
+
+def test_the_base_is_downloaded_as_just_those_files_at_the_pin(monkeypatch, tmp_path):
+    from zvisiongenerator.utils.h3_preset import HubFiles
+
+    calls: list[dict] = []
+
+    def download(**kwargs):
+        calls.append(kwargs)
+        for name in kwargs["allow_patterns"]:
+            (tmp_path / name).write_bytes(b"x")
+        return str(tmp_path)
+
+    monkeypatch.setattr(ltx_converted, "snapshot_download", download)
+    monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [])
+
+    folder = ltx_converted._base_dir(HubFiles("org/base", _PIN, _BASE_FILES))
+
+    assert folder == tmp_path
+    assert calls == [{"repo_id": "org/base", "revision": _PIN, "allow_patterns": list(_BASE_FILES)}]
+
+
+def test_a_base_file_the_revision_lacks_is_an_error(monkeypatch, tmp_path):
+    from zvisiongenerator.utils.h3_preset import HubFiles
+
+    monkeypatch.setattr(ltx_converted, "snapshot_download", lambda **kwargs: str(tmp_path))
+    monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [])
+
+    with pytest.raises(RuntimeError, match="vocoder.safetensors"):
+        ltx_converted._base_dir(HubFiles("org/base", _PIN, ("vocoder.safetensors",)))
+
+
+def test_a_failed_base_download_is_one_runtime_error(monkeypatch):
+    from zvisiongenerator.utils.h3_preset import HubFiles
+
+    def fail(**kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(ltx_converted, "snapshot_download", fail)
+    monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo, revision: [])
+
+    with pytest.raises(RuntimeError, match="offline"):
+        ltx_converted._base_dir(HubFiles("org/base", _PIN, ("vocoder.safetensors",)))
 
 
 def test_macos_dispatches_to_the_mlx_writer(monkeypatch, tmp_path):

@@ -23,7 +23,6 @@ from zvisiongenerator.utils.model_files import (
     is_krea2_model,
     is_ltx_mlx_layout,
     ltx_mlx_bundled_text_encoder,
-    ltx_mlx_text_encoder_repo,
     ltx_mlx_transformer_file,
     ltx_mlx_upsampler_file,
     ltx_mlx_video_decoder_file,
@@ -377,7 +376,7 @@ def clip_memory_fit(
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     env: Mapping[str, str] | None = None,
     model_name: str | None = None,
-    app_config: dict[str, Any] | None = None,
+    app_config: dict[str, Any],
     family: str = "ltx",
     mode: str = "t2v",
     forwards: int = 8,
@@ -397,7 +396,7 @@ def clip_memory_fit(
         find_local_dir: Locates a downloaded model directory.
         env: The environment to read the decode budget from; the process environment when omitted.
         model_name: The name the model was picked by (``ltx-4``), which sets the quantize level on a discrete GPU.
-        app_config: The loaded config, which sets that level and names the single-file transformer (LTX on a discrete GPU only).
+        app_config: The loaded config: it names the Gemma 3 text encoder (LTX on macOS), and sets the quantize level and names the single-file transformer (LTX on a discrete GPU).
         family: The model's video family; LTX and H3 have an estimate.
         mode: H3 only: ``"t2v"``, ``"i2v"`` or ``"extend"``; the image modes cost more memory and time (a keyframe, or an extension's tail).
         forwards: H3 only: the transformer forwards of the run, which set the estimated time.
@@ -433,7 +432,9 @@ def clip_memory_fit(
         return None
     text_encoder_dir = None
     if ltx_mlx_bundled_text_encoder(model_dir) is None:
-        text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
+        from zvisiongenerator.utils.config import ltx_mlx_text_encoder_repo_id
+
+        text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo_id(app_config))
         if text_encoder_dir is None:
             return None
     required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale, unified_bytes=budget.unified_bytes, env=env)

@@ -5,13 +5,15 @@ from __future__ import annotations
 import contextlib
 import os
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS
 from zvisiongenerator.backends.mac.memory import memory_size_bytes, mlx_cache_limit
 from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.hf_snapshot import pack_for_reference, snapshot_with
 from zvisiongenerator.utils.model_files import find_local_model_dir, ltx_mlx_bundled_text_encoder
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.video_extend import CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, carry_latent_frames, cut_window_audio, window_audio_cut, window_frames
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from zvisiongenerator.core.video_types import ExtendSource
+    from zvisiongenerator.utils.h3_preset import HubFiles
 
 # Pixels per latent cell of the video VAE encoder.
 _LATENT_PIXELS = 32
@@ -76,43 +79,73 @@ class _LtxModel:
     ltx25: bool = False
 
 
-def _snapshot_download(repo_id: str, revision: str) -> str:
-    """Download the *revision* snapshot of *repo_id* and return its local folder."""
+def _snapshot_download(repo_id: str, revision: str, allow_patterns: list[str] | None = None) -> str:
+    """Download the *revision* snapshot of *repo_id* (only *allow_patterns* when given) and return its local folder."""
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(repo_id, revision=revision)
+    return snapshot_download(repo_id, revision=revision, allow_patterns=allow_patterns)
 
 
-def _resolve_pinned_model(
+def _resolve_model_dir(
     model_path: str,
     *,
+    packs: Mapping[str, HubFiles],
     find_local_dir: Callable[[str], Path | None] | None = None,
     download: Callable[..., str] | None = None,
+    allow_patterns: Sequence[str] | None = None,
 ) -> str:
-    """Resolve a pinned ``owner/repo@revision`` reference to a local snapshot folder.
+    """Resolve a model reference to the local folder the vendored pipeline loads.
 
-    The vendored pipeline downloads by repo id and cannot take a revision, so a pinned reference is resolved here:
-    the complete cached snapshot when there is one, otherwise a download of that revision.
+    The vendored pipeline downloads by repo id and cannot take a revision or a file list, so a pinned reference is
+    resolved here. A reference to a pinned MLX pack of *packs* (its repo id in any letter case, with or without its
+    pinned revision) is exactly its listed files at its revision: a cached snapshot that holds them all, otherwise a
+    download of just those files. Any other pinned reference is the complete cached snapshot when there is one,
+    otherwise a download of that revision (only *allow_patterns* of it when given).
 
     Args:
         model_path: Local path or HuggingFace repo id, optionally ``@revision``.
+        packs: The pinned MLX packs, each with the files the app loads.
         find_local_dir: Cache lookup returning the complete snapshot folder or ``None``; defaults to ``find_local_model_dir``.
-        download: Called as ``download(repo_id=..., revision=...)`` to fetch the snapshot; defaults to the Hub download.
+        download: Called as ``download(repo_id=..., revision=...[, allow_patterns=...])`` to fetch the snapshot; defaults to the Hub download.
+        allow_patterns: The patterns a download of a reference that is no pack is limited to; the whole revision when ``None``.
 
     Returns:
-        The snapshot folder for a pinned reference. An unpinned reference or a local path comes back unchanged.
+        The snapshot folder for a pinned reference or a pack. An unpinned reference to no pack, or a local path, comes back unchanged.
+
+    Raises:
+        FileNotFoundError: If a pinned pack's folder lacks a listed file after the download.
     """
     if Path(model_path).expanduser().is_dir():
         return model_path
+    download = _snapshot_download if download is None else download
+    pack = pack_for_reference(packs, model_path)
+    if pack is not None:
+        folder = snapshot_with(pack, download)
+        missing = [name for name in pack.files if not (folder / name).is_file()]
+        if missing:
+            raise FileNotFoundError(f"{pack.repo_id}@{pack.revision} has no {', '.join(missing)}; the pinned file list in the config does not match that revision.")
+        return str(folder)
     reference = parse_huggingface_repo_reference(model_path)
     if reference is None or reference.revision is None:
         return model_path
     find_local_dir = find_local_model_dir if find_local_dir is None else find_local_dir
-    download = _snapshot_download if download is None else download
     local = find_local_dir(model_path)
     if local is not None:
         return str(local)
-    return str(download(repo_id=reference.repo_id, revision=reference.revision))
+    patterns = {} if allow_patterns is None else {"allow_patterns": list(allow_patterns)}
+    return str(download(repo_id=reference.repo_id, revision=reference.revision, **patterns))
+
+
+def _text_encoder_options(model_dir: str, text_encoder: str | None) -> dict[str, str]:
+    """Return the pipeline's ``gemma_model_id`` argument: the local folder of the configured Gemma 3 reference *text_encoder*, fetched with the files ``mlx_lm`` loads.
+
+    Empty (the pipeline's own default applies) when no reference is configured, *model_dir* is not a local folder yet
+    (the pipeline downloads it, and decides then what text encoder it needs) or the folder bundles its own text encoder.
+    """
+    folder = Path(model_dir)
+    if text_encoder is None or not folder.is_dir() or ltx_mlx_bundled_text_encoder(folder) is not None:
+        return {}
+    return {"gemma_model_id": _resolve_model_dir(text_encoder, packs={}, allow_patterns=MLX_LM_ALLOW_PATTERNS)}
 
 
 class _TwoStageProgress:
@@ -733,7 +766,8 @@ class LtxVideoBackend:
 
         Args:
             model_path: Local path or HuggingFace repo ID.
-            **kwargs: low_memory (bool), loras (list[tuple[str, float]]), upscale (bool).
+            **kwargs: low_memory (bool), loras (list[tuple[str, float]]), upscale (bool), mlx_packs (the pinned
+                packs by reference, each a ``HubFiles``) and mlx_text_encoder (the Gemma 3 reference).
                 ``mode`` is accepted and ignored; the same pipeline serves t2v and i2v.
 
         Returns:
@@ -742,12 +776,14 @@ class LtxVideoBackend:
         Raises:
             RuntimeError: If ltx-pipelines-mlx is not installed.
             ValueError: If the pack is LTX-2.5 but its text encoder is not at the folder root.
+            FileNotFoundError: If a pinned pack lacks a file its configured list names.
         """
         low_memory: bool = kwargs.get("low_memory", True)
         loras: list[tuple[str, float]] | None = kwargs.get("loras")
         upscale: bool = bool(kwargs.get("upscale"))
         streaming = _use_low_ram_streaming(low_memory, memory_size_bytes())
-        model_dir = _resolve_pinned_model(model_path)
+        model_dir = _resolve_model_dir(model_path, packs=kwargs.get("mlx_packs") or {})
+        text_encoder = _text_encoder_options(model_dir, kwargs.get("mlx_text_encoder"))
 
         try:
             # The constructor sets the MLX cache limit to 0 process-wide when streaming; scope it.
@@ -755,11 +791,11 @@ class LtxVideoBackend:
                 if upscale:
                     from ltx_pipelines_mlx import DistilledPipeline
 
-                    pipeline = DistilledPipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming)
+                    pipeline = DistilledPipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming, **text_encoder)
                 else:
                     from ltx_pipelines_mlx import BasePipeline
 
-                    pipeline = BasePipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming)
+                    pipeline = BasePipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming, **text_encoder)
         except ImportError as exc:
             raise RuntimeError("Video dependency ltx-pipelines-mlx not found. Reinstall with: uv sync") from exc
 

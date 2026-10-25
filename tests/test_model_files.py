@@ -468,22 +468,6 @@ def test_root_single_file_counts_only_when_the_transformer_folder_is_empty(tmp_p
     assert set(model_files.model_weight_files(tmp_path)) == {shard, vae}
 
 
-def test_ltx_text_encoder_repo_comes_from_the_pipeline_default(monkeypatch):
-    import sys
-    import types
-
-    class _Pipeline:
-        def __init__(self, model_dir, gemma_model_id="org/gemma-new", low_memory=True):
-            pass
-
-    monkeypatch.setattr(model_files, "_ltx_mlx_text_encoder_repo", None)
-    monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", None)  # import fails: fall back, but do not cache it
-    assert model_files.ltx_mlx_text_encoder_repo() == model_files._LTX_MLX_TEXT_ENCODER_FALLBACK
-
-    monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", types.SimpleNamespace(BasePipeline=_Pipeline))
-    assert model_files.ltx_mlx_text_encoder_repo() == "org/gemma-new"
-
-
 @pytest.mark.parametrize(
     ("present", "expected"),
     [
@@ -629,6 +613,20 @@ def test_ltx_bundled_text_encoder_needs_both_files(tmp_path, present, expected):
     found = model_files.ltx_mlx_bundled_text_encoder(tmp_path)
 
     assert (found.name if found else None) == expected
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        (["text_encoder.safetensors", "text_encoder_config.json", "connector.safetensors"], True),
+        (["text_encoder.safetensors"], False),
+        (["text_encoder_config.json"], False),
+        (["connector.safetensors"], False),
+        ([], False),
+    ],
+)
+def test_ltx_pack_file_list_bundles_a_text_encoder_with_both_files(files, expected):
+    assert model_files.ltx_mlx_files_bundle_text_encoder(files) is expected
 
 
 @pytest.mark.parametrize(

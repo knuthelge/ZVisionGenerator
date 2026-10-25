@@ -15,6 +15,7 @@ from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import (
     enhancer_tier_models,
+    ltx_mlx_text_encoder_repo_id,
     model_display_name,
     resolve_defaults,
     resolve_enhancer_model,
@@ -36,7 +37,6 @@ from zvisiongenerator.utils.model_files import (
     find_local_model_dir,
     huggingface_cache_dir,
     huggingface_cache_repo_dir,
-    ltx_mlx_text_encoder_repo,
 )
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
@@ -399,7 +399,7 @@ def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = No
     """
     cache_dir = cache_dir or huggingface_cache_dir()
     # The MLX LTX text encoder counts as used everywhere; only the macOS backend downloads it.
-    extra = [ltx_mlx_text_encoder_repo(), *([SEEDVR2_REPO] if web_config.seedvr2 is not None and web_config.seedvr2.weights.stores_copy else [])]
+    extra = [ltx_mlx_text_encoder_repo_id(web_config.app_config), *([SEEDVR2_REPO] if web_config.seedvr2 is not None and web_config.seedvr2.weights.stores_copy else [])]
     used = used_repo_ids((*web_config.image_inventory, *web_config.video_inventory), web_config.app_config, platform_key=sys.platform, extra=extra)
     linked = cache_repos_linked_from(Path(web_config.models_dir), cache_dir)
     return tuple(repo for repo in cached_model_repos(cache_dir) if repo.repo_id.casefold() not in used and repo.path.name not in linked)

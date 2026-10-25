@@ -8,8 +8,9 @@ from typing import Any
 
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils.config import ltx_mlx_text_encoder_repo_id
 from zvisiongenerator.utils.h3_memory import estimate_h3_cuda_clip_memory, h3_mlx_clip_fit
-from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder, ltx_mlx_text_encoder_repo
+from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder
 from zvisiongenerator.utils.model_memory import (
     GIB,
     CudaMemoryEstimate,
@@ -44,7 +45,7 @@ def describe_model_status(
     budget: MemoryBudget | None = None,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     model_name: str | None = None,
-    app_config: dict[str, Any] | None = None,
+    app_config: dict[str, Any],
     family: str | None = None,
     target_present: Callable[[DownloadTarget], bool] = target_present_offline,
 ) -> dict[str, Any]:
@@ -57,7 +58,7 @@ def describe_model_status(
         budget: This machine's memory budget, or ``None`` when this platform is not estimated.
         find_local_dir: Resolver for fully downloaded model directories.
         model_name: The name the model is picked by (``ltx-4``); on CUDA it sets a video model's quantize level.
-        app_config: The loaded config, for the same.
+        app_config: The loaded config: it names the Gemma 3 text encoder and the downloads of a video model, and sets a CUDA video model's quantize level.
         family: A video model's family (``"ltx"`` or ``"h3"``); ``None`` is LTX. LTX and H3 have a memory estimate.
         target_present: Tells whether one download target is fully on disk; MiniMax H3 is downloaded when every target of its plan is.
 
@@ -74,13 +75,11 @@ def describe_model_status(
     ltx_video = kind == "video" and family in (None, "ltx")
     h3_video = kind == "video" and family == "h3"
     if h3_video:
-        downloaded = _h3_downloaded(resolved_path, model_name, app_config, target_present)
+        downloaded = _video_downloaded(resolved_path, "h3", model_name, app_config, target_present)
     elif ltx_video and model_dir is not None and is_ltx_mlx_layout(model_dir):
-        if ltx_mlx_bundled_text_encoder(model_dir) is not None:
-            downloaded = True  # An LTX-2.5 pack carries its own Gemma 4; it never needs the Gemma 3 repo.
-        else:
-            text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
-            downloaded = text_encoder_dir is not None
+        downloaded = _video_downloaded(resolved_path, "ltx", model_name, app_config, target_present)
+        if downloaded and ltx_mlx_bundled_text_encoder(model_dir) is None:  # An LTX-2.5 pack carries its own Gemma 4; the others need the Gemma 3 repo.
+            text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo_id(app_config))
     else:
         downloaded = model_dir is not None
 
@@ -98,13 +97,11 @@ def describe_model_status(
     return {"downloaded": downloaded, "memory_fit": memory_fit}
 
 
-def _h3_downloaded(resolved_path: str, model_name: str | None, app_config: dict[str, Any] | None, target_present: Callable[[DownloadTarget], bool]) -> bool:
-    """Return whether every download of MiniMax H3's plan on this platform is on disk (a plan that cannot be made counts as not downloaded)."""
-    from zvisiongenerator.downloads.plans import video_plan
-    from zvisiongenerator.utils.config import load_config
+def _video_downloaded(resolved_path: str, family: str, model_name: str | None, app_config: dict[str, Any], target_present: Callable[[DownloadTarget], bool]) -> bool:
+    """Return whether every download of the video model's plan on this platform is on disk (a plan that cannot be made counts as not downloaded)."""
+    from zvisiongenerator.downloads.plans import video_model_downloaded
 
-    plan = video_plan(resolved_path, family="h3", config=app_config if app_config is not None else load_config(), model_name=model_name or resolved_path, upscale=False)
-    return plan is not None and all(target_present(target) for target in plan)
+    return video_model_downloaded(resolved_path, family=family, config=app_config, model_name=model_name or resolved_path, target_present=target_present)
 
 
 def _h3_memory_fit(budget: MemoryBudget) -> dict[str, Any] | None:

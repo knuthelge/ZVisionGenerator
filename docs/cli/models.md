@@ -64,7 +64,7 @@ A video model is converted for the machine it is converted on, so convert the ch
 - **Inputs.** Lightricks' full checkpoint layout and transformer-only exports are accepted, in bfloat16 or any of the quantized formats above. Checkpoints in diffusers' layout, LTX-2.0 checkpoints, LoRAs and torchao repacks are refused. A checkpoint whose text connectors differ from stock's converts with them on macOS and is refused on Windows and Linux.
 - **The checkpoint** can be moved or deleted afterwards.
 
-Converting takes a few minutes. On Windows and Linux it needs about 5 GB of system memory. On macOS, the parts it links from the stock model are downloaded first if you haven't used that level yet (about 10 GB, 15 GB for LTX-2.5).
+Converting takes a few minutes. On Windows and Linux it needs about 5 GB of system memory. On macOS, the parts it links from the stock model are downloaded first if you haven't used that level yet (about 9 GB, 17 GB for LTX-2.5).
 
 ### MiniMax H3 video fine-tunes
 

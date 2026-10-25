@@ -14,11 +14,12 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, is_built, is_instant_dir
+from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
 if TYPE_CHECKING:
     from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
 
-__all__ = ["enhancer_plan", "image_plan", "instant_plan", "seedvr2_plan", "video_plan"]
+__all__ = ["enhancer_plan", "image_plan", "instant_plan", "seedvr2_plan", "video_model_downloaded", "video_plan"]
 
 
 def image_plan(model_ref: str, *, family: str, config: dict[str, Any] | None, platform_key: str) -> tuple[DownloadTarget, ...] | None:
@@ -87,8 +88,43 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
             upscale=upscale,
             repo_ignore=options.get("repo_ignore", ()),
             text_encoder_bundled=ltx_version(config, model_name) is not None,
+            mlx_packs=options["mlx_packs"],
+            mlx_text_encoder=options.get("mlx_text_encoder"),
         )
     )
+
+
+def video_model_downloaded(
+    model_ref: str,
+    *,
+    family: str,
+    config: dict[str, Any],
+    model_name: str | None,
+    target_present: Callable[[DownloadTarget], bool] | None = None,
+) -> bool:
+    """Return whether every download of the video model's plan on this platform is on disk, judged without the network.
+
+    A plan that cannot be made now counts as not downloaded, and so does a reference that is neither a Hugging Face repo
+    nor an existing local folder (nothing could be downloaded for it).
+
+    Args:
+        model_ref: The resolved model path or Hugging Face repo reference.
+        family: The model family (``ltx`` or ``h3``).
+        config: The app config.
+        model_name: The name the model is picked by (``ltx-4``).
+        target_present: Tells whether one target is fully on disk; defaults to the offline cache check.
+
+    Raises:
+        ValueError: If the ``video_model_presets`` config entries of the family are malformed.
+    """
+    if not Path(model_ref).expanduser().is_dir() and parse_huggingface_repo_reference(model_ref) is None:
+        return False  # A local path that is no folder (deleted or never made) has nothing to download.
+    if target_present is None:
+        from zvisiongenerator.downloads.presence import target_present_offline
+
+        target_present = target_present_offline
+    plan = video_plan(model_ref, family=family, config=config, model_name=model_name, upscale=False)
+    return plan is not None and all(target_present(target) for target in plan)
 
 
 def seedvr2_plan(model: str, *, models_dir: Path, weights: SeedVR2Weights) -> tuple[DownloadTarget, ...]:

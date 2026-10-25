@@ -39,21 +39,41 @@ def _make_mlx_pack(root: Path, *, bundled: bool) -> Path:
     return pack
 
 
-class TestDescribeMlxVideoStatus:
-    @pytest.fixture(autouse=True)
-    def _gemma_repo(self, monkeypatch):
-        monkeypatch.setattr(model_status, "ltx_mlx_text_encoder_repo", lambda: "org/gemma")
+_GEMMA_REPO = "mlx-community/gemma-3-12b-it-4bit"
 
+
+@pytest.fixture
+def darwin(monkeypatch):
+    import zvisiongenerator.backends as backends
+
+    monkeypatch.setattr(backends.sys, "platform", "darwin")
+
+
+def _ltx_status(name, pack, *, gemma=None, present=None, budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), **extra):
+    """Describe the macOS alias *name* whose pinned pack is the folder *pack*; *gemma* is the Gemma 3 folder when it is on disk."""
+    from zvisiongenerator.utils.config import load_config
+
+    config = load_config()
+    ref = config["model_aliases"][name]["darwin"]
+    folders = {ref: pack, **({_GEMMA_REPO: gemma} if gemma is not None else {})}
+    present = present or (lambda target: target.repo_id != _GEMMA_REPO or gemma is not None)
+    return describe_model_status(ref, kind="video", budget=budget, find_local_dir=_finder(folders), model_name=name, app_config=config, target_present=present, **extra)
+
+
+@pytest.mark.usefixtures("darwin")
+class TestDescribeMlxVideoStatus:
     def _gemma_dir(self, root: Path) -> Path:
         _write_sized(root / "gemma" / "model-00001-of-00001.safetensors", 7.5)
         return root / "gemma"
 
     def test_a_bundled_pack_is_downloaded_without_gemma_3_and_estimated(self, tmp_path):
         pack = _make_mlx_pack(tmp_path, bundled=True)
+        seen = []
 
-        status = describe_model_status("owner/ltx25", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx25": pack}))
+        status = _ltx_status("ltx25-4", pack, present=lambda target: (seen.append(target.repo_id), True)[1])
 
         assert status["downloaded"] is True
+        assert seen == ["MarceloFSO/ltx-2.5-mlx-q4-fast"]
         assert status["memory_fit"] is not None
         assert status["memory_fit"]["kind"] == "unified"
         assert set(status["memory_fit"]) == {"kind", "budget_gb", "by_quantize", "without_low_memory", "note"}
@@ -61,25 +81,56 @@ class TestDescribeMlxVideoStatus:
 
     def test_a_bundled_pack_is_estimated_the_same_with_or_without_a_gemma_3_copy(self, tmp_path):
         pack = _make_mlx_pack(tmp_path, bundled=True)
-        budget = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
 
-        alone = describe_model_status("owner/ltx25", kind="video", budget=budget, find_local_dir=_finder({"owner/ltx25": pack}))
-        with_gemma = describe_model_status("owner/ltx25", kind="video", budget=budget, find_local_dir=_finder({"owner/ltx25": pack, "org/gemma": self._gemma_dir(tmp_path)}))
+        alone = _ltx_status("ltx25-4", pack)
+        with_gemma = _ltx_status("ltx25-4", pack, gemma=self._gemma_dir(tmp_path))
 
         assert alone == with_gemma
+
+    @pytest.mark.parametrize("unpinned", [False, True])
+    def test_a_custom_name_for_the_bundled_pack_is_downloaded_with_no_gemma_3_cached(self, tmp_path, unpinned):
+        from zvisiongenerator.utils.config import load_config
+
+        pack = _make_mlx_pack(tmp_path, bundled=True)
+        config = load_config()
+        ref = config["model_aliases"]["ltx25-4"]["darwin"]
+        ref = ref.split("@")[0] if unpinned else ref
+        seen = []
+
+        status = describe_model_status(
+            ref,
+            kind="video",
+            budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB),
+            find_local_dir=_finder({ref: pack}),
+            model_name="my-custom-ltx",
+            app_config=config,
+            target_present=lambda target: (seen.append(target.repo_id), True)[1],
+        )
+
+        assert status["downloaded"] is True
+        assert seen == ["MarceloFSO/ltx-2.5-mlx-q4-fast"]
+        assert status["memory_fit"] is not None
 
     def test_a_2_3_pack_without_gemma_3_is_not_downloaded(self, tmp_path):
         pack = _make_mlx_pack(tmp_path, bundled=False)
 
-        status = describe_model_status("owner/ltx23", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx23": pack}))
+        assert _ltx_status("ltx-4", pack) == {"downloaded": False, "memory_fit": None}
 
-        assert status == {"downloaded": False, "memory_fit": None}
+    def test_a_2_3_pack_with_a_missing_file_is_not_downloaded_even_with_gemma_3(self, tmp_path):
+        pack = _make_mlx_pack(tmp_path, bundled=False)
+        packs = []
+
+        def present(target):
+            packs.append(target.allow_patterns)
+            return target.repo_id == _GEMMA_REPO  # the pack's literal files are not all cached
+
+        assert _ltx_status("ltx-4", pack, gemma=self._gemma_dir(tmp_path), present=present) == {"downloaded": False, "memory_fit": None}
+        assert any(patterns and "transformer-distilled-1.1.safetensors" in patterns for patterns in packs)
 
     def test_a_2_3_pack_with_gemma_3_keeps_its_payload(self, tmp_path):
         pack = _make_mlx_pack(tmp_path, bundled=False)
-        finder = _finder({"owner/ltx23": pack, "org/gemma": self._gemma_dir(tmp_path)})
 
-        status = describe_model_status("owner/ltx23", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=finder)
+        status = _ltx_status("ltx-4", pack, gemma=self._gemma_dir(tmp_path))
 
         assert status == {
             "downloaded": True,
@@ -92,19 +143,75 @@ class TestDescribeMlxVideoStatus:
             },
         }
 
+    def test_a_pack_that_is_not_on_disk_is_not_downloaded(self):
+        from zvisiongenerator.utils.config import load_config
 
+        config = load_config()
+        ref = config["model_aliases"]["ltx-8"]["darwin"]
+
+        status = describe_model_status(
+            ref, kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({}), model_name="ltx-8", app_config=config, target_present=lambda target: True
+        )
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+
+@pytest.mark.usefixtures("darwin")
+class TestTrimmedPackOnDisk:
+    """The Models page reads a pinned pack from the real Hub cache layout: every listed file must be there."""
+
+    @pytest.fixture
+    def pack(self, tmp_path, monkeypatch):
+        import huggingface_hub.constants
+
+        from zvisiongenerator.utils.config import ltx_mlx_packs, load_config
+
+        monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(tmp_path / "cache"))
+        config = load_config()
+        files = ltx_mlx_packs(config)[config["model_aliases"]["ltx-4"]["darwin"]]
+        snapshot = tmp_path / "cache" / f"models--{files.repo_id.replace('/', '--')}" / "snapshots" / files.revision
+        for name in files.files:
+            (snapshot / name).parent.mkdir(parents=True, exist_ok=True)
+            (snapshot / name).write_bytes(b"x")
+        return snapshot
+
+    @staticmethod
+    def _status(snapshot, tmp_path):
+        from zvisiongenerator.downloads.presence import target_present_offline
+        from zvisiongenerator.utils.config import load_config
+
+        config = load_config()
+        ref = config["model_aliases"]["ltx-4"]["darwin"]
+        gemma = tmp_path / "gemma"
+        gemma.mkdir(exist_ok=True)
+        return describe_model_status(
+            ref,
+            kind="video",
+            find_local_dir=_finder({ref: snapshot, _GEMMA_REPO: gemma}),
+            model_name="ltx-4",
+            app_config=config,
+            target_present=lambda target: target.repo_id == _GEMMA_REPO or target_present_offline(target),
+        )["downloaded"]
+
+    def test_a_folder_with_every_listed_file_is_downloaded(self, pack, tmp_path):
+        assert self._status(pack, tmp_path) is True
+
+    @pytest.mark.parametrize("name", ["audio_vae.safetensors", "spatial_upscaler_x2_v1_1.safetensors", "embedded_config.json"])
+    def test_a_folder_missing_one_listed_file_is_not_downloaded(self, pack, tmp_path, name):
+        (pack / name).unlink()
+
+        assert self._status(pack, tmp_path) is False
+
+
+@pytest.mark.usefixtures("darwin")
 class TestDescribeLtxStatusGolden:
     """G5: the LTX MLX status dicts, pinned so the family argument cannot move them."""
-
-    @pytest.fixture(autouse=True)
-    def _gemma_repo(self, monkeypatch):
-        monkeypatch.setattr(model_status, "ltx_mlx_text_encoder_repo", lambda: "org/gemma")
 
     @pytest.mark.parametrize("family", [pytest.param({}, id="default"), pytest.param({"family": "ltx"}, id="ltx")])
     def test_a_bundled_pack_status_is_pinned(self, tmp_path, family):
         pack = _make_mlx_pack(tmp_path, bundled=True)
 
-        status = describe_model_status("owner/ltx25", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx25": pack}), **family)
+        status = _ltx_status("ltx25-4", pack, **family)
 
         assert status == {
             "downloaded": True,
@@ -121,9 +228,7 @@ class TestDescribeLtxStatusGolden:
     def test_a_2_3_pack_without_gemma_3_status_is_pinned(self, tmp_path, family):
         pack = _make_mlx_pack(tmp_path, bundled=False)
 
-        status = describe_model_status("owner/ltx23", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx23": pack}), **family)
-
-        assert status == {"downloaded": False, "memory_fit": None}
+        assert _ltx_status("ltx-4", pack, **family) == {"downloaded": False, "memory_fit": None}
 
 
 class TestH3Status:
@@ -247,7 +352,7 @@ class TestH3Status:
 
 class TestDescribeModelStatus:
     def test_missing_model_is_not_downloaded_and_has_no_estimate(self):
-        status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({}))
+        status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({}), app_config={})
 
         assert status == {"downloaded": False, "memory_fit": None}
 
@@ -255,7 +360,7 @@ class TestDescribeModelStatus:
         estimates = {None: 16 * _GIB, 8: 13 * _GIB, 4: 5 * _GIB}
         monkeypatch.setattr(model_status, "estimate_image_memory", lambda model_dir, levels: {level: estimates[level] for level in levels})
 
-        status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({"owner/repo": tmp_path}))
+        status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({"owner/repo": tmp_path}), app_config={})
 
         assert status["downloaded"] is True
         assert status["memory_fit"] == {
@@ -269,10 +374,11 @@ class TestDescribeModelStatus:
         }
 
     def test_no_budget_means_no_estimate(self, tmp_path):
-        status = describe_model_status("owner/repo", kind="image", budget=None, find_local_dir=_finder({"owner/repo": tmp_path}))
+        status = describe_model_status("owner/repo", kind="image", budget=None, find_local_dir=_finder({"owner/repo": tmp_path}), app_config={})
 
         assert status == {"downloaded": True, "memory_fit": None}
 
+    @pytest.mark.usefixtures("darwin")
     def test_ltx_mlx_video_needs_the_separate_text_encoder(self, tmp_path, monkeypatch):
         model_dir = tmp_path / "ltx"
         model_dir.mkdir()
@@ -284,15 +390,9 @@ class TestDescribeModelStatus:
             return (16 if low_memory else 24) * _GIB
 
         monkeypatch.setattr(model_status, "estimate_ltx_mlx_clip_memory", _estimate)
-        monkeypatch.setattr(model_status, "ltx_mlx_text_encoder_repo", lambda: "org/gemma")
 
-        without_encoder = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({"owner/ltx": model_dir}))
-        with_encoder = describe_model_status(
-            "owner/ltx",
-            kind="video",
-            budget=MemoryBudget(10 * _GIB, unified_bytes=32 * _GIB),
-            find_local_dir=_finder({"owner/ltx": model_dir, "org/gemma": tmp_path / "gemma"}),
-        )
+        without_encoder = _ltx_status("ltx-4", model_dir, budget=MemoryBudget(10 * _GIB))
+        with_encoder = _ltx_status("ltx-4", model_dir, gemma=tmp_path / "gemma", budget=MemoryBudget(10 * _GIB, unified_bytes=32 * _GIB))
 
         assert without_encoder == {"downloaded": False, "memory_fit": None}
         assert with_encoder["downloaded"] is True
@@ -309,7 +409,7 @@ class TestDescribeCudaModelStatus:
         estimates = {None: CudaMemoryEstimate(4 * _GIB, 34 * _GIB), 8: CudaMemoryEstimate(4 * _GIB, 18 * _GIB), 4: CudaMemoryEstimate(11 * _GIB, 3 * _GIB)}
         monkeypatch.setattr(model_status, "estimate_cuda_image_memory", lambda model_dir, levels: {level: estimates[level] for level in levels})
 
-        status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({"owner/repo": tmp_path}))
+        status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({"owner/repo": tmp_path}), app_config={})
 
         assert status["memory_fit"] == {
             "kind": "discrete",

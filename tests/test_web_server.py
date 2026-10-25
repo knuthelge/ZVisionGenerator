@@ -54,6 +54,12 @@ from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Sett
 from zvisiongenerator.utils.provenance import embed_png_config
 
 
+@pytest.fixture(autouse=True)
+def _gemma_repo(monkeypatch):
+    """Give the minimal test configs the macOS LTX text encoder reference the Models page reads."""
+    monkeypatch.setattr(workspace_api_module, "ltx_mlx_text_encoder_repo_id", lambda config: "owner/gemma")
+
+
 def _make_web_config() -> SimpleNamespace:
     app_config = {
         "generation": {
@@ -2134,6 +2140,7 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     )
     web_config.video_inventory = (VideoInventoryEntry(name="ltx-8", family="ltx", supports_i2v=True, source="alias", resolved_path="owner/ltx"),)
     web_config.app_config["model_presets"] = {"ideogram4": {"supports_quantize": False}}
+    web_config.app_config["video_model_presets"] = {"ltx": {"mlx_text_encoder": "owner/gemma"}}
     calls: list[tuple[str, str, tuple[int, ...]]] = []
     video_names: list[tuple[str | None, bool]] = []
 

@@ -158,7 +158,7 @@ def web_config(hub, tmp_path):
         data_dir=str(tmp_path),
         models_dir=str(models_dir),
         seedvr2=None,
-        app_config={},
+        app_config={"video_model_presets": {"ltx": {"mlx_text_encoder": "org/gemma@" + "a" * 40}}},
         image_inventory=(_alias("used", "org/used"),),
         video_inventory=(),
     )

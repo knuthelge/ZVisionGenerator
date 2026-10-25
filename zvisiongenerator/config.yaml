@@ -94,18 +94,20 @@ model_aliases:
   # On Windows/Linux both LTX aliases load the diffusers repo, at the quantize level
   # video_model_presets.ltx.diffusers.quantize sets for each.
   ltx-8:
-    darwin: "dgrauet/ltx-2.3-mlx-q8"
+    darwin: "${video_model_presets.ltx.mlx_base.q8}"
     win32: "${video_model_presets.ltx.diffusers.default_repo}"
     linux: "${video_model_presets.ltx.diffusers.default_repo}"
   ltx-4:
-    darwin: "dgrauet/ltx-2.3-mlx-q4"
+    darwin: "${video_model_presets.ltx.mlx_base.q4}"
     win32: "${video_model_presets.ltx.diffusers.default_repo}"
     linux: "${video_model_presets.ltx.diffusers.default_repo}"
+  # On macOS the LTX aliases load the pinned MLX packs of video_model_presets.ltx.mlx_base, so an alias, the download
+  # plan and the Models page read one revision and one file list.
   # LTX-2.5 (video_model_presets.ltx.versions.ltx25). Windows/Linux load the diffusers repo; macOS loads the MLX
   # distilled files from MarceloFSO/ltx-2.5-mlx-q4-fast, an ungated mirror of dgrauet/ltx-2.5-mlx-q4, distilled
   # files only, sha256-identical; pinned.
   ltx25-4:
-    darwin: "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
+    darwin: "${video_model_presets.ltx.versions.ltx25.mlx_base.q4}"
     win32: "${video_model_presets.ltx.versions.ltx25.diffusers.default_repo}"
     linux: "${video_model_presets.ltx.versions.ltx25.diffusers.default_repo}"
   # MiniMax H3 (video_model_presets.h3): the same pinned repository on every platform. Windows/Linux stream it from a
@@ -336,11 +338,26 @@ video_model_presets:
     distilled_lora:
       repo: "Lightricks/LTX-2.3"
       filename: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
-    # macOS: the MLX folder a converted checkpoint takes its VAEs, vocoder, upsamplers and configs from, per
-    # quantize level (the ltx-4 and ltx-8 folders).
+    # macOS: the pinned MLX pack of each quantize level (the ltx-4 and ltx-8 aliases), and the folder a converted
+    # checkpoint takes its VAEs, vocoder, upsampler and configs from. A pack is downloaded as exactly the files of
+    # mlx_files, at its pinned revision. After changing a pin, list the files of the new revision that the vendored
+    # loader reads: the pack repos hold files the app never loads (other transformers, LoRAs, other upsamplers).
     mlx_base:
-      q4: "dgrauet/ltx-2.3-mlx-q4"
-      q8: "dgrauet/ltx-2.3-mlx-q8"
+      q4: "dgrauet/ltx-2.3-mlx-q4@56a5866d638ecfe37c54d348e88938235185c2d4"
+      q8: "dgrauet/ltx-2.3-mlx-q8@6671a7572a530862d1d60ce393b5d93491e3f76b"
+    mlx_files:
+      - transformer-distilled-1.1.safetensors
+      - connector.safetensors
+      - vae_encoder.safetensors
+      - vae_decoder.safetensors
+      - audio_vae.safetensors
+      - vocoder.safetensors
+      - spatial_upscaler_x2_v1_1.safetensors
+      - spatial_upscaler_x2_v1_1_config.json
+      - embedded_config.json
+      - config.json
+    # macOS: the Gemma 3 text encoder the LTX-2.3 packs encode prompts with, pinned; LTX-2.5 packs bundle their own.
+    mlx_text_encoder: "mlx-community/gemma-3-12b-it-4bit@86cc6a8dedbc456dd0e4af01a9d09f396f77e558"
     # Per-version overlays: a version's block is merged over this family preset for the aliases it lists
     # (CLI flags > version > family > global). The family block above is LTX-2.3.
     versions:
@@ -360,6 +377,24 @@ video_model_presets:
         mlx_base:
           q4: "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
           q8: "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
+        # The files of that pack the app loads.
+        mlx_files:
+          - transformer-distilled.safetensors
+          - text_encoder.safetensors
+          - text_encoder_config.json
+          - tokenizer.json
+          - tokenizer_config.json
+          - chat_template.jinja
+          - connector.safetensors
+          - vae_decoder_conv.safetensors
+          - vae_encoder_conv.safetensors
+          - audio_vae.safetensors
+          - vocoder.safetensors
+          - spatial_upscaler_x2_v1_0.safetensors
+          - spatial_upscaler_x2_v1_0_config.json
+          - duration_head.safetensors
+          - embedded_config.json
+          - quantize_config.json
         diffusers:
           # Ungated, byte-identical copy of Lightricks/LTX-2.5-Diffusers (bf16 despite its name), pinned.
           default_repo: "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"

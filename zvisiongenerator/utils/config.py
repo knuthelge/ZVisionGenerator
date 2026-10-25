@@ -19,10 +19,10 @@ from typing import Any, Final
 import yaml
 
 from zvisiongenerator.core.video_family import FrameRule, VideoCapabilities, VideoFamily
-from zvisiongenerator.utils.h3_preset import h3_preset
+from zvisiongenerator.utils.h3_preset import HubFiles, h3_preset
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.ltx_converted import LTX_FAMILY_MODEL_TYPE
-from zvisiongenerator.utils.paths import get_ziv_data_dir, split_huggingface_revision
+from zvisiongenerator.utils.paths import get_ziv_data_dir, parse_huggingface_repo_reference, split_huggingface_revision
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
 from zvisiongenerator.utils.upscale import max_megapixels
 
@@ -784,6 +784,60 @@ def ltx_mlx_base_repo(config: dict[str, Any], bits: int, version: str | None = N
     return repo.strip()
 
 
+def ltx_mlx_packs(config: dict[str, Any]) -> dict[str, HubFiles]:
+    """Return the pinned MLX LTX packs of *config*, keyed by their ``owner/repo@revision`` reference, each with the files the app loads from it.
+
+    Every ``mlx_base`` entry of the LTX family block and of its version blocks that carries a revision is a pack, and
+    its block's ``mlx_files`` are its files. An entry without a revision is skipped: it has no fixed file set.
+
+    Raises:
+        ValueError: If ``mlx_base`` is not a mapping of non-blank strings, a pinned entry's block has no valid ``mlx_files``
+            (a non-empty list of non-blank strings), or two blocks pin the same reference to different files.
+    """
+    ltx = (config.get("video_model_presets") or {}).get("ltx") or {}
+    blocks = [(None, ltx), *((version, block) for version, block in (ltx.get("versions") or {}).items() if isinstance(block, dict))]
+    packs: dict[str, HubFiles] = {}
+    for version, block in blocks:
+        path = _ltx_path(version)
+        bases = block.get("mlx_base")
+        if bases is None:
+            continue
+        if not isinstance(bases, dict) or not all(isinstance(ref, str) and ref.strip() for ref in bases.values()):
+            raise ValueError(f"{path}.mlx_base must be a mapping of quantize levels to non-blank strings.")
+        for ref in dict.fromkeys(ref.strip() for ref in bases.values()):
+            reference = parse_huggingface_repo_reference(ref)
+            if reference is None or reference.revision is None:
+                continue
+            files = block.get("mlx_files")
+            if not isinstance(files, list) or not files or not all(isinstance(name, str) and name.strip() for name in files):
+                raise ValueError(f"{path}.mlx_files must be a non-empty list of non-blank strings: the files of the pinned pack {ref}.")
+            pack = HubFiles(reference.repo_id, reference.revision, tuple(name.strip() for name in files))
+            if packs.setdefault(ref, pack) != pack:
+                raise ValueError(f"{path}.mlx_files lists other files for {ref} than another LTX block.")
+    return packs
+
+
+def ltx_mlx_text_encoder(config: dict[str, Any]) -> str:
+    """Return the Gemma 3 text encoder of the macOS LTX-2.3 packs (``mlx_text_encoder``) as a ``repo`` or ``repo@revision`` reference.
+
+    Raises:
+        ValueError: If it is not set to a Hugging Face repo reference.
+    """
+    ref = ((config.get("video_model_presets") or {}).get("ltx") or {}).get("mlx_text_encoder")
+    if not isinstance(ref, str) or parse_huggingface_repo_reference(ref) is None:
+        raise ValueError("video_model_presets.ltx.mlx_text_encoder must be a Hugging Face repo reference (owner/repo or owner/repo@revision).")
+    return ref.strip()
+
+
+def ltx_mlx_text_encoder_repo_id(config: dict[str, Any]) -> str:
+    """Return the repo id of the Gemma 3 text encoder of the macOS LTX-2.3 packs, without its revision.
+
+    Raises:
+        ValueError: If ``mlx_text_encoder`` is not set to a Hugging Face repo reference.
+    """
+    return split_huggingface_revision(ltx_mlx_text_encoder(config))[0]
+
+
 def ltx_diffusers_repo(config: dict[str, Any], version: str | None = None) -> str:
     """Return the diffusers LTX repo of Windows/Linux for *version* (``diffusers.default_repo``, the version's own or else the family's).
 
@@ -898,7 +952,8 @@ def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale:
     """Return the configured keyword arguments a video backend's ``load_model`` takes for the model picked as *model_name*.
 
     The diffusers options (``quantize``, ``transformer_source``, ``model_name``, ``latent_upsampler`` and the
-    version-only ``repo_ignore``, ``sampler`` and ``image_crf``) are ignored by the MLX backend. The three
+    version-only ``repo_ignore``, ``sampler`` and ``image_crf``) are ignored by the MLX backend, and the MLX options
+    (``mlx_packs``, and ``mlx_text_encoder`` when configured) by the diffusers backend. The three
     version-only keys are present only when the preset of *model_name* sets them, so the options of a model
     without them are unchanged.
 
@@ -911,7 +966,10 @@ def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale:
         "quantize": ltx_diffusers_quantize(config, model_name),
         "transformer_source": ltx_transformer_source(config, model_name),
         "model_name": model_name,
+        "mlx_packs": ltx_mlx_packs(config),
     }
+    if "mlx_text_encoder" in ((config.get("video_model_presets") or {}).get("ltx") or {}):
+        options["mlx_text_encoder"] = ltx_mlx_text_encoder(config)
     for name, validate in _LTX_OPTION_VALIDATORS.items():
         if diffusers.get(name) is not None:
             options[name] = validate(diffusers[name], f"{path}.{name}")
