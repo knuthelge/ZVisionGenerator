@@ -8,6 +8,8 @@ The copy folds three things into one set of files, so the stock checkpoint is ne
 * The linears of the transformer blocks are packed to NF4 with bitsandbytes. The token refiner and everything outside the
   blocks stay in bfloat16 (the refiner is merged with user LoRAs in place, which a packed weight cannot take).
 
+A converted fine-tune (:func:`write_folded`) is written the same way from any tensor source under diffusers' names.
+
 Loading builds the model empty, installs the folded tables for the keys a clip needs, fills it from the copy, applies the user
 LoRAs by target (refiner merge, AdaLN table delta, PEFT on the NF4 layers) and sets up block streaming.
 """
@@ -27,8 +29,8 @@ from zvisiongenerator.backends.cuda.quant import empty_diffusers_model, fill_wei
 from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, shard_files
 from zvisiongenerator.utils.h3_preset import is_folder_name
-from zvisiongenerator.utils.quantized_weights import decoded_tensors
 from zvisiongenerator.utils.stored_quant import ensure_stored_copy, file_identities, stored_quant_name
+from zvisiongenerator.utils.quantized_weights import decoded_tensors
 
 if TYPE_CHECKING:
     import torch
@@ -36,12 +38,18 @@ if TYPE_CHECKING:
     from zvisiongenerator.backends.cuda.video.h3.adaln import Key
 
 __all__ = [
+    "Tensors",
     "copy_manifest",
     "copy_name",
+    "copy_settings",
     "ensure_copy",
     "load_copy",
     "write_copy",
+    "write_folded",
 ]
+
+# A source of transformer tensors under diffusers' names: called with a name filter (``None`` for all), yields ``(name, tensor)``.
+Tensors = Callable[[Callable[[str], bool] | None], Iterator[tuple[str, "torch.Tensor"]]]
 
 _LAYOUT_VERSION = 1
 _BITS = 4
@@ -63,13 +71,20 @@ def copy_manifest(shards: Iterable[Path], lora_file: Path, scale: float, keys: I
     Every value is JSON-native, so the manifest compares equal after a round trip through its file. A copy with any other
     source file, scale, key union or NF4 serialization is not current.
     """
+    return {**copy_settings(scale, keys), "sources": file_identities([*shards, lora_file])}
+
+
+def copy_settings(scale: float | None, keys: Iterable[Key]) -> dict[str, Any]:
+    """Return what makes a folded copy current besides its sources: its layout, the NF4 serialization, the turbo merge scale (``None`` without one) and the fold keys.
+
+    A converted folder records these too; when they differ from what this machine would write, it must be converted again.
+    """
     return {
         "layout": _LAYOUT_VERSION,
         "family": _FAMILY,
         "bits": _BITS,
         "format": nf4_storage_format(),
-        "sources": file_identities([*shards, lora_file]),
-        "lora_scale": float(scale),
+        "lora_scale": None if scale is None else float(scale),
         "fold_keys": [list(key) for key in keys],
     }
 
@@ -122,6 +137,39 @@ def write_copy(shards: Sequence[Path], config: dict[str, Any], lora_file: Path, 
     Raises:
         RuntimeError: When the shards do not cover the transformer, or the turbo LoRA targets a module they lack.
     """
+    label = ", ".join(path.name for path in shards)
+    write_folded(lambda wanted: _source_tensors(shards, wanted), config, (h3_lora.load_pairs(lora_file), scale), keys, target, device, label=label)
+
+
+def write_folded(
+    tensors: Tensors,
+    config: dict[str, Any],
+    turbo: tuple[dict[str, h3_lora.Pair], float] | None,
+    keys: Sequence[Key],
+    target: Path,
+    device: Any,
+    *,
+    label: str,
+) -> None:
+    """Write the folded 4-bit copy of the transformer *tensors* yields (diffusers names) to the folder *target*, one tensor at a time.
+
+    With *turbo* (the LoRA's factors and the scale that replaces ``alpha / rank``), each weight it targets is merged first.
+    The AdaLN projections are not stored: their tables for every key of *keys* are built from the merged weights and written
+    to one file. The linears under ``transformer_blocks.`` are packed to NF4 on *device*; every other tensor is stored in the
+    dtype the model keeps it in.
+
+    Args:
+        tensors: The source; it is read twice, once for the time embedder and once for everything.
+        config: The diffusers transformer config.
+        turbo: The turbo LoRA to merge, or ``None`` for a source that is already step-distilled.
+        keys: The AdaLN fold keys to build tables for.
+        target: The folder to write.
+        device: The CUDA device bitsandbytes packs weights on.
+        label: Names the source in error messages.
+
+    Raises:
+        RuntimeError: When the source does not cover the transformer, or the turbo LoRA targets a module it lacks.
+    """
     import torch
 
     from zvisiongenerator.backends.cuda.video.h3 import adaln
@@ -130,13 +178,14 @@ def write_copy(shards: Sequence[Path], config: dict[str, Any], lora_file: Path, 
     storage = {name: tensor.dtype for name, tensor in model.state_dict().items()}
     nf4_weights = {f"{name}.weight" for name in nf4_linear_names(model, prefix=_BLOCKS_PREFIX, exclude=_NF4_EXCLUDE)}
     expected_adaln = _adaln_tensor_names(storage)
-    temb = _timestep_embeddings(adaln, shards, config, keys, device)
-    merger = h3_lora.LoraMerger(h3_lora.load_pairs(lora_file), scale, device)
+    temb = _timestep_embeddings(adaln, tensors, config, keys, device, label)
+    pairs, scale = turbo if turbo is not None else ({}, 0.0)
+    merger = h3_lora.LoraMerger(pairs, scale, device)
     writer = ShardWriter(target, _SHARD_PREFIX, _INDEX_NAME)
     adaln_parts: dict[int, dict[str, torch.Tensor]] = {}
     tables: dict[int, dict[Key, torch.Tensor]] = {}
     written: set[str] = set()
-    for name, tensor in _source_tensors(shards):
+    for name, tensor in tensors(None):
         if name not in storage:
             continue
         module, _, leaf = name.rpartition(".")
@@ -150,7 +199,7 @@ def write_copy(shards: Sequence[Path], config: dict[str, Any], lora_file: Path, 
         else:
             writer.add(pack_nf4(name, tensor, device) if name in nf4_weights else {name: tensor.to(storage[name])})
         written.add(name)
-    _require_coverage((storage.keys() - written) | {name for name in expected_adaln if _adaln_block(name) in adaln_parts}, shards)
+    _require_coverage((storage.keys() - written) | {name for name in expected_adaln if _adaln_block(name) in adaln_parts}, label)
     if merger.unmerged():
         raise RuntimeError(f"The turbo LoRA targets {len(merger.unmerged())} modules the transformer does not have, e.g. {merger.unmerged()[0]}.")
     writer.close()
@@ -249,11 +298,11 @@ def _adaln_leaves(names: set[str], block: int) -> set[str]:
     return {name.rpartition(".")[2] for name in names if name.startswith(f"{_BLOCKS_PREFIX}{block}.")}
 
 
-def _timestep_embeddings(adaln: Any, shards: Iterable[Path], config: dict[str, Any], keys: Iterable[Key], device: Any) -> dict[Key, torch.Tensor]:
-    """Return ``{key: timestep embedding}`` from the shards' (float32) time embedder."""
-    state = {name.removeprefix(_TIME_EMBEDDER): tensor for name, tensor in _source_tensors(shards, lambda name: name.startswith(_TIME_EMBEDDER))}
+def _timestep_embeddings(adaln: Any, tensors: Tensors, config: dict[str, Any], keys: Iterable[Key], device: Any, label: str) -> dict[Key, torch.Tensor]:
+    """Return ``{key: timestep embedding}`` from the source's (float32) time embedder."""
+    state = {name.removeprefix(_TIME_EMBEDDER): tensor for name, tensor in tensors(lambda name: name.startswith(_TIME_EMBEDDER))}
     if not state:
-        raise RuntimeError("The transformer shards hold no time embedder.")
+        raise RuntimeError(f"{label} holds no time embedder.")
     time_proj, embedder = adaln.load_time_embedder(config, state, device)
     return {key: adaln.compute_temb(time_proj, embedder, key, device) for key in keys}
 
@@ -272,10 +321,9 @@ def _block_tables(adaln: Any, parts: dict[str, torch.Tensor], temb: dict[Key, to
     return {key: table.cpu() for key, table in adaln.build_tables(holder, temb).items()}
 
 
-def _require_coverage(missing: set[str], shards: Iterable[Path]) -> None:
-    """Raise when *missing* is not empty: the shards do not provide every tensor of the model."""
+def _require_coverage(missing: set[str], label: str) -> None:
+    """Raise when *missing* is not empty: the source *label* does not provide every tensor of the model."""
     if missing:
-        label = ", ".join(path.name for path in shards)
         raise RuntimeError(f"The weights in {label} do not cover the model ({len(missing)} tensors missing, e.g. {sorted(missing)[0]}).")
 
 

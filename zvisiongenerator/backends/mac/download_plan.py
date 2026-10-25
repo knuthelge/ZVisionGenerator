@@ -120,7 +120,8 @@ def h3_mlx_download_plan(model_ref: str, preset: "H3MlxPreset", lora: "HubFiles"
 
     Every target lists its files literally and is the ``(repo_id, revision, allow_patterns)`` the backend's own file
     resolution downloads with, so a target reads as present exactly when the backend finds its files without the
-    network. A local H3 folder carries its own components, so it needs no component target; one that carries a
+    network. A local H3 folder carries its own components, so it needs no component target, except a converted one,
+    which reads its text encoder from the stock download; one that carries a
     transformer needs no transformer target either, because the backend loads that one (or refuses it) and never
     falls back to the preset's.
 
@@ -131,13 +132,17 @@ def h3_mlx_download_plan(model_ref: str, preset: "H3MlxPreset", lora: "HubFiles"
         lora: The turbo LoRA's repository and file.
     """
     from zvisiongenerator.backends.mac.h3_video import local_transformer_dirs
+    from zvisiongenerator.utils.h3_converted import read_converted_h3
 
     local = Path(model_ref).expanduser()
     is_hub = not local.is_dir() and parse_huggingface_repo_reference(model_ref) is not None
     targets = [] if not is_hub and local_transformer_dirs(local) else [DownloadTarget(preset.transformer.repo_id, preset.transformer.revision, preset.transformer.files)]
-    if is_hub:
+    # A converted folder reads its text encoder from the stock download, and holds its turbo merge.
+    converted = not is_hub and read_converted_h3(local) is not None
+    if is_hub or converted:
         targets.append(DownloadTarget(preset.components.repo_id, preset.components.revision, preset.components.files))
-    targets.append(DownloadTarget(lora.repo_id, lora.revision, lora.files))
+    if not converted:
+        targets.append(DownloadTarget(lora.repo_id, lora.revision, lora.files))
     return tuple(targets)
 
 

@@ -85,7 +85,7 @@ class H3Files:
     repo_dir: Path
     text_encoder_dir: Path
     text_encoder_shards: tuple[Path, ...]
-    lora_file: Path
+    lora_file: Path | None  # None for a converted folder, which holds its turbo merge
     latent_upsampler_file: Path | None = None
 
 
@@ -96,7 +96,7 @@ class H3MlxFiles:
     fl2va_dir: Path
     transformer_dir: Path
     text_encoder_source: Path
-    lora_file: Path
+    lora_file: Path | None  # None for a converted folder, which holds its turbo merge
 
 
 def h3_preset(config: dict[str, Any]) -> H3Preset:

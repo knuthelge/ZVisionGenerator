@@ -1,4 +1,4 @@
-"""Converted LTX-2.3 folders on Windows/Linux: write one from a single-file checkpoint.
+"""Converted LTX-2.3 and LTX-2.5 folders on Windows/Linux: write one from a single-file checkpoint.
 
 A converted folder is a diffusers LTX-2 folder that holds its own quantized weights:
 
@@ -44,8 +44,8 @@ _STORAGE = {4: "nf4", 8: "fp8-e4m3"}
 Report = Callable[[str, int, int], None]
 
 
-def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[str, Any], models_dir: Path, lora: Path | None, report: Report) -> None:
-    """Write the converted folder of *checkpoint* at *bits* into *target* on this machine's GPU, with the configured diffusers repo's components.
+def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[str, Any], version: str | None, models_dir: Path, lora: Path | None, report: Report) -> None:
+    """Write the converted folder of *checkpoint* at *bits* into *target* on this machine's GPU, with the components of LTX version *version*'s diffusers repo.
 
     Raises:
         RuntimeError: When there is no usable NVIDIA GPU, or the repo can't be downloaded.
@@ -54,11 +54,11 @@ def convert(checkpoint: LtxCheckpoint, target: Path, bits: int, *, config: dict[
 
     from zvisiongenerator.backends.cuda.driver import require_cuda
     from zvisiongenerator.backends.cuda.video.backend import _repo_dir
-    from zvisiongenerator.utils.config import ltx_diffusers_repo
+    from zvisiongenerator.utils.config import ltx_diffusers_repo, ltx_repo_ignore
 
     require_cuda(torch, "Converting an LTX checkpoint on Windows and Linux")
     report("download", 0, 1)
-    repo_dir = _repo_dir(ltx_diffusers_repo(config), with_transformer=False)
+    repo_dir = _repo_dir(ltx_diffusers_repo(config, version), with_transformer=False, extra_ignore=ltx_repo_ignore(config, version))
     write_converted(checkpoint, target, bits, repo_dir=repo_dir, models_dir=models_dir, lora=lora, device=torch.device("cuda"), report=report)
 
 
@@ -79,7 +79,7 @@ def write_converted(
         checkpoint: The checked checkpoint.
         target: The folder to write (a partial folder; the caller moves it into place).
         bits: 4 (NF4) or 8 (FP8).
-        repo_dir: The diffusers LTX-2.3 repo the other components come from (its transformer weights are not needed).
+        repo_dir: The diffusers LTX repo of the checkpoint's version the other components come from (its transformer weights are not needed).
         models_dir: The models folder, searched for a text-encoder copy to reuse.
         lora: Lightricks' distilled LoRA to merge in, or ``None``.
         device: The CUDA device NF4 weights are packed on (and the LoRA merged on).
@@ -90,8 +90,11 @@ def write_converted(
         RuntimeError: When the checkpoint does not cover the transformer.
     """
     report("connectors", 0, 1)
-    if connectors_status(checkpoint) == "changed":
+    connectors = connectors_status(checkpoint)
+    if connectors == "changed":
         raise ValueError(f"{checkpoint.path.name} changes the text connectors; on Windows and Linux only checkpoints with stock connectors can be converted.")
+    if connectors == "unknown":
+        print("Note: the checkpoint's text connectors are quantized, so whether they were fine-tuned can't be told; the stock connectors are used.")
     config = json.loads((repo_dir / "transformer" / "config.json").read_text(encoding="utf-8"))
     names = transformer_name_map(checkpoint.transformer)
     tensors = transformer_tensors(checkpoint, lora=lora, merge_device=device, progress=lambda done, total: report("transformer", done, total))
@@ -110,7 +113,7 @@ def write_converted(
         "source": checkpoint.path.name,
         "distilled_lora": lora.name if lora is not None else None,
     }
-    write_converted_ltx(target, manifest)
+    write_converted_ltx(target, manifest, version=checkpoint.version)
 
 
 def _link_components(repo_dir: Path, target: Path) -> None:

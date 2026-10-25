@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint
+    from zvisiongenerator.converters.h3_checkpoint import H3Checkpoint
     from zvisiongenerator.core.image_backend import ImageBackend
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
@@ -340,20 +341,51 @@ def estimate_ltx_system_memory(
     return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
 
 
+def convert_h3_checkpoint(
+    checkpoint: "H3Checkpoint",
+    target: "Path",
+    *,
+    turbo: bool,
+    config: dict[str, Any],
+    report: Callable[[str, int, int], None],
+) -> None:
+    """Write this platform's converted MiniMax H3 model folder of *checkpoint* into the new folder *target*.
+
+    macOS writes the INT8 transformer the MLX port reads; Windows and Linux write a folded 4-bit copy. With *turbo* the
+    checkpoint is already step-distilled and the turbo LoRA is not merged.
+
+    Raises:
+        RuntimeError: On another platform, or when the conversion fails.
+    """
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.mac.h3_converted import convert as convert_mlx
+
+        convert_mlx(checkpoint, target, turbo=turbo, config=config, report=report)
+        return
+    if sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.cuda.video.h3.converted import convert
+
+        convert(checkpoint, target, turbo=turbo, config=config, report=report)
+        return
+    raise RuntimeError(f"Unsupported platform: {sys.platform}. Converting MiniMax H3 checkpoints supports macOS, Windows, and Linux.")
+
+
 def convert_ltx_checkpoint(
     checkpoint: "LtxCheckpoint",
     target: "Path",
     bits: int,
     *,
     config: dict[str, Any],
+    version: str | None,
     models_dir: "Path",
     lora: "Path | None",
     report: Callable[[str, int, int], None],
 ) -> None:
-    """Write this platform's converted LTX-2.3 model folder of *checkpoint* at *bits* into the new folder *target*.
+    """Write this platform's converted LTX model folder of *checkpoint* at *bits* into the new folder *target*.
 
     macOS writes an MLX folder with an MLX-quantized transformer; Windows and Linux write a diffusers folder with an
-    NF4 or FP8 transformer.
+    NF4 or FP8 transformer. *version* is the LTX version block the checkpoint belongs to (``None`` for LTX-2.3),
+    whose repos the other components come from.
 
     Raises:
         RuntimeError: On another platform, or when the conversion fails.
@@ -361,12 +393,12 @@ def convert_ltx_checkpoint(
     if sys.platform == "darwin":
         from zvisiongenerator.backends.mac.ltx_converted import convert as convert_mlx
 
-        convert_mlx(checkpoint, target, bits, config=config, models_dir=models_dir, lora=lora, report=report)
+        convert_mlx(checkpoint, target, bits, config=config, version=version, models_dir=models_dir, lora=lora, report=report)
         return
     if sys.platform in ("win32", "linux"):
         from zvisiongenerator.backends.cuda.video.converted import convert
 
-        convert(checkpoint, target, bits, config=config, models_dir=models_dir, lora=lora, report=report)
+        convert(checkpoint, target, bits, config=config, version=version, models_dir=models_dir, lora=lora, report=report)
         return
     raise RuntimeError(f"Unsupported platform: {sys.platform}. Converting LTX checkpoints supports macOS, Windows, and Linux.")
 

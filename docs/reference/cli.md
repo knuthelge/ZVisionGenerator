@@ -180,12 +180,13 @@ Options refused with `--extend`, since the extension keeps the source's size and
 |---|---|---|
 | `-i`, `--input` | *(required)* | Path to  `.safetensors` checkpoint |
 | `--name` | input filename | Custom model folder name |
-| `--model-type` | `zimage` | Model type: `zimage`, `flux2-klein-4b`, `flux2-klein-9b`, `krea2-turbo`, `ltx-2.3` |
+| `--model-type` | `zimage` | Model type: `zimage`, `flux2-klein-4b`, `flux2-klein-9b`, `krea2-turbo`, `ltx-2.3`, `ltx-2.5`, `h3` |
 | `--base-model` | `Tongyi-MAI/Z-Image-Turbo` | Base HF repo (only for zimage type) |
 | `--copy` | off | Copy files instead of symlinking |
-| `--quantize` | off | Also save a quantized copy as `<name>@q4` or `<name>@q8` (`4` or `8`). Required for `ltx-2.3`, where it is the only level stored |
-| `--distill` | off | `ltx-2.3` only: merge Lightricks' distilled LoRA into a plain-dev checkpoint |
-| `--force` | off | `ltx-2.3` only: replace an existing model of that name once the new one is complete |
+| `--quantize` | off | Also save a quantized copy as `<name>@q4` or `<name>@q8` (`4` or `8`). Required for `ltx-2.3` and `ltx-2.5`, where it is the only level stored; `h3` takes none |
+| `--distill` | off | `ltx-2.3` and `ltx-2.5` only: merge Lightricks' distilled LoRA into a plain-dev checkpoint |
+| `--turbo` | off | `h3` only: the checkpoint is already step-distilled, so the turbo LoRA is not merged |
+| `--force` | off | Video types only: replace an existing model of that name once the new one is complete |
 
 ## `ziv-model lora` — LoRA Import
 

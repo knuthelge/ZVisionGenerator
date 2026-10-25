@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ from zvisiongenerator.utils.hf_snapshot import snapshot_download as hub_snapshot
 from zvisiongenerator.utils.hf_snapshot import snapshot_with
 from zvisiongenerator.utils.paths import split_huggingface_revision
 
-__all__ = ["resolve_files", "transformer_files"]
+__all__ = ["base_repo_allow", "resolve_base_files", "resolve_files", "transformer_files"]
 
 _INDEX_NAME = "diffusion_pytorch_model.safetensors.index.json"
 _TRANSFORMER_DIR = "transformer"
@@ -42,7 +43,7 @@ def _repo_dir(model_ref: str, preset: H3Preset, download: Callable[..., str]) ->
         raise RuntimeError(f"Failed to download the MiniMax H3 model '{model_ref}': {exc}") from exc
 
 
-def resolve_files(model_ref: str, preset: H3Preset, *, upscale: bool = False, snapshot_download: Callable[..., str] | None = None) -> H3Files:
+def resolve_files(model_ref: str, preset: H3Preset, *, upscale: bool = False, lora: bool = True, snapshot_download: Callable[..., str] | None = None) -> H3Files:
     """Return the on-disk files of the CUDA H3 model, downloading what is missing.
 
     The repository, the text encoder and the turbo LoRA are each fetched as one snapshot with just their files. With
@@ -52,6 +53,7 @@ def resolve_files(model_ref: str, preset: H3Preset, *, upscale: bool = False, sn
         model_ref: A local H3 folder or a Hub reference (``owner/repo`` or ``owner/repo@revision``).
         preset: The CUDA preset: the repository's file filters, the text encoder's files, the turbo LoRA and the latent upscaler.
         upscale: Whether to resolve the latent upscaler's file too; without it the field is ``None`` and nothing more is fetched.
+        lora: Whether to resolve the turbo LoRA; without it the field is ``None`` (a converted folder holds its merge).
         snapshot_download: Called as ``snapshot_download(repo_id=, revision=, allow_patterns=[, ignore_patterns=])``;
             defaults to the Hub's.
 
@@ -69,8 +71,8 @@ def resolve_files(model_ref: str, preset: H3Preset, *, upscale: bool = False, sn
     for path in (text_encoder_dir / "config.json", *shards):
         if not path.is_file():
             raise FileNotFoundError(f"Text encoder file not found: {path}")
-    lora_file = snapshot_with(preset.lora, download) / preset.lora.files[0]
-    if not lora_file.is_file():
+    lora_file = snapshot_with(preset.lora, download) / preset.lora.files[0] if lora else None
+    if lora_file is not None and not lora_file.is_file():
         raise FileNotFoundError(f"Turbo LoRA not found: {lora_file}")
     upsampler_file = None
     if upscale:
@@ -78,6 +80,19 @@ def resolve_files(model_ref: str, preset: H3Preset, *, upscale: bool = False, sn
         if not upsampler_file.is_file():
             raise FileNotFoundError(f"Latent upsampler not found: {upsampler_file}")
     return H3Files(repo_dir=repo_dir, text_encoder_dir=text_encoder_dir, text_encoder_shards=shards, lora_file=lora_file, latent_upsampler_file=upsampler_file)
+
+
+def base_repo_allow(preset: H3Preset) -> tuple[str, ...]:
+    """Return what a converted H3 folder downloads of the stock repository: the preset's files without the transformer's weights (its config is kept)."""
+    return (*(pattern for pattern in preset.repo_allow if not pattern.startswith(f"{_TRANSFORMER_DIR}/")), f"{_TRANSFORMER_DIR}/config.json")
+
+
+def resolve_base_files(preset: H3Preset, *, upscale: bool = False, lora: bool = False, snapshot_download: Callable[..., str] | None = None) -> H3Files:
+    """Return the files a converted H3 folder takes from the stock repository (see :func:`base_repo_allow`), and the turbo LoRA only with *lora* (to merge it).
+
+    See :func:`resolve_files` for the arguments and errors.
+    """
+    return resolve_files(f"{preset.repo}@{preset.revision}", replace(preset, repo_allow=base_repo_allow(preset)), upscale=upscale, lora=lora, snapshot_download=snapshot_download)
 
 
 def transformer_files(repo_dir: Path) -> tuple[list[Path], dict[str, Any]]:

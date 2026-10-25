@@ -177,20 +177,29 @@ def h3_download_plan(
 
     Each target is the ``(repo_id, revision, allow, ignore)`` the backend's own file resolution downloads with, so a
     target reads as present exactly when the backend finds its files without the network. A reference without a
-    revision to the preset's repository takes the preset's revision; a local folder needs no repository download.
+    revision to the preset's repository takes the preset's revision; a local folder needs no repository download, except a
+    converted one, which takes the stock repository's components (without its transformer) and no turbo LoRA.
 
     Args:
         model_ref: A local H3 folder or a Hugging Face ``owner/repo[@revision]`` reference.
         preset: The CUDA H3 preset.
         upscale: Whether the run upscales, which adds the latent upscaler's file.
     """
+    from zvisiongenerator.backends.cuda.video.h3.sources import base_repo_allow
+    from zvisiongenerator.utils.h3_converted import read_converted_h3
+
     targets: list[DownloadTarget] = []
-    if not Path(model_ref).expanduser().is_dir() and parse_huggingface_repo_reference(model_ref) is not None:
+    local = Path(model_ref).expanduser()
+    if not local.is_dir() and parse_huggingface_repo_reference(model_ref) is not None:
         repo_id, revision = split_huggingface_revision(model_ref)
         if revision is None and repo_id == preset.repo:
             revision = preset.revision
         targets.append(DownloadTarget(repo_id, revision, preset.repo_allow, preset.repo_ignore))
-    targets.extend(DownloadTarget(files.repo_id, files.revision, files.files) for files in (preset.text_encoder, preset.lora))
+    converted = local.is_dir() and read_converted_h3(local) is not None
+    if converted:
+        targets.append(DownloadTarget(preset.repo, preset.revision, base_repo_allow(preset), preset.repo_ignore))
+    # A converted folder holds its turbo merge (or needs none), so it never needs the LoRA.
+    targets.extend(DownloadTarget(files.repo_id, files.revision, files.files) for files in (preset.text_encoder, *(() if converted else (preset.lora,))))
     if upscale:
         upsampler = preset.latent_upsampler
         targets.append(DownloadTarget(upsampler.repo_id, upsampler.revision, upsampler.files))

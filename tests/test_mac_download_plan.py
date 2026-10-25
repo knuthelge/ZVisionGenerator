@@ -220,6 +220,19 @@ def test_h3_plan_for_a_local_folder_with_a_transformer_has_no_transformer_target
     assert [target.repo_id for target in plan] == ["lightx2v/Minimax-h3-Turbo"]
 
 
+def test_h3_plan_for_a_converted_folder_is_the_components_without_the_lora(tmp_path: Path, h3_plan_inputs) -> None:
+    from zvisiongenerator.utils.h3_converted import write_converted_h3
+
+    preset, _lora = h3_plan_inputs
+    (tmp_path / "FL2VA" / "transformer").mkdir(parents=True)
+    (tmp_path / "FL2VA" / "transformer" / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+    write_converted_h3(tmp_path, {"storage": "mlx-int8", "turbo": "merged"})
+
+    plan = h3_mlx_download_plan(str(tmp_path), *h3_plan_inputs)
+
+    assert [target.repo_id for target in plan] == [preset.components.repo_id]
+
+
 def test_h3_plan_takes_the_presets_components_whatever_the_reference_revision(h3_plan_inputs) -> None:
     (_transformer, components, _lora) = h3_mlx_download_plan("MiniMaxAI/MiniMax-H3@other", *h3_plan_inputs)
 

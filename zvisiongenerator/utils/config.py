@@ -21,6 +21,7 @@ import yaml
 from zvisiongenerator.core.video_family import FrameRule, VideoCapabilities, VideoFamily
 from zvisiongenerator.utils.h3_preset import h3_preset
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.ltx_converted import LTX_FAMILY_MODEL_TYPE
 from zvisiongenerator.utils.paths import get_ziv_data_dir, split_huggingface_revision
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
 from zvisiongenerator.utils.upscale import max_megapixels
@@ -223,18 +224,48 @@ def video_preset(config: dict[str, Any], family: str, model_name: str | None = N
         ValueError: If ``versions`` is not a mapping of mappings, a version's ``aliases`` is not a list of
             non-blank strings, or an alias appears in two versions.
     """
+    return _merged_preset(config, family, _video_version(config, family, model_name))
+
+
+def _merged_preset(config: dict[str, Any], family: str, version: str | None) -> dict[str, Any]:
+    """Return the ``video_model_presets.<family>`` block with version *version* merged over it (the family block alone for ``None``)."""
     preset = (config.get("video_model_presets") or {}).get(family) or {}
     merged = {key: deepcopy(value) for key, value in preset.items() if key != "versions"}
-    version = _video_version(config, family, model_name)
     if version is not None:
-        overlay = {key: deepcopy(value) for key, value in preset["versions"][version].items() if key != "aliases"}
+        overlay = {key: deepcopy(value) for key, value in preset["versions"][version].items() if key not in ("aliases", "model_type")}
         _deep_merge(merged, overlay)
     return merged
+
+
+def ltx_version_for_type(config: dict[str, Any], model_type: str) -> str | None:
+    """Return the id of the LTX version block a converter model type belongs to (its ``model_type``); ``None`` for ``ltx-2.3``, the family block.
+
+    Raises:
+        ValueError: If no version block names *model_type*.
+    """
+    if model_type == LTX_FAMILY_MODEL_TYPE:
+        return None
+    versions = ((config.get("video_model_presets") or {}).get("ltx") or {}).get("versions") or {}
+    for version, block in versions.items():
+        if isinstance(block, dict) and block.get("model_type") == model_type:
+            return version
+    raise ValueError(f"No video_model_presets.ltx.versions block has model_type '{model_type}'.")
+
+
+def _converted_model_type(model_name: str) -> str | None:
+    """Return the kind of the converted LTX folder *model_name* names (a folder in the models folder, or a path), or ``None`` when it is not one."""
+    from zvisiongenerator.utils.h3_preset import is_folder_name
+    from zvisiongenerator.utils.ltx_converted import read_converted_ltx
+
+    folder = get_ziv_data_dir() / "models" / model_name if is_folder_name(model_name) else Path(model_name).expanduser()
+    manifest = read_converted_ltx(folder) if folder.is_dir() else None
+    return manifest["kind"] if manifest is not None else None
 
 
 def _video_version(config: dict[str, Any], family: str, model_name: str | None) -> str | None:
     """Return the id of the version of *family* that lists *model_name* in its ``aliases``, or ``None``.
 
+    A converted LTX folder (by name or path) belongs to the version whose ``model_type`` is its manifest's kind.
     Every version is validated, whatever *model_name* is.
 
     Raises:
@@ -256,7 +287,14 @@ def _video_version(config: dict[str, Any], family: str, model_name: str | None) 
             if alias in owners and owners[alias] != version:
                 raise ValueError(f"{base}: alias '{alias}' is listed by both '{owners[alias]}' and '{version}'.")
             owners[alias] = version
-    return owners.get(model_name) if model_name is not None else None
+    if model_name is None:
+        return None
+    if model_name in owners or family != "ltx":
+        return owners.get(model_name)
+    kind = _converted_model_type(model_name)
+    if kind is None or kind == LTX_FAMILY_MODEL_TYPE:
+        return None
+    return next((version for version, block in versions.items() if block.get("model_type") == kind), None)
 
 
 def ltx_version(config: dict[str, Any], model_name: str | None) -> str | None:
@@ -713,42 +751,65 @@ def ltx_companion_repos(config: dict[str, Any], repo_id: str) -> tuple[str, ...]
     return tuple(dict.fromkeys(source[0] for source in sources if source is not None and source[0] != repo_id))
 
 
-def ltx_distilled_lora_source(config: dict[str, Any]) -> tuple[str, str] | None:
-    """Return Lightricks' distilled LoRA (``video_model_presets.ltx.distilled_lora``) as ``(repo_id, filename)``, or ``None`` when not configured.
+def _ltx_path(version: str | None) -> str:
+    """Return the config key path of the LTX family block, or of its version *version*."""
+    return "video_model_presets.ltx" + (f".versions.{version}" if version is not None else "")
 
-    LTX checkpoint conversion merges it into plain-dev checkpoints with ``--distill``.
+
+def ltx_distilled_lora_source(config: dict[str, Any], version: str | None = None) -> tuple[str, str] | None:
+    """Return Lightricks' distilled LoRA of LTX version *version* (``distilled_lora``) as ``(repo_id, filename)``, or ``None`` when not configured.
+
+    LTX checkpoint conversion merges it into plain-dev checkpoints with ``--distill``. *version* is a version block
+    id (:func:`ltx_version_for_type`); ``None`` is the family block, LTX-2.3. A version without its own entry has
+    none: another version's LoRA never fits it.
 
     Raises:
         ValueError: If the entry is set but is not a mapping with non-blank string ``repo`` and ``filename``.
     """
-    ltx = (config.get("video_model_presets") or {}).get("ltx") or {}
-    if "distilled_lora" not in ltx:
+    block = _ltx_block(config, version)
+    if block.get("distilled_lora") is None:
         return None
-    return _ltx_hub_file(ltx["distilled_lora"], "video_model_presets.ltx.distilled_lora")
+    return _ltx_hub_file(block["distilled_lora"], f"{_ltx_path(version)}.distilled_lora")
 
 
-def ltx_mlx_base_repo(config: dict[str, Any], bits: int) -> str:
-    """Return the MLX LTX repo a converted checkpoint at *bits* takes its other components from on macOS (``video_model_presets.ltx.mlx_base.q<bits>``).
+def ltx_mlx_base_repo(config: dict[str, Any], bits: int, version: str | None = None) -> str:
+    """Return the MLX LTX repo a converted checkpoint of *version* at *bits* takes its other components from on macOS (``mlx_base.q<bits>``).
+
+    Raises:
+        ValueError: If it is not set to a non-blank string (a version without its own entry has none).
+    """
+    repo = (_ltx_block(config, version).get("mlx_base") or {}).get(f"q{bits}")
+    if not isinstance(repo, str) or not repo.strip():
+        raise ValueError(f"{_ltx_path(version)}.mlx_base.q{bits} must be a non-blank string.")
+    return repo.strip()
+
+
+def ltx_diffusers_repo(config: dict[str, Any], version: str | None = None) -> str:
+    """Return the diffusers LTX repo of Windows/Linux for *version* (``diffusers.default_repo``, the version's own or else the family's).
 
     Raises:
         ValueError: If it is not set to a non-blank string.
     """
-    repo = (((config.get("video_model_presets") or {}).get("ltx") or {}).get("mlx_base") or {}).get(f"q{bits}")
+    repo = (_merged_preset(config, "ltx", version).get("diffusers") or {}).get("default_repo")
     if not isinstance(repo, str) or not repo.strip():
-        raise ValueError(f"video_model_presets.ltx.mlx_base.q{bits} must be a non-blank string.")
+        raise ValueError(f"{_ltx_path(version)}.diffusers.default_repo must be a non-blank string.")
     return repo.strip()
 
 
-def ltx_diffusers_repo(config: dict[str, Any]) -> str:
-    """Return the diffusers LTX repo of Windows/Linux (``video_model_presets.ltx.diffusers.default_repo``).
+def ltx_repo_ignore(config: dict[str, Any], version: str | None = None) -> tuple[str, ...]:
+    """Return the patterns *version*'s diffusers repo is downloaded without (``diffusers.repo_ignore``, the version's or else the family's), empty when unset.
 
     Raises:
-        ValueError: If it is not set to a non-blank string.
+        ValueError: If it is set but is not a list of non-blank strings.
     """
-    repo = (((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}).get("default_repo")
-    if not isinstance(repo, str) or not repo.strip():
-        raise ValueError("video_model_presets.ltx.diffusers.default_repo must be a non-blank string.")
-    return repo.strip()
+    value = (_merged_preset(config, "ltx", version).get("diffusers") or {}).get("repo_ignore")
+    return () if value is None else _ltx_repo_ignore(value, f"{_ltx_path(version)}.diffusers.repo_ignore")
+
+
+def _ltx_block(config: dict[str, Any], version: str | None) -> dict[str, Any]:
+    """Return the LTX family block (``None``) or version block *version* as written, without merging one over the other."""
+    ltx = (config.get("video_model_presets") or {}).get("ltx") or {}
+    return ltx if version is None else (ltx.get("versions") or {}).get(version) or {}
 
 
 def _ltx_diffusers(config: dict[str, Any], model_name: str | None) -> tuple[dict[str, Any], str]:

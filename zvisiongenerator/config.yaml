@@ -346,6 +346,20 @@ video_model_presets:
     versions:
       ltx25:
         aliases: [ltx25-4]
+        # `ziv model model --model-type ltx-2.5` converts into this version.
+        model_type: ltx-2.5
+        # Lightricks' LTX-2.5 distilled LoRA for --distill: an ungated copy whose size and SHA-256
+        # (86370bbf79a9eb4edaa158907e2b48a5188fe4c5dc8ce30c7eb8f2f131a9bbf5, 8,899,889,568 bytes) equal the gated
+        # original's, Lightricks/LTX-2.5 loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors; pinned.
+        distilled_lora:
+          repo: "lxxxy6/LTX-2.5@3506f52caf688795fc35edbf0d1b197bc30f3df1"
+          filename: "ltx-2.5-22b-distilled-lora-450-bf16.safetensors"
+        # macOS: the MLX folder a converted LTX-2.5 checkpoint takes its Gemma 4 text encoder, VAEs, duration head,
+        # upsampler and configs from (the ltx25-4 repo). It only has q4, and its quantize_config.json is linked at both levels:
+        # the MLX loader reads the bits from the weights' shapes.
+        mlx_base:
+          q4: "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
+          q8: "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
         diffusers:
           # Ungated, byte-identical copy of Lightricks/LTX-2.5-Diffusers (bf16 despite its name), pinned.
           default_repo: "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"

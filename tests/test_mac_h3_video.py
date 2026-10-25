@@ -409,7 +409,7 @@ class TestResolveFiles:
         (folder / where / "config.json").write_text("{}", encoding="utf-8")
         (folder / where / "diffusion_pytorch_model-00001-of-00014.safetensors").write_bytes(b"x")
 
-        with pytest.raises(ValueError, match=r"INT8 layout.*not supported yet"):
+        with pytest.raises(ValueError):
             self._resolve(tmp_path, monkeypatch, folder)
 
     def test_a_bf16_transformer_beside_an_int8_one_does_not_hide_the_int8_one(self, tmp_path, monkeypatch):
@@ -571,6 +571,31 @@ class TestDirectTurbo:
     def test_the_scale_can_be_given(self, env, written, tmp_path):
         H3MlxVideoBackend().text_to_video(_load(env, lora_scale=0.125), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
         assert env.loads[0]["turbo_lora_alpha"] == 0.125 * TURBO_RANK
+
+
+class TestConvertedFolder:
+    @staticmethod
+    def _converted(tmp_path: Path, storage: str = "mlx-int8") -> str:
+        from zvisiongenerator.utils.h3_converted import write_converted_h3
+
+        folder = tmp_path / "myh3"
+        folder.mkdir()
+        write_converted_h3(folder, {"storage": storage, "turbo": "merged"})
+        return str(folder)
+
+    def test_gets_no_turbo_lora_and_shares_stocks_text_encoder_copy(self, env, written, tmp_path, monkeypatch):
+        stock = _make_files(tmp_path / "stock")
+        monkeypatch.setattr(h3_video, "snapshot_with", lambda files, download: stock.fl2va_dir.parent)
+        model, _ = H3MlxVideoBackend().load_model(self._converted(tmp_path), preset=PRESET, lora=LORA, lora_scale=TURBO_SCALE, models_dir=env.tmp / "models", model_name="myh3")
+        H3MlxVideoBackend().text_to_video(model, "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+
+        assert env.loads[0]["turbo_lora_path"] is None
+        assert model.text_encoder_dir.name == "h3@mlx-te4"
+        assert model.files.text_encoder_source == stock.text_encoder_source  # stock's files, so stock's copy stays current
+
+    def test_a_folder_converted_on_windows_or_linux_is_refused(self, env, tmp_path):
+        with pytest.raises(RuntimeError):
+            H3MlxVideoBackend().load_model(self._converted(tmp_path, "nf4-folded"), preset=PRESET, lora=LORA, lora_scale=TURBO_SCALE, models_dir=env.tmp / "models")
 
 
 class TestTextToVideo:
@@ -993,6 +1018,46 @@ class TestCombineLoras:
         user = _write_peft(tmp_path / "user.safetensors", {"blocks.0.attn.out_proj": (HIDDEN + 8, HIDDEN)}, rank=2, metadata={"alpha": "2"})
         with pytest.raises(ValueError, match="do not fit"):
             combine_loras(turbo, 0.0625, [(user, 1.0)], tmp_path / "adapter.safetensors")
+
+
+def _tiny_slot_shapes() -> dict:
+    """Return the slots of a two-block, one-refiner model with the test's projection shapes, as ``(inputs, outputs)``."""
+    counts = {"transformer_blocks": 2, "token_refiner.refiner_blocks": 1}
+    return {(family, index, target): (columns, rows) for family, count in counts.items() for index in range(count) for target, (rows, columns) in TARGET_SHAPES.items()}
+
+
+class TestCombineWithoutTurbo:
+    def test_covers_every_projection_at_the_users_rank(self, tmp_path, monkeypatch):
+        from zvisiongenerator.utils.h3_lora import load_lora, pairs_from_state
+
+        monkeypatch.setattr(h3_video, "_slot_shapes", _tiny_slot_shapes)
+        user = _write_kohya(tmp_path / "user.safetensors", USER_MODULES, rank=2, alpha=1.0)
+        converted = pairs_from_state(load_lora(user).state)
+
+        tensors = load_file(str(combine_loras(None, 0.0625, [(user, 0.5)], tmp_path / "adapter.safetensors")))
+
+        assert {key.rsplit(".lora_", 1)[0] for key in tensors} == {f"{family}.{index}.{target}" for family, index, target in _tiny_slot_shapes()}
+        for slot in {key.rsplit(".lora_", 1)[0] for key in tensors}:
+            assert tensors[f"{slot}.lora_A.default.weight"].shape[0] == 2
+            if slot in USER_SLOTS:
+                down, up = converted[slot]
+                expected = 0.5 * (up.float() @ down.float())
+                torch.testing.assert_close(_delta(tensors, slot), expected, rtol=0, atol=0.02 * float(expected.abs().max()))
+            else:
+                assert not tensors[f"{slot}.lora_A.default.weight"].any()
+
+    def test_a_converted_folder_with_user_loras_gets_an_adapter_without_the_turbo(self, env, written, tmp_path, monkeypatch):
+        monkeypatch.setattr(h3_video, "_slot_shapes", _tiny_slot_shapes)
+        stock = _make_files(tmp_path / "stock")
+        monkeypatch.setattr(h3_video, "snapshot_with", lambda files, download: stock.fl2va_dir.parent)
+        user = _write_kohya(tmp_path / "user.safetensors", USER_MODULES, rank=2, alpha=1.0)
+        folder = TestConvertedFolder._converted(tmp_path)
+
+        model, _ = H3MlxVideoBackend().load_model(folder, preset=PRESET, lora=LORA, lora_scale=TURBO_SCALE, models_dir=env.tmp / "models", model_name="myh3", loras=[(str(user), 1.0)])
+        H3MlxVideoBackend().text_to_video(model, "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+
+        adapter = load_file(str(env.loads[0]["turbo_lora_path"]))
+        assert all(tensor.shape[0] == 2 for key, tensor in adapter.items() if key.endswith("lora_A.default.weight"))
 
 
 class TestLoadWithUserLoras:

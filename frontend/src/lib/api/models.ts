@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ConversionStatus, DownloadItem, DownloadList, DownloadPlan, LtxCheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
+import type { ConversionStatus, DownloadItem, DownloadList, DownloadPlan, CheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
 
 export function getModelInventory(): Promise<ModelInventory> {
   return api.get<ModelInventory>('/api/models');
@@ -11,20 +11,22 @@ export function convertCheckpoint(data: {
   model_type: string;
   base_model?: string;
   copy?: boolean;
-  /** '4' or '8' also saves a quantized copy; empty for none. For ltx-2.3 it is required and is the only level stored. */
+  /** '4' or '8' also saves a quantized copy; empty for none. For ltx-2.3 and ltx-2.5 it is required and is the only level stored. */
   quantize?: string;
-  /** ltx-2.3 only: merge Lightricks' distilled LoRA into a plain-dev checkpoint. */
+  /** ltx-2.3 and ltx-2.5 only: merge Lightricks' distilled LoRA into a plain-dev checkpoint. */
   distill?: boolean;
+  /** h3 only: the checkpoint is already step-distilled, so the turbo LoRA is not merged. */
+  turbo?: boolean;
 }): Promise<ModelOperationResult> {
   return api.post<ModelOperationResult>('/api/models/convert', data);
 }
 
-/** Inspect an LTX-2.3 checkpoint before converting it (nothing is downloaded). */
-export function inspectLtxCheckpoint(inputPath: string): Promise<LtxCheckpointInspection> {
-  return api.post<LtxCheckpointInspection>('/api/models/convert/inspect', { input_path: inputPath });
+/** Inspect a video checkpoint as *modelType* before converting it (nothing is downloaded). */
+export function inspectCheckpoint(inputPath: string, modelType: string): Promise<CheckpointInspection> {
+  return api.post<CheckpointInspection>('/api/models/convert/inspect', { input_path: inputPath, model_type: modelType });
 }
 
-/** The state and progress of the current or last LTX conversion. */
+/** The state and progress of the current or last video conversion. */
 export function getConversionStatus(): Promise<ConversionStatus> {
   return api.get<ConversionStatus>('/api/models/convert/status');
 }

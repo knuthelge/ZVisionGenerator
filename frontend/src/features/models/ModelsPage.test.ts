@@ -10,7 +10,7 @@ import type { DownloadItem, DownloadPlan, ModelInventory } from '$lib/types';
 const modelApiMocks = vi.hoisted(() => ({
   getModelInventory: vi.fn<() => Promise<ModelInventory>>(),
   convertCheckpoint: vi.fn(),
-  inspectLtxCheckpoint: vi.fn(),
+  inspectCheckpoint: vi.fn(),
   getConversionStatus: vi.fn(),
   importLoraLocal: vi.fn(),
   importLoraHF: vi.fn(),
@@ -34,7 +34,7 @@ const browseApiMocks = vi.hoisted(() => ({
 vi.mock('$lib/api/models', () => ({
   getModelInventory: modelApiMocks.getModelInventory,
   convertCheckpoint: modelApiMocks.convertCheckpoint,
-  inspectLtxCheckpoint: modelApiMocks.inspectLtxCheckpoint,
+  inspectCheckpoint: modelApiMocks.inspectCheckpoint,
   getConversionStatus: modelApiMocks.getConversionStatus,
   importLoraLocal: modelApiMocks.importLoraLocal,
   importLoraHF: modelApiMocks.importLoraHF,
@@ -109,7 +109,7 @@ describe('ModelsPage Browse buttons', () => {
     downloadStore.reset();
     modelApiMocks.getModelInventory.mockReset();
     modelApiMocks.convertCheckpoint.mockReset();
-    modelApiMocks.inspectLtxCheckpoint.mockReset();
+    modelApiMocks.inspectCheckpoint.mockReset();
     modelApiMocks.getConversionStatus.mockReset();
     modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
     modelApiMocks.importLoraLocal.mockReset();
@@ -410,8 +410,8 @@ describe('ModelsPage Browse buttons', () => {
   });
 
   it('converts an LTX checkpoint at the inspected level, with Distill preselected for plain dev, as a background job', async () => {
-    modelApiMocks.inspectLtxCheckpoint.mockResolvedValue({
-      layout: 'full', fp8_weights: 440, distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 8,
+    modelApiMocks.inspectCheckpoint.mockResolvedValue({
+      model_type: 'ltx-2.3', summary: 'LTX-2.3, full checkpoint, FP8 (440)', tone: 'warning', distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 8,
     });
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'success', message: 'Converting.', detail: '', background: true });
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -424,7 +424,7 @@ describe('ModelsPage Browse buttons', () => {
     await new Promise((resolve) => setTimeout(resolve, 450));
     await settle();
 
-    expect(modelApiMocks.inspectLtxCheckpoint).toHaveBeenCalledWith('/models/ltx-finetune.safetensors');
+    expect(modelApiMocks.inspectCheckpoint).toHaveBeenCalledWith('/models/ltx-finetune.safetensors', 'ltx-2.3');
     expect(target.querySelector('#convert-base-model')).toBeNull();
     expect((target.querySelector('#convert-ltx-quantize') as HTMLButtonElement).dataset.value).toBe('8');
     expect((target.querySelector('#convert-distill') as HTMLInputElement).checked).toBe(true);
@@ -445,7 +445,7 @@ describe('ModelsPage Browse buttons', () => {
 
   it('ignores an inspect answer that arrives after the path changed', async () => {
     let answerFirst: (value: unknown) => void = () => {};
-    modelApiMocks.inspectLtxCheckpoint
+    modelApiMocks.inspectCheckpoint
       .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }))
       .mockRejectedValueOnce(new Error('not an LTX checkpoint'));
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -457,12 +457,37 @@ describe('ModelsPage Browse buttons', () => {
     typePath(input, '/models/dev.safetensors');
     await new Promise((resolve) => setTimeout(resolve, 450));
     typePath(input, '/models/other.safetensors');
-    answerFirst({ layout: 'full', fp8_weights: 0, distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 4 });
+    answerFirst({ model_type: 'ltx-2.3', summary: 'LTX-2.3, full checkpoint, bf16', tone: 'warning', distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 4 });
     await new Promise((resolve) => setTimeout(resolve, 450));
     await settle();
 
     expect((target.querySelector('#convert-distill') as HTMLInputElement).checked).toBe(false);
     expect(target.textContent).not.toContain('Convert it with Distill.');
+  });
+
+  it('converts an H3 checkpoint with Already step-distilled left to the user, even with turbo hints', async () => {
+    modelApiMocks.inspectCheckpoint.mockResolvedValue({
+      model_type: 'h3', summary: 'MiniMax H3, ComfyUI single file, pruned (rank 8), INT8 (195)', tone: 'warning', advice: 'This may already be step-distilled.', turbo_hints: ["the name says 'turbo'"],
+    });
+    modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'success', message: 'Converting.', detail: '', background: true });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const { input, form } = pathAndForm(target, 'convert-input-path');
+    typePath(input, '/models/h3-turbo-finetune.safetensors');
+    pickOption(target.querySelector('#convert-model-type') as HTMLButtonElement, 'h3');
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await settle();
+
+    expect(modelApiMocks.inspectCheckpoint).toHaveBeenCalledWith('/models/h3-turbo-finetune.safetensors', 'h3');
+    expect(target.querySelector('#convert-ltx-quantize')).toBeNull();
+    const turbo = target.querySelector('#convert-turbo') as HTMLInputElement;
+    expect(turbo.checked).toBe(false);
+    turbo.click();
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(modelApiMocks.convertCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ model_type: 'h3', turbo: true }));
   });
 
   it('keeps reading the conversion status after a missed read', async () => {

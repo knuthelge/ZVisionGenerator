@@ -4,6 +4,7 @@
 closes. A single checkpoint can be larger than system memory, and reclaiming that cache under load is the memory
 pressure that gets processes killed on Linux. :func:`iter_tensors` reads each tensor with plain file reads instead and
 drops its byte range from the cache right after; :class:`TensorFile` does the same for tensors read by name;
+:func:`read_stream_tensors` reads named tensors from any seekable stream, such as a file on the Hub read by range;
 :class:`ShardWriter` writes shards of bounded size and flushes each one out of the cache once written;
 :class:`SingleFileWriter` writes one file of any size, its header first and then each tensor as it comes.
 """
@@ -32,6 +33,7 @@ __all__ = [
     "read_header",
     "read_header_and_metadata",
     "read_metadata",
+    "read_stream_tensors",
     "shard_files",
 ]
 
@@ -86,19 +88,52 @@ def _read_all(path: Path) -> tuple[int, dict[str, dict], dict[str, str]]:
 def _raw_header(path: Path) -> tuple[int, dict]:
     """Return the byte offset where *path*'s tensor data starts, and its whole header."""
     with open(path, "rb") as handle:
-        prefix = handle.read(_HEADER_LENGTH_BYTES)
-        if len(prefix) != _HEADER_LENGTH_BYTES:
-            raise ValueError(f"{path} is not a safetensors file.")
-        (length,) = struct.unpack("<Q", prefix)
-        if length > min(MAX_HEADER_BYTES, os.fstat(handle.fileno()).st_size - _HEADER_LENGTH_BYTES):
-            raise ValueError(f"{path} is not a safetensors file: its header length {length} is out of range.")
-        try:
-            header = json.loads(handle.read(length))
-        except ValueError as exc:
-            raise ValueError(f"{path} is not a safetensors file.") from exc
+        return _stream_header(handle, str(path), os.fstat(handle.fileno()).st_size)
+
+
+def _stream_header(handle: IO[bytes], label: str, size: int) -> tuple[int, dict]:
+    """Return where the tensor data of the *size*-byte safetensors stream *handle* starts, and its whole header; *label* names it in errors."""
+    prefix = handle.read(_HEADER_LENGTH_BYTES)
+    if len(prefix) != _HEADER_LENGTH_BYTES:
+        raise ValueError(f"{label} is not a safetensors file.")
+    (length,) = struct.unpack("<Q", prefix)
+    if length > min(MAX_HEADER_BYTES, size - _HEADER_LENGTH_BYTES):
+        raise ValueError(f"{label} is not a safetensors file: its header length {length} is out of range.")
+    try:
+        header = json.loads(handle.read(length))
+    except ValueError as exc:
+        raise ValueError(f"{label} is not a safetensors file.") from exc
     if not isinstance(header, dict):
-        raise ValueError(f"{path} is not a safetensors file.")
+        raise ValueError(f"{label} is not a safetensors file.")
     return _HEADER_LENGTH_BYTES + length, header
+
+
+def read_stream_tensors(handle: IO[bytes], label: str, size: int, names: Callable[[str], bool]) -> dict[str, torch.Tensor]:
+    """Return the tensors that *names* accepts from the seekable *size*-byte safetensors stream *handle*, reading only its header and their bytes.
+
+    Args:
+        handle: The open stream, such as a file on the Hub opened for range reads.
+        label: What errors call the stream.
+        size: The stream's length in bytes.
+        names: Accepts the names to read.
+
+    Raises:
+        ValueError: If the stream is not safetensors, holds a dtype this reader does not know, or ends inside a tensor.
+    """
+    import torch
+
+    data_start, header = _stream_header(handle, label, size)
+    tensors = {}
+    wanted = [(name, info) for name, info in header.items() if name != "__metadata__" and names(name)]
+    for name, info in sorted(wanted, key=lambda item: item[1]["data_offsets"][0]):
+        begin, end = info["data_offsets"]
+        dtype = _dtype(info["dtype"], Path(label))
+        handle.seek(data_start + begin)
+        data = handle.read(end - begin)
+        if len(data) != end - begin:
+            raise ValueError(f"{label} ended inside tensor {name}.")
+        tensors[name] = (torch.frombuffer(bytearray(data), dtype=dtype) if data else torch.empty(0, dtype=dtype)).reshape(info["shape"])
+    return tensors
 
 
 def iter_tensors(path: Path, wanted: Callable[[str], bool] | None = None) -> Iterator[tuple[str, torch.Tensor]]:

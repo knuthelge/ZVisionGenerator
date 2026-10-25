@@ -733,4 +733,4 @@ def test_loading_needs_no_heavy_import_at_module_level() -> None:
 
 
 def test_public_names_are_exported() -> None:
-    assert sorted(stored_copy.__all__) == ["copy_manifest", "copy_name", "ensure_copy", "load_copy", "write_copy"]
+    assert sorted(stored_copy.__all__) == ["Tensors", "copy_manifest", "copy_name", "copy_settings", "ensure_copy", "load_copy", "write_copy", "write_folded"]

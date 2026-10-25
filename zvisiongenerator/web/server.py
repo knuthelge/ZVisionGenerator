@@ -39,7 +39,7 @@ from zvisiongenerator.backends import (
     video_family_on_platform,
 )
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu, smart_budget_bytes
-from zvisiongenerator.converters.convert_checkpoint import LTX_MODEL_TYPE, MODEL_TYPES
+from zvisiongenerator.converters.convert_checkpoint import H3_MODEL_TYPE, LTX_MODEL_TYPES, MODEL_TYPES, VIDEO_MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
@@ -1581,6 +1581,16 @@ def _required_path(form: Any, key: str) -> str:
     return value
 
 
+def _checkpoint_path(form: Any, key: str) -> str:
+    """Return the checkpoint file the field *key* names, absolute but with symlinks kept (a Hugging Face cache file links to a blob named by its hash, and a sharded checkpoint is found through the links beside it).
+
+    Raises:
+        ValueError: As :func:`_required_path`.
+    """
+    _required_path(form, key)
+    return str(Path(str(_optional_text(form, key))).expanduser().absolute())
+
+
 def _upload_field(path_key: str) -> str:
     """Return the form field that uploads the file a path field names (``image_path`` -> ``image_file``)."""
     return f"{path_key.removesuffix('_path')}_file"
@@ -1782,7 +1792,7 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
         HTTPException: 409 when a quantized copy is requested while a generation job runs or another model is
             being quantized (each holds a full model in memory). Jobs are refused while it runs.
     """
-    input_path = _required_path(form, "input_path")
+    input_path = _checkpoint_path(form, "input_path")
     model_type = _optional_text(form, "model_type") or "zimage"
     if model_type not in MODEL_TYPES:
         raise ValueError(f"Model type must be one of {', '.join(MODEL_TYPES)}.")
@@ -1791,8 +1801,8 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
     model_name = _optional_text(form, "name")
     if model_name:
         args.extend(["--name", model_name])
-    if model_type == LTX_MODEL_TYPE:
-        return _start_ltx_conversion(form, args, model_name or Path(input_path).stem)
+    if model_type in VIDEO_MODEL_TYPES:
+        return _start_video_conversion(form, args, model_type, model_name or Path(input_path).stem)
     if model_type == "zimage":
         args.extend(["--base-model", _optional_text(form, "base_model") or "Tongyi-MAI/Z-Image-Turbo"])
     if _checkbox(form, "copy"):
@@ -1816,28 +1826,34 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
     }
 
 
-def _start_ltx_conversion(form: Any, args: list[str], name: str) -> dict[str, str]:
-    """Start an LTX conversion as a background job (see :mod:`zvisiongenerator.web.ltx_conversion`); it holds the quantize slot until it ends.
+def _start_video_conversion(form: Any, args: list[str], model_type: str, name: str) -> dict[str, str]:
+    """Start a video conversion as a background job (see :mod:`zvisiongenerator.web.video_conversion`); it holds the quantize slot until it ends.
+
+    An LTX conversion takes the quantize level and Distill; an H3 conversion takes "already step-distilled" (``turbo``).
 
     Raises:
-        ValueError: Without a quantize level of 4 or 8 (the only level an LTX conversion stores).
+        ValueError: Without a quantize level of 4 or 8 for LTX (the only level it stores).
         HTTPException: 409 while a generation job runs or another conversion holds the slot.
     """
-    from zvisiongenerator.web.ltx_conversion import start_conversion
+    from zvisiongenerator.web.video_conversion import start_conversion
 
     quantize = _optional_int(form, "quantize")
-    if quantize not in (4, 8):
-        raise ValueError("Converting an LTX-2.3 checkpoint needs a quantize level of 4 or 8: that level is the only one stored.")
-    args.extend(["--quantize", str(quantize)])
-    if _checkbox(form, "distill"):
-        args.append("--distill")
+    if model_type in LTX_MODEL_TYPES:
+        if quantize not in (4, 8):
+            raise ValueError(f"Converting an {model_type.upper()} checkpoint needs a quantize level of 4 or 8: that level is the only one stored.")
+        args.extend(["--quantize", str(quantize)])
+        if _checkbox(form, "distill"):
+            args.append("--distill")
+    elif model_type == H3_MODEL_TYPE and _checkbox(form, "turbo"):
+        args.append("--turbo")
     slot = ExitStack()
     try:
         slot.enter_context(_claim_quantize_slot())
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     start_conversion(args, name, slot)
-    return {"tone": "success", "message": f"Converting the checkpoint into '{name}' at q{quantize}. This takes several minutes.", "detail": "", "background": "1"}
+    level = f" at q{quantize}" if model_type in LTX_MODEL_TYPES else ""
+    return {"tone": "success", "message": f"Converting the checkpoint into '{name}'{level}. This takes several minutes.", "detail": "", "background": "1"}
 
 
 def _import_local_lora_from_form(form: Any) -> dict[str, str]:
@@ -2033,21 +2049,22 @@ async def api_models_convert(request: Request) -> dict[str, Any]:
 
 @app.post("/api/models/convert/inspect")
 async def api_models_convert_inspect(request: Request) -> dict[str, Any]:
-    """Inspect an LTX checkpoint before converting it: its layout, whether it needs --distill, and the level that fits."""
-    from zvisiongenerator.web.ltx_conversion import inspect_checkpoint_for_form
+    """Inspect a video checkpoint before converting it as the model type given: a summary, advice, and what to preselect."""
+    from zvisiongenerator.web.video_conversion import inspect_checkpoint_for_form
 
     payload = await request.json()
     try:
-        path = Path(_required_path(payload, "input_path")).expanduser()
-        return await run_in_threadpool(inspect_checkpoint_for_form, path, load_web_config().app_config)
+        path = Path(_checkpoint_path(payload, "input_path"))
+        model_type = _optional_text(payload, "model_type") or LTX_MODEL_TYPES[0]
+        return await run_in_threadpool(inspect_checkpoint_for_form, path, load_web_config().app_config, model_type)
     except (ValueError, FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/models/convert/status")
 def api_models_convert_status() -> dict[str, Any]:
-    """Return the state and progress of the current or last LTX conversion."""
-    from zvisiongenerator.web.ltx_conversion import conversion_status
+    """Return the state and progress of the current or last video conversion."""
+    from zvisiongenerator.web.video_conversion import conversion_status
 
     return conversion_status()
 

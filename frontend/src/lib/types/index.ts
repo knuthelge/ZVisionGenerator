@@ -1213,14 +1213,19 @@ export interface ModelOperationResult {
   background?: boolean;
 }
 
-/** What the converter found in an LTX-2.3 checkpoint before converting it. */
-export interface LtxCheckpointInspection {
-  layout: 'full' | 'transformer';
-  fp8_weights: number;
-  distillation: 'dev' | 'distilled' | 'unknown';
+/** What the converter found in a video checkpoint (LTX-2.3, LTX-2.5 or MiniMax H3) before converting it. */
+export interface CheckpointInspection {
+  model_type: string;
+  /** The version, layout and storage, e.g. "MiniMax H3, ComfyUI single file, pruned (rank 8), INT8 (195)". */
+  summary: string;
   advice: string;
-  recommend_distill: boolean;
-  recommended_quantize: 4 | 8;
+  tone: 'success' | 'warning' | 'info';
+  /** LTX only. */
+  distillation?: 'dev' | 'distilled' | 'unknown';
+  recommend_distill?: boolean;
+  recommended_quantize?: 4 | 8;
+  /** MiniMax H3 only: what the file's name or metadata hints about a step-distilled checkpoint. */
+  turbo_hints?: string[];
 }
 
 /** The current or last LTX conversion. */

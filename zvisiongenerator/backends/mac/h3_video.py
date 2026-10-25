@@ -23,7 +23,7 @@ import shutil
 import tempfile
 import weakref
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -93,7 +93,7 @@ class _H3MlxModel:
 
     files: H3MlxFiles
     text_encoder_dir: Path
-    turbo_lora_path: Path
+    turbo_lora_path: Path | None
     turbo_lora_alpha: float | None
     turbo_lora_scale: float
     mode: str
@@ -153,8 +153,8 @@ def local_int8_transformer(local: Path) -> Path | None:
 
     Raises:
         ValueError: If *local* holds a transformer that is not in that layout (the release's bf16 ``transformer/`` or
-            ``FL2VA/transformer``, or a fine-tune of them): the Mac cannot convert one yet, and the stock transformer
-            must not stand in for it.
+            ``FL2VA/transformer``, or a fine-tune of them): it must be converted first, and the stock transformer must
+            not stand in for it.
         FileNotFoundError: If an INT8 transformer lacks its index or a shard.
     """
     candidates = local_transformer_dirs(local)
@@ -167,12 +167,12 @@ def local_int8_transformer(local: Path) -> Path | None:
             return folder
     raise ValueError(
         f"{local} holds a transformer ({', '.join(str(folder.relative_to(local)) for folder in candidates)}) that is not in the MLX INT8 layout. "
-        "MiniMax H3 on macOS needs the fork's INT8 layout (config.json, quant_config.json, model.safetensors.index.json and its shards); "
-        "converting fine-tunes for the Mac is not supported yet. Remove the transformer from the folder to use the stock INT8 transformer."
+        "MiniMax H3 on macOS needs the fork's INT8 layout (config.json, quant_config.json, model.safetensors.index.json and its shards). "
+        "Convert the fine-tune on the Models page (MiniMax H3) or with `ziv model model --model-type h3`, or remove the transformer from the folder to use the stock INT8 transformer."
     )
 
 
-def resolve_mlx_files(model_ref: str, preset: H3MlxPreset, *, lora: HubFiles, snapshot_download: Callable[..., str] | None = None) -> H3MlxFiles:
+def resolve_mlx_files(model_ref: str, preset: H3MlxPreset, *, lora: HubFiles | None, snapshot_download: Callable[..., str] | None = None) -> H3MlxFiles:
     """Return the on-disk files of the macOS H3 model, downloading what is missing.
 
     Args:
@@ -180,7 +180,7 @@ def resolve_mlx_files(model_ref: str, preset: H3MlxPreset, *, lora: HubFiles, sn
             A local folder with an MLX INT8 transformer (see :func:`local_int8_transformer`) uses it; one without any
             transformer takes the preset's INT8 transformer.
         preset: The macOS preset: the INT8 transformer and the ``FL2VA`` components.
-        lora: The turbo LoRA's repository and file (one file).
+        lora: The turbo LoRA's repository and file (one file), or ``None`` for a converted folder, which holds its turbo merge.
         snapshot_download: Called as ``snapshot_download(repo_id=, revision=, allow_patterns=)``; defaults to the Hub's.
 
     Raises:
@@ -188,7 +188,7 @@ def resolve_mlx_files(model_ref: str, preset: H3MlxPreset, *, lora: HubFiles, sn
         ValueError: If *lora* does not name exactly one file, or a local folder holds a transformer the Mac cannot load.
     """
     download = hub_snapshot_download if snapshot_download is None else snapshot_download
-    if len(lora.files) != 1:
+    if lora is not None and len(lora.files) != 1:
         raise ValueError(f"The turbo LoRA must be one file, got {len(lora.files)}.")
     local = Path(model_ref).expanduser()
     transformer_dir: Path | None = None
@@ -199,8 +199,8 @@ def resolve_mlx_files(model_ref: str, preset: H3MlxPreset, *, lora: HubFiles, sn
         transformer_dir = local_int8_transformer(local)
     else:
         fl2va_dir = snapshot_with(preset.components, download) / "FL2VA"
-    lora_file = snapshot_with(lora, download) / lora.files[0]
-    if not lora_file.is_file():
+    lora_file = snapshot_with(lora, download) / lora.files[0] if lora is not None else None
+    if lora_file is not None and not lora_file.is_file():
         raise FileNotFoundError(f"Turbo LoRA not found: {lora_file}")
     if transformer_dir is None:
         transformer_dir = snapshot_with(preset.transformer, download)
@@ -353,16 +353,17 @@ def _read_turbo_lora(path: Path, scale: float) -> dict[_Slot, tuple[torch.Tensor
     return {slot: (pair["A"].to(torch.bfloat16), pair["B"]) for slot, pair in halves.items()}
 
 
-def combine_loras(turbo: Path, turbo_scale: float, user: Sequence[tuple[Path, float]], target: Path) -> Path:
-    """Write one adapter that holds the turbo LoRA and every user LoRA, in the format the fork's turbo provider reads.
+def combine_loras(turbo: Path | None, turbo_scale: float, user: Sequence[tuple[Path, float]], target: Path) -> Path:
+    """Write one adapter that holds the turbo LoRA (when given) and every user LoRA, in the format the fork's turbo provider reads.
 
     Each file's up-projection is scaled by its strength (the turbo's is *turbo_scale* alone; a user file's is ``weight * alpha /
     rank``). The files' ranks are concatenated per projection, with the slots a file does not cover left at zero, so the sum
-    of the files' deltas is exact. The adapter is written in bf16 with its metadata alpha equal to the total rank; pass it with
-    ``turbo_lora_scale=1.0`` and no alpha override.
+    of the files' deltas is exact. The fork needs every projection of every block, so the adapter covers them all. The adapter
+    is written in bf16 with its metadata alpha equal to the total rank; pass it with ``turbo_lora_scale=1.0`` and no alpha
+    override.
 
     Args:
-        turbo: The turbo LoRA file (PEFT diffusers keys).
+        turbo: The turbo LoRA file (PEFT diffusers keys), or ``None`` for a converted model, which holds its turbo merge.
         turbo_scale: The turbo's strength.
         user: ``(file, strength)`` of each user LoRA, in any format diffusers' H3 loader converts.
         target: Where to write the adapter.
@@ -371,38 +372,38 @@ def combine_loras(turbo: Path, turbo_scale: float, user: Sequence[tuple[Path, fl
         *target*.
 
     Raises:
-        ValueError: If a user LoRA targets anything but transformer-block and token-refiner projections, or a projection the
-            turbo does not have, or with factors of the wrong shape.
+        ValueError: If a user LoRA targets anything but transformer-block and token-refiner projections, or a projection
+            the model does not have, or with factors of the wrong shape.
     """
     import torch
     from safetensors.torch import save_file
 
     contributions = [_read_user_lora(Path(path), float(weight)) for path, weight in user]
-    contributions.insert(0, _read_turbo_lora(Path(turbo), float(turbo_scale)))
-    base = contributions[0]
+    if turbo is not None:
+        contributions.insert(0, _read_turbo_lora(Path(turbo), float(turbo_scale)))
+    # The turbo covers every projection; without it, the model's config lists them.
+    shapes = {slot: (down.shape[1], up.shape[0]) for slot, (down, up) in contributions[0].items()} if turbo is not None else _slot_shapes()
     ranks = [max(down.shape[0] for down, _ in contribution.values()) for contribution in contributions]
     offsets = [sum(ranks[:index]) for index in range(len(ranks))]
     total = sum(ranks)
 
-    stray = sorted({slot for contribution in contributions[1:] for slot in contribution} - set(base))
+    stray = sorted({slot for contribution in contributions for slot in contribution} - set(shapes))
     if stray:
         family, index, projection = stray[0]
         raise ValueError(f"A LoRA targets {family}.{index}.{projection}, which MiniMax H3 does not have.")
 
     tensors: dict[str, torch.Tensor] = {}
-    for slot in sorted(base):
+    for slot in sorted(shapes):
         family, index, projection = slot
-        reference_a, reference_b = base[slot]
-        down = torch.zeros(total, reference_a.shape[1], dtype=torch.bfloat16)
-        up = torch.zeros(reference_b.shape[0], total, dtype=torch.bfloat16)
+        inputs, outputs = shapes[slot]
+        down = torch.zeros(total, inputs, dtype=torch.bfloat16)
+        up = torch.zeros(outputs, total, dtype=torch.bfloat16)
         for contribution, offset in zip(contributions, offsets, strict=True):
             if slot not in contribution:
                 continue
             lora_a, lora_b = contribution[slot]
-            if lora_a.shape[1] != down.shape[1] or lora_b.shape[0] != up.shape[0] or lora_a.shape[0] != lora_b.shape[1]:
-                raise ValueError(
-                    f"A LoRA's factors for {family}.{index}.{projection} (A {tuple(lora_a.shape)}, B {tuple(lora_b.shape)}) do not fit the model's ({tuple(down.shape[1:])} in, {up.shape[0]} out)."
-                )
+            if lora_a.shape[1] != inputs or lora_b.shape[0] != outputs or lora_a.shape[0] != lora_b.shape[1]:
+                raise ValueError(f"A LoRA's factors for {family}.{index}.{projection} (A {tuple(lora_a.shape)}, B {tuple(lora_b.shape)}) do not fit the model's ({inputs} in, {outputs} out).")
             rank = lora_a.shape[0]
             down[offset : offset + rank] = lora_a
             up[:, offset : offset + rank] = lora_b
@@ -419,6 +420,23 @@ def combine_loras(turbo: Path, turbo_scale: float, user: Sequence[tuple[Path, fl
     finally:
         partial.unlink(missing_ok=True)
     return target
+
+
+def _slot_shapes() -> dict[_Slot, tuple[int, int]]:
+    """Return every projection the fork's adapter covers, with its ``(inputs, outputs)``, from stock H3's config."""
+    from zvisiongenerator.converters.h3_checkpoint import STOCK_CONFIG
+
+    hidden, inner, ffn = STOCK_CONFIG["hidden_size"], STOCK_CONFIG["num_attention_heads"] * STOCK_CONFIG["attention_head_dim"], STOCK_CONFIG["ffn_dim"]
+    projections = {
+        "attn.to_q": (hidden, inner),
+        "attn.to_k": (hidden, inner),
+        "attn.to_v": (hidden, inner),
+        "attn.to_out.0": (inner, hidden),
+        "ff.net.0.proj": (hidden, 2 * ffn),
+        "ff.net.2": (ffn, hidden),
+    }
+    counts = {"transformer_blocks": STOCK_CONFIG["num_layers"], "token_refiner.refiner_blocks": STOCK_CONFIG["num_refiner_layers"]}
+    return {(family, index, projection): shape for family, count in counts.items() for index in range(count) for projection, shape in projections.items()}
 
 
 # ---- The one-shot text encoder --------------------------------------------------------------------------------------
@@ -474,6 +492,21 @@ def _process_limits(mx: Any, *, low_memory: bool) -> Iterator[None]:
     finally:
         mx.set_cache_limit(previous_cache)
         mx.set_memory_limit(previous_memory)
+
+
+def _converted(folder: Path) -> bool:
+    """Return whether *folder* is a converted H3 folder.
+
+    Raises:
+        RuntimeError: When it was converted on Windows or Linux.
+    """
+    from zvisiongenerator.backends.mac.h3_converted import STORAGE
+    from zvisiongenerator.utils.h3_converted import read_converted_h3
+
+    manifest = read_converted_h3(folder) if folder.is_dir() else None
+    if manifest is not None and manifest.get("storage") != STORAGE:
+        raise RuntimeError(f"{folder.name} was converted on Windows or Linux; convert the checkpoint again on this Mac.")
+    return manifest is not None
 
 
 def _load_pipeline(model: _H3MlxModel, schedule: H3Schedule, *, low_memory: bool) -> Any:
@@ -662,20 +695,30 @@ class H3MlxVideoBackend:
         scale = float(lora_scale)
         user_loras = [(Path(path), float(weight)) for path, weight in kwargs.get("loras") or ()]
 
-        files = resolve_mlx_files(model_path, preset, lora=lora)
+        # A converted folder holds its turbo merge (or needs none), so it gets no turbo LoRA.
+        converted = _converted(Path(model_path).expanduser())
+        files = resolve_mlx_files(model_path, preset, lora=None if converted else lora)
+        if converted:
+            # Stock's own text encoder files, so stock and every converted model share one copy and none rebuilds it.
+            files = replace(files, text_encoder_source=snapshot_with(preset.components, hub_snapshot_download) / "FL2VA" / "text_encoder")
         directory: str | None = None
+        lora_path: Path | None
         if user_loras:
             directory = tempfile.mkdtemp(prefix="ziv-h3-lora-")
             try:
-                adapter = combine_loras(files.lora_file, scale, user_loras, Path(directory) / "adapter.safetensors")
+                adapter = combine_loras(None if converted else files.lora_file, scale, user_loras, Path(directory) / "adapter.safetensors")
             except BaseException:
                 shutil.rmtree(directory, ignore_errors=True)
                 raise
             lora_path, alpha, adapter_scale = adapter, None, 1.0
+        elif converted:
+            lora_path, alpha, adapter_scale = None, None, 1.0
         else:
             lora_path, alpha, adapter_scale = files.lora_file, scale * _turbo_rank(files.lora_file), 1.0
+        # A converted model shares stock's text encoder, so its copy is stock's.
+        copy_name = "h3" if converted else kwargs.get("model_name") or "h3"
         try:
-            text_encoder_dir = ensure_text_encoder_copy(Path(kwargs.get("models_dir") or get_ziv_data_dir() / "models"), kwargs.get("model_name") or "h3", files, preset)
+            text_encoder_dir = ensure_text_encoder_copy(Path(kwargs.get("models_dir") or get_ziv_data_dir() / "models"), copy_name, files, preset)
         except BaseException:
             if directory is not None:
                 shutil.rmtree(directory, ignore_errors=True)

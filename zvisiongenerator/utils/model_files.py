@@ -211,9 +211,11 @@ def _read_model_index(model_dir: Path) -> dict | None:
 
 
 def is_h3_model_dir(model_dir: Path) -> bool:
-    """Return whether *model_dir*'s ``model_index.json`` declares a MiniMax H3 pipeline."""
+    """Return whether *model_dir* holds MiniMax H3: its ``model_index.json`` declares the pipeline, or it is a converted H3 folder."""
+    from zvisiongenerator.utils.h3_converted import read_converted_h3
+
     index = _read_model_index(model_dir)
-    return index is not None and index.get("_class_name") == _H3_PIPELINE
+    return (index is not None and index.get("_class_name") == _H3_PIPELINE) or read_converted_h3(model_dir) is not None
 
 
 def is_krea2_model(model_dir: Path) -> bool:

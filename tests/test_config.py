@@ -1470,6 +1470,44 @@ class TestLtxVersionAwareAccessors:
         assert ltx_version(config, "ltx-4") is None
         assert ltx_version(config, None) is None
 
+    def test_a_converted_ltx25_folder_takes_its_versions_settings(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils.ltx_converted import write_converted_ltx
+
+        config = _packaged_config(monkeypatch, tmp_path)
+        data = tmp_path / "data"
+        for name, version in (("my25", "2.5"), ("my23", "2.3")):
+            (data / "models" / name).mkdir(parents=True)
+            write_converted_ltx(data / "models" / name, {"bits": 4, "storage": "nf4", "block_matrices": 1, "transformer_rest": 1}, version=version)
+        monkeypatch.setattr("zvisiongenerator.utils.config.get_ziv_data_dir", lambda: data)
+
+        assert ltx_version(config, "my25") == "ltx25"
+        assert ltx_version(config, str(data / "models" / "my25")) == "ltx25"
+        assert ltx_version(config, "my23") is None
+        assert ltx_load_options(config, "my25", upscale=False)["sampler"] == "euler_ancestral"
+
+    def test_the_converter_types_map_to_version_blocks_with_their_own_sources(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils.config import ltx_diffusers_repo, ltx_distilled_lora_source, ltx_mlx_base_repo, ltx_version_for_type
+
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert ltx_version_for_type(config, "ltx-2.3") is None
+        assert ltx_version_for_type(config, "ltx-2.5") == "ltx25"
+        repo, filename = ltx_distilled_lora_source(config, "ltx25")
+        assert repo.partition("@")[2] and "2.5" in filename  # pinned at a revision
+        assert ltx_distilled_lora_source(config, None) != ltx_distilled_lora_source(config, "ltx25")
+        assert ltx_diffusers_repo(config, "ltx25") != ltx_diffusers_repo(config, None)
+        assert ltx_mlx_base_repo(config, 8, "ltx25") != ltx_mlx_base_repo(config, 8, None)
+        with pytest.raises(ValueError):
+            ltx_version_for_type(config, "ltx-9")
+
+    def test_the_repo_ignore_of_a_version_skips_its_root_checkpoints(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils.config import ltx_repo_ignore
+
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert "LTX-2.5-*.safetensors" in ltx_repo_ignore(config, "ltx25")
+        assert ltx_repo_ignore(config, None) == ()
+
     def test_a_version_without_the_new_keys_adds_none(self):
         config = _versioned(diffusers={"quantize": {"alias-v": 4}})
 

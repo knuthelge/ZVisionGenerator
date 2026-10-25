@@ -32,8 +32,9 @@ from zvisiongenerator.backends.cuda.memory import release_memory
 from zvisiongenerator.backends.cuda.video.encode import encode_video
 from zvisiongenerator.backends.cuda.video.h3 import audio as h3_audio
 from zvisiongenerator.backends.cuda.video.h3 import conditioning, decode, sampler, schedule, stored_copy, text_encoder
+from zvisiongenerator.backends.cuda.video.h3 import converted as converted_h3
 from zvisiongenerator.backends.cuda.video.h3.frames import Geometry, geometry
-from zvisiongenerator.backends.cuda.video.h3.sources import resolve_files, transformer_files
+from zvisiongenerator.backends.cuda.video.h3.sources import resolve_base_files, resolve_files, transformer_files
 from zvisiongenerator.backends.cuda.video.runtime import configure_torch_runtime, fit_image
 from zvisiongenerator.backends.cuda.video.token_chunking import chunk_tokens
 from zvisiongenerator.core.video_types import ExtendSegment
@@ -52,6 +53,7 @@ from zvisiongenerator.utils.h3_memory import (
     h3_refine_windows,
     h3_upscale_keeps_transformer,
 )
+from zvisiongenerator.utils.h3_converted import read_converted_h3
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE as JOIN_SAMPLE_RATE
@@ -298,6 +300,25 @@ def _all_fold_keys(preset: H3Preset, repo_dir: Path) -> list[Any]:
     from zvisiongenerator.backends.cuda.video.h3 import adaln
 
     return adaln.fold_keys(preset.schedules, repo_dir)
+
+
+def _converted_copy(folder: Path, manifest: dict[str, Any], preset: H3Preset, upscale: bool) -> tuple[H3Files, Path]:
+    """Return the stock files (without stock's transformer) and the copy of the converted H3 folder *folder*.
+
+    The folder is the copy itself; it holds its turbo merge (or needs none), so stock's ``h3@q4`` is never written for it.
+
+    Raises:
+        RuntimeError: When the folder was converted on macOS, or its copy is not what this machine would write (the same
+            check as stock's copy, without the sources): other schedules or turbo strength in the config, or another NF4
+            serialization after a bitsandbytes update. Its copy keeps no AdaLN weights to rebuild the tables from.
+    """
+    if manifest.get("storage") != converted_h3.STORAGE:
+        raise RuntimeError(f"{folder.name} was converted on macOS; convert the checkpoint again on this machine.")
+    files = resolve_base_files(preset, upscale=upscale)
+    scale = preset.lora_scale if manifest.get("turbo") == "merged" else None
+    if manifest.get("copy") != stored_copy.copy_settings(scale, _all_fold_keys(preset, files.repo_dir)):
+        raise RuntimeError(f"{folder.name} was converted for other H3 settings than this machine's (schedules, turbo strength or the 4-bit format); convert the checkpoint again.")
+    return files, folder
 
 
 def _chunk_feed_forwards(transformer: Any, preset: H3Preset) -> None:
@@ -723,11 +744,15 @@ class H3VideoBackend:
         configure_torch_runtime(torch)
         _check_system_memory(loras)
         device = torch.device("cuda")
-        files = resolve_files(model_path, preset, upscale=upscale)
-        shards, config = transformer_files(files.repo_dir)
-        copy_dir = stored_copy.ensure_copy(
-            _models_dir(), stored_copy.copy_name(kwargs.get("model_name"), model_path), shards, config, files.lora_file, preset.lora_scale, _all_fold_keys(preset, files.repo_dir), device
-        )
+        converted = read_converted_h3(Path(model_path).expanduser())
+        if converted is not None:
+            files, copy_dir = _converted_copy(Path(model_path).expanduser(), converted, preset, upscale)
+        else:
+            files = resolve_files(model_path, preset, upscale=upscale)
+            shards, config = transformer_files(files.repo_dir)
+            copy_dir = stored_copy.ensure_copy(
+                _models_dir(), stored_copy.copy_name(kwargs.get("model_name"), model_path), shards, config, files.lora_file, preset.lora_scale, _all_fold_keys(preset, files.repo_dir), device
+            )
         return _H3Model(files=files, preset=preset, copy_dir=copy_dir, mode=mode, loras=loras, upscale=upscale, device=device), _MODEL_INFO
 
     def text_to_video(

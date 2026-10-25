@@ -54,8 +54,11 @@ def _base(tmp_path: Path) -> Path:
     """Return a stand-in MLX folder: its components, a transformer and LoRA that must never be linked, and stock's config."""
     base = tmp_path / "base"
     base.mkdir()
-    for name in ("vae_decoder.safetensors", "vocoder.safetensors", "config.json", "spatial_upscaler_x2_v1_1.safetensors", "connector.safetensors"):
+    for name in ("vae_decoder.safetensors", "vocoder.safetensors", "config.json", "spatial_upscaler_x2_v1_1.safetensors"):
         (base / name).write_bytes(b"stock " + name.encode())
+    save_file(
+        {f"connector.{name}": torch.full((2,), 9.0, dtype=torch.bfloat16) for name in ("video_embeddings_connector.weight", "text_embedding_projection.weight")}, str(base / "connector.safetensors")
+    )
     for name in ("transformer-distilled-1.1.safetensors", "transformer-dev.safetensors", "ltx-2.3-22b-distilled-lora-384.safetensors"):
         (base / name).write_bytes(b"never linked")
     (base / "embedded_config.json").write_text(json.dumps(_STOCK_CONFIG))
@@ -83,7 +86,7 @@ def test_the_folder_has_the_mlx_layout_with_one_transformer_file(tmp_path):
     assert sorted(path.name for path in target.glob("transformer*")) == ["transformer-distilled.safetensors"]
     assert ltx_mlx_transformer_file(target) == target / "transformer-distilled.safetensors"
     assert is_ltx_model_dir(target)
-    assert (target / "connector.safetensors").read_bytes() == b"stock connector.safetensors"
+    assert (target / "connector.safetensors").read_bytes() == (tmp_path / "base" / "connector.safetensors").read_bytes()  # linked, not written
     assert {path.name for path in target.iterdir()} == {
         "transformer-distilled.safetensors",
         "connector.safetensors",
@@ -129,7 +132,7 @@ def test_transformer_elements_count_scalars_and_zero_size_tensors_by_whether_the
         f"{P}patchify_proj.empty": [4, 0],
     }
     checkpoint = ltx_checkpoint.LtxCheckpoint(
-        path=Path("unused.safetensors"), transformer={name: name for name in shapes}, connectors={}, shapes=shapes, scales={}, fp8_weights=0, bundles_components=False
+        path=Path("unused.safetensors"), transformer={name: name for name in shapes}, connectors={}, shapes=shapes, quantized={}, bundles_components=False, version="2.3"
     )
 
     assert ltx_converted._transformer_elements(checkpoint) == (2 * 64 + 0, 2 + 1 + 15 + 0)
@@ -151,7 +154,7 @@ def test_a_block_weight_that_does_not_split_into_groups_of_64_is_refused(tmp_pat
 
 
 def test_changed_connectors_are_written_from_the_checkpoint(monkeypatch, tmp_path):
-    monkeypatch.setattr(ltx_checkpoint, "_pinned", lambda: {"connectors": dict.fromkeys(_connectors(), "stock hash"), "distillation": {}})
+    monkeypatch.setattr(ltx_checkpoint, "_pinned", lambda version: {"connectors": dict.fromkeys(_connectors(), "stock hash"), "distillation": {}})
     target = _write(tmp_path, _checkpoint(tmp_path, connectors=_connectors(5.0)), own_connectors=True)
 
     written = load_file(str(target / "connector.safetensors"))
@@ -159,11 +162,20 @@ def test_changed_connectors_are_written_from_the_checkpoint(monkeypatch, tmp_pat
     assert written["connector.video_embeddings_connector.weight"].tolist() == [5.0, 5.0]
 
 
-def test_connectors_with_other_tensors_than_stock_are_refused(monkeypatch, tmp_path):
-    monkeypatch.setattr(ltx_checkpoint, "_pinned", lambda: {"connectors": {"text_embedding_projection.weight": "stock hash"}, "distillation": {}})
+def test_a_missing_connector_group_is_taken_from_stock(tmp_path):
+    connectors = {f"{P}video_embeddings_connector.weight": torch.full((2,), 5.0, dtype=torch.bfloat16)}  # no text_embedding_projection, as many exports
+    target = _write(tmp_path, _checkpoint(tmp_path, connectors=connectors), own_connectors=True)
 
-    with pytest.raises(ValueError, match="other tensors"):
-        _write(tmp_path, _checkpoint(tmp_path, connectors=_connectors()), own_connectors=True)
+    written = load_file(str(target / "connector.safetensors"))
+    assert written["connector.video_embeddings_connector.weight"].tolist() == [5.0, 5.0]
+    assert written["connector.text_embedding_projection.weight"].tolist() == [9.0, 9.0]
+
+
+def test_connectors_stock_lacks_are_refused(tmp_path):
+    connectors = {**_connectors(), f"{P}video_embeddings_connector.extra.weight": torch.ones(2, dtype=torch.bfloat16)}
+
+    with pytest.raises(ValueError):
+        _write(tmp_path, _checkpoint(tmp_path, connectors=connectors), own_connectors=True)
 
 
 def test_the_checkpoints_own_config_is_used_in_stock_spelling(tmp_path):
@@ -173,6 +185,12 @@ def test_the_checkpoints_own_config_is_used_in_stock_spelling(tmp_path):
     assert json.loads((target / "embedded_config.json").read_text()) == {"transformer": {"num_layers": 48, "text_encoder_norm_type": "per_token_rms", "extra": "Kept"}, "vae": {"a": 2}}
 
 
+def test_stock_keys_the_checkpoints_section_lacks_are_kept():
+    merged = embedded_config({"transformer": {"num_layers": 40}}, _STOCK_CONFIG)
+
+    assert merged == {"transformer": {"num_layers": 40, "text_encoder_norm_type": "per_token_rms"}, "vae": {"a": 1}}
+
+
 def test_stocks_config_is_used_when_the_checkpoint_has_none(tmp_path):
     target = _write(tmp_path, _checkpoint(tmp_path))
 
@@ -180,11 +198,29 @@ def test_stocks_config_is_used_when_the_checkpoint_has_none(tmp_path):
     assert embedded_config(None, _STOCK_CONFIG) == _STOCK_CONFIG
 
 
+@pytest.mark.parametrize(("status", "own"), [("changed", True), ("unknown", True), ("stock", False), ("absent", False)])
+def test_changed_and_quantized_connectors_are_kept_and_stock_ones_linked(monkeypatch, tmp_path, status, own):
+    import contextlib
+    from types import SimpleNamespace
+
+    seen: dict = {}
+    monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: status)
+    monkeypatch.setattr(ltx_converted, "_base_dir", lambda repo, version: tmp_path)
+    monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(own=kwargs["own_connectors"]))
+    monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
+
+    ltx_converted.convert(
+        SimpleNamespace(version="2.3"), tmp_path, 4, config={"video_model_presets": {"ltx": {"mlx_base": {"q4": "org/base"}}}}, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None
+    )
+
+    assert seen == {"own": own}
+
+
 def test_macos_dispatches_to_the_mlx_writer(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(backends.sys, "platform", "darwin")
     monkeypatch.setattr(ltx_converted, "convert", lambda *args, **kwargs: calls.append((args, kwargs)))
 
-    backends.convert_ltx_checkpoint("checkpoint", tmp_path, 8, config={}, models_dir=tmp_path, lora=None, report=print)  # type: ignore[arg-type]
+    backends.convert_ltx_checkpoint("checkpoint", tmp_path, 8, config={}, version=None, models_dir=tmp_path, lora=None, report=print)  # type: ignore[arg-type]
 
     assert calls and calls[0][0][2] == 8

@@ -10,6 +10,8 @@ Supported model types:
   - flux2-klein-9b : FLUX.2 Klein 9B (manual key remapping)
   - krea2-turbo    : Krea 2 Turbo fine-tunes (manual key remapping)
   - ltx-2.3        : LTX-2.3 video fine-tunes, stored at one quantize level (see ltx_convert)
+  - ltx-2.5        : LTX-2.5 video fine-tunes, likewise
+  - h3             : MiniMax H3 video fine-tunes (see h3_convert)
 
 Only the transformer weights are converted from the checkpoint.
 Text encoder, VAE, tokenizer, and scheduler are downloaded from the
@@ -26,6 +28,7 @@ import sys
 from pathlib import Path
 
 from zvisiongenerator.utils.app_log import setup_logging
+from zvisiongenerator.utils.ltx_converted import LTX_MODEL_TYPES as LTX_VERSIONS
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 
@@ -43,11 +46,15 @@ KREA2_REPOS = {
     "krea2-turbo": "unsloth/Krea-2-Turbo",
 }
 
-# LTX-2.3 video checkpoints (converters/ltx_convert.py).
-LTX_MODEL_TYPE = "ltx-2.3"
+# LTX-2.3 and LTX-2.5 video checkpoints (converters/ltx_convert.py).
+LTX_MODEL_TYPES = tuple(LTX_VERSIONS)
+# MiniMax H3 video checkpoints (converters/h3_convert.py).
+H3_MODEL_TYPE = "h3"
+# The video types: each converts as one job into a folder of its own, with --force to replace one.
+VIDEO_MODEL_TYPES = (*LTX_MODEL_TYPES, H3_MODEL_TYPE)
 
 # Every --model-type the converter accepts (the CLI and the Web UI converter share this list).
-MODEL_TYPES = ("zimage", *FLUX2_KLEIN_REPOS, *KREA2_REPOS, LTX_MODEL_TYPE)
+MODEL_TYPES = ("zimage", *FLUX2_KLEIN_REPOS, *KREA2_REPOS, *VIDEO_MODEL_TYPES)
 
 
 # ── Transformer key conversion ──────────────────────────────────────────────
@@ -530,7 +537,9 @@ def _cmd_model(args):
     """Handle the 'model' subcommand — convert a checkpoint to diffusers format."""
     from safetensors.torch import load_file, save_file
 
-    input_path = Path(args.input).expanduser().resolve()
+    # Absolute, but with symlinks kept: a Hugging Face cache file is a link to a blob named by its hash, and a sharded
+    # checkpoint is found through the links beside it.
+    input_path = Path(args.input).expanduser().absolute()
 
     # Validate input
     if not input_path.is_file():
@@ -552,11 +561,14 @@ def _cmd_model(args):
     if parse_stored_quant_name(model_name) is not None:
         print(f"Error: Model name '{model_name}' is reserved for stored quants (<name>@q4 / <name>@q8 / <name>@mlx-te4). Choose another name.", file=sys.stderr)
         sys.exit(1)
-    if args.model_type == LTX_MODEL_TYPE:
+    if args.model_type in LTX_MODEL_TYPES:
         _cmd_ltx(args, input_path, output_dir, model_name)
         return
-    if args.distill or args.force:
-        print("Error: --distill and --force are for --model-type ltx-2.3 only.", file=sys.stderr)
+    if args.model_type == H3_MODEL_TYPE:
+        _cmd_h3(args, input_path, output_dir, model_name)
+        return
+    if args.distill or args.force or args.turbo:
+        print("Error: --distill, --turbo and --force are for the video model types (ltx-2.3, ltx-2.5, h3) only.", file=sys.stderr)
         sys.exit(1)
     output_dir = output_dir / model_name
 
@@ -632,15 +644,37 @@ def _cmd_model(args):
 
 
 def _cmd_ltx(args, input_path: Path, models_dir: Path, model_name: str) -> None:
-    """Convert an LTX-2.3 checkpoint: ``--quantize`` is required and is the only level stored (no extra copy)."""
+    """Convert an LTX-2.3 or LTX-2.5 checkpoint: ``--quantize`` is required and is the only level stored (no extra copy)."""
     from zvisiongenerator.converters.ltx_convert import convert_ltx
     from zvisiongenerator.utils.config import load_config
 
     if args.quantize is None:
-        print("Error: --model-type ltx-2.3 needs --quantize 4 or 8: that level is the only one stored.", file=sys.stderr)
+        print(f"Error: --model-type {args.model_type} needs --quantize 4 or 8: that level is the only one stored.", file=sys.stderr)
+        sys.exit(1)
+    if args.turbo:
+        print("Error: --turbo is for --model-type h3; LTX checkpoints take --distill.", file=sys.stderr)
         sys.exit(1)
     try:
-        target = convert_ltx(input_path, models_dir, model_name, args.quantize, distill=args.distill, force=args.force, config=load_config())
+        target = convert_ltx(input_path, models_dir, model_name, args.quantize, distill=args.distill, force=args.force, config=load_config(), model_type=args.model_type)
+    except (ValueError, FileExistsError, RuntimeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"\nConversion complete! Output directory: {target}")
+
+
+def _cmd_h3(args, input_path: Path, models_dir: Path, model_name: str) -> None:
+    """Convert a MiniMax H3 checkpoint: the level is fixed per platform, and ``--turbo`` says it is already step-distilled."""
+    from zvisiongenerator.converters.h3_convert import convert_h3
+    from zvisiongenerator.utils.config import load_config
+
+    if args.quantize is not None:
+        print("Error: --model-type h3 takes no --quantize: the level is fixed (4-bit on Windows and Linux, 8-bit on macOS).", file=sys.stderr)
+        sys.exit(1)
+    if args.distill:
+        print("Error: --distill is for LTX; an H3 checkpoint that is already step-distilled takes --turbo.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        target = convert_h3(input_path, models_dir, model_name, turbo=args.turbo, force=args.force, config=load_config())
     except (ValueError, FileExistsError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -738,10 +772,11 @@ def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:
         type=int,
         choices=[4, 8],
         default=None,
-        help="Also save a quantized copy as <name>@q4 or <name>@q8, used when that quantize level is selected. For ltx-2.3 it is required and is the only level stored",
+        help="Also save a quantized copy as <name>@q4 or <name>@q8, used when that quantize level is selected. For ltx-2.3 and ltx-2.5 it is required and is the only level stored; h3 takes none",
     )
-    model_parser.add_argument("--distill", action="store_true", help="ltx-2.3 only: merge Lightricks' distilled LoRA into a plain-dev checkpoint so it runs at 8 steps")
-    model_parser.add_argument("--force", action="store_true", help="ltx-2.3 only: replace an existing model of that name once the new one is complete")
+    model_parser.add_argument("--distill", action="store_true", help="ltx-2.3 and ltx-2.5 only: merge Lightricks' distilled LoRA into a plain-dev checkpoint so it runs at 8 steps")
+    model_parser.add_argument("--turbo", action="store_true", help="h3 only: the checkpoint is already step-distilled (turbo, lightning), so the turbo LoRA is not merged")
+    model_parser.add_argument("--force", action="store_true", help="video model types only: replace an existing model of that name once the new one is complete")
 
     # lora subcommand
     lora_parser = subparsers.add_parser("lora", help="Import a LoRA file")

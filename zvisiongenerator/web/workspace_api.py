@@ -27,6 +27,7 @@ from zvisiongenerator.utils.config import (
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
 from zvisiongenerator.utils.model_files import (
@@ -422,11 +423,15 @@ def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:
 
 
 def _converted_bits(entry: VideoInventoryEntry) -> int | None:
-    """Return the quantize level a converted LTX checkpoint was stored at, or ``None`` for other video models."""
+    """Return the quantize level a converted LTX or H3 checkpoint was stored at, or ``None`` for other video models."""
     if entry.source != "installed":
         return None
-    manifest = read_converted_ltx(Path(entry.resolved_path))
-    return None if manifest is None else manifest["bits"]
+    folder = Path(entry.resolved_path)
+    manifest = read_converted_ltx(folder)
+    if manifest is not None:
+        return manifest["bits"]
+    h3 = read_converted_h3(folder)
+    return None if h3 is None else CONVERTED_H3_STORAGES[h3["storage"]]
 
 
 def _status_resolver(

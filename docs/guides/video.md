@@ -284,7 +284,7 @@ On macOS:
 - **Memory** — estimated at about 15 GiB at `s` with 121 frames and `--low-memory`, which is within a Mac with 32 GB of memory. Longer clips and larger sizes need more (see [Memory Check](#memory-check)).
 - **Sampler** — as on Windows and Linux: text to video and image to video use LTX-2.5's own distilled sampler, and **Extend** on `ltx25-4` is deterministic. Image to video sets the input image's quality automatically.
 
-On every platform, `ltx25-4` has no 8-bit level, and LTX-2.5 fine-tunes cannot be converted.
+On every platform, `ltx25-4` has no 8-bit level. LTX-2.5 fine-tunes can be converted, at q4 or q8 (see [LTX-2.3 and LTX-2.5 video fine-tunes](model.md#ltx-23-and-ltx-25-video-fine-tunes)), and run with LTX-2.5's settings.
 
 ## MiniMax H3
 
@@ -366,7 +366,7 @@ For MiniMax H3 the check also covers the mode (image to video and Extend need mo
 - **Aliases** — `ltx-4`, `ltx-8`, `ltx25-4` and `h3`
 - **Supported repo IDs** — known LTX prefixes such as `dgrauet/ltx*`, `Lightricks/LTX-Video*` and `unsloth/LTX-2.5*`, and the MiniMax H3 prefixes `MiniMaxAI/MiniMax-H3*` and `unsloth/MiniMax-H3*`
 - **Local paths** — local paths containing `ltx` are treated as LTX candidates, including Windows-style path strings on any host; a folder with a MiniMax H3 repository's layout is recognised as H3 first
-- **Converted models** — LTX folders are also recognised by their contents, so a fine-tune converted with `ziv-model model --model-type ltx-2.3` (see [LTX-2.3 video fine-tunes](model.md#ltx-23-video-fine-tunes)) runs by its name, whatever it is called
+- **Converted models** — LTX and H3 folders are also recognised by their contents, so a fine-tune converted with `ziv-model model --model-type ltx-2.3`, `ltx-2.5` or `h3` (see [LTX-2.3 and LTX-2.5 video fine-tunes](model.md#ltx-23-and-ltx-25-video-fine-tunes) and [MiniMax H3 video fine-tunes](model.md#minimax-h3-video-fine-tunes)) runs by its name, whatever it is called, with its version's settings
 
 Arbitrary HuggingFace repositories are not accepted solely because their names contain `ltx`.
 

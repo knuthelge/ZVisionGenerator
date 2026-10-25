@@ -1,8 +1,8 @@
-"""LTX checkpoint conversion from the Models page: inspect a checkpoint, then convert it as a background job with progress.
+"""Video checkpoint conversion from the Models page (LTX-2.3, LTX-2.5, MiniMax H3): inspect a checkpoint, then convert it as a background job with progress.
 
-An LTX conversion takes minutes, so it runs the converter CLI in a subprocess on its own thread and reads its
+A conversion takes minutes, so it runs the converter CLI in a subprocess on its own thread and reads its
 ``Converting: <stage> (done/total)`` lines. The caller's exclusive slot (no generation job while it runs, since the
-conversion holds about 21 GB and the GPU) is held until the subprocess ends.
+conversion holds tens of GB and the GPU) is held until the subprocess ends.
 """
 
 from __future__ import annotations
@@ -15,7 +15,11 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.converters.ltx_convert import PROGRESS_PREFIX, distill_advice, inspect_ltx
+from zvisiongenerator.converters.convert_checkpoint import H3_MODEL_TYPE, LTX_MODEL_TYPES
+from zvisiongenerator.converters.convert_target import PROGRESS_PREFIX
+from zvisiongenerator.converters.h3_convert import inspect_h3_for_conversion
+from zvisiongenerator.converters.ltx_convert import distill_advice, inspect_ltx
+from zvisiongenerator.utils.quantized_weights import precision_label
 from zvisiongenerator.utils.subprocess_env import utf8_child_env
 
 __all__ = ["conversion_status", "inspect_checkpoint_for_form", "recommended_ltx_quantize", "start_conversion"]
@@ -26,26 +30,80 @@ _REFERENCE_ALIAS = "ltx-8"
 _SYSTEM_FITS_RATIO = 0.8
 # Unified memory of the smallest Mac that runs ltx-8; a Mac sold as "32 GB" reports exactly 32 GiB.
 _UNIFIED_Q8_BYTES = 32 * 1024**3
+_TYPE_LABELS = {"ltx-2.3": "LTX-2.3", "ltx-2.5": "LTX-2.5", H3_MODEL_TYPE: "MiniMax H3"}
+# Each label with its article, as the refusal reads it.
+_TYPE_ARTICLES = {"ltx-2.3": "an", "ltx-2.5": "an", H3_MODEL_TYPE: "a"}
 
 _lock = threading.Lock()
 _status: dict[str, Any] = {"state": "idle"}
 
 
-def inspect_checkpoint_for_form(path: Path, config: dict[str, Any]) -> dict[str, Any]:
-    """Return what the convert form shows for the LTX checkpoint at *path*: its layout, distillation and the level to preselect.
+def inspect_checkpoint_for_form(path: Path, config: dict[str, Any], model_type: str) -> dict[str, Any]:
+    """Return what the convert form shows for the checkpoint at *path* as *model_type*: a summary, advice and what to preselect.
+
+    Every answer has ``model_type``, ``summary``, ``advice`` and ``tone``. An LTX type adds ``distillation``,
+    ``recommend_distill`` and ``recommended_quantize``; ``h3`` adds ``turbo_hints``. Nothing is downloaded.
 
     Raises:
-        ValueError: If it is not an LTX-2.3 checkpoint the converter reads.
+        ValueError: If *model_type* is not a video type, or the file is not a checkpoint of it (a checkpoint of another
+            video type names the type to pick).
     """
-    inspection = inspect_ltx(path)
+    try:
+        if model_type in LTX_MODEL_TYPES:
+            return _ltx_answer(path, config, model_type)
+        if model_type == H3_MODEL_TYPE:
+            return _h3_answer(path)
+    except ValueError as exc:
+        raise ValueError(_other_type_message(path, model_type) or str(exc)) from exc
+    raise ValueError(f"Only the video model types are inspected ({', '.join(_TYPE_LABELS)}).")
+
+
+def _ltx_answer(path: Path, config: dict[str, Any], model_type: str) -> dict[str, Any]:
+    """Return the form's answer for an LTX checkpoint."""
+    inspection = inspect_ltx(path, model_type)
+    checkpoint = inspection.checkpoint
+    layout = "full checkpoint" if inspection.layout == "full" else "transformer only"
     return {
-        "layout": inspection.layout,
-        "fp8_weights": inspection.checkpoint.fp8_weights,
+        "model_type": model_type,
+        "summary": f"LTX-{checkpoint.version}, {layout}, {precision_label(checkpoint.precision)}",
+        "advice": distill_advice(inspection.distillation, "Distill on", checkpoint.version),
+        "tone": "success" if inspection.distillation == "distilled" else "warning",
         "distillation": inspection.distillation,
-        "advice": distill_advice(inspection.distillation, "Distill on"),
         "recommend_distill": inspection.distillation == "dev",
-        "recommended_quantize": recommended_ltx_quantize(config),
+        # LTX-2.5's q8 headroom isn't measured yet (stock has q4 only), so it starts at q4.
+        "recommended_quantize": recommended_ltx_quantize(config) if checkpoint.version == "2.3" else 4,
     }
+
+
+def _h3_answer(path: Path) -> dict[str, Any]:
+    """Return the form's answer for an H3 checkpoint."""
+    inspection = inspect_h3_for_conversion(path, '"Already step-distilled" ticked')
+    return {
+        "model_type": H3_MODEL_TYPE,
+        "summary": f"MiniMax H3, {inspection.summary}",
+        "advice": inspection.advice,
+        "tone": "warning" if inspection.checkpoint.turbo_hints else "info",
+        "turbo_hints": list(inspection.checkpoint.turbo_hints),
+    }
+
+
+def _other_type_message(path: Path, model_type: str) -> str | None:
+    """Return "this is a <type> checkpoint; pick <type>" when *path* reads as another video type than *model_type*, else ``None``."""
+    from zvisiongenerator.converters.h3_checkpoint import inspect_h3
+    from zvisiongenerator.converters.ltx_checkpoint import inspect_checkpoint
+
+    found: str | None = None
+    try:
+        found = f"ltx-{inspect_checkpoint(path).version}"
+    except ValueError:
+        try:
+            inspect_h3(path)
+            found = H3_MODEL_TYPE
+        except ValueError:
+            return None
+    if found == model_type:
+        return None
+    return f"This is {_TYPE_ARTICLES[found]} {_TYPE_LABELS[found]} checkpoint; pick {_TYPE_LABELS[found]} as the model type."
 
 
 def recommended_ltx_quantize(config: dict[str, Any]) -> int:
@@ -75,18 +133,18 @@ def start_conversion(args: list[str], name: str, slot: AbstractContextManager[No
     """Run the converter CLI with *args* in the background, holding the entered *slot* until it ends.
 
     Args:
-        args: The converter's arguments (``model --input ... --model-type ltx-2.3 ...``).
+        args: The converter's arguments (``model --input ... --model-type h3 ...``).
         name: The model's name, for the status.
         slot: The exclusive slot, already entered; it is exited when the conversion ends.
     """
     with _lock:
         _status.clear()
         _status.update({"state": "running", "name": name, "stage": "Starting", "done": 0, "total": 0, "message": None})
-    threading.Thread(target=_run, args=(args, slot), name="ziv-ltx-convert", daemon=True).start()
+    threading.Thread(target=_run, args=(args, slot), name="ziv-video-convert", daemon=True).start()
 
 
 def conversion_status() -> dict[str, Any]:
-    """Return the current or last LTX conversion's state (``idle``, ``running``, ``done`` or ``failed``) and progress."""
+    """Return the current or last video conversion's state (``idle``, ``running``, ``done`` or ``failed``) and progress."""
     with _lock:
         return dict(_status)
 

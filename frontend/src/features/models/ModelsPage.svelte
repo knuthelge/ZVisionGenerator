@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
   import { errorText } from '$lib/api/client';
-  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectLtxCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
+  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
   import { downloadLine, partLabel } from '$lib/state/downloadProgress';
   import { downloadStore } from '$lib/state/downloads.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { ConversionStatus, DownloadItem, EnhancerModelEntry, LtxCheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
+  import type { ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
   import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
@@ -25,21 +25,24 @@
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
-  const LTX_TYPE = 'ltx-2.3';
+  const LTX_TYPES = ['ltx-2.3', 'ltx-2.5'];
+  const H3_TYPE = 'h3';
   const CONVERSION_POLL_MS = 2000;
   const INSPECT_DELAY_MS = 400;
   let convertType = $state('');
   let ltxQuantize = $state('4');
   let ltxDistill = $state(false);
+  let h3Turbo = $state(false);
   let convertQuantize = $state('');
-  let ltxInspection = $state<LtxCheckpointInspection | null>(null);
-  let ltxInspectError = $state<string | null>(null);
+  let inspection = $state<CheckpointInspection | null>(null);
+  let inspectError = $state<string | null>(null);
   let conversion = $state<ConversionStatus | null>(null);
   let conversionTimer: ReturnType<typeof setTimeout> | null = null;
   let destroyed = false;
   let inspectTimer: ReturnType<typeof setTimeout> | null = null;
   let inspectRequest = 0;
-  const isLtx = $derived(convertType === LTX_TYPE);
+  const isLtx = $derived(LTX_TYPES.includes(convertType));
+  const isH3 = $derived(convertType === H3_TYPE);
   const converting = $derived(conversion?.state === 'running');
 
   const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
@@ -169,24 +172,26 @@
     }
   }
 
-  /** Inspect the chosen LTX checkpoint shortly after the path or type last changed, preselecting the level and Distill. */
+  /** Inspect the chosen video checkpoint shortly after the path or type last changed, preselecting LTX's level and Distill. H3's "already step-distilled" is never preselected: only the user can say. */
   function scheduleInspect(): void {
     if (inspectTimer) clearTimeout(inspectTimer);
     // A new path makes any answer still on its way for the old one stale.
     const request = ++inspectRequest;
-    ltxInspection = null;
-    ltxInspectError = null;
+    inspection = null;
+    inspectError = null;
+    h3Turbo = false;
     const path = checkpointPath.trim();
-    if (!isLtx || !path) return;
+    const type = convertType;
+    if (!(isLtx || isH3) || !path) return;
     inspectTimer = setTimeout(async () => {
       try {
-        const found = await inspectLtxCheckpoint(path);
+        const found = await inspectCheckpoint(path, type);
         if (request !== inspectRequest) return;
-        ltxInspection = found;
-        ltxQuantize = String(found.recommended_quantize);
-        ltxDistill = found.recommend_distill;
+        inspection = found;
+        if (found.recommended_quantize) ltxQuantize = String(found.recommended_quantize);
+        if (found.recommend_distill !== undefined) ltxDistill = found.recommend_distill;
       } catch (err) {
-        if (request === inspectRequest) ltxInspectError = errorText(err, 'Could not read this checkpoint.');
+        if (request === inspectRequest) inspectError = errorText(err, 'Could not read this checkpoint.');
       }
     }, INSPECT_DELAY_MS);
   }
@@ -222,7 +227,8 @@
       base_model: (fd.get('base_model') as string) ?? '',
       copy: fd.get('copy') === 'on',
       quantize: (fd.get('quantize') as string) ?? '',
-      distill: fd.get('distill') === 'on'
+      distill: fd.get('distill') === 'on',
+      turbo: fd.get('turbo') === 'on'
     };
     formsBusy = true;
     notice = null;
@@ -775,17 +781,30 @@
                 { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
                 { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
                 { value: 'krea2-turbo', label: 'krea2-turbo' },
-                { value: LTX_TYPE, label: 'LTX-2.3 (video)' }
+                { value: 'ltx-2.3', label: 'LTX-2.3 (video)' },
+                { value: 'ltx-2.5', label: 'LTX-2.5 (video)' },
+                { value: H3_TYPE, label: 'MiniMax H3 (video)' }
               ]}
             />
           </FormField>
 
-          {#if isLtx}
-            {#if ltxInspection}
-              <Alert tone={ltxInspection.distillation === 'distilled' ? 'success' : 'warning'}>{ltxInspection.advice}</Alert>
-            {:else if ltxInspectError}
-              <Alert tone="error">{ltxInspectError}</Alert>
+          {#if isLtx || isH3}
+            {#if inspection}
+              <p class="text-ui text-text-secondary">{inspection.summary}</p>
+              <Alert tone={inspection.tone}>{inspection.advice}</Alert>
+            {:else if inspectError}
+              <Alert tone="error">{inspectError}</Alert>
             {/if}
+          {/if}
+
+          {#if isH3}
+            <FormField label="Turbo" helper="Stored at 4-bit on Windows and Linux, 8-bit on macOS. The turbo LoRA (H3's 4- and 8-step distillation) is merged in unless the checkpoint already has it.">
+              <label class="flex min-h-control cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-turbo">
+                <input type="checkbox" name="turbo" id="convert-turbo" class="ui-checkbox" bind:checked={h3Turbo} />
+                Already step-distilled
+              </label>
+            </FormField>
+          {:else if isLtx}
 
             <FormField label="Quantize level" for="convert-ltx-quantize" required helper="The only level stored. q8 needs about 10 GB more memory than q4.">
               <Select
@@ -800,7 +819,7 @@
               />
             </FormField>
 
-            <FormField label="Distillation" helper="Merges Lightricks' distilled LoRA (7.6 GB, downloaded once). Plain-dev checkpoints need it to run at 8 steps.">
+            <FormField label="Distillation" helper="Merges Lightricks' distilled LoRA (8 to 9 GB, downloaded once). Plain-dev checkpoints need it to run at 8 steps.">
               <label class="flex min-h-control cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-distill">
                 <input type="checkbox" name="distill" id="convert-distill" class="ui-checkbox" bind:checked={ltxDistill} />
                 Distill
