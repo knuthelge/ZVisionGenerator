@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **Web UI: a running job's view goes live again right away when you return to the browser from another app.** On a phone it used to wait a long time to reconnect. The controls of a paused or review job come back as soon as it reconnects.
+- **Web UI: pinching to zoom an image no longer opens the actions menu.** On a phone or tablet, a pinch in the image viewer that lasted half a second opened the menu a long press opens; a second finger now always cancels a long press, in the viewer, on Gallery tiles and on the Generate button
 - **macOS: the first run of an image model at a quantize level no longer needs extra memory.** Building the `q8` or `q4` model on its first run used to briefly need several GB more than later runs, which could freeze other apps on a 16 GB Mac. It now peaks at about the same memory as later runs.
 - **macOS: MiniMax H3 image to video, first and last frame and Extend work.** They run in stages, with one component in memory at a time, and peak at about 14 GiB (15.5 GiB with a LoRA) instead of failing, or needing 28.9 GiB when forced; a 3 s image-to-video clip at 768×448 takes about 10 minutes on a Mac with 32 GB. Their memory estimate now follows these measurements
 - **`ziv-video --extend` without `-m` keeps the clip's own model when its files are downloaded.** MiniMax H3 on macOS used to fall back to the default model
