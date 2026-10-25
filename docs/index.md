@@ -6,7 +6,7 @@
 
 Local AI image and video generation, hassle-free and fun. No tangled node graphs and no cloud: write a prompt, press Generate, and the picture or clip is made on your own computer.
 
-![The Workspace with a prompt, the settings and a finished image](assets/screenshots/placeholder.svg "home-workspace")
+![The Workspace with an enhanced prompt, the settings and a finished image](assets/screenshots/workspace.webp)
 
 ## What it does
 

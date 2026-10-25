@@ -2,7 +2,7 @@
 
 The **Job log** lists the jobs that have finished, newest first. Open it with the clock button in the top bar, or press ++g++ then ++j++.
 
-![The Job log drawer with a failed job expanded](../assets/screenshots/placeholder.svg "job-log")
+![The Job log drawer with a cancelled and a completed job](../assets/screenshots/job-log.webp){ width="420" }
 
 ## Each row
 

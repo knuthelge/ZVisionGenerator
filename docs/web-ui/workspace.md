@@ -2,7 +2,7 @@
 
 The Workspace is where you make things. Pick a workflow in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**.
 
-![The Workspace with its areas labelled: top bar, Compose, Settings, preview, job card and Gallery strip](../assets/screenshots/placeholder.svg "workspace-areas")
+![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
 ## Model and LoRAs
 
@@ -26,7 +26,7 @@ The **Add LoRA** menu lists the LoRAs made for the selected model first, with th
 
 A **preset** saves your whole setup under a name, so you can bring it back in one step. The **Preset** control is the first item of the Workspace toolbar, before the model.
 
-![The Preset menu open in the Workspace toolbar](../assets/screenshots/placeholder.svg "preset-menu")
+![The Preset menu open in the Workspace toolbar](../assets/screenshots/preset-menu.webp){ width="540" }
 
 - **What it keeps:** the model, quant, LoRAs and their weights, size, number of runs, steps, guidance, image strength, scheduler, post-processing and upscale settings including review. For video: the length, audio, low memory and upscale.
 - **What it leaves alone:** the prompt, seed, reference image and workflow.
@@ -124,7 +124,7 @@ If the job can't start with the current settings, for example Image to Image wit
 
 ### While a job runs
 
-![The job card beside the live preview, with Pause, Cancel, Skip and Repeat](../assets/screenshots/placeholder.svg "job-card")
+![The job card at step 3 of 4, with Pause, Cancel and Repeat](../assets/screenshots/job-card.webp){ width="420" }
 
 The **live preview** shows the current image taking shape at 25, 50 and 75% of the steps, so you can skip a bad one early. It has the image's own shape, a custom size included. It is a preview only and never saved.
 

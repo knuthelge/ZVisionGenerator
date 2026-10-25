@@ -44,17 +44,44 @@ The Zensical defaults include:
 
 ## Screenshots
 
-Screenshots go stale whenever the UI changes, so pages use a placeholder until the UI for a release is settled:
+Screenshots are taken by a script, `scripts/docs_screenshots.py`, from a Web UI running in a throwaway environment, so they never show your own models, files, paths or account, and can be retaken after the UI changes.
 
-```markdown
-![The Workspace with a finished image in the Gallery strip](../assets/screenshots/placeholder.svg "workspace-finished")
+### The environment
+
+Run the Web UI with its own data folder and Hugging Face cache, outside your home folder, and on a port of its own:
+
+```bash
+export ZIV_DATA_DIR=/var/tmp/ziv-docs/data HF_HOME=/var/tmp/ziv-docs/hf HF_HUB_CACHE=/var/tmp/ziv-docs/hf/hub
+ziv ui --port 8790 --no-browser
 ```
 
-- The **alt text** says what the shot must show; it is the brief for taking it.
-- The **title** is the shot's name. The real image will be `docs/assets/screenshots/<name>.png`.
-- `grep -r placeholder.svg docs/` lists every shot still to take.
+- **Models:** download FLUX.2 Klein 4B and the Fast enhancer from its Models page, and set `ui.default_models.image: klein4b` in its `config.yaml`.
+- **Content:** generate demo images with the app into its output folder, and put a demo prompt file at `prompts/demo.yaml` in its data folder. Make one striking image with the enhancer and keep it the newest output; it is the hero the Workspace, viewer and Home shots show. Its file name is `_HERO` in the script.
+- **Browser:** the script opens a fresh browser profile for every shot, so no settings or recent paths carry over.
+- **Check before you capture:** open the Web UI and look at the Config and Models pages for anything that isn't demo content.
 
-When shots are taken, crop to the part being explained (a dialog, the model picker, a job card) rather than the whole window, so a change elsewhere doesn't make it wrong.
+The first-run dialog needs a second Web UI whose data folder and cache are empty.
+
+### Taking them
+
+```bash
+make docs-screenshots URL=http://localhost:8790 EMPTY_URL=http://localhost:8791
+make docs-screenshots URL=http://localhost:8790 ONLY=gallery-page,viewer-details
+```
+
+Each shot writes `docs/assets/screenshots/<name>.webp` at 1.5× pixel density. The job shots run real jobs, and delete their outputs afterwards so the hero stays the newest image. Look at every shot before you commit it.
+
+Shots crop to the part being explained (the job card, the Job log, the Preset menu) where they can, so a change elsewhere doesn't make them wrong.
+
+### Placeholders
+
+A picture that can't be taken yet uses the placeholder, with a slug in the title:
+
+```markdown
+![Extend Video with the source clip shown under Source video](../assets/screenshots/placeholder.svg "extend-video")
+```
+
+The alt text says what the shot must show. `grep -r placeholder.svg docs/` lists every shot still missing.
 
 ## Changelog
 

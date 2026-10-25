@@ -2,7 +2,7 @@
 
 The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. Here you download models ahead of time, see how much disk they use, convert checkpoints, import LoRAs and free space.
 
-![The Models page with the image models table](../assets/screenshots/placeholder.svg "models-page")
+![The Models page with the folders and the image models table](../assets/screenshots/models-page.webp)
 
 ## The tables
 

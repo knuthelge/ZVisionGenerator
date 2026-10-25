@@ -22,7 +22,7 @@ lock: ## Regenerate uv.lock
 
 # ——— Quality ——————————————————————————————————————————————
 
-.PHONY: lint lint-fix format format-check test docs-check docs-serve check
+.PHONY: lint lint-fix format format-check test docs-check docs-serve docs-screenshots check
 
 lint: ## Run ruff linter
 	uv run --frozen ruff check zvisiongenerator/ tests/ bench/
@@ -44,6 +44,9 @@ docs-check: ## Build documentation strictly with Zensical
 
 docs-serve: ## Serve documentation with live reload on localhost:8000
 	uv run --frozen zensical serve
+
+docs-screenshots: ## Retake the docs screenshots from a running throwaway Web UI (URL=..., optional EMPTY_URL=..., ONLY=...)
+	uv run --frozen --with playwright python scripts/docs_screenshots.py --url $(URL) $(if $(EMPTY_URL),--empty-url $(EMPTY_URL)) $(if $(ONLY),--only $(ONLY))
 
 check: lint format-check test frontend-test frontend-palette-check frontend-hover-check frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
 

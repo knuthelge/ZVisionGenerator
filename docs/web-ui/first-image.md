@@ -17,7 +17,7 @@ The first time, a welcome dialog lists the image models with the size of each do
 - **FLUX.2 Klein 9B** when it has 32 GB of memory or more (unified memory on a Mac, GPU memory on a graphics card).
 - **FLUX.2 Klein 4B** otherwise.
 
-![The welcome dialog with FLUX.2 Klein 9B preselected](../assets/screenshots/placeholder.svg "first-run-dialog")
+![The welcome dialog with FLUX.2 Klein 4B recommended for this machine](../assets/screenshots/first-run-dialog.webp)
 
 Press **Download**. The model becomes your default image model, and its progress shows in the Workspace model picker. You can carry on while it downloads.
 
@@ -38,7 +38,7 @@ Plain descriptions work best: the subject, where it is, the light, and how it's 
 
 Press **Generate**, or ++ctrl+enter++ (++cmd+enter++ on a Mac).
 
-![A running job: the live preview and the job card with its steps](../assets/screenshots/placeholder.svg "job-running")
+![A running job: the live preview at 75% beside the job card with its steps](../assets/screenshots/job-running.webp)
 
 The job card shows each phase: loading the model, the steps, and saving. While it works, the preview shows the image taking shape at 25, 50 and 75% of the steps. The first job is the slowest, because the model loads from disk; later jobs with the same model start faster.
 

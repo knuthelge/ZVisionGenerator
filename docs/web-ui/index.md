@@ -21,7 +21,7 @@ It opens your browser at `http://127.0.0.1:8080/`. If port 8080 is busy it takes
 
 ## The screen
 
-![The Workspace: top bar, Compose and Settings on the left, the preview and Gallery strip on the right](../assets/screenshots/placeholder.svg "web-ui-tour")
+![The Workspace: the top bar, Compose and Settings on the left, the preview with the Gallery strip below](../assets/screenshots/workspace.webp)
 
 The **top bar** has the pages and, on the Workspace, the five workflows:
 

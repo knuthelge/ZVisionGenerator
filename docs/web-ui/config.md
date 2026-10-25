@@ -2,7 +2,7 @@
 
 The **Config** page (++g++ ++c++) holds the defaults the whole app uses. Saved settings apply from the next generation.
 
-![The Config page with Settings and Folders and access](../assets/screenshots/placeholder.svg "config-page")
+![The Config page with Settings and Folders and access](../assets/screenshots/config-page.webp)
 
 ## Settings
 

@@ -2,7 +2,7 @@
 
 The **Prompts** page (++g++ ++p++) builds [prompt files](../concepts/prompts.md) without typing YAML. It reads and writes the same files the CLI uses, and keeps their comments, quoting and `|` blocks.
 
-![The Prompts page: snippets on the left, sets of prompts in the middle, the preview on the right](../assets/screenshots/placeholder.svg "prompts-page")
+![The Prompts page: snippets on the left, sets of prompts in the middle, the preview on the right](../assets/screenshots/prompts-page.webp)
 
 ## Open or create a file
 

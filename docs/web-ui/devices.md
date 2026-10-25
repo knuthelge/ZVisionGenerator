@@ -37,7 +37,7 @@ stops every running Web UI, including ones running in another terminal, and any 
 
 ## On a phone
 
-![The Workspace on a phone: the preview fills the screen, setting chips and the prompt beneath](../assets/screenshots/placeholder.svg "phone-workspace")
+![The Workspace on a phone: the preview, the setting chips and the prompt beneath](../assets/screenshots/phone-workspace.webp){ width="300" }
 
 On the phone, Share → *Add to Home Screen* installs the Web UI as an app that opens without the browser's bars.
 

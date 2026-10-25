@@ -2,7 +2,7 @@
 
 The **Gallery** (++g++ ++g++) shows every image and video in your output folder, including ones the CLI made there. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
 
-![The Gallery page with a grid of images and videos](../assets/screenshots/placeholder.svg "gallery-page")
+![The Gallery page with a grid of images](../assets/screenshots/gallery-page.webp)
 
 ## Browse
 
@@ -26,7 +26,7 @@ Clicking an image grows it out of its tile into the viewer. On a computer or iPa
 
 Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for the first and last. Right-click the image for its menu.
 
-![The viewer with the Details panel open](../assets/screenshots/placeholder.svg "viewer-details")
+![The viewer with the Details panel open, showing how the prompt was enhanced](../assets/screenshots/viewer-details.webp)
 
 | Action | Does | Key |
 |---|---|---|

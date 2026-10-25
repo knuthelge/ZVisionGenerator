@@ -73,7 +73,7 @@ Material for MkDocs has been in maintenance mode since November 2025: 9.7 was it
 2. **Audit.** Done; see [Audit](#audit-2026-10-22). Listed every user-facing feature from the code and `CHANGELOG.md`, checked each against the docs, and turned that into a gap list.
 3. **Document the app as it is.** Write about what has shipped. Work that hasn't started, such as other proposals, doesn't hold the docs up; when it ships, it updates the docs like any other change.
 4. **Restructure and fill the gaps.** Done: the four sections are written, with every gap in the audit covered. The content was rewritten as it moved, since most of it needed it.
-5. **Screenshots, last.** Pages are written with placeholders (section 4), so the content isn't held up by images. Screenshots are taken once the UI for v1 is settled.
+5. **Screenshots.** Done for 14 shots with `scripts/docs_screenshots.py` (`make docs-screenshots`) against a throwaway Web UI with its own data folder and Hugging Face cache, verified before capture. The three video shots were dropped for v1; they can come back once the screenshot environment has a video model.
 6. **Drift guards.** Done: `tests/test_docs_reference.py` fails when a CLI option, a config section or a user-facing config key is missing from the reference.
 7. **Fresh-eyes pass.** Follow both tutorials from a clean install on macOS, Windows and Linux.
 
