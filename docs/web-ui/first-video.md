@@ -61,5 +61,4 @@ Open a clip in the viewer and press **Extend** (++e++). The Workspace switches t
 
 ## Next
 
-- [Video](../concepts/video.md): sizes, upscaling, sound and extending in detail.
-- [Workspace](workspace.md): every part of the screen.
+[Video in detail](../concepts/video.md){ .md-button .md-button--primary } [Every part of the Workspace](workspace.md){ .md-button }

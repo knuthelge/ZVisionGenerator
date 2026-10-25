@@ -41,6 +41,7 @@ The Zensical defaults include:
 - keys: `++ctrl+enter++`;
 - code blocks with titles: ```` ```yaml title="prompts.yaml" ````;
 - diagrams: ```` ```mermaid ````.
+- buttons: `[Your first image](first-image.md){ .md-button .md-button--primary }` for the one main next step, `{ .md-button }` for the others. Use them for "Next" sections, not inside running text.
 
 ## Screenshots
 

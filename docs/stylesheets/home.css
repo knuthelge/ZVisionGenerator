@@ -1,0 +1,185 @@
+/* Home page hero: the product screenshot on a blurred backdrop of a generated image. */
+
+.zh {
+  position: relative;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-top: -2.6rem;
+  margin-bottom: 2.5rem;
+  padding: 4.5rem 1.5rem 0;
+  overflow: hidden;
+  text-align: center;
+  color: #fff;
+  background: #0b0d12;
+}
+
+.zh::before {
+  content: "";
+  position: absolute;
+  inset: -2rem;
+  background: url("../assets/home/backdrop.webp") center / cover;
+  filter: blur(18px) saturate(1.3);
+  opacity: 0.55;
+}
+
+.zh > * {
+  position: relative;
+}
+
+.zh h1 {
+  max-width: 42rem;
+  margin: 0 auto 0.6rem;
+  font-size: 3.1rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  color: inherit;
+}
+
+.zh p {
+  max-width: 36rem;
+  margin: 0 auto 1.4rem;
+  font-size: 1.05rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.zh__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.7rem;
+}
+
+.md-typeset .zh__btn {
+  display: inline-block;
+  padding: 0.65rem 1.3rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
+  text-decoration: none;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 0.15s ease;
+}
+
+.md-typeset .zh__btn--primary {
+  color: #062a26;
+  background: #2dd4bf;
+}
+
+@media (hover: hover) {
+  .md-typeset .zh__btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .md-typeset .zh__btn--primary:hover {
+    background: #5eead4;
+  }
+}
+
+.zh__shot {
+  display: block;
+  width: min(62rem, 92vw);
+  margin: 3rem auto;
+  border-radius: 0.6rem;
+  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+@keyframes zh-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+.zh__rise {
+  animation: zh-rise 0.8s ease both;
+}
+
+.zh__rise--late {
+  animation-delay: 0.2s;
+}
+
+@media (max-width: 760px) {
+  .zh h1 {
+    font-size: 2.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zh__rise {
+    animation: none;
+  }
+}
+
+/* Section banners: the hero's treatment at the top of each section's start page. */
+
+.zb.zb {
+  position: relative;
+  margin: 0 0 2rem;
+  padding: 3.2rem 2rem 2.6rem;
+  overflow: hidden;
+  border-radius: 0.8rem;
+  text-align: center;
+  color: #fff;
+  background: #0b0d12;
+}
+
+.zb.zb::before {
+  content: "";
+  position: absolute;
+  inset: -1.5rem;
+  background: var(--zb-image) center / cover;
+  filter: blur(8px) saturate(1.2);
+  opacity: 0.6;
+}
+
+.zb.zb > * {
+  position: relative;
+}
+
+.zb.zb h1 {
+  margin: 0 0 0.6rem;
+  font-size: 2.4rem;
+  color: #fff;
+}
+
+.zb.zb p {
+  max-width: 34rem;
+  margin: 0 auto;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.zb.zb a {
+  color: #5eead4;
+}
+
+.zb.zb .headerlink {
+  display: none;
+}
+
+/* Moved above the columns by banner.js: full width, square edges, the hero's height. */
+
+.zb.zb--wide {
+  margin: 0;
+  padding: 4rem 1.5rem 3.4rem;
+  border-radius: 0;
+}
+
+.zb.zb--wide::before {
+  inset: -2rem;
+  filter: blur(14px) saturate(1.25);
+  opacity: 0.55;
+}
+
+.zb.zb--wide h1 {
+  font-size: 2.9rem;
+}
+
+.zb.zb--wide p {
+  max-width: 38rem;
+  font-size: 1.05rem;
+}
+
+.zb--web-ui { --zb-image: url("../assets/sections/web-ui.webp"); }
+.zb--cli { --zb-image: url("../assets/sections/cli.webp"); }
+.zb--concepts { --zb-image: url("../assets/sections/concepts.webp"); }
+.zb--developer { --zb-image: url("../assets/sections/developer.webp"); }

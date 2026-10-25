@@ -1,6 +1,10 @@
+<div class="zb zb--concepts" markdown>
+
 # Concepts
 
 How the app works, whichever way you use it. The [Web UI](../web-ui/index.md) and [CLI](../cli/index.md) sections show where to click and what to type; these pages explain what happens and why.
+
+</div>
 
 ## Making things
 

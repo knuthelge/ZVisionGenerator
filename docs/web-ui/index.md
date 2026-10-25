@@ -1,6 +1,10 @@
+<div class="zb zb--web-ui" markdown>
+
 # Web UI
 
 The Web UI is a browser app that runs on your computer. You write prompts, generate, look through what you made and manage your models, all in one place.
+
+</div>
 
 ## Start it
 
@@ -48,5 +52,4 @@ Press <kbd>?</kbd> anywhere outside a text field for every [keyboard shortcut](s
 
 ## Next
 
-- [Your first image](first-image.md)
-- [Your first video](first-video.md)
+[Your first image](first-image.md){ .md-button .md-button--primary } [Your first video](first-video.md){ .md-button }

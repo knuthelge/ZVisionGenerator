@@ -1,6 +1,10 @@
+<div class="zb zb--cli" markdown>
+
 # CLI
 
 Every feature of the app is also a command. The CLI suits batch runs, scripts and working over SSH.
+
+</div>
 
 | Command | Does |
 |---|---|
@@ -57,6 +61,4 @@ The terminal button in the Web UI's *Settings* header copies a command with the 
 
 ## Next
 
-- [Generate images](images.md)
-- [Generate videos](video.md)
-- [Command reference](reference.md)
+[Generate images](images.md){ .md-button .md-button--primary } [Generate videos](video.md){ .md-button } [Command reference](reference.md){ .md-button }

@@ -61,5 +61,4 @@ Images are saved to the output folder, `~/.ziv/outputs` unless you [changed it](
 
 ## Next
 
-- [Your first video](first-video.md)
-- [Workspace](workspace.md): every part of the screen.
+[Your first video](first-video.md){ .md-button .md-button--primary } [Every part of the Workspace](workspace.md){ .md-button }

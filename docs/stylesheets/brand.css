@@ -1,27 +1,140 @@
-/* Brand colours on Zensical's modern theme: teal marks where you are, pink stays for hover. */
+/* The site's look, taken from the Home hero: near-black, off-white text, teal for where you are and the main action. */
 
-.md-header {
-  border-top: 0.2rem solid var(--md-primary-fg-color);
+/* Dark, the default scheme, in the hero's colours. */
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0b0d12;
+  --md-default-bg-color--light: rgba(11, 13, 18, 0.7);
+  --md-default-bg-color--lighter: rgba(11, 13, 18, 0.3);
+  --md-default-bg-color--lightest: rgba(11, 13, 18, 0.12);
+  --md-default-fg-color: rgba(242, 242, 240, 0.9);
+  --md-default-fg-color--light: rgba(242, 242, 240, 0.66);
+  --md-default-fg-color--lighter: rgba(242, 242, 240, 0.36);
+  --md-default-fg-color--lightest: rgba(242, 242, 240, 0.1);
+  --md-code-bg-color: #151922;
+  --md-code-fg-color: rgba(242, 242, 240, 0.86);
+  --md-typeset-a-color: #5eead4;
+  --md-typeset-table-color: rgba(242, 242, 240, 0.1);
+  --md-admonition-bg-color: #11151c;
+  --md-footer-bg-color: #07090c;
+  --md-footer-bg-color--dark: #050608;
+}
+
+/* The header and tabs are dark in both schemes, so Home opens straight into the hero. */
+
+.md-header,
+.md-tabs {
+  color: #f2f2f0;
+  background-color: #0b0d12;
+  box-shadow: none;
+}
+
+.md-tabs {
+  border-bottom: 1px solid rgba(242, 242, 240, 0.08);
 }
 
 .md-header__title {
   font-weight: 700;
 }
 
+.md-header .md-search__form {
+  background-color: rgba(242, 242, 240, 0.08);
+}
+
+.md-header .md-search__input,
+.md-header .md-search__input::placeholder,
+.md-header .md-source,
+.md-header .md-icon,
+.md-tabs__link {
+  color: rgba(242, 242, 240, 0.72);
+}
+
 .md-tabs__item--active {
-  border-bottom: 0.1rem solid var(--md-primary-fg-color);
+  border-bottom: 0.1rem solid #2dd4bf;
 }
 
 .md-tabs__item--active .md-tabs__link {
-  color: var(--md-primary-fg-color);
+  color: #f2f2f0;
+  opacity: 1;
 }
+
+@media (hover: hover) {
+  .md-tabs__link:hover {
+    color: #f2f2f0;
+  }
+}
+
+/* Where you are in the side navigation. */
 
 .md-nav--primary .md-nav__item .md-nav__link--active {
   color: var(--md-primary-fg-color);
   background: color-mix(in srgb, var(--md-primary-fg-color) 12%, transparent);
 }
 
-[data-md-color-scheme="slate"] .md-tabs__item--active .md-tabs__link,
 [data-md-color-scheme="slate"] .md-nav--primary .md-nav__item .md-nav__link--active {
-  color: var(--md-primary-fg-color--light);
+  color: #5eead4;
+  background: rgba(45, 212, 191, 0.1);
+}
+
+/* Headings in the hero's weight. */
+
+.md-typeset h1 {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Screenshots framed like the one on Home. */
+
+.md-typeset img[src*="assets/screenshots/"]:not([src$="placeholder.svg"]) {
+  border-radius: 0.6rem;
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(242, 242, 240, 0.12);
+}
+
+/* Buttons as on Home: solid teal for the main action, a quiet fill for the rest. */
+
+.md-typeset .md-button {
+  padding: 0.6rem 1.2rem;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--md-default-fg-color);
+  background-color: var(--md-default-fg-color--lightest);
+  transition: background-color 0.15s ease;
+}
+
+.md-typeset .md-button--primary {
+  color: #062a26;
+  background-color: #2dd4bf;
+}
+
+@media (hover: hover) {
+  .md-typeset .md-button:hover {
+    color: var(--md-default-fg-color);
+    background-color: var(--md-default-fg-color--lighter);
+    opacity: 1;
+  }
+
+  .md-typeset .md-button--primary:hover {
+    color: #062a26;
+    background-color: #5eead4;
+  }
+}
+
+/* Cards on a dark page: a filled surface instead of an outline. */
+
+[data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li {
+  border: none;
+  border-radius: 0.6rem;
+  background: #11151c;
+}
+
+/* Diagrams in teal instead of the pink accent. */
+
+:root > * {
+  --md-mermaid-node-fg-color: var(--md-primary-fg-color);
+  --md-mermaid-node-bg-color: color-mix(in srgb, var(--md-primary-fg-color) 12%, transparent);
 }

@@ -1,12 +1,16 @@
-<p align="center">
-    <img src="assets/ziv-logo.png" alt="Z-Vision Generator logo with the Blob mascot" width="360"/>
-</p>
+---
+title: Z-Vision Generator
+hide:
+  - navigation
+  - toc
+---
 
-# Z-Vision Generator
-
-Local AI image and video generation, hassle-free and fun. No tangled node graphs and no cloud: write a prompt, press Generate, and the picture or clip is made on your own computer.
-
-![The Workspace with an enhanced prompt, the settings and a finished image](assets/screenshots/workspace.webp)
+<div class="zh">
+<h1 class="zh__rise">Your own studio for AI images and video.</h1>
+<p class="zh__rise">Write a prompt, press Generate, and the picture or clip is made on your own computer. No cloud, no node graphs.</p>
+<div class="zh__buttons zh__rise zh__rise--late"><a class="zh__btn zh__btn--primary" href="web-ui/">Start with the Web UI</a><a class="zh__btn" href="cli/">Use the CLI</a></div>
+<img class="zh__shot zh__rise zh__rise--late" src="assets/screenshots/workspace.webp" alt="The Workspace with an enhanced prompt and a finished image">
+</div>
 
 ## What it does
 
@@ -30,7 +34,7 @@ It runs on macOS with Apple Silicon, and on Windows and Linux with an NVIDIA GPU
 
     A browser app for writing prompts, generating, browsing your gallery and managing models. Works from a phone or tablet too.
 
-    [Start with the Web UI](web-ui/index.md)
+    [Start with the Web UI](web-ui/index.md){ .md-button .md-button--primary }
 
 -   **Command line**
 
@@ -38,7 +42,7 @@ It runs on macOS with Apple Silicon, and on Windows and Linux with an NVIDIA GPU
 
     `ziv-image` and `ziv-video` for scripted and batch work, with every setting as a flag.
 
-    [Start with the CLI](cli/index.md)
+    [Start with the CLI](cli/index.md){ .md-button }
 
 </div>
 

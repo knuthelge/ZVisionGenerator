@@ -1,6 +1,10 @@
+<div class="zb zb--developer" markdown>
+
 # Developer
 
 Thanks for helping with Z-Vision Generator. This section is for working on the code: setting up, the rules every change follows, and how the app is built.
+
+</div>
 
 ## Ways to help
 
