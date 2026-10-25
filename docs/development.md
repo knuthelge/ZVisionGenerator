@@ -18,7 +18,7 @@ make install
 | `make lint-fix` | Run ruff linter with auto-fix |
 | `make format` | Format code with ruff |
 | `make format-check` | Check formatting without changes |
-| `make test` | Run tests with pytest |
+| `make test` | Run tests with pytest, one worker per CPU core |
 | `make docs-check` | Build documentation with `mkdocs build --strict` |
 | `make check` | Full CI gate: lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate |
 | `make frontend-dev` | Start the Vite dev server |

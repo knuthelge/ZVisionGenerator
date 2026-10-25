@@ -36,8 +36,8 @@ format: ## Format code with ruff
 format-check: ## Check formatting without changes
 	uv run --frozen ruff format --check zvisiongenerator/ tests/ bench/
 
-test: ## Run tests with pytest
-	uv run --frozen pytest
+test: ## Run tests with pytest, one worker per CPU core
+	uv run --frozen pytest -n auto
 
 docs-check: ## Build documentation strictly with MkDocs
 	uv run --frozen mkdocs build --strict
