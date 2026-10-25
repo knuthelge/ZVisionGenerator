@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-25
+
 ### Upgrading from 0.12
 - **Windows/Linux needs NVIDIA driver 580+ and an RTX 20-series or newer GPU.** GTX 900/10-series, Titan V and V100 are no longer supported
 - **Windows/Linux video: `ltx-2.3` is gone.** Use `ltx-4` or `ltx-8`, as on macOS. Only distilled LTX models are supported, so remove a `default_repo` that points at a non-distilled one such as `dg845/LTX-2.3-Diffusers`
