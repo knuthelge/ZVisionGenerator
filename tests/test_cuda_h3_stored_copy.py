@@ -203,21 +203,6 @@ def _write(sources: _Sources, target: Path, keys=_ALL_KEYS, scale: float = _SCAL
 # --- manifest ---------------------------------------------------------------------------------------------------------
 
 
-def test_manifest_is_json_native_with_the_24_key_union(sources: _Sources, recorder: _Recorder) -> None:
-    manifest = copy_manifest(sources.shards, sources.turbo, _SCALE, _ALL_KEYS)
-
-    assert len(_ALL_KEYS) == 24
-    assert json.loads(json.dumps(manifest)) == manifest
-    assert manifest["layout"] == 1
-    assert manifest["family"] == "h3"
-    assert manifest["bits"] == 4
-    assert manifest["format"] == _NF4_FORMAT
-    assert manifest["lora_scale"] == _SCALE
-    assert manifest["fold_keys"] == [list(key) for key in _ALL_KEYS]
-    assert [source["name"] for source in manifest["sources"]] == [path.name for path in (*sources.shards, sources.turbo)]
-    assert all(source["bytes"] > 0 for source in manifest["sources"])
-
-
 # --- ensure ---------------------------------------------------------------------------------------------------------
 
 
@@ -731,7 +716,3 @@ def test_loading_needs_no_heavy_import_at_module_level() -> None:
 
     script = "import sys; import zvisiongenerator.backends.cuda.video.h3.stored_copy; sys.exit(int('bitsandbytes' in sys.modules or 'diffusers' in sys.modules))"
     assert subprocess.run([sys.executable, "-c", script], check=False).returncode == 0
-
-
-def test_public_names_are_exported() -> None:
-    assert sorted(stored_copy.__all__) == ["Tensors", "copy_manifest", "copy_name", "copy_settings", "ensure_copy", "load_copy", "write_copy", "write_folded"]

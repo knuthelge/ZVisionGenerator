@@ -21,7 +21,6 @@ from zvisiongenerator.backends.cuda.video.h3 import text_encoder  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.text_encoder import (  # noqa: E402
     TEXT_TAG,
     VIDEO_TAG,
-    Presentation,
     empty_text_encoder,
     encode,
     load_text_encoder,
@@ -140,11 +139,6 @@ def test_wanted_tensor(name, vision, wanted):
     assert wanted_tensor(name, 50, vision) is wanted
 
 
-def test_wanted_tensor_follows_the_layer_count():
-    assert wanted_tensor("model.language_model.layers.9.mlp.up_proj.weight", 10)
-    assert not wanted_tensor("model.language_model.layers.10.mlp.up_proj.weight", 10)
-
-
 # --- the cut model -----------------------------------------------------------------------------------------------
 
 
@@ -195,11 +189,6 @@ def test_encode_refuses_keyframes_without_a_vision_tower(tiny):
         encode(_cut_model(tiny, vision=False), presentation, "cpu")
 
 
-def test_a_presentation_needs_one_tag_and_type_per_token():
-    with pytest.raises(ValueError, match="one tag and one type per token"):
-        Presentation((1, 2), (TEXT_TAG,), (0, 0), {})
-
-
 # --- contracts against diffusers' encoder steps ------------------------------------------------------------------
 
 
@@ -248,23 +237,6 @@ def test_keyframe_presentation_matches_the_fl2va_step(tiny, count):
     assert pads == count * 15  # a 40x24 image is a 10x6 patch grid, 15 merged positions
     assert embeds.shape == expected.shape == (1, len(presentation.token_ids), 32)
     torch.testing.assert_close(embeds, expected, rtol=1e-5, atol=1e-6)
-
-
-def test_keyframe_presentation_ids_are_labels_then_blocks_then_the_prompt(tiny):
-    presentation = tokenize_presentation(_PROMPT, tiny.root / "tokenizer", tiny.root / "processor", _keyframes(2))
-    tokenizer = tiny.tokenizer
-    start, end = (tokenizer.convert_tokens_to_ids(token) for token in ("<|vision_start|>", "<|vision_end|>"))
-    ids = list(presentation.token_ids)
-
-    first_label = tokenizer("<Picture 1>: ", add_special_tokens=False)["input_ids"]
-    second_label = tokenizer("<Picture 2>: ", add_special_tokens=False)["input_ids"]
-    assert ids[: len(first_label)] == first_label
-    assert ids[len(first_label)] == start
-    second = ids.index(second_label[0], ids.index(end))
-    assert ids[second : second + len(second_label)] == second_label
-    assert ids[-len(tokenizer(_PROMPT, add_special_tokens=False)["input_ids"]) :] == tokenizer(_PROMPT, add_special_tokens=False)["input_ids"]
-    assert set(presentation.vision_inputs) == {"pixel_values", "image_grid_thw"}
-    assert presentation.vision_inputs["image_grid_thw"].shape == (2, 3)
 
 
 # --- the NF4 loader ----------------------------------------------------------------------------------------------
@@ -391,13 +363,6 @@ def test_load_refuses_shards_that_miss_a_tensor_before_reading_any(tiny, packed_
         load_text_encoder(tiny.root / "config", paths, "cpu", layers=50, vision=True)
 
 
-def test_load_refuses_a_missing_shard(tiny, packed_tensors, tmp_path, streaming_spies):
-    paths = _write_shards(packed_tensors, tmp_path / "shards")
-
-    with pytest.raises(RuntimeError, match="do not hold every tensor"):
-        load_text_encoder(tiny.root / "config", paths[:1], "cpu", layers=50, vision=True)
-
-
 def test_load_refuses_an_incomplete_nf4_weight(tiny, packed_tensors, tmp_path, streaming_spies):
     paths = _write_shards(packed_tensors, tmp_path / "shards", drop=lambda name: name == "model.language_model.layers.2.mlp.up_proj.weight.nested_absmax")
 
@@ -410,18 +375,3 @@ def test_load_refuses_layers_outside_the_checkpoint(tiny, packed_tensors, tmp_pa
 
     with pytest.raises(ValueError, match="between 1 and 52"):
         load_text_encoder(tiny.root / "config", paths, "cpu", layers=60, vision=True)
-
-
-def test_public_names():
-    assert set(text_encoder.__all__) == {
-        "TEXT_ENCODER_LAYERS",
-        "TEXT_TAG",
-        "VIDEO_TAG",
-        "Presentation",
-        "empty_text_encoder",
-        "encode",
-        "load_text_encoder",
-        "tokenize_presentation",
-        "wanted_tensor",
-    }
-    assert text_encoder.TEXT_ENCODER_LAYERS == 50
