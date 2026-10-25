@@ -1,6 +1,6 @@
 # Convert LTX-2.5 and MiniMax H3 fine-tunes
 
-**Status:** Proposed (2026-10-23).
+**Status:** Implemented on all three platforms (2026-10-25), on the branch `feat/ltx25-h3-checkpoint-conversion`. The Windows/Linux gates ran on the reference card; the macOS gates (Parts 3 and 4) wait for the Mac test. See [Implementation and results](#implementation-and-results-2026-10-25).
 
 Four parts, in this order:
 
@@ -39,6 +39,42 @@ The user answered the three questions this proposal first left open.
 1. **LTX-2.5 sources: a verified repackage, or nothing.** The LTX-2.5 pins, the distilled LoRA and the stock test input come from an ungated repackage only when its file's SHA-256 matches the gated original's LFS id, as the Hub listing shows it. Reason: this proves the repackage is byte-identical to the original without reading gated content. Downloads stay ungated, with a link to the original. Outcome (2026-10-23): every item has a verified copy. These are the dev and distilled transformers (and so the distillation and connector pins), the distilled LoRA, and the stock test input. See [Verified sources](#verified-sources).
 2. **No per-model H3 schedule for now.** Every converted H3 model runs at shift 6.0, at 4 or 8 steps. A per-model schedule is added only if Part 1's spike shows a problem (G6). Reason: no fine-tune has yet been shown to need one.
 3. **Odd H3 formats: scaled INT8 in, pruned out.** Scaled-INT8 files are supported: Part 1 extends the shared dequantize helper, which now handles FP8, to INT8, with a test and a spike gate (G8). Pruned files are still refused, with a clear message. Reason: scaled INT8 is a scale multiplied out, like FP8. A pruned file's AdaLN projection has another shape, so the fold can't apply to it.
+
+## Implementation and results (2026-10-25)
+
+Built as planned, with these changes. The first three came from two community test fine-tunes (a pruned INT8-ConvRot H3 one and a W4A8+INT8 ConvRot LTX-2.5 one) and from a header survey of every H3 and LTX-2.5 repository on the Hub (about 470 repositories, read 2026-10-25).
+
+- **Decision 3 reversed: pruned and rotated files are read.** The survey shows ComfyUI's own H3 templates and most community H3 files are pruned, at ranks 8, 25 and 64, and that INT8-ConvRot is the most common quantized format for both families. NVFP4 and W4A8 are common as well.
+  - A pruned curve turned out to be an exact affine projection of stock's `silu(time embedding)` (fit error 1e-12 on its grid). The reader un-prunes it: the projection is fitted once, leaving out the embedding's noise directions (rcond 1e-5), and each curve-reading projection becomes stock-shaped. On the H3 test fine-tune, the rebuilt modulation matches the curve to 1e-5–1e-4; stock's own bf16 modulation is 1.5e-3 from the curve. One code path then serves both platforms, with LoRAs and the turbo merge working unchanged.
+  - One shared decoder (`utils/quantized_weights`) reads scaled FP8, INT8 with or without ConvRot, W4A4, W4A8, W6A8, NVFP4 and MXFP8. Each format was checked against comfy-kitchen's own encoder and decoder to bf16 precision. Rotation is undone with the same block Hadamard matrix ComfyUI uses.
+- **ComfyUI stores the fused QKV contiguous** (`[q; k; v]`); only MiniMax's raw sharded transformer interleaves it per head. The reader tells them apart by layout: a single file is ComfyUI, a sharded native set is MiniMax's. The MLX port reads the interleaved order, so the Mac writer interleaves again.
+- **Quantized connectors** (LTX) can't be compared with stock's hashes, so they read as "can't tell" and stock's are used, rather than the file being refused.
+- **No server-sent type list.** All three types run on all three platforms, so the form's list stays in the frontend.
+- **Pins without full downloads.** The LTX-2.5 pins were computed with ranged reads of only the needed tensors from the verified copy (about 8 GB read, not 84 GB downloaded). The size and SHA-256 of both files were checked against the official listing first. The dev and distilled connectors are identical.
+- **The macOS LTX-2.5 base** links its `quantize_config.json` unchanged for q8: the MLX loader reads the bits from the weights' shapes, so no q8 config is written.
+- **The converter runs with the backend's torch settings** (TF32 for float32 matmuls). Without them the time embedding, and so the AdaLN tables, differ slightly from stock's copy.
+- **Picking a Hugging Face cache file works.** The CLI and Web UI used to resolve symlinks, which turned the file into a hash-named blob and lost its shards.
+
+Gate results on the reference machine (Windows/Linux):
+
+| Gate | Result |
+|---|---|
+| H3 G1 Layouts | Pass: every layout in the table is classified; the mapped names and shapes cover stock both ways (tests on a tiny config, the H3 test fine-tune and stock's shards) |
+| H3 G2 Sampled mapping | Pass: range-read tensors of `FL2VA/transformer/` (interleaved) and Comfy-Org's bf16 file (contiguous) are bit-identical to `transformer/` after mapping |
+| H3 G3 Stock equivalence | Pass: stock converted from `transformer/` is byte-identical to `h3@q4` (2038 tensors, 1200 tables). The native and Comfy-Org full files were not downloaded; G2 covers their mapping |
+| H3 G4 Clip | Pass: the video is identical to `h3`'s; the audio differs, as it does between two `h3` runs (the audio path is not deterministic) |
+| H3 G5 Cost | Pass: 6 min 19 s and 5.7 GiB RSS for stock (Phase 2a: 11.6 min, 8.3 GiB); no swap, no kill. The pruned INT8 test fine-tune: 2 min 58 s, 6.8 GiB |
+| H3 G6 Turbo flag | Not run (no full turbo file downloaded) |
+| H3 G7 Fine-tune | Pass on review: the pruned INT8-ConvRot test fine-tune, turbo merged, renders sharp with its own character at 864×480, 8 steps |
+| H3 G8 Scaled INT8 | Pass: decoded INT8-ConvRot Linears are within 0.9–1.0% of stock (wrong by 137% without the rotation); the fine-tune's own bf16 layers are 2.7% from stock |
+| LTX G1 Mapping | Pass: every name of the LTX-2.5 test fine-tune maps onto the diffusers 2.5 transformer, keyframe embedding included, in both directions; the MLX names, dtypes and shapes equal `ltx25-4`'s transformer (7355 tensors) |
+| LTX G2 Version | Pass on the files read: each reads as its own version |
+| LTX G3 Pins | Pass: 8 tensors per label, 258 connectors, no projection group; the test fine-tune reads as `distilled` |
+| LTX G4 Stock equivalence | Not run (needs the 42 GB distilled transformer) |
+| LTX G5 Fine-tune | Pass: the W4A8+INT8 ConvRot test fine-tune converts at q4 in 8 min 15 s with 5.1 GiB RSS (this includes writing the FP8 text-encoder copy once); its quantized connectors read as "can't tell" and stock's are used. It renders sharp with its own character at `s`, 49 frames (117 s; stock `ltx25-4` 109 s at 21.6 GiB). The 1280×704 memory run was not repeated: the storage equals `ltx25-4`'s |
+| LTX G6 Settings | Pass: the converted folder's load options equal `ltx25-4`'s (ancestral sampler, CRF 18, its repo_ignore and upsampler) |
+
+macOS, checked from Linux only: the Mac H3 writer run on the H3 test fine-tune yields every one of the 1042 tensor names, dtypes and shapes of the shipped INT8 transformer (`water1234/...` at `70505b09`), and the same `config.json`. The only differences are the four layers the shipped build keeps in bf16 for its calibration, which plain rounding quantizes, as its `quant_config.json` records. The LTX-2.5 MLX writer's names, dtypes and shapes equal `ltx25-4`'s transformer. Parts 3 and 4's gates (G0–G4/G6) still run on the Mac.
 
 ## Evidence
 
@@ -451,7 +487,7 @@ Decision: build once G0–G3 and G5 pass. If G4 fails (RTN visibly worse than ca
 ### Not in scope
 
 - **A per-model H3 schedule** (shift, step counts): only if Part 1's spike shows a need ([Decision 2](#decisions-2026-10-23)).
-- **Other input formats:** pruned H3 files ([Decision 3](#decisions-2026-10-23)), INT8 formats that need more than a scale, GGUF, NVFP4 and torchao's `Float8Tensor`.
+- **Other input formats:** GGUF, SVDQuant and torchao's `Float8Tensor`. (Pruned H3 files and the rotated and 4-bit ComfyUI formats were moved into scope, see [Implementation and results](#implementation-and-results-2026-10-25).)
 - **A weight-space turbo detector:** decided against.
 - **Changed LTX connectors on Windows/Linux:** refused, as for 2.3.
 - **Converting H3 LoRAs** from ComfyUI's format.
