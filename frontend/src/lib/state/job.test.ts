@@ -606,19 +606,19 @@ describe('jobStore reconnect contract', () => {
     }
   });
 
+  function startAndLoseStream(jobId: string): void {
+    jobStore.startJob({ job_id: jobId, workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '' });
+    (globalThis.EventSource as unknown as { lastInstance: { emitFatalError: () => void } }).lastInstance.emitFatalError();
+  }
+
+  function snapshot(jobId: string, status: string, extra: Record<string, unknown> = {}) {
+    return {
+      ok: true,
+      json: async () => ({ id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'txt2img', status, prompt: 'p', model: 'zit', runs: 1, created_at: '', event_count: 1, paused: false, supported_controls: [], ...extra }),
+    };
+  }
+
   describe('when the event stream closes permanently', () => {
-    function startAndLoseStream(jobId: string): void {
-      jobStore.startJob({ job_id: jobId, workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '' });
-      (globalThis.EventSource as unknown as { lastInstance: { emitFatalError: () => void } }).lastInstance.emitFatalError();
-    }
-
-    function snapshot(jobId: string, status: string, extra: Record<string, unknown> = {}) {
-      return {
-        ok: true,
-        json: async () => ({ id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'txt2img', status, prompt: 'p', model: 'zit', runs: 1, created_at: '', event_count: 1, paused: false, supported_controls: [], ...extra }),
-      };
-    }
-
     it('ends the job neutrally (not as failed) when the server no longer knows it', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', text: async () => 'Unknown job' }));
       const onFailed = vi.fn();
@@ -718,6 +718,154 @@ describe('jobStore reconnect contract', () => {
       await vi.waitFor(() => expect((globalThis.EventSource as unknown as { instances: unknown[] }).instances.length).toBe(before + 2));
       expect(jobStore.current?.status).toBe('running');
       expect(jobStore.isRunning).toBe(true);
+    });
+  });
+
+  describe('when the tab becomes visible again', () => {
+    type Source = { emit: (type: string, data: unknown) => void; emitError: () => void; emitFatalError: () => void; closeCalls: number; url: string };
+    type MockEventSourceClass = { instances: Source[]; lastInstance: Source };
+    const sources = (): MockEventSourceClass => globalThis.EventSource as unknown as MockEventSourceClass;
+    const stepEvent = (eventId: number) => ({ type: 'step_progress', event_id: eventId, current_step: eventId, total_steps: 20, elapsed_secs: 1, workflow_stage_name: 'denoise', workflow_stage_index: 0 });
+    let stopWatching: () => void;
+
+    function setHidden(hidden: boolean): void {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+    }
+
+    /** Hide the tab, then show it again. */
+    function leaveAndReturn(): void {
+      setHidden(true);
+      document.dispatchEvent(new Event('visibilitychange'));
+      setHidden(false);
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    function start(jobId: string): void {
+      jobStore.startJob({ job_id: jobId, workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '', supported_controls: ['pause', 'resume'] });
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      stopWatching = jobStore.watchVisibility(document);
+    });
+
+    afterEach(() => {
+      stopWatching();
+      setHidden(false);
+      vi.useRealTimers();
+    });
+
+    it('reattaches once after the last received event, keeping the job state and fetching no snapshot', async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      start('resume-job');
+      const old = sources().lastInstance;
+      const asset = makeOutput('shown');
+      old.emit('step_progress', stepEvent(3));
+      old.emit('generation_finished', { type: 'generation_finished', event_id: 9, status: 'success', run_index: 0, asset });
+      old.emit('step_progress', stepEvent(5));
+      const before = jobStore.current;
+      const count = sources().instances.length;
+
+      leaveAndReturn();
+
+      expect(sources().instances).toHaveLength(count + 1);
+      expect(sources().lastInstance.url).toMatch(/^\/jobs\/resume-job\/events\?after=9$/);
+      expect(old.closeCalls).toBe(1);
+      expect(sources().lastInstance.closeCalls).toBe(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(jobStore.current).toEqual(before);
+      expect(jobStore.current?.outputs.map((output) => output.id)).toEqual([asset.id]);
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(jobStore.current).toEqual(before);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('replays from the start after a snapshot reattach, which rebuilds state from the full history', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(snapshot('snap-job', 'running')));
+      start('snap-job');
+      sources().lastInstance.emit('step_progress', stepEvent(6));
+      sources().lastInstance.emitFatalError();
+      await vi.advanceTimersByTimeAsync(0);
+
+      leaveAndReturn();
+
+      expect(sources().lastInstance.url).toBe('/jobs/snap-job/events');
+    });
+
+    it('does nothing without a followed job, while the tab is hidden, or once the job has ended', () => {
+      jobStore.clearJob();
+      const count = sources().instances.length;
+      leaveAndReturn();
+      expect(sources().instances).toHaveLength(count);
+
+      start('hidden-job');
+      const live = sources().lastInstance;
+      const liveCount = sources().instances.length;
+      setHidden(true);
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(sources().instances).toHaveLength(liveCount);
+      expect(live.closeCalls).toBe(0);
+      setHidden(false);
+
+      live.emit('job_completed', { type: 'job_completed', event_id: 4, total_runs: 1, outputs: [] });
+      leaveAndReturn();
+      expect(sources().instances).toHaveLength(liveCount);
+    });
+
+    it('reattaches at once instead of waiting out a scheduled recovery', async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+      vi.stubGlobal('fetch', fetchMock);
+      startAndLoseStream('backoff-job');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(jobStore.current?.connection).toBe('reconnecting');
+      const count = sources().instances.length;
+
+      leaveAndReturn();
+      expect(sources().instances).toHaveLength(count + 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(jobStore.current).toMatchObject({ status: 'running', connection: 'live' });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sources().instances).toHaveLength(count + 1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('marks a reconnecting paused review job live again once the stream opens, keeping its controls', async () => {
+      start('review-job');
+      sources().lastInstance.emit('job_paused', { type: 'job_paused', event_id: 2, review: { iteration: 1 } });
+      sources().lastInstance.emitError();
+      expect(jobStore.current).toMatchObject({ paused: true, review: { iteration: 1 }, connection: 'reconnecting' });
+
+      leaveAndReturn();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(jobStore.current).toMatchObject({ status: 'paused', paused: true, review: { iteration: 1 }, connection: 'live' });
+    });
+
+    it('keeps the reattached stream when a recovery snapshot that was in flight reports the job finished', async () => {
+      let resolveSnapshot: (value: unknown) => void = () => {};
+      const fetchMock = vi.fn().mockReturnValue(new Promise((resolve) => { resolveSnapshot = resolve; }));
+      vi.stubGlobal('fetch', fetchMock);
+      const onComplete = vi.fn();
+      const detach = jobStore.subscribeLifecycle({ onComplete });
+      startAndLoseStream('race-job');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      leaveAndReturn();
+      const attached = sources().lastInstance;
+      const count = sources().instances.length;
+      resolveSnapshot(snapshot('race-job', 'completed'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(jobStore.current?.status).toBe('running');
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(attached.closeCalls).toBe(0);
+      expect(sources().instances).toHaveLength(count);
+      detach();
     });
   });
 });

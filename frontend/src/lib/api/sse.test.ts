@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { connectJobSSE } from './sse';
 
 type MockEventSource = {
@@ -8,6 +8,7 @@ type MockEventSource = {
   close: () => void;
   closeCalls: number;
   readyState: number;
+  url: string;
 };
 
 function latestEventSource(): MockEventSource {
@@ -199,5 +200,37 @@ describe('connectJobSSE', () => {
     latestEventSource().emit('model_downloading', event);
     expect(onStatus).toHaveBeenCalledWith('model_downloading', expect.objectContaining(event));
     subscription.close();
+  });
+
+  describe('resuming a stream', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('opens the plain events URL without an id or with 0, and resumes after a positive id', () => {
+      connectJobSSE('job-a', {}).close();
+      expect(latestEventSource().url).toBe('/jobs/job-a/events');
+
+      connectJobSSE('job-a', {}, 0).close();
+      expect(latestEventSource().url).toBe('/jobs/job-a/events');
+
+      connectJobSSE('job-a', {}, 42).close();
+      expect(latestEventSource().url).toBe('/jobs/job-a/events?after=42');
+    });
+
+    it('calls onOpen when the stream connects, but not after the subscription is closed', () => {
+      vi.useFakeTimers();
+      const onOpen = vi.fn();
+      const subscription = connectJobSSE('job-a', { onOpen });
+      expect(onOpen).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(0);
+      expect(onOpen).toHaveBeenCalledOnce();
+      subscription.close();
+
+      const closedOnOpen = vi.fn();
+      connectJobSSE('job-a', { onOpen: closedOnOpen }).close();
+      vi.advanceTimersByTime(0);
+      expect(closedOnOpen).not.toHaveBeenCalled();
+    });
   });
 });

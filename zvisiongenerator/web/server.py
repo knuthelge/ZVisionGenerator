@@ -944,7 +944,7 @@ async def get_job_review(job_id: str) -> Response:
 
 
 @app.get("/jobs/{job_id}/events")
-async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
+async def stream_job_events(job_id: str, request: Request, after: int | None = Query(None, ge=0)) -> StreamingResponse:
     """Stream job progress as SSE frames for browser and programmatic consumers."""
     try:
         web_runner.get_job_snapshot(job_id)
@@ -952,7 +952,8 @@ async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
         raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}") from exc
 
     last_event_id = request.headers.get("last-event-id")
-    after_event_id = int(last_event_id) if last_event_id and last_event_id.isascii() and last_event_id.isdecimal() else None
+    header_event_id = int(last_event_id) if last_event_id and last_event_id.isascii() and last_event_id.isdecimal() else None
+    after_event_id = header_event_id if header_event_id is not None else after
 
     return StreamingResponse(
         web_runner.stream_job_events(job_id, after_event_id=after_event_id),

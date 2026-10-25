@@ -1464,18 +1464,23 @@ class TestWebServerSse:
     """Verify the FastAPI endpoints expose job state and SSE updates."""
 
     @pytest.mark.parametrize(
-        ("last_event_id", "expected_cursor"),
+        ("last_event_id", "after", "expected_cursor"),
         [
-            (None, None),
-            ("7", 7),
-            ("", None),
-            ("-1", None),
-            ("7.5", None),
-            (" 7", None),
+            (None, None, None),
+            ("7", None, 7),
+            ("", None, None),
+            ("-1", None, None),
+            ("7.5", None, None),
+            (" 7", None, None),
+            (None, "5", 5),
+            (None, "0", 0),
+            ("7", "5", 7),
+            ("-1", "5", 5),
+            ("7.5", "5", 5),
         ],
     )
-    def test_sse_endpoint_forwards_only_valid_non_negative_last_event_id(self, monkeypatch, last_event_id, expected_cursor):
-        """Missing or malformed browser cursors retain the initial replay behavior."""
+    def test_sse_endpoint_forwards_only_valid_non_negative_last_event_id(self, monkeypatch, last_event_id, after, expected_cursor):
+        """A valid Last-Event-ID wins, then the ``after`` query; anything malformed retains the initial replay."""
         captured: list[int | None] = []
 
         async def _stream_job_events(_job_id: str, *, after_event_id: int | None = None):
@@ -1487,13 +1492,26 @@ class TestWebServerSse:
         fake_runner.stream_job_events.side_effect = _stream_job_events
         monkeypatch.setattr(web_server, "web_runner", fake_runner)
         headers = {} if last_event_id is None else {"Last-Event-ID": last_event_id}
+        params = {} if after is None else {"after": after}
 
         with TestClient(web_server.app) as client:
-            response = client.get("/jobs/job-cursor/events", headers=headers)
+            response = client.get("/jobs/job-cursor/events", headers=headers, params=params)
 
         assert response.status_code == 200
         assert "job_completed" in response.text
         assert captured == [expected_cursor]
+
+    def test_sse_endpoint_rejects_negative_after_query(self, monkeypatch):
+        """A negative ``after`` is a validation error and nothing is streamed."""
+        fake_runner = MagicMock()
+        fake_runner.get_job_snapshot.return_value = {"job_id": "job-cursor"}
+        monkeypatch.setattr(web_server, "web_runner", fake_runner)
+
+        with TestClient(web_server.app) as client:
+            response = client.get("/jobs/job-cursor/events", params={"after": -1})
+
+        assert response.status_code == 422
+        fake_runner.stream_job_events.assert_not_called()
 
     def test_dummy_job_sse_endpoint_streams_events(self, monkeypatch):
         """The SSE endpoint should emit structured progress frames for a background job."""

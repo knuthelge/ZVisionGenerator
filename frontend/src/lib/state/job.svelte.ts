@@ -16,6 +16,8 @@ let _listRequest = 0;
 // Event id the reconnect snapshot was taken at: replayed SSE history up to it must not change the live preview,
 // which the snapshot already reflects.
 let _previewEventFloor = 0;
+// Highest event id received on the current job's stream; a reattach asks the server only for the events after it.
+let _lastEventId = 0;
 let _subscription: SSESubscription | null = null;
 // Consecutive stream-loss recoveries for the current job; reset whenever an event arrives.
 let _recoveryAttempts = 0;
@@ -272,7 +274,9 @@ function failureMessage(event: Record<string, unknown> | null | undefined): stri
 
 /** Apply the phase, timing and queued-control bookkeeping every event carries. */
 function track(type: string, event: unknown): void {
-  if (_job) _job = trackJobEvent(_job, type, event as Record<string, unknown>, Date.now());
+  if (!_job) return;
+  _job = trackJobEvent(_job, type, event as Record<string, unknown>, Date.now());
+  _lastEventId = Math.max(_lastEventId, eventFieldNumber(event as Record<string, unknown>, 'event_id'));
 }
 
 function isTerminalStatus(status: string): boolean {
@@ -296,6 +300,8 @@ function closeSubscription(): void {
 function connectSnapshot(snapshot: JobSnapshot): true {
   _job = makeJobStateFromSnapshot(snapshot);
   _previewEventFloor = eventFieldNumber(snapshot.last_event, 'event_id');
+  // The snapshot path rebuilds phase state from the full history, so the stream replays from the start.
+  _lastEventId = 0;
   writeActiveJobId(snapshot.job_id ?? snapshot.id);
   attachJobEvents(snapshot.job_id ?? snapshot.id);
   return true;
@@ -352,7 +358,7 @@ function notifyLifecycle(
   }
 }
 
-function attachJobEvents(jobId: string): void {
+function attachJobEvents(jobId: string, afterEventId = 0): void {
   closeSubscription();
   _subscription = connectJobSSE(jobId, {
     onStep(event) {
@@ -440,13 +446,16 @@ function attachJobEvents(jobId: string): void {
     onReconnecting() {
       if (_job && !isTerminalStatus(_job.status)) _job = { ..._job, connection: 'reconnecting' };
     },
+    onOpen() {
+      if (_job && !isTerminalStatus(_job.status)) _job = { ..._job, connection: 'live' };
+    },
     onClose() {
       _subscription = null;
     },
     onStreamLost() {
       scheduleRecovery(jobId);
     }
-  });
+  }, afterEventId);
 }
 
 function finishCompleted(outputs: unknown): void {
@@ -546,6 +555,7 @@ async function recoverLostStream(jobId: string): Promise<void> {
   } catch (error) {
     // Ignore if the store moved on (new job, cleared, or already terminal) while the snapshot was loading.
     if (!isCurrentLiveJob(jobId)) return;
+    if (_subscription) return; // the tab reattached while the snapshot was loading
     if (error instanceof ApiError && error.status === 404) {
       finishLost();
     } else {
@@ -556,6 +566,7 @@ async function recoverLostStream(jobId: string): Promise<void> {
     return;
   }
   if (!isCurrentLiveJob(jobId)) return;
+  if (_subscription) return; // the tab reattached while the snapshot was loading
   if (snapshot.status === 'completed') {
     finishCompleted(snapshot.outputs);
   } else if (wasRemoved(snapshot)) {
@@ -657,11 +668,23 @@ export const jobStore = {
     };
   },
 
+  /** Reconnect the followed job's event stream when the tab becomes visible, since the OS may have dropped it in the background. */
+  watchVisibility(doc: Document): () => void {
+    const onVisible = (): void => {
+      if (doc.hidden || !_job || isTerminalStatus(_job.status)) return;
+      cancelRecovery();
+      attachJobEvents(_job.job_id, _lastEventId);
+    };
+    doc.addEventListener('visibilitychange', onVisible);
+    return () => doc.removeEventListener('visibilitychange', onVisible);
+  },
+
   startJob(ctx: JobContext): void {
     cancelRecovery();
     _removedOutputIds.clear();
     _job = makeInitialJobState(ctx);
     _previewEventFloor = 0;
+    _lastEventId = 0;
     writeActiveJobId(ctx.job_id);
     attachJobEvents(ctx.job_id);
   },
@@ -698,6 +721,7 @@ export const jobStore = {
     cancelRecovery();
     closeSubscription();
     _previewEventFloor = 0;
+    _lastEventId = 0;
     _job = null;
     _queued = [];
     _listRequest += 1;

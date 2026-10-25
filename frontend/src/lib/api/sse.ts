@@ -6,6 +6,7 @@ export interface SSESubscription {
   close: () => void;
 }
 
+/** Open a job's event stream; with *afterEventId*, the server sends only the events after that id. */
 export function connectJobSSE(
   jobId: string,
   handlers: {
@@ -22,11 +23,14 @@ export function connectJobSSE(
     onClose?: () => void;
     /** The stream closed for good without a terminal event (e.g. 404 after a server restart or job pruning). */
     onStreamLost?: () => void;
-    /** The stream dropped and the browser is reconnecting; the next event means it is live again. */
+    /** The stream dropped and the browser is reconnecting; `onOpen` reports when it is connected again. */
     onReconnecting?: () => void;
-  }
+    /** The stream is connected (again), even before the next event arrives. */
+    onOpen?: () => void;
+  },
+  afterEventId = 0
 ): SSESubscription {
-  const es = new EventSource(`/jobs/${jobId}/events`);
+  const es = new EventSource(afterEventId > 0 ? `/jobs/${jobId}/events?after=${afterEventId}` : `/jobs/${jobId}/events`);
   const TERMINAL_EVENTS: ReadonlySet<string> = new Set(['job_completed', 'job_failed', 'job_cancelled']);
   let closed = false;
 
@@ -104,6 +108,10 @@ export function connectJobSSE(
   // EventSource reconnects automatically and sends Last-Event-ID after a
   // transient failure. A non-200 response instead closes it permanently
   // (readyState CLOSED, no retry), so hand recovery to the caller.
+  es.onopen = () => {
+    if (!closed) handlers.onOpen?.();
+  };
+
   es.onerror = () => {
     if (closed) return;
     if (es.readyState === EventSource.CONNECTING) {
