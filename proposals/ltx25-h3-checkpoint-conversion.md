@@ -1,6 +1,6 @@
 # Convert LTX-2.5 and MiniMax H3 fine-tunes
 
-**Status:** Implemented on all three platforms (2026-10-25), on the branch `feat/ltx25-h3-checkpoint-conversion`. The Windows/Linux gates ran on the reference card; the macOS gates (Parts 3 and 4) wait for the Mac test. See [Implementation and results](#implementation-and-results-2026-10-25).
+**Status:** Implemented on all three platforms; macOS gates run as a minimal set, two open findings (2026-10-25), on the branch `feat/ltx25-h3-checkpoint-conversion`. The Windows/Linux gates ran on the reference card; the macOS gates ran on a 32 GiB M5 as a minimal set (Part 3 G3 and G4, Part 4 G6). See [Implementation and results](#implementation-and-results-2026-10-25) and [macOS gate results](#macos-gate-results-2026-10-25).
 
 Four parts, in this order:
 
@@ -9,7 +9,7 @@ Four parts, in this order:
 3. LTX-2.5 on macOS
 4. MiniMax H3 on macOS
 
-Part 1 comes first, and its work (per-model naming and conversion) may run alongside Parts 2 and 3, since it touches different modules. Parts 3 and 4 start only after the Mac test of the shipped LTX-2.5 and H3 support ([ltx-2.5-mac-test-plan.md](ltx-2.5-mac-test-plan.md)) passes. Each part opens with a spike and a gate table, and is built only once its gates pass.
+Part 1 comes first, and its work (per-model naming and conversion) may run alongside Parts 2 and 3, since it touches different modules. Parts 3 and 4 started after the Mac test of the shipped LTX-2.5 and H3 support ([ltx-2.5-mac-test-plan.md](archive/ltx-2.5-mac-test-plan.md)) passed. Each part opens with a spike and a gate table, and is built only once its gates pass.
 
 This follows [Convert LTX-2.3 checkpoints](archive/ltx-checkpoint-conversion.md), and it picks up an item that [LTX-2.5 and MiniMax H3](ltx-2.5.md) left out of scope: "Converting single-file fine-tunes for either family."
 
@@ -45,7 +45,7 @@ The user answered the three questions this proposal first left open.
 Built as planned, with these changes. The first three came from two community test fine-tunes (a pruned INT8-ConvRot H3 one and a W4A8+INT8 ConvRot LTX-2.5 one) and from a header survey of every H3 and LTX-2.5 repository on the Hub (about 470 repositories, read 2026-10-25).
 
 - **Decision 3 reversed: pruned and rotated files are read.** The survey shows ComfyUI's own H3 templates and most community H3 files are pruned, at ranks 8, 25 and 64, and that INT8-ConvRot is the most common quantized format for both families. NVFP4 and W4A8 are common as well.
-  - A pruned curve turned out to be an exact affine projection of stock's `silu(time embedding)` (fit error 1e-12 on its grid). The reader un-prunes it: the projection is fitted once, leaving out the embedding's noise directions (rcond 1e-5), and each curve-reading projection becomes stock-shaped. On the H3 test fine-tune, the rebuilt modulation matches the curve to 1e-5–1e-4; stock's own bf16 modulation is 1.5e-3 from the curve. One code path then serves both platforms, with LoRAs and the turbo merge working unchanged.
+  - A pruned curve turned out to be an affine projection of stock's `silu(time embedding)` (a fit residual of 4.9e-5 on its grid, measured on the Mac gate's pruned fine-tune). The reader un-prunes it: the projection is fitted once, leaving out the embedding's noise directions (rcond 1e-5), and each curve-reading projection becomes stock-shaped. On the H3 test fine-tune, the rebuilt modulation matches the curve to 1e-5–1e-4; stock's own bf16 modulation is 1.5e-3 from the curve. One code path then serves both platforms, with LoRAs and the turbo merge working unchanged.
   - One shared decoder (`utils/quantized_weights`) reads scaled FP8, INT8 with or without ConvRot, W4A4, W4A8, W6A8, NVFP4 and MXFP8. Each format was checked against comfy-kitchen's own encoder and decoder to bf16 precision. Rotation is undone with the same block Hadamard matrix ComfyUI uses.
 - **ComfyUI stores the fused QKV contiguous** (`[q; k; v]`); only MiniMax's raw sharded transformer interleaves it per head. The reader tells them apart by layout: a single file is ComfyUI, a sharded native set is MiniMax's. The MLX port reads the interleaved order, so the Mac writer interleaves again.
 - **Quantized connectors** (LTX) can't be compared with stock's hashes, so they read as "can't tell" and stock's are used, rather than the file being refused.
@@ -74,7 +74,28 @@ Gate results on the reference machine (Windows/Linux):
 | LTX G5 Fine-tune | Pass: the W4A8+INT8 ConvRot test fine-tune converts at q4 in 8 min 15 s with 5.1 GiB RSS (this includes writing the FP8 text-encoder copy once); its quantized connectors read as "can't tell" and stock's are used. It renders sharp with its own character at `s`, 49 frames (117 s; stock `ltx25-4` 109 s at 21.6 GiB). The 1280×704 memory run was not repeated: the storage equals `ltx25-4`'s |
 | LTX G6 Settings | Pass: the converted folder's load options equal `ltx25-4`'s (ancestral sampler, CRF 18, its repo_ignore and upsampler) |
 
-macOS, checked from Linux only: the Mac H3 writer run on the H3 test fine-tune yields every one of the 1042 tensor names, dtypes and shapes of the shipped INT8 transformer (`water1234/...` at `70505b09`), and the same `config.json`. The only differences are the four layers the shipped build keeps in bf16 for its calibration, which plain rounding quantizes, as its `quant_config.json` records. The LTX-2.5 MLX writer's names, dtypes and shapes equal `ltx25-4`'s transformer. Parts 3 and 4's gates (G0–G4/G6) still run on the Mac.
+macOS, checked from Linux only: the Mac H3 writer run on the H3 test fine-tune yields every one of the 1042 tensor names, dtypes and shapes of the shipped INT8 transformer (`water1234/...` at `70505b09`), and the same `config.json`. The only differences are the four layers the shipped build keeps in bf16 for its calibration, which plain rounding quantizes, as its `quant_config.json` records. The LTX-2.5 MLX writer's names, dtypes and shapes equal `ltx25-4`'s transformer. Parts 3 and 4's gates ran on the Mac afterwards; see [macOS gate results](#macos-gate-results-2026-10-25).
+
+## macOS gate results (2026-10-25)
+
+Run on an M5 with 32 GiB, on the fix branch `fix/mac-video` after the Mac test's fixes, as a minimal set the user chose: Part 3 G3 and G4 and Part 4 G6. Part 3 G1 and G2, Part 4 G2, G4 and G5 were not run. G6 also stands in for Part 4 G1 (strict load) and G3 (cost on a full-size file). Free disk stayed above 10 GiB, and the cached `h3` was deleted for G6 and downloaded again afterwards.
+
+**A reader finding.** A community LTX-2.5 W4A8+INT8 ConvRot file is rejected: `model.diffusion_model.audio_embeddings_connector.transformer_1d_blocks.0.attn1.to_v.weight is stored as I8 with a scale but no quantization record`. Its quantization records live in the safetensors `__metadata__` key `_quantization_metadata` (`asym_w4a8_int8`, `group_size` 16, `convrot_groupsize` 256) with no `comfy_quant` tensors, and `utils/quantized_weights.py` reads only the `comfy_quant` form. The rejection is platform-independent, and a second community file in the same layout is rejected the same way.
+
+**An observation to check against the design rule.** G3's fine-tune has FP8 connectors, which read as "can't tell" (96 of their Linears are FP8, so they can't match the pins), yet the Mac writer wrote its own `connector.safetensors` from the checkpoint (4.03 GB, +3.75 GiB of disk) instead of linking stock's. The Windows/Linux results above say that "can't tell" connectors use stock's. Part 3's design rule says connectors are linked only when the pins say they are stock, and otherwise written from the checkpoint; the two statements disagree. Which one is intended is open.
+
+**Result: image to video with a converted H3 model follows the start image when the checkpoint does.** A community H3 fine-tune converted the normal way (the converter merges the turbo LoRA, then rounds to 8 bit) gives frame 0 at 27.5 dB PSNR and 0.857 SSIM against the start image, equal to stock `h3` (27.7 dB, 0.866) at the same size. Two other community H3 checkpoints ignored the start image (9.5 dB and 5.1 dB): one was converted with `--turbo` (nothing merged by the converter) and one with the converter's merge, so the behavior follows the checkpoint, not the converter. The staged path itself runs as designed on a converted folder (`--size xs --frames 33 --image <start>`: keyframes peak 14.1, vision 1.2, prompt 13.5 GiB; 162.5 s, 14.0 GiB, no swap).
+
+A control on stock `h3` with the turbo LoRA off gave frame 0 at 12.9 dB, so the turbo is needed for start-image adherence at 8 steps. A converted model keeps it, merged before the rounding.
+
+**Conversion cost.** Three H3 conversions peaked at 8.8, 9.1 and 9.4 GiB, with no swap (the 9.4 GiB one took 57.4 s, with a max RSS of 11.35 GB). Part 4's 8 GB bar was set too low. G3's bar is kept as written and recorded as missed.
+
+Part 4's build decision (G0–G3 and G5 pass) is met in substance: G3's bar was set too low, and G6 covers G5.
+
+### Follow-ups
+
+- **Read `__metadata__._quantization_metadata`.** Extend `utils/quantized_weights.py` to take the quantization records from the safetensors metadata when no `comfy_quant` tensors are present, so the W4A8 files above convert.
+- **The connectors' design rule.** Decide whether "can't tell" connectors link stock's or are written from the checkpoint (see the observation above).
 
 ## Evidence
 
@@ -406,7 +427,7 @@ Decision: build once G1–G6 pass.
 
 ### Part 3: LTX-2.5 on macOS (size S to M)
 
-Part 3 starts after the Mac test passes.
+Part 3 started after the Mac test passed (2026-10-25).
 
 **What exists and can be reused:**
 
@@ -426,11 +447,11 @@ Part 3 starts after the Mac test passes.
 
 | Gate | Bar | Result |
 |---|---|---|
-| G0 Precondition | The Mac test of the shipped LTX-2.5 and H3 support has passed | not run |
-| G1 Bit identity | Stock 2.5 distilled, converted at q4, equals the `ltx25-4` repo's `transformer-distilled.safetensors` bit for bit. The input is the verified distilled transformer ([Verified sources](#verified-sources)) | not run |
-| G2 Load | The converted folder is read as a 2.5 pack, and its clip is identical to `ltx25-4`'s | not run |
-| G3 Fine-tune | It converts at q4 with a peak of at most 6 GB (2.3: 5.0 GB). Review | not run |
-| G4 q8 | It loads and renders on 32 GB, with no more swap than the 2.3 q8 run | not run |
+| G0 Precondition | The Mac test of the shipped LTX-2.5 and H3 support has passed | Passed: the Mac test and its re-run on the fix branch (`ltx25-4` frames identical before and after the trimmed re-download) |
+| G1 Bit identity | Stock 2.5 distilled, converted at q4, equals the `ltx25-4` repo's `transformer-distilled.safetensors` bit for bit. The input is the verified distilled transformer ([Verified sources](#verified-sources)) | Not run (user: minimal set; names, dtypes and shapes matched from Linux) |
+| G2 Load | The converted folder is read as a 2.5 pack, and its clip is identical to `ltx25-4`'s | Not run (user: minimal set); G3's folder loads as a 2.5 pack and renders |
+| G3 Fine-tune | It converts at q4 with a peak of at most 6 GB (2.3: 5.0 GB). Review | Pass: a community LTX-2.5 FP8 fine-tune converts in 25.7 s at a 2.8 GiB peak, no swap. The clip (768×448, 121 frames, 179 s, 17.9 GiB) is sharp and coherent. Disk grew 14.32 GiB: transformer 10.54 plus the connector 3.75, written from the checkpoint (see the observation below) |
+| G4 q8 | It loads and renders on 32 GB, with no more swap than the 2.3 q8 run | Pass on a re-run: converts in 29.4 s at 2.9 GiB; renders at a 22.7 GiB peak (the 2.3 q8 run: 22.67 GiB, swap 0). The first render gained 0.60 GiB of swap for no identified reason; the same command again gained 0.05 GiB. Sharp and coherent, with a small green speck on the fox's shoulder in every frame |
 
 Decision: build once G0–G3 pass. q8 is offered only if G4 passes.
 
@@ -441,7 +462,7 @@ Decision: build once G0–G3 pass. q8 is offered only if G4 passes.
 
 ### Part 4: MiniMax H3 on macOS (size L)
 
-Part 4 starts after the Mac test passes. It is the largest part, because no streaming INT8 writer exists upstream.
+Part 4 started after the Mac test passed (2026-10-25). It is the largest part, because no streaming INT8 writer exists upstream.
 
 **What exists and can be reused:**
 
@@ -467,13 +488,13 @@ Part 4 starts after the Mac test passes. It is the largest part, because no stre
 
 | Gate | Bar | Result |
 |---|---|---|
-| G0 Precondition | The Mac test has passed | not run |
-| G1 Four blocks | Four stream-quantized blocks strict-load with `load_dit` | not run |
-| G2 Inverse mapping | The sampled tensors, mapped from diffusers to native names, are bit-identical to `FL2VA/transformer/` | not run |
-| G3 Cost | The full stock conversion peaks at 8 GB or less, with no swap. Time recorded | not run |
-| G4 Quality | A clip from RTN-converted stock against the shipped calibrated INT8 `h3`. Review: no visible loss. PSNR recorded | not run |
-| G5 Turbo | A clip with the LoRA merged before quantizing, against stock's run-time LoRA clip. Review: no visible loss | not run |
-| G6 Fine-tune | A community fine-tune converts and renders. Review | not run |
+| G0 Precondition | The Mac test has passed | Passed: the Mac test and its re-run on the fix branch |
+| G1 Four blocks | Four stream-quantized blocks strict-load with `load_dit` | Not run alone (user: minimal set); G6's full folder strict-loads and renders text to video |
+| G2 Inverse mapping | The sampled tensors, mapped from diffusers to native names, are bit-identical to `FL2VA/transformer/` | Not run (user: minimal set; passed on Linux, same code) |
+| G3 Cost | The full stock conversion peaks at 8 GB or less, with no swap. Time recorded | Bar missed: three H3 conversions peaked at 8.8, 9.1 and 9.4 GiB, with no swap; the 9.4 GiB one took 57.4 s (peak footprint 9.38 GiB, 10.07 GB, max RSS 11.35 GB). The bar was set too low |
+| G4 Quality | A clip from RTN-converted stock against the shipped calibrated INT8 `h3`. Review: no visible loss. PSNR recorded | Not run (user: minimal set) |
+| G5 Turbo | A clip with the LoRA merged before quantizing, against stock's run-time LoRA clip. Review: no visible loss | Not run as specified (user: minimal set). G6's result stands in: a fine-tune converted with the turbo merged keeps the start image (27.5 dB against stock's 27.7 dB). Stock with the turbo off gave 12.9 dB, so the turbo is needed, and the merge keeps it |
+| G6 Fine-tune | A community fine-tune converts and renders. Review | Pass: a community fine-tune converted with the turbo merged renders sharp, and its image to video frame 0 is 27.5 dB / SSIM 0.857 against the start image, equal to stock `h3` (27.7 dB / 0.866). Two other community checkpoints ignored the start image (9.5 dB and 5.1 dB), one converted with `--turbo` and one with the merge, so that follows the checkpoint, not the converter. The 5.1 dB one (pruned rank 8, INT8, 20.98 GB, converted in 57.4 s) renders text to video sharp and coherent (`xs`, 73 frames, 257 s, 11.7 GiB) |
 
 Decision: build once G0–G3 and G5 pass. If G4 fails (RTN visibly worse than calibrated), stop and ask the user. The calibrated path needs recorded activations and a CUDA device, so it would be a different proposal.
 
