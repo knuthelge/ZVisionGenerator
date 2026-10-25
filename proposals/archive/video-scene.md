@@ -1,6 +1,6 @@
 # A scene for video prompts
 
-**Status:** Done (unreleased, 2026-10-11)
+**Status:** Done (v0.13.0, 2026-10-11)
 
 ## Problem
 

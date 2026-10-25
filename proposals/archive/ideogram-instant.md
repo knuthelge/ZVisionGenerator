@@ -1,6 +1,6 @@
 # Replace Ideogram 4 with Ideogram 4 Instant
 
-**Status:** Done (2026-10-21, unreleased). Built on Windows/Linux and measured on a 10 GB NVIDIA GPU; the macOS test plan (step 5) passed on a 32 GB M5 (both below).
+**Status:** Done (2026-10-21, v0.13.0). Built on Windows/Linux and measured on a 10 GB NVIDIA GPU; the macOS test plan (step 5) passed on a 32 GB M5 (both below).
 
 ### Shipped
 

@@ -1,6 +1,6 @@
 # Upscale existing videos 2×
 
-**Status:** In progress (2026-10-24). Windows and Linux have shipped (unreleased) with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is not started: it uses LTX's own upsampler and refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
+**Status:** In progress (2026-10-24). Windows and Linux ship in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is not started: it uses LTX's own upsampler and refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
 
 ## Problem
 
@@ -148,7 +148,7 @@ Write the numbers, the default step count, the tiling rule and the plain-or-IC-L
 
 ## Windows and Linux: SeedVR2 (shipped)
 
-Shipped on 2026-10-24 (unreleased). The viewer's Upscale menu offers **2×** for every video in the gallery, made by the app or not. `TorchSeedVR2Upscaler.upscale_video` runs the vendored core in our own chunk loop: the DiT and VAE are built once and cached across chunks, each chunk's frames are streamed to the encoder, and the original sound is kept (AAC copied, other codecs re-encoded to AAC). Settings: the image upscale's SeedVR2 tier (7B FP8, 3B below about 22 GB of system memory), softness 0, temporal overlap 0, 512-px VAE tiles, and the largest 4n+1 batch whose estimate fits the GPU's budget. A clip the card can only take at batch 1 is marked as very slow. The job card shows batches done and the time left. HDR, variable frame rate, interlaced, non-square-pixel and unreadable sources are refused when clicked. An upscaled video can't be extended. Stepping the batch down after an out-of-memory error is proposed separately in [video-upscale-batch-step-down.md](video-upscale-batch-step-down.md).
+Shipped on 2026-10-24, in v0.13.0. The viewer's Upscale menu offers **2×** for every video in the gallery, made by the app or not. `TorchSeedVR2Upscaler.upscale_video` runs the vendored core in our own chunk loop: the DiT and VAE are built once and cached across chunks, each chunk's frames are streamed to the encoder, and the original sound is kept (AAC copied, other codecs re-encoded to AAC). Settings: the image upscale's SeedVR2 tier (7B FP8, 3B below about 22 GB of system memory), softness 0, temporal overlap 0, 512-px VAE tiles, and the largest 4n+1 batch whose estimate fits the GPU's budget. A clip the card can only take at batch 1 is marked as very slow. The job card shows batches done and the time left. HDR, variable frame rate, interlaced, non-square-pixel and unreadable sources are refused when clicked. An upscaled video can't be extended. Stepping the batch down after an out-of-memory error is proposed separately in [video-upscale-batch-step-down.md](video-upscale-batch-step-down.md).
 
 ### W0 spike results
 

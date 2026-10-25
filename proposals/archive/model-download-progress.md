@@ -1,6 +1,6 @@
 # Show model download progress in Web UI jobs
 
-**Status:** Done (2026-10-21, unreleased). On-demand Enhance progress and LoRA import progress were cut.
+**Status:** Done (2026-10-21, v0.13.0). On-demand Enhance progress and LoRA import progress were cut.
 
 ## Shipped
 

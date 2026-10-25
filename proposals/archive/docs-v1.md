@@ -1,6 +1,6 @@
 # Documentation for v1: Web UI, CLI, Concepts and Developer
 
-**Status:** Done (unreleased, 2026-10-25). Shipped in c99d830 to 642c197: Zensical, the four-section site, the reference tests, 14 screenshots, the Home hero, the dark theme and section banners.
+**Status:** Done (v0.13.0, 2026-10-25). Shipped in c99d830 to 642c197: Zensical, the four-section site, the reference tests, 14 screenshots, the Home hero, the dark theme and section banners.
 
 ## Problem
 

@@ -1,6 +1,6 @@
 # Extend a video
 
-**Status:** Done (unreleased, 2026-10-12), on macOS. Windows and Linux moved to [platform parity](platform-parity.md) step 11. The prompt design builds on [A scene for video prompts](video-scene.md).
+**Status:** Done (v0.13.0, 2026-10-12), on macOS. Windows and Linux moved to [platform parity](platform-parity.md) step 11. The prompt design builds on [A scene for video prompts](video-scene.md).
 
 ## Problem
 

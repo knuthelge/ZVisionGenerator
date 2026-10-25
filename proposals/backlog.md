@@ -43,7 +43,7 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 - `backends/cuda/video/h3/lora.py` docstring mentions a planning label ("C11's `load_copy`"); `h3/conditioning.py` imports the private `_weight_files` from `decode.py`.
 - The Windows CUDA install command is hand-copied into `docs/install.md` while the code carries it as `CUDA_INSTALL_COMMAND` in `backends/cuda/driver.py`; a later index change (cu130 to cu131) would leave the error message and the docs apart. A test in `tests/test_docs_reference.py` asserting the docs contain the constant would tie them. Decision: skipped for v1.
 - Docs: `docs/developer/downloads.md` names `ziv convert --model-type h3`; the command is `ziv model model --model-type h3`. `docs/install.md` says Apple Silicon (M1 or newer) but the locked mlx and torch wheels need macOS 14. `core/video_backend.py` says `mode` is accepted and ignored for LTX; the CUDA LTX backend raises on a mismatched mode.
-- Proposals to archive once confirmed: `ltx25-h3-checkpoint-conversion.md` (implemented, Mac gates pending), `macos-speed.md` (settled: nothing further to build), `docs-v1.md` (merged). Status passes due on `ltx-2.5.md`, `video-first-last-frame.md` and `video-upscale-existing.md`.
+- `ltx25-h3-checkpoint-conversion.md` stays open until its two macOS findings are settled: W4A8 files that keep their records in the safetensors metadata, and the LTX connectors' design rule. `macos-speed.md` stays open: only item 4 (LTX streaming) is settled.
 
 ## Accepted as is
 

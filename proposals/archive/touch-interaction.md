@@ -1,8 +1,8 @@
 # Touch that feels native, on every screen
 
-**Status:** Done (2026-10-20, unreleased)
+**Status:** Done (2026-10-20, v0.13.0)
 
-## Shipped (2026-10-20, unreleased, tested on an iPhone)
+## Shipped (2026-10-20, v0.13.0, tested on an iPhone)
 
 All eight stages, one commit each. Checked in headless Chrome at a phone size with real touch input through CDP (sheet pulls from the head and the body, scrolled and not, spring-back, popover, drawer, dialogs as sheets, the composer and `--app-height`, no field under 16 px, no page errors) and at desktop size; not committed as a test, since it needs a Playwright dependency. Left out, and open:
 

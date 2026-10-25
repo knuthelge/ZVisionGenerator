@@ -1,6 +1,6 @@
 # Delete enhancer models, and a Hugging Face downloads list
 
-**Status:** Done (unreleased, 2026-10-18)
+**Status:** Done (v0.13.0, 2026-10-18)
 
 Shipped as proposed, plus two things found while building it:
 

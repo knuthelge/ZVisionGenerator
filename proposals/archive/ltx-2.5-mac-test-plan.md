@@ -1,6 +1,6 @@
 # Mac test plan: LTX-2.5 and MiniMax H3 (32 GB Apple Silicon)
 
-**Status:** Done (unreleased, 2026-10-25). The plan ran on an M5 with 32 GiB, then the failed steps ran again on the fix branch `fix/mac-video` (all passed; fixes in the commits "download only the files macOS LTX loads, at pinned revisions", "run MiniMax H3 image modes on macOS in stages" and "extend with the clip's own model when its downloads are present", and in the `test(video)` commits that made the test suite pass on macOS). See [Results](#results-2026-10-25) and [Follow-ups](#follow-ups). The steps below are kept as the record of what was run; the H-c and W2 bars are the corrected ones.
+**Status:** Done (v0.13.0, 2026-10-25). The plan ran on an M5 with 32 GiB, then the failed steps ran again on the fix branch `fix/mac-video` (all passed; fixes in the commits "download only the files macOS LTX loads, at pinned revisions", "run MiniMax H3 image modes on macOS in stages" and "extend with the clip's own model when its downloads are present", and in the `test(video)` commits that made the test suite pass on macOS). See [Results](#results-2026-10-25) and [Follow-ups](#follow-ups). The steps below are kept as the record of what was run; the H-c and W2 bars are the corrected ones.
 
 ## Summary
 

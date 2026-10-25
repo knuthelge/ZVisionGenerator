@@ -1,6 +1,6 @@
 # Download only the LTX files macOS uses
 
-**Status:** Done (unreleased, 2026-10-25). Shipped as the commits "download only the files macOS LTX loads, at pinned revisions" (pinned, trimmed downloads) and "extend with the clip's own model when its downloads are present" (CLI Extend keeps the clip's model), and verified on a Mac (see [Mac results](#mac-results)).
+**Status:** Done (v0.13.0, 2026-10-25). Shipped as the commits "download only the files macOS LTX loads, at pinned revisions" (pinned, trimmed downloads) and "extend with the clip's own model when its downloads are present" (CLI Extend keeps the clip's model), and verified on a Mac (see [Mac results](#mac-results)).
 
 ## Problem
 

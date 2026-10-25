@@ -1,6 +1,6 @@
 # Review before upscaling
 
-**Status:** Done (unreleased, 2026-10-12). Shipped in `a45e8e9` (feature) and `2741388` (docs): images on every platform, video on macOS through the `_stage1` wrapper in `video_mac`. The manual real-model checks on macOS (step 2) are done. Video review on CUDA moved to [platform parity](platform-parity.md) step 3, since it builds on the two-stage upscale there; until then `supports_video_upscale_review()` is false on CUDA.
+**Status:** Done (v0.13.0, 2026-10-12). Shipped in `a45e8e9` (feature) and `2741388` (docs): images on every platform, video on macOS through the `_stage1` wrapper in `video_mac`. The manual real-model checks on macOS (step 2) are done. Video review on CUDA moved to [platform parity](platform-parity.md) step 3, since it builds on the two-stage upscale there; until then `supports_video_upscale_review()` is false on CUDA.
 
 ## Problem
 

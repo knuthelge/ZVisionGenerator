@@ -1,6 +1,6 @@
 # Prompt enhancer v3: a test bench, sharper rules, better options
 
-**Status:** Done (2026-10-22, unreleased). Phases 1 and 2 and phase 3's option set and popover shipped. Per-model hints, worked examples and the bench's local judge moved to [Prompt enhancer: model hints, worked examples and a local judge](../prompt-enhancer-hints.md).
+**Status:** Done (2026-10-22, v0.13.0). Phases 1 and 2 and phase 3's option set and popover shipped. Per-model hints, worked examples and the bench's local judge moved to [Prompt enhancer: model hints, worked examples and a local judge](../prompt-enhancer-hints.md).
 
 Three phases, each shippable on its own:
 

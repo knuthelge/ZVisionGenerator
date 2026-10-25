@@ -1,6 +1,6 @@
 # Upscale existing images on macOS with SeedVR2
 
-**Status:** Done (unreleased, 2026-10-13). The spike gate passed before any code; the shipped behaviour is described in the Web UI image guide.
+**Status:** Done (v0.13.0, 2026-10-13). The spike gate passed before any code; the shipped behaviour is described in the Web UI image guide.
 
 ## Problem
 

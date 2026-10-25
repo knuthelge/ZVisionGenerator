@@ -1,6 +1,6 @@
 # Named presets, and a LoRA picker sorted by model
 
-**Status:** Done (unreleased, 2026-10-22). Both parts shipped as described below.
+**Status:** Done (v0.13.0, 2026-10-22). Both parts shipped as described below.
 
 ## Problem
 

@@ -1,6 +1,6 @@
 # First and last frame for image-to-video
 
-**Status:** Proposed (2026-10-23). Partly shipped: the Web UI **Last frame** control, its recorded settings and Reuse, the `--end-image` preview and the enhancer's two-frame rule shipped for MiniMax H3 on `feat/ltx-2.5`. LTX first and last frame, with its backend work, is still proposed.
+**Status:** Proposed (2026-10-23). Partly shipped: the Web UI **Last frame** control, its recorded settings and Reuse, the `--end-image` preview and the enhancer's two-frame rule shipped for MiniMax H3 in v0.13.0. LTX first and last frame, with its backend work, is still proposed.
 
 ## Problem
 

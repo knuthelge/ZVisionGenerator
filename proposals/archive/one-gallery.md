@@ -1,6 +1,6 @@
 # One Gallery, and a viewer that feels native on every device
 
-**Status:** Done (2026-10-24, unreleased). All six stages shipped, one commit each; the gestures, the flight, the hold and right-click menus and the panel were driven in headless Chrome at phone, iPad and desktop sizes. On a real phone, the swipe-back and the pull-to-close deserve one pass.
+**Status:** Done (2026-10-24, v0.13.0). All six stages shipped, one commit each; the gestures, the flight, the hold and right-click menus and the panel were driven in headless Chrome at phone, iPad and desktop sizes. On a real phone, the swipe-back and the pull-to-close deserve one pass.
 
 ## Problem
 

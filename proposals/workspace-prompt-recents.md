@@ -2,7 +2,7 @@
 
 **Status:** In progress (2026-10-21)
 
-## Shipped (unreleased): save a Workspace prompt to a prompt file
+## Shipped in v0.13.0: save a Workspace prompt to a prompt file
 
 - **Save…** sits in the prompt box's tools row (not in a Compose header menu) and offers Recent files, **Browse…** and **New file…**.
 - It saves the text the prompt box shows (Original or Enhanced, with the scene for video and the negative prompt when shown) and writes no `enhance:` field.

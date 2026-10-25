@@ -1,6 +1,6 @@
 # An in-app path browser
 
-**Status:** Done (unreleased, 2026-10-15)
+**Status:** Done (v0.13.0, 2026-10-15)
 
 ## Problem
 

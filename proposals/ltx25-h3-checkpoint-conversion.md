@@ -1,6 +1,6 @@
 # Convert LTX-2.5 and MiniMax H3 fine-tunes
 
-**Status:** Implemented on all three platforms; macOS gates run as a minimal set, two open findings (2026-10-25), on the branch `feat/ltx25-h3-checkpoint-conversion`. The Windows/Linux gates ran on the reference card; the macOS gates ran on a 32 GiB M5 as a minimal set (Part 3 G3 and G4, Part 4 G6). See [Implementation and results](#implementation-and-results-2026-10-25) and [macOS gate results](#macos-gate-results-2026-10-25).
+**Status:** Implemented on all three platforms; macOS gates run as a minimal set, two open findings (2026-10-25), shipping in v0.13.0. The Windows/Linux gates ran on the reference card; the macOS gates ran on a 32 GiB M5 as a minimal set (Part 3 G3 and G4, Part 4 G6). See [Implementation and results](#implementation-and-results-2026-10-25) and [macOS gate results](#macos-gate-results-2026-10-25).
 
 Four parts, in this order:
 
@@ -178,7 +178,7 @@ LTX-2.5, from headers:
   - It adds `keyframes_abs_pos_embedding` (`[1, 4096]`). `_normalized_name` (`ltx_checkpoint.py:143`) drops it when it has no prefix, yet the MLX pipeline needs it for keyframes (`ltx_pipelines_mlx/_base.py:373-389`).
   - The text encoder is Gemma 4.
   - There are 258 connector tensors, against the 262 in the 2.3 pins: 2.3 also pins its 4 `text_embedding_projection` tensors, and 2.5 has none in the transformer.
-- **Community fine-tunes.** Full ones are few. One is a ComfyUI-scaled FP8 file, `ChrisColeTech/LTX-2.5-uncensored-v1.1-FP8` (21.5 GB, `weight_scale` of shape `[1]`). Most 2.5 repos are GGUF, FP8, NVFP4 or W4A8 quantizations, repackages, or LoRAs. unsloth's 2.5 single file uses torchao's `Float8Tensor` (`_weight_qdata`, `_weight_scale`), which no reader here knows.
+- **Community fine-tunes.** Full ones are few. One is a ComfyUI-scaled FP8 file (21.5 GB, `weight_scale` of shape `[1]`). Most 2.5 repos are GGUF, FP8, NVFP4 or W4A8 quantizations, repackages, or LoRAs. unsloth's 2.5 single file uses torchao's `Float8Tensor` (`_weight_qdata`, `_weight_scale`), which no reader here knows.
 - **The distilled LoRA.** The original is [`Lightricks/LTX-2.5`](https://huggingface.co/Lightricks/LTX-2.5) `loras/ltx-2.5-22b-distilled-lora-450-bf16.safetensors` (8,899,889,568 bytes, gated). `lxxxy6/LTX-2.5` has an ungated copy with the same oid: rank 450 and alpha 450, with `diffusion_model.<module>.lora_A/B.weight` keys that `_lora_pairs` (`ltx_checkpoint.py:261`) already reads. The 2.3 distillation and connector pins don't carry over to 2.5.
 - **macOS.** The shipped `ltx25-4` repo, [`MarceloFSO/ltx-2.5-mlx-q4-fast`](https://huggingface.co/MarceloFSO/ltx-2.5-mlx-q4-fast), uses the MLX names and the q4 group-64 scheme that the 2.3 writer already produces. Two things block the 2.3 writer from making a 2.5 folder:
   - `_BASE_FILES` lacks what the 2.5 pack needs (`model_files.py:98-109`, `mac/video.py:766-771`): the Gemma 4 bundle, the conv and AV VAEs, and the duration head.

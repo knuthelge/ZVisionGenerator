@@ -1,6 +1,6 @@
 # Stable frames: the frame first, pages remember, anchors do not move
 
-**Status:** Done (2026-10-24, unreleased). Seven of the eight stages shipped, one commit each (stage 6 was dropped after review); checked frame by frame in headless Chrome at a phone size (the stage keeps its height from the first frame on a return to the Workspace, and Back closes the drawer and sheets without leaving the page).
+**Status:** Done (2026-10-24, v0.13.0). Seven of the eight stages shipped, one commit each (stage 6 was dropped after review); checked frame by frame in headless Chrome at a phone size (the stage keeps its height from the first frame on a return to the Workspace, and Back closes the drawer and sheets without leaving the page).
 
 ## Problem
 

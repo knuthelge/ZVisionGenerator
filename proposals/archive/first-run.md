@@ -1,6 +1,6 @@
 # First run: pick a model, download it, and no gated defaults
 
-**Status:** Done (unreleased, 2026-10-21). All four parts shipped, plus friendly model names. The dialog's final design differs from the sketch in §4; [As built](#as-built) records what shipped.
+**Status:** Done (v0.13.0, 2026-10-21). All four parts shipped, plus friendly model names. The dialog's final design differs from the sketch in §4; [As built](#as-built) records what shipped.
 
 ## Done
 
