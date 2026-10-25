@@ -21,10 +21,9 @@ from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
 from zvisiongenerator.utils.h3_memory import h3_lora_bytes
-from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.model_memory import clip_memory_fit
-from zvisiongenerator.downloads import describe_refusal
-from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
+from zvisiongenerator.downloads import describe_refusal, video_model_downloaded
+from zvisiongenerator.utils.paths import canonical_model_name, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, extend_step, load_extend_source, require_extend_family, resolve_extend_frames
@@ -167,12 +166,15 @@ def _load_extend_source(parser: argparse.ArgumentParser, path: str) -> ExtendSou
 
 
 def _model_available_locally(model: str, config: dict[str, Any]) -> bool:
-    """Return whether a model reference resolves to a fully downloaded local model."""
+    """Return whether every download the model's plan needs on this platform is on disk."""
+    aliases = config.get("model_aliases", {})
+    name = canonical_model_name(model, aliases=aliases, platform_key=sys.platform)
     try:
-        resolved = resolve_model_path(model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+        resolved = resolve_model_path(name, aliases=aliases, platform_key=sys.platform)
+        family = detect_video_model(resolved).family
+        return family != "unknown" and video_model_downloaded(resolved, family=family, config=config, model_name=name)
     except ValueError:
         return False
-    return find_local_model_dir(resolved) is not None
 
 
 def _extend_model(model: str | None, source: ExtendSource, config: dict[str, Any]) -> str:
@@ -390,10 +392,11 @@ def main(*, prog: str = "ziv-video") -> None:
 
     # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...); the picked name chooses the quantize level
     # and is what the video records, as the Web UI does: on Windows/Linux ltx-4 and ltx-8 resolve to the same repo.
-    model_name = args.model
+    # A typed repo id that is an alias's repo runs as that alias, with its pin, version and recorded name.
+    model_name = canonical_model_name(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
     args.model_name = model_name
     try:
-        args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+        args.model = resolve_model_path(model_name, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
     except ValueError as e:
         parser.error(str(e))
 

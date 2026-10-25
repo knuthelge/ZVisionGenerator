@@ -573,7 +573,8 @@ def _run_cli(
     app_config = {"ui": {"default_models": {"video": "ltx-8"}}} if config is None else config
     monkeypatch.setattr(video_cli, "load_config", lambda: app_config)
     monkeypatch.setattr(video_cli, "resolve_model_path", resolve or (lambda model, **_: model))
-    monkeypatch.setattr(video_cli, "find_local_model_dir", lambda ref: tmp_path if ref in local_models else None)
+    if local_models is not None:
+        monkeypatch.setattr(video_cli, "video_model_downloaded", lambda ref, **_: ref in local_models)
     monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
     monkeypatch.setattr(video_cli, "supports_video_extend", lambda: extend_supported)
     monkeypatch.setattr(video_cli, "supports_video_audio", lambda: True)
@@ -615,6 +616,14 @@ def _run_cli(
                 captured["warnings"] = [str(item.message) for item in seen]
                 captured["memory_warnings"] = [message for message in captured["warnings"] if "GB" in message]
     return captured
+
+
+_H3_CONFIG = {**load_config(), "ui": {"default_models": {"video": "ltx-8"}}}
+
+
+def _h3_repo(model: str, **_) -> str:
+    """Resolve the alias ``h3`` to a repo reference, as the real resolver does; other names stay as they are."""
+    return "org/h3" if model == "h3" else model
 
 
 class TestVideoCliScene:
@@ -972,6 +981,34 @@ class TestVideoCliExtend:
         assert captured["backend"].load_model.call_args.args[0] == "org/recorded-model"
         assert captured["backend"].load_model.call_args.kwargs["mode"] == "extend"
         assert not any("not available locally" in message for message in captured["warnings"])
+
+    def test_a_source_model_whose_every_download_is_present_is_kept(self, monkeypatch, tmp_path):
+        from zvisiongenerator.downloads import DownloadTarget
+
+        targets = (DownloadTarget("org/h3", "rev1", ()), DownloadTarget("org/h3-text", "rev2", ()))
+        monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", lambda *_args, **_kwargs: targets)
+        present = {"org/h3", "org/h3-text"}
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: target.repo_id in present)
+        h3_info = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=24, frame_alignment=17, resolution_alignment=32)
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model="h3"), local_models=None, detect=lambda _model: h3_info, config=_H3_CONFIG, resolve=_h3_repo)
+        assert captured["args"].model_name == "h3"
+        assert not any("not available locally" in message for message in captured["warnings"])
+
+    def test_a_source_model_with_one_download_missing_falls_back_with_a_warning(self, monkeypatch, tmp_path):
+        from zvisiongenerator.downloads import DownloadTarget
+
+        targets = (DownloadTarget("org/h3", "rev1", ()), DownloadTarget("org/h3-text", "rev2", ()))
+        monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", lambda *_args, **_kwargs: targets)
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: target.repo_id == "org/h3")
+        h3_info = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=24, frame_alignment=17, resolution_alignment=32)
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model="h3"), local_models=None, detect=lambda _model: h3_info, config=_H3_CONFIG, resolve=_h3_repo)
+        assert captured["args"].model == "ltx-8"
+        assert any("(h3)" in message and "not available locally" in message for message in captured["warnings"])
+
+    def test_a_typed_repo_id_of_an_alias_runs_as_that_alias(self, monkeypatch, tmp_path):
+        config = {"model_aliases": {"ltx-4": "org/ltx-mlx-q4"}, "ui": {"default_models": {"video": "ltx-8"}}}
+        captured = _run_cli(monkeypatch, tmp_path, ["-m", "org/ltx-mlx-q4", "--prompt", "a dog"], backend=MagicMock(), config=config)
+        assert captured["args"].model_name == "ltx-4"
 
     def test_an_explicit_model_wins(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "org/other"], source=self._source(model="org/recorded-model"))
