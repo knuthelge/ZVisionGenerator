@@ -23,6 +23,8 @@ function makeJob(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
     previewUrl: null,
     stageName: 'text_to_image',
     meta: '3:4 · m · 32 steps',
+    width: 960,
+    height: 1280,
     lastEventType: 'step',
     ...overrides,
   } as ActiveJobState;
@@ -51,6 +53,12 @@ describe('JobPreview', () => {
     expect(figure.style.aspectRatio.startsWith('0.75')).toBe(true);
     expect(figure.textContent).toContain('First preview at 25%');
     expect(figure.querySelector('img')).toBeNull();
+  });
+
+  it('takes the shape of a custom size, not the ratio preset beside it', () => {
+    app = flushSync(() => mount(JobPreview, { target, props: { job: makeJob({ meta: '1600x900 · 32 steps', width: 1600, height: 900 }) } }));
+    const figure = target.querySelector('[data-testid="job-preview"]') as HTMLElement;
+    expect(figure.style.aspectRatio.startsWith('1.77')).toBe(true);
   });
 
   it('shows the live preview once it arrives, with how far along it is', () => {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
-  import { isPaused, isVideo, itemActivity, jobPhase, stepFraction } from '$lib/state/jobView';
+  import { isPaused, isVideo, itemActivity, jobPhase, outputAspect, stepFraction } from '$lib/state/jobView';
   import type { ActiveJobState } from '$lib/types';
 
   interface Props {
@@ -15,11 +15,8 @@
 
   const phase = $derived(jobPhase(job));
   const activity = $derived(itemActivity(job));
-  // The slot keeps the output's shape from the start, read from the job's meta ("2:3 · m · 8 steps"), so it never jumps.
-  const aspect = $derived.by(() => {
-    const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)/.exec(job.meta ?? '');
-    return match ? Number(match[1]) / Number(match[2]) : 1;
-  });
+  // The slot keeps the output's shape from the start, so it never jumps.
+  const aspect = $derived(outputAspect(job));
   // Paused between images: the image that just finished, sharp. Otherwise the transient live preview.
   const pausedBetween = $derived(isPaused(job) && phase === 'generate' && !!job.itemFinished);
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);

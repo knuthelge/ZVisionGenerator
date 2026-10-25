@@ -707,6 +707,8 @@ def _job_response(job_id: str, context: dict[str, Any], supported_controls: tupl
             "status_url": f"/jobs/{job_id}",
             "supported_controls": list(supported_controls),
             "meta": context["meta"],
+            "width": context.get("width"),
+            "height": context.get("height"),
             "notices": list(context.get("notices", ())),
             "queue_position": queue_position,
             **({"media_type": context["media_type"]} if "media_type" in context else {}),
@@ -724,11 +726,14 @@ def _public_job_context(
     prompt: str,
     runs: int,
     meta: str,
+    width: int,
+    height: int,
     output_dir: str,
     uploads: dict[str, str | None],
 ) -> dict[str, Any]:
     """Build the public context a job carries from submission on (shown in snapshots and the queue).
 
+    ``width`` and ``height`` are the size the job renders at, which gives its preview the output's shape.
     ``uploads`` maps each path setting (``image_path``, ``end_image_path``) to the file the job uses for it.
     """
     requested_workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback=_default_workflow_for_mode(mode))
@@ -741,6 +746,8 @@ def _public_job_context(
         "model_label": model_label,
         "runs": runs,
         "meta": meta,
+        "width": width,
+        "height": height,
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": output_dir,
         "settings": _submitted_settings(form, uploads=uploads),
@@ -825,6 +832,8 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         "model_label": model_display_name(web_config.app_config, upscale_model),
         "runs": 1,
         "meta": upscale_size_label(plan),
+        "width": plan.option.width,
+        "height": plan.option.height,
         "notices": list(plan.notices),
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": web_config.output_dir,
@@ -871,6 +880,8 @@ def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSO
         "model_label": model_display_name(web_config.app_config, upscale_model),
         "runs": 1,
         "meta": video_upscale_size_label(plan),
+        "width": plan.request.width,
+        "height": plan.request.height,
         "notices": list(plan.notices),
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": web_config.output_dir,
@@ -1141,8 +1152,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         negative_prompt=negative_prompt,
         ratio=args.ratio,
         size=args.size,
-        width=args.width or dims["width"],
-        height=args.height or dims["height"],
+        width=eff_width,
+        height=eff_height,
         seed=args.seed or 0,
         steps=args.steps,
         guidance=args.guidance,
@@ -1175,7 +1186,10 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         model_label=model_display_name(app_config, model_name),
         prompt=prompt,
         runs=args.runs,
-        meta=f"{args.ratio} · {args.size} · {args.steps} steps",
+        # A custom size has no ratio or size preset of its own; the ratio fields hold the form's defaults.
+        meta=f"{eff_width}x{eff_height} · {args.steps} steps" if args.width else f"{args.ratio} · {args.size} · {args.steps} steps",
+        width=eff_width,
+        height=eff_height,
         output_dir=args.output,
         uploads={"image_path": args.image_path},
     )
@@ -1332,6 +1346,8 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         prompt=prompt or scene or "",
         runs=args.runs,
         meta=meta,
+        width=args.width,
+        height=args.height,
         output_dir=args.output,
         uploads={"image_path": image_path, "end_image_path": end_image_path},
     )

@@ -2550,6 +2550,20 @@ def test_submit_image_job_queues_with_its_public_context(monkeypatch, tmp_path):
     assert context["settings"] == {"model": "zit", "prompt": "hello", "steps": "9", "workflow": "txt2img"}
 
 
+def test_submit_image_job_with_a_custom_size_carries_that_size(monkeypatch, tmp_path):
+    """A custom size sets the job's size and label, not the ratio preset the form still holds."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=_make_resolved_image_defaults(), submitted=submitted)
+
+    response = web_server._submit_image_job({"model": "zit", "prompt": "hello", "steps": "9", "width": "1600", "height": "896", "workflow": "txt2img"}, web_config)
+
+    context = response["context"]
+    assert (context["width"], context["height"]) == (1600, 896)
+    assert context["meta"].startswith("1600x896 · ")
+
+
 def test_a_submitted_job_carries_the_models_configured_name_beside_its_id(monkeypatch, tmp_path):
     """AC4.5: the context and the response say the name; the model id is unchanged."""
     web_config = _make_web_config()

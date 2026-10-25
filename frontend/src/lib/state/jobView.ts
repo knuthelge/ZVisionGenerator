@@ -117,6 +117,11 @@ const ENDED_PHASE_WORDS: Record<JobPhase, string> = {
   generate: 'while generating',
 };
 
+/** Return the width/height ratio of the job's output, or 1 when the job does not say its size. */
+export function outputAspect(job: ActiveJobState): number {
+  return job.width && job.height ? job.width / job.height : 1;
+}
+
 export function isActive(job: ActiveJobState): boolean {
   return job.status === 'queued' || job.status === 'running' || job.status === 'paused';
 }

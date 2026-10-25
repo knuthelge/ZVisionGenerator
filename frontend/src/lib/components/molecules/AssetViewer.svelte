@@ -999,10 +999,10 @@
   /* The backdrop and the chrome clear as the image is pulled down (--pull), and the chrome goes on a tap. */
   .viewer-backdrop { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-bg-base) 70%, black); opacity: var(--pull, 1); }
   .viewer-panel { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
-  /* A desktop or a tablet: a panel over the page, the details beside the image, a backdrop that closes on click. */
+  /* A desktop or a tablet: a panel over the whole page but a gutter of backdrop, which closes on click; the details sit beside the image. */
   .asset-viewer[data-compact='false'] { padding: 24px; }
   .asset-viewer[data-compact='false'] .viewer-backdrop { background: var(--color-scrim); cursor: default; }
-  .asset-viewer[data-compact='false'] .viewer-panel { flex: none; width: min(1400px, 100%); height: 100%; margin: 0 auto; overflow: hidden; border-radius: var(--radius-lg); background: var(--color-bg-base); box-shadow: 0 24px 64px var(--color-scrim); }
+  .asset-viewer[data-compact='false'] .viewer-panel { flex: none; width: 100%; height: 100%; overflow: hidden; border-radius: var(--radius-lg); background: var(--color-bg-base); box-shadow: 0 24px 64px var(--color-scrim); }
   .viewer-bar, .viewer-main, .viewer-film { position: relative; }
   .viewer-bar, .viewer-film { opacity: var(--pull, 1); transition: opacity 160ms ease; }
   .asset-viewer[data-chrome='hidden'] .viewer-bar, .asset-viewer[data-chrome='hidden'] .viewer-film { opacity: 0; pointer-events: none; }

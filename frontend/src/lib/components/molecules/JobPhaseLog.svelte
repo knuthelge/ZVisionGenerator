@@ -4,7 +4,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    activeDownload, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, loadBody, outcome, phaseRows,
+    activeDownload, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, loadBody, outcome, outputAspect, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, stepUnit, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
   import type { ActiveJobState, JobDownload } from '$lib/types';
@@ -48,11 +48,8 @@
   const activity = $derived(itemActivity(job));
   const download = $derived(activeDownload(job));
 
-  // Reserve the preview slot from the start, sized from the job's aspect ratio ("2:3 · m · 8 steps"), so text never re-wraps.
-  const aspect = $derived.by(() => {
-    const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)/.exec(job.meta ?? '');
-    return match ? Number(match[1]) / Number(match[2]) : 1;
-  });
+  // Reserve the preview slot from the start, at the output's shape, so text never re-wraps.
+  const aspect = $derived(outputAspect(job));
   const previewWidth = $derived(Math.round(Math.min(PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT * aspect)));
   // Paused between images: show the image that just finished, sharp. Otherwise the transient live preview.
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);

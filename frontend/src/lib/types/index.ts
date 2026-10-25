@@ -898,6 +898,9 @@ export interface JobContext {
   supported_controls?: string[];
   /** Size label, e.g. "2:3 · m · 8 steps". */
   meta?: string;
+  /** Size in pixels the job renders at; absent on jobs from an older server. */
+  width?: number | null;
+  height?: number | null;
   /** Form fields the job was submitted with; the submit response omits them, so the Workspace adds them. */
   settings?: JobSettings;
   /** 1-based place in the queue; null once the job is the active one. */

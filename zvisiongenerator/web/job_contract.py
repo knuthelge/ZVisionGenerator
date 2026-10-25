@@ -97,6 +97,8 @@ def public_job_snapshot(
         "model_label": context.get("model_label") or context.get("model", ""),
         "runs": context.get("runs", 1),
         "meta": context.get("meta", ""),
+        "width": context.get("width"),
+        "height": context.get("height"),
         "settings": context.get("settings", {}),
         "notices": list(context.get("notices", ())),
     }
