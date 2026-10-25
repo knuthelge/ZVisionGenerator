@@ -1,18 +1,17 @@
-"""Keep a bounded, persisted log of finished Web UI jobs."""
+"""Keep a bounded log of finished Web UI jobs in the app database."""
 
 from __future__ import annotations
 
 import json
 import math
-import threading
+import sqlite3
 from collections.abc import Callable, Mapping
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.utils.atomic_write import write_text_atomic
-from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils import app_db
 
-JOB_LOG_FILENAME = "jobs.jsonl"
 JOB_LOG_MAX_LINES = 2000
 JOB_LOG_KEEP_LINES = 1500
 JOB_LOG_PAGE_SIZE = 50
@@ -20,10 +19,14 @@ JOB_LOG_PROMPT_LIMIT = 500
 LOGGED_JOB_TYPES = frozenset({"image", "video", "upscale"})
 JOB_LOG_STATUS_FILTERS = ("all", "failed", "completed", "cancelled")
 
+_VERSION = 1
+_TABLE_PREFIX = "jobs_entries_v"
+_TABLE = f"{_TABLE_PREFIX}{_VERSION}"
+_STORAGE_ERRORS = (sqlite3.Error, OSError)
+
 type JobLogEntry = dict[str, Any]
 
 __all__ = [
-    "JOB_LOG_FILENAME",
     "JOB_LOG_KEEP_LINES",
     "JOB_LOG_MAX_LINES",
     "JOB_LOG_PAGE_SIZE",
@@ -32,17 +35,12 @@ __all__ = [
     "LOGGED_JOB_TYPES",
     "JobLog",
     "JobLogEntry",
+    "JobLogError",
     "build_job_log_entry",
     "is_loggable",
-    "job_log_path",
     "matches_status",
     "page_entries",
 ]
-
-
-def job_log_path() -> Path:
-    """Return the job log file inside the ZIV data directory, resolved at call time."""
-    return get_ziv_data_dir() / JOB_LOG_FILENAME
 
 
 def is_loggable(job_type: str, started_at: float | None) -> bool:
@@ -171,79 +169,94 @@ def page_entries(entries_oldest_first: list[JobLogEntry], *, status: str, page: 
     }
 
 
-def _parse_lines(text: str) -> list[JobLogEntry]:
-    """Return the entries in *text*, skipping lines that are blank, not JSON, not objects or without a ``job_id``."""
-    entries: list[JobLogEntry] = []
-    # Split on "\n" only: str.splitlines() also breaks on U+2028, U+0085 and others, which JSON output keeps raw.
-    for line in text.split("\n"):
-        line = line.removesuffix("\r")
-        if not line.strip():
-            continue
-        try:
-            entry = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(entry, dict) and isinstance(entry.get("job_id"), str):
-            entries.append(entry)
-    return entries
+class JobLogError(RuntimeError):
+    """Report that the job log could not be read or written."""
 
 
-def _serialize(entries: list[JobLogEntry]) -> str:
-    """Return *entries* as JSON lines, one per entry."""
-    return "".join(json.dumps(entry, ensure_ascii=False, default=str) + "\n" for entry in entries)
+def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
+    """Create the job log table and index, refusing a database written by a newer ziv."""
+    if from_version > _VERSION:
+        raise JobLogError("it was written by a newer version of ziv; update ziv to read it")
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_TABLE} (seq INTEGER PRIMARY KEY, job_id TEXT NOT NULL, entry TEXT NOT NULL)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS {_TABLE}_job_id ON {_TABLE} (job_id)")
+    if from_version < _VERSION:
+        app_db.drop_lower_versioned_tables(conn, _TABLE_PREFIX, _VERSION)
+
+
+_COMPONENT = app_db.Component("jobs", _VERSION, _migrate)
+
+
+def _reason(exc: BaseException) -> str:
+    """Return the operating system's description of *exc* when it has one, else its text."""
+    return getattr(exc, "strerror", None) or str(exc)
 
 
 class JobLog:
-    """Store finished jobs in a JSON-lines file, oldest first, behind one lock.
+    """Store finished jobs as rows of the ``jobs`` component of the app database, oldest first.
 
-    The path is resolved on every call. Each change reads the file, edits the entries and replaces the file
-    atomically, so readers never see a partial line. ``OSError`` from the file system propagates to the caller.
+    The database path is resolved on every call and each operation uses its own short-lived connection, so
+    servers sharing one data folder share the log; SQLite serialises the writers. Storage failures, and a
+    jobs schema written by a newer ziv, raise :class:`JobLogError`.
     """
 
     def __init__(self, path_provider: Callable[[], Path]) -> None:
-        """Create a store that finds its file through *path_provider*."""
+        """Create a store that finds its database through *path_provider*."""
         self._path_provider = path_provider
-        self._lock = threading.Lock()
 
-    def _read(self, path: Path) -> list[JobLogEntry]:
-        """Return the entries in *path*; a missing file is empty and bad lines are skipped."""
+    def _run[T](self, operation: Callable[[app_db.AppConnection], T]) -> T:
+        """Run *operation* on a new connection; roll back, quarantine a corrupt file and wrap storage errors."""
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except FileNotFoundError:
-            return []
-        return _parse_lines(text)
+            with closing(app_db.connect(self._path_provider(), components=(_COMPONENT,))) as conn:
+                try:
+                    return operation(conn)
+                except BaseException as exc:
+                    app_db.rollback(conn)
+                    app_db.recover_if_corrupt(conn, exc)
+                    raise
+        except _STORAGE_ERRORS as exc:
+            raise JobLogError(_reason(exc)) from exc
 
     def append(self, entry: JobLogEntry) -> None:
-        """Add *entry* as the newest line; past the cap only the newest lines are kept."""
-        with self._lock:
-            path = self._path_provider()
-            entries = [*self._read(path), entry]
-            if len(entries) > JOB_LOG_MAX_LINES:
-                entries = entries[-JOB_LOG_KEEP_LINES:]
-            write_text_atomic(path, _serialize(entries))
+        """Add *entry* as the newest row; past the cap only the newest rows are kept."""
+        job_id = entry.get("job_id")
+        if not isinstance(job_id, str):
+            raise ValueError("A job log entry needs a string job_id.")
+        text = json.dumps(entry, ensure_ascii=False, default=str)
+
+        def write(conn: app_db.AppConnection) -> None:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(f"INSERT INTO {_TABLE} (job_id, entry) VALUES (?, ?)", (job_id, text))
+            (count,) = conn.execute(f"SELECT COUNT(*) FROM {_TABLE}").fetchone()
+            if count > JOB_LOG_MAX_LINES:
+                conn.execute(
+                    f"DELETE FROM {_TABLE} WHERE seq < (SELECT seq FROM {_TABLE} ORDER BY seq DESC LIMIT 1 OFFSET ?)",
+                    (JOB_LOG_KEEP_LINES - 1,),
+                )
+            conn.execute("COMMIT")
+
+        self._run(write)
 
     def page(self, status: str, page: int, page_size: int = JOB_LOG_PAGE_SIZE) -> dict[str, Any]:
         """Return one newest-first page of entries matching *status*."""
-        with self._lock:
-            entries = self._read(self._path_provider())
+        rows = self._run(lambda conn: conn.execute(f"SELECT entry FROM {_TABLE} ORDER BY seq").fetchall())
+        entries = [json.loads(text) for (text,) in rows]
         return page_entries(entries, status=status, page=page, page_size=page_size)
 
     def delete(self, job_id: str) -> bool:
         """Remove the entries of *job_id*; return whether there were any."""
-        with self._lock:
-            path = self._path_provider()
-            entries = self._read(path)
-            kept = [entry for entry in entries if entry["job_id"] != job_id]
-            if len(kept) == len(entries):
-                return False
-            write_text_atomic(path, _serialize(kept))
-            return True
+        return self._delete(f"DELETE FROM {_TABLE} WHERE job_id = ?", (job_id,)) > 0
 
     def clear(self) -> int:
         """Remove every entry and return how many there were."""
-        with self._lock:
-            path = self._path_provider()
-            entries = self._read(path)
-            if path.exists():
-                write_text_atomic(path, "")
-            return len(entries)
+        return self._delete(f"DELETE FROM {_TABLE}", ())
+
+    def _delete(self, statement: str, params: tuple[str, ...]) -> int:
+        """Run one DELETE in its own write transaction and return how many rows it removed."""
+
+        def remove(conn: app_db.AppConnection) -> int:
+            conn.execute("BEGIN IMMEDIATE")
+            removed = conn.execute(statement, params).rowcount
+            conn.execute("COMMIT")
+            return removed
+
+        return self._run(remove)

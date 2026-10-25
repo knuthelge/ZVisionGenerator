@@ -47,6 +47,7 @@ from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, Settle
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
+from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
     enhancer_tier_models,
@@ -110,7 +111,7 @@ from zvisiongenerator.web.gallery import (
     list_gallery_assets,
     resolve_output_asset_path,
 )
-from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, job_log_path
+from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, JobLogError
 from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
 from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
@@ -148,7 +149,7 @@ _WORKFLOW_DEFINITIONS = WORKFLOW_DEFINITIONS
 _PROMPT_FILE_EXTENSIONS = tuple(PROMPT_FILE_CONTRACT["accepted_extensions"])
 
 download_flights = DownloadFlights()
-job_log = JobLog(job_log_path)
+job_log = JobLog(app_db.app_db_path)
 web_runner = WebRunner(download_flights=download_flights, job_log=job_log)
 download_lane = DownloadLane(flights=download_flights)
 logger = logging.getLogger(__name__)
@@ -2282,9 +2283,9 @@ def _ensure_not_downloading(*, repo_ids: tuple[str, ...] = (), paths: tuple[Path
         raise HTTPException(status_code=409, detail=f"Wait for the download of {repo} to finish, or cancel it, before deleting it.")
 
 
-def _job_log_unavailable(exc: OSError) -> HTTPException:
-    """Return the 500 for a job log file that could not be read or written."""
-    return HTTPException(status_code=500, detail=f"Could not read or write the job log: {exc.strerror or exc}")
+def _job_log_unavailable(exc: JobLogError) -> HTTPException:
+    """Return the 500 for a job log that could not be read or written."""
+    return HTTPException(status_code=500, detail=f"Could not read or write the job log: {exc}")
 
 
 # Declared before the parameterised /api/jobs/{job_id} routes.
@@ -2299,7 +2300,7 @@ def api_job_log(page: int = Query(1, ge=1), status: Literal["all", "failed", "co
     """Return one newest-first page of the finished-job log, filtered by outcome."""
     try:
         return job_log.page(status, page, JOB_LOG_PAGE_SIZE)
-    except OSError as exc:
+    except JobLogError as exc:
         raise _job_log_unavailable(exc) from exc
 
 
@@ -2308,7 +2309,7 @@ def api_delete_job_log_entry(job_id: str) -> dict[str, str]:
     """Remove one entry from the job log; 404 when it is not there."""
     try:
         deleted = job_log.delete(job_id)
-    except OSError as exc:
+    except JobLogError as exc:
         raise _job_log_unavailable(exc) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Unknown log entry: {job_id}")
@@ -2320,7 +2321,7 @@ def api_clear_job_log() -> dict[str, int]:
     """Remove every entry from the job log and return how many there were."""
     try:
         return {"deleted_count": job_log.clear()}
-    except OSError as exc:
+    except JobLogError as exc:
         raise _job_log_unavailable(exc) from exc
 
 

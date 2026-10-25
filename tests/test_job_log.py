@@ -1,23 +1,23 @@
-"""Tests for the persisted job log: entry builder, filters, paging and the file-backed store."""
+"""Tests for the persisted job log: entry builder, filters, paging and the app-database store."""
 
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
+from zvisiongenerator.utils import app_db
 from zvisiongenerator.web import job_log as job_log_module
 from zvisiongenerator.web.job_log import (
-    JOB_LOG_FILENAME,
-    JOB_LOG_KEEP_LINES,
-    JOB_LOG_MAX_LINES,
     JOB_LOG_STATUS_FILTERS,
     JobLog,
+    JobLogError,
     build_job_log_entry,
     is_loggable,
-    job_log_path,
     matches_status,
     page_entries,
 )
@@ -137,14 +137,6 @@ class TestHelpers:
     def test_is_loggable(self, job_type, started_at, expected):
         assert is_loggable(job_type, started_at) is expected
 
-    def test_default_path_is_resolved_at_call_time(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(job_log_module, "get_ziv_data_dir", lambda: tmp_path / "one")
-        first = job_log_path()
-        monkeypatch.setattr(job_log_module, "get_ziv_data_dir", lambda: tmp_path / "two")
-
-        assert first == tmp_path / "one" / JOB_LOG_FILENAME
-        assert job_log_path() == tmp_path / "two" / JOB_LOG_FILENAME
-
     def test_status_filters_constant_lists_the_route_values(self):
         assert JOB_LOG_STATUS_FILTERS == ("all", "failed", "completed", "cancelled")
 
@@ -182,104 +174,108 @@ class TestHelpers:
         assert empty == {"entries": [], "page": 1, "total_pages": 1, "total_count": 0, "page_size": 50}
 
 
+def _ids(log: JobLog) -> list[str]:
+    """Return the ids in *log*, newest first."""
+    return [e["job_id"] for e in log.page("all", 1, 10_000)["entries"]]
+
+
+def _seed_newer_schema(db: Path) -> None:
+    """Create a database whose recorded jobs schema is newer than this ziv's."""
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute("CREATE TABLE schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL) WITHOUT ROWID")
+        conn.execute("INSERT INTO schema_versions VALUES ('jobs', 2)")
+        conn.commit()
+
+
+def _tables(db: Path) -> set[str]:
+    with closing(sqlite3.connect(db)) as conn:
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
 class TestJobLogStore:
     @pytest.fixture()
-    def path(self, tmp_path) -> Path:
-        return tmp_path / "jobs.jsonl"
+    def db(self, tmp_path) -> Path:
+        return tmp_path / "ziv.sqlite3"
 
     @pytest.fixture()
-    def log(self, path) -> JobLog:
-        return JobLog(lambda: path)
+    def log(self, db) -> JobLog:
+        return JobLog(lambda: db)
 
-    @staticmethod
-    def _lines(path: Path) -> list[str]:
-        return path.read_text(encoding="utf-8").splitlines()
-
-    def test_missing_file_reads_as_empty(self, log, path):
+    def test_empty_database_reads_as_empty(self, log):
         assert log.page("all", 1, 50)["total_count"] == 0
         assert log.delete("x") is False
         assert log.clear() == 0
-        assert not path.exists()
 
-    def test_append_writes_one_json_line_per_entry_keeping_unicode(self, log, path):
-        log.append(_entry("a", prompt="blå øyne"))
-        log.append(_entry("b"))
+    def test_first_use_creates_the_table_and_records_the_version(self, log, db):
+        log.page("all", 1)
 
-        lines = self._lines(path)
-        assert [json.loads(line)["job_id"] for line in lines] == ["a", "b"]
-        assert "blå øyne" in lines[0]
+        assert "jobs_entries_v1" in _tables(db)
+        with closing(sqlite3.connect(db)) as conn:
+            assert conn.execute("SELECT component, version FROM schema_versions WHERE component = 'jobs'").fetchall() == [("jobs", 1)]
 
-    def test_unicode_line_separators_in_an_entry_do_not_split_it(self, log):
-        prompt = "one\u2028two\u2029three\x85four"
+    def test_entries_round_trip_in_written_form(self, log):
+        entry = _build(context={"prompt": "blå øyne", "settings": {"path": Path("/x")}})
+        log.append(entry)
+
+        (stored,) = log.page("all", 1, 50)["entries"]
+
+        assert list(stored) == list(entry)
+        assert stored["created_at"] == 100.0
+        assert isinstance(stored["created_at"], float)
+        assert stored["prompt"] == "blå øyne"
+        assert stored["settings"] == {"path": str(Path("/x"))}
+
+    def test_unicode_line_separators_in_an_entry_are_kept(self, log):
+        prompt = "one two three\x85four\u2028five"
         log.append(_entry("a", prompt=prompt))
         log.append(_entry("b"))
 
-        assert [e["job_id"] for e in log.page("all", 1, 50)["entries"]] == ["b", "a"]
+        assert _ids(log) == ["b", "a"]
         assert log.page("all", 1, 50)["entries"][1]["prompt"] == prompt
 
-    def test_values_that_are_not_json_are_written_as_text(self, log, path):
-        log.append(_entry("a", settings={"path": Path("/x")}))
+    @pytest.mark.parametrize("entry", [{"job_id": 5}, {}])
+    def test_entry_without_a_string_job_id_is_refused(self, log, entry):
+        with pytest.raises(ValueError):
+            log.append(entry)
 
-        assert json.loads(self._lines(path)[0])["settings"] == {"path": str(Path("/x"))}
+        assert log.page("all", 1, 50)["total_count"] == 0
 
-    def test_appending_past_the_cap_keeps_the_newest_lines(self, log, path):
-        path.write_text("".join(json.dumps(_entry(f"j{i}")) + "\n" for i in range(JOB_LOG_MAX_LINES)), encoding="utf-8")
+    def test_appending_past_the_cap_keeps_the_newest_entries(self, log, monkeypatch):
+        monkeypatch.setattr(job_log_module, "JOB_LOG_MAX_LINES", 5)
+        monkeypatch.setattr(job_log_module, "JOB_LOG_KEEP_LINES", 3)
+        for i in range(5):
+            log.append(_entry(f"j{i}"))
+        assert len(_ids(log)) == 5
 
         log.append(_entry("newest"))
 
-        ids = [json.loads(line)["job_id"] for line in self._lines(path)]
-        assert len(ids) == JOB_LOG_KEEP_LINES
-        assert ids[-1] == "newest"
-        assert ids[0] == f"j{JOB_LOG_MAX_LINES - JOB_LOG_KEEP_LINES + 1}"
+        assert _ids(log) == ["newest", "j4", "j3"]
 
-    def test_exactly_at_the_cap_nothing_is_trimmed(self, log, path):
-        path.write_text("".join(json.dumps(_entry(f"j{i}")) + "\n" for i in range(JOB_LOG_MAX_LINES - 1)), encoding="utf-8")
-
-        log.append(_entry("last"))
-
-        assert len(self._lines(path)) == JOB_LOG_MAX_LINES
-
-    def test_corrupt_file_still_reads_and_the_next_rewrite_drops_bad_lines(self, log, path):
-        good_a = json.dumps(_entry("a")).encode()
-        good_b = json.dumps(_entry("b", prompt="ok")).encode()
-        path.write_bytes(
-            b"\n".join(
-                [
-                    good_a,
-                    b"\xff\xfe not utf-8 \xc3(",
-                    b"",
-                    b"[1, 2, 3]",
-                    b'"just a string"',
-                    json.dumps({"no_id": 1}).encode(),
-                    json.dumps({"job_id": 5}).encode(),
-                    good_b,
-                    b'{"job_id": "cut", "status": "comp',
-                ]
-            )
-        )
-
-        assert [e["job_id"] for e in log.page("all", 1, 50)["entries"]] == ["b", "a"]
-
-        log.append(_entry("c"))
-
-        assert [json.loads(line)["job_id"] for line in self._lines(path)] == ["a", "b", "c"]
-
-    def test_delete_removes_only_the_named_entry(self, log, path):
+    def test_delete_removes_only_the_named_entry(self, log):
         for job_id in ("a", "b", "c"):
             log.append(_entry(job_id))
 
         assert log.delete("b") is True
         assert log.delete("b") is False
 
-        assert [json.loads(line)["job_id"] for line in self._lines(path)] == ["a", "c"]
+        assert _ids(log) == ["c", "a"]
 
-    def test_clear_returns_the_count_and_empties_the_file(self, log, path):
+    def test_delete_removes_every_entry_of_the_id(self, log):
+        log.append(_entry("a"))
+        log.append(_entry("a", status="failed"))
+        log.append(_entry("b"))
+
+        assert log.delete("a") is True
+
+        assert _ids(log) == ["b"]
+
+    def test_clear_returns_the_count_and_empties_the_log(self, log):
         for job_id in ("a", "b"):
             log.append(_entry(job_id))
 
         assert log.clear() == 2
+        assert log.clear() == 0
 
-        assert path.read_text(encoding="utf-8") == ""
         assert log.page("all", 1, 50)["total_count"] == 0
 
     def test_page_uses_the_filter(self, log):
@@ -290,27 +286,76 @@ class TestJobLogStore:
         assert [e["job_id"] for e in log.page("completed", 1, 50)["entries"]] == ["ok"]
 
     def test_the_path_is_resolved_on_every_call(self, tmp_path):
-        current = {"path": tmp_path / "one.jsonl"}
+        current = {"path": tmp_path / "one.sqlite3"}
         log = JobLog(lambda: current["path"])
 
         log.append(_entry("a"))
-        current["path"] = tmp_path / "two.jsonl"
+        current["path"] = tmp_path / "two.sqlite3"
 
         assert log.page("all", 1, 50)["total_count"] == 0
-        assert (tmp_path / "one.jsonl").exists()
+        assert (tmp_path / "one.sqlite3").exists()
 
-    def test_os_errors_propagate(self, tmp_path):
-        log = JobLog(lambda: tmp_path)  # a directory, not a file
-
-        for call in (lambda: log.append(_entry("a")), lambda: log.page("all", 1, 50), lambda: log.delete("a"), log.clear):
-            with pytest.raises(OSError):
-                call()
-
-    def test_concurrent_appends_lose_nothing(self, log, path):
+    def test_concurrent_appends_lose_nothing(self, log):
         threads = [threading.Thread(target=log.append, args=(_entry(f"j{i}"),)) for i in range(20)]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
 
-        assert sorted(json.loads(line)["job_id"] for line in self._lines(path)) == sorted(f"j{i}" for i in range(20))
+        assert log.page("all", 1, 50)["total_count"] == 20
+        assert set(_ids(log)) == {f"j{i}" for i in range(20)}
+
+
+class TestJobLogErrors:
+    def test_a_directory_at_the_path_raises_job_log_error_and_is_left_alone(self, tmp_path):
+        log = JobLog(lambda: tmp_path)
+
+        for call in (lambda: log.append(_entry("a")), lambda: log.page("all", 1, 50), lambda: log.delete("a"), log.clear):
+            with pytest.raises(JobLogError) as caught:
+                call()
+            assert isinstance(caught.value.__cause__, sqlite3.Error)
+
+        assert tmp_path.is_dir()
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_newer_schema_is_refused_and_left_untouched(self, tmp_path):
+        db = tmp_path / "ziv.sqlite3"
+        _seed_newer_schema(db)
+        log = JobLog(lambda: db)
+
+        for call in (lambda: log.append(_entry("a")), lambda: log.page("all", 1, 50), lambda: log.delete("a"), log.clear):
+            with pytest.raises(JobLogError, match="newer version"):
+                call()
+
+        with closing(sqlite3.connect(db)) as conn:
+            assert conn.execute("SELECT version FROM schema_versions WHERE component = 'jobs'").fetchone() == (2,)
+        assert "jobs_entries_v1" not in _tables(db)
+        assert [p.name for p in tmp_path.iterdir() if ".corrupt-" in p.name] == []
+
+    def test_corruption_mid_operation_quarantines_the_file_and_the_log_restarts_empty(self, tmp_path, monkeypatch):
+        db = tmp_path / "ziv.sqlite3"
+        log = JobLog(lambda: db)
+        log.append(_entry("a"))
+        real_connect = app_db.connect
+
+        def failing_connect(*args, **kwargs):
+            conn = real_connect(*args, **kwargs)
+            real_execute = conn.execute
+
+            def execute(sql, *params):
+                if sql.startswith("SELECT") and "jobs_entries_v1" in sql:
+                    error = sqlite3.DatabaseError("database disk image is malformed")
+                    error.sqlite_errorcode = sqlite3.SQLITE_CORRUPT
+                    raise error
+                return real_execute(sql, *params)
+
+            conn.execute = execute
+            return conn
+
+        monkeypatch.setattr(app_db, "connect", failing_connect)
+        with pytest.warns(UserWarning, match="damaged"), pytest.raises(JobLogError):
+            log.page("all", 1, 50)
+        monkeypatch.setattr(app_db, "connect", real_connect)
+
+        assert [p.name for p in tmp_path.iterdir() if p.name.startswith("ziv.sqlite3.corrupt-")]
+        assert log.page("all", 1, 50)["total_count"] == 0

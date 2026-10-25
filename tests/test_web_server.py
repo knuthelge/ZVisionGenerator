@@ -9,6 +9,7 @@ import inspect
 import io
 import json
 import os
+import sqlite3
 import subprocess
 import threading
 from pathlib import Path
@@ -37,12 +38,13 @@ from zvisiongenerator.web import video_clip as video_clip_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.gallery import list_gallery_assets
 from zvisiongenerator.web.job_contract import public_job_snapshot
-from zvisiongenerator.web.job_log import JOB_LOG_STATUS_FILTERS, JobLog
+from zvisiongenerator.web.job_log import JOB_LOG_STATUS_FILTERS, JobLog, JobLogError, build_job_log_entry
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.h3_converted import write_converted_h3
 from zvisiongenerator.utils.ltx_converted import write_converted_ltx
+from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils import video_extend as video_extend_module
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.config import load_config
@@ -3874,9 +3876,9 @@ class TestJobLogRoutes:
 
     @pytest.fixture()
     def path(self, tmp_path, monkeypatch) -> Path:
-        log_path = tmp_path / "jobs.jsonl"
-        monkeypatch.setattr(web_server, "job_log", JobLog(lambda: log_path))
-        return log_path
+        db_path = tmp_path / "ziv.sqlite3"
+        monkeypatch.setattr(web_server, "job_log", JobLog(lambda: db_path))
+        return db_path
 
     @staticmethod
     def _seed(entries: list[dict]) -> None:
@@ -3969,7 +3971,7 @@ class TestJobLogRoutes:
         assert again.json()["detail"] == "Unknown log entry: a"
         assert [entry["job_id"] for entry in remaining["entries"]] == ["b"]
 
-    def test_delete_on_a_missing_file_is_404(self, path):
+    def test_delete_on_an_empty_log_is_404(self, path):
         with TestClient(web_server.app) as client:
             assert client.delete("/api/jobs/log/nope").status_code == 404
 
@@ -3983,13 +3985,33 @@ class TestJobLogRoutes:
         assert first.json() == {"deleted_count": 2}
         assert second.json() == {"deleted_count": 0}
 
-    def test_clear_on_a_missing_file_is_zero(self, path):
+    def test_clear_on_an_empty_log_is_zero(self, path):
         with TestClient(web_server.app) as client:
             response = client.delete("/api/jobs/log")
 
         assert response.status_code == 200
         assert response.json() == {"deleted_count": 0}
-        assert not path.exists()
+
+    def test_listing_keeps_the_written_key_order_and_float_forms(self, path):
+        entry = build_job_log_entry(
+            job_id="abc",
+            job_type="image",
+            context={"prompt": "a lake", "model": "m1", "workflow": "txt2img", "settings": {"steps": 4}},
+            status="completed",
+            created_at=100.0,
+            started_at=110.0,
+            completed_at=112.5,
+            outputs=[{"id": "a.png"}],
+            error=None,
+            failed_runs=0,
+        )
+        self._seed([entry])
+
+        with TestClient(web_server.app) as client:
+            response = client.get("/api/jobs/log")
+
+        assert b'"created_at":100.0' in response.content
+        assert list(response.json()["entries"][0]) == list(entry)
 
     def test_log_routes_are_not_swallowed_by_job_id_routes(self, path):
         with TestClient(web_server.app) as client:
@@ -3999,7 +4021,7 @@ class TestJobLogRoutes:
     @pytest.mark.parametrize(("method", "url"), [("get", "/api/jobs/log"), ("delete", "/api/jobs/log/a"), ("delete", "/api/jobs/log")])
     def test_store_os_errors_become_500_with_a_detail(self, monkeypatch, method, url):
         def _broken(*_args, **_kwargs):
-            raise PermissionError(13, "Permission denied")
+            raise JobLogError("Permission denied")
 
         for name in ("page", "delete", "clear"):
             monkeypatch.setattr(web_server.job_log, name, _broken)
@@ -4014,10 +4036,19 @@ class TestJobLogRoutes:
         monkeypatch.setattr(web_server, "job_log", JobLog(lambda: tmp_path))
 
         with TestClient(web_server.app) as client:
-            assert client.get("/api/jobs/log").status_code == 500
+            response = client.get("/api/jobs/log")
+
+        assert response.status_code == 500
+        assert response.json()["detail"].startswith("Could not read or write the job log: ")
 
     def test_the_server_runner_writes_to_the_server_job_log(self):
         assert web_server.web_runner._job_log is web_server.job_log
+
+    def test_the_server_job_log_lives_in_the_app_database(self):
+        web_server.job_log.append({"job_id": "a"})
+
+        with contextlib.closing(sqlite3.connect(app_db.app_db_path())) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM jobs_entries_v1").fetchone() == (1,)
 
 
 class TestLoraFamilies:

@@ -1,6 +1,6 @@
 # A log of past jobs
 
-**Status:** Done (unreleased, 2026-10-20). Shipped from `c80daa0` (the log and its API) on, in the next release. The routes are `/api/jobs/log` rather than `/api/jobs/history`, and the drawer is titled Job log.
+**Status:** Done (v0.13.0b25, 2026-10-21). The routes are `/api/jobs/log` rather than `/api/jobs/history`, and the drawer is titled Job log. The log later moved from `jobs.jsonl` into the app database.
 
 ## Problem
 
