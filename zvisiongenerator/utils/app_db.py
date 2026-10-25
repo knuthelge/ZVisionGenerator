@@ -35,6 +35,7 @@ APP_DB_FILENAME = "ziv.sqlite3"
 BUSY_TIMEOUT_SECONDS = 5.0
 
 _CORRUPTION_CODES = frozenset({sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB})
+_BUSY_CODES = frozenset({sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED})
 _SIDECAR_SUFFIXES = ("-wal", "-shm")
 
 type FileIdentity = tuple[int, int]
@@ -158,8 +159,19 @@ def _bring_to_version(conn: sqlite3.Connection, component: Component) -> None:
             )
 
 
+def _is_busy(exc: BaseException) -> bool:
+    """Return whether *exc* is SQLite reporting a lock held by another connection (SQLITE_BUSY, SQLITE_LOCKED)."""
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    code = getattr(exc, "sqlite_errorcode", None)
+    return code is not None and (code & 0xFF) in _BUSY_CODES
+
+
 def _enable_wal(conn: sqlite3.Connection) -> None:
     """Switch the file to WAL, waiting out a concurrent switch that SQLite does not route through the busy handler.
+
+    A switch that returns without raising ends the wait even when SQLite reports another mode (a file system
+    without shared memory cannot use WAL); the connection then carries on in that mode.
 
     Raises:
         sqlite3.OperationalError: When the file stays locked for ``BUSY_TIMEOUT_SECONDS`` or the switch fails otherwise.
@@ -169,10 +181,11 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError as exc:
-            message = str(exc).lower()
-            if ("locked" not in message and "busy" not in message) or time.monotonic() >= deadline:
+            if not _is_busy(exc) or time.monotonic() >= deadline:
                 raise
             time.sleep(0.01)
+        else:
+            return
 
 
 def _configure(conn: sqlite3.Connection, components: Sequence[Component]) -> None:

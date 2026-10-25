@@ -67,8 +67,6 @@ Attach the log when you [report a bug](troubleshooting.md#report-a-problem).
 
 The Web UI keeps a record of finished jobs, with the reason each failed, in the [app database](#app-database). Unlike the error log it is kept across restarts, and entries are kept until you remove them with **Delete** or **Clear log** in the [Job log](../web-ui/job-log.md).
 
-A `jobs.jsonl` file left in the data folder by an earlier version is no longer used; delete it when you like. Jobs recorded in it are not carried over.
-
 ## App database
 
 `ziv.sqlite3` holds the Gallery index and the [job log](#job-log). The Gallery index is what was read from each file in the output folder, so the Gallery opens fast after a restart. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` sit beside it.

@@ -90,6 +90,13 @@ def test_simultaneous_first_connects_all_succeed_and_leave_wal(tmp_path: Path) -
             assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
+def _locked_error() -> sqlite3.OperationalError:
+    """Return an error shaped like SQLite's "database is locked"."""
+    exc = sqlite3.OperationalError("database is locked")
+    exc.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    return exc
+
+
 def _locked_on_wal_switch(monkeypatch: pytest.MonkeyPatch, failures: int | None) -> list[str]:
     """Make the WAL switch raise "database is locked" *failures* times (always when None); return the statements seen."""
     real_open = app_db._open_connection
@@ -103,7 +110,7 @@ def _locked_on_wal_switch(monkeypatch: pytest.MonkeyPatch, failures: int | None)
             if sql == "PRAGMA journal_mode=WAL":
                 seen.append(sql)
                 if failures is None or len(seen) <= failures:
-                    raise sqlite3.OperationalError("database is locked")
+                    raise _locked_error()
             return real_execute(sql, *params)
 
         conn.execute = execute
@@ -128,6 +135,33 @@ def test_wal_switch_gives_up_after_the_busy_timeout(tmp_path: Path, monkeypatch:
 
     with pytest.raises(sqlite3.OperationalError, match="locked"):
         app_db.connect(tmp_path / "ziv.sqlite3")
+
+
+def test_wal_switch_that_leaves_another_mode_does_not_spin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_open = app_db._open_connection
+    seen: list[str] = []
+
+    def open_connection(path: Path) -> AppConnection:
+        conn = real_open(path)
+        real_execute = conn.execute
+
+        def execute(sql: str, *params: object) -> sqlite3.Cursor:
+            if sql == "PRAGMA journal_mode=WAL":
+                seen.append(sql)
+                return real_execute("PRAGMA journal_mode=DELETE")
+            return real_execute(sql, *params)
+
+        conn.execute = execute
+        return conn
+
+    monkeypatch.setattr(app_db, "_open_connection", open_connection)
+    monkeypatch.setattr(app_db, "BUSY_TIMEOUT_SECONDS", 0.5)
+
+    with closing(app_db.connect(tmp_path / "ziv.sqlite3")) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+
+    assert len(seen) == 1
 
 
 def test_wal_file_skips_the_switch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
