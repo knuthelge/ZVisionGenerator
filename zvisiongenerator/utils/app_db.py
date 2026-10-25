@@ -6,7 +6,8 @@ data. Features follow these rules:
 * Open one short-lived connection per operation with
   ``with closing(app_db.connect(components=(MY_COMPONENT,))) as conn:``.
 * Never keep a module-global connection and never share a connection across threads.
-* Keep ``BEGIN IMMEDIATE`` ... ``COMMIT`` writes short, with no slow I/O inside them.
+* Run every write inside ``with transaction(conn):`` (``BEGIN IMMEDIATE``, then ``COMMIT``, or ``ROLLBACK`` when
+  the block raises) and keep it short, with no slow I/O inside it.
 * Locks belong to the feature that needs them; this module holds none.
 * Name tables ``<component>_*`` and never read or write another component's tables.
 * When an operation fails, pass the exception to :func:`recover_if_corrupt` before deciding what to do.
@@ -23,7 +24,8 @@ import re
 import sqlite3
 import time
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,6 +54,7 @@ __all__ = [
     "recover_if_corrupt",
     "rollback",
     "stat_key",
+    "transaction",
 ]
 
 
@@ -122,12 +125,30 @@ def rollback(conn: sqlite3.Connection) -> None:
         pass
 
 
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Run the block in a ``BEGIN IMMEDIATE`` transaction: commit when it finishes, roll back and re-raise when it raises.
+
+    Args:
+        conn: Connection in autocommit mode with no transaction open.
+
+    Yields:
+        Nothing; the transaction is open while the block runs.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+        conn.execute("COMMIT")
+    except BaseException:
+        rollback(conn)
+        raise
+
+
 def _bring_to_version(conn: sqlite3.Connection, component: Component) -> None:
     """Run *component*'s migration when its stored version differs, then record the highest version seen."""
     if _stored_version(conn, component.name) == component.version:
         return
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with transaction(conn):
         stored = _stored_version(conn, component.name)
         if stored != component.version:
             component.migrate(conn, stored)
@@ -135,10 +156,6 @@ def _bring_to_version(conn: sqlite3.Connection, component: Component) -> None:
                 "INSERT INTO schema_versions (component, version) VALUES (?, ?) ON CONFLICT(component) DO UPDATE SET version = excluded.version",
                 (component.name, max(stored, component.version)),
             )
-        conn.execute("COMMIT")
-    except BaseException:
-        rollback(conn)
-        raise
 
 
 def _configure(conn: sqlite3.Connection, components: Sequence[Component]) -> None:

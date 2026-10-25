@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from zvisiongenerator.utils import app_db
-from zvisiongenerator.web import job_log as job_log_module
 from zvisiongenerator.web.job_log import (
     JOB_LOG_STATUS_FILTERS,
     JobLog,
@@ -240,17 +239,6 @@ class TestJobLogStore:
 
         assert log.page("all", 1, 50)["total_count"] == 0
 
-    def test_appending_past_the_cap_keeps_the_newest_entries(self, log, monkeypatch):
-        monkeypatch.setattr(job_log_module, "JOB_LOG_MAX_LINES", 5)
-        monkeypatch.setattr(job_log_module, "JOB_LOG_KEEP_LINES", 3)
-        for i in range(5):
-            log.append(_entry(f"j{i}"))
-        assert len(_ids(log)) == 5
-
-        log.append(_entry("newest"))
-
-        assert _ids(log) == ["newest", "j4", "j3"]
-
     def test_delete_removes_only_the_named_entry(self, log):
         for job_id in ("a", "b", "c"):
             log.append(_entry(job_id))
@@ -324,8 +312,9 @@ class TestJobLogErrors:
         log = JobLog(lambda: db)
 
         for call in (lambda: log.append(_entry("a")), lambda: log.page("all", 1, 50), lambda: log.delete("a"), log.clear):
-            with pytest.raises(JobLogError, match="newer version"):
+            with pytest.raises(JobLogError) as caught:
                 call()
+            assert caught.value.__cause__ is None
 
         with closing(sqlite3.connect(db)) as conn:
             assert conn.execute("SELECT version FROM schema_versions WHERE component = 'jobs'").fetchone() == (2,)

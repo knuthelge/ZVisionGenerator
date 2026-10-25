@@ -144,7 +144,7 @@ def _load_rows(conn: sqlite3.Connection, table: str, root_key: str) -> dict[str,
 
 
 def _write(conn: sqlite3.Connection, table: str, root_key: str, upserts: Sequence[_Upsert], deletes: Sequence[_Delete]) -> None:
-    """Apply *upserts* and conditional *deletes* in one ``BEGIN IMMEDIATE`` transaction.
+    """Apply *upserts* and conditional *deletes* in one write transaction.
 
     A delete removes a row only if its key still equals the one the caller loaded.
 
@@ -152,8 +152,7 @@ def _write(conn: sqlite3.Connection, table: str, root_key: str, upserts: Sequenc
         sqlite3.Error: When the transaction fails; it is rolled back first. A value that cannot be bound
             raises ``UnicodeError`` or ``OverflowError`` instead.
     """
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with app_db.transaction(conn):
         conn.executemany(
             f"INSERT INTO {table} (root, rel_path, mtime_ns, ctime_ns, size, facts) VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(root, rel_path) DO UPDATE SET mtime_ns = excluded.mtime_ns, ctime_ns = excluded.ctime_ns, "
@@ -164,10 +163,6 @@ def _write(conn: sqlite3.Connection, table: str, root_key: str, upserts: Sequenc
             f"DELETE FROM {table} WHERE root = ? AND rel_path = ? AND mtime_ns = ? AND ctime_ns = ? AND size = ?",
             [(root_key, *delete) for delete in deletes],
         )
-        conn.execute("COMMIT")
-    except BaseException:
-        app_db.rollback(conn)
-        raise
 
 
 @dataclass
@@ -281,9 +276,8 @@ class GalleryIndex:
         conn: app_db.AppConnection | None = None
         try:
             conn = app_db.connect(path, components=(self._component,))
-            conn.execute("BEGIN IMMEDIATE")
-            conn.executemany(f"DELETE FROM {self._table} WHERE root = ? AND rel_path = ?", names)
-            conn.execute("COMMIT")
+            with app_db.transaction(conn):
+                conn.executemany(f"DELETE FROM {self._table} WHERE root = ? AND rel_path = ?", names)
         except _DB_ERRORS as exc:
             self._handle_failure(conn, exc, "could not forget deleted files")
         finally:

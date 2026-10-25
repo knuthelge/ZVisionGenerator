@@ -2174,7 +2174,7 @@ class TestJobLogHook:
         assert not app_db.app_db_path().exists()
 
     def test_a_failing_store_warns_and_the_next_job_still_runs(self, tmp_path):
-        # The log "file" is a directory, so every read raises OSError.
+        # The log "file" is a directory, so the store raises JobLogError.
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, job_log=JobLog(lambda: tmp_path))
         ran: list[str] = []
         try:

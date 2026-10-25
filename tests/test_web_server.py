@@ -4019,7 +4019,7 @@ class TestJobLogRoutes:
             assert client.get("/api/jobs").json() == {"active_job": None, "queued_jobs": []}
 
     @pytest.mark.parametrize(("method", "url"), [("get", "/api/jobs/log"), ("delete", "/api/jobs/log/a"), ("delete", "/api/jobs/log")])
-    def test_store_os_errors_become_500_with_a_detail(self, monkeypatch, method, url):
+    def test_store_errors_become_500_with_a_detail(self, monkeypatch, method, url):
         def _broken(*_args, **_kwargs):
             raise JobLogError("Permission denied")
 

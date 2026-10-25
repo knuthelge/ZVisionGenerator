@@ -112,8 +112,7 @@ def _store(conn: sqlite3.Connection, root: str, rows: Sequence[tuple], stale: Se
     """Upsert *rows* and delete the *stale* names of *root* in one short transaction."""
     if not rows and not stale:
         return
-    conn.execute("BEGIN IMMEDIATE")
-    try:
+    with app_db.transaction(conn):
         conn.executemany(
             f"INSERT INTO {_TABLE} (root, name, mtime_ns, ctime_ns, size, family, size_variant, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(root, name) DO UPDATE SET mtime_ns = excluded.mtime_ns, ctime_ns = excluded.ctime_ns, size = excluded.size, "
@@ -121,7 +120,3 @@ def _store(conn: sqlite3.Connection, root: str, rows: Sequence[tuple], stale: Se
             rows,
         )
         conn.executemany(f"DELETE FROM {_TABLE} WHERE root = ? AND name = ?", [(root, name) for name in stale])
-        conn.execute("COMMIT")
-    except BaseException:
-        app_db.rollback(conn)
-        raise

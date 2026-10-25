@@ -1,4 +1,4 @@
-"""Keep a bounded log of finished Web UI jobs in the app database."""
+"""Keep a log of finished Web UI jobs in the app database."""
 
 from __future__ import annotations
 
@@ -12,23 +12,18 @@ from typing import Any
 
 from zvisiongenerator.utils import app_db
 
-JOB_LOG_MAX_LINES = 2000
-JOB_LOG_KEEP_LINES = 1500
 JOB_LOG_PAGE_SIZE = 50
 JOB_LOG_PROMPT_LIMIT = 500
 LOGGED_JOB_TYPES = frozenset({"image", "video", "upscale"})
 JOB_LOG_STATUS_FILTERS = ("all", "failed", "completed", "cancelled")
 
 _VERSION = 1
-_TABLE_PREFIX = "jobs_entries_v"
-_TABLE = f"{_TABLE_PREFIX}{_VERSION}"
+_TABLE = f"jobs_entries_v{_VERSION}"
 _STORAGE_ERRORS = (sqlite3.Error, OSError)
 
 type JobLogEntry = dict[str, Any]
 
 __all__ = [
-    "JOB_LOG_KEEP_LINES",
-    "JOB_LOG_MAX_LINES",
     "JOB_LOG_PAGE_SIZE",
     "JOB_LOG_PROMPT_LIMIT",
     "JOB_LOG_STATUS_FILTERS",
@@ -179,8 +174,6 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         raise JobLogError("it was written by a newer version of ziv; update ziv to read it")
     conn.execute(f"CREATE TABLE IF NOT EXISTS {_TABLE} (seq INTEGER PRIMARY KEY, job_id TEXT NOT NULL, entry TEXT NOT NULL)")
     conn.execute(f"CREATE INDEX IF NOT EXISTS {_TABLE}_job_id ON {_TABLE} (job_id)")
-    if from_version < _VERSION:
-        app_db.drop_lower_versioned_tables(conn, _TABLE_PREFIX, _VERSION)
 
 
 _COMPONENT = app_db.Component("jobs", _VERSION, _migrate)
@@ -204,35 +197,27 @@ class JobLog:
         self._path_provider = path_provider
 
     def _run[T](self, operation: Callable[[app_db.AppConnection], T]) -> T:
-        """Run *operation* on a new connection; roll back, quarantine a corrupt file and wrap storage errors."""
+        """Run *operation* on a new connection; quarantine a corrupt file and wrap storage errors."""
         try:
             with closing(app_db.connect(self._path_provider(), components=(_COMPONENT,))) as conn:
                 try:
                     return operation(conn)
                 except BaseException as exc:
-                    app_db.rollback(conn)
                     app_db.recover_if_corrupt(conn, exc)
                     raise
         except _STORAGE_ERRORS as exc:
             raise JobLogError(_reason(exc)) from exc
 
     def append(self, entry: JobLogEntry) -> None:
-        """Add *entry* as the newest row; past the cap only the newest rows are kept."""
+        """Add *entry* as the newest row; rows stay until :meth:`delete` or :meth:`clear` removes them."""
         job_id = entry.get("job_id")
         if not isinstance(job_id, str):
             raise ValueError("A job log entry needs a string job_id.")
         text = json.dumps(entry, ensure_ascii=False, default=str)
 
         def write(conn: app_db.AppConnection) -> None:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(f"INSERT INTO {_TABLE} (job_id, entry) VALUES (?, ?)", (job_id, text))
-            (count,) = conn.execute(f"SELECT COUNT(*) FROM {_TABLE}").fetchone()
-            if count > JOB_LOG_MAX_LINES:
-                conn.execute(
-                    f"DELETE FROM {_TABLE} WHERE seq < (SELECT seq FROM {_TABLE} ORDER BY seq DESC LIMIT 1 OFFSET ?)",
-                    (JOB_LOG_KEEP_LINES - 1,),
-                )
-            conn.execute("COMMIT")
+            with app_db.transaction(conn):
+                conn.execute(f"INSERT INTO {_TABLE} (job_id, entry) VALUES (?, ?)", (job_id, text))
 
         self._run(write)
 
@@ -254,9 +239,7 @@ class JobLog:
         """Run one DELETE in its own write transaction and return how many rows it removed."""
 
         def remove(conn: app_db.AppConnection) -> int:
-            conn.execute("BEGIN IMMEDIATE")
-            removed = conn.execute(statement, params).rowcount
-            conn.execute("COMMIT")
-            return removed
+            with app_db.transaction(conn):
+                return conn.execute(statement, params).rowcount
 
         return self._run(remove)

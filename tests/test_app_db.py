@@ -303,3 +303,20 @@ def test_rollback_ends_an_open_transaction_and_ignores_none(tmp_path: Path) -> N
         assert conn.in_transaction
         app_db.rollback(conn)
         assert not conn.in_transaction
+
+
+def test_transaction_commits_on_success_and_rolls_back_then_reraises_on_failure(tmp_path: Path) -> None:
+    with closing(app_db.connect(tmp_path / "ziv.sqlite3")) as conn:
+        conn.execute("CREATE TABLE items (value TEXT)")
+
+        with app_db.transaction(conn):
+            assert conn.in_transaction
+            conn.execute("INSERT INTO items VALUES ('kept')")
+        assert not conn.in_transaction
+
+        with pytest.raises(RuntimeError, match="boom"), app_db.transaction(conn):
+            conn.execute("INSERT INTO items VALUES ('lost')")
+            raise RuntimeError("boom")
+
+        assert not conn.in_transaction
+        assert conn.execute("SELECT value FROM items").fetchall() == [("kept",)]
