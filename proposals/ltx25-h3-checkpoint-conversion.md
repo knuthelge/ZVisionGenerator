@@ -498,8 +498,8 @@ Decision: build once G0–G3 and G5 pass. If G4 fails (RTN visibly worse than ca
 ### Docs and tests
 
 - **Docs.**
-  - `docs/guides/model.md` gets LTX-2.5 and H3 sections beside LTX-2.3's: inputs, levels, `--distill` and `--turbo`, names, and what is linked. It drops the line saying LTX-2.5 checkpoints are refused.
-  - `docs/guides/video.md`'s model-selection rules mention converted folders.
+  - `docs/cli/models.md` gets LTX-2.5 and H3 sections beside LTX-2.3's: inputs, levels, `--distill` and `--turbo`, names, and what is linked. It drops the line saying LTX-2.5 checkpoints are refused.
+  - `docs/concepts/models.md`'s name lookup rules mention converted folders.
   - Each part adds a `CHANGELOG.md` entry under `[Unreleased]`.
 - **Tests**, on synthetic tensors and with no real weights:
   - **Mapping:** each layout's mapping; the diffusers-to-native-to-diffusers round trip as an identity; the fc1 swap and the QKV de-interleave against hand-built examples.

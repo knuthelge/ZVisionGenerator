@@ -1,0 +1,47 @@
+# Vendored packages
+
+Three upstream projects are copied into `packages/` because they are not on PyPI in a form we can depend on. Never edit them by hand; update them with the make targets below.
+
+## LTX (MLX)
+
+`packages/ltx_core_mlx` and `packages/ltx_pipelines_mlx` are vendored from [`dgrauet/ltx-2-mlx`](https://github.com/dgrauet/ltx-2-mlx). They are not published to PyPI, and PyPI rejects direct-URL dependencies, so they live in the repository. Never edit them by hand.
+
+- **Pin.** `LTX_COMMIT` in the `Makefile` must be the commit of a release tag; the comment above it names the tag.
+- **Update.** `make update-ltx` replaces both packages with the pinned commit. It does not carry their dependencies: mirror the `dependencies` of upstream's `packages/*/pyproject.toml` into ours by hand, macOS-only and capped at the minor version that upstream's `uv.lock` tests (for example `mlx-arsenal>=0.2.4,<0.3`).
+- **Internals we rely on.** `backends/mac/video.py` uses upstream attributes and call shapes that are not public API. Re-check each on every bump. `tests/test_ltx_mlx_contract.py` pins their names and signatures by introspection, and the mocked tests in `tests/test_video_upscale.py` cover our calls:
+    - `_pending_loras` on the pipeline (LoRAs applied at load)
+    - the duck-typed `stepwise` slot and its `bind(..., stage=)` contract, which returns the stage's `on_step` callable
+    - `_pre_denoise_flush(video_state, audio_state)` (guards against the Metal watchdog) and `_decode_and_save_video(frame_rate=, seed=)`
+    - `dit`, `load()`, `prompt_encoder`, `video_patchifier`, `audio_patchifier`, `low_memory`, and `image_conditioner` (`__call__(fn, free_after=)` and `resolve_crf`)
+    - resetting `vae_decoder`, `audio_decoder` and `vocoder` to `None` to free the decoders
+    - `utils._orchestration.combined_image_conditionings`, `utils.args.ImageConditioningInput`, and `utils.helpers.create_noised_state(legacy_scalar_blend=True)`
+    - `ltx_core_mlx`'s `X0Model`, `snap_output_dimensions(two_stage=)`, `compute_video_latent_shape`, `compute_audio_token_count`, `compute_audio_positions`, `compute_video_positions` and `aggressive_cleanup`
+    - `scheduler.shorten_schedule`, `DISTILLED_SIGMAS` and `STAGE_2_SIGMAS`, and `utils.samplers.denoise_loop` with its `on_step(step_idx, total, video_x0, sigma)` signature
+    - for LTX-2.5 packs: `utils.generation.is_ltx25_pack` and `BasePipeline.model_dir`, `scheduler.LTX_2_5_DISTILLED_SIGMAS` and `LTX_2_5_STAGE_2_DISTILLED_SIGMAS`, `components.diffusion_steps.EulerAncestralDiffusionStep(eta, s_noise)`, `utils.samplers.euler_ancestral_denoising_loop` (keyword arguments `transformer=`, `stepper=`, `noise_seed=` and `on_step=`), `distilled.ANCESTRAL_ETA`, `ANCESTRAL_S_NOISE` and `ANCESTRAL_NOISE_SEED_OFFSET`
+    - the two file rules `utils.model_files` mirrors: `ltx_core_mlx`'s `select_text_encoder` (a root `text_encoder.safetensors` with `text_encoder_config.json` marks a bundled Gemma 4 encoder) and `ltx_pipelines_mlx`'s `blocks._video_vae_names` (the conv decoder of 2.5 packs wins over the 2.3 one)
+    - for review before upscaling: `_stage1` (shadowed per call), `Stage1Result.video_tokens`/`audio_tokens`/`latent_dims`, `_load_decoders`, `dit`/`_loaded` (restored after the preview decode), and the model state released after an aborted generation
+    - `DistilledPipeline.generate_and_save` for upscale, and `BasePipeline`'s `gemma_model_id` default, the transformer-file preference order and the `low_memory` and `low_ram_streaming` constructor arguments
+    - Extending a clip (`LtxVideoBackend.extend_video`), video side: `conditioning.types.VideoConditionByLatentIndex(frame_indices, clean_latent, strength)` pins the carried tail at the start of the window; `retake.encode_video_tensor(encoder, video_tensor)` and `utils.media_io.video_preprocess(frames, height, width)` encode the tail frames inside `image_conditioner(fn, free_after=)`
+    - Extending a clip, audio side: `ltx_core_mlx.utils.audio.load_audio(path, target_sample_rate, start_time, max_duration, mono)` reads the tail's sound at its position in the file; `audio_vae.encode_audio(waveform, sample_rate, encoder, processor)` encodes it inside `audio_conditioner(fn, free_after=)`; `extend_distilled.fit_audio_latent(audio_latent, audio_tokens)` fits the `(1, 8, T, 16)` latent before `audio_patchifier.patchify`, and `extend_distilled.carry_audio_tokens(frame_rate, carry_pixel_frames)` gives the token count
+    - Extending a clip, decode: the pipeline's `_loaded` flag (cleared with `dit = None` so the next `load()` reloads the transformer), `video_decoder_block.load()` and `video_decoder_block.video_decoder` (the diffusion decoder is rejected), `video_vae.VideoDecoder.tiled_decode(latent, tiling_config)`, `video_vae._compute_decode_tiling(latent_shape, frame_rate, budget_bytes)` (which may return `None` or temporal tiles), `video_vae.decode_cache_limit()`, `video_vae.stream_chunks_to_ffmpeg(chunks, proc)` and `video_vae._ffmpeg_sink(cmd)`, and `audio_decoder_block.__call__(audio_latent)`
+    - Extending a clip: `ltx_core_mlx.utils.audio.load_audio` returns an `AudioData` whose `.waveform` and `.sample_rate` are passed to `encode_audio`, and `video_patchifier.patchify` and `audio_patchifier.patchify` return `(tokens, dims)` tuples, so the tokens are `patchify(...)[0]`
+- **Converted folders.** `backends/mac/ltx_converted.py` writes LTX checkpoints in the layout of dgrauet's MLX folders, which upstream loads: `transformer.`-prefixed names with the renames of `LTXV_LORA_COMFY_RENAMING_MAP`, the block Linears quantized at group size 64 (the bit width is read back from the shapes), `connector.`-prefixed connectors, and `embedded_config.json`. Re-check that layout against a published folder on every bump.
+- **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/mac/memory.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
+
+## SeedVR2
+
+`packages/seedvr2_torch` is the PyTorch SeedVR2 inference core from [`numz/ComfyUI-SeedVR2_VideoUpscaler`](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) (Apache-2.0), which the Windows and Linux plain upscale runs. Upstream is not a pip package, so it lives in the repository. Never edit it by hand.
+
+- **Pin.** `SEEDVR2_COMMIT` in the `Makefile` must be the commit of a release; the comment above it names the version.
+- **Layout.** `make update-seedvr2` copies upstream's `src/` without `src/interfaces/` (the ComfyUI nodes), the two model configs, the fixed text embeddings `pos_emb.pt` and `neg_emb.pt`, and the licence, and writes its own `__init__.py` in place of upstream's, which loads the nodes. Upstream's code imports itself relatively and finds its configs and embeddings three folders above `src/utils/constants.py`, so the copy keeps upstream's layout and is imported as `seedvr2_torch.src`.
+- **Update.** It does not carry dependencies: mirror upstream's `requirements.txt` into ours by hand, Windows and Linux only, leaving out `gguf` (only imported for GGUF weights) and `matplotlib` (debug output). `torchvision` comes from the same CUDA index as `torch`, and `opencv-python` is replaced by `opencv-python-headless`.
+- **Internals we rely on.** `tests/test_seedvr2_torch_contract.py` pins the entry points the upscaler calls, their keyword arguments and the bundled files.
+
+## MiniMax H3 MLX
+
+`packages/minimax_h3_mlx` is the MLX pipeline for MiniMax H3 from [`Argus-AiTeam/minimax-h3-mac`](https://github.com/Argus-AiTeam/minimax-h3-mac) (Apache-2.0), which the macOS H3 backend runs. Upstream is not published to PyPI, so it lives in the repository. Never edit it by hand.
+
+- **Pin.** `H3_MLX_COMMIT` in the `Makefile` names the vendored commit and the comment above it names the branch and date. `tests/test_h3_mlx_contract.py` checks it against `H3_MLX_COMMIT` in `backends/mac/h3_video.py`.
+- **Layout.** `make update-h3-mlx` copies upstream's `minimax_h3_mlx/` without its command-line modules (`generate_cli.py`, `doctor.py` and `cleanroom_smoke.py`), adds `scripts/quantize_text_encoder.py` as `quantize_text_encoder.py`, and copies the license. Upstream imports itself absolutely as `minimax_h3_mlx`, so the directory keeps that name and is imported as a top-level package.
+- **Update.** It does not carry dependencies: mirror upstream's `dependencies` into ours by hand, macOS-only. `mlx-vlm` is pinned exactly, because upstream imports its Qwen3-VL vision model, and a newer `mlx-vlm` pulls a newer `mlx` than the one LTX is tested with. Check that `uv lock` adds packages and leaves `mlx` where it was. On macOS the pinned `mlx-vlm` also needs a newer `starlette` (the Web UI's server library) than Windows and Linux use, so run the Web UI on a Mac after a bump.
+- **Internals we rely on.** `tests/test_h3_mlx_contract.py` reads the source as a syntax tree, since Linux has no MLX, and pins the `MiniMaxH3Pipeline.from_pretrained` and `__call__` parameters, the single read of `self.text_encoder` in `__call__`, the `GenerationResult` fields, the low-memory image refusal, the Turbo LoRA key pattern and its six targets, and `quantize_text_encoder.convert`. Import checks for the same names run where MLX is installed.

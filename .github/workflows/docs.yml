@@ -6,6 +6,9 @@ on:
     paths:
       - "docs/**"
       - "zensical.toml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:

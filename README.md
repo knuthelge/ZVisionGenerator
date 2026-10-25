@@ -15,95 +15,60 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 ## Features
 
-- **Image generation** — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 (FP8 on macOS/MLX, NF4 on Windows and Linux)
-- **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases and MiniMax H3 (first and last frame, Extend) across macOS, Windows, and Linux
-- **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
-- **Prompt system** — YAML prompt files with variables, structured prompts, snippets, and batch runs
-- **Model store** — central `~/.ziv/` directory with bare-name resolution and HuggingFace fallback
-- **LoRA support** — single or stacked, configurable weights, bare-name resolution
-- **Image upscale** — generate small → Lanczos → img2img refine → CAS sharpen
-- **Video upscale** — `--upscale 2` renders at half size, upsamples the latents 2× and refines at full size, so the clip keeps the requested size, on macOS and on Windows/Linux
-- **Reference images** — img2img steering from any starting image
-- **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
-- **Post-processing** — contrast, saturation, and CAS sharpening (image only)
-- **Interactive controls** — skip, quit, pause, and repeat during image batch runs; Web UI video jobs can be cancelled
+- **Images** from a prompt, with Z-Image, FLUX.2 Klein, Krea 2 Turbo and Ideogram 4 Instant.
+- **Videos with sound** from a prompt or a starting image, with LTX-2.3, LTX-2.5 and MiniMax H3. End on a chosen last frame with H3, and extend a clip to make it longer.
+- **A prompt enhancer** that runs on your machine and turns a short idea into a detailed prompt.
+- **Upscaling** of new and existing images, of video as it's made, and of existing videos on Windows and Linux.
+- **Prompt files** with random choices, reusable snippets and batch runs.
+- **LoRAs**, stacked and weighted, for images and video.
+- **A Web UI** for your computer, phone or tablet, and a **CLI** for scripts and batches, sharing the same models, prompt files and outputs.
 
-## Platform Support
+| Platform | Images | Video |
+|---|---|---|
+| macOS (Apple Silicon) | ✅ via MLX | ✅ via MLX |
+| Windows (NVIDIA GPU) | ✅ via diffusers/CUDA | ✅ via diffusers/CUDA |
+| Linux (NVIDIA GPU) | ✅ via diffusers/CUDA | ✅ via diffusers/CUDA |
 
-| Platform | Image Generation | Video Generation |
-|----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`, untested on a Mac, no upscale) |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`) |
-| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`) |
+## Install
 
-## Installation
-
-Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
-
-> **uv is required.** This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support. All commands below use uv.
+Requires Python 3.14+, [uv](https://docs.astral.sh/uv/) (pip is not supported), and [ffmpeg](https://ffmpeg.org/) for video. On Windows and Linux: an RTX 20-series or newer NVIDIA GPU with driver 580 or newer.
 
 ```bash
-# Install globally from PyPI
 uv tool install z-vision-generator
-
-# Install globally from repository
-uv tool install -e git+https://github.com/knuthelge/ZVisionGenerator.git
-
-# Development setup
-git clone https://github.com/knuthelge/ZVisionGenerator && cd ZVisionGenerator
-uv sync
+ziv ui
 ```
 
-> Video generation requires [ffmpeg](https://ffmpeg.org/). On Windows and Linux, image and video generation require an RTX 20-series (Turing) or newer NVIDIA GPU, including RTX 50-series, with NVIDIA driver 580 or newer, so that CUDA is available to PyTorch.
+The Web UI opens in your browser and offers to download an image model picked for your machine. See [Install](https://knuthelge.github.io/ZVisionGenerator/install/) for the details.
 
-> Video uses `ltx-4` (4-bit), `ltx-8` (8-bit), `ltx25-4` (LTX-2.5, 4-bit) or `h3` (MiniMax H3) on every platform. On Windows and Linux they need about 20 GB, 27 GB, 21 GB and 18 GB of system memory. MiniMax H3 is a 98 GB download (107 GB on macOS). See the [Video Guide](docs/guides/video.md).
-
-## Quick Start
+## Quick start
 
 ```bash
-# Generate an image (bare name from ~/.ziv/models/)
-ziv-image -m my-model --prompt "a beautiful sunset"
-
-# Generate from a HuggingFace model
-ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat in a garden"
-
-# Batch run from a prompts file
-ziv-image -m my-model -p prompts.yaml -r 3
-
-# Generate a video (4-bit LTX)
-ziv-video -m ltx-4 --prompt "A cat walking through a garden"
-
-# Image-to-video
-ziv-video -m ltx-4 --image photo.jpg --prompt "Camera zooms in slowly"
-
-# Launch the Web UI
+# Start the Web UI
 ziv ui
 
-# Show command help and available subcommands
-ziv
+# An image from the command line
+ziv-image -m klein4b --prompt "A red fox sitting in fresh snow, early morning light"
+
+# A batch from a prompt file, three runs each
+ziv-image -m klein9b -p prompts.yaml -r 3
+
+# A video with sound, and one from an image
+ziv-video -m ltx-4 --prompt "A cat walking through a garden, birds singing"
+ziv-video -m ltx-4 --image photo.jpg --prompt "The camera slowly zooms in"
 ```
-
-The Web UI is an explicit local launcher: use `ziv ui` or `ziv-ui`. Running bare `ziv` prints command-discovery help without starting a browser or server. If a local environment is missing required Web UI packages, the launcher reports how to repair the base install instead of failing with an import traceback.
-
-The packaged Web UI is served from local static files and does not fetch cloud fonts or other font assets at runtime. It uses local system font fallbacks when Inter or JetBrains Mono are not installed.
-
-> **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command. Use `ziv -h` or `ziv --help` to print terminal help.
 
 ## Documentation
 
-Full documentation is available at **[knuthelge.github.io/ZVisionGenerator](https://knuthelge.github.io/ZVisionGenerator/)**.
+**[knuthelge.github.io/ZVisionGenerator](https://knuthelge.github.io/ZVisionGenerator/)**
 
-- [Getting Started](https://knuthelge.github.io/ZVisionGenerator/getting-started/) — installation, model store, quick start
-- [Image Guide](https://knuthelge.github.io/ZVisionGenerator/guides/image/) — aliases, sizes, reference images, LoRA, upscaling, quantization
-- [Video Guide](https://knuthelge.github.io/ZVisionGenerator/guides/video/) — T2V, I2V, upscale, audio, LoRA, constraints
-- [Prompts Guide](https://knuthelge.github.io/ZVisionGenerator/guides/prompts/) — prompt files, variables, structured prompts, snippets
-- [Model & LoRA Guide](https://knuthelge.github.io/ZVisionGenerator/guides/model/) — checkpoint conversion, LoRA import, asset listing
-- [CLI Reference](https://knuthelge.github.io/ZVisionGenerator/reference/cli/) — full argument tables for all commands
-- [Development](https://knuthelge.github.io/ZVisionGenerator/development/) — setup, testing, architecture
+- [Web UI](https://knuthelge.github.io/ZVisionGenerator/web-ui/): your first image and video, and every page of the app
+- [CLI](https://knuthelge.github.io/ZVisionGenerator/cli/): how-tos and the full command reference
+- [Concepts](https://knuthelge.github.io/ZVisionGenerator/concepts/): models, prompts, the enhancer, upscaling, memory and configuration
+- [Developer](https://knuthelge.github.io/ZVisionGenerator/developer/): setting up, conventions and architecture
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [developer docs](https://knuthelge.github.io/ZVisionGenerator/developer/).
 
 ## License
 

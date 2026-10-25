@@ -30,7 +30,7 @@ The Workspace's inspector is already called **Settings**, so the merged page is 
 ### Docs and changelog
 
 - CHANGELOG `[Unreleased]`: "The Models and Config pages are now tabs of one Setup page."
-- `docs/getting-started.md` and `docs/guides/model.md` refer to the Setup tabs.
+- `docs/web-ui/models.md` and `docs/web-ui/config.md` become one page that describes the Setup tabs.
 
 ## Alternatives considered
 

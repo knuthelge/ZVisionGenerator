@@ -1,44 +1,52 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/ziv-logo.png" alt="Z-Vision Generator logo with the Blob mascot" width="360"/>
+    <img src="assets/ziv-logo.png" alt="Z-Vision Generator logo with the Blob mascot" width="360"/>
 </p>
-&nbsp;
 
 # Z-Vision Generator
 
-Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and on Windows and Linux with NVIDIA CUDA through diffusers.
+Local AI image and video generation, hassle-free and fun. No tangled node graphs and no cloud: write a prompt, press Generate, and the picture or clip is made on your own computer.
 
-Z-Vision Generator gives you a unified CLI for both image and video generation, with batch runs, prompt variables, LoRA support, upscaling, and more — all while abstracting away platform-specific details.
+![The Workspace with a prompt, the settings and a finished image](assets/screenshots/placeholder.svg "home-workspace")
 
-## Features
+## What it does
 
-- **Image generation** — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 Instant (8 steps, with q4/q8 on every platform)
-- **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases and MiniMax H3, audio included by default
-- **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
-- **Prompt system** — YAML prompt files with variables (`{red|blue|green}`), structured prompts, snippets, and batch runs
-- **Model store** — central `~/.ziv/` directory with bare-name resolution, aliases, local paths, and supported HuggingFace model references
-- **LoRA support** — single or stacked, configurable weights, bare-name resolution (image and video)
-- **Image upscale** — generate small → Lanczos → img2img refine → CAS sharpen
-- **Video upscale** — `--upscale 2` renders at half size, upsamples the latents 2× and refines at full size, so the clip keeps the requested size, on macOS and on Windows/Linux
-- **Reference images** — img2img steering from any starting image
-- **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
-- **Post-processing** — contrast, saturation, and CAS sharpening (image only)
-- **Interactive controls** — skip, quit, pause, and repeat during image batch runs; Web UI video jobs can be cancelled
-- **Live preview** — the Web UI shows the image taking shape at 25/50/75% of the steps so you can skip early (preview only, never saved). Supported for Z-Image, FLUX.2 Klein, Krea 2 and Ideogram 4 on every platform
+- **Images** from a prompt, with Z-Image, FLUX.2 Klein, Krea 2 Turbo and Ideogram 4 Instant.
+- **Videos with sound** from a prompt or a starting image, with LTX-2.3, LTX-2.5 and MiniMax H3. End on a chosen last frame with H3, and extend a clip to make it longer.
+- **A prompt enhancer** that runs on your machine and turns a short idea into a detailed prompt.
+- **Upscaling** of new and existing images, of video as it's made, and of existing videos on Windows and Linux.
+- **Prompt files** with random choices, reusable snippets and batch runs.
+- **LoRAs**, stacked and weighted, for images and video.
+- **Models that download themselves** on first use, or ahead of time from the Models page, and your own fine-tunes converted with one command.
 
-## Platform Support
+It runs on macOS with Apple Silicon, and on Windows and Linux with an NVIDIA GPU. The same models and features work on all three.
 
-| Platform | Image Generation | Video Generation |
-|----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`, untested on a Mac, no upscale) |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`) |
-| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) and MiniMax H3 (`h3`) |
+## Two ways in
 
-## Quick Links
+<div class="grid cards" markdown>
 
-- [Getting Started](getting-started.md) — installation, prerequisites, and first steps
-- [Image Generation Guide](guides/image.md) — model aliases, sizes, LoRA, upscaling, post-processing
-- [Video Generation Guide](guides/video.md) — text-to-video, image-to-video, upscale, audio
-- [Prompts Guide](guides/prompts.md) — prompt files, variables, structured prompts, snippets
-- [Model & LoRA Management](guides/model.md) — converting checkpoints, importing LoRAs
-- [CLI Reference](reference/cli.md) — full argument tables for all commands
-- [Development](development.md) — setup, testing, architecture
+-   **Web UI**
+
+    ---
+
+    A browser app for writing prompts, generating, browsing your gallery and managing models. Works from a phone or tablet too.
+
+    [Start with the Web UI](web-ui/index.md)
+
+-   **Command line**
+
+    ---
+
+    `ziv-image` and `ziv-video` for scripted and batch work, with every setting as a flag.
+
+    [Start with the CLI](cli/index.md)
+
+</div>
+
+Both use the same models, prompt files, settings and output folder, so you can switch between them at any time. The Web UI can even copy the command that reproduces its current settings.
+
+## Where to go next
+
+- [Install](install.md): what you need and how to install.
+- [Concepts](concepts/index.md): how models, prompts, upscaling and memory work, whichever way you use the app.
+- [Troubleshooting](concepts/troubleshooting.md): when something goes wrong.
+- [Developer](developer/index.md): working on the code.

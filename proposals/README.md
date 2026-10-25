@@ -37,7 +37,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
 | [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 | [Prompt enhancer: model hints, worked examples and a local judge](prompt-enhancer-hints.md) | Proposed | Split out of v3: per-model `enhance_hint` lines from config, one worked example per rewrite mode, and a local judge that ranks bench runs 1 to 5; each measured on the bench |
-| [Documentation for v1](docs-v1.md) | In progress | Zensical replaces MkDocs first; then a four-section site (Web UI, CLI, Concepts, Developer) with generated CLI and config references, screenshots and drift tests |
+| [Documentation for v1](docs-v1.md) | In progress | Zensical replaces MkDocs first; then a four-section site (Web UI, CLI, Concepts, Developer) with hand-written CLI and config references kept complete by tests, and screenshots |
 
 ## Archive
 

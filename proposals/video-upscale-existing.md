@@ -140,9 +140,9 @@ Write the numbers, the default step count, the tiling rule and the plain-or-IC-L
 
 ### 5. Docs and changelog
 
-- `docs/guides/video.md`: an "Upscale an existing video (Web UI)" section next to "Video Upscale & Audio": the generate-small, extend, then upscale workflow; 2× only; time and memory from the spike; macOS only; audio and frame rate kept; that an upscaled video can't be extended (extend first, upscale last).
+- `docs/concepts/upscaling.md`: an "Upscale an existing video" section next to "Video upscale", and the viewer's menu in `docs/web-ui/gallery.md`: the generate-small, extend, then upscale workflow; 2× only; time and memory from the spike; macOS only; audio and frame rate kept; that an upscaled video can't be extended (extend first, upscale last).
 - The `video_upscale` key in the video guide's configuration snippet, and `generation.upscale.method: "ltx"` in the embedded-settings list.
-- `docs/development.md`: the new modules in Project Structure.
+- `docs/developer/project-structure.md`: the new modules.
 - A `CHANGELOG.md` entry under `[Unreleased]`.
 - Move this proposal to `archive/` and update the index.
 

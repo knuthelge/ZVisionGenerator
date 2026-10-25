@@ -397,7 +397,7 @@ Swap Δ is the "used" value after minus before; output is from `probe`.
 
 ## What the results feed
 
-- The "not run on a Mac" lines in `docs/guides/video.md` and the "not yet tested on a Mac" line in the CHANGELOG `[Unreleased]` entry: reword them once H-a to H-e pass.
+- The "hasn't been run on a Mac" lines in `docs/concepts/models.md` and `docs/concepts/memory.md` and the "not yet tested on a Mac" line in the CHANGELOG `[Unreleased]` entry: reword them once H-a to H-e pass.
 - The `_MLX_*` constants in `utils/h3_memory.py`: refit them if a peak is more than 2 GiB over its estimate or a time is more than 1.5 times it.
 - Whether the Mac H3 estimate should count LoRAs: H-e's peak against H-d's.
 

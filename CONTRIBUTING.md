@@ -2,13 +2,15 @@
 
 Thank you for your interest in contributing!
 
+The full guide is in the [developer docs](https://knuthelge.github.io/ZVisionGenerator/developer/) (or [docs/developer/](docs/developer/index.md) in this repository): setting up, the conventions every change follows, and how the app is built.
+
 ## Code of Conduct
 
 This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold it.
 
 ## Reporting Bugs
 
-Open a [bug report](https://github.com/knuthelge/ZVisionGenerator/issues/new?template=bug_report.yml) with steps to reproduce, expected vs actual behavior, platform, Python version, and any error output.
+Open a [bug report](https://github.com/knuthelge/ZVisionGenerator/issues/new?template=bug_report.yml) with steps to reproduce, expected vs actual behavior, platform, Python version, and any error output. Report security issues as described in [SECURITY.md](SECURITY.md).
 
 ## Suggesting Features
 
@@ -16,28 +18,12 @@ Open a [feature request](https://github.com/knuthelge/ZVisionGenerator/issues/ne
 
 ## Submitting Code
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b my-feature`)
-3. Make your changes, committing with [Conventional Commits](https://www.conventionalcommits.org/) messages: `type(scope): imperative summary`, plus a short list of high-level changes in the body
-4. Run `make check` (lint + format-check + pytest + frontend checks + docs build + packaged SPA static/drift verification must all pass)
-5. Open a Pull Request against `main`
-
-See the [Development Guide](docs/development.md) for setup, testing, and code style details.
-
-## Code Style
-
-- Enforced by [ruff](https://docs.astral.sh/ruff/) (line-length 200)
-- Google-style docstrings
-- `from __future__ import annotations` in every `.py` file
-- Python 3.14+ type syntax (`str | None`, `list[str]`)
-
-### Frontend Development
-
-- Node.js 22.22.2+ (22.x), 24.15.0+ (24.x) or 26+ and pnpm ≥ 11.0.0 are required to build and test the web frontend.
-- Install frontend dependencies: `make frontend-install`
-- Build frontend assets: `make frontend-build`
-- Run frontend tests: `make frontend-test`
-- Start Vite dev server: `make frontend-dev`
+1. Fork the repository and create a feature branch.
+2. Set up with `make install`. See [Set up](docs/developer/index.md#set-up).
+3. Make your changes, following the [conventions](docs/developer/conventions.md), with tests.
+4. Update the docs and `CHANGELOG.md` for user-facing changes. See [Writing docs](docs/developer/docs.md).
+5. Run `make check`: lint, format check, pytest, frontend checks, the packaged SPA drift check and a strict docs build must all pass.
+6. Commit with [Conventional Commits](https://www.conventionalcommits.org/) messages (`type(scope): imperative summary`, plus a short list of high-level changes in the body) and open a pull request against `main`.
 
 ## License
 

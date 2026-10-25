@@ -40,7 +40,7 @@ The Workspace remembers one prompt: the one in the box. Typing a new one loses t
 ### Docs and changelog
 
 - CHANGELOG `[Unreleased]`: "The Workspace remembers recent prompts and the last rewrites."
-- The Web UI section of `docs/getting-started.md` mentions the clock button and that recents are kept in the browser, like the Workspace settings.
+- `docs/web-ui/workspace.md` mentions the clock button and that recents are kept in the browser, like the Workspace settings.
 
 ## Alternatives considered
 

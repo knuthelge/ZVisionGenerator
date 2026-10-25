@@ -63,7 +63,7 @@ The strip shows the star on each tile and keeps the full list; no search there. 
 ### Docs and changelog
 
 - CHANGELOG `[Unreleased]`: "Search the Gallery by prompt, model, workflow, seed or LoRA, filter by date, and star favourites."
-- The Web UI section of `docs/getting-started.md` gets a short Gallery paragraph (search, filters, the `F` key, and where favourites are stored).
+- `docs/web-ui/gallery.md` gets a short section (search, filters, the `F` key, and where favourites are stored).
 
 ## Alternatives considered
 

@@ -1,4 +1,4 @@
-# Prompt-enhancer bench cases. See proposals/prompt-enhancer-v3.md (phase 1) and docs/development.md.
+# Prompt-enhancer bench cases. See proposals/archive/prompt-enhancer-v3.md (phase 1) and docs/developer/enhancer-bench.md.
 #
 # Each case: id, tags, mode (image | video | caption), prompt, scene (video only), settings (as a prompt file's
 # enhance: mapping; {} = the defaults), context (ratio, width, height, frames, fps, audio, reference_image, extends,

@@ -1,6 +1,6 @@
 # Project Guidelines
 
-Architecture, project structure, and full conventions live in [docs/development.md](docs/development.md). Read its Project Structure and Architecture Overview sections before adding a module, backend, workflow stage, or config key. This file holds the rules every change must follow.
+Architecture, project structure, and full conventions live in the developer docs in [docs/developer/](docs/developer/index.md). Read [Project structure](docs/developer/project-structure.md), [Architecture overview](docs/developer/architecture.md) and [How-to](docs/developer/how-to.md) before adding a module, backend, workflow stage, CLI flag or config key. This file holds the rules every change must follow.
 
 ## Design Philosophy — Atomic Code Design
 
@@ -29,9 +29,9 @@ Every module, function, and class should be **atomic**: a single, self-contained
 - `packages/ltx_*` and `packages/seedvr2_torch` are vendored. Never edit them by hand; update them with `make update-ltx` and `make update-seedvr2`.
 - The Web UI is built from `frontend/` (Svelte 5, TypeScript, pnpm) into `zvisiongenerator/web/static/app/`, which is committed. After any frontend change, run `make frontend-build` and commit the rebuilt files.
 - Future work is written up as proposals in `proposals/` (see its README). Check there before larger work. When a proposal ships or is rejected, update its status and move it to `proposals/archive/`. Files in `docs/` never link to proposals.
-- User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`.
+- User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`. Explain a feature once in Concepts; the Web UI and CLI pages show how to use it and link there. New settings go in `docs/concepts/configuration.md` and new flags in `docs/cli/reference.md`. See [Writing docs](docs/developer/docs.md).
 - Commits follow Conventional Commits: `type(scope): imperative summary` (types: feat, fix, perf, refactor, docs, test, build, ci, chore; scope is the product area, e.g. web, image, video, enhance). Add a body with a short list of high-level changes, not file-by-file detail. Mark breaking changes with `!` and a `BREAKING CHANGE:` line. Release commits are `chore(release): v<version>`.
-- Never create or push `v*` tags or cut a release unless the user explicitly asks; a tag push publishes to PyPI and cannot be undone (see [Releasing](docs/development.md#releasing)).
+- Never create or push `v*` tags or cut a release unless the user explicitly asks; a tag push publishes to PyPI and cannot be undone (see [Releasing](docs/developer/releasing.md)).
 
 ## Build & Test
 

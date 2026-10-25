@@ -21,7 +21,7 @@ The terminal button in the Settings header copies a `ziv image` or `ziv video` c
 ### Docs and changelog
 
 - CHANGELOG `[Unreleased]`: "Copy the CLI command that reproduces any output from its tile menu or the viewer."
-- The Web UI section of `docs/getting-started.md` mentions it next to the existing terminal button.
+- `docs/web-ui/workspace.md` and `docs/web-ui/gallery.md` mention it next to the existing terminal button (Copy as a command).
 
 ## Alternatives considered
 

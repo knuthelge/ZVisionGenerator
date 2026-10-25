@@ -50,8 +50,8 @@ Three independent items, each measured on the enhancer bench (`make enhance-benc
 
 ## Docs and changelog
 
-- **Hints and examples:** CHANGELOG `[Unreleased]` line ("the enhancer tailors rewrites to the selected model"); a sentence in `docs/guides/prompts.md`; `enhance_hint` in the config reference.
-- **Judge:** the bench section of `docs/development.md`.
+- **Hints and examples:** CHANGELOG `[Unreleased]` line ("the enhancer tailors rewrites to the selected model"); a sentence in `docs/concepts/prompt-enhancer.md`; `enhance_hint` in the config reference.
+- **Judge:** `docs/developer/enhancer-bench.md`.
 
 ## Alternatives considered
 

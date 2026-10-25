@@ -39,7 +39,7 @@ The two most common next steps after a good output are "more like this, differen
 ### Docs and changelog
 
 - CHANGELOG `[Unreleased]`: "Generate variations of any output with new seeds, and sweep one or two settings over a list of values."
-- The Web UI section of `docs/getting-started.md` explains Variations and the Sweep section.
+- `docs/web-ui/workspace.md` explains Variations and the Sweep section.
 
 ## Alternatives considered
 

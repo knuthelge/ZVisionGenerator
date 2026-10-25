@@ -48,7 +48,7 @@ A short chime on completion and a lower one on failure, off by default, toggled 
 ### Docs and changelog
 
 - CHANGELOG `[Unreleased]`: "The tab title and favicon show job progress and the result; optional sound and browser notifications when a job finishes."
-- The Web UI section of `docs/getting-started.md` documents the bell menu and the localhost/https limit for notifications.
+- `docs/web-ui/workspace.md` documents the bell menu and the localhost/https limit for notifications.
 
 ## Alternatives considered
 

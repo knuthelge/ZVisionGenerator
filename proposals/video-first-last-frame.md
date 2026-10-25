@@ -220,13 +220,13 @@ Write the numbers into this proposal's Evidence section before step 1.
 
 ### 7. Docs and changelog (macOS release)
 
-- `docs/guides/video.md`:
+- `docs/concepts/video.md` (and the picker in `docs/web-ui/workspace.md`, the flag in `docs/cli/video.md`):
   - A section on first and last frames: the Web UI pickers and the CLI flag.
   - The last frame is a soft condition, so the clip ends close to the image but not pixel-identical, unlike the first frame.
   - Use images with the video's aspect ratio. Each image is scaled to cover the frame and center-cropped.
   - The enhancer behaviour, next to the existing enhancer text.
   - Until step 8 lands, an end image is macOS-only. Windows and Linux don't show the Last frame picker.
-- `docs/reference/cli.md`: add `--end-image`.
+- `docs/cli/reference.md`: add `--end-image`.
 - `CHANGELOG.md` `[Unreleased]`: one entry under Added.
 
 ### 8. CUDA backend
@@ -254,7 +254,7 @@ Starts only if the spike's CUDA path passed. Until then, `supports_video_end_ima
   - The trim helper keeps the first `num_frames`, and the upscaler receives the trimmed frames.
   - The kwarg guard raises when `image` or `conditions` is dropped.
   - A contract test that `LTX2ConditionPipeline.__call__` takes `conditions`, and `LTX2VideoCondition` has `frames`, `index`, `strength` and `crf`.
-- **Docs and changelog:** remove the macOS-only note from `docs/guides/video.md`, describe the Windows and Linux behaviour (end image one frame past the end, extra time and memory), and add a changelog entry. Set this proposal to Done and update the index.
+- **Docs and changelog:** remove the macOS-only note from `docs/concepts/video.md`, describe the Windows and Linux behaviour (end image one frame past the end, extra time and memory), and add a changelog entry. Set this proposal to Done and update the index.
 
 ## Alternatives considered
 
