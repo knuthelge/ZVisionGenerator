@@ -19,6 +19,20 @@ from zvisiongenerator.utils.h3_converted import read_converted_h3, write_convert
 _KEYS = [(0.5,), (0.25, 1.0)]
 
 
+@pytest.fixture(autouse=True)
+def _nf4_format(monkeypatch):
+    """Pin the NF4 storage format, so the tests run without bitsandbytes installed (as on macOS)."""
+    monkeypatch.setattr(converted.stored_copy, "nf4_storage_format", lambda: "nf4-bitsandbytes-0.50")
+
+
+def _copy() -> dict:
+    return converted.stored_copy.copy_settings(0.0625, _KEYS)
+
+
+def _current() -> dict:
+    return {"storage": "nf4-folded", "turbo": "merged", "copy": _copy()}
+
+
 @pytest.fixture
 def checkpoint(monkeypatch, tmp_path):
     monkeypatch.setattr(h3_checkpoint, "STOCK_CONFIG", _TINY)
@@ -60,7 +74,7 @@ def test_the_manifest_records_the_turbo_choice_the_fold_keys_and_the_source(monk
 def test_a_converted_folder_loads_its_own_copy_with_stocks_components(monkeypatch, tmp_path):
     folder = tmp_path / "myh3"
     folder.mkdir()
-    write_converted_h3(folder, _CURRENT)
+    write_converted_h3(folder, _current())
     files = SimpleNamespace(repo_dir=tmp_path / "repo")
     monkeypatch.setattr(h3_backend, "resolve_base_files", lambda preset, upscale: files)
     monkeypatch.setattr(h3_backend, "_all_fold_keys", lambda preset, repo_dir: _KEYS)
@@ -68,22 +82,26 @@ def test_a_converted_folder_loads_its_own_copy_with_stocks_components(monkeypatc
     assert h3_backend._converted_copy(folder, read_converted_h3(folder), _preset(), False) == (files, folder)
 
 
-_COPY = converted.stored_copy.copy_settings(0.0625, _KEYS)
-_CURRENT = {"storage": "nf4-folded", "turbo": "merged", "copy": _COPY}
-
-
 @pytest.mark.parametrize(
-    "manifest",
+    "changes",
     [
-        {**_CURRENT, "storage": "mlx-int8"},  # converted on a Mac
-        {**_CURRENT, "copy": {**_COPY, "fold_keys": [[0.5]]}},  # other schedules
-        {**_CURRENT, "copy": {**_COPY, "lora_scale": 0.125}},  # another turbo strength
-        {"storage": "nf4-folded", "turbo": "merged"},  # no record of the copy's settings
+        {"storage": "mlx-int8"},  # converted on a Mac
+        {"copy": {"fold_keys": [[0.5]]}},  # other schedules
+        {"copy": {"lora_scale": 0.125}},  # another turbo strength
+        {"copy": None},  # no record of the copy's settings
     ],
 )
-def test_a_folder_from_the_other_platform_or_with_other_copy_settings_is_refused(monkeypatch, tmp_path, manifest):
+def test_a_folder_from_the_other_platform_or_with_other_copy_settings_is_refused(monkeypatch, tmp_path, changes):
     folder = tmp_path / "myh3"
     folder.mkdir()
+    manifest = _current()
+    if "storage" in changes:
+        manifest["storage"] = changes["storage"]
+    if "copy" in changes:
+        if changes["copy"] is None:
+            del manifest["copy"]
+        else:
+            manifest["copy"].update(changes["copy"])
     write_converted_h3(folder, manifest)
     monkeypatch.setattr(h3_backend, "resolve_base_files", lambda preset, upscale: SimpleNamespace(repo_dir=tmp_path))
     monkeypatch.setattr(h3_backend, "_all_fold_keys", lambda preset, repo_dir: _KEYS)
@@ -95,7 +113,7 @@ def test_a_folder_from_the_other_platform_or_with_other_copy_settings_is_refused
 def test_a_new_nf4_serialization_asks_for_a_new_conversion(monkeypatch, tmp_path):
     folder = tmp_path / "myh3"
     folder.mkdir()
-    write_converted_h3(folder, _CURRENT)
+    write_converted_h3(folder, _current())
     monkeypatch.setattr(h3_backend, "resolve_base_files", lambda preset, upscale: SimpleNamespace(repo_dir=tmp_path))
     monkeypatch.setattr(h3_backend, "_all_fold_keys", lambda preset, repo_dir: _KEYS)
     monkeypatch.setattr(converted.stored_copy, "nf4_storage_format", lambda: "nf4-bitsandbytes-99.0")

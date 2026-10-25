@@ -208,6 +208,7 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Rig:
 def _load(rig: Rig, **kwargs: Any) -> Any:
     kwargs.setdefault("preset", PRESET)
     model, _info = H3VideoBackend().load_model("MiniMaxAI/MiniMax-H3", **kwargs)
+    model = dataclasses.replace(model, device=torch.device("cpu"))  # the stand-ins run anywhere; macOS CI has no CUDA
     rig.events.clear()
     rig.calls.clear()
     rig.row_sets.clear()
