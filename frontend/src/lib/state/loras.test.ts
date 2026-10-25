@@ -132,9 +132,9 @@ describe('groupLorasForModel', () => {
   const zimage = { family: 'zimage', sizeVariant: null };
 
   it('shows only the matches, by name, and folds the rest, unknown-family LoRAs included', () => {
-    const loras = [lora('zz-match', 'zimage'), lora('mystery', null), lora('aa-match', 'zimage'), lora('b-ltx', 'ltx'), lora('a-flux', 'flux1')];
+    const loras = [lora('z-match', 'zimage'), lora('mystery', null), lora('a-match', 'zimage'), lora('b-ltx', 'ltx'), lora('a-flux', 'flux1')];
     const { main, other } = groupLorasForModel(loras, zimage, []);
-    expect(names(main)).toEqual(['aa-match', 'zz-match']);
+    expect(names(main)).toEqual(['a-match', 'z-match']);
     expect(names(other)).toEqual(['a-flux', 'b-ltx', 'mystery']);
   });
 
