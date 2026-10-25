@@ -158,9 +158,26 @@ def _bring_to_version(conn: sqlite3.Connection, component: Component) -> None:
             )
 
 
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switch the file to WAL, waiting out a concurrent switch that SQLite does not route through the busy handler.
+
+    Raises:
+        sqlite3.OperationalError: When the file stays locked for ``BUSY_TIMEOUT_SECONDS`` or the switch fails otherwise.
+    """
+    deadline = time.monotonic() + BUSY_TIMEOUT_SECONDS
+    while conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            if ("locked" not in message and "busy" not in message) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def _configure(conn: sqlite3.Connection, components: Sequence[Component]) -> None:
     """Apply the standard pragmas, create ``schema_versions`` and migrate each component."""
-    conn.execute("PRAGMA journal_mode=WAL")
+    _enable_wal(conn)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("CREATE TABLE IF NOT EXISTS schema_versions (component TEXT PRIMARY KEY, version INTEGER NOT NULL) WITHOUT ROWID")

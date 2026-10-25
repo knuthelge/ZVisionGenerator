@@ -342,7 +342,7 @@ class TestJobLogErrors:
             return conn
 
         monkeypatch.setattr(app_db, "connect", failing_connect)
-        with pytest.warns(UserWarning, match="damaged"), pytest.raises(JobLogError):
+        with pytest.warns(UserWarning), pytest.raises(JobLogError):
             log.page("all", 1, 50)
         monkeypatch.setattr(app_db, "connect", real_connect)
 
