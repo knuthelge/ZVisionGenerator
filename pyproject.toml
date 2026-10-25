@@ -9,7 +9,7 @@ license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Knut Risheim" }]
 keywords = ["ai", "image-generation", "video-generation", "z-image", "flux", "mlx", "diffusers", "stable-diffusion"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "Intended Audience :: Developers",
@@ -45,9 +45,9 @@ dependencies = [
     "torchvision>=0.29.0; sys_platform != 'darwin'",
     "transformers>=5.19.0",
     "uvicorn>=0.54.0",
-    "mlx>=0.32.2; sys_platform == 'darwin'",
+    "mlx>=0.32.2,<0.33; sys_platform == 'darwin'",
     "mlx-arsenal>=0.2.4,<0.3; sys_platform == 'darwin'",
-    "mlx-lm>=0.32.0; sys_platform == 'darwin'",
+    "mlx-lm>=0.32.0,<0.33; sys_platform == 'darwin'",
     "mlx-vlm==0.6.10; sys_platform == 'darwin'",
     "safetensors>=0.8.0",
     "tqdm>=4.66.0",

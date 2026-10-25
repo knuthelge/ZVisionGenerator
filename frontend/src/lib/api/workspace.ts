@@ -43,10 +43,8 @@ export function clearQueue(): Promise<{ cancelled: string[] }> {
 
 export function parseUrlPrefill(): Record<string, string> {
   const params: Record<string, string> = {};
-  // Hash takes precedence over query string (per router design)
-  const hashSearch = window.location.hash.replace(/^#\/[^?]*\??/, '');
-  const querySearch = window.location.search.replace(/^\?/, '');
-  const source = hashSearch || querySearch;
+  // The hash is the one form the app emits (#/workspace?...), and the one the Workspace clears after applying it.
+  const source = window.location.hash.replace(/^#\/[^?]*\??/, '');
   if (!source) return params;
   new URLSearchParams(source).forEach((value, key) => {
     params[key] = value;

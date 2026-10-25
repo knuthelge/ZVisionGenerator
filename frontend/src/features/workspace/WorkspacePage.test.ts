@@ -683,6 +683,36 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.has('output')).toBe(false);
   });
 
+  it('drops the reuse params from the address once they are in the draft, so a reload keeps the edits', async () => {
+    workspaceApiMocks.parseUrlPrefill.mockReturnValue({ workflow: 'txt2img', prompt: 'Reuse prompt', seed: '9876' });
+    router.navigate('workspace', { prompt: 'Reuse prompt', seed: '9876' });
+
+    await mountWorkspace(makeContext());
+
+    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('Reuse prompt');
+    expect(router.page).toBe('workspace');
+    expect(router.params).toEqual({});
+    expect(window.location.hash).toBe('#/workspace');
+  });
+
+  it('applies the reuse params once: an edit made before the server answers survives its context', async () => {
+    workspaceApiMocks.parseUrlPrefill.mockReturnValue({ workflow: 'txt2img', prompt: 'Reuse prompt', seed: '9876' });
+    workspaceMemory.set(makeContext());
+    let answer: (ctx: WorkspaceContext) => void = () => {};
+    workspaceApiMocks.getWorkspaceCoreContext.mockReturnValue(new Promise<WorkspaceContext>((resolve) => { answer = resolve; }));
+
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('Reuse prompt');
+
+    type('ws-prompt', 'My edit');
+    answer(makeContext());
+    await settle();
+
+    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('My edit');
+    expect(draft.state.seed).toBe(9876);
+  });
+
   it('shows a refused Generate above the button, keeps the preview, and clears it when a setting changes', async () => {
     draft.update('prompt', 'A lighthouse at dusk');
     await mountWorkspace(makeContext());

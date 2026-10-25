@@ -847,33 +847,28 @@
 
     let cancelled = false;
     let historyTimer: ReturnType<typeof setTimeout> | undefined;
+    // The URL's prefill goes into the draft once; the server's context, arriving after the remembered one, must not redo it over edits.
+    let prefillApplied = false;
 
-    /** Take a context as the page's authority: the draft hydrated from it, with the URL's prefill on top. */
+    /** Take a context as the page's authority: the draft hydrated from it, with the URL's prefill on top the first time. */
     function adoptContext(ctx: WorkspaceContext): void {
       context = ctx;
       workflows = ctx.workflow_contract.values;
       if (ctx.history_assets.length > 0) {
         galleryStore.seed(ctx.history_assets);
       }
-      if (urlParams.workflow) {
-        draft.loadFromUrl({ workflow: urlParams.workflow }, ctx);
+      if (hasUrlParams && !prefillApplied) {
+        prefillApplied = true;
+        // A link into the workspace loads a source's settings; a saved draft keeps its own unless the link names a model.
+        applyPrefill(urlParams, { keepSettings: !urlParams.model });
+        // The prefill is in the draft now; drop it from the address so a reload or Back keeps the user's edits.
+        router.replace('workspace');
+      } else {
+        // A saved draft keeps its settings across visits and restarts.
+        draft.hydrateFromContext(ctx, null, { keepSettings: true });
+        // The workflow-change $effect must not fire for the initial state.
+        _prevWorkflow = draft.state.workflow;
       }
-      // Hydrate model + defaults from backend for the current workflow.
-      // preferredModel = URL-specified model (may be null).
-      // A saved draft keeps its settings across visits and restarts unless a URL names a model to reuse.
-      draft.hydrateFromContext(ctx, urlParams.model ?? null, { keepSettings: !urlParams.model });
-
-      // Re-apply remaining URL params on top of the backend defaults so that
-      // explicit URL values (prompt, steps, ratio, etc.) take precedence.
-      if (hasUrlParams) {
-        draft.loadFromUrl(urlParams, ctx);
-        // A link into the workspace loads a source's settings, so the form no longer starts from a preset.
-        draft.setAppliedPreset(null);
-      }
-
-      // After full hydration, sync _prevWorkflow so the workflow-change $effect
-      // does not fire for the initial state.
-      _prevWorkflow = draft.state.workflow;
     }
 
     // Pages remember: the context a previous visit loaded answers the first frame; the server's fresh one replaces it.

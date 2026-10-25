@@ -195,6 +195,33 @@ def main(*, prog: str = "ziv-image") -> None:
         except ValueError as e:
             parser.error(str(e))
 
+    # Validate the prompt source before the slow steps (model detection, backend import).
+    args.json_prompt_enabled = args.json_prompt is not None
+    enhance_by_set = None
+    if args.json_prompt_enabled:
+        if not args.json_prompt.strip():
+            parser.error("--json-prompt must not be empty")
+        try:
+            parsed_json_prompt = json.loads(args.json_prompt)
+        except json.JSONDecodeError as e:
+            parser.error(f'--json-prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\': {e}')
+        if not isinstance(parsed_json_prompt, dict):
+            parser.error(f'--json-prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\', got {type(parsed_json_prompt).__name__}')
+        prompts_data = {"prompt": [(args.json_prompt, None)]}
+    elif args.prompt is not None:
+        if not args.prompt.strip():
+            parser.error("--prompt must not be empty")
+        prompts_data = {"prompt": [(args.prompt, None)]}
+    else:
+        try:
+            inspection = inspect_prompts_file(args.prompts_file)
+        except FileNotFoundError:
+            parser.error(f"Prompts file not found: {args.prompts_file}. Provide --prompt or a valid --prompts-file.")
+        except ValueError as e:
+            parser.error(str(e))
+        prompts_data, enhance_by_set = inspection.prompts_data, image_enhance_entries(inspection.enhance_by_set, caption=args.enhance_format == "json")
+        defer_format_to_entries(args, enhance_by_set)
+
     try:
         model_info = detect_image_model(args.model)
     except Exception as e:
@@ -237,29 +264,6 @@ def main(*, prog: str = "ziv-image") -> None:
     if not (0.0 <= args.image_strength <= 1.0):
         parser.error(f"--image-strength must be between 0.0 and 1.0, got {args.image_strength}")
 
-    args.json_prompt_enabled = args.json_prompt is not None
-    enhance_by_set = None
-    if args.json_prompt_enabled:
-        if not args.json_prompt.strip():
-            parser.error("--json-prompt must not be empty")
-        try:
-            parsed_json_prompt = json.loads(args.json_prompt)
-        except json.JSONDecodeError as e:
-            parser.error(f'--json-prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\': {e}')
-        if not isinstance(parsed_json_prompt, dict):
-            parser.error(f'--json-prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\', got {type(parsed_json_prompt).__name__}')
-        prompts_data = {"prompt": [(args.json_prompt, None)]}
-    elif args.prompt is not None:
-        if not args.prompt.strip():
-            parser.error("--prompt must not be empty")
-        prompts_data = {"prompt": [(args.prompt, None)]}
-    else:
-        try:
-            inspection = inspect_prompts_file(args.prompts_file)
-        except (FileNotFoundError, ValueError) as e:
-            parser.error(str(e))
-        prompts_data, enhance_by_set = inspection.prompts_data, image_enhance_entries(inspection.enhance_by_set, caption=args.enhance_format == "json")
-        defer_format_to_entries(args, enhance_by_set)
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")
 

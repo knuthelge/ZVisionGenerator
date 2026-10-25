@@ -7,7 +7,7 @@ These files are not part of the published docs site, and the docs don't link to 
 ## Conventions
 
 - One file per proposal, named with a short kebab-case slug (e.g. `image-editing.md`).
-- Start each file with a **Status** line: `Proposed`, `Accepted`, `In progress`, `Done` or `Rejected`, plus the date it last changed.
+- Start each file with a **Status** line: `Proposed`, `Accepted`, `In progress`, `Done` or `Rejected`, plus the date it last changed. `Backlog` marks a list of small verified items that have no proposal of their own.
 - Open proposals (`Proposed`, `Accepted`, `In progress`) live in this folder. When a proposal ships or is rejected, set its status, link the release or commit, and `git mv` it to [`archive/`](archive/); the file stays as a design record of what was measured and decided. Fix relative links in both directions when moving it.
 - Keep a proposal that is partly done open, with the shipped part summarised at the top and only the remaining work below it. Move leftover work that depends on another proposal into that proposal.
 - Add every proposal to the index below, and move its row when it is archived.
@@ -37,6 +37,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
 | [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 | [Prompt enhancer: model hints, worked examples and a local judge](prompt-enhancer-hints.md) | Proposed | Split out of v3: per-model `enhance_hint` lines from config, one worked example per rewrite mode, and a local judge that ranks bench runs 1 to 5; each measured on the bench |
+| [Backlog from the v1 review](backlog.md) | Backlog | Verified findings left out of v1, each small enough to pick up alone: stalled-stream detection, toasts that drop the reason, config comments lost on save, image-batch exceptions, Ctrl+C tracebacks, converter error handling, dead code and `__all__`, doc nits, proposals to archive |
 
 ## Archive
 

@@ -48,7 +48,7 @@
 
   onMount(async () => {
     // Only apply startup_view when no explicit URL destination was specified
-    if (shouldApplyStartupView(window.location.hash, window.location.search)) {
+    if (shouldApplyStartupView(window.location.hash)) {
       try {
         const appConfig = await getConfig();
         const startupView = appConfig.ui.startup_view ?? 'workspace';

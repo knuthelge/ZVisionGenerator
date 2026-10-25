@@ -435,6 +435,25 @@ class TestCLIValidation:
         with pytest.raises(SystemExit, match="2"):
             self._run_main(["--prompt", "   ", "-m", "fake"])
 
+    def test_missing_prompts_file_is_refused_before_model_detection(self, capsys):
+        """No --prompt and no prompts file ends with a hint, before the model is detected or the backend loads."""
+        detect = MagicMock(side_effect=AssertionError("detect_image_model must not run"))
+        get_backend = MagicMock(side_effect=AssertionError("get_backend must not run"))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["-m", "fake", "-p", "missing.yaml"],
+                inspect_prompts_file=MagicMock(side_effect=FileNotFoundError(2, "No such file or directory", "missing.yaml")),
+                detect_image_model=detect,
+                get_backend=get_backend,
+            )
+
+        error = capsys.readouterr().err
+        assert "Prompts file not found: missing.yaml" in error
+        assert "Provide --prompt or a valid --prompts-file" in error
+        detect.assert_not_called()
+        get_backend.assert_not_called()
+
     def test_json_prompt_accepts_inline_json_object_value(self):
         recorded = {}
         mock_backend = MagicMock()
