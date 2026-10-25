@@ -207,11 +207,17 @@ class TestLoadOptionsAndCompanions:
         assert "upscale" not in video_load_options("h3", config, "h3", upscale=False)
         assert video_load_options("h3", config, "h3", upscale=True)["upscale"] is True
 
-    def test_only_the_keys_the_h3_backend_takes_are_given(self, config):
+    def test_only_the_keys_the_h3_backend_takes_are_given(self, config, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "linux")
         assert set(video_load_options("h3", config, "h3", upscale=True)) <= {"model_name", "preset", "upscale"}
 
     @pytest.mark.parametrize("repo_id", [REPO_REF, "MiniMaxAI/MiniMax-H3", "MiniMaxAI/MiniMax-H3@other"])
-    def test_the_companions_are_the_text_encoder_the_lora_and_the_latent_upsampler_repos(self, config, repo_id):
+    def test_the_companions_are_the_text_encoder_the_lora_and_the_latent_upsampler_repos(self, config, monkeypatch, repo_id):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "linux")
         assert video_companion_repos("h3", config, repo_id) == ("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo", "LBH-123-AI/Minimax_h3_latent_Upscaler")
 
     def test_seedvr2_repos_are_not_companions(self, config):

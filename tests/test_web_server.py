@@ -2868,6 +2868,7 @@ def test_inspect_route_gives_h3_a_window_of_its_22_frame_tail(clip, monkeypatch)
     config.app_config = load_config()
     monkeypatch.setattr(web_server, "load_web_config", lambda: config)
     monkeypatch.setattr(extend_api_module, "resolve_model_path", lambda model, **_: "MiniMaxAI/MiniMax-H3")
+    monkeypatch.setattr(web_server.sys, "platform", "linux")
 
     payload = _inspect({"path": str(clip.path), "extend_frames": 34, "model": "h3"}).json()
 
