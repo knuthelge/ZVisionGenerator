@@ -188,6 +188,7 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     monkeypatch.setattr(stored_copy, "pack_nf4", fake_pack)
     monkeypatch.setattr(stored_copy, "nf4_linear_names", spy_names)
     monkeypatch.setattr(stored_copy, "swap_in_linear4bit", swap)
+    monkeypatch.setattr(stored_copy, "place_nf4", lambda tensors, layers: tensors)
     monkeypatch.setattr(stored_copy, "fill_weights", fill)
     monkeypatch.setattr(stored_copy, "stream_blocks", lambda blocks, device: record.events.append("stream"))
     monkeypatch.setattr(stored_copy, "move_outside", lambda model, blocks, device: record.events.append("move_outside"))

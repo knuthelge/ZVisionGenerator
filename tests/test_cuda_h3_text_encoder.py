@@ -13,6 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 pytest.importorskip("diffusers")
+pytest.importorskip("torchvision")  # Qwen3-VL's processor needs it; macOS does not install it
 safetensors_torch = pytest.importorskip("safetensors.torch")
 PIL_Image = pytest.importorskip("PIL.Image")
 
