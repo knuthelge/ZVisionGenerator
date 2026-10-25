@@ -171,9 +171,11 @@ class TestVideoPlan:
 
     @pytest.mark.parametrize("upscale", [False, True])
     def test_h3_is_planned_from_its_preset_by_the_h3_planner(self, monkeypatch, upscale):
+        import zvisiongenerator.backends as backends
         from zvisiongenerator.utils.config import load_config
         from zvisiongenerator.utils.h3_preset import h3_preset
 
+        monkeypatch.setattr(backends.sys, "platform", "linux")
         config = load_config()
         target = DownloadTarget("owner/h3")
         h3_backend = _patch_backend(monkeypatch, "h3_download_plan", (target,))

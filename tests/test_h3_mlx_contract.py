@@ -39,13 +39,14 @@ def _function(scope: ast.Module | ast.ClassDef, name: str) -> ast.FunctionDef:
 
 
 def _parameters(function: ast.FunctionDef) -> dict[str, ast.expr | None]:
-    """Map every parameter name (``self`` excluded) to its default node, or ``None`` when it has none."""
+    """Map every parameter name (``self`` and ``cls`` excluded) to its default node, or ``None`` when it has none."""
     args = function.args
     positional = [*args.posonlyargs, *args.args]
     defaults: list[ast.expr | None] = [None] * (len(positional) - len(args.defaults)) + list(args.defaults)
     result = {arg.arg: default for arg, default in zip(positional, defaults, strict=True)}
     result.update({arg.arg: default for arg, default in zip(args.kwonlyargs, args.kw_defaults, strict=True)})
     result.pop("self", None)
+    result.pop("cls", None)
     return result
 
 
@@ -305,7 +306,7 @@ def test_imported_pipeline_matches_the_syntax_tree() -> None:
     from minimax_h3_mlx.pipeline import GenerationResult, MiniMaxH3Pipeline
 
     function = _function(_pipeline_class(), "from_pretrained")
-    assert list(inspect.signature(MiniMaxH3Pipeline.from_pretrained).parameters) == ["cls", *_parameters(function)]
+    assert list(inspect.signature(MiniMaxH3Pipeline.from_pretrained).parameters) == list(_parameters(function))
     assert list(inspect.signature(MiniMaxH3Pipeline.__call__).parameters)[1:] == list(_parameters(_function(_pipeline_class(), "__call__")))
     assert list(GenerationResult.__dataclass_fields__) == ["video", "audio", "sample_rate", "fps", "seconds_per_step", "total_seconds", "block_cache_stats"]
 
