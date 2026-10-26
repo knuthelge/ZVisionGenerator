@@ -1980,6 +1980,7 @@ class TestEndImage:
 
     @pytest.mark.parametrize(("repo", "crf"), [("diffusers/LTX-2.3-Distilled-Diffusers", None), ("unsloth/LTX-2.5-FP8@" + _PIN, 0)])
     def test_an_image_the_backend_recompressed_is_not_recompressed_again(self, monkeypatch, tmp_path, repo, crf):
+        monkeypatch.setattr(video_diffusers_module, "recompress", lambda image, crf: image)
         model = self._load(monkeypatch, repo=repo, image_crf=18 if crf == 0 else None)
         self._run(model, tmp_path)
         assert [c.crf for c in model.image_to_video.calls[0]["conditions"]] == [crf, crf]
