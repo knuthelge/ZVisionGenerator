@@ -646,3 +646,14 @@ def test_ltx_video_decoder_file_follows_the_pipeline_names(tmp_path, present, ex
     found = model_files.ltx_mlx_video_decoder_file(tmp_path)
 
     assert (found.name if found else None) == expected
+
+
+class TestIsMossModel:
+    @pytest.mark.parametrize(("class_name", "expected"), [("MOSSImagePipeline", True), ("Ideogram4Pipeline", False)])
+    def test_reads_the_pipeline_class(self, tmp_path, class_name, expected):
+        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": class_name}))
+
+        assert model_files.is_moss_model(tmp_path) is expected
+
+    def test_a_folder_without_an_index_is_not_moss(self, tmp_path):
+        assert model_files.is_moss_model(tmp_path) is False

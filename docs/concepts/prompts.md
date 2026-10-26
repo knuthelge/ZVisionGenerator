@@ -118,7 +118,7 @@ portrait:
     negative: blurry, low quality, bad anatomy
 ```
 
-It takes the same forms as `prompt:`. Only some models use it: Z-Image does, while FLUX.2, Krea 2 and Ideogram 4 ignore it with a warning. See [Models](models.md).
+It takes the same forms as `prompt:`. Only some models use it: Z-Image and MOSS-Image SFT (`moss-sft`) do, while FLUX.2, Krea 2, Ideogram 4 and MOSS-Image Turbo (`moss`) ignore it with a warning. See [Models](models.md).
 
 ## Scenes for video
 

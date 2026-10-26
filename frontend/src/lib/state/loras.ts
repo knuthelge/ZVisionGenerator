@@ -65,6 +65,7 @@ const FAMILY_LABELS: Record<string, string> = {
   flux1: 'Flux 1',
   krea2: 'Krea 2',
   ideogram4: 'Ideogram 4',
+  moss: 'MOSS-Image',
   ltx: 'LTX',
 };
 

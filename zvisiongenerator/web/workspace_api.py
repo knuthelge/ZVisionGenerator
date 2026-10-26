@@ -446,7 +446,7 @@ def _status_resolver(
     Image quantize levels come from the same bootstrap defaults that drive the workspace quantize picker, and
     download lookups are memoised for the request (LTX MLX models share one Gemma text-encoder lookup).
 
-    With *instant_sources_count*, an Ideogram 4 Instant folder that is not built yet reads as downloaded once all
+    With *instant_sources_count*, a model built on first use (Ideogram 4 Instant, MOSS-Image) that is not built yet reads as downloaded once all
     its sources are on disk (the first job builds the folder from them), with ``memory_fit`` still ``None``.
     The Models page leaves it off so a row shows it still has to be built.
     """

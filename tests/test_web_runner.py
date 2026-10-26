@@ -394,7 +394,7 @@ class TestWebRunner:
         workflow = MagicMock(name="workflow")
 
         try:
-            job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="/models/zit", context={"output_dir": str(tmp_path)})
+            job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="/models/zit", config={}, context={"output_dir": str(tmp_path)})
             snapshot = _wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
@@ -437,7 +437,7 @@ class TestWebRunner:
         workflow = MagicMock(name="workflow")
 
         try:
-            job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="numz/SeedVR2_comfyUI", context={"output_dir": str(tmp_path)})
+            job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="numz/SeedVR2_comfyUI", config={}, context={"output_dir": str(tmp_path)})
             snapshot = _wait_for_status(runner, job_id, "completed")
             events = [event for event in runner._get_job(job_id).history if event["type"] == "model_loading"]
         finally:
@@ -457,7 +457,7 @@ class TestWebRunner:
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source="/out/a.png", upscale_method="seedvr2", upscale_model="seedvr2-7b")
 
         try:
-            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="numz/SeedVR2_comfyUI", context={})
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="numz/SeedVR2_comfyUI", config={}, context={})
             snapshot = _wait_for_status(runner, job_id, "failed")
         finally:
             runner.shutdown()
@@ -481,7 +481,7 @@ class TestWebRunner:
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source=str(tmp_path / "a.png"), upscale_method="seedvr2", upscale_model="seedvr2-3b")
 
         try:
-            runner._run_upscale_request(request=request, workflow=workflow, model_ref="numz/SeedVR2_comfyUI", progress_callback=events.append, control_signal=control)
+            runner._run_upscale_request(request=request, workflow=workflow, model_ref="numz/SeedVR2_comfyUI", config={}, progress_callback=events.append, control_signal=control)
         finally:
             runner.shutdown()
 
@@ -533,7 +533,7 @@ class TestWebRunner:
             runner.shutdown()
 
         image_plan = web_runner_module.WebRunner._upscale_download_plan(
-            ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_method="seedvr2", upscale_model="seedvr2-7b"), "numz/SeedVR2_comfyUI"
+            ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_method="seedvr2", upscale_model="seedvr2-7b"), "numz/SeedVR2_comfyUI", {}
         )
         assert snapshot["job_type"] == "upscale"
         assert snapshot["supported_controls"] == ["quit"]
@@ -580,7 +580,7 @@ class TestWebRunner:
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_name="zit", upscale_factor=2, upscale_source="/out/a.png", quantize=8)
 
         try:
-            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/zit", context={"output_dir": str(tmp_path)})
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/zit", config={}, context={"output_dir": str(tmp_path)})
             snapshot = _wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()

@@ -592,6 +592,98 @@ class TestEstimateCudaImageMemory:
         assert estimate_cuda_image_memory(tmp_path) is None
 
 
+class TestEstimateCudaMossMemory:
+    """MOSS-Image: NF4 text encoder (bf16 embeddings) at every level, resident transformer at q4, streamed otherwise, plus the Turbo LoRA."""
+
+    _TE = 1024 * 1024
+    _EMBED = 256 * 1024
+    _DIT = 4096 * 1024
+    _VAE = 64 * 64 * 9
+    _LORA = 4000
+
+    def _model(self, root: Path, name: str = "moss", *, lora: bool = True, stored: int | None = None) -> Path:
+        model_dir = root / name
+        index = {"_class_name": "MOSSImagePipeline", "transformer": ["x", "T"], "text_encoder": ["x", "E"], "vae": ["x", "V"]}
+        model_dir.mkdir(parents=True)
+        (model_dir / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
+        embed = {"language_model.embed_tokens.weight": ("BF16", [256, 1024])}
+        if stored == 4:
+            _write_safetensors(model_dir / "transformer" / "model.safetensors", {"packed": ("U8", [self._DIT // 2, 1]), "norm": ("BF16", [1024])})
+            _write_safetensors(model_dir / "text_encoder" / "model.safetensors", {"packed": ("U8", [self._TE // 2, 1]), **embed})
+        else:
+            _write_safetensors(model_dir / "transformer" / "model.safetensors", {"linear": ("BF16", [4096, 1024]), "norm": ("BF16", [1024])})
+            _write_safetensors(model_dir / "text_encoder" / "model.safetensors", {"linear": ("BF16", [1024, 1024]), **embed})
+        _write_safetensors(model_dir / "vae" / "model.safetensors", {"conv": ("F32", [64, 64, 3, 3])})
+        if stored is not None:
+            (model_dir / "ziv-quant.json").write_text(json.dumps({"version": 1, "bits": stored}), encoding="utf-8")
+        if lora:
+            (model_dir.with_name(model_dir.name.split("@")[0]) / "turbo_lora.safetensors").write_bytes(b"\0" * self._LORA)
+        return model_dir
+
+    def _text_encoder_bytes(self, linear_elements: int) -> float:
+        nf4 = model_memory._NF4_BYTES_PER_WEIGHT
+        return linear_elements * nf4 + self._EMBED * 2
+
+    def test_levels_follow_the_placement(self, tmp_path, monkeypatch):
+        # Shrink the measured constants so each phase can win in turn.
+        monkeypatch.setattr(model_memory, "_MOSS_CUDA_WORKING_BYTES", 0)
+        monkeypatch.setattr(model_memory, "_CUDA_STREAMED_GPU_BYTES", 0)
+        monkeypatch.setattr(model_memory, "_CUDA_RESIDENT_WORKING_BYTES", 0)
+        estimates = estimate_cuda_image_memory(self._model(tmp_path, lora=False), (None, 4, 8))
+
+        te = self._text_encoder_bytes(self._TE)
+        dit = {None: self._DIT * 2, 4: self._DIT * model_memory._NF4_BYTES_PER_WEIGHT, 8: self._DIT}
+        vae = self._VAE * 4
+        for level in (None, 8):
+            assert estimates[level].gpu_bytes == int(te + vae)
+        assert estimates[4].gpu_bytes == int(max(te, dit[4] + 1024 * 2) + vae)
+        for level in (None, 4, 8):
+            assert estimates[level].system_bytes == int(te + dit[level] + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[level])
+
+    def test_the_decode_peak_is_what_the_card_needs(self, tmp_path):
+        estimates = estimate_cuda_image_memory(self._model(tmp_path, lora=False), (None, 4, 8))
+
+        for level in (None, 4, 8):
+            assert estimates[level].gpu_bytes == int(model_memory._MOSS_CUDA_WORKING_BYTES + self._VAE * 4)
+
+    def test_the_embedding_table_stays_bfloat16(self, tmp_path):
+        estimate = estimate_cuda_image_memory(self._model(tmp_path, lora=False), (4,))[4]
+
+        without_embedding_in_bf16 = self._TE * model_memory._NF4_BYTES_PER_WEIGHT + self._EMBED * model_memory._NF4_BYTES_PER_WEIGHT
+        dit = self._DIT * model_memory._NF4_BYTES_PER_WEIGHT
+        assert estimate.system_bytes == int(self._text_encoder_bytes(self._TE) + dit + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[4])
+        assert estimate.system_bytes > int(without_embedding_in_bf16 + dit + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[4])
+
+    def test_system_memory_grows_with_the_transformer_precision(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(model_memory, "_MOSS_CUDA_SYSTEM_WORKING_BYTES", {4: 0, 8: 0, None: 0})
+        estimates = estimate_cuda_image_memory(self._model(tmp_path), (None, 4, 8))
+
+        assert estimates[4].system_bytes < estimates[8].system_bytes < estimates[None].system_bytes
+
+    def test_an_unlisted_level_is_estimated_like_unquantized(self, tmp_path):
+        estimates = estimate_cuda_image_memory(self._model(tmp_path), (None, 6))
+
+        assert estimates[6] == estimates[None]
+
+    def test_the_turbo_lora_adds_to_the_gpu_and_sft_has_none(self, tmp_path):
+        turbo = estimate_cuda_image_memory(self._model(tmp_path), (None, 4))
+        sft = estimate_cuda_image_memory(self._model(tmp_path, "moss-sft", lora=False), (None, 4))
+
+        assert turbo[None].gpu_bytes == sft[None].gpu_bytes + self._LORA
+        assert turbo[4].gpu_bytes == sft[4].gpu_bytes + self._LORA
+        assert turbo[None].system_bytes == sft[None].system_bytes
+
+    def test_a_stored_copy_counts_its_stored_weights_whatever_level_is_asked(self, tmp_path):
+        self._model(tmp_path)  # the base folder holds the Turbo LoRA the copy shares
+        stored = self._model(tmp_path, "moss@q4", lora=False, stored=4)
+
+        estimate = estimate_cuda_image_memory(stored, (None,))[None]
+
+        assert estimate == estimate_cuda_image_memory(stored, (4,))[4]
+        assert estimate.system_bytes == int(self._TE // 2 + self._EMBED * 2 + self._DIT // 2 + 1024 * 2 + model_memory._MOSS_CUDA_SYSTEM_WORKING_BYTES[4])
+        assert estimate.gpu_bytes == int(self._LORA + model_memory._MOSS_CUDA_WORKING_BYTES + self._VAE * 4)
+
+
 @pytest.mark.parametrize(
     ("gpu", "system", "expected"),
     [

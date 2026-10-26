@@ -146,7 +146,7 @@ def create_stored_quant(backend: ImageBackend, source: Path, target: Path, bits:
     backend_format = backend.stored_quant_format(bits)
     if backend_format is None:
         raise RuntimeError(f"The {backend.name} backend cannot store quantized weights.")
-    if backend.quantizes_from_files(bits):
+    if backend.quantizes_from_files(bits, source=str(source)):
         return _write_stored_quant(backend, source=source, target=target, bits=bits, backend_format=backend_format)
     model, _info = backend.load_model(str(source), quantize=bits, precision=_PRECISION)
     return save_stored_quant(backend, model, source=source, target=target, bits=bits, backend_format=backend_format)
@@ -258,7 +258,7 @@ def load_image_model(
     plan = plan_image_model_load(model_path, quantize, models_dir=models_dir, backend_format=backend_format, model_name=model_name, find_local_dir=find_local_dir)
     if plan.create is None or plan.quantize is None or backend_format is None:
         return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
-    if backend.quantizes_from_files(plan.quantize):
+    if backend.quantizes_from_files(plan.quantize, source=str(plan.source) if plan.source is not None else None):
         return _write_then_load(backend, plan, plan.create, plan.quantize, backend_format, lora_paths=lora_paths, lora_weights=lora_weights, on_phase=on_phase, cancelled=cancelled)
 
     # Saved weights must be LoRA-free: mflux bakes LoRAs into what it saves.

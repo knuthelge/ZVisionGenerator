@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 #### Video
 - **A last frame for LTX.** `ltx-4`, `ltx-8` and `ltx25-4` take a **Last frame** in Image to Video, or `--end-image`, as MiniMax H3 does: the clip runs from the first image to the last. Use two images of the same scene, and give a big change a few seconds
 
+#### Images
+- **MOSS-Image on Windows and Linux: `moss` (Turbo, 4 steps) and `moss-sft` (50 steps, with a negative prompt).** OpenMOSS's Apache-2.0 text-to-image model, strong at rendering text in English and Chinese, and it runs on a 10 GB card at every quant level. Not available on macOS yet
+
 ### Changed
 
 #### Web UI

@@ -34,11 +34,12 @@ The **weight** sets how strongly the LoRA applies: 1.0 is full strength, lower i
 ## What works
 
 - **Images:** standard LoRAs and LyCORIS LoKr files work on every platform and quant level, and can be combined. Other LyCORIS formats aren't supported; those parts of a file are skipped with a warning.
+- **MOSS-Image (Windows and Linux):** LoRAs in kohya, ai-toolkit and diffusers/PEFT formats, and LyCORIS LoKr files, on `moss` and `moss-sft`. They are applied unmerged, next to the model's weights, at any quant level. LyCORIS LoHa files and full `diff` weights in a file are skipped with a warning. On `moss` (Turbo) the Turbo LoRA stays on and yours is added on top.
 - **Video on macOS:** LTX LoRAs as MLX loads them.
 - **Video on Windows and Linux:** LTX LoRAs in a diffusers-compatible format. An unsupported file or scale fails before generation with a message saying why.
 - **MiniMax H3:** H3 LoRAs in PEFT, ai-toolkit, kohya and ComfyUI formats. A LoRA that changes the model's timestep embedding is refused, and on macOS so is one that changes its AdaLN projections or anything outside its transformer blocks and text refiner. A LoRA adds a few percent to the time, and can break the seam of an extension.
 
-A LoRA must match the model: LTX LoRAs for the LTX models, MiniMax H3 LoRAs for `h3`.
+A LoRA must match the model: LTX LoRAs for the LTX models, MiniMax H3 LoRAs for `h3`, MOSS-Image LoRAs for `moss` and `moss-sft`.
 
 With [quantization](quantization.md), the LoRA is applied on top of the quantized model when the job loads.
 

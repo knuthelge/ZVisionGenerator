@@ -12,7 +12,7 @@ An image's size is a **ratio** and a **size preset**. The default is `2:3` portr
 | `l` | 1408×1408 | 1920×1088 | 1088×1920 | 1728×1152 | 1152×1728 |
 | `xl` | 1600×1600 | 2176×1216 | 1216×2176 | 1920×1280 | 1280×1920 |
 
-You can also set an exact width and height (**W × H** in the Web UI, `-W` and `-H` in the CLI). Some models limit the size: Ideogram 4 takes 256–2048 pixels in steps of 16.
+You can also set an exact width and height (**W × H** in the Web UI, `-W` and `-H` in the CLI). Some models limit the size: Ideogram 4 takes 256–2048 pixels in steps of 16, and MOSS-Image takes multiples of 16.
 
 Larger images take longer and need more memory. To get a large image quickly, generate smaller and [upscale](upscaling.md): every preset keeps its exact size under a 2× upscale, and `m`, `l` and `xl` under 4×.
 
@@ -20,8 +20,8 @@ The **Base resolution** on the [Config page](../web-ui/config.md) changes the de
 
 ## Steps, guidance and seed
 
-- **Steps** is how many denoising steps the model takes. Each model has a default that suits it, such as 4 for FLUX.2 Klein and 8 for Krea 2 and Ideogram 4. More steps aren't always better with these distilled models.
-- **Guidance** is how strictly the model follows the prompt. The defaults suit each model; Ideogram 4 ignores it, and for Krea 2 anything above 1.0 makes each step take about twice as long.
+- **Steps** is how many denoising steps the model takes. Each model has a default that suits it, such as 4 for FLUX.2 Klein and MOSS-Image Turbo, 8 for Krea 2 and Ideogram 4, and 50 for MOSS-Image SFT. More steps aren't always better with these distilled models.
+- **Guidance** is how strictly the model follows the prompt. The defaults suit each model; Ideogram 4 and MOSS-Image Turbo ignore it, and for Krea 2 and MOSS-Image SFT anything above 1.0 makes each step take about twice as long.
 - **Seed** picks the starting noise. The same model, prompt, settings and seed give the same image. Without a seed every image gets a random one, which is recorded in the file.
 - **Scheduler** decides how the steps are spaced. Z-Image uses `beta` by default; most other models have no choice.
 

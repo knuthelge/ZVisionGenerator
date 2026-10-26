@@ -412,8 +412,8 @@ class MfluxBackend:
         """Return the format tag of quantized weights this backend saves: the mflux version, at every level."""
         return f"mflux-{importlib.metadata.version('mflux')}"
 
-    def quantizes_from_files(self, bits: int) -> bool:
-        """Return ``False``: mflux saves every level from a model loaded at that level."""
+    def quantizes_from_files(self, bits: int, source: str | None = None) -> bool:
+        """Return ``False``: mflux saves every level from a model loaded at that level; *source* is ignored."""
         return False
 
     def write_quantized_files(self, source: str, path: str, bits: int, cancelled: Callable[[], bool] | None = None) -> None:

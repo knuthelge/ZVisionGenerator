@@ -428,6 +428,7 @@ def test_upscale_route_queues_job(upscale_client):
     submitted = upscale_client.submitted[0]
     assert submitted["request"].upscale_source == str((upscale_client.root / "set" / "portrait.png").resolve())
     assert [stage.__name__ for stage in submitted["workflow"].stages][2] == "load_source_stage"
+    assert submitted["config"] is upscale_client.web_config.app_config
     assert submitted["context"]["workflow"] == "upscale"
     assert submitted["context"]["settings"] == {}
     assert submitted["context"]["meta"].startswith("2× creative → 1664×2432")

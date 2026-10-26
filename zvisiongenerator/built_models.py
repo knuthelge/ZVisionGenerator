@@ -1,4 +1,4 @@
-"""One entry point for the models built on first use (Ideogram 4 Instant).
+"""One entry point for the models built on first use (Ideogram 4 Instant, MOSS-Image).
 
 Callers ask here to prepare a model, so none of them names a family. Each family's build specifics live in its own
 builder module, which is imported only when a build is needed.
@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
+from zvisiongenerator.utils.moss_build import is_moss_dir
 
 __all__ = ["ensure_built_model"]
 
@@ -43,4 +44,8 @@ def ensure_built_model(
         from zvisiongenerator.ideogram4_instant_builder import ensure_instant_model
 
         return ensure_instant_model(model_path, config, platform_key=platform_key, on_phase=on_phase, cancelled=cancelled)
+    if is_moss_dir(model_path):
+        from zvisiongenerator.moss_builder import ensure_moss_model
+
+        return ensure_moss_model(model_path, config, on_phase=on_phase, cancelled=cancelled)
     return True

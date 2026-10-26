@@ -3,7 +3,7 @@
 Estimates read only safetensors headers (tensor dtypes and shapes), never the weights, and mirror how
 each backend holds each component in memory. They are deliberately rough: a fixed working-memory
 margin stands in for activations in image models, and the LTX MLX clip estimate uses working-memory
-curves measured over the clip's size and length. LoRAs are not counted.
+curves measured over the clip's size and length. LoRAs are not counted, except MOSS-Image Turbo's built-in LoRA.
 """
 
 from __future__ import annotations
@@ -22,12 +22,14 @@ from zvisiongenerator.utils.model_files import (
     is_ideogram4_model,
     is_krea2_model,
     is_ltx_mlx_layout,
+    is_moss_model,
     ltx_mlx_bundled_text_encoder,
     ltx_mlx_transformer_file,
     ltx_mlx_upsampler_file,
     ltx_mlx_video_decoder_file,
     model_weight_files,
 )
+from zvisiongenerator.utils.moss_build import moss_base_dir, turbo_lora_file
 from zvisiongenerator.utils.safetensors_stream import read_header
 from zvisiongenerator.utils.stored_quant import stored_quant_bits
 
@@ -50,6 +52,14 @@ _CUDA_SYSTEM_WORKING_BYTES = int(1.5 * GIB)
 # bitsandbytes NF4 packs two weights per byte plus a double-quantized scale per 64-weight block (~4.13 bits).
 _NF4_BYTES_PER_WEIGHT = 4.13 / 8
 _CUDA_QUANTIZED_COMPONENTS = ("text_encoder", "transformer")
+# MOSS-Image on CUDA, measured on a 10 GB card with gate G2 (1024x1024 Turbo txt2img, then up to 4 MP). The VAE and the
+# Turbo LoRA (~1.34 GiB together) stay on the GPU throughout. The peak is the FP32 VAE decode: 8.8 GiB reserved at the
+# worst size at q4 (q8 8.6, unquantized 7.2), so 8.8 - 1.34 = 7.46 rounds up to 7.5 GiB above the resident weights.
+_MOSS_CUDA_WORKING_BYTES = int(7.5 * GIB)
+# MOSS-Image process memory beyond the weights held in system memory (text encoder, plus the transformer unless it is
+# on the GPU), so the estimate lands just above the peak RSS measured per level: q4 15.4, q8 16.8, unquantized 16.9
+# GiB. The unquantized figure is the load and 1 MP peak; the other two include sizes up to 4 MP.
+_MOSS_CUDA_SYSTEM_WORKING_BYTES = {4: int(7.75 * GIB), 8: int(6.75 * GIB), None: int(2 * GIB)}
 # A CUDA model fits while its GPU need stays under 90% of VRAM and its weights under 80% of system memory,
 # leaving the rest to the desktop and other apps. Weights beyond that stream from disk, which is much slower.
 _CUDA_GPU_FITS_RATIO = 0.9
@@ -147,6 +157,7 @@ class WeightTotals:
     packed_bytes: int = 0  # other non-float tensors (packed quantized weights, ints, non-2-D FP8), resident as stored
     prequantized: bool = False  # packed U32 weights: already quantized, so requested quantization is ignored
     fp8_matrix_elements: int = 0  # 2-D FP8 tensors: one byte each as stored, and mflux quantization packs them too
+    embedding_elements: int = 0  # token-embedding tables (``embed_tokens``), already counted in float_matrix_elements
 
     def __add__(self, other: WeightTotals) -> WeightTotals:
         return WeightTotals(
@@ -155,6 +166,7 @@ class WeightTotals:
             self.packed_bytes + other.packed_bytes,
             self.prequantized or other.prequantized,
             self.fp8_matrix_elements + other.fp8_matrix_elements,
+            self.embedding_elements + other.embedding_elements,
         )
 
     @property
@@ -182,7 +194,7 @@ def read_safetensors_totals(path: Path, skipped_prefixes: tuple[str, ...] = ()) 
 def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: tuple[str, ...]) -> WeightTotals:
     del size, mtime_ns  # Cache-key only: a rewritten file gets a fresh read.
     _, header = read_header(Path(path))
-    matrix = other = packed = fp8_matrix = 0
+    matrix = other = packed = fp8_matrix = embedding = 0
     prequantized = False
     for name, spec in header.items():
         if name.startswith(skipped_prefixes):
@@ -199,9 +211,11 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: t
             prequantized = prequantized or dtype == "U32"
         elif len(shape) == 2:
             matrix += elements
+            if "embed_tokens" in name:
+                embedding += elements
         else:
             other += elements
-    return WeightTotals(matrix, other, packed, prequantized, fp8_matrix)
+    return WeightTotals(matrix, other, packed, prequantized, fp8_matrix, embedding)
 
 
 def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,)) -> dict[int | None, int] | None:
@@ -238,7 +252,10 @@ def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | Non
     transformer and text encoder in system memory and stream them to the GPU; q4 holds them in NF4 on the GPU,
     one at a time for Krea 2 (whose NF4 pair does not fit a 10-12 GB card together). The VAE stays on the GPU.
     Ideogram 4 Instant streams its transformer at every level and keeps its pre-quantized NF4 text encoder on the
-    GPU only while it encodes (see :func:`_cuda_ideogram4_estimate`). A stored quant loads at its own level whatever
+    GPU only while it encodes (see :func:`_cuda_ideogram4_estimate`). MOSS-Image keeps its NF4 text encoder on the
+    GPU only while it encodes and holds its transformer resident at q4 (away for the encoder and the decode) or
+    streams it otherwise (see
+    :func:`_cuda_moss_estimate`). A stored quant loads at its own level whatever
     level is asked for.
 
     Args:
@@ -254,6 +271,8 @@ def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | Non
     stored_bits = stored_quant_bits(model_dir)
     if is_ideogram4_model(model_dir):
         return {level: _cuda_ideogram4_estimate(components, stored_bits or level) for level in quantize_levels}
+    if is_moss_model(model_dir):
+        return {level: _cuda_moss_estimate(components, stored_bits or level, _turbo_lora_bytes(model_dir)) for level in quantize_levels}
     # Mirrors _Q4_CPU_OFFLOAD_FAMILIES in backends/cuda/image/backend.py.
     text_encoder_offloaded = is_krea2_model(model_dir)
     return {level: _cuda_level_estimate(components, stored_bits or level, text_encoder_offloaded) for level in quantize_levels}
@@ -658,6 +677,40 @@ def _cuda_ideogram4_estimate(components: dict[str, WeightTotals], quantize: int 
     transformer = _cuda_component_bytes(components["transformer"], bytes_per_weight) if "transformer" in components else 0
     gpu = max(text_encoder + _CUDA_RESIDENT_WORKING_BYTES, _CUDA_STREAMED_GPU_BYTES) + vae
     return CudaMemoryEstimate(int(gpu), int(transformer + text_encoder + rest + _CUDA_SYSTEM_WORKING_BYTES))
+
+
+def _cuda_moss_estimate(components: dict[str, WeightTotals], quantize: int | None, lora_bytes: int) -> CudaMemoryEstimate:
+    """Estimate MOSS-Image on CUDA, mirroring its placement.
+
+    The text encoder is on the GPU only while it encodes. Its NF4 weights cover the Linear layers; the token
+    embedding table stays in bfloat16, because bitsandbytes quantizes only ``nn.Linear``. The VAE (FP32) and the Turbo
+    LoRA, when the model has one, stay on the GPU throughout. At q4 the transformer is resident on the GPU for the
+    denoising and steps aside to system memory for the encoder turn and the VAE decode. At q8 and unquantized it
+    streams from system memory through a fixed GPU window. The GPU peak is the largest phase above the resident VAE and
+    LoRA: the encoder turn, the denoising, or the VAE decode.
+    """
+    text_encoder = _moss_text_encoder_bytes(components["text_encoder"]) if "text_encoder" in components else 0
+    transformer = _cuda_component_bytes(components["transformer"], {4: _NF4_BYTES_PER_WEIGHT, 8: 1}.get(quantize, 2)) if "transformer" in components else 0
+    vae = _image_component_bytes("vae", components["vae"], None) if "vae" in components else 0
+    rest = sum(totals.bfloat16_bytes for name, totals in components.items() if name not in ("vae", *_CUDA_QUANTIZED_COMPONENTS))
+    denoising = transformer + _CUDA_RESIDENT_WORKING_BYTES if quantize == 4 else _CUDA_STREAMED_GPU_BYTES
+    gpu = vae + lora_bytes + max(text_encoder + _CUDA_RESIDENT_WORKING_BYTES, denoising, _MOSS_CUDA_WORKING_BYTES)
+    system = text_encoder + transformer + rest + _MOSS_CUDA_SYSTEM_WORKING_BYTES.get(quantize, _MOSS_CUDA_SYSTEM_WORKING_BYTES[None])
+    return CudaMemoryEstimate(int(gpu), int(system))
+
+
+def _moss_text_encoder_bytes(totals: WeightTotals) -> float:
+    """Return the NF4 text encoder's resident bytes: Linear weights in NF4, the embedding table in bfloat16."""
+    return _cuda_component_bytes(totals, _NF4_BYTES_PER_WEIGHT) + totals.embedding_elements * (2 - _NF4_BYTES_PER_WEIGHT)
+
+
+def _turbo_lora_bytes(model_dir: Path) -> int:
+    """Return the bytes the Turbo LoRA occupies on the GPU; zero when the model has none."""
+    lora = turbo_lora_file(moss_base_dir(model_dir))
+    if lora is None:
+        return 0
+    # The LoRA is float32 on disk and on the GPU, so the file size is its footprint.
+    return lora.stat().st_size
 
 
 def _cuda_component_bytes(totals: WeightTotals, bytes_per_weight: float) -> float:

@@ -15,7 +15,7 @@ from typing import Any
 __all__ = ["LORA_FAMILY_VERSION", "LoraFamily", "detect_lora_family"]
 
 # Bump when the rules change so cached detections are recomputed.
-LORA_FAMILY_VERSION = 3
+LORA_FAMILY_VERSION = 4
 
 _METADATA_KEYS = ("ss_base_model_version", "release_base_model", "modelspec.architecture")
 _KEY_PREFIXES = ("diffusion_model.", "transformer.", "model.diffusion_model.", "base_model.model.")
@@ -28,10 +28,13 @@ _LINEAR1_OUT = {36864: ("flux2_klein", "9b"), 27648: ("flux2_klein", "4b"), 2150
 _PROJ_MLP_OUT = {12288: ("flux1", None)}
 # Kohya names a block ``single_blocks_0_linear1``; the dotted form is ``single_blocks.0.linear1``.
 _KOHYA_BLOCK = re.compile(r"^lora_unet_((?:single|double)_blocks)_(\d+)_")
+# MOSS-Image names its attention and feed-forward projections ``layers.N.proj.q`` (``layers_N_proj_q`` in Kohya names).
+_MOSS_PROJ = re.compile(r"(?:^|[._])layers[._]\d+[._]proj[._](?:q|k|v|o|qkv|ffn_up_gate|ffn_down)(?:\.|$)")
 # The model hidden size that must appear among the adapted weights' input or output widths.
 _HIDDEN_SIZE = {
     ("zimage", None): 3840,
     ("ideogram4", None): 4608,
+    ("moss", None): 3072,
     ("krea2", None): 6144,
     ("ltx", None): 4096,
     ("flux2_klein", "9b"): 4096,
@@ -69,6 +72,8 @@ def detect_lora_family(header: Mapping[str, Any], metadata: Mapping[str, str]) -
 def _family_from_metadata(metadata: Mapping[str, str]) -> tuple[str, str | None] | None:
     """Return ``(family, size_variant)`` named by the training metadata, or None when it names no known family."""
     value = " ".join(str(metadata.get(key, "")) for key in _METADATA_KEYS).lower()
+    if "moss" in value:
+        return ("moss", None)
     if "ideogram4" in value:
         return ("ideogram4", None)
     if "klein_9b" in value or "klein-9b" in value:
@@ -174,6 +179,8 @@ def _match_fingerprint(keys: set[str], dims: Mapping[str, tuple[int, int]]) -> t
         return _by_single_block_width(dims, "single_transformer_blocks.", "attn.to_qkv_mlp_proj", _LINEAR1_OUT) or _by_single_block_width(dims, "single_transformer_blocks.", "proj_mlp", _PROJ_MLP_OUT)
     if has("transformer_blocks.") and has(".attn1.", ".attn2."):
         return ("ltx", None)
+    if any(_MOSS_PROJ.search(key) for key in keys):
+        return ("moss", None)
     if has("layers.") and has("noise_refiner", "context_refiner", "cap_embedder"):
         return ("zimage", None)
     if starts("layers.", "adaLN_modulation"):

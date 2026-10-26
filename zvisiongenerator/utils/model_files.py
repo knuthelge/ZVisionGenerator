@@ -213,6 +213,12 @@ def is_ideogram4_model(model_dir: Path) -> bool:
     return index is not None and index.get("_class_name") == "Ideogram4Pipeline"
 
 
+def is_moss_model(model_dir: Path) -> bool:
+    """Return whether *model_dir*'s ``model_index.json`` declares a MOSS-Image pipeline."""
+    index = _read_model_index(model_dir)
+    return index is not None and index.get("_class_name") == "MOSSImagePipeline"
+
+
 def has_complete_weights(model_dir: Path, only: set[str] | None = None) -> bool:
     """Return whether *model_dir* holds every weight file its layout declares.
 

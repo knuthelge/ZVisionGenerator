@@ -13,6 +13,7 @@ zvisiongenerator/
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
 ├── image_review.py                Review of an image's small render before the upscale
 ├── image_runner.py                Image generation run orchestration
+├── moss_builder.py                Build the MOSS-Image model folders on first use (link the downloaded SFT files, and the Turbo LoRA for moss)
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── video_file_upscale_runner.py   Upscale one existing video: check it, stream its frames through SeedVR2, keep its sound and settings
 ├── review.py                      Shared wait for a review decision
@@ -34,6 +35,9 @@ zvisiongenerator/
 │   │   │   ├── backend.py         Image backend
 │   │   │   ├── ideogram4.py       Ideogram 4 Instant: load, placement, the first-step sigma and the pipeline call
 │   │   │   ├── lokr.py            LyCORIS LoKr adapters (applied like mflux)
+│   │   │   ├── moss.py            MOSS-Image: load, placement, the sampling run and the stored q4/q8 copies
+│   │   │   ├── moss_lora.py       Unmerged LoRA and LoKr adapters for the MOSS-Image transformer (kohya, ai-toolkit, diffusers/PEFT)
+│   │   │   ├── moss_sampler.py    MOSS-Image denoising loop, prompt encoding and latent helpers (mirrors the vendored pipeline)
 │   │   │   └── preview.py         Cheap latent → RGB live previews
 │   │   └── video/
 │   │       ├── audio_carry.py     Pin a clip's last sound at the start of an extension window
@@ -89,6 +93,7 @@ zvisiongenerator/
 │   ├── types.py                   Shared types (StageOutcome)
 │   ├── job_plan.py                Job plan value types (JobPlan, IterationPlan, EnhanceStatus)
 │   ├── ideogram4.py               Ideogram 4 Instant settings both image backends share: first-step sigma, JSON captions, sampler
+│   ├── moss.py                    MOSS-Image settings every image backend shares: sampler, img2img step count, text length
 │   ├── progress_events.py         Shared image/video workflow progress event helpers
 │   ├── latent_preview.py          Latent → RGB projection factors shared by live previews
 │   ├── image_types.py             Image request and artifacts
@@ -145,6 +150,7 @@ zvisiongenerator/
 │   ├── ltx_converted.py           The manifest of a converted LTX model folder (LTX-2.3 or LTX-2.5)
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
+│   ├── moss_build.py              MOSS-Image's pinned sources, model folders, build records and shared stored copies
 │   ├── page_cache.py              Drop model files from the page cache once written or read
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── platform.py                Platform metadata and platform-aware alias values
@@ -215,7 +221,7 @@ zvisiongenerator/
 | `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed |
 | `tests/` | The pytest suite |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
-| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2 and MiniMax H3 MLX code |
+| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX and MOSS-Image code |
 | `docs/` | These docs, built with Zensical from `zensical.toml` |
 | `proposals/` | Write-ups of future work. See [Proposals](index.md#proposals) |
 | `prompts.yaml` | Default prompt definitions |

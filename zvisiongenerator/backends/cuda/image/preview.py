@@ -17,7 +17,7 @@ __all__ = ["LivePreview", "create_live_preview", "estimate_clean_latents", "rend
 
 # FLUX.2 and FLUX.2 Klein pipelines share the FLUX.2 VAE and its packed latent layout.
 _FLUX2_FAMILIES = frozenset({"flux2", "flux2_klein"})
-_PREVIEW_FAMILIES = _FLUX2_FAMILIES | {"zimage", "krea2", "ideogram4"}
+_PREVIEW_FAMILIES = _FLUX2_FAMILIES | {"zimage", "krea2", "ideogram4", "moss"}
 
 
 def estimate_clean_latents(previous: torch.Tensor, current: torch.Tensor, noise_previous: float, noise_current: float) -> torch.Tensor:
@@ -47,14 +47,17 @@ def render_latent_preview(pipe: Any, family: str, latents: torch.Tensor, height:
     """Project one family's step-end latents to an RGB preview at 1/8 of the output resolution.
 
     Args:
-        pipe: The running diffusers pipeline (FLUX.2 needs its VAE batch-norm statistics).
-        family: Image model family (``zimage``, ``flux2``, ``flux2_klein``, ``krea2`` or ``ideogram4``).
+        pipe: The running pipeline (FLUX.2-VAE families need its VAE batch-norm statistics).
+        family: Image model family (``zimage``, ``flux2``, ``flux2_klein``, ``krea2``, ``ideogram4`` or ``moss``).
         latents: Latents exactly as the pipeline passes them to ``callback_on_step_end``.
         height: Output image height in pixels.
         width: Output image width in pixels.
 
     Returns:
         The preview image, or ``None`` for families without a projection.
+
+    MOSS latents are FLUX.2-VAE latents after batch-norm de-normalisation and unpatchify, so the FLUX.2 fit applies. The
+    preview costs one matmul per previewed step and never calls the VAE.
     """
     if family == "zimage":
         return _project_to_image(latents[0], ZIMAGE_RGB_FACTORS, ZIMAGE_RGB_BIAS)
@@ -64,6 +67,11 @@ def render_latent_preview(pipe: Any, family: str, latents: torch.Tensor, height:
         return _project_to_image(_krea2_spatial(pipe, latents, height, width), QWEN_IMAGE_RGB_FACTORS, QWEN_IMAGE_RGB_BIAS)
     if family == "ideogram4":
         return _project_to_image(_ideogram4_spatial(pipe, latents, height, width), FLUX2_RGB_FACTORS, FLUX2_RGB_BIAS)
+    if family == "moss":
+        from zvisiongenerator.backends.cuda.image.moss_sampler import to_vae_latents
+
+        # float32 on the latents' device keeps the batch-norm statistics of the FP32 VAE usable whatever dtype the loop runs in.
+        return _project_to_image(to_vae_latents(pipe.vae, latents[:1].float())[0], FLUX2_RGB_FACTORS, FLUX2_RGB_BIAS)
     return None
 
 

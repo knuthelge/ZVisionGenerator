@@ -44,11 +44,13 @@ __all__ = [
     "load_fp8_components",
     "load_fp8_transformer",
     "load_nf4_components",
+    "load_nf4_text_encoder",
     "load_nf4_transformer",
     "nf4_linear_names",
     "nf4_storage_format",
     "pack_nf4",
     "place_nf4",
+    "save_components",
     "swap_in_linear4bit",
     "write_fp8_copy",
 ]
@@ -68,17 +70,30 @@ def kept_in_compute_dtype(tensor_name: str) -> bool:
     return any(re.search(pattern, module) for pattern in _TEXT_ENCODER_SKIP_PATTERNS)
 
 
-def cast_to_fp8(component: Any, compute_dtype: torch.dtype) -> Any:
+def cast_to_fp8(component: Any, compute_dtype: torch.dtype, keep_patterns: tuple[str, ...] = ()) -> Any:
     """Store *component*'s layer weights in FP8 and compute in *compute_dtype*, in place; return *component*.
 
     Weights already in FP8 stay as they are, so this also prepares a component loaded from a stored FP8 copy.
     Each FP8 layer also declares *compute_dtype* (see :func:`_declare_compute_dtype`) so LoRAs load on top of it.
+
+    Args:
+        component: The diffusers model or transformers text encoder to cast.
+        compute_dtype: The dtype the layers compute in.
+        keep_patterns: Regular expressions for module names of a diffusers model that stay in *compute_dtype*
+            on top of diffusers' defaults, for layers the model reads for their dtype (see ``model_class`` of
+            :func:`load_fp8_transformer`). Ignored for a text encoder, which has its own list.
     """
     import torch
 
     if hasattr(component, "enable_layerwise_casting"):
         # A diffusers model knows which of its layers must stay in the compute dtype.
-        component.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=compute_dtype)
+        if keep_patterns:
+            from diffusers.hooks.layerwise_casting import DEFAULT_SKIP_MODULES_PATTERN
+
+            # Giving patterns replaces diffusers' defaults, so they are passed along.
+            component.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=compute_dtype, skip_modules_pattern=(*DEFAULT_SKIP_MODULES_PATTERN, *keep_patterns))
+        else:
+            component.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=compute_dtype)
     else:
         from diffusers.hooks import apply_layerwise_casting
 
@@ -110,9 +125,17 @@ def load_fp8_components(model_path: str, compute_dtype: torch.dtype) -> dict[str
     return {"text_encoder": text_encoder, "transformer": load_fp8_transformer(model_path, compute_dtype)}
 
 
-def load_fp8_transformer(model_path: str, compute_dtype: torch.dtype) -> Any:
-    """Load the transformer of *model_path*, or of a stored FP8 copy of it, with FP8 weight storage, streamed from its files."""
-    return _stream_fp8_transformer(_component_dir(model_path, "transformer"), compute_dtype)
+def load_fp8_transformer(model_path: str, compute_dtype: torch.dtype, *, model_class: type[Any] | None = None, keep_patterns: tuple[str, ...] = ()) -> Any:
+    """Load the transformer of *model_path*, or of a stored FP8 copy of it, with FP8 weight storage, streamed from its files.
+
+    Args:
+        model_path: The model directory or repo id.
+        compute_dtype: The dtype the layers compute in.
+        model_class: The class of a transformer diffusers' ``AutoModel`` cannot resolve by name (a custom class).
+        keep_patterns: Regular expressions for layers that stay in *compute_dtype* on top of diffusers' defaults,
+            for layers the model reads for their dtype.
+    """
+    return _stream_fp8_transformer(_component_dir(model_path, "transformer"), compute_dtype, model_class, keep_patterns)
 
 
 def write_fp8_copy(source: Path, target: Path, compute_dtype: torch.dtype, cancelled: Callable[[], bool] | None = None) -> None:
@@ -132,19 +155,37 @@ def write_fp8_copy(source: Path, target: Path, compute_dtype: torch.dtype, cance
         "transformer": lambda: _stream_fp8_transformer(source / "transformer", compute_dtype),
     }
     loaders = {name: load for name, load in loaders.items() if not _is_prequantized(source / name)}
+    if not save_components(source, target, loaders, cancelled):
+        return
+    link_tree(source / "model_index.json", target / "model_index.json")
+    for name in _listed_components(source):
+        if name not in loaders and (source / name).exists():
+            link_tree(source / name, target / name)
+
+
+def save_components(source: Path, target: Path, loaders: Mapping[str, Callable[[], Any]], cancelled: Callable[[], bool] | None = None) -> bool:
+    """Load each component with its loader and save it into *target*, one at a time; return False if stopped.
+
+    After each save the component's memory is released and its source and new files leave the page cache. *cancelled*
+    is checked before each component; when it turns true the loop stops, leaving an incomplete folder for the caller
+    to discard.
+
+    Args:
+        source: The model directory the components were loaded from (its files leave the page cache).
+        target: The directory to save into; each component goes into ``target / name``.
+        loaders: Maps a component's name to a function that returns it, quantized as wanted.
+        cancelled: Returns true to stop.
+    """
     for name, load in loaders.items():
         if cancelled is not None and cancelled():
-            return
+            return False
         component = load()
         component.save_pretrained(str(target / name))
         del component
         release_memory()
         drop_cached_files(source / name)
         drop_cached_files(target / name)
-    link_tree(source / "model_index.json", target / "model_index.json")
-    for name in _listed_components(source):
-        if name not in loaders and (source / name).exists():
-            link_tree(source / name, target / name)
+    return True
 
 
 def _is_prequantized(component_dir: Path) -> bool:
@@ -169,31 +210,51 @@ def load_nf4_components(model_path: str, compute_dtype: torch.dtype, *, prequant
         text_encoder_to_cpu: Move the text encoder off the GPU before the transformer loads, for models
             whose NF4 text encoder and transformer do not fit a 10-12 GB card together.
     """
-    from transformers import AutoModel as HFAutoModel
-
-    # A stored copy's configs carry its quantization; transformers rejects an explicit None config.
-    te_options = {} if prequantized else {"quantization_config": _nf4_configs(compute_dtype)[0]}
-    text_encoder = HFAutoModel.from_pretrained(model_path, subfolder="text_encoder", dtype=compute_dtype, **te_options)
+    text_encoder = load_nf4_text_encoder(model_path, compute_dtype, prequantized=prequantized)
     if text_encoder_to_cpu:
         text_encoder.to("cpu")
     return {"text_encoder": text_encoder, "transformer": load_nf4_transformer(model_path, compute_dtype, prequantized=prequantized)}
 
 
-def load_nf4_transformer(model_path: str, compute_dtype: torch.dtype, *, prequantized: bool) -> Any:
-    """Load the transformer of *model_path* quantized to NF4 on the GPU (*prequantized*: a stored NF4 copy, loaded as saved)."""
+def load_nf4_text_encoder(model_path: str, compute_dtype: torch.dtype, *, prequantized: bool) -> Any:
+    """Load the text encoder of *model_path* quantized to NF4 on the GPU (*prequantized*: a stored NF4 copy, loaded as saved)."""
+    from transformers import AutoModel as HFAutoModel
+
+    # A stored copy's configs carry its quantization; transformers rejects an explicit None config.
+    options = {} if prequantized else {"quantization_config": _nf4_configs(compute_dtype)[0]}
+    return HFAutoModel.from_pretrained(model_path, subfolder="text_encoder", dtype=compute_dtype, **options)
+
+
+def load_nf4_transformer(model_path: str, compute_dtype: torch.dtype, *, prequantized: bool, model_class: type[Any] | None = None, keep_modules: tuple[str, ...] = ()) -> Any:
+    """Load the transformer of *model_path* quantized to NF4 on the GPU (*prequantized*: a stored NF4 copy, loaded as saved).
+
+    Args:
+        model_path: The model directory or repo id.
+        compute_dtype: The dtype NF4 layers compute in.
+        prequantized: Whether *model_path* is a stored NF4 copy, whose config carries the quantization.
+        model_class: The class of a transformer diffusers' ``AutoModel`` cannot resolve by name (a custom class).
+        keep_modules: Names of modules left unquantized, for layers the model reads for their dtype. Only
+            applied when quantizing at load; a stored copy keeps what it was saved with.
+    """
     from diffusers import AutoModel as DiffusersAutoModel
 
-    options = {} if prequantized else {"quantization_config": _nf4_configs(compute_dtype)[1]}
-    return DiffusersAutoModel.from_pretrained(model_path, subfolder="transformer", torch_dtype=compute_dtype, **options)
+    options: dict[str, Any] = {}
+    if not prequantized:
+        options["quantization_config"] = _nf4_configs(compute_dtype, keep_modules)[1]
+    return (model_class or DiffusersAutoModel).from_pretrained(model_path, subfolder="transformer", torch_dtype=compute_dtype, **options)
 
 
-def _nf4_configs(compute_dtype: torch.dtype) -> tuple[Any, Any]:
-    """Return matching NF4 quantization configs for the transformers text encoder and the diffusers transformer."""
+def _nf4_configs(compute_dtype: torch.dtype, keep_modules: tuple[str, ...] = ()) -> tuple[Any, Any]:
+    """Return matching NF4 quantization configs for the transformers text encoder and the diffusers transformer.
+
+    *keep_modules* names modules the transformer config leaves unquantized.
+    """
     from diffusers import BitsAndBytesConfig as DiffusersBnBConfig
     from transformers import BitsAndBytesConfig as TransformersBnBConfig
 
     options = {"load_in_4bit": True, "bnb_4bit_quant_type": "nf4", "bnb_4bit_use_double_quant": True, "bnb_4bit_compute_dtype": compute_dtype}
-    return TransformersBnBConfig(**options), DiffusersBnBConfig(**options)
+    transformer_options = {**options, "llm_int8_skip_modules": list(keep_modules)} if keep_modules else options
+    return TransformersBnBConfig(**options), DiffusersBnBConfig(**transformer_options)
 
 
 def _load_text_encoder(model_path: str, dtype: torch.dtype) -> Any:
@@ -213,12 +274,13 @@ def _component_dir(model_path: str, name: str) -> Path:
     return Path(snapshot_download(model_path, allow_patterns=[f"{name}/*"])) / name
 
 
-def _stream_fp8_transformer(component_dir: Path, compute_dtype: torch.dtype) -> Any:
+def _stream_fp8_transformer(component_dir: Path, compute_dtype: torch.dtype, model_class: type[Any] | None = None, keep_patterns: tuple[str, ...] = ()) -> Any:
     """Build the diffusers model in *component_dir* with FP8 weight storage, reading one tensor at a time.
 
     The model is created empty in *compute_dtype* and prepared with :func:`cast_to_fp8`, which fixes each
     parameter's storage dtype; every saved tensor is then cast to that dtype as it is read and put in place.
     Each tensor leaves the page cache once it is read. Saved bfloat16 (a source model) and saved FP8 (a stored copy) load the same way.
+    *model_class* and *keep_patterns* are as for :func:`load_fp8_transformer`.
 
     Raises:
         RuntimeError: When the saved tensors do not cover the model (a damaged or partial copy).
@@ -228,10 +290,10 @@ def _stream_fp8_transformer(component_dir: Path, compute_dtype: torch.dtype) -> 
     files = _weight_files(component_dir)
     if not files:
         # Weights in another format (e.g. an old .bin checkpoint) cannot stream: load them in full, then cast.
-        return cast_to_fp8(DiffusersAutoModel.from_pretrained(str(component_dir), torch_dtype=compute_dtype), compute_dtype)
+        return cast_to_fp8((model_class or DiffusersAutoModel).from_pretrained(str(component_dir), torch_dtype=compute_dtype), compute_dtype, keep_patterns)
     # AutoModel.from_config reads a path as a pipeline folder; a component's own config is passed as a dict.
     config = json.loads((component_dir / "config.json").read_text(encoding="utf-8"))
-    model = cast_to_fp8(empty_diffusers_model(config, compute_dtype), compute_dtype)
+    model = cast_to_fp8(empty_diffusers_model(config, compute_dtype, model_class), compute_dtype, keep_patterns)
     fill_weights(model, (item for path in files for item in iter_tensors(path)), str(component_dir))
     return model.eval()
 

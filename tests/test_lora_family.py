@@ -240,6 +240,34 @@ class TestFingerprintOtherFamilies:
         assert _detect(header) == LoraFamily("ideogram4", None, "fingerprint")
 
 
+class TestMoss:
+    @pytest.mark.parametrize(
+        "header",
+        [
+            _lora("diffusion_model.layers.0.proj.q", 3072, 3072, rank=128, layout="kohya"),
+            _lora("lora_unet_layers_0_proj_ffn_up_gate", 3072, 8192, rank=16, layout="kohya"),
+            _lora("diffusion_model.layers.0.proj.qkv", 3072, 9216, rank=32),
+            _lora("transformer.layers.3.proj.k", 3072, 3072),
+            _lokr("diffusion_model.layers.0.proj.o", (8, 8), (384, 384)),
+        ],
+        ids=["dotted-down-up", "kohya-underscore", "fused-qkv", "transformer-prefix", "lokr"],
+    )
+    def test_projection_keys_fingerprint_the_family(self, header):
+        assert _detect(header) == LoraFamily("moss", None, "fingerprint")
+
+    @pytest.mark.parametrize("metadata", [{"ss_base_model_version": "moss_image"}, {"modelspec.architecture": "MOSS-Image/lora"}])
+    def test_label_names_the_family(self, metadata):
+        assert _detect({}, metadata) == LoraFamily("moss", None, "metadata")
+
+    def test_other_width_is_rejected_by_the_guard(self):
+        assert _detect(_lora("diffusion_model.layers.0.proj.q", 4096, 4096)) == LoraFamily(None, None, "none")
+
+    def test_zimage_layers_are_not_taken_for_it(self):
+        header = _lora("layers.0.attention.to_q", 3840, 3840) | _lora("layers.0.adaLN_modulation.1", 256, 3840)
+
+        assert _detect(header).family == "zimage"
+
+
 class TestHiddenSizeGuard:
     def test_guard_rejects_a_fingerprint_without_the_hidden_size(self):
         header = _lora("transformer_blocks.0.attn1.to_q", 2048, 2048)

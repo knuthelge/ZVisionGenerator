@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, is_built, is_instant_dir
+from zvisiongenerator.utils.moss_build import SFT_IGNORE, SFT_PATTERNS, is_moss_dir, is_turbo_dir, moss_source
+from zvisiongenerator.utils.moss_build import is_built as is_moss_built
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
 if TYPE_CHECKING:
@@ -49,7 +51,10 @@ def built_model_plan(model_ref: str, *, config: dict[str, Any], platform_key: st
     Raises:
         ValueError: If the model's source block in *config* is invalid.
     """
-    return _instant_plan(model_ref, config=config, platform_key=platform_key)
+    for plan in (_instant_plan(model_ref, config=config, platform_key=platform_key), _moss_plan(model_ref, config=config)):
+        if plan is not None:
+            return plan
+    return None
 
 
 def _instant_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) -> tuple[DownloadTarget, ...] | None:
@@ -71,6 +76,26 @@ def _instant_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) 
         DownloadTarget(source.components_repo, source.components_revision, COMPONENT_PATTERNS),
         DownloadTarget(source.transformer_repo, source.transformer_revision, (source.transformer_file,), local_dir=str(instant_downloads_dir(folder))),
     )
+
+
+def _moss_plan(model_ref: str, *, config: dict[str, Any]) -> tuple[DownloadTarget, ...] | None:
+    """Return the targets an unbuilt MOSS-Image folder needs, ``()`` once it is built, or ``None`` for any other model.
+
+    The targets are the SFT repo's model files at their pinned revision and, for the Turbo folder, the LoRA file.
+
+    Raises:
+        ValueError: If the ``moss_image`` block of *config* is invalid.
+    """
+    if not is_moss_dir(model_ref):
+        return None
+    source = moss_source(config)
+    folder = Path(model_ref).expanduser()
+    if is_moss_built(folder, source):
+        return ()
+    targets = (DownloadTarget(source.sft_repo, source.sft_revision, SFT_PATTERNS, SFT_IGNORE),)
+    if is_turbo_dir(folder):
+        targets += (DownloadTarget(source.turbo_repo, source.turbo_revision, (source.turbo_file,)),)
+    return targets
 
 
 def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_name: str | None, upscale: bool) -> tuple[DownloadTarget, ...] | None:

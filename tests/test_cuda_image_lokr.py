@@ -86,19 +86,19 @@ class TestSplitLoraTensors:
 class TestLokrFactors:
     def test_full_factors_ignore_alpha(self):
         w1, w2 = _factors(0)
-        assert lokr._lokr_factors({"lokr_w1": w1, "lokr_w2": w2, "alpha": torch.tensor(8.0)})[2] == 1.0
+        assert lokr.lokr_factors({"lokr_w1": w1, "lokr_w2": w2, "alpha": torch.tensor(8.0)})[2] == 1.0
 
     def test_decomposed_factor_scales_by_alpha_over_rank(self):
         w1, _ = _factors(0)
         w2_a, w2_b = torch.ones(2, 4), torch.ones(4, 2)
-        _w1, w2, scale = lokr._lokr_factors({"lokr_w1": w1, "lokr_w2_a": w2_a, "lokr_w2_b": w2_b, "alpha": torch.tensor(2.0)})
+        _w1, w2, scale = lokr.lokr_factors({"lokr_w1": w1, "lokr_w2_a": w2_a, "lokr_w2_b": w2_b, "alpha": torch.tensor(2.0)})
         assert scale == 0.5
         assert torch.equal(w2, w2_a @ w2_b)
 
     def test_tucker_and_dora_layers_are_rejected(self):
         w1, w2 = _factors(0)
         with pytest.raises(ValueError):
-            lokr._lokr_factors({"lokr_w1": w1, "lokr_w2": w2, "dora_scale": torch.ones(4)})
+            lokr.lokr_factors({"lokr_w1": w1, "lokr_w2": w2, "dora_scale": torch.ones(4)})
 
 
 class TestLokrTerm:
@@ -106,7 +106,7 @@ class TestLokrTerm:
         w1, w2 = _factors(1)
         x = torch.randn(5, 6)
 
-        out = lokr._LoKrTerm(w1, w2, 0.5)(x)
+        out = lokr.LoKrTerm(w1, w2, 0.5)(x)
 
         assert torch.allclose(out, 0.5 * x @ torch.kron(w1, w2).T, atol=1e-5)
 

@@ -572,7 +572,7 @@ class TestPlannerArguments:
 
         plan.assert_called_once_with("owner/atlas", family="zimage", config={"generation": {}}, platform_key=sys.platform)
 
-    def test_the_creative_upscale_plans_the_image_model_without_config(self, monkeypatch, tmp_path):
+    def test_the_creative_upscale_plans_the_image_model_with_the_app_config(self, monkeypatch, tmp_path):
         plan = MagicMock(return_value=None)
         monkeypatch.setattr(web_runner_module, "image_plan", plan)
         _stub_request_job(monkeypatch)
@@ -583,12 +583,33 @@ class TestPlannerArguments:
         runner = _runner()
         try:
             request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="flux2_klein", model_name="atlas", upscale_factor=2, upscale_source="/out/a.png")
-            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/atlas", context={"output_dir": str(tmp_path)})
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/atlas", config={"generation": {}}, context={"output_dir": str(tmp_path)})
             _wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
-        plan.assert_called_once_with("/models/atlas", family="flux2_klein", config=None, platform_key=sys.platform)
+        plan.assert_called_once_with("/models/atlas", family="flux2_klein", config={"generation": {}}, platform_key=sys.platform)
+
+    def test_the_creative_upscale_builds_the_model_before_loading_it(self, monkeypatch, tmp_path):
+        """A model built on first use (MOSS-Image, Ideogram 4 Instant) is built from the app config on the upscale path too."""
+        calls: list = []
+        config = {"moss_image": {}}
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(web_runner_module, "ensure_built_model", lambda model_ref, cfg, **_kw: calls.append(("built", model_ref, cfg)) or True)
+        _stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: calls.append(("load",)) or (MagicMock(), MagicMock()))
+        monkeypatch.setattr(
+            web_runner_module, "run_upscale", lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+        )
+        runner = _runner()
+        try:
+            request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="zimage", model_name="moss", upscale_factor=2, upscale_source="/out/a.png")
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/moss", config=config, context={"output_dir": str(tmp_path)})
+            _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert calls == [("built", "/models/moss", config), ("load",)]
 
     def test_the_seedvr2_upscale_plans_its_tier_files_and_labels_the_download_with_the_tier(self, monkeypatch, tmp_path):
         upscaler = SimpleNamespace(weights=FP8_WEIGHTS)
@@ -605,7 +626,7 @@ class TestPlannerArguments:
         runner = _runner()
         try:
             request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source="/out/a.png", upscale_method="seedvr2", upscale_model="seedvr2-7b")
-            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="numz/SeedVR2_comfyUI", context={"output_dir": str(tmp_path)})
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="numz/SeedVR2_comfyUI", config={}, context={"output_dir": str(tmp_path)})
             _wait_for_status(runner, job_id, "completed")
             events = _history(runner, job_id)
         finally:
@@ -624,7 +645,7 @@ class TestPlannerArguments:
         runner = _runner()
         try:
             request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="zimage", upscale_factor=2, upscale_source="/out/a.png")
-            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/atlas", context={"output_dir": str(tmp_path)})
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/atlas", config={}, context={"output_dir": str(tmp_path)})
             _wait_for_status(runner, job_id, "cancelled")
             last = _history(runner, job_id)[-1]
         finally:

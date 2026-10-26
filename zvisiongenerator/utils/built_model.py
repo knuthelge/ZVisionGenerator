@@ -1,6 +1,6 @@
 """What the models that are built on first use share: the build record, the models-directory check and the partial-build runner.
 
-A built model (Ideogram 4 Instant) is assembled in a hidden partial folder next to its final place; a build
+A built model (Ideogram 4 Instant, MOSS-Image) is assembled in a hidden partial folder next to its final place; a build
 record written last marks the folder finished, and promoting the partial replaces any older build.
 """
 

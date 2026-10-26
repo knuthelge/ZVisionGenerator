@@ -120,6 +120,14 @@ model_aliases:
   krea2: "unsloth/Krea-2-Turbo"
   # Ideogram 4 Instant: the models-folder entry of the same name, built on first use from ideogram4_instant below.
   ideo: "ideo"
+  # MOSS-Image: models-folder entries built on first use from moss_image below. Windows/Linux only.
+  # moss is Turbo (the SFT model with a 4-step LoRA); moss-sft is the SFT model as released.
+  moss:
+    win32: "moss"
+    linux: "moss"
+  moss-sft:
+    win32: "moss-sft"
+    linux: "moss-sft"
 
 # Ideogram 4 Instant, fal's 8-step distilled Ideogram 4 (one transformer, guidance built in), under Ideogram's
 # non-commercial license. fal's own repo (fal/ideogram-v4-instant) is gated, so the transformer comes from an ungated
@@ -140,6 +148,17 @@ ideogram4_instant:
     darwin: "fp8"
     win32: "bf16"
     linux: "bf16"
+
+# MOSS-Image (OpenMOSS-Team), a text-to-image model with a 5B transformer and a Qwen3.5-based text encoder of about
+# 8B. The SFT checkpoint and a community 4-step Turbo LoRA are downloaded once and linked into the moss and moss-sft
+# model folders. Every source is pinned; changing a pin rebuilds the affected folder. sft must name the same revision as MOSS_REVISION in the Makefile (the vendored pipeline's
+# revision). A new Turbo LoRA also means a new variants.turbo.default_steps under model_presets.moss.
+moss_image:
+  sft: "OpenMOSS-Team/MOSS-Image-SFT@f972bd4b4b9e3852133cc5da954d87bc32cd8fb9"
+  turbo_lora:
+    repo: "akhaliq/MOSS-Image-SFT-4-steps"
+    revision: "2ded95c37a029360245926fe72e475e30039bbfb"
+    filename: "moss_image_sft_4step_v2.0.safetensors"
 
 # Declared per-alias image families let the Web UI surface known aliases offline
 # (no network round-trip through detect_image_model).
@@ -180,6 +199,16 @@ model_labels:
       darwin: 28 GB
       win32: 24 GB
       linux: 24 GB
+  moss:
+    name: "MOSS-Image Turbo"
+    download_size_label:
+      win32: 28 GB
+      linux: 28 GB
+  moss-sft:
+    name: "MOSS-Image SFT"
+    download_size_label:
+      win32: 27 GB
+      linux: 27 GB
   ltx-8:
     name: "LTX-2.3 8-bit"
   ltx-4:
@@ -264,6 +293,27 @@ model_presets:
     default_scheduler:
       mflux: null
       diffusers: null
+
+  moss:
+    # Turbo and SFT are variants of one family, picked from the model folder. A variant may also set capability flags.
+    supports_negative_prompt: true
+    supports_scheduler: false  # MOSS samples with its own schedule (Euler, shift 5)
+    default_scheduler:
+      mflux: null
+      diffusers: null
+    variants:
+      turbo:
+        default_steps: 4
+        default_guidance: 1.0
+        supports_negative_prompt: false
+        negative_prompt_hint: Use -m moss-sft for negative prompts.
+        upscale:
+          default_upscale_steps: 2
+      sft:
+        default_steps: 50
+        default_guidance: 3.0
+        upscale:
+          default_upscale_steps: 12
 
   unknown:
     supports_negative_prompt: false

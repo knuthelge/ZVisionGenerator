@@ -147,6 +147,41 @@ class TestRenderLatentPreview:
 
         assert torch.allclose(spatial, spatial_in[0])
 
+    def test_moss_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, preview_module):
+        latents = torch.zeros((1, 128, 8, 8))
+
+        image = preview_module.render_latent_preview(_flux2_pipe(), "moss", latents, height=128, width=128)
+
+        assert image.size == (16, 16)
+        actual, expected = _pixel(image, FLUX2_RGB_BIAS)
+        assert np.allclose(actual, expected, atol=1)
+
+    def test_moss_unpatchifies_like_the_flux2_pipeline(self, preview_module):
+        from diffusers import Flux2Pipeline
+
+        from zvisiongenerator.core.latent_preview import FLUX2_RGB_FACTORS
+
+        pipe = _flux2_pipe()
+        pipe.vae.bn.running_mean = torch.randn(128)
+        pipe.vae.bn.running_var = torch.rand(128) + 0.5
+        pipe.vae.config.batch_norm_eps = 1e-4
+        latents = torch.randn((1, 128, 4, 6))
+        std = torch.sqrt(pipe.vae.bn.running_var + 1e-4).view(1, -1, 1, 1)
+        reference = Flux2Pipeline._unpatchify_latents(latents * std + pipe.vae.bn.running_mean.view(1, -1, 1, 1))[0]
+
+        image = preview_module.render_latent_preview(pipe, "moss", latents, height=64, width=96)
+        expected = preview_module._project_to_image(reference, FLUX2_RGB_FACTORS, FLUX2_RGB_BIAS)
+
+        assert image.size == (12, 8)
+        assert np.array_equal(np.asarray(image), np.asarray(expected))
+
+    def test_moss_preview_accepts_half_precision_latents(self, preview_module):
+        latents = torch.zeros((1, 128, 4, 4), dtype=torch.bfloat16)
+
+        image = preview_module.render_latent_preview(_flux2_pipe(), "moss", latents, height=64, width=64)
+
+        assert image.size == (8, 8)
+
     def test_unknown_family_has_no_preview(self, preview_module):
         assert preview_module.render_latent_preview(None, "flux1", torch.zeros((1, 16, 4, 4)), 32, 32) is None
 
@@ -168,7 +203,7 @@ class TestEstimateCleanLatents:
 
 
 class TestCreateLivePreview:
-    @pytest.mark.parametrize("family", ["zimage", "flux2", "flux2_klein", "krea2", "ideogram4"])
+    @pytest.mark.parametrize("family", ["zimage", "flux2", "flux2_klein", "krea2", "ideogram4", "moss"])
     def test_supported_families(self, preview_module, family):
         assert isinstance(preview_module.create_live_preview(family, 8, 64, 64), preview_module.LivePreview)
 
@@ -222,6 +257,26 @@ class TestLivePreview:
         # Step 1 has no earlier latents to estimate from; later previews recover the clean image.
         for step in (2, 3):
             assert np.allclose(np.asarray(previews[step], dtype=int), np.asarray(expected, dtype=int), atol=1)
+
+    def test_moss_previews_every_step_but_the_last_with_a_flow_matching_scheduler_subclass(self, preview_module):
+        class MOSSLikeScheduler(diffusers.FlowMatchEulerDiscreteScheduler):
+            """Stand-in for MOSSImageScheduler, which subclasses the diffusers Euler scheduler."""
+
+        steps = 8
+        scheduler = MOSSLikeScheduler()
+        scheduler.set_timesteps(steps)
+        pipe = _flux2_pipe(scheduler=scheduler)
+        pipe.num_timesteps = steps
+        preview = preview_module.LivePreview("moss", steps, 128, 128)
+
+        def latents_for_step(step):
+            scheduler._step_index = step + 1
+            return torch.zeros((1, 128, 8, 8))
+
+        previews = self._run(preview, pipe, steps, latents_for_step)
+
+        assert set(previews) == {1, 2, 3, 4, 5, 6, 7}
+        assert all(image.size == (16, 16) for image in previews.values())
 
     def test_failure_warns_once_and_disables_previews(self, preview_module):
         pipe = SimpleNamespace(scheduler=None, num_timesteps=8, vae_scale_factor=8)

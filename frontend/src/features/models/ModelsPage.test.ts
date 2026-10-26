@@ -1147,17 +1147,19 @@ describe('ModelsPage downloads', () => {
       return label?.parentElement?.querySelector('[role="tooltip"]')?.textContent ?? '';
     }
 
-    it('says the SeedVR2 copy and the Ideogram 4 Instant build are made on first use when nothing is left to fetch', async () => {
+    it('says the SeedVR2 copy and the Ideogram 4 Instant and MOSS-Image builds are made on first use when nothing is left to fetch', async () => {
       await mountPage(inventoryWith({
         image_models: [
           { name: 'seedvr2-7b@q8', label: 'seedvr2-7b@q8', family: 'seedvr2', source: 'seedvr2', downloaded: false, download_needed: false, download_size_label: '17.0 GB', delete: null },
           { name: 'ideo', label: 'ideo', family: 'ideogram4', downloaded: false, download_needed: false, delete: null },
+          { name: 'moss', label: 'moss', family: 'moss', downloaded: false, download_needed: false, delete: null },
           { name: 'klein9b', label: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
         ],
       }));
 
       expect(nameTooltip('seedvr2-7b@q8')).toContain(PREPARED_SEEDVR2_TOOLTIP);
       expect(nameTooltip('ideo')).toContain(PREPARED_INSTANT_TOOLTIP);
+      expect(nameTooltip('moss')).toContain(PREPARED_INSTANT_TOOLTIP);
       expect(nameTooltip('klein9b')).toContain(DOWNLOADABLE_TOOLTIP);
       expect(target.querySelectorAll('[data-testid="download-button"]')).toHaveLength(1);
     });

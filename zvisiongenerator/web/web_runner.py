@@ -365,10 +365,14 @@ class WebRunner:
         request: ImageGenerationRequest,
         workflow: GenerationWorkflow,
         model_ref: str,
+        config: dict[str, Any],
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
     ) -> str:
-        """Queue the upscale job; the worker loads the refinement model (at ``request.quantize``) and upscales one image."""
+        """Queue the upscale job; the worker loads the refinement model (at ``request.quantize``) and upscales one image.
+
+        *config* is the app config, from which a model built on first use (MOSS-Image, Ideogram 4 Instant) is planned and built.
+        """
         control_signal = SkipSignal()
         return self._submit_job(
             job_type="upscale",
@@ -381,6 +385,7 @@ class WebRunner:
                 request=request,
                 workflow=workflow,
                 model_ref=model_ref,
+                config=config,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
             ),
@@ -792,6 +797,7 @@ class WebRunner:
         request: ImageGenerationRequest,
         workflow: GenerationWorkflow,
         model_ref: str,
+        config: dict[str, Any],
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
     ) -> None:
@@ -800,7 +806,7 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             return
         if not self._ensure_downloads(
-            self._upscale_download_plan(request, model_ref),
+            self._upscale_download_plan(request, model_ref, config),
             mode="image",
             role="model",
             model=self._upscale_model_label(request, model_ref),
@@ -812,7 +818,7 @@ class WebRunner:
         if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
             backend, model = _load_seedvr2_with_progress(request.upscale_model, progress_callback, mode="image")
         else:
-            backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal)
+            backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal, config=config)
         run_upscale(backend, model, request, workflow, progress_callback=progress_callback, skip_signal=control_signal)
 
     def _run_video_file_upscale_request(
@@ -910,10 +916,10 @@ class WebRunner:
         )
 
     @staticmethod
-    def _upscale_download_plan(request: ImageGenerationRequest, model_ref: str) -> tuple[DownloadTarget, ...] | None:
+    def _upscale_download_plan(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any]) -> tuple[DownloadTarget, ...] | None:
         """Return the downloads an upscale job needs: the SeedVR2 tier's files or the creative refinement model's."""
         if request.upscale_method != UPSCALE_METHOD_SEEDVR2:
-            return image_plan(model_ref, family=request.model_family, config=None, platform_key=sys.platform)
+            return image_plan(model_ref, family=request.model_family, config=config, platform_key=sys.platform)
         return WebRunner._seedvr2_download_plan(request.upscale_model)
 
     @staticmethod
@@ -1227,7 +1233,7 @@ def _load_image_model_with_progress(
 ) -> tuple[Any, Any, Any]:
     """Load the request's image model (stored quants, LoRAs) and report ``model_loading`` events.
 
-    With *config*, Ideogram 4 Instant's folder is built first when it is missing (the ``building`` phase).
+    With *config*, a model built on first use (Ideogram 4 Instant, MOSS-Image) is built first when it is missing (the ``building`` phase).
 
     Returns:
         ``(backend, model, model_info)``; the model is ``None`` when the user quit during the build.

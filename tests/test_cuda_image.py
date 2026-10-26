@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import math
 import sys
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -343,6 +345,199 @@ class TestIdeogram4:
 
         assert result is None
         assert pipe._interrupt is False
+
+
+class TestMoss:
+    """MOSS-Image loads through its family module, with Turbo's LoRA, and runs through the family's generate."""
+
+    _BASE = Path("/models/moss")
+
+    @staticmethod
+    def _info(*, turbo: bool):
+        return _make_model_info(family="moss", is_distilled=turbo)
+
+    def _load(self, mod, *, turbo=True, path="/models/moss", lora=Path("/models/moss/turbo_lora.safetensors"), base=_BASE, **kwargs):
+        pipeline = MagicMock()
+        with (
+            patch.object(mod, "detect_image_model", return_value=self._info(turbo=turbo)),
+            patch.object(mod, "built_moss_base", return_value=base),
+            patch.object(mod, "turbo_lora_file", return_value=lora),
+            patch.object(mod, "load_moss_pipeline", return_value=pipeline) as mock_load,
+            patch.object(mod, "_load_loras") as mock_loras,
+        ):
+            result = mod.DiffusersBackend().load_model(path, **kwargs)
+        return result, pipeline, mock_load, mock_loras
+
+    def test_turbo_loads_with_its_lora_and_the_user_loras_go_to_the_family_loader(self, win_backend):
+        mod, _, _ = win_backend
+
+        (result, info), pipeline, mock_load, mock_loras = self._load(mod, quantize=8, lora_paths=["/l/a.safetensors"], lora_weights=[0.5])
+
+        assert result is pipeline and info.family == "moss"
+        assert mock_load.call_args.args[0] == "/models/moss" and mock_load.call_args.args[2] == 8
+        assert mock_load.call_args.kwargs == {"prequantized": False, "turbo_lora": Path("/models/moss/turbo_lora.safetensors"), "lora_paths": ["/l/a.safetensors"], "lora_weights": [0.5]}
+        mock_loras.assert_not_called()
+        pipeline.vae.enable_tiling.assert_called_once()
+        mod.AutoPipelineForText2Image.from_pretrained.assert_not_called()
+
+    def test_sft_has_no_turbo_lora(self, win_backend):
+        mod, _, _ = win_backend
+
+        _, _, mock_load, _ = self._load(mod, turbo=False, path="/models/moss-sft", base=Path("/models/moss-sft"), lora=None)
+
+        assert mock_load.call_args.kwargs["turbo_lora"] is None
+
+    def test_a_stored_copy_loads_at_its_own_level_as_prequantized(self, win_backend, tmp_path):
+        mod, _, _ = win_backend
+        stored = tmp_path / "moss@q4"
+        stored.mkdir()
+        (stored / "ziv-quant.json").write_text('{"bits": 4}', encoding="utf-8")
+
+        _, _, mock_load, _ = self._load(mod, path=str(stored))
+
+        assert mock_load.call_args.args[2] == 4 and mock_load.call_args.kwargs["prequantized"] is True
+
+    def test_a_turbo_folder_without_its_lora_fails_naming_the_remedy(self, win_backend):
+        mod, _, _ = win_backend
+
+        with pytest.raises(FileNotFoundError, match="-m moss"):
+            self._load(mod, lora=None)
+
+    def test_a_folder_that_is_not_built_is_left_to_the_family_loader_to_refuse(self, win_backend):
+        mod, _, _ = win_backend
+
+        _, _, mock_load, _ = self._load(mod, path="org/MOSS-Image-SFT", base=None, lora=None)
+
+        mock_load.assert_called_once()
+        assert mock_load.call_args.kwargs["turbo_lora"] is None
+
+    @pytest.mark.parametrize(("bits", "expected"), [(8, True), (4, True), (6, False)])
+    def test_moss_is_stored_from_files_at_q4_and_q8(self, win_backend, tmp_path, bits, expected):
+        mod, _, _ = win_backend
+        (tmp_path / "model_index.json").write_text('{"_class_name": "MOSSImagePipeline"}', encoding="utf-8")
+
+        assert mod.DiffusersBackend().quantizes_from_files(bits, source=str(tmp_path)) is expected
+
+    def test_other_families_are_stored_from_files_only_at_q8(self, win_backend, tmp_path):
+        mod, _, _ = win_backend
+        (tmp_path / "model_index.json").write_text('{"_class_name": "ZImagePipeline"}', encoding="utf-8")
+        backend = mod.DiffusersBackend()
+
+        assert backend.quantizes_from_files(8, source=str(tmp_path)) is True
+        assert backend.quantizes_from_files(4, source=str(tmp_path)) is False
+        assert backend.quantizes_from_files(4, source=None) is False
+
+    @pytest.mark.parametrize("bits", [4, 8])
+    def test_write_quantized_files_uses_the_family_writer(self, win_backend, tmp_path, bits):
+        mod, _, _ = win_backend
+        (tmp_path / "model_index.json").write_text('{"_class_name": "MOSSImagePipeline"}', encoding="utf-8")
+        cancelled = MagicMock(return_value=False)
+
+        with (
+            patch.object(mod.importlib.metadata, "version", side_effect=lambda package: "1.0"),
+            patch.object(mod, "write_moss_stored_copy") as mock_moss,
+            patch.object(mod, "write_fp8_copy") as mock_fp8,
+        ):
+            mod.DiffusersBackend().write_quantized_files(str(tmp_path), "/models/.moss@q.partial", bits, cancelled)
+
+        source, target, passed_bits, _dtype, backend_format, passed_cancelled = mock_moss.call_args.args
+        assert (source, target, passed_bits, passed_cancelled) == (tmp_path, Path("/models/.moss@q.partial"), bits, cancelled)
+        assert backend_format == "diffusers-1.0+transformers-1.0" + ("+bitsandbytes-1.0" if bits == 4 else "")
+        mock_fp8.assert_not_called()
+
+    def _generate(self, mod, *, turbo=True, result="image", callback_steps=4, **overrides):
+        """Run text_to_image with the family's generate faked; also build its callback for *callback_steps* steps.
+
+        Returns ``(image, generate mock, callback)``.
+        """
+        backend = mod.DiffusersBackend()
+        backend._model_info = self._info(turbo=turbo)
+        arguments = {"model": MagicMock(), "prompt": "a car", "width": 1024, "height": 768, "seed": 5, "steps": 4, "guidance": 1.0, **overrides}
+        built: list[Any] = []
+
+        def fake_generate(*args, make_callback, **kwargs):
+            built.append(make_callback(callback_steps))
+            return result
+
+        with patch.object(mod, "generate_moss", side_effect=fake_generate) as mock_generate, patch.object(mod, "create_live_preview", return_value=None):
+            image = backend.text_to_image(**arguments)
+        return image, mock_generate, built[0]
+
+    def test_turbo_runs_the_given_steps_without_guidance_or_a_negative_prompt(self, win_backend):
+        mod, _, _ = win_backend
+
+        image, mock_generate, _ = self._generate(mod, steps=6, negative_prompt="blurry")
+
+        sampler = mock_generate.call_args.kwargs["sampler"]
+        assert image == "image"
+        assert (sampler.steps, sampler.guidance, sampler.negative_prompt) == (6, 1.0, None)
+        assert mock_generate.call_args.args[1] == "a car"
+        assert {key: mock_generate.call_args.kwargs[key] for key in ("width", "height", "seed", "strength")} == {"width": 1024, "height": 768, "seed": 5, "strength": 1.0}
+        assert mock_generate.call_args.kwargs["image"] is None
+
+    def test_turbo_ignores_another_guidance_with_a_warning(self, win_backend):
+        mod, _, _ = win_backend
+
+        with pytest.warns(UserWarning, match="guidance"):
+            _, mock_generate, _ = self._generate(mod, guidance=4.0)
+
+        assert mock_generate.call_args.kwargs["sampler"].guidance == 1.0
+
+    def test_sft_guides_with_the_negative_prompt_and_skips_a_layer_in_that_branch(self, win_backend):
+        mod, _, _ = win_backend
+
+        _, mock_generate, _ = self._generate(mod, turbo=False, steps=50, guidance=3.0, negative_prompt=None)
+
+        sampler = mock_generate.call_args.kwargs["sampler"]
+        assert (sampler.steps, sampler.guidance, sampler.negative_prompt, sampler.skip_layers) == (50, 3.0, "", (22,))
+
+    def test_without_progress_or_skip_no_callback_is_built(self, win_backend):
+        mod, _, _ = win_backend
+
+        _, _, callback = self._generate(mod)
+
+        assert callback is None
+
+    def test_the_progress_callback_counts_the_steps_the_run_takes(self, win_backend):
+        mod, _, _ = win_backend
+        progress = MagicMock()
+
+        _, _, callback = self._generate(mod, step_callback=progress, callback_steps=3)
+        callback(MagicMock(num_timesteps=None), 1, 0.5, {"latents": MagicMock()})
+
+        progress.assert_called_once_with({"current_step": 2, "total_steps": 3})
+
+    def test_the_skip_signal_interrupts_the_pipeline(self, win_backend):
+        mod, _, _ = win_backend
+        skip = MagicMock()
+        skip.check.return_value = True
+        pipe = MagicMock(num_timesteps=None, _interrupt=False)
+
+        _, _, callback = self._generate(mod, skip_signal=skip)
+        callback(pipe, 0, 0.5, {"latents": MagicMock()})
+
+        assert pipe._interrupt is True
+
+    def test_a_skipped_run_returns_none(self, win_backend):
+        mod, _, _ = win_backend
+
+        image, _, _ = self._generate(mod, result=None, skip_signal=MagicMock())
+
+        assert image is None
+
+    def test_image_to_image_rounds_the_reference_size_down_to_16_and_passes_the_strength(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = self._info(turbo=True)
+        reference = Image.new("RGB", (1000, 790))
+
+        with patch.object(mod, "generate_moss", return_value="image") as mock_generate:
+            result = backend.image_to_image(MagicMock(), reference, "a car", 0.4, 8, 5, 1.0)
+
+        assert result == "image"
+        assert (mock_generate.call_args.kwargs["width"], mock_generate.call_args.kwargs["height"]) == (992, 784)
+        assert mock_generate.call_args.kwargs["image"] is reference and mock_generate.call_args.kwargs["strength"] == 0.4
+        assert mock_generate.call_args.kwargs["sampler"].steps == 8
 
 
 # ---------------------------------------------------------------------------

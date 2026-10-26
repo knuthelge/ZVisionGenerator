@@ -95,10 +95,11 @@ class ImageBackend(Protocol):
         """
         ...
 
-    def quantizes_from_files(self, bits: int) -> bool:
+    def quantizes_from_files(self, bits: int, source: str | None = None) -> bool:
         """Return whether the stored quant at *bits* is written by :meth:`write_quantized_files`.
 
-        ``False`` means it is saved from a model loaded at *bits* with :meth:`save_quantized`.
+        ``False`` means it is saved from a model loaded at *bits* with :meth:`save_quantized`. *source* is the
+        local folder the copy would be made from, when known (a backend may store some families' levels from files).
         """
         ...
 

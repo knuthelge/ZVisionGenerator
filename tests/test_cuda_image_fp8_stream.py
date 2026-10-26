@@ -40,9 +40,9 @@ def _source_tensors():
     return {key: value.contiguous() for key, value in source.state_dict().items()}
 
 
-def _stream(component_dir):
+def _stream(component_dir, **options):
     with patch("diffusers.AutoModel.from_config", side_effect=lambda config: _TinyTransformer(config["width"])):
-        return quant._stream_fp8_transformer(component_dir, torch.bfloat16)
+        return quant._stream_fp8_transformer(component_dir, torch.bfloat16, **options)
 
 
 class TestStreamFp8Transformer:
@@ -92,3 +92,28 @@ class TestStreamFp8Transformer:
             _stream(tmp_path / "transformer")
 
         assert mock_drop.call_count == len(tensors)
+
+
+class TestKeepPatterns:
+    def test_a_kept_linear_keeps_its_compute_dtype_while_the_rest_goes_to_fp8(self, tmp_path):
+        tensors = _source_tensors()
+        _save(tmp_path / "transformer", tensors)
+
+        model = _stream(tmp_path / "transformer", keep_patterns=("^layer$",))
+
+        assert model.layer.weight.dtype == torch.bfloat16
+        assert torch.equal(model.layer.weight, tensors["layer.weight"])
+        assert model.norm.weight.dtype == torch.bfloat16  # diffusers' default list still applies
+
+    def test_without_keep_patterns_the_linear_is_cast(self, tmp_path):
+        _save(tmp_path / "transformer", _source_tensors())
+
+        assert _stream(tmp_path / "transformer", keep_patterns=()).layer.weight.dtype == torch.float8_e4m3fn
+
+    def test_cast_to_fp8_keeps_the_matching_layer_in_the_compute_dtype(self):
+        model = _TinyTransformer().to(torch.bfloat16)
+
+        quant.cast_to_fp8(model, torch.bfloat16, ("^layer$",))
+
+        assert model.layer.weight.dtype == torch.bfloat16
+        assert not hasattr(model.layer, "compute_dtype")

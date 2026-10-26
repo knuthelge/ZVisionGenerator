@@ -297,10 +297,10 @@
   }
 
   function notDownloadedTooltip(m: { family?: string; source?: string; download_size_label?: string | null; download_needed?: boolean }): string {
-    // Nothing to fetch, yet not ready: the first use makes it (the SeedVR2 stored copy, the Ideogram 4 Instant build).
+    // Nothing to fetch, yet not ready: the first use makes it (the SeedVR2 stored copy, the Ideogram 4 Instant and MOSS-Image builds).
     if (m.download_needed === false) {
       if (m.source === 'seedvr2') return PREPARED_SEEDVR2_TOOLTIP;
-      if (m.family === 'ideogram4') return PREPARED_INSTANT_TOOLTIP;
+      if (m.family === 'ideogram4' || m.family === 'moss') return PREPARED_INSTANT_TOOLTIP;
     }
     const ahead = m.download_needed ? 'Download fetches it now, or ' : '';
     if (m.source === 'enhancer') return `Not downloaded: ${ahead}it downloads the first time you enhance a prompt with it.`;

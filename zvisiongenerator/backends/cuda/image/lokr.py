@@ -23,7 +23,7 @@ from typing import Any
 
 import torch
 
-__all__ = ["LoraParts", "apply_lokr", "has_lokr_tensors", "split_lora_tensors"]
+__all__ = ["AdaptedLinear", "LoKrTerm", "LoraParts", "adapt_linear", "apply_lokr", "base_linear", "check_fits", "has_lokr_tensors", "lokr_factors", "split_key", "split_lora_tensors"]
 
 _LOKR_TENSORS = frozenset({"lokr_w1", "lokr_w2", "lokr_w1_a", "lokr_w1_b", "lokr_w2_a", "lokr_w2_b", "lokr_t2"})
 _LORA_TENSORS = frozenset({"lora_A.weight", "lora_B.weight", "lora_down.weight", "lora_up.weight", "lora_A.bias", "lora_B.bias"})
@@ -50,14 +50,14 @@ class LoraParts:
 
 def has_lokr_tensors(keys: Iterable[str]) -> bool:
     """Return whether any of a LoRA file's tensor *keys* belongs to a LoKr adapter."""
-    return any(_split_key(key)[1] in _LOKR_TENSORS for key in keys)
+    return any(split_key(key)[1] in _LOKR_TENSORS for key in keys)
 
 
 def split_lora_tensors(state: dict[str, torch.Tensor]) -> LoraParts:
     """Split a LoRA file's tensors into LoKr layers and the rest, noting which of the rest are standard LoRA."""
     layers: dict[str, dict[str, str]] = {}
     for key in state:
-        layer, tensor = _split_key(key)
+        layer, tensor = split_key(key)
         layers.setdefault(layer, {})[tensor] = key
     rest: dict[str, torch.Tensor] = {}
     lora: dict[str, torch.Tensor] = {}
@@ -89,7 +89,7 @@ def apply_lokr(pipeline: Any, layers: dict[str, dict[str, torch.Tensor]], streng
     Raises:
         ValueError: When a layer's factors do not fit the layer they map to (a LoRA made for a different model).
     """
-    factors = {layer: _lokr_factors(tensors) for layer, tensors in layers.items()}
+    factors = {layer: lokr_factors(tensors) for layer, tensors in layers.items()}
     shapes = {layer: (w1.shape[0] * w2.shape[0], w1.shape[1] * w2.shape[1]) for layer, (w1, w2, _scale) in factors.items()}
     resolved: dict[str, list[tuple[str, range, torch.nn.Module]]] = {}
     for layer, targets in _map_layers(type(pipeline), shapes).items():
@@ -99,24 +99,51 @@ def apply_lokr(pipeline: Any, layers: dict[str, dict[str, torch.Tensor]], streng
             continue  # the converter passed through a name that is no layer of this model
     for layer, targets in resolved.items():
         for target, rows, linear in targets:
-            _check_fits(layer, target, linear, len(rows), shapes[layer][1])
+            check_fits("LoKr", layer, target, linear, (len(rows), shapes[layer][1]))
     for layer, targets in resolved.items():
         w1, w2, scale = factors[layer]
         # Targets split from one fused layer share its factors; each keeps its own rows of the product.
         host_w1, host_w2 = _host(w1, pin_memory), _host(w2, pin_memory)
         for target, rows, linear in targets:
             kept = None if rows == range(shapes[layer][0]) else rows
-            _add_term(pipeline, target, linear, _LoKrTerm(host_w1, host_w2, scale * strength, kept))
+            _add_term(pipeline, target, LoKrTerm(host_w1, host_w2, scale * strength, kept))
     return tuple(sorted(shapes.keys() - resolved.keys()))
 
 
-def _check_fits(layer: str, target: str, linear: torch.nn.Module, out_features: int, in_features: int) -> None:
-    """Raise ``ValueError`` when an ``out_features × in_features`` delta does not fit the layer *linear*."""
+def check_fits(label: str, layer: str, target: str, linear: torch.nn.Module, shape: tuple[int, int], *, parts: int = 1) -> None:
+    """Raise ``ValueError`` when a layer's ``out × in`` delta of *shape* does not fit the layer *linear*.
+
+    The delta must be *parts* times as tall as the layer.
+
+    Args:
+        label: The adapter kind named in the message (``LoKr``, ``LoRA``).
+        layer: The layer's name in the adapter file.
+        target: The model layer it maps to.
+        linear: The layer at *target*, without adapter wrappers.
+        shape: The delta's ``(out, in)`` features.
+        parts: How many layers' worth of rows the delta holds (3 for a fused ``qkv``).
+    """
     if not hasattr(linear, "out_features") or not hasattr(linear, "in_features"):
-        raise ValueError(f"LoKr layer {layer} maps to {target}, which is not a linear layer; the LoRA was probably made for a different model.")
-    expected = (linear.out_features, linear.in_features)
-    if expected != (out_features, in_features):
-        raise ValueError(f"LoKr layer {layer} ({out_features}×{in_features}) does not fit {target} ({expected[0]}×{expected[1]}); the LoRA was probably made for a different model.")
+        raise ValueError(f"{label} layer {layer} maps to {target}, which is not a linear layer; the LoRA was probably made for a different model.")
+    expected = (linear.out_features * parts, linear.in_features)
+    if expected != shape:
+        raise ValueError(f"{label} layer {layer} ({shape[0]}×{shape[1]}) does not fit {target} ({expected[0]}×{expected[1]}); the LoRA was probably made for a different model.")
+
+
+def base_linear(module: torch.nn.Module) -> torch.nn.Module:
+    """Return the layer under an adapter wrapper, or *module* itself."""
+    return module.base if isinstance(module, AdaptedLinear) else module
+
+
+def adapt_linear(root: torch.nn.Module, path: str) -> AdaptedLinear:
+    """Return the layer at *path* under *root* as an :class:`AdaptedLinear`, wrapping it the first time."""
+    module = root.get_submodule(path)
+    if isinstance(module, AdaptedLinear):
+        return module
+    wrapper = AdaptedLinear(module)
+    parent, _, child = path.rpartition(".")
+    setattr(root.get_submodule(parent) if parent else root, child, wrapper)
+    return wrapper
 
 
 def _host(tensor: torch.Tensor, pin_memory: bool) -> torch.Tensor:
@@ -125,7 +152,7 @@ def _host(tensor: torch.Tensor, pin_memory: bool) -> torch.Tensor:
     return host.pin_memory() if pin_memory else host
 
 
-class _LoKrTerm(torch.nn.Module):
+class LoKrTerm(torch.nn.Module):
     """``scale * kron(w1, w2) @ x``, computed as ``w1 @ X @ w2ᵀ`` without building the product.
 
     For a target split from a fused layer, only its *rows* of the product are kept. The factors are plain
@@ -150,7 +177,7 @@ class _LoKrTerm(torch.nn.Module):
         return (out * self.scale).to(x.dtype)
 
 
-class _AdaptedLinear(torch.nn.Module):
+class AdaptedLinear(torch.nn.Module):
     """A linear layer plus adapter terms added to its output; the layer itself is left unchanged."""
 
     def __init__(self, base: torch.nn.Module) -> None:
@@ -170,7 +197,7 @@ class _AdaptedLinear(torch.nn.Module):
         return out
 
 
-def _split_key(key: str) -> tuple[str, str]:
+def split_key(key: str) -> tuple[str, str]:
     """Split a tensor key into its layer name and tensor name, e.g. ``a.b.lora_A.weight`` -> ``(a.b, lora_A.weight)``."""
     parts = key.rsplit(".", 2)
     if len(parts) == 3 and f"{parts[1]}.{parts[2]}" in _LORA_TENSORS:
@@ -179,7 +206,7 @@ def _split_key(key: str) -> tuple[str, str]:
     return layer, tensor
 
 
-def _lokr_factors(tensors: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, float]:
+def lokr_factors(tensors: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, float]:
     """Rebuild a layer's LoKr factors and scale, as mflux's ``rebuild_lokr_factors`` does.
 
     Raises:
@@ -260,24 +287,15 @@ def _convert_stand_ins(pipeline_class: type, shapes: dict[str, tuple[int, int]])
 
 
 def _resolve(pipeline: Any, target: str) -> torch.nn.Module:
-    """Return the layer *target* names (``transformer.``-prefixed or bare) on *pipeline*."""
+    """Return the layer *target* names (``transformer.``-prefixed or bare) on *pipeline*, without adapter wrappers."""
     component, layer = _component_and_layer(target)
-    module = getattr(pipeline, component).get_submodule(layer)
-    return module.base if isinstance(module, _AdaptedLinear) else module
+    return base_linear(getattr(pipeline, component).get_submodule(layer))
 
 
-def _add_term(pipeline: Any, target: str, linear: torch.nn.Module, term: torch.nn.Module) -> None:
-    """Add *term* to the layer at *target*, wrapping it in an :class:`_AdaptedLinear` the first time."""
+def _add_term(pipeline: Any, target: str, term: torch.nn.Module) -> None:
+    """Add *term* to the layer at *target*, wrapping it in an :class:`AdaptedLinear` the first time."""
     component, layer = _component_and_layer(target)
-    root = getattr(pipeline, component)
-    existing = root.get_submodule(layer)
-    if isinstance(existing, _AdaptedLinear):
-        existing.terms.append(term)
-        return
-    wrapper = _AdaptedLinear(linear)
-    wrapper.terms.append(term)
-    parent_name, _, child_name = layer.rpartition(".")
-    setattr(root.get_submodule(parent_name) if parent_name else root, child_name, wrapper)
+    adapt_linear(getattr(pipeline, component), layer).terms.append(term)
 
 
 def _component_and_layer(target: str) -> tuple[str, str]:

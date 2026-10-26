@@ -31,6 +31,14 @@ class TestDetectModelType:
         assert info.family == "krea2"
         assert info.size is None
 
+    @pytest.mark.parametrize("distilled", [True, False])
+    def test_moss_pipeline(self, tmp_path, distilled):
+        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "MOSSImagePipeline", "is_distilled": distilled}))
+        info = detect_image_model(str(tmp_path))
+        assert info.family == "moss"
+        assert info.is_distilled is distilled
+        assert info.size is None
+
     def test_flux2_klein_pipeline(self, tmp_path):
         (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Flux2KleinPipeline", "is_distilled": True}))
         # Need "4b" in path for size detection

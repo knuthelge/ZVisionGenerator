@@ -14,6 +14,9 @@ import pytest
 from zvisiongenerator.backends.cuda import quant
 
 
+_Custom = MagicMock(name="CustomModel")  # a pipeline-specific model class diffusers' AutoModel cannot resolve
+
+
 @pytest.fixture
 def libs():
     """Install fake torch, diffusers, transformers, accelerate and safetensors modules for the lazy imports."""
@@ -82,15 +85,114 @@ class TestCastToFp8:
         assert {"norm", "embed", "lm_head"} <= set(kwargs["skip_modules_pattern"])
 
 
+class TestCastToFp8KeepPatterns:
+    def test_keep_patterns_extend_diffusers_defaults(self, libs):
+        model = MagicMock()
+        layerwise_casting = MagicMock(DEFAULT_SKIP_MODULES_PATTERN=("pos_embed", "norm"))
+
+        with patch.dict(sys.modules, {"diffusers.hooks.layerwise_casting": layerwise_casting}):
+            quant.cast_to_fp8(model, "bf16", ("^t_embedder",))
+
+        model.enable_layerwise_casting.assert_called_once_with(storage_dtype="fp8-sentinel", compute_dtype="bf16", skip_modules_pattern=("pos_embed", "norm", "^t_embedder"))
+
+    def test_text_encoders_ignore_keep_patterns(self, libs):
+        text_encoder = MagicMock(spec=["forward", "modules"])
+
+        quant.cast_to_fp8(text_encoder, "bf16", ("^t_embedder",))
+
+        assert libs.diffusers.hooks.apply_layerwise_casting.call_args.kwargs["skip_modules_pattern"] == quant._TEXT_ENCODER_SKIP_PATTERNS
+
+
+class TestModelClass:
+    def test_fp8_stream_passes_the_class_and_keep_patterns_along(self, libs):
+        with patch.object(quant, "_component_dir", return_value=Path("/models/moss/transformer")), patch.object(quant, "_stream_fp8_transformer", return_value="tx") as mock_stream:
+            assert quant.load_fp8_transformer("/models/moss", "bf16", model_class=_Custom, keep_patterns=("^t_embedder",)) == "tx"
+
+        assert mock_stream.call_args.args == (Path("/models/moss/transformer"), "bf16", _Custom, ("^t_embedder",))
+
+    def test_fp8_defaults_leave_the_class_and_patterns_unset(self, libs):
+        with patch.object(quant, "_component_dir", return_value=Path("/models/zit/transformer")), patch.object(quant, "_stream_fp8_transformer") as mock_stream:
+            quant.load_fp8_transformer("/models/zit", "bf16")
+
+        assert mock_stream.call_args.args == (Path("/models/zit/transformer"), "bf16", None, ())
+
+    def test_the_empty_model_is_built_by_the_class(self, libs):
+        _Custom.from_config.reset_mock()
+
+        quant.empty_diffusers_model({"width": 8}, "bf16", _Custom)
+
+        _Custom.from_config.assert_called_once_with({"width": 8})
+        libs.diffusers.AutoModel.from_config.assert_not_called()
+
+    def test_the_fallback_load_uses_the_class_and_keeps_the_patterns(self, libs, tmp_path):
+        _Custom.from_pretrained.reset_mock()
+
+        with patch.object(quant, "_weight_files", return_value=[]), patch.object(quant, "cast_to_fp8", side_effect=lambda component, _dtype, _keep=(): component) as mock_cast:
+            quant._stream_fp8_transformer(tmp_path / "transformer", "bf16", _Custom, ("^t_embedder",))
+
+        _Custom.from_pretrained.assert_called_once_with(str(tmp_path / "transformer"), torch_dtype="bf16")
+        libs.diffusers.AutoModel.from_pretrained.assert_not_called()
+        assert mock_cast.call_args.args[2] == ("^t_embedder",)
+
+    def test_nf4_transformer_loads_through_the_class(self, libs):
+        _Custom.from_pretrained.reset_mock()
+
+        quant.load_nf4_transformer("/models/moss", "bf16", prequantized=False, model_class=_Custom)
+
+        _Custom.from_pretrained.assert_called_once()
+        assert _Custom.from_pretrained.call_args.kwargs["subfolder"] == "transformer"
+        libs.diffusers.AutoModel.from_pretrained.assert_not_called()
+
+
+class TestNf4KeepModules:
+    def test_the_transformer_config_skips_the_kept_modules(self, libs):
+        quant.load_nf4_transformer("/models/moss", "bf16", prequantized=False, keep_modules=("t_embedder", "final_layer"))
+
+        assert libs.diffusers.BitsAndBytesConfig.call_args.kwargs["llm_int8_skip_modules"] == ["t_embedder", "final_layer"]
+        assert "llm_int8_skip_modules" not in libs.transformers.BitsAndBytesConfig.call_args.kwargs
+
+    def test_no_kept_modules_leaves_the_config_alone(self, libs):
+        quant.load_nf4_transformer("/models/zit", "bf16", prequantized=False)
+
+        assert "llm_int8_skip_modules" not in libs.diffusers.BitsAndBytesConfig.call_args.kwargs
+
+    def test_a_stored_copy_takes_no_config_even_with_kept_modules(self, libs):
+        quant.load_nf4_transformer("/models/moss@q4", "bf16", prequantized=True, keep_modules=("t_embedder",))
+
+        assert "quantization_config" not in libs.diffusers.AutoModel.from_pretrained.call_args.kwargs
+        libs.diffusers.BitsAndBytesConfig.assert_not_called()
+
+    def test_the_real_diffusers_config_carries_the_kept_modules(self):
+        pytest.importorskip("bitsandbytes")
+        import torch
+
+        _, config = quant._nf4_configs(torch.bfloat16, ("t_embedder",))
+
+        assert config.llm_int8_skip_modules == ["t_embedder"]
+
+
+class TestLoadNf4TextEncoder:
+    def test_quantizes_at_load(self, libs):
+        result = quant.load_nf4_text_encoder("/models/zit", "bf16", prequantized=False)
+
+        assert result is libs.transformers.AutoModel.from_pretrained.return_value
+        assert libs.transformers.AutoModel.from_pretrained.call_args.kwargs["quantization_config"] is libs.transformers.BitsAndBytesConfig.return_value
+
+    def test_a_stored_copy_takes_no_config(self, libs):
+        quant.load_nf4_text_encoder("/models/zit@q4", "bf16", prequantized=True)
+
+        assert "quantization_config" not in libs.transformers.AutoModel.from_pretrained.call_args.kwargs
+
+
 class TestLoadFp8Components:
     def test_text_encoder_is_cast_before_the_transformer_streams_in(self, libs):
         events: list[str] = []
         libs.transformers.AutoModel.from_pretrained.side_effect = lambda *_a, **_k: events.append("load text_encoder") or "te"
 
         with (
-            patch.object(quant, "cast_to_fp8", side_effect=lambda component, _dtype: events.append(f"cast {component}") or component),
+            patch.object(quant, "cast_to_fp8", side_effect=lambda component, _dtype, _keep=(): events.append(f"cast {component}") or component),
             patch.object(quant, "_component_dir", side_effect=lambda path, name: Path(path) / name),
-            patch.object(quant, "_stream_fp8_transformer", side_effect=lambda path, _dtype: events.append(f"stream {path.name}") or "tx"),
+            patch.object(quant, "_stream_fp8_transformer", side_effect=lambda path, _dtype, *_rest: events.append(f"stream {path.name}") or "tx"),
         ):
             components = quant.load_fp8_components("/models/zit", "bf16")
 

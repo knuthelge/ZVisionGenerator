@@ -14,7 +14,7 @@ hide:
 
 ## What it does
 
-- **Images** from a prompt, with Z-Image, FLUX.2 Klein, Krea 2 Turbo and Ideogram 4 Instant.
+- **Images** from a prompt, with Z-Image, FLUX.2 Klein, Krea 2 Turbo, Ideogram 4 Instant and, on Windows and Linux, MOSS-Image.
 - **Videos with sound** from a prompt or a starting image, with LTX-2.3, LTX-2.5 and MiniMax H3. End on a chosen last frame with H3, and extend a clip to make it longer.
 - **A prompt enhancer** that runs on your machine and turns a short idea into a detailed prompt.
 - **Upscaling** of new and existing images, of video as it's made, and of existing videos on Windows and Linux.

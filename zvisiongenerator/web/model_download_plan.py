@@ -83,7 +83,7 @@ def row_download_needed(
 ) -> bool:
     """Return whether the row still has something to download, judged offline from what is on disk.
 
-    A model built on first use (Ideogram 4 Instant) needs its sources; any other image row needs a download when it is not
+    A model built on first use (Ideogram 4 Instant, MOSS-Image) needs its sources; any other image row needs a download when it is not
     *downloaded* (no planner runs, so no file list is read); video, SeedVR2 and enhancer rows need one when a
     target of their plan is not present. A video plan that cannot be made falls back to *downloaded*. Rows of
     unknown status (``downloaded`` is ``None``) and enhancer rows that are *unavailable* need none.

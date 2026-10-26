@@ -845,6 +845,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
             request=plan.request,
             workflow=build_seedvr2_upscale_workflow() if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen),
             model_ref=plan.model_ref,
+            config=web_config.app_config,
             admission_check=_reject_while_busy,
             context=context,
         )

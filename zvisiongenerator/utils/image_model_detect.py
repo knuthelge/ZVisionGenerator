@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
+from zvisiongenerator.utils.moss_build import is_moss_dir, is_turbo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
 
 _HF_REPO_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
@@ -24,13 +25,14 @@ _CLASS_NAME_MAP: dict[str, str] = {
     "FluxPipeline": "flux1",
     "Ideogram4Pipeline": "ideogram4",
     "Krea2Pipeline": "krea2",
+    "MOSSImagePipeline": "moss",
 }
 
 
 @dataclass(frozen=True)
 class ImageModelInfo:
-    family: str  # "zimage" | "flux2_klein" | "flux2" | "flux1" | "ideogram4" | "krea2" | "unknown"
-    is_distilled: bool  # True for distilled Klein, False otherwise
+    family: str  # "zimage" | "flux2_klein" | "flux2" | "flux1" | "ideogram4" | "krea2" | "moss" | "unknown"
+    is_distilled: bool  # True for distilled Klein and MOSS-Image Turbo, False otherwise
     size: str | None  # "4b" | "9b" | None
 
 
@@ -52,6 +54,9 @@ def detect_image_model(model_path: str) -> ImageModelInfo:
     if not is_local and is_instant_dir(model_path):
         # Ideogram 4 Instant's folder before its first-use build.
         return ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
+    if not is_local and is_moss_dir(model_path):
+        # MOSS-Image's folders before their first-use build: Turbo is the distilled one.
+        return ImageModelInfo(family="moss", is_distilled=is_turbo_dir(model_path), size=None)
 
     if not is_local:
         # Explicitly local paths: absolute, starts with ./ ../ ~/, or has backslash
@@ -91,6 +96,8 @@ def detect_image_model(model_path: str) -> ImageModelInfo:
         info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
     elif family == "krea2":
         info = ImageModelInfo(family="krea2", is_distilled=False, size=None)
+    elif family == "moss":
+        info = ImageModelInfo(family="moss", is_distilled=bool(index.get("is_distilled", False)), size=None)
     else:
         info = ImageModelInfo(family="unknown", is_distilled=False, size=None)
 

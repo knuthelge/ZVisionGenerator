@@ -42,6 +42,20 @@ The badge follows the quant you pick, so you can see whether `q8` or `q4` brings
 
 After each job the Web UI gives the model's memory back to the system.
 
+## MOSS-Image
+
+MOSS-Image (`moss` and `moss-sft`, see [Models](models.md#moss-image)) runs on Windows and Linux and fits a 10 GB card at every level.
+
+| Level | GPU memory | System memory |
+|---|---|---|
+| `q4` | about 9 GB | about 15 GB |
+| `q8` | about 9 GB | about 17 GB |
+| None | about 7 GB | about 17 GB |
+
+The figures are peaks for Turbo images from 1024×1024 up to 4 megapixels, on a 10 GB GPU with 32 GB of system memory. Unquantized is about five times slower than `q4` or `q8` (about a minute per image instead of 13 s), so pick `q4` or `q8` unless you want the unquantized weights.
+
+**Upscale 4× creative.** The viewer's **4× creative** on a MOSS-Image picture fits a 10 GB GPU up to about 8 megapixels (a 576×864 picture enlarged to 2304×3456 takes about a minute at `q8`); a 16 megapixel result runs out of memory. For a larger one, use **2× creative** or the plain **4×** upscale. See [Upscaling](upscaling.md#upscaling-an-existing-image).
+
 ## Video
 
 Text to Video and Image to Video check the clip's size and length against memory before generating, and Extend Video checks the extension. The check never blocks a job; it warns when the clip may run slowly or fail.

@@ -74,6 +74,7 @@ def load_config() -> dict[str, Any]:
         "platforms",
         "model_aliases",
         "ideogram4_instant",
+        "moss_image",
         "model_presets",
         "video_sizes",
         "video_generation",
@@ -462,10 +463,12 @@ def get_variant_key(model_info: ImageModelInfo) -> str | None:
     """Determine the variant key for preset lookup.
 
     Returns:
-        ``"distilled"`` or ``"base"`` for flux2_klein, ``None`` otherwise.
+        ``"distilled"`` or ``"base"`` for flux2_klein, ``"turbo"`` or ``"sft"`` for moss, ``None`` otherwise.
     """
     if model_info.family == "flux2_klein":
         return "distilled" if model_info.is_distilled else "base"
+    if model_info.family == "moss":
+        return "turbo" if model_info.is_distilled else "sft"
     return None
 
 
@@ -476,23 +479,30 @@ def model_display_name(config: dict[str, Any], name: str) -> str:
     return label.strip() if isinstance(label, str) and label.strip() else name
 
 
-def model_capabilities(config: dict[str, Any], family: str) -> dict[str, Any]:
-    """Return a model family's capability flags and dimension limits from its preset, with permissive defaults.
+def model_capabilities(config: dict[str, Any], family: str, variant: str | None = None) -> dict[str, Any]:
+    """Return a model family's capability flags, dimension limits and negative prompt hint from its preset, with permissive defaults.
 
-    These are family-level only (variants change steps and guidance), so they can be looked up by family alone.
+    The family's values apply to every variant; a capability key set in ``variants[variant]`` overrides them. Without
+    *variant* the result is the family's own, which is what callers that only know the family look up.
     """
     preset = config.get("model_presets", {}).get(family, {})
+    variant_preset = (preset.get("variants") or {}).get(variant, {}) if variant else {}
+
+    def capability(key: str, default: Any) -> Any:
+        return variant_preset.get(key, preset.get(key, default))
+
     return {
-        "supports_negative_prompt": preset.get("supports_negative_prompt", False),
-        "supports_img2img": preset.get("supports_img2img", True),
-        "supports_upscale": preset.get("supports_upscale", True),
-        "supports_quantize": preset.get("supports_quantize", True),
-        "supports_scheduler": preset.get("supports_scheduler", True),
-        "supports_json_prompt": preset.get("supports_json_prompt", False),
-        "supports_first_sigma": preset.get("supports_first_sigma", False),
-        "dimension_min": preset.get("dimension_min", 16),
-        "dimension_max": preset.get("dimension_max", None),
-        "dimension_step": preset.get("dimension_step", 16),
+        "supports_negative_prompt": capability("supports_negative_prompt", False),
+        "supports_img2img": capability("supports_img2img", True),
+        "supports_upscale": capability("supports_upscale", True),
+        "supports_quantize": capability("supports_quantize", True),
+        "supports_scheduler": capability("supports_scheduler", True),
+        "supports_json_prompt": capability("supports_json_prompt", False),
+        "supports_first_sigma": capability("supports_first_sigma", False),
+        "negative_prompt_hint": capability("negative_prompt_hint", None),
+        "dimension_min": capability("dimension_min", 16),
+        "dimension_max": capability("dimension_max", None),
+        "dimension_step": capability("dimension_step", 16),
     }
 
 
@@ -522,13 +532,15 @@ def resolve_defaults(
     """
     preset = config.get("model_presets", {}).get(model_info.family, {})
 
+    variant_key = get_variant_key(model_info)
+
     # Start with global defaults
     effective: dict[str, Any] = {
         "steps": config["generation"]["default_steps"],
         "guidance": config["generation"]["default_guidance"],
         "scheduler": None,
         "upscale_steps": None,
-        **model_capabilities(config, model_info.family),
+        **model_capabilities(config, model_info.family, variant_key),
     }
 
     # Layer family defaults
@@ -541,7 +553,6 @@ def resolve_defaults(
         effective["upscale_steps"] = preset_upscale["default_upscale_steps"]
 
     # Layer variant defaults
-    variant_key = get_variant_key(model_info)
     if variant_key and "variants" in preset:
         variant = preset["variants"].get(variant_key, {})
         if "default_steps" in variant:

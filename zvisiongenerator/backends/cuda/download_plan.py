@@ -87,7 +87,7 @@ def image_download_plan(
 
     The patterns follow what ``DiffusionPipeline.download`` fetches, so single-file checkpoints at the repo root
     (Klein's ``flux-2-klein-9b.safetensors``, Krea's ``turbo.safetensors``) and precision variants are left out.
-    A local folder, a reference that is not a repo id, and an Ideogram 4 base repo (refused on this platform) need no download.
+    A local folder, a reference that is not a repo id, and an Ideogram 4 or MOSS-Image repo (both refused when loaded raw; their folders are built from pinned sources) need no download.
 
     Args:
         model_ref: A local path or a Hugging Face ``owner/repo[@revision]`` reference.
@@ -99,7 +99,7 @@ def image_download_plan(
         LookupError: If the repo's ``model_index.json`` cannot be read for any other reason.
     """
     reference = parse_huggingface_repo_reference(model_ref)
-    if reference is None or Path(model_ref).expanduser().is_dir() or family == "ideogram4":
+    if reference is None or Path(model_ref).expanduser().is_dir() or family in ("ideogram4", "moss"):
         return ()
     try:
         index = (read_index or _read_hub_model_index)(reference.repo_id, reference.revision)

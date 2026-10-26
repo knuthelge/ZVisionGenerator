@@ -11,6 +11,8 @@ A model is what turns a prompt into an image or video. The app has built-in mode
 | Z-Image Turbo | `zit` | 33 GB | 10 | Yes | See its [model page](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) |
 | Krea 2 Turbo | `krea2` | 36 GB | 8 | No | [Krea 2 Community License](https://huggingface.co/krea/Krea-2-Turbo) |
 | Ideogram 4 Instant | `ideo` | 28 GB (macOS), 24 GB (Windows, Linux) | 8 | No | Ideogram's non-commercial license |
+| MOSS-Image Turbo | `moss` | 28 GB (Windows, Linux) | 4 | No | Apache-2.0 |
+| MOSS-Image SFT | `moss-sft` | 27 GB (Windows, Linux) | 50 | Yes | Apache-2.0 |
 
 Klein 4B is the lightest and the first-run pick on machines with less than 32 GB of memory; Klein 9B is the pick from 32 GB.
 
@@ -62,6 +64,35 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
     - **Windows and Linux:** the transformer streams to the GPU block by block. On a 10 GB GPU with 32 GB of system memory, `q4` and `q8` both take about 3.5 s per step at 1024×1024, about a minute per image (`q8` peaks at about 17 GB of system memory, `q4` at 14 GB). Unquantized it takes about 15 s per step and peaks at about 26 GB, so pick `q4` or `q8`.
 
     Every source is pinned to a checked revision in the `ideogram4_instant` section of the [configuration](configuration.md), and the folder is rebuilt when a pin changes. The model is under Ideogram's non-commercial license, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
+
+### MOSS-Image
+
+`moss` and `moss-sft` are MOSS-Image from OpenMOSS, an image model with a 5-billion-parameter transformer and a Qwen3.5-based text encoder, released under the Apache-2.0 license. It renders text well, in English and in Chinese, and follows long, detailed prompts.
+
+=== "Windows and Linux"
+
+    Two models share one set of weights:
+
+    | | `moss` (Turbo) | `moss-sft` |
+    |---|---|---|
+    | What it is | MOSS-Image SFT with a community Turbo LoRA distilled from it | MOSS-Image SFT as released |
+    | Steps | 4 by default | 50 |
+    | Guidance | Built in; a guidance setting is ignored with a warning | 3.0 |
+    | Negative prompt | No | Yes |
+    | Speed | About 13 s per image at 1024×1024 on a 10 GB GPU, quantized | About 2 minutes at 50 steps |
+
+    Start with `moss`. Pick `moss-sft` when you want a negative prompt or the model as released. Both run on a 10 GB card at every level; run them [quantized](quantization.md), as unquantized Turbo takes about a minute per image. The figures are in [Memory](memory.md#moss-image).
+
+=== "macOS"
+
+    MOSS-Image isn't available on macOS yet.
+
+- **Sizes** are multiples of 16, from about 0.25 to 4 megapixels. The model is made for about 1–2 megapixels; above that, Turbo's 4 steps look softer, so use 6–8 steps.
+- **Text.** Put the words you want in the image in quotes in the prompt.
+- **Reference image, upscale, LoRAs and live previews** work. LoRAs must be MOSS-Image LoRAs: see [LoRAs](loras.md). The Turbo LoRA stays on, and a LoRA of your own is added on top.
+- **No JSON captions.** MOSS-Image takes plain prompts, so `--json-prompt` and the enhancer's JSON format don't apply.
+
+**The first job builds the model** in `~/.ziv/models/moss` or `~/.ziv/models/moss-sft` from the shared download, which takes a moment. The community Turbo LoRA comes from `akhaliq/MOSS-Image-SFT-4-steps`; its pin is in the `moss_image` section of the [configuration](configuration.md).
 
 ## Video models
 

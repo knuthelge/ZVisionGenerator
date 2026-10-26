@@ -29,11 +29,14 @@ class _FakeBackend:
         save_error: BaseException | None = None,
         save_gate: threading.Event | None = None,
         files_levels: tuple[int, ...] = (),
+        files_sources: tuple[str, ...] | None = None,
     ):
         self._format = backend_format
         self._save_error = save_error
         self._save_gate = save_gate
         self._files_levels = files_levels
+        self._files_sources = files_sources
+        self.queries: list[tuple[int, str | None]] = []
         self.loads: list[dict] = []
         self.saved: list[str] = []
         self.written: list[tuple[str, str, int]] = []
@@ -42,8 +45,9 @@ class _FakeBackend:
     def stored_quant_format(self, bits: int) -> str | None:
         return self._format
 
-    def quantizes_from_files(self, bits: int) -> bool:
-        return bits in self._files_levels
+    def quantizes_from_files(self, bits: int, source: str | None = None) -> bool:
+        self.queries.append((bits, source))
+        return bits in self._files_levels and (self._files_sources is None or source in self._files_sources)
 
     def write_quantized_files(self, source, path, bits, cancelled=None):
         if self._save_error is not None:
@@ -401,6 +405,46 @@ class TestWriteFromFiles:
 
         assert _partials(models_dir) == []
         assert backend.loads == [{"path": str(source), "quantize": 8, "lora_paths": None}]
+
+
+class TestSourceHook:
+    """The backend is told which folder a stored quant would be made from."""
+
+    def test_load_passes_the_local_source(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend()
+
+        load_image_model(backend, str(source), quantize=8, models_dir=models_dir)
+
+        assert backend.queries == [(8, str(source))]
+
+    def test_load_passes_none_when_the_model_is_not_local(self, models_dir):
+        backend = _FakeBackend()
+
+        load_image_model(backend, "org/repo", quantize=8, models_dir=models_dir, model_name="zit", find_local_dir=lambda _ref: None)
+
+        assert backend.queries == [(8, None)]
+
+    def test_create_passes_the_source(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend()
+
+        create_stored_quant(backend, source, models_dir / "atlas@q8", 8)
+
+        assert backend.queries == [(8, str(source))]
+
+    def test_only_the_accepted_source_is_written_from_files(self, models_dir):
+        accepted = _make_source(models_dir, "atlas")
+        other = _make_source(models_dir, "other")
+        backend = _FakeBackend(files_levels=(8,), files_sources=(str(accepted),))
+
+        load_image_model(backend, str(accepted), quantize=8, models_dir=models_dir)
+        assert [written[2] for written in backend.written] == [8]
+        assert backend.saved == []
+
+        load_image_model(backend, str(other), quantize=8, models_dir=models_dir)
+        assert len(backend.written) == 1
+        assert len(backend.saved) == 1
 
 
 class TestCreateStoredQuant:

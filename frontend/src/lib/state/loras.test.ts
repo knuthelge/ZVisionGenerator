@@ -194,6 +194,7 @@ describe('familyLabel', () => {
     expect(familyLabel('flux1')).toBe('Flux 1');
     expect(familyLabel('krea2')).toBe('Krea 2');
     expect(familyLabel('ideogram4')).toBe('Ideogram 4');
+    expect(familyLabel('moss')).toBe('MOSS-Image');
     expect(familyLabel('ltx')).toBe('LTX');
   });
 
