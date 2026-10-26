@@ -268,7 +268,7 @@ def _has_adapter(pipeline: Any, adapter_name: str, path: str) -> bool:
 def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None, live_preview: LivePreview | None = None):
     """Create a callback_on_step_end that reports progress and interrupts on skip.
 
-    With ``live_preview``, milestone steps also carry a cheap preview of the predicted final image under the
+    With ``live_preview``, every step but the last also carries a cheap preview of the predicted final image under the
     ``preview`` key.
     """
 

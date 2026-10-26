@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -12,9 +11,6 @@ from zvisiongenerator.utils.ffmpeg import strip_ffmpeg_banner
 
 
 type ProgressCallback = Callable[[dict[str, Any]], None]
-
-# Fractions of a denoising run at which a live preview is rendered.
-PREVIEW_STEP_FRACTIONS = (0.25, 0.5, 0.75)
 
 # Longest failure message, in characters, that a runner sends to clients.
 FAILURE_MESSAGE_LIMIT = 500
@@ -74,12 +70,12 @@ def exception_message(text: str, *, limit: int = FAILURE_MESSAGE_LIMIT) -> str:
     return one_line_message(text, limit=limit)
 
 
-def preview_milestone_steps(total_steps: int) -> frozenset[int]:
-    """Return the 1-based steps that should emit a live preview.
+def preview_steps(total_steps: int) -> frozenset[int]:
+    """Return the 1-based steps that should emit a live preview: every step but the last.
 
     The final step is excluded because the finished image follows immediately.
     """
-    return frozenset(step for fraction in PREVIEW_STEP_FRACTIONS if 1 <= (step := math.ceil(total_steps * fraction)) < total_steps)
+    return frozenset(range(1, total_steps))
 
 
 def emit_progress(progress_callback: ProgressCallback | None, event_type: str, **payload: Any) -> None:

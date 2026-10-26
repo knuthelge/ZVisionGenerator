@@ -48,10 +48,10 @@ describe('JobPreview', () => {
   });
 
   it('reserves the output shape and says when the first preview comes', () => {
-    app = flushSync(() => mount(JobPreview, { target, props: { job: makeJob() } }));
+    app = flushSync(() => mount(JobPreview, { target, props: { job: makeJob({ currentStep: 1 }) } }));
     const figure = target.querySelector('[data-testid="job-preview"]') as HTMLElement;
     expect(figure.style.aspectRatio.startsWith('0.75')).toBe(true);
-    expect(figure.textContent).toContain('First preview at 25%');
+    expect(figure.textContent).toContain('First preview after the first step');
     expect(figure.querySelector('img')).toBeNull();
   });
 

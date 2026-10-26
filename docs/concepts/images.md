@@ -56,7 +56,7 @@ Post-processing is for images only.
 
 ## Live preview
 
-While an image is made, the Web UI shows it taking shape at 25, 50 and 75% of the steps, so you can skip a bad one early. The preview is never saved. It works for every built-in image model.
+While an image is made, the Web UI shows it taking shape after every step, so you can skip a bad one early. The preview is never saved. It works for every built-in image model.
 
 ## Output files
 

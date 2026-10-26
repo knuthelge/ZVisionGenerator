@@ -165,7 +165,7 @@ Not researched in depth. One candidate: the video backend enables VAE slicing an
 - **LTX sparse attention (`LTX2_SOL_TAU`).** Applies to the distilled stage 2 only and above 4096 tokens. Size `m` is about 2.2k tokens.
 - **LTX TeaCache.** Upstream refuses it on distilled models (`docs/PIPELINES.md`, around line 266).
 - **PiD decode.** It is a 4x image decode, slower, and changes the picture.
-- **Live previews as a cost.** They are a linear projection at three milestones (`progress_events.py:16`), which is negligible.
+- **Live previews as a cost.** They are a linear projection on every step but the last, about 0.6 ms each when measured on CUDA (see [denser-live-previews.md](denser-live-previews.md)), which is negligible.
 - **Removing `mx.eval` in `_ProgressChecker`** (`zvisiongenerator/backends/mac/image.py:223`). mflux evaluates the same latents right afterwards (`z_image.py:133`), so there is nothing to save.
 - **A smaller MLX cache cap or clearing the cache per image.** Already measured with no slowdown in [image-model-memory.md](archive/image-model-memory.md); not worth more work.
 - **VAE tiling.** Already off (`flux2_initializer.py:48`).

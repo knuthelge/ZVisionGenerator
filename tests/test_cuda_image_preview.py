@@ -1,4 +1,4 @@
-"""Tests for cheap diffusers latent previews and their milestone tracking."""
+"""Tests for cheap diffusers latent previews and the steps that render them."""
 
 from __future__ import annotations
 
@@ -186,15 +186,15 @@ class TestLivePreview:
                 previews[step + 1] = image
         return previews
 
-    def test_previews_only_at_milestone_steps(self, preview_module):
+    def test_previews_on_every_step_but_the_last(self, preview_module):
         pipe = SimpleNamespace(scheduler=None, num_timesteps=8)
         preview = preview_module.LivePreview("zimage", 8, 64, 64)
 
         previews = self._run(preview, pipe, 8, lambda _: torch.zeros((1, 16, 8, 8)))
 
-        assert set(previews) == {2, 4, 6}
+        assert set(previews) == {1, 2, 3, 4, 5, 6, 7}
 
-    def test_milestones_follow_the_steps_the_pipeline_actually_runs(self, preview_module):
+    def test_previews_follow_the_steps_the_pipeline_actually_runs(self, preview_module):
         # img2img at strength 0.5 runs 4 of 8 requested steps.
         pipe = SimpleNamespace(scheduler=None, num_timesteps=4)
         preview = preview_module.LivePreview("zimage", 8, 64, 64)
@@ -203,7 +203,7 @@ class TestLivePreview:
 
         assert set(previews) == {1, 2, 3}
 
-    def test_milestone_previews_show_the_predicted_clean_image(self, preview_module):
+    def test_previews_show_the_predicted_clean_image(self, preview_module):
         steps = 4
         scheduler = _euler_scheduler(steps)
         pipe = SimpleNamespace(scheduler=scheduler, num_timesteps=steps)
@@ -219,7 +219,7 @@ class TestLivePreview:
         previews = self._run(preview, pipe, steps, latents_for_step)
         expected = preview_module.render_latent_preview(None, "zimage", clean, 64, 64)
 
-        # Step 1 has no earlier latents to estimate from; later milestones recover the clean image.
+        # Step 1 has no earlier latents to estimate from; later previews recover the clean image.
         for step in (2, 3):
             assert np.allclose(np.asarray(previews[step], dtype=int), np.asarray(expected, dtype=int), atol=1)
 

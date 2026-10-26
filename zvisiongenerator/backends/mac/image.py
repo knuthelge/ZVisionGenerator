@@ -32,7 +32,7 @@ from mlx.utils import tree_map
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
 from zvisiongenerator.backends.mac.memory import load_resident
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
-from zvisiongenerator.core.progress_events import preview_milestone_steps
+from zvisiongenerator.core.progress_events import preview_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
 # Per-run override slot, distinct from the always-on default constant (IDEOGRAM4_INITIAL_SIGMA).
@@ -237,7 +237,7 @@ def _step_noise_levels(family: str, t: int, config) -> tuple[float, float] | Non
 class _ProgressChecker:
     """Before/in-loop callback that reports denoising progress for each step.
 
-    When ``model`` and ``family`` are given, milestone steps also carry a cheap
+    When ``model`` and ``family`` are given, every step but the last also carries a cheap
     preview of the predicted final image under the ``preview`` key.
     """
 
@@ -263,32 +263,32 @@ class _ProgressChecker:
             return
         self._previous_latents = latents
         try:
-            # img2img, refine and upscale runs start part-way through the schedule; place milestones within the steps actually run.
+            # img2img, refine and upscale runs start part-way through the schedule; place previews within the steps actually run.
             start = config.init_time_step
-            self._preview_steps = frozenset(start + step for step in preview_milestone_steps(config.num_inference_steps - start))
+            self._preview_steps = frozenset(start + step for step in preview_steps(config.num_inference_steps - start))
         except Exception as exc:  # noqa: BLE001 - previews are best-effort
             warnings.warn(f"Live previews disabled for {self._family}: {exc}", stacklevel=2)
             self._previews_enabled = False
 
     def call_in_loop(self, t, seed, prompt, latents, config, time_steps, denoised=None, **_):
         del seed, prompt, time_steps
-        # mflux calls this before it evaluates the step. Evaluate it first so every report is a finished step, and
-        # send a preview as a second report so its decode never holds this one back (steps would arrive in pairs).
+        # mflux calls this before it evaluates the step. Evaluate it first so every report is a finished step; the
+        # preview's projection then costs well under a millisecond and rides on the same report.
         mx.eval(latents)
         self._current_step = min(self._current_step + 1, self._total_steps)
         payload = {
             "current_step": self._current_step,
             "total_steps": self._total_steps,
         }
-        self._step_callback(payload)
         preview = self._render_preview(t, latents, config, denoised)
         # Keep these latents only when the next step renders a preview from them; a reported prediction needs none.
         self._previous_latents = latents if self._previews_enabled and denoised is None and t + 2 in self._preview_steps else None
         if preview is not None:
-            self._step_callback({**payload, "preview": preview})
+            payload["preview"] = preview
+        self._step_callback(payload)
 
     def _render_preview(self, t, latents, config, denoised=None) -> Image.Image | None:
-        """Render a preview at milestone steps; never let a preview failure stop generation.
+        """Render a preview on a preview step; never let a preview failure stop generation.
 
         Samplers that report their clean-image prediction (``denoised``, e.g. Krea 2's) preview it directly.
         """

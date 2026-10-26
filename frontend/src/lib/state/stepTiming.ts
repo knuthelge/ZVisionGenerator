@@ -18,8 +18,8 @@ export interface StepSample {
 /**
  * Fold one progress sample into the step timing.
  *
- * Step events can arrive unevenly (mflux reports a step before computing it, except on preview steps),
- * so the estimate averages every step since the stage started or the job last resumed.
+ * Step events can arrive unevenly, so the estimate averages every step since the stage started or the job last
+ * resumed.
  */
 export function trackStepTiming(previous: StepTiming | null, sample: StepSample): StepTiming {
   const { scope, step, paused, now } = sample;

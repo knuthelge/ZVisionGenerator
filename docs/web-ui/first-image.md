@@ -40,7 +40,7 @@ Press **Generate**, or ++ctrl+enter++ (++cmd+enter++ on a Mac).
 
 ![A running job: the live preview at 75% beside the job card with its steps](../assets/screenshots/job-running.webp)
 
-The job card shows each phase: loading the model, the steps, and saving. While it works, the preview shows the image taking shape at 25, 50 and 75% of the steps. The first job is the slowest, because the model loads from disk; later jobs with the same model start faster.
+The job card shows each phase: loading the model, the steps, and saving. While it works, the preview shows the image taking shape after every step (see [Live preview](../concepts/images.md#live-preview)). The first job is the slowest, because the model loads from disk; later jobs with the same model start faster.
 
 ## 5. Look at the result
 

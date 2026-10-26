@@ -364,12 +364,12 @@ describe('JobCard', () => {
       expect(header().querySelector('[role="progressbar"]')?.getAttribute('aria-valuetext')).toBe('Joining clips');
     });
 
-    it('promises the first preview at 25% and says so when a model renders none', () => {
-      render({ runs: 3, currentStep: 2, totalSteps: 28 });
-      expect(log().querySelector('.job-media')?.textContent).toContain('25%');
+    it('promises the first preview and says so when a model renders none', () => {
+      render({ runs: 3, currentStep: 1, totalSteps: 28 });
+      expect(log().querySelector('.job-media')?.textContent).toContain('First preview after the first step');
       unmount(component);
 
-      render({ runs: 3, currentStep: 20, totalSteps: 28 });
+      render({ runs: 3, currentStep: 2, totalSteps: 28 });
       expect(log().querySelector('.job-media')?.textContent).toContain('No live preview');
     });
 

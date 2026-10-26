@@ -4,7 +4,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    activeDownload, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, loadBody, outcome, outputAspect, phaseRows,
+    activeDownload, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, livePreviewNote, loadBody, outcome, outputAspect, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, stepUnit, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
   import type { ActiveJobState, JobDownload } from '$lib/types';
@@ -29,8 +29,6 @@
   /** The live preview fits this box: landscape images get the width, portrait ones the height. */
   const PREVIEW_MAX_WIDTH = 280;
   const PREVIEW_MAX_HEIGHT = 200;
-  /** Fraction of the steps at which the first live preview arrives (the server renders them at 25, 50 and 75%). */
-  const FIRST_PREVIEW_AT = 0.25;
 
   const active = $derived(isActive(job));
   const generating = $derived(jobPhase(job) === 'generate');
@@ -56,9 +54,8 @@
   let failedPreviewUrl = $state<string | null>(null);
   const previewSrc = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? null) : job.previewUrl);
   const showMedia = $derived(preview && active && generating && !isVideo(job) && !job.review);
-  // Some models render no live preview; once well past the first one, say so instead of promising it.
-  const previewNote = $derived(activity === 'stepping' && stepFraction(job) > FIRST_PREVIEW_AT + 0.15
-    ? 'No live preview for this model' : `First preview at ${FIRST_PREVIEW_AT * 100}%`);
+  // Some models render no live preview; once past the first one, say so instead of promising it.
+  const previewNote = $derived(livePreviewNote(job));
 
   function duration(row: PhaseRow): string {
     if (row.secs !== undefined) return formatClock(row.secs);

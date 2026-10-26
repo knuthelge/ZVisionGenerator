@@ -177,6 +177,18 @@ export function iterations(job: ActiveJobState): Iterations {
   return { total, index, done };
 }
 
+/**
+ * What an image's preview slot says until a live preview arrives.
+ *
+ * The server renders one on every step but the last, so a model still without one after two steps renders none.
+ * After the last step the preview is dropped, so the slot says what the job is doing until the image arrives.
+ */
+export function livePreviewNote(job: ActiveJobState): string {
+  const activity = itemActivity(job);
+  if (activity === 'finishing') return finishingLabel(job);
+  return activity === 'stepping' && job.currentStep >= 2 ? 'No live preview for this model' : 'First preview after the first step';
+}
+
 /** The current item's step progress in [0, 1]. */
 export function stepFraction(job: ActiveJobState): number {
   if (jobPhase(job) !== 'generate' || !(job.totalSteps > 0) || !Number.isFinite(job.currentStep)) return 0;

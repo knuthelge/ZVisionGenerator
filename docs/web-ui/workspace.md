@@ -126,7 +126,7 @@ If the job can't start with the current settings, for example Image to Image wit
 
 ![The job card at step 3 of 4, with Pause, Cancel and Repeat](../assets/screenshots/job-card.webp){ width="420" }
 
-The **live preview** shows the current image taking shape at 25, 50 and 75% of the steps, so you can skip a bad one early. It has the image's own shape, a custom size included. It is a preview only and never saved.
+The **live preview** shows the current image taking shape after every step ([Live preview](../concepts/images.md#live-preview)), so you can skip a bad one early. It has the image's own shape, a custom size included. It is a preview only and never saved.
 
 The **job card** beside it shows the progress, the time left and each phase with its timing. When a model isn't downloaded yet, the load step shows the download first, with its size, speed and time left.
 

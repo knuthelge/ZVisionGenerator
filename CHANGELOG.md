@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 #### Web UI
 - **The mascot lives in the logo.** He hops out to greet you in the first-run welcome, to the job card (on a phone, the job bar) while a job runs, waits beside Approve and Discard during a review, and hops back home once he has reacted to the result. His outline keeps his place in the logo while he is out, on every page. He no longer sits in a corner of the latest output
 - **A job that ends while you're on another page** shows its "Generation complete" or failure toast there too
+- **The live preview updates after every step** instead of at 25, 50 and 75%, so a 10-step Z-Image job shows 9 previews instead of 3
 
 ## [0.13.0] - 2026-10-25
 

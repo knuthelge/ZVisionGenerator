@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
-  import { isPaused, isVideo, itemActivity, jobPhase, outputAspect, stepFraction } from '$lib/state/jobView';
+  import { isPaused, isVideo, jobPhase, livePreviewNote, outputAspect, stepFraction } from '$lib/state/jobView';
   import type { ActiveJobState } from '$lib/types';
 
   interface Props {
@@ -10,11 +10,7 @@
 
   let { job, class: extraClass = '' }: Props = $props();
 
-  /** Fraction of the steps at which the first live preview arrives (the server renders them at 25, 50 and 75%). */
-  const FIRST_PREVIEW_AT = 0.25;
-
   const phase = $derived(jobPhase(job));
-  const activity = $derived(itemActivity(job));
   // The slot keeps the output's shape from the start, so it never jumps.
   const aspect = $derived(outputAspect(job));
   // Paused between images: the image that just finished, sharp. Otherwise the transient live preview.
@@ -30,8 +26,7 @@
     if (phase === 'enhance') return 'Enhancing the prompt';
     if (phase === 'load') return 'Loading the model';
     if (isVideo(job)) return 'No live preview for video';
-    if (activity === 'stepping' && stepFraction(job) > FIRST_PREVIEW_AT + 0.15) return 'No live preview for this model';
-    return `First preview at ${FIRST_PREVIEW_AT * 100}%`;
+    return livePreviewNote(job);
   });
 </script>
 

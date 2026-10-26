@@ -116,16 +116,17 @@ class TestProgressCheckerPreviews:
         for t in range(init_time_step, total_steps):
             checker.call_in_loop(t, 1, "prompt", latents, config, None)
 
-    def test_previews_attach_only_at_quarter_milestones(self, mx, image_mac):
+    def test_previews_attach_to_every_step_but_the_last(self, mx, image_mac):
         events: list[dict] = []
         checker = image_mac._ProgressChecker(8, events.append, model=None, family="zimage")
 
         self._run_steps(checker, total_steps=8, latents=mx.zeros((16, 1, 8, 8)))
 
-        assert [event["current_step"] for event in events if "preview" in event] == [2, 4, 6]
+        assert [event["current_step"] for event in events] == [1, 2, 3, 4, 5, 6, 7, 8]
+        assert [event["current_step"] for event in events if "preview" in event] == [1, 2, 3, 4, 5, 6, 7]
         assert all(event["preview"].size == (8, 8) for event in events if "preview" in event)
 
-    def test_steps_are_reported_once_evaluated_and_before_their_preview(self, mx, image_mac, monkeypatch):
+    def test_steps_are_reported_once_evaluated_with_their_preview(self, mx, image_mac, monkeypatch):
         calls: list = []
         real_eval = image_mac.mx.eval
         monkeypatch.setattr(image_mac.mx, "eval", lambda *arrays: (calls.append("eval"), real_eval(*arrays))[1])
@@ -137,7 +138,7 @@ class TestProgressCheckerPreviews:
         checker.call_in_loop(0, 1, "prompt", mx.zeros((16, 1, 8, 8)), config, None)
 
         assert calls[0] == "eval"
-        assert calls[-3:] == ["step 1", "preview", "preview 1"]
+        assert calls[-2:] == ["preview", "preview 1"]
 
     def test_callbacks_accept_keywords_added_by_newer_mflux(self, mx, image_mac):
         # mflux 0.20 passes control_images to before-loop callbacks; a strict signature failed every generation.
@@ -152,14 +153,14 @@ class TestProgressCheckerPreviews:
 
         assert events[-1]["current_step"] == 1
 
-    def test_partial_runs_place_milestones_within_the_steps_actually_run(self, mx, image_mac):
+    def test_partial_runs_place_previews_within_the_steps_actually_run(self, mx, image_mac):
         events: list[dict] = []
         checker = image_mac._ProgressChecker(8, events.append, model=None, family="zimage")
 
         # An upscale/refine at denoise 0.5 over 16 scheduled steps runs steps 9..16.
         self._run_steps(checker, total_steps=16, latents=mx.zeros((16, 1, 8, 8)), init_time_step=8)
 
-        assert [event["current_step"] for event in events if "preview" in event] == [2, 4, 6]
+        assert [event["current_step"] for event in events if "preview" in event] == [1, 2, 3, 4, 5, 6, 7]
 
     def test_partial_runs_report_only_the_steps_actually_run(self, mx, image_mac):
         events: list[dict] = []
@@ -236,8 +237,8 @@ class TestProgressCheckerPreviews:
             checker.call_in_loop(t, 1, "prompt", latents, config, None)
             kept.append(checker._previous_latents is not None)
 
-        # Previews land on steps 2, 4 and 6, so only steps 1, 3 and 5 keep their latents.
-        assert kept == [True, False, True, False, True, False, False, False]
+        # Previews land on steps 1 to 7, so steps 1 to 6 keep their latents for the next one.
+        assert kept == [True, True, True, True, True, True, False, False]
 
     def test_ideogram4_noise_levels_come_from_the_recorded_schedule(self, mx, image_mac, monkeypatch):
         monkeypatch.setattr(image_mac._ideogram4_timesteps, "value", (np.array([0.9, 0.5, 0.1]), np.array([1.0, 0.9, 0.5])), raising=False)
@@ -287,7 +288,7 @@ class TestProgressCheckerPreviews:
         checker.call_before_loop(1, "prompt", mx.zeros((16, 1, 8, 8)), config)
         checker._previews_enabled = False
 
-        # Step 3 precedes the step-4 preview milestone, which would normally keep its latents.
+        # Step 3 precedes the step-4 preview, which would normally keep its latents.
         checker.call_in_loop(2, 1, "prompt", mx.zeros((16, 1, 8, 8)), config, None)
 
         assert checker._previous_latents is None

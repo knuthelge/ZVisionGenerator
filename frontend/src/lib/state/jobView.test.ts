@@ -4,7 +4,7 @@ import type { ActiveJobState } from '$lib/types';
 import { downloadFromEvent } from './jobPhases';
 import {
   activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, formatClock, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, isVideoUpscale, itemActivity, itemFraction, iterations, itemNoun,
-  jobBar, jobControls, jobTone, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
+  jobBar, jobControls, jobTone, livePreviewNote, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
   reviewVideoUrl, stageBars, stepUnit, timeLeft
 } from './jobView';
 
@@ -219,6 +219,18 @@ describe('jobView', () => {
     expect(etaLabel(batch({ remaining: 600, status: 'paused', paused: true }))).toBe('');
     expect(timeLeft(30)).toBe('Under a minute left');
     expect(timeLeft(7210)).toBe('About 2 h 0 min left');
+  });
+
+  describe('live preview note', () => {
+    it('promises a preview until two steps pass without one, then says the model renders none', () => {
+      expect(livePreviewNote(job({ currentStep: 0 }))).toBe('First preview after the first step');
+      expect(livePreviewNote(job({ currentStep: 1 }))).toBe('First preview after the first step');
+      expect(livePreviewNote(job({ currentStep: 2 }))).toBe('No live preview for this model');
+    });
+
+    it('says the image is finishing once the steps are done', () => {
+      expect(livePreviewNote(job({ currentStep: 28 }))).toBe(finishingLabel(job({ currentStep: 28 })));
+    });
   });
 
   describe('a video upscale', () => {

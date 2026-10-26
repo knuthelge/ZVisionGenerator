@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import warnings
 from typing import Any
 
@@ -10,7 +11,7 @@ from PIL import Image
 from diffusers import FlowMatchEulerDiscreteScheduler
 
 from zvisiongenerator.core.latent_preview import FLUX2_RGB_BIAS, FLUX2_RGB_FACTORS, QWEN_IMAGE_RGB_BIAS, QWEN_IMAGE_RGB_FACTORS, ZIMAGE_RGB_BIAS, ZIMAGE_RGB_FACTORS
-from zvisiongenerator.core.progress_events import preview_milestone_steps
+from zvisiongenerator.core.progress_events import preview_steps
 
 __all__ = ["LivePreview", "create_live_preview", "estimate_clean_latents", "render_latent_preview"]
 
@@ -74,7 +75,7 @@ def create_live_preview(family: str, total_steps: int, height: int, width: int) 
 
 
 class LivePreview:
-    """Turn a pipeline's step-end latents into previews at milestone steps.
+    """Turn a pipeline's step-end latents into a preview on every step but the last.
 
     Previews are best-effort: the first failure warns once and disables them for the rest of the run.
     """
@@ -85,21 +86,21 @@ class LivePreview:
         self._height = height
         self._width = width
         self._enabled = True
-        self._milestones: frozenset[int] | None = None
+        self._preview_steps: frozenset[int] | None = None
         self._previous: torch.Tensor | None = None
 
     def observe(self, pipe: Any, step: int, latents: torch.Tensor | None) -> Image.Image | None:
-        """Record the latents after 0-based ``step`` and return a preview when it is a milestone."""
+        """Record the latents after 0-based ``step`` and return a preview when it is a preview step."""
         if not self._enabled or latents is None:
             return None
         try:
-            if self._milestones is None:
+            if self._preview_steps is None:
                 # img2img runs only part of the schedule; the pipeline knows how many steps it actually runs.
                 run_steps = getattr(pipe, "num_timesteps", None)
-                self._milestones = preview_milestone_steps(run_steps if isinstance(run_steps, int) else self._total_steps)
-            preview = self._render(pipe, latents) if step + 1 in self._milestones else None
+                self._preview_steps = preview_steps(run_steps if isinstance(run_steps, int) else self._total_steps)
+            preview = self._render(pipe, latents) if step + 1 in self._preview_steps else None
             # Keep these latents only when the next step renders a preview from them.
-            self._previous = latents if step + 2 in self._milestones else None
+            self._previous = latents if step + 2 in self._preview_steps else None
             return preview
         except Exception as exc:  # noqa: BLE001 - previews are best-effort
             warnings.warn(f"Live preview failed for {self._family}: {exc}", stacklevel=2)
@@ -165,8 +166,13 @@ def _krea2_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) ->
 
 def _project_to_image(spatial: torch.Tensor, factors: tuple[tuple[float, ...], ...], bias: tuple[float, ...]) -> Image.Image:
     """Map ``(channels, h, w)`` latents to RGB with a linear ``factors`` and ``bias`` projection."""
-    weight = torch.tensor(factors, dtype=torch.float32, device=spatial.device)
-    offset = torch.tensor(bias, dtype=torch.float32, device=spatial.device)
+    weight, offset = _projection_tensors(factors, bias, spatial.device)
     rgb = torch.einsum("chw,cr->hwr", spatial.float(), weight) + offset
     pixels = (rgb.clamp(0.0, 1.0) * 255.0).to(torch.uint8).cpu().numpy()
     return Image.fromarray(pixels)
+
+
+@functools.cache
+def _projection_tensors(factors: tuple[tuple[float, ...], ...], bias: tuple[float, ...], device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return a ``(factors, bias)`` projection as float32 tensors on ``device``, built once per device."""
+    return torch.tensor(factors, dtype=torch.float32, device=device), torch.tensor(bias, dtype=torch.float32, device=device)

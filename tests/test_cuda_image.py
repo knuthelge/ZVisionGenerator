@@ -1037,7 +1037,7 @@ class TestMakeSkipCallback:
 class TestStepCallbackLivePreview:
     """Step callbacks carry live previews from the backend's LivePreview tracker."""
 
-    def test_milestone_preview_is_added_to_the_progress_payload(self, win_backend):
+    def test_preview_is_added_to_the_progress_payload(self, win_backend):
         mod, _, _ = win_backend
         preview_image = Image.new("RGB", (8, 8))
         live_preview = MagicMock()
@@ -1052,7 +1052,7 @@ class TestStepCallbackLivePreview:
         live_preview.observe.assert_called_once_with(fake_pipe, 1, latents)
         assert events == [{"current_step": 2, "total_steps": 4, "preview": preview_image}]
 
-    def test_non_milestone_steps_report_progress_only(self, win_backend):
+    def test_steps_without_a_preview_report_progress_only(self, win_backend):
         mod, _, _ = win_backend
         live_preview = MagicMock()
         live_preview.observe.return_value = None

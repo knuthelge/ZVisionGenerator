@@ -13,7 +13,7 @@ from zvisiongenerator.core.progress_events import (
     exception_message,
     failure_with_detail,
     one_line_message,
-    preview_milestone_steps,
+    preview_steps,
     run_workflow_with_progress,
 )
 from zvisiongenerator.core.types import StageOutcome
@@ -28,13 +28,11 @@ from zvisiongenerator.workflows.image_stages import emit_step_progress
         (1, set()),
         (2, {1}),
         (4, {1, 2, 3}),
-        (8, {2, 4, 6}),
-        (9, {3, 5, 7}),
-        (20, {5, 10, 15}),
+        (8, {1, 2, 3, 4, 5, 6, 7}),
     ],
 )
-def test_preview_milestone_steps_cover_quarters_but_not_the_final_step(total_steps, expected):
-    assert preview_milestone_steps(total_steps) == expected
+def test_preview_steps_cover_every_step_but_the_final_one(total_steps, expected):
+    assert preview_steps(total_steps) == expected
 
 
 def test_stage_step_progress_forwards_preview_images():
