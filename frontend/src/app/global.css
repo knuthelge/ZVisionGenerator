@@ -123,6 +123,7 @@
     --z-menu: 170;
     --z-toast: 180;
     --z-modal-top: 200;
+    --z-mascot-flight: 210;
   }
 
   *::-webkit-scrollbar-track {

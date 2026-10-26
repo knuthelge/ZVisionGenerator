@@ -3,7 +3,8 @@
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { isReviewing } from '$lib/state/jobView';
-  import { Badge, Icon } from '$lib/components/atoms';
+  import { mascotHome } from '$lib/state/mascotHome.svelte';
+  import { Badge, Icon, MascotHome } from '$lib/components/atoms';
   import type { PageId, Workflow } from '$lib/types';
 
   interface Props {
@@ -35,13 +36,12 @@
   // Until the contract is known the four always-available workflows show; Extend Video appears only when the server lists it.
   const visibleWorkflows = $derived(workflowItems.filter((item) => (workflows === null ? item.id !== 'extend' : workflows.includes(item.id))));
 
-  const logoSrc = '/app-static/ziv-icon.svg';
 </script>
 
 <header class="app-nav">
   <div class="nav-workflows">
     <h1 class="brand flex items-center gap-2 shrink-0">
-      <img src={logoSrc} alt="ziv" class="w-6 h-6 object-contain">
+      <MascotHome placement={mascotHome.placement} size={24} />
       ziv
     </h1>
 

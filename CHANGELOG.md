@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+
+#### Web UI
+- **The mascot lives in the logo.** He hops out to greet you in the first-run welcome, to the job card (on a phone, the job bar) while a job runs, waits beside Approve and Discard during a review, and hops back home once he has reacted to the result. His outline keeps his place in the logo while he is out, on every page. He no longer sits in a corner of the latest output
+- **A job that ends while you're on another page** shows its "Generation complete" or failure toast there too
+
 ## [0.13.0] - 2026-10-25
 
 ### Upgrading from 0.12

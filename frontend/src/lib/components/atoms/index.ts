@@ -6,6 +6,7 @@ export { default as Spinner } from './Spinner.svelte';
 export { default as Label } from './Label.svelte';
 export { default as Mascot } from './Mascot.svelte';
 export { default as MascotSpot } from './MascotSpot.svelte';
+export { default as MascotHome } from './MascotHome.svelte';
 export { default as Tooltip } from './Tooltip.svelte';
 export { default as Icon } from './Icon.svelte';
 export { default as InspectorNumber } from './InspectorNumber.svelte';

@@ -4,7 +4,10 @@
   import { getConfig } from '$lib/api/config';
   import { shouldApplyStartupView } from './startupRouting';
   import { jobStore } from '$lib/state/job.svelte';
-  import { documentTitle, isReviewing } from '$lib/state/jobView';
+  import { documentTitle, failureToastText, isReviewing } from '$lib/state/jobView';
+  import { mascotHome } from '$lib/state/mascotHome.svelte';
+  import type { MascotReaction } from '$lib/state/mascot';
+  import { addToast } from '$lib/state/toasts.svelte';
   import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
   import type { JobLogEntry, PageId, Workflow } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
@@ -44,6 +47,28 @@
   const baseTitle = document.title;
   $effect(() => {
     document.title = documentTitle(baseTitle, isReviewing(jobStore.current));
+  });
+
+  /** React to a job that ended while the Workspace was closed; the Workspace handles its own. */
+  function jobEndedElsewhere(reaction: MascotReaction, toast?: () => void): void {
+    if (router.page === 'workspace') return;
+    mascotHome.react(reaction);
+    toast?.();
+  }
+
+  // The job list stays current on every page, so the logo knows when the mascot is out at work.
+  onMount(() => {
+    const stopJobSync = jobStore.startSync();
+    const unsubscribeLifecycle = jobStore.subscribeLifecycle({
+      onComplete: () => jobEndedElsewhere('cheerful', () => addToast('Generation complete', 'success')),
+      onFailed: () => jobEndedElsewhere('sad', () => addToast(failureToastText(jobStore.current?.message, jobStore.queuedJobs.length > 0), 'error')),
+      onCancelled: () => jobEndedElsewhere('surprised'),
+      onLost: () => jobEndedElsewhere('surprised'),
+    });
+    return () => {
+      stopJobSync();
+      unsubscribeLifecycle();
+    };
   });
 
   onMount(async () => {

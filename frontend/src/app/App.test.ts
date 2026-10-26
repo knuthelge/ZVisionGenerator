@@ -3,6 +3,8 @@ import { flushSync, mount, unmount } from '../../node_modules/svelte/src/index-c
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { jobStore } from '$lib/state/job.svelte';
+import { mascotHome } from '$lib/state/mascotHome.svelte';
+import { toasts } from '$lib/state/toasts.svelte';
 import { router } from '$lib/state/router.svelte';
 import type { AppConfig, WorkspaceContext } from '$lib/types';
 
@@ -148,6 +150,24 @@ describe('App startup routing', () => {
     source.emit('job_resumed', { type: 'job_resumed' });
     await settle();
     expect(document.title).toBe('ZVision Generator');
+    jobStore.clearJob();
+  });
+
+  it('calls the mascot home to react when a job ends off the Workspace', async () => {
+    configApiMocks.getConfig.mockResolvedValue(makeConfig('gallery'));
+    app = flushSync(() => mount(App, { target }));
+    await settle();
+
+    jobStore.clearJob();
+    jobStore.startJob({ job_id: 'job-away', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+    await settle();
+    expect(mascotHome.placement.away).toBe(true);
+
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('job_completed', { type: 'job_completed', outputs: [] });
+    await settle();
+    expect(mascotHome.placement).toMatchObject({ away: false, mood: 'cheerful' });
+    expect(toasts.map((toast) => toast.message)).toContain('Generation complete');
     jobStore.clearJob();
   });
 });

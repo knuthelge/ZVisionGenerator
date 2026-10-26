@@ -53,6 +53,8 @@ function jobMood(job: ActiveJobState | null): MascotMood | null {
     case 'pending':
       return 'thinking';
     case 'running':
+      // A render waiting for approval: the mascot looks to the user.
+      if (job.review) return 'curious';
       if (job.stageName === 'enhancing_prompts') return 'reading';
       if (!isPainting(job)) return 'thinking';
       return isFinishing(job) ? 'finishing' : 'creating';
@@ -84,4 +86,54 @@ export function mascotMood({ job, reaction, loadError, loading, greeting, typing
 /** Pick what the mascot holds: a clapperboard for video workflows, otherwise a brush. */
 export function mascotTool(workflow: JobWorkflow | undefined): MascotTool {
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'clapper' : 'brush';
+}
+
+/** The Workspace spots the mascot can be called out to; elsewhere he is at home in the logo. */
+export type MascotSpotId = 'welcome' | 'job' | 'outputs' | 'review' | 'empty' | 'error';
+
+export interface MascotSpotSignals {
+  view: 'error' | 'outputs' | 'job' | 'latest' | 'empty';
+  running: boolean;
+  reviewing: boolean;
+  reacting: boolean;
+  lookingForHistory: boolean;
+  /** The first-run welcome is open. */
+  welcoming: boolean;
+}
+
+/**
+ * Pick the one Workspace spot the mascot works at, or null to send him home.
+ * He stays on a job while it runs and while he reacts to its end, presents
+ * finished outputs only while reacting, greets a first-time user in the welcome,
+ * and explains a real empty or error stage.
+ */
+export function mascotSpot({ view, running, reviewing, reacting, lookingForHistory, welcoming }: MascotSpotSignals): MascotSpotId | null {
+  if (view === 'error') return 'error';
+  if (welcoming) return 'welcome';
+  if (reviewing) return 'review';
+  if (view === 'empty') return lookingForHistory ? null : 'empty';
+  if (view === 'outputs') return reacting ? 'outputs' : null;
+  if (view === 'job') return running || reacting ? 'job' : null;
+  return null;
+}
+
+/** Where the mascot is and how it looks: out on a Workspace spot, or at home in the logo. */
+export interface MascotPlacement {
+  away: boolean;
+  mood: MascotMood;
+  tool: MascotTool;
+}
+
+/**
+ * Place the mascot for the logo. The Workspace decides while it is open; on
+ * other pages he is away while a job is in flight and reacts at home to its end.
+ */
+export function homePlacement(
+  workspace: MascotPlacement | null,
+  job: ActiveJobState | null,
+  workflow: JobWorkflow | undefined,
+  reaction: MascotReaction | null = null,
+): MascotPlacement {
+  if (workspace) return workspace;
+  return { away: jobMood(job) !== null, mood: reaction ?? 'idle', tool: mascotTool(job?.workflow ?? workflow) };
 }

@@ -19,12 +19,14 @@
   import { canExtend, extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { Icon, MascotSpot } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
+  import { mascotHome } from '$lib/state/mascotHome.svelte';
   import {
     DROWSY_AFTER_MS,
     GREETING_DURATION_MS,
     REACTION_DURATION_MS,
     TYPING_DURATION_MS,
     mascotMood as pickMascotMood,
+    mascotSpot as pickMascotSpot,
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
@@ -299,14 +301,6 @@
       && viewedAsset.media_type !== 'video'
       && loadedLatestUrl !== viewedAsset.url
   );
-  // The latest asset fills the stage, so the mascot docks in a corner there (outputs have their own header spot).
-  const dockMascot = $derived(previewView === 'latest' && !latestLoading);
-  // Measure the mascot before the preview swaps views, so it hops from where it really was.
-  $effect.pre(() => {
-    void previewView;
-    void latestLoading;
-    untrack(rememberMascotSpots);
-  });
   const lookingForHistory = $derived(!historyChecked || galleryStore.loading);
   const mascotMood = $derived(pickMascotMood({
     job: jobStore.current,
@@ -833,7 +827,6 @@
       onCancelled: handleJobCancelled,
       onLost: handleJobLost,
     });
-    const stopJobSync = jobStore.startSync();
     const stopDownloadSync = downloadStore.startSync();
     const stopDownloaded = downloadStore.onDownloaded(refreshModelStatus);
     const urlParams = parseUrlPrefill();
@@ -948,7 +941,6 @@
       activityEvents.forEach((type) => document.removeEventListener(type, markActive));
       cancelled = true;
       clipMemory.reset();
-      stopJobSync();
       stopDownloadSync();
       stopDownloaded();
       unsubscribeLifecycle();
@@ -1162,6 +1154,25 @@
       dismissed: firstRun.dismissed,
     }),
   );
+  // The mascot lives in the logo and is called out to one spot here while there is work for him.
+  const mascotAt = $derived(pickMascotSpot({
+    view: previewView,
+    running: jobStore.isRunning,
+    reviewing,
+    reacting: reaction !== null,
+    lookingForHistory,
+    welcoming: offerFirstRun && context !== null,
+  }));
+  // Measure the mascot before the preview swaps spots, so it hops from where it really was.
+  $effect.pre(() => {
+    void previewView;
+    void mascotAt;
+    untrack(rememberMascotSpots);
+  });
+  $effect.pre(() => {
+    mascotHome.publish({ away: mascotAt !== null, mood: mascotMood, tool: mascotTool });
+  });
+  $effect(() => () => mascotHome.clear());
 
   /** Download the model chosen in the first-run dialog; once it is queued, make it the default and select it. */
   async function downloadFirstRunModel(model: ModelOption): Promise<DownloadRequestResult> {
@@ -1376,9 +1387,11 @@
           </div>
         {:else if hasCompletedOutputs}
           <div class="completed-output-region flex h-full w-full min-w-0 flex-col p-4">
-            <div class="mb-3 flex shrink-0 items-center justify-between gap-3">
+            <div class="mb-3 flex min-h-12 shrink-0 items-center justify-between gap-3">
               <div class="flex items-center gap-2">
-                <MascotSpot mood={mascotMood} tool={mascotTool} size={48} />
+                {#if mascotAt === 'outputs'}
+                  <MascotSpot mood={mascotMood} tool={mascotTool} size={48} />
+                {/if}
                 <h3 class="ui-area-label">Completed outputs</h3>
               </div>
               <span class="font-mono text-meta text-text-muted">{jobOutputs.length}</span>
@@ -1443,17 +1456,29 @@
               <JobPreview job={jobStore.current!} />
             </div>
             {#if compact}
-              <JobBar
-                job={jobStore.current!}
-                queuedCount={jobStore.queuedJobs.length}
-                onpause={sendControl('pause')}
-                onresume={sendControl('resume')}
-                ondetails={() => { jobSheetOpen = true; }}
-              />
+              <div class="job-bar-dock">
+                <!-- Blob rides the bar, peeking over its top edge. -->
+                <div class="job-bar-mascot">
+                  {#if mascotAt === 'job'}
+                    <MascotSpot mood={mascotMood} tool={mascotTool} size={56} />
+                  {/if}
+                </div>
+                <JobBar
+                  job={jobStore.current!}
+                  queuedCount={jobStore.queuedJobs.length}
+                  onpause={sendControl('pause')}
+                  onresume={sendControl('resume')}
+                  ondetails={() => { jobSheetOpen = true; }}
+                />
+              </div>
             {:else}
             <div class="job-view-card">
-              <!-- Blob hosts the job: it stands on the card, clear of the forming image. -->
-              <MascotSpot mood={mascotMood} tool={mascotTool} size={112} class="job-view-mascot" />
+              <!-- Blob hosts the job: it stands on the card, clear of the forming image. His place stays when he goes home. -->
+              <div class="job-view-mascot">
+                {#if mascotAt === 'job'}
+                  <MascotSpot mood={mascotMood} tool={mascotTool} size={112} />
+                {/if}
+              </div>
               <JobCard
                 job={jobStore.current!}
                 preview={false}
@@ -1476,7 +1501,7 @@
           <button type="button" class="stage-nav next ui-btn ui-btn-icon" aria-label="Older output" disabled={viewedIndex >= galleryStore.assets.length - 1 && !galleryStore.hasMore} onclick={() => stepView(1)}>
             <Icon name="chevright" size={16} />
           </button>
-          <!-- Side padding keeps wide media clear of the docked mascot. -->
+          <!-- Side padding keeps wide media clear of the newer and older arrows. -->
           <div class="latest-region flex h-full w-full flex-col px-20 py-4" class:fit={latest.width && latest.height} style:--ar={latest.width && latest.height ? latest.width / latest.height : null} style:--natural-w={latest.width ? `${latest.width}px` : null}>
             <AssetTile
               asset={latest}
@@ -1498,13 +1523,14 @@
           </div>
           {#if latestLoading}
             <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-4" data-testid="latest-loading">
-              <MascotSpot mood={mascotMood} tool={mascotTool} size={128} />
               <p class="text-content text-text-secondary">Loading latest output…</p>
             </div>
           {/if}
         {:else}
           <div class="flex flex-col items-center justify-center gap-3 text-center p-4">
-            <MascotSpot mood={mascotMood} tool={mascotTool} size={128} />
+            {#if mascotAt === 'empty'}
+              <MascotSpot mood={mascotMood} tool={mascotTool} size={128} />
+            {/if}
             {#if lookingForHistory}
               <p class="text-content text-text-secondary">Looking for your latest work…</p>
             {:else}
@@ -1519,14 +1545,13 @@
           {@const job = jobStore.current}
           <!-- Scoped to the preview area: settings, history, navigation and menus stay usable. The job card stays under the backdrop. -->
           <div class="review-overlay absolute inset-0 z-20 flex items-center justify-center bg-scrim p-3 sm:p-6" data-testid="review-overlay">
-            <div class="ui-overlay flex h-full w-full max-w-4xl min-h-0 min-w-0 flex-col">
+            <div class="ui-overlay relative flex h-full w-full max-w-4xl min-h-0 min-w-0 flex-col">
               <ReviewStage {job} onapprove={sendControl('approve')} ondiscard={sendControl('discard')} />
+              {#if mascotAt === 'review'}
+                <!-- Blob waits beside the decision. -->
+                <MascotSpot mood={mascotMood} tool={mascotTool} size={compact ? 48 : 72} class="review-mascot" />
+              {/if}
             </div>
-          </div>
-        {/if}
-        {#if dockMascot}
-          <div class="mascot-dock pointer-events-none absolute top-3 left-3 z-10" data-testid="mascot-dock">
-            <MascotSpot mood={mascotMood} tool={mascotTool} size={64} />
           </div>
         {/if}
       </div>
@@ -1748,7 +1773,6 @@
   .compact-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .compact-workspace > :global(.workspace-preview) { flex: 1; min-height: 0; }
   .compact-workspace :global(.latest-region) { padding: 8px 12px; }
-  .compact-workspace :global(.mascot-dock) { display: none; }
   .compact-workspace :global(.latest-meta span) { max-width: none; flex: 1 1 auto; }
   .compact-workspace :global(.latest-meta) { justify-content: flex-start; gap: 10px; }
   .compact-workspace :global(.latest-seed) { display: none; }
@@ -1763,8 +1787,10 @@
   @media (hover: none) { .stage-position-pill button:active { background: var(--color-bg-surface-hover); } }
   /* Phone: the preview takes the stage with the bar over its foot. */
   .job-view-compact { position: relative; padding: 12px 12px 12px; }
-  .job-view-compact .job-view-preview { padding-bottom: 104px; }
-  .job-view-compact > :global(.job-bar) { position: absolute; left: 12px; right: 12px; bottom: 12px; }
+  .job-view-compact .job-view-preview { padding-bottom: 140px; }
+  .job-bar-dock { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-direction: column; }
+  /* The mascot's place on the bar; his feet overlap its top edge. */
+  .job-bar-mascot { position: relative; z-index: 1; height: 56px; margin: 0 0 -14px 8px; pointer-events: none; }
   .job-sheet { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
   .compact-controls { position: relative; flex: none; }
   /* The popover rises from the strip; a clear scrim behind it catches the tap that dismisses it, and the strip stays
@@ -1798,7 +1824,8 @@
   .job-view { display: flex; width: 100%; min-width: 0; height: 100%; align-items: stretch; gap: 16px; padding: 16px; }
   .job-view-preview { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; container-type: size; }
   /* Blob peeks over the card's top edge; its foot overlaps the card by a little. */
-  .job-view :global(.job-view-mascot) { position: relative; z-index: 1; flex: none; align-self: center; margin: 4px 0 -26px; pointer-events: none; }
+  .job-view-mascot { position: relative; z-index: 1; flex: none; align-self: center; height: 112px; margin: 4px 0 -26px; pointer-events: none; }
+  .review-overlay :global(.review-mascot) { position: absolute; left: 12px; bottom: 12px; pointer-events: none; }
   .job-view-card { display: flex; flex: none; width: 400px; max-width: 46%; flex-direction: column; gap: 12px; overflow-y: auto; }
   /* A drag moves what the stage shows with the finger, and lets it settle back or away when it lifts. */
   .stage-body > :global(:not(.gallery-pull)) { transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1); }

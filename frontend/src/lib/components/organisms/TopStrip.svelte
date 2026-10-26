@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Icon } from '$lib/components/atoms';
+  import { Icon, MascotHome } from '$lib/components/atoms';
   import { Select } from '$lib/components/molecules';
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { jobStatusLine } from '$lib/state/jobStatusLine';
+  import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { router } from '$lib/state/router.svelte';
   import type { PageId, Workflow } from '$lib/types';
 
@@ -36,7 +37,6 @@
   const workflowLabel = $derived(WORKFLOW_LABELS.find((item) => item.id === draft.state.workflow)?.label ?? '');
   const onWorkspace = $derived(currentPage === 'workspace');
   const status = $derived(jobStatusLine(jobStore.current, jobStore.queuedJobs.length));
-  const logoSrc = '/app-static/ziv-icon.svg';
 </script>
 
 <!-- The phone's top strip: the menu on every page; on the Workspace the workflow, the job state and the Gallery;
@@ -55,7 +55,7 @@
     >
       {#snippet trigger()}
         <span class="flex min-w-0 items-center gap-1.5">
-          <img src={logoSrc} alt="" class="h-5 w-5 shrink-0">
+          <MascotHome placement={mascotHome.placement} size={20} />
           <span class="truncate">{workflowLabel}</span>
         </span>
       {/snippet}

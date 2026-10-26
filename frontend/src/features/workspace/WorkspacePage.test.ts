@@ -15,6 +15,7 @@ import { extendInspection } from '$lib/state/extendInspection.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { jobStore } from '$lib/state/job.svelte';
+import { mascotHome } from '$lib/state/mascotHome.svelte';
 import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
@@ -598,22 +599,24 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('#ws-prompt')).not.toBeNull();
   });
 
-  it('keeps the mascot on stage until the latest output paints, then docks it', async () => {
+  it('keeps the mascot at home in the logo while the latest output shows', async () => {
     const asset = makeAsset({ id: 'out/latest.png', url: '/media/out/latest.png', filename: 'latest.png' });
     galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
 
     await mountWorkspace(makeContext({ history_assets: [asset] }));
 
     const preview = target.querySelector('.workspace-preview') as HTMLElement;
-    expect(preview.querySelector('[data-testid="latest-loading"] svg.mascot')).not.toBeNull();
-    expect(preview.querySelector('[data-testid="mascot-dock"]')).toBeNull();
+    expect(preview.querySelector('[data-testid="latest-loading"]')).not.toBeNull();
+    expect(preview.querySelector('svg.mascot')).toBeNull();
+    expect(mascotHome.placement.away).toBe(false);
 
     const image = preview.querySelector(`img[src="${asset.url}"]`) as HTMLImageElement;
     image.dispatchEvent(new Event('load'));
     await settle();
 
     expect(preview.querySelector('[data-testid="latest-loading"]')).toBeNull();
-    expect(preview.querySelector('[data-testid="mascot-dock"] svg.mascot')).not.toBeNull();
+    expect(preview.querySelector('svg.mascot')).toBeNull();
+    expect(mascotHome.placement.away).toBe(false);
   });
 
   it('looks for history instead of claiming no assets until the first history check settles', async () => {
@@ -655,7 +658,6 @@ describe('WorkspacePage', () => {
     const video = preview.querySelector(`video[src="${asset.url}"]`) as HTMLVideoElement;
     expect(video).not.toBeNull();
     expect(preview.querySelector('[data-testid="latest-loading"]')).toBeNull();
-    expect(preview.querySelector('[data-testid="mascot-dock"] svg.mascot')).not.toBeNull();
   });
 
   it('prefills seed from Gallery reuse URL params after backend defaults hydrate', async () => {
@@ -914,6 +916,7 @@ describe('WorkspacePage', () => {
       const view = target.querySelector('[data-testid="job-view"]') as HTMLElement;
       expect(view.querySelector('.job-view-card svg.mascot')).not.toBeNull();
       expect(view.querySelector('.job-view-preview svg.mascot')).toBeNull();
+      expect(mascotHome.placement.away).toBe(true);
     });
 
     it('submits once for a held Cmd+Enter', async () => {

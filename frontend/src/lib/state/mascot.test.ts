@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState, JobStatus } from '$lib/types';
-import { mascotMood, mascotTool } from './mascot';
+import { homePlacement, mascotMood, mascotSpot, mascotTool, type MascotSpotSignals } from './mascot';
 
 function job(status: JobStatus, currentStep = 0, totalSteps = 0, overrides: Partial<ActiveJobState> = {}): ActiveJobState {
   return { status, currentStep, totalSteps, stageName: '', outputs: [], ...overrides } as ActiveJobState;
@@ -91,5 +91,67 @@ describe('mascotTool for extend', () => {
   it('holds the clapperboard for an extension', () => {
     expect(mascotTool('extend')).toBe('clapper');
     expect(mascotTool('txt2img')).toBe('brush');
+  });
+});
+
+describe('mascotMood during a review', () => {
+  it('looks to the user while a render waits for approval', () => {
+    expect(mascotMood({ job: job('running', 3, 20, { review: { iteration: 1 } }) })).toBe('curious');
+  });
+});
+
+describe('mascotSpot', () => {
+  const at = (overrides: Partial<MascotSpotSignals>) => mascotSpot({
+    view: 'latest', running: false, reviewing: false, reacting: false, lookingForHistory: false, welcoming: false, ...overrides,
+  });
+
+  it('stays home while the latest output shows', () => {
+    expect(at({})).toBeNull();
+  });
+
+  it('works on the job while it runs and while reacting to its end', () => {
+    expect(at({ view: 'job', running: true })).toBe('job');
+    expect(at({ view: 'job', reacting: true })).toBe('job');
+    expect(at({ view: 'job' })).toBeNull();
+  });
+
+  it('waits beside a review instead of the job card', () => {
+    expect(at({ view: 'job', running: true, reviewing: true })).toBe('review');
+  });
+
+  it('presents finished outputs only while reacting', () => {
+    expect(at({ view: 'outputs', reacting: true })).toBe('outputs');
+    expect(at({ view: 'outputs' })).toBeNull();
+  });
+
+  it('explains a real empty stage, not one still looking for history', () => {
+    expect(at({ view: 'empty' })).toBe('empty');
+    expect(at({ view: 'empty', lookingForHistory: true })).toBeNull();
+  });
+
+  it('greets a first-time user in the welcome, in place of the empty stage', () => {
+    expect(at({ view: 'empty', welcoming: true })).toBe('welcome');
+    expect(at({ view: 'empty', welcoming: true, lookingForHistory: true })).toBe('welcome');
+  });
+
+  it('explains a load error', () => {
+    expect(at({ view: 'error', reviewing: true })).toBe('error');
+  });
+});
+
+describe('homePlacement', () => {
+  it('takes the Workspace placement while it is open', () => {
+    const workspace = { away: true, mood: 'creating' as const, tool: 'clapper' as const };
+    expect(homePlacement(workspace, null, 'txt2img')).toBe(workspace);
+  });
+
+  it('is away off the Workspace while a job is in flight', () => {
+    expect(homePlacement(null, job('running', 3, 20), 'txt2img').away).toBe(true);
+    expect(homePlacement(null, job('queued'), 'txt2img').away).toBe(true);
+  });
+
+  it('is home off the Workspace once the job ended, reacting to it', () => {
+    expect(homePlacement(null, job('completed'), 'txt2img', 'cheerful')).toEqual({ away: false, mood: 'cheerful', tool: 'brush' });
+    expect(homePlacement(null, null, 'txt2vid')).toEqual({ away: false, mood: 'idle', tool: 'clapper' });
   });
 });

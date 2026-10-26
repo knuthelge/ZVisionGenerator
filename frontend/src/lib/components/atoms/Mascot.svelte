@@ -30,6 +30,8 @@
     mood?: MascotMood;
     tool?: MascotTool;
     size?: number | string;
+    /** Hidden from assistive technology, for a copy that only decorates (the logo). */
+    decorative?: boolean;
     class?: string;
   }
 
@@ -37,6 +39,7 @@
     mood = 'idle',
     tool = 'brush',
     size = 120,
+    decorative = false,
     class: extraClass = ''
   }: Props = $props();
 
@@ -184,8 +187,9 @@
   width={size}
   height={size}
   viewBox="-20 -20 240 225"
-  role="img"
-  aria-label={labels[mood]}
+  role={decorative ? undefined : 'img'}
+  aria-label={decorative ? undefined : labels[mood]}
+  aria-hidden={decorative ? 'true' : undefined}
 >
   <ellipse class="shadow" cx="100" cy="190" rx="50" ry="6" fill="#000" opacity=".35" />
 

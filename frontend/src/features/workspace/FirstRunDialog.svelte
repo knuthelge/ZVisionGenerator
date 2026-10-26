@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { Icon, Mascot, Spinner } from '$lib/components/atoms';
+  import { Icon, MascotSpot, Spinner } from '$lib/components/atoms';
   import type { MascotMood } from '$lib/components/atoms/Mascot.svelte';
   import { Modal } from '$lib/components/molecules';
   import type { DownloadRequestResult } from '$lib/state/downloads.svelte';
@@ -124,7 +124,8 @@
     </div>
     <div class="fr-pool" aria-hidden="true"></div>
 
-    <Mascot size={layout.compact ? 96 : 150} {mood} class="fr-blob" />
+    <!-- Blob hops out of the logo to greet a first-time user. -->
+    <MascotSpot size={layout.compact ? 96 : 150} {mood} class="fr-blob" />
 
     <div class="fr-head">
       <span class="ui-area-label fr-kicker">Welcome to Z-Vision Generator</span>
