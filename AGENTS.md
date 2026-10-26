@@ -26,7 +26,7 @@ Every module, function, and class should be **atomic**: a single, self-contained
 
 ## Repository Rules
 
-- `packages/ltx_*` and `packages/seedvr2_torch` are vendored. Never edit them by hand; update them with `make update-ltx` and `make update-seedvr2`.
+- `packages/ltx_*`, `packages/seedvr2_torch`, `packages/minimax_h3_mlx` and `packages/moss_image` are vendored. Never edit them by hand; update them with `make update-ltx`, `make update-seedvr2`, `make update-h3-mlx` and `make update-moss`.
 - The Web UI is built from `frontend/` (Svelte 5, TypeScript, pnpm) into `zvisiongenerator/web/static/app/`, which is committed. After any frontend change, run `make frontend-build` and commit the rebuilt files.
 - Future work is written up as proposals in `proposals/` (see its README). Check there before larger work. When a proposal ships or is rejected, update its status and move it to `proposals/archive/`. Files in `docs/` never link to proposals.
 - User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`. Explain a feature once in Concepts; the Web UI and CLI pages show how to use it and link there. New settings go in `docs/concepts/configuration.md` and new flags in `docs/cli/reference.md`. See [Writing docs](docs/developer/docs.md).

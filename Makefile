@@ -107,6 +107,20 @@ update-h3-mlx: ## Update vendored minimax_h3_mlx (MiniMax H3 on macOS)
 	rm -rf $(TMP)
 	@echo "✓ Vendored minimax_h3_mlx updated to $(H3_MLX_COMMIT)"
 
+MOSS_REPO     ?= https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT
+# main (2026-10-21)
+MOSS_REVISION ?= f972bd4b4b9e3852133cc5da954d87bc32cd8fb9
+
+.PHONY: update-moss
+
+update-moss: ## Update vendored moss_image pipeline (MOSS-Image on Windows/Linux)
+	rm -rf packages/moss_image
+	mkdir -p packages/moss_image
+	curl -fsSL -o packages/moss_image/pipeline_moss_image.py $(MOSS_REPO)/resolve/$(MOSS_REVISION)/pipeline_moss_image.py
+	curl -fsSL -o packages/moss_image/LICENSE $(MOSS_REPO)/resolve/$(MOSS_REVISION)/LICENSE
+	printf '"""MOSS-Image pipeline vendored from OpenMOSS-Team/MOSS-Image-SFT at revision %s."""\n' $(MOSS_REVISION) > packages/moss_image/__init__.py
+	@echo "✓ Vendored moss_image updated to $(MOSS_REVISION)"
+
 # ——— Frontend ————————————————————————————————————————————
 
 .PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-hover-check frontend-test frontend-dev

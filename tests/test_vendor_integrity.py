@@ -33,6 +33,16 @@ class TestVendoredPackagesExist:
         assert not (ROOT / "packages" / "ltx_pipelines_mlx" / "__main__.py").exists()
 
 
+class TestVendoredMossImage:
+    """The MOSS-Image pipeline is vendored with its license and a generated package marker."""
+
+    def test_pipeline_license_and_init_exist(self) -> None:
+        package = ROOT / "packages" / "moss_image"
+        assert (package / "pipeline_moss_image.py").is_file()
+        assert (package / "LICENSE").is_file()
+        assert (package / "__init__.py").is_file()
+
+
 class TestVendoredPackagesImportable:
     """Vendored packages can be imported as top-level modules."""
 
@@ -88,6 +98,9 @@ class TestPyprojectToml:
     def test_wheel_packages_include_vendored(self, pyproject_text: str) -> None:
         assert '"packages/ltx_core_mlx"' in pyproject_text
         assert '"packages/ltx_pipelines_mlx"' in pyproject_text
+
+    def test_wheel_packages_include_moss_image(self, pyproject_text: str) -> None:
+        assert '"packages/moss_image"' in pyproject_text
 
     def test_ruff_excludes_vendored(self, pyproject_text: str) -> None:
         assert '"packages"' in pyproject_text

@@ -40,6 +40,12 @@ The MiniMax H3 MLX pipeline (`packages/minimax_h3_mlx`, used on macOS) is vendor
 
 Licensed under the Apache License, Version 2.0. The full license text ships with the vendored code as `packages/minimax_h3_mlx/LICENSE`, and at http://www.apache.org/licenses/LICENSE-2.0. Upstream publishes no NOTICE file and names no copyright holder in its license file.
 
+## moss_image
+
+The MOSS-Image pipeline (`packages/moss_image`, used on Windows and Linux) is vendored unchanged from [OpenMOSS-Team/MOSS-Image-SFT](https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT) at revision f972bd4b4b9e3852133cc5da954d87bc32cd8fb9.
+
+Licensed under the Apache License, Version 2.0. The full license text ships with the vendored code as `packages/moss_image/LICENSE`, and at http://www.apache.org/licenses/LICENSE-2.0.
+
 ## MiniMax H3 latent upscaler (network code)
 
 The network code of the MiniMax H3 upscale (`zvisiongenerator/backends/cuda/video/h3/latent_upsampler.py`, used on Windows and Linux) is ported from [LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) (`nodes/minimax_h3_latent_upscaler_3d.py`), matching upstream commit 98934c0b5f4a213323c4d1d0e47eb3d2f27cb743, without its ComfyUI node code.
