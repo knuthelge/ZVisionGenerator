@@ -17,6 +17,7 @@ from typing import Any
 
 from zvisiongenerator.converters.ideogram4_instant import write_transformer
 from zvisiongenerator.image_model_loader import LOADING_PHASE
+from zvisiongenerator.utils.built_model import BUILDING_PHASE, build_in_partial
 from zvisiongenerator.utils.file_links import link_tree
 from zvisiongenerator.utils.ideogram4_instant import (
     COMPONENT_PATTERNS,
@@ -29,12 +30,8 @@ from zvisiongenerator.utils.ideogram4_instant import (
     is_instant_dir,
     write_build_record,
 )
-from zvisiongenerator.utils.stored_quant import discard_partial, flush_to_disk, partial_dir, promote_partial, sweep_stale_partials
 
-__all__ = ["BUILDING_PHASE", "build_instant_model", "ensure_instant_model", "instant_model_index"]
-
-# Reported while the folder is built (download and conversion), before the model loads.
-BUILDING_PHASE = "building"
+__all__ = ["build_instant_model", "ensure_instant_model", "instant_model_index"]
 
 Downloader = Callable[[InstantSource, Path], Path]
 
@@ -98,24 +95,17 @@ def build_instant_model(
     download_components = download_components or _download_components
     download_transformer = download_transformer or _download_transformer
     downloads = instant_downloads_dir(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    sweep_stale_partials(target)
-    partial = partial_dir(target)
-    try:
+
+    def assemble(partial: Path) -> bool:
         components = download_components(source, downloads)
         transformer_file = download_transformer(source, downloads)
         partial.mkdir()
         _link_components(components, partial)
         base_config = json.loads((components / "transformer" / "config.json").read_text(encoding="utf-8"))
-        if not write_transformer(transformer_file, partial / "transformer", source.transformer_format, base_config, cancelled):
-            discard_partial(partial)
-            return False
-        flush_to_disk(partial)
-        write_build_record(partial, source)
-    except BaseException:
-        discard_partial(partial)
-        raise
-    promote_partial(partial, target)
+        return write_transformer(transformer_file, partial / "transformer", source.transformer_format, base_config, cancelled)
+
+    if not build_in_partial(target, assemble, lambda partial: write_build_record(partial, source)):
+        return False
     shutil.rmtree(downloads, ignore_errors=True)
     return True
 

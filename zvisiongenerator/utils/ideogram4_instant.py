@@ -7,15 +7,14 @@ and scheduler from the base model's repo. The ``ideogram4_instant`` config block
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.utils.paths import get_ziv_data_dir, split_huggingface_revision
+from zvisiongenerator.utils.built_model import is_models_dir_child, read_build_record, write_record
+from zvisiongenerator.utils.paths import split_huggingface_revision
 
 __all__ = [
-    "BUILD_RECORD_NAME",
     "COMPONENT_PATTERNS",
     "INSTANT_DIR_NAME",
     "LICENSE_FILES",
@@ -26,15 +25,12 @@ __all__ = [
     "instant_source",
     "is_built",
     "is_instant_dir",
-    "read_build_record",
     "write_build_record",
 ]
 
 # The model folder's name in the models directory, the same as its alias: once built, the folder is the installed
 # model ``ideo``, and its stored quants are ``ideo@q4`` and ``ideo@q8``.
 INSTANT_DIR_NAME = "ideo"
-# Written last into a finished build; a folder without it (or with an outdated one) is rebuilt.
-BUILD_RECORD_NAME = "ziv-build.json"
 # ``bf16``: diffusers' names and dtype (the CUDA backend). ``fp8``: the base FP8 repo's names and storage (mflux).
 TRANSFORMER_FORMATS = ("bf16", "fp8")
 _RECORD_VERSION = 1
@@ -116,30 +112,12 @@ def instant_downloads_dir(target: Path) -> Path:
 
 def is_instant_dir(path: str | Path) -> bool:
     """Return whether *path* is the Ideogram 4 Instant model folder in the models directory (built or not)."""
-    candidate = Path(path).expanduser()
-    return candidate.name == INSTANT_DIR_NAME and _same_path(candidate.parent, get_ziv_data_dir() / "models")
-
-
-def _same_path(first: Path, second: Path) -> bool:
-    """Return whether *first* and *second* are the same location."""
-    try:
-        return first.resolve() == second.resolve()
-    except OSError:
-        return False
+    return is_models_dir_child(path, (INSTANT_DIR_NAME,))
 
 
 def _record(source: InstantSource) -> dict[str, Any]:
     """Return the build record of a folder built from *source*."""
     return {"version": _RECORD_VERSION, **asdict(source)}
-
-
-def read_build_record(model_dir: Path) -> dict[str, Any] | None:
-    """Return *model_dir*'s build record, or ``None`` when it has none or it cannot be read."""
-    try:
-        record = json.loads((model_dir / BUILD_RECORD_NAME).read_text(encoding="utf-8"))
-    except OSError, ValueError:
-        return None
-    return record if isinstance(record, dict) else None
 
 
 def is_built(model_dir: Path, source: InstantSource) -> bool:
@@ -149,4 +127,4 @@ def is_built(model_dir: Path, source: InstantSource) -> bool:
 
 def write_build_record(model_dir: Path, source: InstantSource) -> None:
     """Mark *model_dir* as a finished build from *source*; written last."""
-    (model_dir / BUILD_RECORD_NAME).write_text(json.dumps(_record(source), indent=2) + "\n", encoding="utf-8")
+    write_record(model_dir, _record(source))

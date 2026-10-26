@@ -10,9 +10,10 @@ torch = pytest.importorskip("torch")
 from safetensors.torch import load_file, save_file  # noqa: E402
 
 from zvisiongenerator.converters.ideogram4_instant import convert_tensor, fp8_rows, transformer_config, write_transformer  # noqa: E402
-from zvisiongenerator.ideogram4_instant_builder import BUILDING_PHASE, build_instant_model, ensure_instant_model, instant_model_index  # noqa: E402
+from zvisiongenerator.ideogram4_instant_builder import build_instant_model, ensure_instant_model, instant_model_index  # noqa: E402
 from zvisiongenerator.image_model_loader import LOADING_PHASE  # noqa: E402
-from zvisiongenerator.utils.ideogram4_instant import BUILD_RECORD_NAME, InstantSource, instant_source, is_built, is_instant_dir  # noqa: E402
+from zvisiongenerator.utils.built_model import BUILD_RECORD_NAME, BUILDING_PHASE  # noqa: E402
+from zvisiongenerator.utils.ideogram4_instant import InstantSource, instant_source, is_built, is_instant_dir  # noqa: E402
 from zvisiongenerator.utils.image_model_detect import detect_image_model  # noqa: E402
 
 _CONFIG = {
