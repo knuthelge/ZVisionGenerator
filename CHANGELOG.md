@@ -21,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **A job that ends while you're on another page** shows its "Generation complete" or failure toast there too
 - **The live preview updates after every step** instead of at 25, 50 and 75%, so a 10-step Z-Image job shows 9 previews instead of 3
 
+### Fixed
+- **Ideogram 4 Instant downloads on the Models page.** Its source download no longer shows under **Other downloads** while `ideo` uses it, and deleting the `ideo` row also deletes that download and, if it isn't built yet, the transformer file waiting beside it, so the space is freed. The delete dialog lists the downloads it removes
+- **Building Ideogram 4 Instant never replaces another model.** If a folder called `ideo` that the app didn't build is already in your models folder, the first job that uses `ideo` stops with a message to rename or move it, instead of downloading and then replacing it
+
 ## [0.13.0] - 2026-10-25
 
 ### Upgrading from 0.12

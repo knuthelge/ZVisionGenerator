@@ -240,6 +240,55 @@ class TestBuildInstantModel:
         assert not target.exists() and not list((tmp_path / "models").glob(".ideo.*.partial"))
 
 
+class TestForeignFolder:
+    def test_a_non_empty_folder_without_a_build_record_is_never_replaced_and_nothing_downloads(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        calls: list[str] = []
+        other = tmp_path / "models" / "ideo"
+        other.mkdir(parents=True)
+        (other / "weights.safetensors").write_bytes(b"someone else's model")
+
+        with pytest.raises(RuntimeError, match="Rename or move"):
+            build_instant_model(_source(), other, **TestBuildInstantModel()._downloaders(tmp_path, calls))
+
+        assert calls == []
+        assert (other / "weights.safetensors").read_bytes() == b"someone else's model"
+        assert not (tmp_path / "models" / ".ideo.download").exists()
+
+    def test_a_folder_built_by_v0_13_0_is_still_ours_and_is_rebuilt_when_outdated(self, tmp_path):
+        target = tmp_path / "models" / "ideo"
+        target.mkdir(parents=True)
+        (target / "model_index.json").write_text("{}")
+        # The record exactly as v0.13.0 wrote it, with a revision that is no longer the pinned one.
+        record = {
+            "version": 1,
+            "transformer_repo": "Hippotes/Ideogram4-Fal-ComfyUI",
+            "transformer_revision": "0" * 40,
+            "transformer_file": "Ideogram4-instant_bf16.safetensors",
+            "components": "unsloth/ideogram-4-nf4-diffusers@cb5b5dda5e0406c04160f3555c48256ec0cfc899",
+            "transformer_format": "bf16",
+        }
+        (target / BUILD_RECORD_NAME).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+        assert build_instant_model(_source(), target, **TestBuildInstantModel()._downloaders(tmp_path, [])) is True
+        assert is_built(target, _source())
+
+    def test_an_empty_folder_is_built_in(self, tmp_path):
+        target = tmp_path / "models" / "ideo"
+        target.mkdir(parents=True)
+
+        assert build_instant_model(_source(), target, **TestBuildInstantModel()._downloaders(tmp_path, [])) is True
+        assert is_built(target, _source())
+
+    def test_a_folder_with_an_outdated_record_is_rebuilt(self, tmp_path):
+        target = tmp_path / "models" / "ideo"
+        downloaders = TestBuildInstantModel()._downloaders(tmp_path, [])
+        build_instant_model(_source(), target, **downloaders)
+
+        assert build_instant_model(_source("fp8"), target, **downloaders) is True
+        assert is_built(target, _source("fp8"))
+
+
 class TestEnsureBuiltModel:
     def test_an_ideo_folder_goes_to_the_instant_builder_with_the_cancel_check(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))

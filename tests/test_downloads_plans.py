@@ -83,6 +83,20 @@ class TestBuiltModelPlan:
         assert plan is not None
         assert len(plan) == 2
 
+    def test_a_folder_that_ziv_did_not_build_needs_nothing_because_the_build_refuses_it(self, models_dir):
+        folder = models_dir / "ideo"
+        folder.mkdir()
+        (folder / "weights.safetensors").write_bytes(b"x")
+
+        assert built_model_plan(str(folder), config=_CONFIG, platform_key="linux") == ()
+
+    def test_an_empty_folder_is_planned_like_a_missing_one(self, models_dir):
+        (models_dir / "ideo").mkdir()
+
+        plan = built_model_plan(str(models_dir / "ideo"), config=_CONFIG, platform_key="linux")
+
+        assert plan is not None and len(plan) == 2
+
     def test_the_downloads_folder_is_the_hidden_sibling(self, tmp_path):
         assert instant_downloads_dir(tmp_path / "ideo") == tmp_path / ".ideo.download"
 

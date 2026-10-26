@@ -18,7 +18,9 @@ __all__ = [
     "BUILDING_PHASE",
     "BUILD_RECORD_NAME",
     "build_in_partial",
+    "is_foreign_folder",
     "is_models_dir_child",
+    "refuse_foreign_folder",
     "read_build_record",
     "write_record",
 ]
@@ -41,6 +43,34 @@ def _same_path(first: Path, second: Path) -> bool:
         return first.resolve() == second.resolve()
     except OSError:
         return False
+
+
+def is_foreign_folder(path: str | Path) -> bool:
+    """Return whether *path* holds something that is not a build of ours: it exists, is not empty and has no build record.
+
+    A missing or empty folder is free to build in, and a folder with an outdated record is an earlier build that a
+    new build replaces.
+    """
+    candidate = Path(path).expanduser()
+    if not candidate.exists() and not candidate.is_symlink():
+        return False
+    if candidate.is_dir():
+        try:
+            if not any(candidate.iterdir()):
+                return False
+        except OSError:
+            return True
+    return read_build_record(candidate) is None
+
+
+def refuse_foreign_folder(target: Path) -> None:
+    """Raise unless *target* is free to build in, so a build never replaces a folder that is not one of ours.
+
+    Raises:
+        RuntimeError: If :func:`is_foreign_folder` says *target* holds another model or other files.
+    """
+    if is_foreign_folder(target):
+        raise RuntimeError(f"Cannot build '{target.name}': the folder {target} already exists and was not built by ziv. Rename or move it, then run again.")
 
 
 def read_build_record(model_dir: Path) -> dict[str, Any] | None:
@@ -68,7 +98,11 @@ def build_in_partial(target: Path, assemble: Callable[[Path], bool], write_build
 
     Returns:
         Whether the folder is in place (False when *assemble* stopped).
+
+    Raises:
+        RuntimeError: If *target* exists and is not an earlier build (see :func:`refuse_foreign_folder`); nothing is downloaded.
     """
+    refuse_foreign_folder(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     sweep_stale_partials(target)
     partial = partial_dir(target)

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils.built_model import is_foreign_folder
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, is_built, is_instant_dir
 from zvisiongenerator.utils.moss_build import SFT_IGNORE, SFT_PATTERNS, is_moss_dir, is_turbo_dir, moss_source
 from zvisiongenerator.utils.moss_build import is_built as is_moss_built
@@ -48,6 +49,8 @@ def image_plan(model_ref: str, *, family: str, config: dict[str, Any] | None, pl
 def built_model_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) -> tuple[DownloadTarget, ...] | None:
     """Return the targets an unbuilt model built on first use needs, ``()`` once it is built, or ``None`` for any other model.
 
+    A folder in the model's place that was not built by ziv needs nothing: the build refuses it before it downloads anything.
+
     Raises:
         ValueError: If the model's source block in *config* is invalid.
     """
@@ -70,7 +73,7 @@ def _instant_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) 
         return None
     source = instant_source(config, platform_key)
     folder = Path(model_ref)
-    if is_built(folder, source):
+    if is_built(folder, source) or is_foreign_folder(folder):
         return ()
     return (
         DownloadTarget(source.components_repo, source.components_revision, COMPONENT_PATTERNS),
@@ -90,7 +93,7 @@ def _moss_plan(model_ref: str, *, config: dict[str, Any]) -> tuple[DownloadTarge
         return None
     source = moss_source(config)
     folder = Path(model_ref).expanduser()
-    if is_moss_built(folder, source):
+    if is_moss_built(folder, source) or is_foreign_folder(folder):
         return ()
     targets = (DownloadTarget(source.sft_repo, source.sft_revision, SFT_PATTERNS, SFT_IGNORE),)
     if is_turbo_dir(folder):

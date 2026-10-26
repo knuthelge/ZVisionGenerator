@@ -605,6 +605,31 @@ describe('ModelsPage Browse buttons', () => {
     expect(document.querySelector('[data-testid="delete-stored-quants"]')).toBeNull();
   });
 
+  it('names the source downloads a built model deletes with its folder', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      image_models: [
+        { download_needed: false, name: 'moss', label: 'moss', family: 'moss', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [], source_repos: ['org/moss-turbo'] } },
+        { download_needed: false, name: 'atlas', label: 'atlas', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [], source_repos: [] } },
+      ],
+    });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+    const buttons = target.querySelectorAll('[data-testid="delete-button"]');
+
+    (buttons[0] as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="delete-sources"]')?.textContent).toContain('org/moss-turbo');
+    expect(document.querySelector('[data-testid="delete-links-kept"]')).toBeNull();
+
+    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+    await settle();
+    (buttons[1] as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="delete-sources"]')).toBeNull();
+    expect(document.querySelector('[data-testid="delete-links-kept"]')).not.toBeNull();
+  });
+
   it('deletes only the prepared copy of a model whose download another model still uses', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),

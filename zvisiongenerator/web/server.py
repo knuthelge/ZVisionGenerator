@@ -2178,12 +2178,13 @@ def api_delete_model(name: str) -> dict[str, Any]:
     web_config = load_web_config()
     entry = next((entry for entry in (*web_config.image_inventory, *web_config.video_inventory) if entry.name == name), None)
     inventory = (*web_config.image_inventory, *web_config.video_inventory)
-    target = model_delete_target(entry, Path(web_config.data_dir) / "models", **delete_scope(entry, inventory, web_config.app_config)) if entry is not None else None
+    models_dir = Path(web_config.data_dir) / "models"
+    target = model_delete_target(entry, models_dir, **delete_scope(entry, inventory, web_config.app_config, models_dir=models_dir, platform_key=sys.platform)) if entry is not None else None
     if entry is None and web_config.seedvr2 is not None:
         target = _seedvr2_copy_target(name, web_config.seedvr2, Path(web_config.models_dir))
     if target is None:
         raise HTTPException(status_code=404, detail=f"No deletable model named '{name}'.")
-    _ensure_not_downloading(repo_ids=(target.repo_id,) if target.repo_id else (), paths=(target.path,))
+    _ensure_not_downloading(repo_ids=target.repo_ids, paths=(target.path, *target.build_downloads))
     try:
         delete_model(target)
     except FileNotFoundError as exc:

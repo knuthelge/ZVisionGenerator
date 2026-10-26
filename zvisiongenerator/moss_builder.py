@@ -56,6 +56,7 @@ def ensure_moss_model(
 
     Raises:
         ValueError: If the ``moss_image`` block of *config* is invalid.
+        RuntimeError: If *model_path* holds something ziv did not build (see :func:`~zvisiongenerator.utils.built_model.build_in_partial`).
     """
     if not is_moss_dir(model_path):
         return True

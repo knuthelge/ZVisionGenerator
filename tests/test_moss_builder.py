@@ -237,6 +237,42 @@ class TestMossPlan:
         assert image_download_plan("OpenMOSS-Team/MOSS-Image-SFT", family="moss") == ()
 
 
+class TestForeignFolder:
+    @pytest.mark.parametrize("name", ["moss", "moss-sft"])
+    def test_a_non_empty_folder_without_a_build_record_is_never_replaced(self, models, tmp_path, name):
+        calls: list[str] = []
+        other = models / name
+        other.mkdir(parents=True)
+        (other / "weights.safetensors").write_bytes(b"someone else's model")
+
+        with pytest.raises(RuntimeError, match="Rename or move"):
+            build_moss_model(_source(), other, turbo=name == "moss", **_downloaders(tmp_path, calls))
+
+        assert calls == [] and (other / "weights.safetensors").read_bytes() == b"someone else's model"
+
+    def test_the_plan_asks_for_no_download(self, models):
+        other = models / "moss"
+        other.mkdir(parents=True)
+        (other / "weights.safetensors").write_bytes(b"x")
+
+        assert built_model_plan(str(other), config=_CONFIG, platform_key=sys.platform) == ()
+
+    def test_an_empty_folder_is_built_in(self, models, tmp_path):
+        (models / "moss-sft").mkdir(parents=True)
+
+        build_moss_model(_source(), models / "moss-sft", turbo=False, **_downloaders(tmp_path))
+
+        assert is_built(models / "moss-sft", _source())
+
+    def test_a_folder_with_an_outdated_record_is_rebuilt(self, models, tmp_path):
+        build_moss_model(_source(), models / "moss-sft", turbo=False, **_downloaders(tmp_path))
+        changed = _source(sft="owner/sft@" + "d" * 40)
+
+        build_moss_model(changed, models / "moss-sft", turbo=False, **_downloaders(tmp_path))
+
+        assert is_built(models / "moss-sft", changed)
+
+
 class TestCancelled:
     def test_a_stop_after_the_download_discards_the_partial_folder(self, models, tmp_path):
         target = models / "moss"

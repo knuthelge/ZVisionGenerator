@@ -2,7 +2,9 @@
 
 Deletes act only on what the user picked. A converted model's folder is removed with its links, never the
 HuggingFace files those links point to; a HuggingFace download is removed from the cache while its alias
-stays in config, so the model can be downloaded again. Either way the model's stored quants
+stays in config, so the model can be downloaded again. A model built on first use (``moss``, ``moss-sft``, ``ideo``)
+is made of hard links to its source repos in the cache, so deleting its row also deletes the source repos that no other
+built model needs, and the hidden folder its build downloads into (Ideogram 4 Instant's transformer). Either way the model's stored quants
 (``<name>@q4`` / ``<name>@q8``, and the text-encoder copy ``<name>@mlx-te4`` of H3 on macOS) go too, since nothing else uses them. When aliases share one download (``ltx-4``
 and ``ltx-8`` on Windows/Linux), deleting one removes only its own stored quants while another still has some.
 """
@@ -11,11 +13,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.downloads.built_sources import BUILT_MODEL_NAMES, built_model_downloads, built_model_source_repos, built_model_sources
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.config import enhancer_tier_models, video_companion_repos
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
@@ -33,8 +37,19 @@ class DeleteTarget:
     path: Path
     repo_id: str | None = None
     stored_quants: tuple[Path, ...] = ()
-    companions: tuple[Path, ...] = ()  # other HuggingFace downloads removed with this one
+    companion_repos: tuple[str, ...] = ()  # other HuggingFace repos removed with this one: an LTX model's companions, or the source repos of a model built on first use
     shared_with: tuple[str, ...] = ()  # for "copy": the models still using the download
+    build_downloads: tuple[Path, ...] = ()  # hidden folders next to a model built on first use that hold files it downloaded, removed with it
+
+    @property
+    def repo_ids(self) -> tuple[str, ...]:
+        """The HuggingFace repos deleting this target removes."""
+        return (*((self.repo_id,) if self.repo_id else ()), *self.companion_repos)
+
+    @property
+    def on_disk(self) -> bool:
+        """Whether there is anything to remove: the target's own path, or a repo or download removed with it."""
+        return self.path.exists() or self.path.is_symlink() or bool(self.companion_repos or self.build_downloads)
 
 
 def model_delete_target(
@@ -44,6 +59,8 @@ def model_delete_target(
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     sharing: tuple[str, ...] = (),
     companion_repos: tuple[str, ...] = (),
+    source_repos: tuple[str, ...] = (),
+    build_downloads: tuple[Path, ...] = (),
 ) -> DeleteTarget | None:
     """Return what deleting *entry* would remove, or ``None`` when the model is not deletable.
 
@@ -58,25 +75,81 @@ def model_delete_target(
         sharing: Other models that load from the same download (see :func:`models_sharing`). While one of them has
             stored quants the download stays, and only *entry*'s own stored quants are deleted.
         companion_repos: Other HuggingFace repos downloaded for this model, removed with its download.
+        source_repos: For a model built on first use, the cache repos it is made from that nothing else needs (see
+            :func:`built_sources_freed_with`). Those on disk are removed with its built folder; with no built folder
+            they are the whole target, so a model that is downloaded but not built yet can be deleted too.
+        build_downloads: For a model built on first use, the hidden folders of files its build downloaded outside the cache
+            (see :func:`built_downloads_freed_with`). Those on disk are removed with it, and alone they make a not yet built
+            model deletable.
     """
     stored_quants = stored_quant_dirs_for(models_dir, entry.name)
-    if entry.source == "installed":
-        path = models_dir / entry.name
-        return DeleteTarget("installed", path, stored_quants=stored_quants) if _is_direct_child(path, models_dir) else None
+    sources = tuple(repo_id for repo_id in source_repos if huggingface_cache_repo_dir(repo_id).is_dir())
+    downloads = tuple(path for path in build_downloads if path.is_dir())
     repo = parse_huggingface_repo_reference(entry.resolved_path)
+    # A built-on-first-use row that is not built has no folder of its own: its target is the sources and downloads it left on disk.
+    if entry.source == "installed" or (repo is None and (sources or downloads)):
+        path = models_dir / entry.name
+        if not _is_direct_child(path, models_dir):
+            return None
+        return DeleteTarget("installed", path, stored_quants=stored_quants, companion_repos=sources, build_downloads=downloads)
     # Whatever is in the cache counts, so an interrupted or partial download (H3 on macOS fetches only parts of its repository) can be cleared too.
     if repo is None or (find_local_dir(entry.resolved_path) is None and not huggingface_cache_repo_dir(repo.repo_id).is_dir()):
         return None
     users = tuple(name for name in sharing if stored_quant_dirs_for(models_dir, name))
     if users:
         return DeleteTarget("copy", stored_quants[0], stored_quants=stored_quants[1:], shared_with=users) if stored_quants else None
-    companions = tuple(huggingface_cache_repo_dir(repo_id) for repo_id in companion_repos)
-    return DeleteTarget("huggingface", huggingface_cache_repo_dir(repo.repo_id), repo_id=repo.repo_id, stored_quants=stored_quants, companions=companions)
+    return DeleteTarget("huggingface", huggingface_cache_repo_dir(repo.repo_id), repo_id=repo.repo_id, stored_quants=stored_quants, companion_repos=companion_repos)
 
 
-def delete_scope(entry: ImageInventoryEntry | VideoInventoryEntry, inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry], app_config: dict[str, Any]) -> dict[str, tuple[str, ...]]:
-    """Return the ``sharing`` and ``companion_repos`` arguments of :func:`model_delete_target` for *entry*."""
-    return {"sharing": models_sharing(entry, inventory), "companion_repos": video_companion_repos(entry.family, app_config, entry.resolved_path)}
+def delete_scope(
+    entry: ImageInventoryEntry | VideoInventoryEntry,
+    inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry],
+    app_config: dict[str, Any],
+    *,
+    models_dir: Path,
+    platform_key: str,
+) -> dict[str, tuple[str, ...]]:
+    """Return the ``sharing``, ``companion_repos``, ``source_repos`` and ``build_downloads`` arguments of :func:`model_delete_target` for *entry*."""
+    return {
+        "sharing": models_sharing(entry, inventory),
+        "companion_repos": video_companion_repos(entry.family, app_config, entry.resolved_path),
+        "source_repos": built_sources_freed_with(entry, tuple(inventory), app_config, models_dir=models_dir, platform_key=platform_key),
+        "build_downloads": built_downloads_freed_with(entry, models_dir=models_dir),
+    }
+
+
+def built_sources_freed_with(
+    entry: ImageInventoryEntry | VideoInventoryEntry,
+    inventory: tuple[ImageInventoryEntry | VideoInventoryEntry, ...],
+    app_config: dict[str, Any],
+    *,
+    models_dir: Path,
+    platform_key: str,
+) -> tuple[str, ...]:
+    """Return the source repos that deleting the built-on-first-use model *entry* frees, or ``()`` for any other model.
+
+    A repo is kept only while another such model with a built folder still needs it. A row that is not built does
+    not pin anything, even when its sources happen to be in the cache. So deleting ``moss`` while ``moss-sft`` is
+    built deletes only the Turbo LoRA repo. An invalid source block in *app_config* warns and frees nothing.
+    """
+    if not _is_built_model_row(entry, models_dir):
+        return ()
+    others = [other for other in inventory if other.name != entry.name and other.source == "installed" and _is_built_model_row(other, models_dir)]
+    try:
+        own = built_model_sources(entry.name, app_config, platform_key=platform_key)
+        kept = {repo_id.casefold() for other in others for repo_id in built_model_sources(other.name, app_config, platform_key=platform_key)}
+    except ValueError as exc:
+        warnings.warn(f"Could not read the sources of a model built on first use: {exc}", stacklevel=2)
+        return ()
+    return tuple(repo_id for repo_id in own if repo_id.casefold() not in kept)
+
+
+def built_downloads_freed_with(entry: ImageInventoryEntry | VideoInventoryEntry, *, models_dir: Path) -> tuple[Path, ...]:
+    """Return the hidden download folders that deleting the built-on-first-use model *entry* removes, or ``()`` for any other model.
+
+    They exist while a build downloads (and stay after an interrupted one), so an unbuilt row can own files on disk.
+    """
+    return built_model_downloads(entry.name, models_dir) if _is_built_model_row(entry, models_dir) else ()
 
 
 def models_sharing(entry: ImageInventoryEntry | VideoInventoryEntry, inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry]) -> tuple[str, ...]:
@@ -114,12 +187,13 @@ def used_repo_ids(
     platform_key: str,
     extra: Iterable[str] = (),
 ) -> frozenset[str]:
-    """Return the HuggingFace repos the app loads, case-folded: aliases, their LTX companions, enhancer tiers and *extra*."""
+    """Return the HuggingFace repos the app loads, case-folded: aliases, their LTX companions, enhancer tiers, the sources of models built on first use and *extra*."""
     entries = [entry for entry in inventory if entry.source != "installed"]
     references = [entry.resolved_path for entry in entries]
     references += [model[0] for model in enhancer_tier_models(app_config, platform_key=platform_key).values()]
     ids = {repo.repo_id for reference in references if (repo := parse_huggingface_repo_reference(reference)) is not None}
     ids.update(repo_id for entry in entries for repo_id in video_companion_repos(entry.family, app_config, entry.resolved_path))
+    ids.update(built_model_source_repos(app_config, platform_key=platform_key))
     ids.update(extra)
     return frozenset(repo_id.casefold() for repo_id in ids)
 
@@ -151,7 +225,7 @@ def installed_models_linking_to(target: Path, models_dir: Path) -> tuple[str, ..
 
 
 def delete_model(target: DeleteTarget) -> None:
-    """Remove *target* and its stored quants from disk; a symlinked folder is unlinked rather than emptied.
+    """Remove *target*, its stored quants, companion repos and build downloads from disk; a symlinked folder is unlinked rather than emptied.
 
     Raises:
         FileNotFoundError: If nothing is on disk to delete.
@@ -159,20 +233,23 @@ def delete_model(target: DeleteTarget) -> None:
     path = target.path
     if path.is_symlink():
         path.unlink()
-    elif not path.is_dir():
+    elif path.is_dir():
+        if target.kind == "huggingface":
+            _delete_hub_repo(path)
+        else:
+            # rmtree unlinks symlinks inside the folder without following them, so linked base files survive.
+            shutil.rmtree(path)
+    elif not (target.companion_repos or target.build_downloads):
         raise FileNotFoundError(f"Nothing to delete at {path}")
-    elif target.kind == "huggingface":
-        _delete_hub_repo(path)
-    else:
-        # rmtree unlinks symlinks inside the folder without following them, so linked base files survive.
-        shutil.rmtree(path)
     for extra in target.stored_quants:
         shutil.rmtree(extra, ignore_errors=True)
-    for companion in target.companions:
+    for repo_id in target.companion_repos:
         try:
-            _delete_hub_repo(companion)
+            _delete_hub_repo(huggingface_cache_repo_dir(repo_id))
         except OSError:
             pass
+    for download in target.build_downloads:
+        shutil.rmtree(download, ignore_errors=True)
 
 
 def delete_lora(loras_dir: Path, name: str) -> Path:
@@ -186,6 +263,11 @@ def delete_lora(loras_dir: Path, name: str) -> Path:
         raise FileNotFoundError(f"LoRA not found: {name}")
     path.unlink()
     return path
+
+
+def _is_built_model_row(entry: ImageInventoryEntry | VideoInventoryEntry, models_dir: Path) -> bool:
+    """Return whether *entry* is a model built on first use: its name and its folder in *models_dir* say so."""
+    return entry.name in BUILT_MODEL_NAMES and Path(entry.resolved_path).resolve() == (models_dir / entry.name).resolve()
 
 
 def _delete_hub_repo(repo_dir: Path) -> None:

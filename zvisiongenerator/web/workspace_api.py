@@ -49,7 +49,17 @@ from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_downlo
 from zvisiongenerator.web.first_run import first_run_payload
 from zvisiongenerator.web.lora_index import lookup as lookup_lora_families
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
-from zvisiongenerator.web.model_delete import cache_repos_linked_from, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target, used_repo_ids
+from zvisiongenerator.web.model_delete import (
+    built_downloads_freed_with,
+    built_sources_freed_with,
+    cache_repos_linked_from,
+    delete_scope,
+    enhancer_delete_target,
+    installed_models_linking_to,
+    model_delete_target,
+    seedvr2_delete_target,
+    used_repo_ids,
+)
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
 from zvisiongenerator.web.workspace_contract import END_FRAME_CONTROLS, hidden_video_controls
@@ -254,7 +264,7 @@ def build_models_response(
     status = _status_resolver(web_config, image_defaults, find_local_dir)
     inventory = (*web_config.image_inventory, *web_config.video_inventory)
     delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=inventory, app_config=web_config.app_config)
-    disk_size = _disk_size_resolver(data_dir / "models", listed={entry.name for entry in inventory}, app_config=web_config.app_config)
+    disk_size = _disk_size_resolver(data_dir / "models", listed={entry.name for entry in inventory}, app_config=web_config.app_config, inventory=inventory)
     download_needed = _download_needed_resolver(web_config)
     loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB"} for lora in list_loras(data_dir)]
     image_rows = [
@@ -393,9 +403,9 @@ def _enhancer_download_needed(tier: str, repo: str, revision: str | None, unavai
 def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = None) -> tuple[CachedRepo, ...]:
     """Return the model repos in the HuggingFace cache that nothing on the Models page uses.
 
-    Used means an alias or enhancer tier loads it (with LTX companions, the MLX LTX text encoder and, where the
-    SeedVR2 engine downloads through the cache to make its stored copy, the SeedVR2 repo), or an installed model
-    links into it.
+    Used means an alias or enhancer tier loads it (with LTX companions, the MLX LTX text encoder, the repos MOSS-Image and
+    Ideogram 4 Instant are built from and, where the SeedVR2 engine downloads through the cache to make its stored copy,
+    the SeedVR2 repo), or an installed model links into it.
     """
     cache_dir = cache_dir or huggingface_cache_dir()
     # The MLX LTX text encoder counts as used everywhere; only the macOS backend downloads it.
@@ -492,32 +502,41 @@ def _delete_info_resolver(
     """
 
     def _delete_info(entry: ImageInventoryEntry | VideoInventoryEntry) -> dict[str, Any] | None:
-        target = model_delete_target(entry, models_dir, find_local_dir=find_local_dir, **delete_scope(entry, inventory, app_config or {}))
-        if target is None or not (target.path.exists() or target.path.is_symlink()):
+        target = model_delete_target(entry, models_dir, find_local_dir=find_local_dir, **delete_scope(entry, inventory, app_config or {}, models_dir=models_dir, platform_key=sys.platform))
+        if target is None or not target.on_disk:
             return None
         linked_by = list(installed_models_linking_to(target.path, models_dir)) if target.kind == "huggingface" else []
         stored_quants = [path.name for path in ((target.path, *target.stored_quants) if target.kind == "copy" else target.stored_quants)]
-        info = {"kind": target.kind, "repo_id": target.repo_id, "linked_by": linked_by, "stored_quants": stored_quants}
+        # Only a model built on first use has companion repos on an installed row: the sources it is built from.
+        source_repos = list(target.companion_repos) if target.kind == "installed" else []
+        info = {"kind": target.kind, "repo_id": target.repo_id, "linked_by": linked_by, "stored_quants": stored_quants, "source_repos": source_repos}
         return {**info, "shared_with": list(target.shared_with)} if target.kind == "copy" else info
 
     return _delete_info
 
 
-def _disk_size_resolver(models_dir: Path, *, listed: set[str], app_config: dict[str, Any]) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], str | None]:
+def _disk_size_resolver(
+    models_dir: Path, *, listed: set[str], app_config: dict[str, Any], inventory: tuple[ImageInventoryEntry | VideoInventoryEntry, ...] = ()
+) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], str | None]:
     """Return a resolver for each model's ``disk_size_label``: the disk its files use, or ``None`` when nothing is on disk.
 
     An installed model counts its folder (not the HuggingFace files it links to), an alias its HuggingFace download
-    with any companion repos. Stored quants count with their model unless they are rows of their own (in *listed*).
+    with any companion repos. A model built on first use that is not built yet counts the source repos that deleting
+    it removes (see :func:`built_sources_freed_with`), and the hidden folder its build downloads into (see :func:`built_downloads_freed_with`). Stored quants count with their model unless they are rows of
+    their own (in *listed*).
     """
 
     def _disk_size(entry: ImageInventoryEntry | VideoInventoryEntry) -> str | None:
         stored_quants = [path for path in stored_quant_dirs_for(models_dir, entry.name) if path.name not in listed]
-        local = [*stored_quants]
+        local = [*stored_quants, *built_downloads_freed_with(entry, models_dir=models_dir)]
         hub: list[Path] = []
         if entry.source == "installed":
             local.append(models_dir / entry.name)
         elif (repo := parse_huggingface_repo_reference(entry.resolved_path)) is not None:
             hub = [huggingface_cache_repo_dir(repo_id) for repo_id in (repo.repo_id, *video_companion_repos(entry.family, app_config, entry.resolved_path))]
+        else:
+            sources = built_sources_freed_with(entry, inventory, app_config, models_dir=models_dir, platform_key=sys.platform)
+            hub = [huggingface_cache_repo_dir(repo_id) for repo_id in sources]
         total = sum(directory_bytes(path) for path in local) + sum(repo_disk_bytes(path) for path in hub)
         return disk_size_label(total) if total else None
 

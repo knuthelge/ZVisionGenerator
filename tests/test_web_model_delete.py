@@ -13,12 +13,16 @@ from fastapi.testclient import TestClient
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils.built_model import write_record
 from zvisiongenerator.utils.config import enhancer_tier_models
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.web.model_delete import delete_lora, delete_model, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
+
+
+_SCOPE = {"models_dir": Path("/nonexistent/models"), "platform_key": "linux"}
 
 
 def _touch(path: Path) -> Path:
@@ -152,13 +156,13 @@ class TestSharedDownload:
 
     def _target(self, layout, name):
         entry = next(entry for entry in self._INVENTORY if entry.name == name)
-        return model_delete_target(entry, layout.models_dir, **delete_scope(entry, self._INVENTORY, self._CONFIG))
+        return model_delete_target(entry, layout.models_dir, **delete_scope(entry, self._INVENTORY, self._CONFIG, **_SCOPE))
 
     def test_only_a_video_family_with_companions_lists_them(self):
         ltx, other = self._INVENTORY[0], _image_entry("other", "alias", "org/base")
 
-        assert delete_scope(ltx, self._INVENTORY, self._CONFIG)["companion_repos"] == ("org/ckpt",)
-        assert delete_scope(other, self._INVENTORY, self._CONFIG)["companion_repos"] == ()
+        assert delete_scope(ltx, self._INVENTORY, self._CONFIG, **_SCOPE)["companion_repos"] == ("org/ckpt",)
+        assert delete_scope(other, self._INVENTORY, self._CONFIG, **_SCOPE)["companion_repos"] == ()
 
     def test_while_the_other_alias_has_its_copy_only_this_aliases_copy_goes(self, layout):
         _touch(layout.models_dir / "ltx-4@q4" / "transformer" / "0.safetensors")
@@ -295,11 +299,11 @@ def test_models_payload_describes_what_each_delete_removes(layout):
 
     delete_info = _delete_info_resolver(layout.models_dir)
 
-    assert delete_info(_image_entry("custom", "installed", "")) == {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []}
-    assert delete_info(_image_entry("base", "alias", "org/base")) == {"kind": "huggingface", "repo_id": "org/base", "linked_by": ["custom"], "stored_quants": []}
+    assert delete_info(_image_entry("custom", "installed", "")) == {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": [], "source_repos": []}
+    assert delete_info(_image_entry("base", "alias", "org/base")) == {"kind": "huggingface", "repo_id": "org/base", "linked_by": ["custom"], "stored_quants": [], "source_repos": []}
     assert delete_info(_image_entry("missing", "alias", "org/missing")) is None
     _touch(layout.hub / "models--org--partial" / "snapshots" / "abc" / "model_index.json")
-    assert delete_info(_ltx_entry("partial", "alias", "org/partial")) == {"kind": "huggingface", "repo_id": "org/partial", "linked_by": [], "stored_quants": []}
+    assert delete_info(_ltx_entry("partial", "alias", "org/partial")) == {"kind": "huggingface", "repo_id": "org/partial", "linked_by": [], "stored_quants": [], "source_repos": []}
 
 
 class TestMacH3Delete:
@@ -321,12 +325,12 @@ class TestMacH3Delete:
         return layout
 
     def test_deleting_h3_removes_its_downloads_and_the_text_encoder_copy(self, h3):
-        scope = delete_scope(h3.entry, (h3.entry,), h3.config)
+        scope = delete_scope(h3.entry, (h3.entry,), h3.config, models_dir=h3.models_dir, platform_key="darwin")
         target = model_delete_target(h3.entry, h3.models_dir, **scope)
 
         assert target is not None and target.kind == "huggingface"
         assert [path.name for path in target.stored_quants] == ["h3@mlx-te4"]
-        assert {path.name for path in target.companions} == {"models--water1234--MiniMax-H3-MLX-Argus-Calibrated-INT8", "models--lightx2v--Minimax-h3-Turbo"}
+        assert set(target.companion_repos) == {"water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo"}
 
         delete_model(target)
 
@@ -357,7 +361,7 @@ class TestMacH3Delete:
     def test_a_model_never_downloaded_is_not_deletable(self, h3):
         shutil.rmtree(h3.hub / "models--MiniMaxAI--MiniMax-H3")
 
-        assert model_delete_target(h3.entry, h3.models_dir, **delete_scope(h3.entry, (h3.entry,), h3.config)) is None
+        assert model_delete_target(h3.entry, h3.models_dir, **delete_scope(h3.entry, (h3.entry,), h3.config, models_dir=h3.models_dir, platform_key="darwin")) is None
 
     def test_an_installed_h3_folder_is_removed_with_its_copy(self, h3):
         _touch(h3.models_dir / "h3-local" / "FL2VA" / "model_index.json")
@@ -687,3 +691,208 @@ class TestEnhancerDeleteRoute:
 
         assert client.delete("/api/enhancer-models/fast").status_code == 409
         assert (layout.hub / "models--org--fast").is_dir()
+
+
+class TestBuiltModelDelete:
+    """MOSS-Image and Ideogram 4 Instant folders hard-link their cache sources: deleting a row frees the sources nothing else needs."""
+
+    _CONFIG = {
+        "moss_image": {"sft": "org/moss-sft@" + "d" * 40, "turbo_lora": {"repo": "org/moss-turbo", "revision": "e" * 40, "filename": "turbo.safetensors"}},
+        "ideogram4_instant": {
+            "transformer": {"repo": "org/instant-transformer", "revision": "a" * 40, "filename": "t.safetensors"},
+            "components": {"linux": "org/ideo-nf4@" + "c" * 40},
+            "transformer_format": {"linux": "bf16"},
+        },
+    }
+
+    @pytest.fixture
+    def built(self, layout):
+        """Cache repos for every source; a helper that makes a row built (an installed folder) or leaves it unbuilt (an alias)."""
+        for repo in ("org--moss-sft", "org--moss-turbo", "org--ideo-nf4"):
+            _touch(layout.hub / f"models--{repo}" / "snapshots" / "abc" / "model.safetensors")
+        layout.inventory = {}
+
+        def _row(name: str, *, built: bool) -> ImageInventoryEntry:
+            path = layout.models_dir / name
+            if built:
+                _touch(path / "transformer" / "model.safetensors")
+                write_record(path, {"version": 1})
+            entry = _image_entry(name, "installed" if built else "alias", str(path))
+            layout.inventory[name] = entry
+            return entry
+
+        layout.row = _row
+        return layout
+
+    def _target(self, built, entry):
+        inventory = tuple(built.inventory.values())
+        scope = delete_scope(entry, inventory, self._CONFIG, models_dir=built.models_dir, platform_key="linux")
+        return model_delete_target(entry, built.models_dir, **scope)
+
+    def _cached(self, built) -> set[str]:
+        return {path.name.removeprefix("models--") for path in built.hub.glob("models--*")}
+
+    def test_deleting_the_only_built_moss_removes_the_folder_and_both_sources(self, built):
+        moss = built.row("moss", built=True)
+
+        target = self._target(built, moss)
+        assert target is not None and target.kind == "installed"
+        assert target.companion_repos == ("org/moss-sft", "org/moss-turbo")
+        delete_model(target)
+
+        assert not (built.models_dir / "moss").exists()
+        assert self._cached(built) == {"org--ideo-nf4", "org--base", "org--other"}
+
+    def test_deleting_moss_keeps_the_sft_repo_while_moss_sft_is_built(self, built):
+        moss, _sft = built.row("moss", built=True), built.row("moss-sft", built=True)
+
+        target = self._target(built, moss)
+        assert target is not None and target.companion_repos == ("org/moss-turbo",)
+        delete_model(target)
+
+        assert "org--moss-sft" in self._cached(built) and "org--moss-turbo" not in self._cached(built)
+
+    def test_deleting_moss_sft_keeps_everything_while_moss_is_built(self, built):
+        built.row("moss", built=True)
+        sft = built.row("moss-sft", built=True)
+
+        target = self._target(built, sft)
+        assert target is not None and target.companion_repos == ()
+        delete_model(target)
+
+        assert not (built.models_dir / "moss-sft").exists()
+        assert {"org--moss-sft", "org--moss-turbo"} <= self._cached(built)
+
+    def test_deleting_the_sole_built_moss_frees_both_repos_even_with_moss_sft_unbuilt(self, built):
+        moss = built.row("moss", built=True)
+        built.row("moss-sft", built=False)
+
+        target = self._target(built, moss)
+        assert target is not None and target.companion_repos == ("org/moss-sft", "org/moss-turbo")
+        delete_model(target)
+
+        assert self._cached(built) == {"org--ideo-nf4", "org--base", "org--other"}
+
+    def test_an_unbuilt_moss_row_deletes_its_downloaded_sources(self, built):
+        moss = built.row("moss", built=False)
+
+        target = self._target(built, moss)
+        assert target is not None and target.kind == "installed"
+        assert target.companion_repos == ("org/moss-sft", "org/moss-turbo")
+        delete_model(target)
+
+        assert self._cached(built) == {"org--ideo-nf4", "org--base", "org--other"}
+
+    def test_an_unbuilt_moss_row_keeps_only_the_download_a_built_row_needs(self, built):
+        moss = built.row("moss", built=False)
+        built.row("moss-sft", built=True)
+
+        target = self._target(built, moss)
+        assert target is not None and target.companion_repos == ("org/moss-turbo",)
+        delete_model(target)
+
+        assert "org--moss-sft" in self._cached(built) and "org--moss-turbo" not in self._cached(built)
+
+    def test_an_unbuilt_row_with_nothing_downloaded_is_not_deletable(self, built):
+        shutil.rmtree(built.hub / "models--org--moss-sft")
+        shutil.rmtree(built.hub / "models--org--moss-turbo")
+
+        assert self._target(built, built.row("moss", built=False)) is None
+
+    def test_deleting_ideo_removes_the_components_repo(self, built):
+        ideo = built.row("ideo", built=True)
+
+        target = self._target(built, ideo)
+        assert target is not None and target.companion_repos == ("org/ideo-nf4",)
+        delete_model(target)
+
+        assert "org--ideo-nf4" not in self._cached(built) and "org--moss-sft" in self._cached(built)
+
+    def test_the_models_payload_names_the_sources_and_sizes_an_unbuilt_row_by_them(self, built):
+        from zvisiongenerator.web.workspace_api import _delete_info_resolver, _disk_size_resolver
+
+        moss, sft = built.row("moss", built=True), built.row("moss-sft", built=False)
+        inventory = (moss, sft)
+
+        delete_info = _delete_info_resolver(built.models_dir, inventory=inventory, app_config=self._CONFIG)
+        disk_size = _disk_size_resolver(built.models_dir, listed={"moss", "moss-sft"}, app_config=self._CONFIG, inventory=inventory)
+
+        # The unbuilt moss-sft row does not pin the SFT repo, so deleting the built moss frees both.
+        assert delete_info(moss)["source_repos"] == ["org/moss-sft", "org/moss-turbo"]
+        # moss-sft is downloaded but not built, and moss is built: the SFT repo is moss's, so the unbuilt row frees nothing.
+        assert delete_info(sft) is None and disk_size(sft) is None
+
+    def _hidden_download(self, built) -> Path:
+        return _touch(built.models_dir / ".ideo.download" / "t.safetensors").parent
+
+    def test_an_unbuilt_ideo_row_deletes_its_transformer_download_with_the_components(self, built):
+        hidden = self._hidden_download(built)
+        ideo = built.row("ideo", built=False)
+
+        target = self._target(built, ideo)
+        assert target is not None and target.build_downloads == (hidden,)
+        delete_model(target)
+
+        assert not hidden.exists() and "org--ideo-nf4" not in self._cached(built)
+
+    def test_deleting_a_built_ideo_row_also_removes_a_download_left_by_an_interrupted_rebuild(self, built):
+        hidden = self._hidden_download(built)
+
+        target = self._target(built, built.row("ideo", built=True))
+        assert target is not None
+        delete_model(target)
+
+        assert not hidden.exists() and not (built.models_dir / "ideo").exists()
+
+    def test_the_unbuilt_ideo_row_sizes_the_transformer_download_too(self, built):
+        from zvisiongenerator.web.workspace_api import _disk_size_resolver
+
+        shutil.rmtree(built.hub / "models--org--ideo-nf4")
+        self._hidden_download(built)
+        ideo = built.row("ideo", built=False)
+        size = _disk_size_resolver(built.models_dir, listed={"ideo"}, app_config=self._CONFIG, inventory=(ideo,))
+
+        assert size(ideo) == "1 KB"
+
+    @pytest.fixture
+    def client(self, built, monkeypatch):
+        moss = built.row("moss", built=True)
+        web_config = SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config=self._CONFIG, image_inventory=(moss,), video_inventory=())
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+        monkeypatch.setattr("sys.platform", "linux")
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def test_an_unbuilt_row_shows_the_disk_its_deletable_sources_use(self, built):
+        from zvisiongenerator.web.workspace_api import _disk_size_resolver
+
+        moss = built.row("moss", built=False)
+        size = _disk_size_resolver(built.models_dir, listed={"moss"}, app_config=self._CONFIG, inventory=(moss,))
+
+        assert size(moss) == "1 KB"
+        shutil.rmtree(built.hub / "models--org--moss-sft")
+        shutil.rmtree(built.hub / "models--org--moss-turbo")
+        assert size(moss) is None
+
+    def test_the_route_deletes_the_row_with_its_sources(self, client, built):
+        assert client.delete("/api/models/moss").status_code == 200
+
+        assert not (built.models_dir / "moss").exists()
+        assert not {"org--moss-sft", "org--moss-turbo"} & self._cached(built)
+
+    def test_the_route_refuses_while_the_transformer_downloads(self, client, built, downloading, monkeypatch):
+        hidden = self._hidden_download(built)
+        ideo = built.row("ideo", built=False)
+        web_config = SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config=self._CONFIG, image_inventory=(ideo,), video_inventory=())
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        downloading(DownloadTarget("org/instant-transformer", allow_patterns=("t.safetensors",), local_dir=str(hidden)))
+
+        assert client.delete("/api/models/ideo").status_code == 409
+        assert hidden.is_dir()
+
+    def test_the_route_refuses_while_a_source_downloads(self, client, built, downloading):
+        downloading(DownloadTarget("org/moss-turbo", allow_patterns=("*.safetensors",)))
+
+        assert client.delete("/api/models/moss").status_code == 409
+        assert (built.models_dir / "moss").is_dir() and "org--moss-turbo" in self._cached(built)

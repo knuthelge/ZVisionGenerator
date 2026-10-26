@@ -57,6 +57,9 @@ def ensure_instant_model(
 
     Returns:
         Whether the model is ready (``False`` only when *cancelled* stopped the build).
+
+    Raises:
+        RuntimeError: If *model_path* holds something ziv did not build (see :func:`~zvisiongenerator.utils.built_model.build_in_partial`).
     """
     if not is_instant_dir(model_path):
         return True

@@ -1265,6 +1265,8 @@ export interface ModelDeleteInfo {
   stored_quants?: string[];
   /** For `copy`: the models still using the shared download, which stays. */
   shared_with?: string[];
+  /** For a model built on first use: the source repos deleted with it (those no other built model needs). */
+  source_repos?: string[];
 }
 
 /** One Models-page download in the downloads lane. */

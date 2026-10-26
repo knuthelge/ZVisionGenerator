@@ -945,8 +945,8 @@
       {/if}
       {#if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed' && pendingDelete.downloadSizeLabel}
         <p data-testid="delete-redownload">The next plain upscale downloads it again ({pendingDelete.downloadSizeLabel}).</p>
-      {:else if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed'}
-        <p>Hugging Face files it links to are kept.</p>
+      {:else if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed' && (pendingDelete.info.source_repos?.length ?? 0) === 0}
+        <p data-testid="delete-links-kept">Hugging Face files it links to are kept.</p>
       {:else if pendingDelete.type === 'model' && pendingDelete.info.kind === 'copy'}
         <p data-testid="delete-copy">
           Deletes <span class="font-mono">{pendingDelete.info.stored_quants?.join(', ')}</span>. The download stays, since
@@ -960,6 +960,11 @@
             <span class="font-mono">{pendingDelete.info.linked_by.join(', ')}</span>
           </Alert>
         {/if}
+      {/if}
+      {#if pendingDelete.type === 'model' && pendingDelete.info.kind !== 'copy' && (pendingDelete.info.source_repos?.length ?? 0) > 0}
+        <p data-testid="delete-sources">
+          The downloads it is built from are deleted too: <span class="font-mono">{pendingDelete.info.source_repos?.join(', ')}</span>
+        </p>
       {/if}
       {#if pendingDelete.type === 'model' && pendingDelete.info.kind !== 'copy' && (pendingDelete.info.stored_quants?.length ?? 0) > 0}
         <p data-testid="delete-stored-quants">

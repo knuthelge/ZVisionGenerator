@@ -47,6 +47,7 @@ Each row has a delete button, which appears as soon as any of the model's files 
 |---|---|
 | Converted model | Its folder in `~/.ziv/models/`. Base-model files it links to are kept. |
 | Built-in model | Its Hugging Face download, including a partial one. The model downloads again the next time you use it. The confirmation lists converted models that link to it, because they stop working until it's downloaded again. |
+| MOSS-Image, Ideogram 4 Instant | The model folder, built or not yet built, and the Hugging Face downloads it is built from, except those another one of these models still uses. Deleting `moss` while `moss-sft` is built keeps the shared model files and removes only the Turbo LoRA; deleting the `moss-sft` row then frees the rest. A row that is not built never keeps another one's downloads. Ideogram 4 Instant's transformer, which downloads beside the model while it is built, goes with it, also when the row is not built yet, and counts in the row's **Size**. Until you delete the last model that uses a download, it isn't listed under **Other downloads**. |
 | MiniMax H3 | Its download, the repositories it downloads beside it, and its prepared copy (`h3@q4`, or `h3@mlx-te4` on a Mac). A converted H3 model is a folder of its own and is left alone, but it needs `h3`'s parts to run, which its next use downloads again. |
 | LoRA | The `.safetensors` file. |
 | Prompt enhancer model | Its download, including a partly finished one. A custom model in a local folder is never deleted. |

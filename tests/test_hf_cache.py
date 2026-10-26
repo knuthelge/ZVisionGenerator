@@ -15,6 +15,7 @@ from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.hf_cache import cached_model_repos, free_stranded_shared_files, stranded_shared_files
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, installed_models_linking_to, used_repo_ids
+from zvisiongenerator.downloads.built_sources import built_model_sources
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.web.workspace_api import _other_downloads_payload, find_other_downloads
 
@@ -123,6 +124,54 @@ def test_used_repo_ids_cover_aliases_companions_enhancers_and_extras():
     assert used == {"org/klein", "org/ltx", "org/ltx-single", "org/fast", "org/seedvr2"}
 
 
+_BUILT_ON_FIRST_USE_CONFIG = {
+    "model_aliases": {
+        "ideo": "ideo",
+        "moss": {"win32": "moss", "linux": "moss"},
+        "moss-sft": {"win32": "moss-sft", "linux": "moss-sft"},
+    },
+    "ideogram4_instant": {
+        "transformer": {"repo": "org/instant-transformer", "revision": "a" * 40, "filename": "t.safetensors"},
+        "components": {"darwin": "org/ideo-fp8@" + "b" * 40, "linux": "Org/Ideo-NF4@" + "c" * 40},
+        "transformer_format": {"darwin": "fp8", "linux": "bf16"},
+    },
+    "moss_image": {
+        "sft": "Org/Moss-SFT@" + "d" * 40,
+        "turbo_lora": {"repo": "org/moss-turbo", "revision": "e" * 40, "filename": "turbo.safetensors"},
+    },
+}
+
+
+def test_used_repo_ids_cover_the_sources_of_models_built_on_first_use():
+    linux = used_repo_ids([], _BUILT_ON_FIRST_USE_CONFIG, platform_key="linux")
+    darwin = used_repo_ids([], _BUILT_ON_FIRST_USE_CONFIG, platform_key="darwin")
+
+    assert linux == {"org/ideo-nf4", "org/moss-sft", "org/moss-turbo"}
+    # MOSS has no alias on macOS, so only the Instant components of that platform count.
+    assert darwin == {"org/ideo-fp8"}
+
+
+def test_each_built_model_names_its_own_source_repos():
+    sources = {name: built_model_sources(name, _BUILT_ON_FIRST_USE_CONFIG, platform_key="linux") for name in ("moss", "moss-sft", "ideo", "zit")}
+
+    assert sources == {"moss": ("Org/Moss-SFT", "org/moss-turbo"), "moss-sft": ("Org/Moss-SFT",), "ideo": ("Org/Ideo-NF4",), "zit": ()}
+
+
+def test_moss_sft_alone_does_not_use_the_turbo_lora_repo():
+    config = {**_BUILT_ON_FIRST_USE_CONFIG, "model_aliases": {"moss-sft": "moss-sft"}}
+
+    assert used_repo_ids([], config, platform_key="linux") == {"org/moss-sft"}
+
+
+def test_an_invalid_built_model_source_block_warns_and_counts_nothing():
+    config = {**_BUILT_ON_FIRST_USE_CONFIG, "moss_image": {}}
+
+    with pytest.warns(UserWarning, match="built on first use"):
+        used = used_repo_ids([], config, platform_key="linux")
+
+    assert used == {"org/ideo-nf4"}
+
+
 def test_cache_repos_linked_from_installed_models(hub, tmp_path):
     base = _repo(hub, "org/base")
     _touch(base / "snapshots" / _SNAPSHOT / "text_encoder" / "model.safetensors")
@@ -166,6 +215,17 @@ def web_config(hub, tmp_path):
 
 def test_other_downloads_are_the_repos_nothing_uses(web_config, hub):
     assert [repo.repo_id for repo in find_other_downloads(web_config, cache_dir=hub)] == ["org/old"]
+
+
+def test_the_repos_a_built_model_links_files_from_are_not_other_downloads(web_config, hub):
+    for repo_id in ("Org/Moss-SFT", "org/moss-turbo", "org/ideo-nf4", "org/instant-transformer"):
+        _repo(hub, repo_id, local=25_000)
+    web_config.app_config = {**web_config.app_config, **_BUILT_ON_FIRST_USE_CONFIG}
+
+    listed = [repo.repo_id for repo in find_other_downloads(web_config, cache_dir=hub)]
+
+    # The built folders hard-link these files, so deleting them would force a re-download.
+    assert sorted(listed) == ["org/instant-transformer", "org/old"]
 
 
 def test_models_payload_lists_other_downloads(web_config, hub):
