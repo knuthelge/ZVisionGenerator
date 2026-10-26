@@ -45,4 +45,4 @@ A video's loop ends at the viewer. Extend continues a clip from its last frames,
 ## Out of scope
 
 - Trimming or cutting videos.
-- Using a frame as the last frame of a clip, which belongs to [First and last frame](video-first-last-frame.md).
+- Using a frame as the last frame of a clip, which belongs to [First and last frame](archive/video-first-last-frame.md).
