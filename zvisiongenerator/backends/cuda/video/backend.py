@@ -147,6 +147,7 @@ class _LoadedVideoModel:
     resident_text_encoder: Any | None = None  # kept between prompts when it fits beside the transformer
     sampler: str | None = None  # the configured step sampler (``euler_ancestral``), or None for the pipeline's own scheduler
     image_crf: int | None = None  # the CRF an i2v image is re-compressed at before the fit, or None to leave it to the pipeline
+    end_image: bool = False  # the i2v pipeline is the condition pipeline, for clips that end on a last-frame image
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -1019,12 +1020,14 @@ def _generate_two_stage(
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
     review: Callable[[Path], None] | None = None,
+    conditioned: bool = False,
 ) -> _GeneratedClip:
     """Render at half size, upsample the latents 2x and refine at full size on the same pipeline.
 
     Both denoising passes run on *pipeline* so its LoRA adapters apply to each. Progress covers both passes as one
     run of ``len(stage-1 sigmas) + len(stage-2 sigmas)`` steps. With *review*, the half-size result is decoded to a
-    temporary video and passed to it before the upsample; an exception from it ends the generation.
+    temporary video and passed to it before the upsample; an exception from it ends the generation. A *conditioned*
+    run keeps the pipeline's own scheduler in both passes whatever sampler is configured.
     """
 
     if width % 64 or height % 64:
@@ -1037,7 +1040,7 @@ def _generate_two_stage(
     generator = _make_generator(runtime.torch, seed)
     common = {"prompt_inputs": prompt_inputs, "num_frames": num_frames, "fps": fps, "generator": generator}
 
-    with _pass_scheduler(model, pipeline, seed=seed, stage=1, refine=False):
+    with _pass_scheduler(model, pipeline, seed=seed, stage=1, refine=False, conditioned=conditioned):
         stage1 = pipeline(
             **_build_generation_kwargs(
                 **common,
@@ -1054,7 +1057,7 @@ def _generate_two_stage(
     upsampled = _upsample_latents(model.upsample_pipeline, stage1.frames, width=width, height=height, num_frames=num_frames, low_memory=model.low_memory)
 
     refine_kwargs = {**extra_kwargs, "latents": upsampled, "audio_latents": stage1.audio, "noise_scale": stage2_sigmas[0]}
-    with _pass_scheduler(model, pipeline, seed=seed, stage=2, refine=True):
+    with _pass_scheduler(model, pipeline, seed=seed, stage=2, refine=True, conditioned=conditioned):
         stage2 = pipeline(
             **_build_generation_kwargs(
                 **common,
@@ -1078,6 +1081,38 @@ def _check_upscale_arguments(model: _LoadedVideoModel, stage1_steps: int | None)
         raise RuntimeError("Upscale was requested, but no latent upsampler is loaded for this model.")
 
 
+def _conditioning_image(model: _LoadedVideoModel, image_path: str, width: int, height: int) -> Any:
+    """Open an i2v image, re-compress it at the model's CRF when it has one, and fit it to the clip's size."""
+
+    with model.runtime.image_module.open(image_path) as image:
+        source = image.convert("RGB")
+        if model.image_crf is not None:
+            source = recompress(source, model.image_crf)  # before the fit, as the model was trained
+        return _fit_image(source, width, height)
+
+
+@contextmanager
+def _keyframe_on_last_frame(pipeline: Any, num_frames: int) -> Iterator[None]:
+    """Place the condition pipeline's appended keyframe on the clip's last pixel frame for the block.
+
+    The pipeline takes a latent index and puts a keyframe at pixel ``(index - 1) * 8 + 1``, so ``-1`` lands 8 frames
+    before the end of an ``8k + 1`` clip. LTX positions an appended keyframe by its pixel time, as the reference
+    implementation does with a pixel frame index, so moving its coordinates to ``num_frames - 1`` puts it on the last frame.
+    """
+
+    original = pipeline._prepare_keyframe_coords  # noqa: SLF001
+
+    def on_last_frame(*args: Any, **kwargs: Any) -> Any:
+        kwargs["pixel_frame_idx"] = num_frames - 1
+        return original(*args, **kwargs)
+
+    pipeline._prepare_keyframe_coords = on_last_frame  # noqa: SLF001
+    try:
+        yield
+    finally:
+        del pipeline._prepare_keyframe_coords  # noqa: SLF001
+
+
 def _generate_clip(
     model: _LoadedVideoModel,
     pipeline: Any,
@@ -1099,7 +1134,7 @@ def _generate_clip(
     """Generate a clip at *fps* in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both.
 
     *audio_carry* (one stage only) pins sound at the start of the clip. *review* (two stages only) sees the half-size render first.
-    *conditioned* (Extend) keeps the pipeline's own scheduler whatever sampler is configured.
+    *conditioned* (Extend, a last-frame image) keeps the pipeline's own scheduler whatever sampler is configured.
     """
 
     prompt_inputs = _encode_prompt(model, pipeline, prompt)
@@ -1135,6 +1170,7 @@ def _generate_clip(
         step_callback=step_callback,
         extra_kwargs=extra_kwargs,
         review=review,
+        conditioned=conditioned,
     )
 
 
@@ -1208,6 +1244,8 @@ class DiffusersVideoBackend:
                 the pipeline's own. An Extend pass always keeps the pipeline's own.
             image_crf: The H.264 CRF an i2v image is re-compressed at before it is fitted; ``None`` leaves the image to
                 the pipeline's own default.
+            end_image: Whether the clips of an i2v load end on a last-frame image (see :meth:`image_to_video`); they
+                run on the condition pipeline instead of the image-to-video one.
 
         A converted folder (``ziv model model --model-type ltx-2.3``) ignores ``quantize``, ``transformer_source``
         and ``model_name``: it loads the weights and level stored in it.
@@ -1218,6 +1256,7 @@ class DiffusersVideoBackend:
         loras = kwargs.get("loras") or []
         upscale = bool(kwargs.get("upscale"))
         sampler = kwargs.get("sampler")
+        end_image = bool(kwargs.get("end_image")) and mode == "i2v"
 
         if mode not in _PIPELINES_BY_MODE:
             raise ValueError(f"Unsupported video generation mode: {mode}")
@@ -1246,7 +1285,7 @@ class DiffusersVideoBackend:
         # Fail fast on a missing upsampler file before the large generation pipeline loads.
         upsampler_weights = _resolve_upsampler_weights(*latent_upsampler) if upscale else None
 
-        pipeline_class = getattr(runtime.pipeline_classes, _PIPELINES_BY_MODE[mode])
+        pipeline_class = getattr(runtime.pipeline_classes, _PIPELINES_BY_MODE["extend" if end_image else mode])  # Extend's pipeline pins any frame
         _check_lora_files(loras)
         active_pipeline, text_encoder, transformer = _load_generation_pipeline(
             pipeline_class,
@@ -1285,6 +1324,7 @@ class DiffusersVideoBackend:
                 transformer=transformer,
                 sampler=sampler,
                 image_crf=kwargs.get("image_crf"),
+                end_image=end_image,
             ),
             model_info,
         )
@@ -1348,27 +1388,43 @@ class DiffusersVideoBackend:
         step_callback: Any | None = None,
         **kwargs: Any,
     ) -> Path | None:
-        """Generate video frames from an image prompt pair and export them to disk."""
+        """Generate video frames from an image prompt pair and export them to disk.
+
+        With ``end_image`` (the path of a last-frame image; the model must be loaded with ``end_image=True``), the clip
+        runs from *image_path* to it: the first frame is pinned and the last image is appended as a keyframe on the
+        clip's last frame, on the pipeline's own scheduler.
+        """
 
         if model.image_to_video is None:
             raise RuntimeError("This loaded video model does not include an image-to-video pipeline.")
 
         stage1_steps = kwargs.get("stage1_steps")
         review = kwargs.get("review")
+        end_image = kwargs.get("end_image")
         _check_upscale_arguments(model, stage1_steps)
         _check_review_arguments(review, stage1_steps)
+        if bool(end_image) != model.end_image:
+            raise RuntimeError(f"A clip {'with' if end_image else 'without'} a last-frame image needs the model loaded with end_image={bool(end_image)}.")
 
-        with model.runtime.image_module.open(image_path) as image:
-            source = image.convert("RGB")
+        input_image = _conditioning_image(model, image_path, width, height)
+        if end_image:
+            condition = model.runtime.pipeline_classes.video_condition
+            crf = 0 if model.image_crf is not None else None  # already re-compressed, or left to the pipeline's default
+            extra_kwargs: dict[str, Any] = {
+                "conditions": [
+                    condition(frames=input_image, index=0, strength=1.0, crf=crf),
+                    condition(frames=_conditioning_image(model, end_image, width, height), index=-1, strength=1.0, crf=crf),
+                ]
+            }
+            placement: AbstractContextManager[None] = _keyframe_on_last_frame(model.image_to_video, num_frames)
+        else:
+            extra_kwargs = {"image": input_image}
             if model.image_crf is not None:
-                source = recompress(source, model.image_crf)  # before the fit, as the model was trained
-            input_image = _fit_image(source, width, height)
-        extra_kwargs: dict[str, Any] = {"image": input_image}
-        if model.image_crf is not None:
-            extra_kwargs["image_crf"] = 0  # already re-compressed: the pipeline must not do it again
+                extra_kwargs["image_crf"] = 0  # already re-compressed: the pipeline must not do it again
+            placement = nullcontext()
 
         try:
-            with model.runtime.torch.inference_mode():
+            with model.runtime.torch.inference_mode(), placement:
                 clip = _generate_clip(
                     model,
                     model.image_to_video,
@@ -1383,6 +1439,7 @@ class DiffusersVideoBackend:
                     step_callback=step_callback,
                     extra_kwargs=extra_kwargs,
                     review=review,
+                    conditioned=bool(end_image),
                 )
                 output = _export_video(model, clip, output_path)
         finally:

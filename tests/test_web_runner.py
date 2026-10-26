@@ -332,6 +332,23 @@ class TestWebRunner:
         assert "upscale" not in backend.load_model.call_args.kwargs
         assert backend.load_model.call_args.kwargs["mode"] == "extend"
 
+    @pytest.mark.parametrize("end_image_path", ["/images/last.png", None])
+    def test_an_image_to_video_job_loads_for_its_last_frame_image_only_when_it_has_one(self, monkeypatch, end_image_path):
+        monkeypatch.setattr(web_runner_module, "run_video_batch", lambda **_kw: None)
+        backend = _stub_request_job(monkeypatch)
+        request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", image_path="/images/first.png", end_image_path=end_image_path)
+        args = _make_video_args(image_path="/images/first.png", end_image_path=end_image_path)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config={}, args=args, model_ref="model")
+            _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        kwargs = backend.load_model.call_args.kwargs
+        assert (kwargs["mode"], kwargs["end_image"]) == ("i2v", end_image_path is not None)
+
     @pytest.mark.parametrize(("upscale", "expect_source"), [(2, True), (None, False)])
     def test_video_job_passes_latent_upsampler_only_when_upscaling(self, monkeypatch, upscale, expect_source):
         """Video jobs hand the configured upsampler source to load_model only for upscale jobs."""

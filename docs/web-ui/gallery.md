@@ -60,7 +60,7 @@ When the prompt was enhanced, Details shows how, as one line such as *Fast · Ci
 
 - **For image (img2img)** puts the prompt in the Prompt box.
 - **For video (img2vid)** puts it in Scene, since it describes the first frame, and leaves Action for what happens.
-- **For last frame (img2vid)** makes it the last frame of a MiniMax H3 clip.
+- **For last frame (img2vid)** makes it the last frame of an image-to-video clip.
 
 ### Upscale a video
 

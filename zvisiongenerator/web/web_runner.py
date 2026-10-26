@@ -891,6 +891,7 @@ class WebRunner:
         model, model_info = backend.load_model(
             model_ref,
             mode="extend" if getattr(args, "extend_source", None) is not None else "i2v" if request.image_path else "t2v",
+            end_image=getattr(args, "end_image_path", None) is not None,
             low_memory=getattr(args, "low_memory", True),
             loras=loras,
             **video_load_options(request.model_family, config, request.model_name or model_ref, upscale=bool(request.upscale), quiet=True),

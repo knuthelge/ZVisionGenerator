@@ -87,7 +87,7 @@ With audio off, and for images, no sounds are described. In a silent video, quot
 
 - **The frame:** portrait, landscape or square, so the composition fits.
 - **The clip length:** one continuous action up to 5 seconds, two or three beats up to 10 seconds.
-- **A starting image:** for image to video, the rewrite describes motion and change rather than what the first frame already shows. For image to image, it mentions the subject only briefly. The enhancer doesn't see the image itself. With a last frame (MiniMax H3), it describes the change that leads from the first image to the last and doesn't invent a different ending.
+- **A starting image:** for image to video, the rewrite describes motion and change rather than what the first frame already shows. For image to image, it mentions the subject only briefly. The enhancer doesn't see the image itself. With a last frame, it describes the change that leads from the first image to the last and doesn't invent a different ending.
 
 ## Video: scene and action
 

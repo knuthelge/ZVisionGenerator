@@ -308,12 +308,13 @@ class _NoRatePipeline(_AudioTextPipeline):
 
 
 class _FakeVideoCondition:
-    """Stand-in for LTX2VideoCondition: records the frames, latent index and strength it was built with."""
+    """Stand-in for LTX2VideoCondition: records the frames, latent index, strength and CRF it was built with."""
 
-    def __init__(self, *, frames, index, strength):
+    def __init__(self, *, frames, index, strength, crf=None):
         self.frames = frames
         self.index = index
         self.strength = strength
+        self.crf = crf
 
 
 class _NumpyWaveform:
@@ -359,9 +360,18 @@ class _FakeConditionPipeline(_BaseFakePipeline):
         self.audio_vae.config = SimpleNamespace(sample_rate=16000)
         self.vocoder = _WindowVocoder(round(self.window / 24 * 48000))
         self.transformer_at_call: list[object] = []
+        self.keyframe_pixels: list[int] = []
+
+    def _prepare_keyframe_coords(self, **kwargs):
+        return kwargs["pixel_frame_idx"]
 
     def __call__(self, **kwargs):
         self.transformer_at_call.append(self.transformer)
+        # As diffusers places an appended (non-zero index) keyframe: latent index -> pixel (index - 1) * 8 + 1.
+        latent_frames = (kwargs["num_frames"] - 1) // 8 + 1
+        for condition in kwargs.get("conditions", []):
+            if condition.index % latent_frames:
+                self.keyframe_pixels.append(self._prepare_keyframe_coords(pixel_frame_idx=(condition.index % latent_frames - 1) * 8 + 1, fps=kwargs["frame_rate"]))
         return _run_fake_denoise(self, kwargs, [[np.full((4, 4, 3), index, dtype=np.uint8) for index in range(self.window)]])
 
 
@@ -1922,6 +1932,91 @@ class TestExtendVideo:
         self._extend(self._load(monkeypatch), tmp_path)
 
         assert seen == [True]
+
+
+class TestEndImage:
+    """A clip that ends on a last-frame image runs on the condition pipeline, pinned at its first and last frames."""
+
+    @staticmethod
+    def _load(monkeypatch, repo="diffusers/LTX-2.3-Distilled-Diffusers", **kwargs):
+        _patch_runtime(monkeypatch, _make_runtime())
+        return DiffusersVideoBackend().load_model(repo, quantize=4, **{"mode": "i2v", "end_image": True, **kwargs})[0]
+
+    @staticmethod
+    def _images(tmp_path):
+        Image.new("RGB", (16, 8), "blue").save(tmp_path / "first.png")
+        Image.new("RGB", (8, 16), "red").save(tmp_path / "last.png")
+        return str(tmp_path / "first.png"), str(tmp_path / "last.png")
+
+    def _run(self, model, tmp_path, *, num_frames=49, **kwargs):
+        first, last = self._images(tmp_path)
+        return DiffusersVideoBackend().image_to_video(model, first, "she turns", 128, 64, num_frames, 7, 8, str(tmp_path / "out.mp4"), end_image=last, **kwargs)
+
+    @pytest.mark.parametrize(
+        ("mode", "end_image", "slot", "pipeline_class"),
+        [("i2v", True, "image_to_video", _FakeConditionPipeline), ("i2v", False, "image_to_video", _FakeImagePipeline), ("t2v", True, "text_to_video", _FakeTextPipeline)],
+    )
+    def test_only_an_image_to_video_load_for_an_end_image_builds_the_condition_pipeline(self, monkeypatch, mode, end_image, slot, pipeline_class):
+        model = self._load(monkeypatch, mode=mode, end_image=end_image)
+        assert type(getattr(model, slot)) is pipeline_class
+        assert model.end_image is (end_image and mode == "i2v")
+
+    def test_pins_the_first_image_at_latent_zero_and_the_last_after_it_both_fitted_to_the_clip(self, monkeypatch, tmp_path):
+        model = self._load(monkeypatch)
+        self._run(model, tmp_path)
+        (call,) = model.image_to_video.calls
+        first, last = call["conditions"]
+        assert [(c.index, c.strength) for c in (first, last)] == [(0, 1.0), (-1, 1.0)]
+        assert first.frames.size == last.frames.size == (128, 64)
+        assert first.frames.getpixel((0, 0)) == (0, 0, 255) and last.frames.getpixel((0, 0)) == (255, 0, 0)
+        assert "image" not in call
+
+    @pytest.mark.parametrize("num_frames", [9, 49, 121])
+    def test_the_last_image_lands_on_the_last_frame_and_the_placement_is_undone_after(self, monkeypatch, tmp_path, num_frames):
+        model = self._load(monkeypatch)
+        self._run(model, tmp_path, num_frames=num_frames)
+        assert model.image_to_video.keyframe_pixels == [num_frames - 1]
+        assert "_prepare_keyframe_coords" not in vars(model.image_to_video)
+
+    @pytest.mark.parametrize(("repo", "crf"), [("diffusers/LTX-2.3-Distilled-Diffusers", None), ("unsloth/LTX-2.5-FP8@" + _PIN, 0)])
+    def test_an_image_the_backend_recompressed_is_not_recompressed_again(self, monkeypatch, tmp_path, repo, crf):
+        model = self._load(monkeypatch, repo=repo, image_crf=18 if crf == 0 else None)
+        self._run(model, tmp_path)
+        assert [c.crf for c in model.image_to_video.calls[0]["conditions"]] == [crf, crf]
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_every_pass_keeps_the_stock_scheduler_whatever_the_sampler(self, monkeypatch, tmp_path, upscale):
+        seen: list[bool] = []
+        real = video_diffusers_module._pass_scheduler
+
+        def _spy(*args, **kwargs):
+            seen.append(kwargs["conditioned"])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(video_diffusers_module, "_pass_scheduler", _spy)
+        if upscale:
+            _patch_upsampler_io(monkeypatch)
+        options = {"upscale": True, "latent_upsampler": _UPSAMPLER_SOURCE} if upscale else {}
+        model = self._load(monkeypatch, repo="unsloth/LTX-2.5-FP8@" + _PIN, sampler="euler_ancestral", **options)
+
+        self._run(model, tmp_path, stage1_steps=8 if upscale else None)
+
+        assert seen == [True, True] if upscale else [True]
+
+    def test_the_refine_pass_pins_both_images_too(self, monkeypatch, tmp_path):
+        _patch_upsampler_io(monkeypatch)
+        model = self._load(monkeypatch, upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)
+        self._run(model, tmp_path, stage1_steps=8)
+        assert [[c.index for c in call["conditions"]] for call in model.image_to_video.calls] == [[0, -1], [0, -1]]
+        assert model.image_to_video.keyframe_pixels == [48, 48]
+
+    @pytest.mark.parametrize("loaded_for_end_image", [True, False])
+    def test_a_clip_that_does_not_match_the_load_is_refused(self, monkeypatch, tmp_path, loaded_for_end_image):
+        model = self._load(monkeypatch, end_image=loaded_for_end_image)
+        first, last = self._images(tmp_path)
+        with pytest.raises(RuntimeError, match="end_image="):
+            DiffusersVideoBackend().image_to_video(model, first, "p", 64, 32, 49, 7, 8, str(tmp_path / "out.mp4"), **({} if loaded_for_end_image else {"end_image": last}))
+        assert model.image_to_video.calls == []
 
 
 class TestUpscaleReview:

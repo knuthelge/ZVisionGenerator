@@ -77,7 +77,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `-p`, `--prompts-file` | `prompts.yaml` | YAML prompt file |
 | `-r`, `--runs` | `1` | How many times to run every prompt |
 | `--image` | none | First frame, for image-to-video |
-| `--end-image` | none | Last frame: the clip runs from `--image` to it. Needs `--image` and a model that takes one (`h3`) |
+| `--end-image` | none | Last frame: the clip runs from `--image` to it. Needs `--image` |
 | `-s`, `--size` | `s` | Size preset: `xs`, `s`, `m`, `l`, `xl` |
 | `--ratio` | `16:9` | Aspect ratio: `16:9`, `9:16`, `1:1` |
 | `-W`, `--width` | from preset | Width; aligned to 32 px (64 with `--upscale`) |

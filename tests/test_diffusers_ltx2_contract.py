@@ -38,6 +38,21 @@ def test_the_condition_pipeline_call_takes_the_arguments_the_backend_passes():
     )
 
 
+def test_a_keyframe_placed_at_a_pixel_frame_spans_that_one_frame_in_seconds():
+    # The CUDA last-frame image moves its keyframe to pixel ``num_frames - 1`` through this method's keyword.
+    pipeline = object.__new__(LTX2ConditionPipeline)
+    pipeline.transformer_spatial_patch_size = 1
+    pipeline.transformer_temporal_patch_size = 1
+    pipeline.vae_temporal_compression_ratio = 8
+    pipeline.vae_spatial_compression_ratio = 32
+
+    coords = pipeline._prepare_keyframe_coords(
+        keyframe_latent_num_frames=1, keyframe_latent_height=2, keyframe_latent_width=2, pixel_frame_idx=48, num_pixel_frames=1, fps=24.0, device=torch.device("cpu")
+    )
+
+    assert torch.allclose(coords[0, 0], torch.tensor([[48 / 24, 49 / 24]] * 4))
+
+
 def test_audio_latents_pack_to_tokens_of_channels_times_mel_bins_and_normalize_per_feature():
     latent = torch.arange(1 * 8 * 3 * 16, dtype=torch.float32).reshape(1, 8, 3, 16)
     packed = LTX2ConditionPipeline._pack_audio_latents(latent)  # noqa: SLF001

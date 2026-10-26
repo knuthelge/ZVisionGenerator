@@ -11,7 +11,7 @@ Choose **Text to Video** in the top bar. The model picker offers:
 | LTX-2.3 4-bit | `ltx-4` | The least memory. About 20 GB of system memory on Windows and Linux. |
 | LTX-2.3 8-bit | `ltx-8` | Closer to the full model. About 27 GB of system memory on Windows and Linux, a Mac with 32 GB or more. |
 | LTX-2.5 4-bit | `ltx25-4` | The newer LTX, with the memory need of `ltx-4`. |
-| MiniMax H3 | `h3` | Stronger on dynamic scenes and can end on a last frame, but a 98 GB download and several minutes per clip. |
+| MiniMax H3 | `h3` | Stronger on dynamic scenes, but a 98 GB download and several minutes per clip. |
 
 Pick `ltx-4` if you're unsure. See [Models](../concepts/models.md#video-models) for downloads and timings. The first job downloads the model and, on Windows and Linux, prepares it for your GPU, which takes a while. Later jobs start much faster. To download it ahead of time, use the [Models](models.md) page.
 
@@ -53,7 +53,7 @@ Choose **Image to Video**, then pick the first frame under **Reference image**: 
 
 Describe in Action what happens from that frame on. The image is scaled to cover the video size and the overflow is cut from the centre, so pick a **Ratio** close to the image's shape.
 
-With MiniMax H3 you can also pick a **Last frame**, and the clip runs from the first image to the last. See [First and last frame](../concepts/video.md#first-and-last-frame).
+You can also pick a **Last frame**, and the clip runs from the first image to the last. See [First and last frame](../concepts/video.md#first-and-last-frame).
 
 ## Make it longer
 

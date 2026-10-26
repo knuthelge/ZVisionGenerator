@@ -276,10 +276,10 @@ class TestLoadModel:
         assert rig.events == []
         assert H3VideoBackend().load_model("m", preset=only_four)[0].upscale is False
 
-    def test_accepts_loras_and_upscale_and_ignores_low_memory_and_model_name(self, rig, tmp_path):
+    def test_accepts_loras_and_upscale_and_ignores_low_memory_model_name_and_end_image(self, rig, tmp_path):
         lora = tmp_path / "style.safetensors"
         lora.write_bytes(b"x")
-        model, _ = H3VideoBackend().load_model("m", preset=PRESET, loras=[(str(lora), 0.7)], upscale=True, low_memory=True, model_name="h3")
+        model, _ = H3VideoBackend().load_model("m", preset=PRESET, loras=[(str(lora), 0.7)], upscale=True, low_memory=True, model_name="h3", end_image=True)
         assert model.loras == ((lora, 0.7),)
         assert model.upscale is True
 

@@ -74,7 +74,7 @@ __all__ = ["H3VideoBackend"]
 _MODEL_INFO = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=H3_FPS, frame_alignment=H3_FRAMES_PER_CHUNK, resolution_alignment=H3_ROW_PIXELS)
 _MODES = ("t2v", "i2v", "extend")
 # What ``load_model`` takes. ``low_memory`` (H3 always streams its blocks) is accepted for the callers that pass it to every backend, and ignored.
-_LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset"})
+_LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset", "end_image"})
 _SYSTEM_MEMORY_TIGHT_RATIO = 0.8  # a load needing more than this share of system memory leaves little to the rest of the machine
 _RESOLUTION_FOR_UPSCALE = 2 * H3_ROW_PIXELS  # stage 1 runs at half size, which must stay a multiple of 32
 _PHASE = "video"
@@ -710,7 +710,7 @@ class H3VideoBackend:
                 loras: ``(path, weight)`` of each user LoRA.
                 upscale: Whether the clips are made with the latent upscale; the upscaler's file is then resolved (and downloaded on first use).
                 model_name: The name the model was picked by; the stored copy is named after it (see ``stored_copy.copy_name``).
-                low_memory: Accepted and ignored.
+                low_memory, end_image: Accepted and ignored (a clip method takes its last-frame image).
 
         Returns:
             Tuple of (backend-private model handle, VideoModelInfo).

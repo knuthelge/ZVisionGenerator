@@ -127,8 +127,8 @@ def test_ltx_workspace_defaults_are_unchanged(model):
         "enhance_max_words": 300,
         "family": "ltx",
         "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"},
-        # LTX has no last frame, so the three end-image controls are the only ones its Workspace hides.
-        "hidden_controls": ["end_image", "end_image_clear", "end_image_path"],
+        # LTX takes every control, the last frame included.
+        "hidden_controls": [],
         "supports_extend": True,
         "step_options": None,
         "extend_frame_step": 8,
@@ -188,7 +188,7 @@ def test_the_packaged_ltx_family_is_described_literally():
         name="ltx",
         label="LTX distilled model",
         frame_rule=FrameRule(8, 1, "nearest"),
-        capabilities=VideoCapabilities(i2v=True, end_frame=False, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=True),
+        capabilities=VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=True),
         platform_capabilities={},
         default_steps=8,
         max_steps=8,

@@ -63,7 +63,7 @@ _FPS_TEXT = f"{H3_FPS}/1"
 _MODEL_INFO = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=H3_FPS, frame_alignment=H3_FRAMES_PER_CHUNK, resolution_alignment=H3_ROW_PIXELS)
 
 _MODES = ("t2v", "i2v", "extend")
-_LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset", "lora", "lora_scale", "verbose", "models_dir"})
+_LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset", "lora", "lora_scale", "verbose", "models_dir", "end_image"})
 _PROGRESS_PHASE = "video_generate"
 
 # The text-encoder copy: its folder is ``<models>/<name>@mlx-te<bits>``; the vision tower goes into its own shard.
@@ -656,7 +656,7 @@ class H3MlxVideoBackend:
                 model_name: The name the text-encoder copy is stored under; defaults to ``"h3"``.
                 models_dir: The models folder; defaults to the app's.
                 verbose: Whether the fork prints its progress; defaults to True (the web runner passes False).
-                low_memory: Accepted and ignored. upscale: Must be falsy.
+                low_memory, end_image: Accepted and ignored (a clip method takes its last-frame image). upscale: Must be falsy.
 
         Returns:
             Tuple of (backend-private model handle, VideoModelInfo).

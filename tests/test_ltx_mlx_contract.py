@@ -16,7 +16,7 @@ pytest.importorskip("mlx")
 pytest.importorskip("ltx_pipelines_mlx")
 
 from ltx_core_mlx.components.patchifiers import AudioPatchifier, VideoLatentPatchifier, compute_video_latent_shape, snap_output_dimensions  # noqa: E402
-from ltx_core_mlx.conditioning.types import VideoConditionByLatentIndex  # noqa: E402
+from ltx_core_mlx.conditioning.types import VideoConditionByKeyframeIndex, VideoConditionByLatentIndex  # noqa: E402
 from ltx_core_mlx.components.diffusion_steps import EulerAncestralDiffusionStep  # noqa: E402
 from ltx_core_mlx.model.audio_vae import encode_audio  # noqa: E402
 from ltx_core_mlx.text_encoders.gemma.encoders import encoder_configurator  # noqa: E402
@@ -37,7 +37,7 @@ from ltx_pipelines_mlx.extend_distilled import carry_audio_tokens, fit_audio_lat
 from ltx_pipelines_mlx.retake import encode_video_tensor  # noqa: E402
 from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, LTX_2_5_DISTILLED_SIGMAS, LTX_2_5_STAGE_2_DISTILLED_SIGMAS, STAGE_2_SIGMAS, shorten_schedule  # noqa: E402
 from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings  # noqa: E402
-from ltx_pipelines_mlx.utils.args import ImageConditioningInput  # noqa: E402
+from ltx_pipelines_mlx.utils.args import ImageConditioningInput, resolve_frame_indices  # noqa: E402
 from ltx_pipelines_mlx.utils.blocks import AudioConditioner, AudioDecoder, ImageConditioner, PromptEncoder, VideoDecoder as VideoDecoderBlock, _video_vae_names  # noqa: E402
 from ltx_pipelines_mlx.utils.generation import is_ltx25_pack  # noqa: E402
 from ltx_pipelines_mlx.utils.helpers import create_noised_state  # noqa: E402
@@ -103,8 +103,8 @@ class TestBasePipelineContract:
         assert "_pending_loras" in source
 
     def test_distilled_generate_and_save_keywords(self):
-        _assert_params(DistilledPipeline.generate_and_save, "prompt", "output_path", "height", "width", "num_frames", "stage1_steps", "image")
-        _assert_keyword_only(DistilledPipeline.generate_and_save, "frame_rate", "seed", "stage1_steps", "image")
+        _assert_params(DistilledPipeline.generate_and_save, "prompt", "output_path", "height", "width", "num_frames", "stage1_steps", "image", "images")
+        _assert_keyword_only(DistilledPipeline.generate_and_save, "frame_rate", "seed", "stage1_steps", "image", "images")
 
 
 class TestReviewContract:
@@ -167,6 +167,15 @@ class TestBlockContract:
 
     def test_image_conditioning_input_fields(self):
         assert {"path", "frame_idx", "strength"} <= set(ImageConditioningInput._fields)
+
+    def test_a_last_frame_index_of_minus_one_resolves_to_the_last_pixel_frame(self):
+        resolved = resolve_frame_indices([ImageConditioningInput(path="a", frame_idx=0, strength=1.0), ImageConditioningInput(path="b", frame_idx=-1, strength=1.0)], 49)
+        assert [image.frame_idx for image in resolved] == [0, 48]
+
+    def test_a_keyframe_conditioning_holds_its_latent_as_keyframe_latent(self):
+        keyframe = VideoConditionByKeyframeIndex(frame_idx=48, keyframe_latent="latent", spatial_dims=(7, 15, 22), frame_rate=24.0)
+        assert keyframe.keyframe_latent == "latent"
+        assert not hasattr(keyframe, "clean_latent")
 
 
 class TestLoadTimeContract:

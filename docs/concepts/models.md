@@ -70,9 +70,9 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 | LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale |
 | LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same |
 | LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same |
-| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | Also a last frame, and 4 or 8 steps. No upscale on macOS |
+| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS |
 
-All of them make video with sound, from a prompt or a starting image, and can [extend](video.md#extending-a-video) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](video.md).
+All of them make video with sound, from a prompt or a starting image (with an optional [last frame](video.md#first-and-last-frame)), and can [extend](video.md#extending-a-video) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](video.md).
 
 You can also convert an [LTX-2.3 or LTX-2.5 fine-tune](../cli/models.md#ltx-23-and-ltx-25-video-fine-tunes) or a [MiniMax H3 fine-tune](../cli/models.md#minimax-h3-video-fine-tunes) into a model you pick by name.
 
@@ -97,7 +97,6 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
 `h3` is MiniMax H3, a video model that is stronger on dynamic scenes than LTX and makes stereo sound with the picture. It is far larger, so it is slower and its download is bigger. It downloads without a Hugging Face account.
 
-- **First and last frame.** Image to video can take a **Last frame** as well as the first (`--end-image`), and the clip runs from one to the other. If the two images show different scenes, the clip dissolves between them.
 - **Steps:** 4 or 8, with 8 the default. Four steps take about a quarter less time and give the same scene, slightly softer; fast motion can blur.
 - **Length:** clips are 17n+5 frames long (22, 39 … 124, 141 …), and a count in between moves up to the next. The default is 5 s (124 frames at 24 fps). The model was trained on 4 to 15 s clips; outside that range quality isn't guaranteed.
 - **Sizes:** the same presets as LTX, in multiples of 32 (64 with upscaling). `xl` is above the size the model was trained on.

@@ -541,6 +541,9 @@ class TestLoadModel:
     def test_low_memory_is_accepted_and_ignored(self, env):
         assert _load(env, low_memory=True) is not None
 
+    def test_the_end_image_flag_is_accepted_and_ignored(self, env):
+        assert _load(env, end_image=True) is not None
+
 
 class TestDirectTurbo:
     def test_the_turbo_file_goes_through_with_alpha_sixteenth_of_its_rank_times_one(self, env, written, tmp_path):

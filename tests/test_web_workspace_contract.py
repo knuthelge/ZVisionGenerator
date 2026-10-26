@@ -84,7 +84,7 @@ _LTX_PAYLOAD = {
 }
 _LTX_FAMILY_KEYS = {
     "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"},
-    "hidden_controls": _END_CONTROLS,
+    "hidden_controls": [],
     "supports_extend": True,
     "step_options": None,
     "extend_frame_step": 8,

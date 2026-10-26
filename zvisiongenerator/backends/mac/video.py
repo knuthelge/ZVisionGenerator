@@ -254,14 +254,31 @@ def _one_stage_progress(callback: Callable[[dict[str, Any]], None] | None) -> Ca
     return on_step
 
 
-def _image_conditionings(pipe: Any, image_path: str, latent_shape: tuple[int, int, int], fps: float) -> list:
-    """Encode the first-frame image into video conditionings, materialized before the encoder is freed."""
-    import mlx.core as mx
-    from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
+def _image_anchors(image_path: str, end_image_path: str | None) -> list[tuple[str, int]]:
+    """Return the ``(path, pixel frame)`` of each image the clip is pinned to: the first frame, and the last (``-1``) when set."""
+    return [(image_path, 0)] if end_image_path is None else [(image_path, 0), (end_image_path, -1)]
+
+
+def _conditioning_inputs(image_path: str, end_image_path: str | None) -> list:
+    """Return the vendored ``ImageConditioningInput`` of each image the clip is pinned to, at full strength."""
     from ltx_pipelines_mlx.utils.args import ImageConditioningInput
 
+    return [ImageConditioningInput(path=path, frame_idx=frame, strength=1.0) for path, frame in _image_anchors(image_path, end_image_path)]
+
+
+def _conditioning_latent(cond: Any) -> Any:
+    """Return the latent a video conditioning holds: a first-frame one replaces latent frame 0, a keyframe one is appended."""
+    return cond.keyframe_latent if hasattr(cond, "keyframe_latent") else cond.clean_latent
+
+
+def _image_conditionings(pipe: Any, image_path: str, latent_shape: tuple[int, int, int], fps: float, *, num_frames: int, end_image_path: str | None = None) -> list:
+    """Encode the first-frame image, and the last-frame image when given, into video conditionings, materialized before the encoder is freed."""
+    import mlx.core as mx
+    from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
+    from ltx_pipelines_mlx.utils.args import resolve_frame_indices
+
     _, H, W = latent_shape
-    images = pipe.image_conditioner.resolve_crf([ImageConditioningInput(path=image_path, frame_idx=0, strength=1.0)])
+    images = pipe.image_conditioner.resolve_crf(resolve_frame_indices(_conditioning_inputs(image_path, end_image_path), num_frames))
 
     def _encode(encoder: Any) -> list:
         conds = combined_image_conditionings(
@@ -273,7 +290,7 @@ def _image_conditionings(pipe: Any, image_path: str, latent_shape: tuple[int, in
             frame_rate=fps,
         )
         # MLX graph evaluation: materialize the conditionings before the encoder is freed.
-        mx.eval(*(cond.clean_latent for cond in conds))
+        mx.eval(*(_conditioning_latent(cond) for cond in conds))
         return conds
 
     return pipe.image_conditioner(_encode, free_after=pipe.low_memory)
@@ -444,6 +461,7 @@ def _generate_one_stage(
     frame_rate: float | None = None,
     carry: _Carry | None = None,
     segment: _SegmentTarget | None = None,
+    end_image_path: str | None = None,
 ) -> None:
     """Run the distilled sampler at full resolution and write the clip to *output_path*.
 
@@ -466,6 +484,7 @@ def _generate_one_stage(
         carry: Encoded tail of a clip to pin at the start of the window; replaces the image conditioning.
         segment: When given, decode the window into this target (dropping the carried frames) instead of writing
             a muxed clip to ``output_path``.
+        end_image_path: Last-frame image (needs ``image_path``): appended as a keyframe on the clip's last frame.
     """
     from ltx_core_mlx.components.patchifiers import compute_video_latent_shape, snap_output_dimensions
     from ltx_core_mlx.model.transformer.model import X0Model
@@ -491,7 +510,7 @@ def _generate_one_stage(
     if carry is not None:
         conditionings = [_carry_conditioning(carry.video_tokens, list(range(carry.latent_frames)))]
     elif image_path is not None:
-        conditionings = _image_conditionings(pipe, image_path, (F, H, W), fps)
+        conditionings = _image_conditionings(pipe, image_path, (F, H, W), fps, num_frames=num_frames, end_image_path=end_image_path)
 
     pipe.load()
 
@@ -665,10 +684,12 @@ def _generate_two_stage(
     image_path: str | None,
     step_callback: Callable[[dict[str, Any]], None] | None,
     review: Callable[[Path], None] | None,
+    end_image_path: str | None = None,
 ) -> None:
     """Generate at half resolution, spatially upscale 2x, and refine with the distilled pipeline.
 
-    With *review*, the half-size result is decoded to a temporary video and passed to it between the two stages.
+    With *review*, the half-size result is decoded to a temporary video and passed to it between the two stages. With
+    *end_image_path*, both stages pin the first and last frames (the pipeline resolves ``-1`` to the clip's last frame).
     """
     from ltx_pipelines_mlx.scheduler import STAGE_2_SIGMAS
 
@@ -690,7 +711,7 @@ def _generate_two_stage(
             frame_rate=model.frame_rate,
             seed=seed,
             stage1_steps=stage1_steps,
-            image=image_path,
+            images=_conditioning_inputs(image_path, end_image_path) if image_path is not None else None,
         )
 
 
@@ -733,22 +754,25 @@ def _generate(
     stage1_steps: int | None,
     step_callback: Callable[[dict[str, Any]], None] | None,
     review: Callable[[Path], None] | None = None,
+    end_image_path: str | None = None,
 ) -> Path:
     """Dispatch to the one-stage or two-stage generator that matches the loaded handle.
 
     Raises:
         ValueError: If ``stage1_steps`` is set but the handle was not loaded for upscale, or the reverse,
-            or if ``review`` is set without ``stage1_steps``.
+            if ``review`` is set without ``stage1_steps``, or ``end_image_path`` without ``image_path``.
     """
+    if end_image_path is not None and image_path is None:
+        raise ValueError("end_image_path needs image_path: the clip runs from the first-frame image to the last-frame image")
     if review is not None and stage1_steps is None:
         raise ValueError("review needs stage1_steps: only the two-stage upscale has a half-size render to review")
     if (stage1_steps is not None) != model.upscale:
         raise ValueError(f"stage1_steps must be set exactly when the model is loaded for upscale (upscale={model.upscale}, stage1_steps={stage1_steps})")
     with _generation_scope(model):
         if stage1_steps is not None:
-            _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback, review)
+            _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback, review, end_image_path=end_image_path)
         else:
-            _generate_one_stage(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, step_callback)
+            _generate_one_stage(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, step_callback, end_image_path=end_image_path)
     return Path(output_path)
 
 
@@ -768,7 +792,7 @@ class LtxVideoBackend:
             model_path: Local path or HuggingFace repo ID.
             **kwargs: low_memory (bool), loras (list[tuple[str, float]]), upscale (bool), mlx_packs (the pinned
                 packs by reference, each a ``HubFiles``) and mlx_text_encoder (the Gemma 3 reference).
-                ``mode`` is accepted and ignored; the same pipeline serves t2v and i2v.
+                ``mode`` and ``end_image`` are accepted and ignored; the same pipeline serves t2v and i2v, with or without a last-frame image.
 
         Returns:
             Tuple of (backend-private model handle, VideoModelInfo).
@@ -878,7 +902,8 @@ class LtxVideoBackend:
             output_path: Path to save video.
             step_callback: Receives progress event dicts.
             **kwargs: stage1_steps for distilled two-stage upscale mode; review, a ``Callable[[Path], None]``
-                that receives a temporary video of the half-size render before the upscale (needs stage1_steps).
+                that receives a temporary video of the half-size render before the upscale (needs stage1_steps);
+                end_image, the path of a last-frame image the clip ends on.
 
         Returns:
             Path to generated video.
@@ -886,7 +911,9 @@ class LtxVideoBackend:
         Raises:
             ValueError: If stage1_steps does not match the model's upscale mode, or review is set without it.
         """
-        return _generate(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, kwargs.get("stage1_steps"), step_callback, kwargs.get("review"))
+        return _generate(
+            model, prompt, width, height, num_frames, seed, steps, output_path, image_path, kwargs.get("stage1_steps"), step_callback, kwargs.get("review"), end_image_path=kwargs.get("end_image")
+        )
 
     def extend_video(
         self,

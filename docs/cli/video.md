@@ -28,10 +28,10 @@ ziv-video -m ltx-4 --image photo.jpg --prompt "The camera slowly zooms in"
 
 The image is scaled to cover the video size and the overflow is cut from the centre. Pick a `--ratio` close to the image's shape.
 
-With MiniMax H3, add a last frame and the clip runs from one image to the other:
+Add a last frame and the clip runs from one image to the other (see [First and last frame](../concepts/video.md#first-and-last-frame)):
 
 ```bash
-ziv-video -m h3 --image start.png --end-image end.png --prompt "The lamp turns on"
+ziv-video -m ltx-4 --image start.png --end-image end.png --prompt "The lamp turns on"
 ```
 
 ## Size and length

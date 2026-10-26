@@ -51,8 +51,8 @@ def _image(tmp_path: Path, name: str) -> str:
     return str(path)
 
 
-def _submit(tmp_path: Path, **form: str) -> dict[str, Any]:
-    return web_server._submit_video_job({"model": "h3", "prompt": "a lake", **form}, _web_config(tmp_path))
+def _submit(tmp_path: Path, config: SimpleNamespace | None = None, **form: str) -> dict[str, Any]:
+    return web_server._submit_video_job({"model": "h3", "prompt": "a lake", **form}, config or _web_config(tmp_path))
 
 
 class TestEndImage:
@@ -89,8 +89,11 @@ class TestEndImage:
     def test_a_family_without_the_capability_refuses_it(self, tmp_path, submitted):
         first, last = _image(tmp_path, "first.png"), _image(tmp_path, "last.png")
 
+        config = _web_config(tmp_path)
+        config.app_config["video_model_presets"]["ltx"]["capabilities"]["end_frame"] = False
+
         with pytest.raises(ValueError, match="does not support a last-frame image"):
-            _submit(tmp_path, model="ltx-8", image_path=first, end_image_path=last)
+            _submit(tmp_path, config, model="ltx-8", image_path=first, end_image_path=last)
 
         assert submitted == []
 

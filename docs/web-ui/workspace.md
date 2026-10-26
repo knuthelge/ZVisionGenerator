@@ -64,7 +64,7 @@ For video, *Compose* has a **Scene** box above the **Action** box. See [Scene an
 
 ### First and last frame
 
-With MiniMax H3, Image to Video shows two slots under **Reference image**: **First frame** and an optional **Last frame**. Pick the last frame the same ways as the first: browse the server, upload from your device, drop an image on the slot, type a path, or choose **Use as reference** → **For last frame (img2vid)** on an image. LTX models have no Last frame slot, and switching to one clears it. See [First and last frame](../concepts/video.md#first-and-last-frame).
+Image to Video shows two slots under **Reference image**: **First frame** and an optional **Last frame**. Pick the last frame the same ways as the first: browse the server, upload from your device, drop an image on the slot, type a path, or choose **Use as reference** → **For last frame (img2vid)** on an image. See [First and last frame](../concepts/video.md#first-and-last-frame).
 
 A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **Prompt (JSON)** mode for a structured caption.
 
@@ -76,7 +76,7 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 |---|---|
 | **Size** | **Ratio**, **Resolution**, or a custom **W × H**; **Duration (s)** for video |
 | **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
-| **Reference image** | The image for Image to Image or Image to Video, and **Img strength**. With MiniMax H3, a **First frame** and an optional **Last frame** |
+| **Reference image** | The image for Image to Image or Image to Video, and **Img strength**. For video, a **First frame** and an optional **Last frame** |
 | **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
 | **Post-processing** | **Sharpen**, **Contrast** and **Saturation** (images) |
 | **Video** | **Audio**, **Low memory** |

@@ -43,10 +43,11 @@ class VideoBackend(Protocol):
 
         Backend-specific keyword arguments:
         - LTX: low_memory (bool), loras (list[tuple[str, float]]), upscale (bool),
-          latent_upsampler (tuple[str, str] | None, diffusers only).
-          ``mode`` is accepted and ignored.
+          latent_upsampler (tuple[str, str] | None, diffusers only), end_image (bool: whether the clips of an
+          image-to-video load end on a last-frame image; diffusers loads another pipeline for them, MLX ignores it).
+          ``mode`` is accepted and ignored by MLX.
         - H3 (Windows/Linux): mode ("t2v", "i2v" or "extend"), loras (list[tuple[str, float]]), upscale (bool),
-          preset (the ``H3Preset``, required), model_name and low_memory (both accepted and ignored). Any other
+          preset (the ``H3Preset``, required), model_name, low_memory and end_image (all accepted and ignored). Any other
           keyword raises ``ValueError`` naming it.
         """
         ...
@@ -94,8 +95,8 @@ class VideoBackend(Protocol):
     ) -> Path | None:
         """Generate video from image + text. Returns output path or None if failed.
 
-        Takes the same optional ``stage1_steps`` and ``review`` keyword arguments as ``text_to_video``. H3 also
-        takes ``end_image``, the path of a last-frame image: the clip then runs from ``image_path`` to it.
+        Takes the same optional ``stage1_steps`` and ``review`` keyword arguments as ``text_to_video``, and
+        ``end_image``, the path of a last-frame image: the clip then runs from ``image_path`` to it.
         """
         ...
 

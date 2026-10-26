@@ -9,7 +9,7 @@ Videos are made with LTX or MiniMax H3, with sound, from a prompt (**Text to Vid
 | LTX-2.3 4-bit | `ltx-4` | The least memory. About 20 GB of system memory on Windows and Linux. |
 | LTX-2.3 8-bit | `ltx-8` | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. |
 | LTX-2.5 4-bit | `ltx25-4` | The newer LTX, with the memory need of `ltx-4`. About 21 GB of system memory on Windows and Linux. |
-| MiniMax H3 | `h3` | Stronger on dynamic scenes, adds a last frame, but much larger and slower. About 18 GB of free system memory on Windows and Linux. |
+| MiniMax H3 | `h3` | Stronger on dynamic scenes, but much larger and slower. About 18 GB of free system memory on Windows and Linux. |
 
 On a 32 GB Windows or Linux machine, use `ltx-4` or `ltx25-4`. A model that can't fit stops with an error before it loads. What each model is like, with downloads and timings, is in [Models](models.md#video-models).
 
@@ -71,7 +71,13 @@ Describe what the image shows in Scene and what happens in Action. The enhancer 
 
 ### First and last frame
 
-MiniMax H3 can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. The first frame is a close re-render of the image, not the image pasted in. If the two images show different scenes, the clip dissolves between them. With a last frame, the enhancer writes the change that leads from one image to the other instead of inventing an ending. A clip made from two images records both, and **Reuse settings** loads both.
+Image to video can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. Every video model takes one.
+
+- **The last frame is a looser match than the first.** The clip ends close to the image, slightly softer. With MiniMax H3 the first frame is a close re-render of the image too, not the image pasted in.
+- **Use two images of the same scene,** seen from about the same place. If they show different places, the clip cuts (LTX) or dissolves (MiniMax H3) to the last image near the end.
+- **Give a big change time.** A new pose or a long camera move needs a few seconds; in a 2 s clip, LTX may cut to the last image instead of moving there.
+
+With a last frame, the enhancer writes the change that leads from one image to the other instead of inventing an ending. A clip made from two images records both, and **Reuse settings** loads both.
 
 ## Sound
 

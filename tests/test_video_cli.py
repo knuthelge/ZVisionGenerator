@@ -1311,9 +1311,9 @@ class TestVideoCliH3:
 
         monkeypatch.setattr(backends_module.sys, "platform", "linux")
 
-    def _main(self, monkeypatch, tmp_path, argv, *, family="h3", **options):
+    def _main(self, monkeypatch, tmp_path, argv, *, family="h3", config=None, backend=None, **options):
         info = self._H3 if family == "h3" else VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        return _run_cli(monkeypatch, tmp_path, argv, backend=MagicMock(), config=load_config(), detect=lambda _model: info, **options)
+        return _run_cli(monkeypatch, tmp_path, argv, backend=backend or MagicMock(), config=config or load_config(), detect=lambda _model: info, **options)
 
     def _images(self, tmp_path):
         from PIL import Image
@@ -1349,10 +1349,25 @@ class TestVideoCliH3:
     def test_a_family_without_the_capability_refuses_the_end_image(self, monkeypatch, tmp_path, capsys):
         first, last = self._images(tmp_path)
 
+        config = load_config()
+        config["video_model_presets"]["ltx"]["capabilities"]["end_frame"] = False
+
         with pytest.raises(SystemExit, match="2"):
-            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--image", first, "--end-image", last], family="ltx")
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--image", first, "--end-image", last], family="ltx", config=config)
 
         assert "does not support a last-frame image" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(("extra", "end_image"), [(["--end-image"], True), ([], False)])
+    def test_ltx_loads_for_the_last_frame_image_only_when_one_is_given(self, monkeypatch, tmp_path, extra, end_image):
+        first, last = self._images(tmp_path)
+        backend = MagicMock()
+        backend.load_model.return_value = (MagicMock(), VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32))
+        monkeypatch.setattr(video_cli, "run_video_batch", MagicMock())
+
+        self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--image", first, *[a for flag in extra for a in (flag, last)]], family="ltx", backend=backend)
+
+        assert backend.load_model.call_args.kwargs["mode"] == "i2v"
+        assert backend.load_model.call_args.kwargs["end_image"] is end_image
 
     def test_an_extension_refuses_the_end_image(self, monkeypatch, tmp_path, capsys):
         first, last = self._images(tmp_path)

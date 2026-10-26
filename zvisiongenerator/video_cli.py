@@ -93,9 +93,7 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         help=f"Frames to add with --extend, rounded to a multiple of the model's extension step ({EXTEND_FRAME_STEP} for LTX, 17 for MiniMax H3; at least one step).",
     )
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="Input image for image-to-video: the first frame.")
-    parser.add_argument(
-        "--end-image", dest="end_image_path", type=str, default=None, help="Last-frame image: the clip runs from --image to it. Needs --image and a model that supports it (MiniMax H3)."
-    )
+    parser.add_argument("--end-image", dest="end_image_path", type=str, default=None, help="Last-frame image: the clip runs from --image to it. Needs --image.")
     parser.add_argument("--ratio", type=str, default=None, help="Aspect ratio for generated video (e.g. 16:9, 9:16, 1:1).")
     parser.add_argument("-s", "--size", type=str, default=None, help="Resolution scale (e.g. s, m, l). Default from config.")
     parser.add_argument("-W", "--width", type=int, default=None, help="Override video width. LTX: must be divisible by 32.")
@@ -579,6 +577,7 @@ def main(*, prog: str = "ziv-video") -> None:
             model, model_info = backend.load_model(
                 args.model,
                 mode=mode,
+                end_image=args.end_image_path is not None,
                 low_memory=args.low_memory,
                 loras=loras,
                 **video_load_options(model_info.family, config, model_name, upscale=bool(args.upscale)),

@@ -312,7 +312,7 @@ video_model_presets:
     extend_frame_step: 8
     # The frames of the source's end an extension carries into its window (4 latent frames); the window is these plus the new frames.
     carry_frames: 25
-    capabilities: { i2v: true, end_frame: false, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true }
+    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true }
     diffusers:
       # Distilled LTX 2.3 in diffusers format, used on Windows/Linux (8 steps, guidance 1.0). Distilled checkpoints only.
       # Its text encoder, connectors, VAEs and vocoder are used; the transformer comes from the file below.

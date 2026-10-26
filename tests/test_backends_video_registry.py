@@ -157,7 +157,7 @@ class TestVideoCapabilities:
 
         for platform_key in ("darwin", "win32", "linux"):
             monkeypatch.setattr(backends_module.sys, "platform", platform_key)
-            assert backends_module.video_capabilities(config, "ltx") == VideoCapabilities(**{**_ALL_ON, "end_frame": False})
+            assert backends_module.video_capabilities(config, "ltx") == VideoCapabilities(**_ALL_ON)
 
     def test_a_family_the_config_does_not_describe_has_none(self):
         assert backends_module.video_capabilities({}, "ltx") is None

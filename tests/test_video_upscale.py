@@ -381,8 +381,11 @@ def ltx(monkeypatch):
     h.scheduler = MagicMock(DISTILLED_SIGMAS=_FAKE_DISTILLED_SIGMAS, STAGE_2_SIGMAS=_FAKE_STAGE_2_SIGMAS, LTX_2_5_DISTILLED_SIGMAS=_FAKE_LTX25_SIGMAS)
     h.scheduler.shorten_schedule.return_value = ["shortened"]
     h.orchestration = MagicMock()
-    h.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: [MagicMock(clean_latent="clean_a"), MagicMock(clean_latent="clean_b")]
+    # Each conditioning has only its real latent field, so reading the wrong one fails as it would upstream.
+    h.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: [SimpleNamespace(clean_latent="clean_a"), SimpleNamespace(clean_latent="clean_b")]
     args = MagicMock(ImageConditioningInput=_ImageConditioningInput)
+    # Upstream's resolution: a negative index counts from the end, so -1 is the last pixel frame.
+    args.resolve_frame_indices.side_effect = lambda images, num_frames: [i._replace(frame_idx=num_frames + i.frame_idx if i.frame_idx < 0 else i.frame_idx) for i in images]
     h.video_state = MagicMock(name="video_state")
     h.audio_state = MagicMock(name="audio_state")
     helpers = MagicMock()
@@ -494,7 +497,7 @@ def _handle(pipe, *, upscale: bool = False, frame_rate: float = _FPS, low_ram_st
     return _LtxModel(pipeline=pipe, frame_rate=frame_rate, upscale=upscale, low_ram_streaming=low_ram_streaming, ltx25=ltx25)
 
 
-def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, steps: int = 8, ltx25: bool = False):
+def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, steps: int = 8, ltx25: bool = False, end_image: str | None = None):
     backend = LtxVideoBackend()
     kwargs = dict(
         model=_handle(pipe, ltx25=ltx25),
@@ -509,6 +512,8 @@ def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, s
     )
     if image_path is None:
         return backend.text_to_video(**kwargs)
+    if end_image is not None:
+        kwargs["end_image"] = end_image
     return backend.image_to_video(image_path=image_path, **kwargs)
 
 
@@ -1082,9 +1087,32 @@ class TestOneStageGeneration:
         assert names == ["combined_image_conditionings", "mx_eval", "conditioner_returned"]
         assert ltx.mx.eval.call_args.args == ("clean_a", "clean_b")
 
+    def test_an_end_image_is_pinned_to_the_last_frame_after_the_first(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe, image_path="/tmp/first.png", end_image="/tmp/last.png")
+
+        anchors = [_ImageConditioningInput(path="/tmp/first.png", frame_idx=0), _ImageConditioningInput(path="/tmp/last.png", frame_idx=48)]
+        pipe.image_conditioner.resolve_crf.assert_called_once_with(anchors)
+        assert ltx.orchestration.combined_image_conditionings.call_args.args == (anchors,)
+
+    def test_an_end_image_materializes_the_keyframe_latent_next_to_the_first_frame_latent(self, ltx):
+        pipe = _pipeline(ltx)
+        ltx.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: [SimpleNamespace(clean_latent="first"), SimpleNamespace(keyframe_latent="last")]
+
+        _run_one_stage(pipe, image_path="/tmp/first.png", end_image="/tmp/last.png")
+
+        assert ltx.mx.eval.call_args.args == ("first", "last")
+
+    def test_an_end_image_without_a_first_image_is_refused(self, ltx):
+        from zvisiongenerator.backends.mac.video import _generate
+
+        with pytest.raises(ValueError, match="end_image_path needs image_path"):
+            _generate(_handle(_pipeline(ltx)), "p", 704, 480, 49, 1, 8, "/tmp/o.mp4", None, None, None, end_image_path="/tmp/last.png")
+
     def test_i2v_conditionings_reach_the_video_state(self, ltx):
         pipe = _pipeline(ltx)
-        produced = [MagicMock(clean_latent="x")]
+        produced = [SimpleNamespace(clean_latent="x")]
         ltx.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: produced
 
         _run_one_stage(pipe, image_path="/tmp/in.png")
@@ -1150,9 +1178,29 @@ class TestTwoStageGeneration:
             "frame_rate": _FPS,
             "seed": 7,
             "stage1_steps": 6,
-            "image": image_path,
+            "images": None if image_path is None else [_ImageConditioningInput(path=image_path, frame_idx=0)],
         }
         assert result == Path("/tmp/o.mp4")
+
+    def test_an_end_image_passes_both_images_with_the_last_at_frame_minus_one(self, ltx):
+        pipe = MagicMock()
+
+        LtxVideoBackend().image_to_video(
+            model=_handle(pipe, upscale=True),
+            image_path="/tmp/first.png",
+            prompt="p",
+            width=704,
+            height=480,
+            num_frames=49,
+            seed=7,
+            steps=8,
+            output_path="/tmp/o.mp4",
+            stage1_steps=6,
+            end_image="/tmp/last.png",
+        )
+
+        kwargs = pipe.generate_and_save.call_args.kwargs
+        assert kwargs["images"] == [_ImageConditioningInput(path="/tmp/first.png", frame_idx=0), _ImageConditioningInput(path="/tmp/last.png", frame_idx=-1)]
 
     def test_frame_rate_comes_from_the_handle(self, ltx):
         pipe = MagicMock()

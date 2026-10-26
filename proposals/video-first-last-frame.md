@@ -1,6 +1,77 @@
 # First and last frame for image-to-video
 
-**Status:** Proposed (2026-10-23). Partly shipped: the Web UI **Last frame** control, its recorded settings and Reuse, the `--end-image` preview and the enhancer's two-frame rule shipped for MiniMax H3 in v0.13.0. LTX first and last frame, with its backend work, is still proposed.
+**Status:** Implemented (2026-10-26, unreleased): LTX first and last frame is implemented on macOS, Windows and Linux, and MiniMax H3's part shipped in v0.13.0. Left: a run of the macOS LTX path on a Mac before the release, then archive this proposal.
+
+## Outcome
+
+The plan below was written before LTX-2.5 and before H3's last frame shipped, so most of steps 1 and 3–6 already existed when LTX's turn came: the request field, `--end-image`, the Web UI Last frame slot, recorded settings, Reuse and the enhancer's two-frame rule. What LTX needed was step 2, a Windows/Linux backend, the capability flag and docs. The design changed in four places.
+
+- **The last frame sits on the true last frame on both platforms.** On macOS `-1` resolves to pixel `num_frames - 1`, as planned. On Windows and Linux, instead of generating 8 extra frames and trimming, the condition pipeline's keyframe coordinates are moved from pixel `num_frames - 8` to `num_frames - 1` for the call (`_keyframe_on_last_frame`), the way the reference positions a keyframe by pixel index.
+- **Windows and Linux load the condition pipeline instead of `from_pipe`.** Every run of a batch has a last frame or none, so `load_model(end_image=True)` builds `LTX2ConditionPipeline` in place of the image-to-video pipeline. `from_pipe` would have shared the transformer with the image-to-video pipeline, which breaks the transformer swap around the text encoder.
+- **Passes with a last frame keep the stock scheduler.** The Euler-ancestral step that LTX-2.5 uses would re-noise the appended keyframe tokens, as it would Extend's pinned frames. The two-stage refine re-applies both conditions.
+- **No separate `supports_video_end_image()`.** `capabilities.end_frame` and `platform_capabilities` already gate the CLI, the server and the Web UI per family.
+
+### Spike results (Windows/Linux, LTX-2.5 `ltx25-4`, a 10 GB card, 768×448)
+
+Three image pairs (a camera push-in, a loop with the same image at both ends, a pose change), at 49 and 121 frames, with three placements of the end image. The similarity is SSIM against the end image after the pipeline's cover-and-crop.
+
+| Placement | Where the best match lands | Last frame against the end image |
+|---|---|---|
+| diffusers `index=-1` | 8 frames before the end, then the clip drifts away (a loop fell to 0.66 at its last frame) | 0.66–0.96 |
+| Generate 8 more and trim | the last frame, but one pose run missed the end image entirely (0.32) | 0.32–0.97 |
+| Keyframe moved to the last frame (shipped) | the last frame in every run | 0.75–0.97 |
+
+- **Motion.** At 121 frames every pair moves smoothly into the end image. At 49 frames a pose change cuts to it near the end, and two images of different places cut at either length; the camera and loop pairs never cut. The docs tell users to use the same scene and give a big change a few seconds.
+- **Cost.** One latent frame of extra tokens, about 6% at 121 frames. Clips took 23–51 s with a 6.75 GiB peak on the card; no run without a last frame was timed for comparison.
+- **First frame.** Stays at about 0.985 SSIM, as without a last frame.
+
+## Mac test (left before the release)
+
+The macOS LTX path has only run in mocked tests. This run checks that a last frame works with `ltx-4` and `ltx25-4` on a Mac, in one stage and with `--upscale 2`, and that image to video without a last frame did not change. About 1 hour, mostly unattended. Both models must be downloaded (`ltx-4` 28.6 GB, `ltx25-4` 28.8 GB).
+
+**What is new on macOS, and what can break.** `_image_conditionings` (one stage) builds a second `ImageConditioningInput` at frame `-1`, resolves it with `resolve_frame_indices` and materializes its `keyframe_latent`. `_generate_two_stage` now always passes `images=` to `generate_and_save`, also without a last frame. LTX-2.5's one-stage clip runs its ancestral loop with the appended keyframe tokens. None of these has run against real MLX.
+
+**Setup.**
+
+1. Check out the branch with this change and run `make install`.
+2. Run the MLX tests that skip on Linux: `uv run pytest tests/test_ltx_mlx_contract.py tests/test_video_upscale.py tests/test_video_review.py`. All must pass.
+3. Make the two test images in a scratch folder outside the repo: a start image, and the same scene with a changed pose made from it by image to image.
+
+   ```bash
+   ziv-image -m zit -q 8 --ratio 16:9 --seed 4242 -o start --prompt "Full body photo of a woman in a yellow raincoat standing in a city park, arms at her sides, looking at the camera, autumn trees behind her"
+   ziv-image -m zit -q 8 --ratio 16:9 --seed 4242 -o end --image start/<file>.png --image-strength 0.6 --prompt "Full body photo of a woman in a yellow raincoat jumping high in the air on the path in a city park, both arms raised high, knees bent, joyful, autumn trees behind her"
+   ```
+
+   Check that the end image shows the same path and trees with the arms up. If the scene changed, try another seed: two different places make LTX cut, which is not what this run tests.
+
+**Runs.** Each at 768×448, 121 frames, seed 7, with this prompt: "A woman in a yellow raincoat standing on a path in a city park smiles and slowly raises both arms high above her head in joy. Autumn trees, fallen leaves, natural light, static camera."
+
+| Step | Command (add `--image start.png --prompt …`) |
+|---|---|
+| M1 | `ziv-video -m ltx-4 --end-image end.png -W 768 -H 448 --frames 121 --seed 7` |
+| M2 | M1 with `--upscale 2` |
+| M3 | M1 with `-m ltx25-4` |
+| M4 | M3 with `--upscale 2` |
+| M5 | Web UI, `ltx-4`, Image to Video: the **Last frame** slot shows; one job with both images; **Reuse settings** on the result loads both; the CLI preview has `--end-image` |
+| R1 | M1 and M2 **without** `--end-image`, once on this branch and once on the commit before it; `ltx-4` is deterministic, so the frames must match: `ffmpeg -i clip.mp4 -f framemd5 -` gives the same lines |
+
+**Pass when**, for M1 to M5:
+
+- The job finishes with no error, and peak memory (Activity Monitor) stays within 1 GiB of the same run without `--end-image`.
+- The last frame matches the end image. Measure it on frame 120 and frame 112 (8 earlier):
+
+  ```bash
+  ffmpeg -v error -i clip.mp4 -i end.png -filter_complex "[0:v]select=eq(n\,120),scale=256:-2,format=gray[a];[1:v]scale=768:448:force_original_aspect_ratio=increase,crop=768:448,scale=256:-2,format=gray[b];[a][b]ssim=stats_file=-" -f null - | grep -o "All:[0-9.]*" | tail -1
+  ```
+
+  Frame 120 must be at least 0.80 and at least frame 112's value. The same command gave 0.88 to 0.93 on Windows/Linux for these four runs.
+- A look at the clip shows the arms rising and no hard cut or dissolve into the end image.
+
+R1 passes when the `framemd5` lines are identical.
+
+**If a step fails.** Record it here. If the fix is not small, turn the last frame off for LTX on macOS before the release, with `platform_capabilities: { darwin: { end_frame: false } }` in the `ltx` family block, and say so in the docs and the changelog entry. Windows and Linux are not affected.
+
+## Original proposal
 
 ## Problem
 
