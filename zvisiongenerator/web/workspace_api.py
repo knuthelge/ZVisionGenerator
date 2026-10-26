@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio, video_capabilities
 from zvisiongenerator.converters.list_assets import list_loras
+from zvisiongenerator.downloads.plans import built_model_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import (
@@ -26,7 +27,6 @@ from zvisiongenerator.utils.config import (
     video_family,
 )
 from zvisiongenerator.utils.alignment import align_frames
-from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
@@ -468,7 +468,7 @@ def _status_resolver(
                 app_config=web_config.app_config,
                 family=entry.family if kind == "video" else None,
             )
-            if instant_sources_count and not described["downloaded"] and is_instant_dir(entry.resolved_path):
+            if instant_sources_count and not described["downloaded"] and built_model_plan(entry.resolved_path, config=web_config.app_config, platform_key=sys.platform) is not None:
                 described["downloaded"] = not row_download_needed(KIND_MODEL, entry.name, web_config, downloaded=False)
             return described
         except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing

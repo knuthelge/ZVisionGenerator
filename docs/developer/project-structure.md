@@ -8,6 +8,7 @@ zvisiongenerator/
 ├── cli.py                         Unified CLI entry point (ziv)
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model / --enhance-format CLI handling
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
+├── built_models.py                One entry point for the models built on first use: recognise their folders, prepare them, name the step
 ├── ideogram4_instant_builder.py   Build the Ideogram 4 Instant model folder on first use (download, convert, link the base components)
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
 ├── image_review.py                Review of an image's small render before the upscale

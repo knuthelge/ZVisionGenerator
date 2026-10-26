@@ -19,7 +19,7 @@ from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 if TYPE_CHECKING:
     from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
 
-__all__ = ["enhancer_plan", "image_plan", "instant_plan", "seedvr2_plan", "video_model_downloaded", "video_plan"]
+__all__ = ["built_model_plan", "enhancer_plan", "image_plan", "seedvr2_plan", "video_model_downloaded", "video_plan"]
 
 
 def image_plan(model_ref: str, *, family: str, config: dict[str, Any] | None, platform_key: str) -> tuple[DownloadTarget, ...] | None:
@@ -28,22 +28,31 @@ def image_plan(model_ref: str, *, family: str, config: dict[str, Any] | None, pl
     Args:
         model_ref: The resolved model path or Hugging Face repo reference.
         family: The model family (``flux2_klein``, ``zimage``, ``krea2``, ``ideogram4``, ...).
-        config: The app config; when given, an Ideogram 4 Instant folder is planned from its pinned sources first.
+        config: The app config; when given, a model built on first use is planned from its pinned sources first.
         platform_key: The platform whose Instant sources apply (``sys.platform``).
 
     Returns:
         The targets, ``()`` when the model is a local folder or needs nothing, or ``None`` when offline.
     """
     if config is not None:
-        instant = instant_plan(model_ref, config=config, platform_key=platform_key)
-        if instant is not None:
-            return instant
+        built = built_model_plan(model_ref, config=config, platform_key=platform_key)
+        if built is not None:
+            return built
     from zvisiongenerator import backends
 
     return _offline_as_none(lambda: backends.image_download_plan(model_ref, family=family))
 
 
-def instant_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) -> tuple[DownloadTarget, ...] | None:
+def built_model_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) -> tuple[DownloadTarget, ...] | None:
+    """Return the targets an unbuilt model built on first use needs, ``()`` once it is built, or ``None`` for any other model.
+
+    Raises:
+        ValueError: If the model's source block in *config* is invalid.
+    """
+    return _instant_plan(model_ref, config=config, platform_key=platform_key)
+
+
+def _instant_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) -> tuple[DownloadTarget, ...] | None:
     """Return the targets an unbuilt Ideogram 4 Instant folder needs, ``()`` once it is built, or ``None`` for any other model.
 
     The targets are the base model's components at their pinned revision and the single-file transformer, which

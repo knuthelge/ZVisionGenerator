@@ -12,6 +12,7 @@ from safetensors.torch import load_file, save_file  # noqa: E402
 from zvisiongenerator.converters.ideogram4_instant import convert_tensor, fp8_rows, transformer_config, write_transformer  # noqa: E402
 from zvisiongenerator.ideogram4_instant_builder import build_instant_model, ensure_instant_model, instant_model_index  # noqa: E402
 from zvisiongenerator.image_model_loader import LOADING_PHASE  # noqa: E402
+from zvisiongenerator.built_models import ensure_built_model  # noqa: E402
 from zvisiongenerator.utils.built_model import BUILD_RECORD_NAME, BUILDING_PHASE  # noqa: E402
 from zvisiongenerator.utils.ideogram4_instant import InstantSource, instant_source, is_built, is_instant_dir  # noqa: E402
 from zvisiongenerator.utils.image_model_detect import detect_image_model  # noqa: E402
@@ -237,6 +238,19 @@ class TestBuildInstantModel:
             build_instant_model(_source(), target, **downloaders)
 
         assert not target.exists() and not list((tmp_path / "models").glob(".ideo.*.partial"))
+
+
+class TestEnsureBuiltModel:
+    def test_an_ideo_folder_goes_to_the_instant_builder_with_the_cancel_check(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        seen: list = []
+        monkeypatch.setattr("zvisiongenerator.ideogram4_instant_builder.build_instant_model", lambda source, target, cancelled=None: seen.append(cancelled) or False)
+        stop = lambda: True  # noqa: E731
+        phases: list[str] = []
+
+        assert ensure_built_model(str(tmp_path / "models" / "ideo"), _CONFIG, platform_key="linux", on_phase=phases.append, cancelled=stop) is False
+
+        assert seen == [stop] and phases == [BUILDING_PHASE]
 
 
 class TestEnsureInstantModel:

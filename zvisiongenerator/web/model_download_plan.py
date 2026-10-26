@@ -9,11 +9,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.downloads.check import check_target
-from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, seedvr2_plan, video_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.space import space_need
 from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name
-from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.model_files import huggingface_cache_dir
 from zvisiongenerator.utils.seedvr2 import seedvr2_row_name
 
@@ -84,7 +83,7 @@ def row_download_needed(
 ) -> bool:
     """Return whether the row still has something to download, judged offline from what is on disk.
 
-    An Ideogram 4 Instant folder needs its sources; any other image row needs a download when it is not
+    A model built on first use (Ideogram 4 Instant) needs its sources; any other image row needs a download when it is not
     *downloaded* (no planner runs, so no file list is read); video, SeedVR2 and enhancer rows need one when a
     target of their plan is not present. A video plan that cannot be made falls back to *downloaded*. Rows of
     unknown status (``downloaded`` is ``None``) and enhancer rows that are *unavailable* need none.
@@ -105,8 +104,9 @@ def row_download_needed(
         return enhancer_download_needed(repo, revision, unavailable=unavailable, present=present)
     image = _image_entry(name, web_config)
     if image is not None:
-        if is_instant_dir(image.resolved_path):
-            return _any_missing(instant_plan(image.resolved_path, config=web_config.app_config, platform_key=sys.platform), present)
+        built_plan = built_model_plan(image.resolved_path, config=web_config.app_config, platform_key=sys.platform)
+        if built_plan is not None:
+            return _any_missing(built_plan, present)
         return downloaded is False
     if downloaded is True and _is_seedvr2_row(name, web_config):
         return False

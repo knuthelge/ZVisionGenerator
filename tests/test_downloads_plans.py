@@ -9,7 +9,7 @@ import httpx
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
-from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_model_downloaded, video_plan
+from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, seedvr2_plan, video_model_downloaded, video_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, write_build_record
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SEEDVR2_MIXED_REPO, SEEDVR2_REPO
@@ -45,22 +45,22 @@ def models_dir(monkeypatch, tmp_path):
     return folder
 
 
-class TestInstantPlan:
+class TestBuiltModelPlan:
     def test_a_model_that_is_not_the_instant_folder_is_not_planned(self, models_dir):
-        assert instant_plan(str(models_dir / "zit"), config=_CONFIG, platform_key="linux") is None
-        assert instant_plan("owner/repo", config=_CONFIG, platform_key="linux") is None
+        assert built_model_plan(str(models_dir / "zit"), config=_CONFIG, platform_key="linux") is None
+        assert built_model_plan("owner/repo", config=_CONFIG, platform_key="linux") is None
 
     def test_a_built_folder_needs_nothing(self, models_dir):
         folder = models_dir / "ideo"
         folder.mkdir()
         write_build_record(folder, instant_source(_CONFIG, "linux"))
 
-        assert instant_plan(str(folder), config=_CONFIG, platform_key="linux") == ()
+        assert built_model_plan(str(folder), config=_CONFIG, platform_key="linux") == ()
 
     def test_an_unbuilt_folder_needs_the_components_and_the_transformer_file(self, models_dir):
         folder = models_dir / "ideo"
 
-        plan = instant_plan(str(folder), config=_CONFIG, platform_key="linux")
+        plan = built_model_plan(str(folder), config=_CONFIG, platform_key="linux")
 
         assert plan == (
             DownloadTarget("owner/base-nf4", "b" * 40, COMPONENT_PATTERNS),
@@ -68,7 +68,7 @@ class TestInstantPlan:
         )
 
     def test_the_platform_picks_the_components_repo(self, models_dir):
-        plan = instant_plan(str(models_dir / "ideo"), config=_CONFIG, platform_key="darwin")
+        plan = built_model_plan(str(models_dir / "ideo"), config=_CONFIG, platform_key="darwin")
 
         assert plan is not None
         assert (plan[0].repo_id, plan[0].revision) == ("owner/base-fp8", "c" * 40)
@@ -78,7 +78,7 @@ class TestInstantPlan:
         folder.mkdir()
         write_build_record(folder, instant_source(_CONFIG, "linux"))
 
-        plan = instant_plan(str(folder), config=_CONFIG, platform_key="darwin")
+        plan = built_model_plan(str(folder), config=_CONFIG, platform_key="darwin")
 
         assert plan is not None
         assert len(plan) == 2
@@ -281,7 +281,7 @@ class TestEnhancerPlan:
 
 
 def test_the_target_round_trips_through_json(models_dir):
-    plan = instant_plan(str(models_dir / "ideo"), config=_CONFIG, platform_key="linux")
+    plan = built_model_plan(str(models_dir / "ideo"), config=_CONFIG, platform_key="linux")
 
     assert plan is not None
     assert all(DownloadTarget.from_json(target.to_json()) == target for target in plan)

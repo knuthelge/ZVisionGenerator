@@ -7,7 +7,7 @@ from zvisiongenerator.downloads.child import ChildResult, child_env, run_in_chil
 from zvisiongenerator.downloads.ensure import DETACHED, READY, STOPPED, UNCHECKED, DownloadReport, ensure_downloaded
 from zvisiongenerator.downloads.flights import DownloadFlights, Flight
 from zvisiongenerator.downloads.hub_access import LOGIN_SOURCE, TOKEN_ENV_VARS, describe_refusal, refusal_message, token_source
-from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_model_downloaded, video_plan
+from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, seedvr2_plan, video_model_downloaded, video_plan
 from zvisiongenerator.downloads.presence import remove_partial_files, target_present_offline
 from zvisiongenerator.downloads.progress import ByteCounts, SpeedMeter, make_byte_sink, progress_from_counts
 from zvisiongenerator.downloads.space import SpaceNeed, space_need
@@ -30,13 +30,13 @@ __all__ = [
     "SpaceNeed",
     "SpeedMeter",
     "TargetCheck",
+    "built_model_plan",
     "check_target",
     "child_env",
     "describe_refusal",
     "enhancer_plan",
     "ensure_downloaded",
     "image_plan",
-    "instant_plan",
     "is_literal",
     "make_byte_sink",
     "progress_from_counts",

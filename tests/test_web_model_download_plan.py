@@ -81,7 +81,7 @@ def _seedvr2(downloaded: bool = False) -> SeedVR2Setup:
 
 
 def _no_planner_may_run(monkeypatch) -> None:
-    for name in ("image_plan", "video_plan", "seedvr2_plan", "enhancer_plan", "instant_plan"):
+    for name in ("image_plan", "video_plan", "seedvr2_plan", "enhancer_plan"):
         monkeypatch.setattr(plan_module, name, lambda *a, _name=name, **k: pytest.fail(f"{_name} ran"))
 
 
@@ -154,7 +154,7 @@ class TestRowPlan:
 
 
 class TestDownloadNeeded:
-    def test_an_image_row_needs_a_download_exactly_when_it_is_not_downloaded_and_no_planner_runs(self, env, monkeypatch):
+    def test_an_image_row_needs_a_download_exactly_when_it_is_not_downloaded_and_no_target_planner_runs(self, env, monkeypatch):
         _no_planner_may_run(monkeypatch)
         web_config = _web_config(env, image=[_image("zit", "owner/zit")])
 

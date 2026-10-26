@@ -26,12 +26,12 @@ from typing import Any
 from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, release_accelerator_memory
+from zvisiongenerator.built_models import ensure_built_model
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.progress_events import exception_message
 from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.downloads import DETACHED, STOPPED, DownloadFlights, DownloadReport, DownloadTarget, describe_refusal, enhancer_plan, ensure_downloaded, image_plan, seedvr2_plan, video_plan
-from zvisiongenerator.ideogram4_instant_builder import ensure_instant_model
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
@@ -1235,7 +1235,7 @@ def _load_image_model_with_progress(
     model_label = request.model_name or model_ref
     progress_callback({"type": "model_loading", "mode": "image", "model": model_label})
     backend = get_backend()
-    if config is not None and not ensure_instant_model(
+    if config is not None and not ensure_built_model(
         model_ref,
         config,
         platform_key=sys.platform,
