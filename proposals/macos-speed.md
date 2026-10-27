@@ -1,6 +1,6 @@
 # Faster generation on macOS
 
-**Status:** Proposed (2026-10-11)
+**Status:** Proposed (2026-10-27)
 
 ## Problem
 
@@ -86,6 +86,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
   - Skip streaming when LoRAs are set and the machine has enough memory.
   - Warn when streaming and LoRAs are combined.
 - **Effort / risk:** not assessed.
+- **Next:** measurement 7 (the vendored LTX at v0.18 re-quantizes LoRAs per streamed block, the likely cause).
 
 ### 5. Klein text encoding: fewer layers and a prompt cache
 
@@ -124,11 +125,11 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 ### 9. Image VAE and temp PNG
 
 - **Change:**
-  - Offer a bf16 VAE. We upcast the VAE to float32 even in bf16 mode (`zvisiongenerator/backends/mac/image.py:383-387`).
+  - Offer a bf16 VAE. We upcast the VAE to float32 even in bf16 mode (`zvisiongenerator/backends/mac/image.py:399-403`).
   - Write the img2img temporary PNG with `compress_level=0` (`:436-438` use the default compression).
 - **Estimated gain:** a faster decode and encode at size `m` and on upscales for the VAE (not sized). For the PNG, an estimated 0.3–1 s per 4 MP upscale.
 - **Output:** the VAE option changes the picture slightly; the PNG change is identical.
-- **Effort / risk:** small. Experiment 5 sizes the VAE part.
+- **Effort / risk:** small. Experiment 6 sizes the VAE part.
 
 ### 10. Wire memory during generation
 
@@ -153,7 +154,21 @@ Run in this order. Each is a measurement only, with no product change, on the M5
 2. **`ltx-4` streaming on and off, with `LTX2_COMPUTE_DTYPE` unset, `float16` and `bfloat16`.** Done: streaming is item 4, and float16 was measured and shipped as item 3 (bfloat16 was not timed end to end).
 3. **`klein9b -n 3` with the same prompt.** Time `_encode_prompt_pair`, and compare step 1 against step 2 on images 2 and 3. Sizes items 5 and 6.
 4. **Two identical `klein4b` Web UI jobs back to back.** Time from `model_loading` to the first step event. Sizes item 2.
-5. **VAE decode in float32 against bf16** at size `m` and on a 2x upscale. Sizes item 9.
+
+### Pending Mac checks from the ecosystem review (2026-10-27)
+
+Added from the dependency and model review of 2026-10-27, which landed mflux 0.24 and the LTX MLX update. Same machine and repeats as above.
+
+5. **H3's text encoder from `mlx-community/Qwen3-VL-32B-Instruct-4bit`.** The spike is written up in [prequantized-model-copies.md](prequantized-model-copies.md).
+6. **mflux 0.24's bf16 strip VAE decode against our float32 VAE upcast.**
+   - *Background:* mflux 0.24 decodes the VAE in bf16 row strips by default (about 1.6 GB at 1 MP instead of 7–14 GB). Our float32 VAE upcast (item 9) works against that.
+   - *Measure, upcast against no upcast:* peak memory (`mx.get_peak_memory`), decode time, and the image at the same seed (PSNR, plus colour gradients and banding by eye). Use `zit`, `klein9b` and `krea2` at `m`, and a 2x upscale.
+   - *Decide:* drop the upcast if the images can't be told apart; otherwise keep it, and record the memory cost in the estimates. Answers item 9's VAE part.
+7. **Vendored LTX MLX at v0.18 (`dgrauet/ltx-2-mlx` `895201d`).** Check:
+   - *LoRA under `--low-memory` on a Mac with 24 GB or less* (or with low memory forced on the 32 GB Mac). LoRA weights outside the blocks were silently dropped while streaming. Pass: a user LoRA visibly applies, as it does resident.
+   - *Image-to-video peak memory* against the old pin, at the same settings. Upstream reports about 1.4 GB lower.
+   - *`LTX2_LORA_MODE=unfused` speed.* Compare seconds per step with a LoRA, streamed and resident, against item 4a's 17.5 and 8.8 s, and record the peak. If unfused removes most of the 2x penalty, it settles item 4a.
+   - *Upstream:* dgrauet/ltx-2-mlx #235 (LoRA weights outside the blocks under streaming), #216 (image encode evaluated before its encoder is freed), #213, #220 and #238 (unfused LoRA, IC-LoRA stage 2).
 
 ## Windows/Linux (secondary)
 
