@@ -6,7 +6,6 @@ import json
 import math
 import sqlite3
 from collections.abc import Callable, Mapping
-from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +18,6 @@ JOB_LOG_STATUS_FILTERS = ("all", "failed", "completed", "cancelled")
 
 _VERSION = 1
 _TABLE = f"jobs_entries_v{_VERSION}"
-_STORAGE_ERRORS = (sqlite3.Error, OSError)
 
 type JobLogEntry = dict[str, Any]
 
@@ -179,11 +177,6 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
 _COMPONENT = app_db.Component("jobs", _VERSION, _migrate)
 
 
-def _reason(exc: BaseException) -> str:
-    """Return the operating system's description of *exc* when it has one, else its text."""
-    return getattr(exc, "strerror", None) or str(exc)
-
-
 class JobLog:
     """Store finished jobs as rows of the ``jobs`` component of the app database, oldest first.
 
@@ -198,15 +191,7 @@ class JobLog:
 
     def _run[T](self, operation: Callable[[app_db.AppConnection], T]) -> T:
         """Run *operation* on a new connection; quarantine a corrupt file and wrap storage errors."""
-        try:
-            with closing(app_db.connect(self._path_provider(), components=(_COMPONENT,))) as conn:
-                try:
-                    return operation(conn)
-                except BaseException as exc:
-                    app_db.recover_if_corrupt(conn, exc)
-                    raise
-        except _STORAGE_ERRORS as exc:
-            raise JobLogError(_reason(exc)) from exc
+        return app_db.run(self._path_provider(), (_COMPONENT,), operation, error=JobLogError)
 
     def append(self, entry: JobLogEntry) -> None:
         """Add *entry* as the newest row; rows stay until :meth:`delete` or :meth:`clear` removes them."""
