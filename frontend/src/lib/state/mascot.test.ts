@@ -62,6 +62,10 @@ describe('mascotMood', () => {
     expect(mascotMood({ job: job('running', 3, 20), greeting: true, typing: true, drowsy: true })).toBe('creating');
   });
 
+  it('looks to the user while a render waits for approval', () => {
+    expect(mascotMood({ job: job('running', 3, 20, { review: { iteration: 1 } }) })).toBe('curious');
+  });
+
   it('is sad when the workspace failed to load', () => {
     expect(mascotMood({ job: null, loadError: true, greeting: true })).toBe('sad');
   });
@@ -81,22 +85,10 @@ describe('mascotTool', () => {
   it('holds a clapperboard for video and a brush otherwise', () => {
     expect(mascotTool('txt2vid')).toBe('clapper');
     expect(mascotTool('img2vid')).toBe('clapper');
+    expect(mascotTool('extend')).toBe('clapper');
     expect(mascotTool('txt2img')).toBe('brush');
     expect(mascotTool('upscale')).toBe('brush');
     expect(mascotTool(undefined)).toBe('brush');
-  });
-});
-
-describe('mascotTool for extend', () => {
-  it('holds the clapperboard for an extension', () => {
-    expect(mascotTool('extend')).toBe('clapper');
-    expect(mascotTool('txt2img')).toBe('brush');
-  });
-});
-
-describe('mascotMood during a review', () => {
-  it('looks to the user while a render waits for approval', () => {
-    expect(mascotMood({ job: job('running', 3, 20, { review: { iteration: 1 } }) })).toBe('curious');
   });
 });
 
@@ -105,37 +97,21 @@ describe('mascotSpot', () => {
     view: 'latest', running: false, reviewing: false, reacting: false, lookingForHistory: false, welcoming: false, ...overrides,
   });
 
-  it('stays home while the latest output shows', () => {
-    expect(at({})).toBeNull();
-  });
-
-  it('works on the job while it runs and while reacting to its end', () => {
-    expect(at({ view: 'job', running: true })).toBe('job');
-    expect(at({ view: 'job', reacting: true })).toBe('job');
-    expect(at({ view: 'job' })).toBeNull();
-  });
-
-  it('waits beside a review instead of the job card', () => {
-    expect(at({ view: 'job', running: true, reviewing: true })).toBe('review');
-  });
-
-  it('presents finished outputs only while reacting', () => {
-    expect(at({ view: 'outputs', reacting: true })).toBe('outputs');
-    expect(at({ view: 'outputs' })).toBeNull();
-  });
-
-  it('explains a real empty stage, not one still looking for history', () => {
-    expect(at({ view: 'empty' })).toBe('empty');
-    expect(at({ view: 'empty', lookingForHistory: true })).toBeNull();
-  });
-
-  it('greets a first-time user in the welcome, in place of the empty stage', () => {
-    expect(at({ view: 'empty', welcoming: true })).toBe('welcome');
-    expect(at({ view: 'empty', welcoming: true, lookingForHistory: true })).toBe('welcome');
-  });
-
-  it('explains a load error', () => {
-    expect(at({ view: 'error', reviewing: true })).toBe('error');
+  it.each<[string, Partial<MascotSpotSignals>, ReturnType<typeof mascotSpot>]>([
+    ['stays home while the latest output shows', {}, null],
+    ['works on the job while it runs', { view: 'job', running: true }, 'job'],
+    ['works on the job while reacting to its end', { view: 'job', reacting: true }, 'job'],
+    ['leaves an idle job view alone', { view: 'job' }, null],
+    ['waits beside a review instead of the job card', { view: 'job', running: true, reviewing: true }, 'review'],
+    ['presents finished outputs while reacting', { view: 'outputs', reacting: true }, 'outputs'],
+    ['leaves finished outputs alone otherwise', { view: 'outputs' }, null],
+    ['explains a real empty stage', { view: 'empty' }, 'empty'],
+    ['waits while still looking for history', { view: 'empty', lookingForHistory: true }, null],
+    ['greets a first-time user in the welcome', { view: 'empty', welcoming: true }, 'welcome'],
+    ['keeps the welcome while looking for history', { view: 'empty', welcoming: true, lookingForHistory: true }, 'welcome'],
+    ['explains a load error', { view: 'error', reviewing: true }, 'error'],
+  ])('%s', (_name, overrides, expected) => {
+    expect(at(overrides)).toBe(expected);
   });
 });
 

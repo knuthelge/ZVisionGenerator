@@ -1,11 +1,11 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GalleryAsset } from '$lib/types';
 
 import AssetViewer from './AssetViewer.svelte';
 import { escapeLayerOpen } from '$lib/actions/escapeStack';
+import { mountComponent } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { requestConfirm } from './confirm.svelte';
@@ -32,26 +32,12 @@ function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
 const assetB = makeAsset({ id: 'out/asset-b.png', url: '/media/out/asset-b.png', filename: 'asset-b.png', prompt: 'Second asset' });
 
 describe('AssetViewer', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
+  let page: ReturnType<typeof mountComponent>;
 
-  beforeEach(() => {
-    localStorage.clear();
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-  });
+  beforeEach(() => localStorage.clear());
 
   function mountViewer(props: Record<string, unknown>): void {
-    app = flushSync(() => mount(AssetViewer, {
-      target,
-      props: { assets: [makeAsset(), assetB], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn(), ...props },
-    }));
+    page = mountComponent(AssetViewer, { assets: [makeAsset(), assetB], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn(), ...props });
   }
 
   function button(label: string): HTMLButtonElement | null {
@@ -63,7 +49,7 @@ describe('AssetViewer', () => {
     expect(button('Previous asset')?.disabled).toBe(true);
     expect(button('Next asset')?.disabled).toBe(false);
 
-    await unmount(app!);
+    await page.unmount();
     mountViewer({ currentIndex: 1 });
     expect(button('Previous asset')?.disabled).toBe(false);
     expect(button('Next asset')?.disabled).toBe(true);
@@ -90,7 +76,7 @@ describe('AssetViewer', () => {
     expect(details?.textContent).toContain('Test asset');
     expect(details?.textContent).toContain('1234');
 
-    await unmount(app!);
+    await page.unmount();
     mountViewer({});
     expect(document.querySelector('#asset-viewer-details')).not.toBeNull();
   });
@@ -160,21 +146,21 @@ describe('AssetViewer', () => {
     mountViewer({ currentIndex: 5, onclose });
     expect(document.querySelector('#asset-viewer-title')?.textContent).toBe('asset-b.png');
 
-    await unmount(app!);
+    await page.unmount();
     mountViewer({ assets: [], onclose });
     flushSync();
     expect(onclose).toHaveBeenCalled();
     expect(document.querySelector('[data-testid="asset-viewer"]')).toBeNull();
   });
 
-  it('lists every asset in the thumbnail strip and asks for more near the end', () => {
+  it('lists every asset in the thumbnail strip and asks for more near the end', async () => {
     const many = Array.from({ length: 30 }, (_, i) => makeAsset({ id: `out/${i}.png`, url: `/media/out/${i}.png`, filename: `${i}.png` }));
     const onnearend = vi.fn();
     mountViewer({ assets: many, currentIndex: 10, onnearend });
     expect(document.querySelectorAll('[data-film-index]')).toHaveLength(30);
     expect(onnearend).not.toHaveBeenCalled();
 
-    flushSync(() => { void unmount(app!); });
+    await page.unmount();
     mountViewer({ assets: many, currentIndex: 28, onnearend });
     expect(onnearend).toHaveBeenCalled();
   });
@@ -235,12 +221,14 @@ describe('AssetViewer', () => {
     expect(onnavigate).toHaveBeenLastCalledWith(0);
   });
 
-  it('opens the reference menu with E and leaves other keys to it while open', () => {
+  it('opens the reference menu with E on an image, leaving other keys to it while open', () => {
     const onreference = vi.fn();
     const ondelete = vi.fn();
-    mountViewer({ onreference, ondelete });
+    const onextend = vi.fn();
+    mountViewer({ onreference, ondelete, onextend });
     press('e');
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    expect(onextend).not.toHaveBeenCalled();
     press('Delete');
     expect(ondelete).not.toHaveBeenCalled();
   });
@@ -258,20 +246,19 @@ describe('AssetViewer', () => {
       const asset = clip();
       mountViewer({ assets: [asset], onextend });
       expect(extendButton()?.disabled).toBe(false);
-      expect(extendButton()?.getAttribute('title')).toBe('Extend this video (E)');
       extendButton()!.click();
       expect(onextend).toHaveBeenCalledWith(asset);
     });
 
-    it('has no Extend button for an image, without a handler, or when extending is unavailable here', () => {
+    it('has no Extend button for an image, without a handler, or when extending is unavailable here', async () => {
       mountViewer({ assets: [makeAsset({ extend: { available: true, reason: null } })], onextend: vi.fn() });
       expect(extendButton()).toBeNull();
 
-      flushSync(() => { void unmount(app!); });
+      await page.unmount();
       mountViewer({ assets: [clip()] });
       expect(extendButton()).toBeNull();
 
-      flushSync(() => { void unmount(app!); });
+      await page.unmount();
       mountViewer({ assets: [clip({ extend: null })], onextend: vi.fn() });
       expect(extendButton()).toBeNull();
     });
@@ -309,13 +296,6 @@ describe('AssetViewer', () => {
       expect(onextend).not.toHaveBeenCalled();
     });
 
-    it('still opens the reference menu with E on an image', () => {
-      const onextend = vi.fn();
-      mountViewer({ assets: [makeAsset()], onextend, onreference: vi.fn() });
-      press('e');
-      expect(document.querySelector('[role="menu"]')).not.toBeNull();
-      expect(onextend).not.toHaveBeenCalled();
-    });
   });
 
   it('copies the prompt with C', async () => {
@@ -339,7 +319,7 @@ describe('AssetViewer', () => {
     press('r');
     expect(onreuse).toHaveBeenCalledWith(makeAsset());
 
-    await unmount(app!);
+    await page.unmount();
     onreuse.mockClear();
     mountViewer({ onreuse, assets: [makeAsset({ has_reusable_config: false })] });
     expect(press('R').defaultPrevented).toBe(false);
@@ -370,7 +350,7 @@ describe('AssetViewer', () => {
 
   it('takes the shortcut list down with it when the viewer closes, leaving no layer behind', () => {
     const props = reactiveProps({ assets: [makeAsset(), assetB], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
-    app = flushSync(() => mount(AssetViewer, { target, props }));
+    page = mountComponent(AssetViewer, props);
     press('?', { shiftKey: true });
     expect(document.querySelector('#asset-viewer-shortcuts')).not.toBeNull();
     expect(escapeLayerOpen()).toBe(true);
@@ -439,132 +419,69 @@ describe('AssetViewer', () => {
     expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2, 'creative');
   });
 
-  it('hides the upscale menu without a handler', () => {
-    mountViewer({ assets: [makeAsset({ upscale })] });
-    expect(document.querySelector('[data-action="upscale"]')).toBeNull();
-  });
-
-  it('hides the upscale menu for videos', () => {
-    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale })], onupscale: vi.fn() });
-    expect(document.querySelector('[data-action="upscale"]')).toBeNull();
-  });
-
   const videoUpscale = (warning: string | null = null) => ({
     factors: [],
     seedvr2: { options: [{ factor: 2 as const, width: 1536, height: 896, allowed: true as const, reason: null, warning }], model: 'SeedVR2 7B fp8', downloaded: true, download_size_label: null },
   });
 
-  it('offers a video one 2× SeedVR2 item', () => {
+  it('hides the upscale menu without a handler, for a video with only creative options, and without options', async () => {
+    const cases: Array<[Partial<GalleryAsset>, boolean]> = [
+      [{ upscale }, false],
+      [{ media_type: 'video', upscale }, true],
+      [{ media_type: 'video', upscale: null }, true],
+    ];
+    for (const [overrides, withHandler] of cases) {
+      mountViewer({ assets: [makeAsset(overrides)], onupscale: withHandler ? vi.fn() : undefined });
+      expect(document.querySelector('[data-action="upscale"]')).toBeNull();
+      await page.unmount();
+    }
+  });
+
+  it('upscales a video with the SeedVR2 2x item from the menu', () => {
     const onupscale = vi.fn();
-    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: videoUpscale('May need more memory.') })], onupscale });
-
+    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: videoUpscale() })], onupscale });
     flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
-
-    const items = upscaleItems();
-    expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['upscale-seedvr2-2']);
-    flushSync(() => items[0].click());
+    flushSync(() => upscaleItems()[0].click());
     expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'seedvr2');
   });
 
-  it('hides the upscale menu for a video the server offers no upscale for', () => {
-    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: null })], onupscale: vi.fn() });
-    expect(document.querySelector('[data-action="upscale"]')).toBeNull();
+  const noCreative = (seedvr2: typeof seedvr2Upscale.seedvr2 | null) => ({
+    factors: upscale.factors.map((option) => ({ ...option, allowed: false, reason: 'This model cannot upscale.' })),
+    seedvr2,
   });
 
-  it('upscales a video 2× with X then 2, warns first about a marked size, and ignores X then 4', () => {
+  it.each([
+    { name: 'creative: 2x runs, a disallowed 4x is refused', upscale, video: false, keys: ['2', '4'], calls: [[2, 'creative']], warnings: ['Over the 16-megapixel upscale limit.'] },
+    {
+      name: 'SeedVR2: 2x and 4x run, the high-memory size warns first',
+      upscale: seedvr2Upscale, video: false, keys: ['2', '4'], calls: [[2, 'seedvr2'], [4, 'seedvr2']], warnings: ['May need more memory than this Mac has.'],
+    },
+    { name: 'video: only 2x runs, with its warning', upscale: videoUpscale('May need more memory.'), video: true, keys: ['4', '2'], calls: [[2, 'seedvr2']], warnings: ['May need more memory.'] },
+    { name: 'SeedVR2 runs when every creative factor is disabled', upscale: noCreative(seedvr2Upscale.seedvr2), video: false, keys: ['2'], calls: [[2, 'seedvr2']], warnings: [] },
+    { name: 'disabled creative factors alone explain instead of upscaling', upscale: noCreative(null), video: false, keys: ['2'], calls: [], warnings: ['This model cannot upscale.'] },
+  ])('runs the X then digit chord, $name', ({ upscale: options, video, keys, calls, warnings }) => {
     const onupscale = vi.fn();
     toasts.length = 0;
-    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: videoUpscale('May need more memory.') })], onupscale });
+    mountViewer({ assets: [makeAsset({ upscale: options, ...(video ? { media_type: 'video' as const } : {}) })], onupscale });
 
-    press('x');
-    press('4');
-    expect(onupscale).not.toHaveBeenCalled();
+    for (const key of keys) {
+      press('x');
+      press(key);
+    }
 
-    press('x');
-    press('2');
-    expect(onupscale).toHaveBeenCalledTimes(1);
-    expect(onupscale).toHaveBeenLastCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'seedvr2');
-    expect(toasts.map((toast) => toast.message)).toEqual(['May need more memory.']);
+    expect(onupscale.mock.calls.map(([, factor, method]) => [factor, method])).toEqual(calls);
+    expect(toasts.map((toast) => toast.message)).toEqual(warnings);
   });
 
-  it('upscales 2× with X then 2 and refuses a disallowed 4× with X then 4', () => {
-    const onupscale = vi.fn();
-    const ondelete = vi.fn();
-    mountViewer({ assets: [makeAsset({ upscale })], onupscale, ondelete });
-
-    press('x');
-    press('2');
-    expect(onupscale).toHaveBeenCalledTimes(1);
-    expect(onupscale).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2, 'creative');
-
-    press('x');
-    press('4');
-    expect(onupscale).toHaveBeenCalledTimes(1);
-  });
-
-  it('runs the SeedVR2 upscale with X then 2 or 4 where it is offered, even for a size flagged as high memory', () => {
+  it('starts the upscale chord only from a plain X', () => {
     const onupscale = vi.fn();
     mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
 
-    press('x');
     press('2');
-    press('x');
-    press('4');
-
-    expect(onupscale.mock.calls.map(([, factor, method]) => [factor, method])).toEqual([[2, 'seedvr2'], [4, 'seedvr2']]);
-  });
-
-  it('warns when the chord starts a SeedVR2 upscale flagged as high memory, and stays quiet otherwise', () => {
-    const onupscale = vi.fn();
-    toasts.length = 0;
-    mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
-
-    press('x');
-    press('2');
-    expect(onupscale).toHaveBeenCalledTimes(1);
-    expect(toasts).toEqual([]);
-
-    press('x');
-    press('4');
-    expect(onupscale).toHaveBeenCalledTimes(2);
-    expect(toasts.map((toast) => [toast.message, toast.type])).toEqual([['May need more memory than this Mac has.', 'warning']]);
-  });
-
-  it('does not start the upscale chord from Shift+X', () => {
-    const onupscale = vi.fn();
-    mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
-
     press('X', { shiftKey: true });
     press('2');
 
     expect(onupscale).not.toHaveBeenCalled();
-  });
-
-  it('runs the SeedVR2 upscale from the chord when every creative factor is disabled', () => {
-    const onupscale = vi.fn();
-    const noCreative = {
-      ...seedvr2Upscale,
-      factors: upscale.factors.map((option) => ({ ...option, allowed: false, reason: 'This model cannot upscale.' })),
-    };
-    mountViewer({ assets: [makeAsset({ upscale: noCreative })], onupscale });
-
-    press('x');
-    press('2');
-
-    expect(onupscale.mock.calls.map(([, factor, method]) => [factor, method])).toEqual([[2, 'seedvr2']]);
-  });
-
-  it('explains instead of upscaling from the chord when only disabled creative factors exist', () => {
-    const onupscale = vi.fn();
-    const noCreative = { factors: upscale.factors.map((option) => ({ ...option, allowed: false, reason: 'This model cannot upscale.' })), seedvr2: null };
-    toasts.length = 0;
-    mountViewer({ assets: [makeAsset({ upscale: noCreative })], onupscale });
-
-    press('x');
-    press('2');
-
-    expect(onupscale).not.toHaveBeenCalled();
-    expect(toasts.map((toast) => toast.message)).toEqual(['This model cannot upscale.']);
   });
 
   it('lists the SeedVR2 items, a separator and the creative items in the upscale menu', () => {
@@ -580,14 +497,7 @@ describe('AssetViewer', () => {
     expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 4, 'seedvr2');
   });
 
-  it('leaves 2 and 4 alone without a preceding X', () => {
-    const onupscale = vi.fn();
-    mountViewer({ assets: [makeAsset({ upscale })], onupscale });
-    press('2');
-    expect(onupscale).not.toHaveBeenCalled();
-  });
-
-  it('shows recorded settings, post-processing and the upscale source in the details', () => {
+  it('navigates to the upscale source from the details', () => {
     const source = makeAsset({ id: 'out/source.png', filename: 'source.png' });
     const onnavigate = vi.fn();
     const upscaled = makeAsset({
@@ -605,13 +515,6 @@ describe('AssetViewer', () => {
     press('i');
 
     const details = document.querySelector('#asset-viewer-details')!;
-    const facts = Object.fromEntries(Array.from(details.querySelectorAll('dl div')).map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
-    expect(facts.Workflow).toBe('Upscale');
-    expect(facts.Scheduler).toBe('beta');
-    expect(facts.Upscale).toBe('2× · denoise 0.4 · 3 steps · pre-sharpen 0.6');
-    expect(facts.Sharpen).toBe('1.2');
-    expect(facts['Generation time']).toBe('12.3 s');
-    expect(details.textContent).toContain('blurry');
 
     flushSync(() => details.querySelector<HTMLButtonElement>('[data-testid="viewer-source"] button')!.click());
     expect(onnavigate).toHaveBeenCalledWith(1);

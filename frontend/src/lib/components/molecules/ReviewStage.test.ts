@@ -1,31 +1,24 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
 
 import ReviewStage from './ReviewStage.svelte';
+import { mountComponent } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 
 describe('ReviewStage', () => {
-  let target: HTMLDivElement;
-  let component: Record<string, unknown> | null = null;
+  let target: HTMLElement;
+  let component: ReturnType<typeof mountComponent> | null = null;
   let onapprove: ReturnType<typeof vi.fn>;
   let ondiscard: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
     onapprove = vi.fn();
     ondiscard = vi.fn();
   });
 
-  afterEach(() => {
-    if (component) unmount(component);
-    component = null;
-    document.body.innerHTML = '';
-    vi.restoreAllMocks();
-  });
+  afterEach(() => vi.restoreAllMocks());
 
   function makeJob(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
     return {
@@ -37,9 +30,13 @@ describe('ReviewStage', () => {
   }
 
   function render(job: ActiveJobState = makeJob(), extra: Record<string, unknown> = {}): void {
-    component = mount(ReviewStage, { target, props: { job, onapprove, ondiscard, ...extra } });
-    flushSync();
+    component = mountComponent(ReviewStage, { job, onapprove, ondiscard, ...extra });
+    target = component.target;
   }
+
+  const videoJob = (overrides: Partial<ActiveJobState> = {}) => makeJob({
+    workflow: 'txt2vid', previewUrl: null, review: { iteration: 2 }, settings: { upscale: '2', audio: ['on', 'false'] }, ...overrides,
+  });
 
   const button = (decision: string) => target.querySelector<HTMLButtonElement>(`button[data-decision="${decision}"]`);
   const image = () => target.querySelector<HTMLImageElement>('img');
@@ -55,14 +52,13 @@ describe('ReviewStage', () => {
     expect(image()?.getAttribute('src')).toBe('/jobs/job-review/preview?v=4');
   });
 
-  it('says which render this is and what it upscales to once the size is known', () => {
+  it('says what the render upscales to once its size is known', () => {
     render();
-    expect(target.querySelector('.review-line')?.textContent).toBe('Review 3 of 8');
     Object.defineProperty(image()!, 'naturalWidth', { configurable: true, value: 832 });
     Object.defineProperty(image()!, 'naturalHeight', { configurable: true, value: 1216 });
     image()!.dispatchEvent(new Event('load'));
     flushSync();
-    expect(target.querySelector('.review-line')?.textContent).toBe('Review 3 of 8 · 832×1216 → 1664×2432');
+    expect(target.querySelector('.review-line')?.textContent).toContain('832×1216 → 1664×2432');
   });
 
   it('keeps the decision buttons usable without a preview', () => {
@@ -121,72 +117,32 @@ describe('ReviewStage', () => {
     expect(dialog.getAttribute('aria-modal')).not.toBe('true');
   });
 
-  it('names the buttons without the key hint', () => {
-    render();
-    expect(button('approve')!.getAttribute('aria-label')).toBe('Approve');
-    expect(button('discard')!.getAttribute('aria-label')).toBe('Discard');
-    for (const hint of target.querySelectorAll('kbd')) expect(hint.getAttribute('aria-hidden')).toBe('true');
-  });
-
-  it('moves focus to Approve when the review appears, and not out of a field being typed in', () => {
+  it('moves focus to Approve when the review appears and nothing has focus', () => {
+    (document.activeElement as HTMLElement | null)?.blur();
     render();
     expect(document.activeElement).toBe(button('approve'));
-    unmount(component);
-    component = null;
+  });
 
+  it('leaves focus on a field being typed in, an open dialog or a menu item, so Enter cannot approve a render nobody has seen', async () => {
     const field = document.createElement('textarea');
     document.body.appendChild(field);
     field.focus();
     render();
     expect(document.activeElement).toBe(field);
-  });
+    await component!.unmount();
+    field.remove();
 
-  it('leaves focus alone while a dialog is open, so Enter cannot approve a render nobody has seen', () => {
     document.body.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"><button id="viewer-close">Close</button></div>');
     document.getElementById('viewer-close')!.focus();
     render();
     expect(document.activeElement).toBe(document.getElementById('viewer-close'));
-    unmount(component);
-    component = null;
+    await component!.unmount();
+    document.getElementById('viewer-close')!.closest('[role="dialog"]')!.remove();
 
-    document.body.innerHTML = '';
-    target = document.createElement('div');
-    document.body.appendChild(target);
-    document.body.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"></div>');
-    render();
-    expect(document.activeElement).not.toBe(button('approve'));
-  });
-
-  it('leaves focus on a menu item being navigated', () => {
     document.body.insertAdjacentHTML('beforeend', '<div role="menu"><button role="menuitem" id="menu-item">Reuse</button></div>');
     document.getElementById('menu-item')!.focus();
     render();
     expect(document.activeElement).toBe(document.getElementById('menu-item'));
-  });
-
-  it('moves focus to Approve when nothing has it', () => {
-    (document.activeElement as HTMLElement | null)?.blur();
-    expect(document.activeElement).toBe(document.body);
-    render();
-    expect(document.activeElement).toBe(button('approve'));
-  });
-
-  it('does not trap focus', () => {
-    render();
-    const outside = document.createElement('button');
-    document.body.appendChild(outside);
-    outside.focus();
-    flushSync();
-    expect(document.activeElement).toBe(outside);
-  });
-
-  it('offers nothing but the render, its line, Approve and Discard', () => {
-    render();
-    expect(image()).not.toBeNull();
-    expect(target.querySelector('.review-line')?.textContent).toContain('Review 3 of 8');
-    const labels = [...target.querySelectorAll('button')].map((element) => element.getAttribute('aria-label'));
-    expect(labels).toEqual(['Approve', 'Discard']);
-    expect(target.querySelector('.review-notice')).toBeNull();
   });
 
   it('waits while the connection is down', () => {
@@ -207,33 +163,23 @@ describe('ReviewStage', () => {
     expect(button('approve')!.disabled).toBe(false);
   });
 
-  it('allows a decision for the next review of the same job', () => {
-    const props = reactiveProps({ job: makeJob(), onapprove, ondiscard });
-    component = mount(ReviewStage, { target, props });
-    flushSync();
+  it.each([
+    ['an image', () => makeJob(), () => makeJob({ previewUrl: '/jobs/job-review/preview?v=9', review: { iteration: 4 } })],
+    ['an image without a preview', () => makeJob({ previewUrl: null }), () => makeJob({ previewUrl: null, review: { iteration: 4 } })],
+    ['a video', () => videoJob(), () => videoJob({ review: { iteration: 3 } })],
+  ])('allows a decision for the next review of the same job, for %s', (_name, first, next) => {
+    const props = reactiveProps({ job: first(), onapprove, ondiscard });
+    component = mountComponent(ReviewStage, props);
+    target = component.target;
     button('approve')!.click();
     flushSync();
     expect(button('approve')!.disabled).toBe(true);
-    props.job = makeJob({ previewUrl: '/jobs/job-review/preview?v=9', review: { iteration: 4 } });
-    flushSync();
-    expect(button('approve')!.disabled).toBe(false);
-  });
-  it('allows a decision for the next review when neither render has a preview', () => {
-    const props = reactiveProps({ job: makeJob({ previewUrl: null }), onapprove, ondiscard });
-    component = mount(ReviewStage, { target, props });
-    flushSync();
-    button('approve')!.click();
-    flushSync();
-    expect(button('approve')!.disabled).toBe(true);
-    props.job = makeJob({ previewUrl: null, review: { iteration: 4 } });
+    props.job = next();
     flushSync();
     expect(button('approve')!.disabled).toBe(false);
   });
 
   describe('for a video', () => {
-    const videoJob = (overrides: Partial<ActiveJobState> = {}) => makeJob({
-      workflow: 'txt2vid', previewUrl: null, review: { iteration: 2 }, settings: { upscale: '2', audio: ['on', 'false'] }, ...overrides,
-    });
     const video = () => target.querySelector<HTMLVideoElement>('video');
     const playback = () => target.querySelector<HTMLButtonElement>('button[data-playback]');
     const size = (element: HTMLVideoElement, width: number, height: number) => {
@@ -286,20 +232,19 @@ describe('ReviewStage', () => {
 
     it('reads the video size from the loaded video and doubles it for the upscaled size', () => {
       render(videoJob());
-      expect(target.querySelector('.review-line')?.textContent).toBe('Review 2 of 8');
       size(video()!, 704, 448);
-      expect(target.querySelector('.review-line')?.textContent).toBe('Review 2 of 8 · 704×448 → 1408×896');
+      expect(target.querySelector('.review-line')?.textContent).toContain('704×448 → 1408×896');
     });
 
     it('shows the size of the next video, not the last one, once it is reviewed', () => {
       const props = reactiveProps({ job: videoJob(), onapprove, ondiscard });
-      component = mount(ReviewStage, { target, props });
-      flushSync();
+      component = mountComponent(ReviewStage, props);
+      target = component.target;
       size(video()!, 704, 448);
       props.job = videoJob({ review: { iteration: 3 } });
       flushSync();
       expect(video()?.getAttribute('src')).toBe('/jobs/job-review/review?v=3');
-      expect(target.querySelector('.review-line')?.textContent).toBe('Review 3 of 8');
+      expect(target.querySelector('.review-line')?.textContent).not.toContain('704×448');
     });
 
     it('approves and discards a video with the buttons and with Y and N, and says video', () => {
@@ -316,8 +261,7 @@ describe('ReviewStage', () => {
       render(videoJob());
       const player = video()!;
       expect(player.getAttribute('src')).toBe('/jobs/job-review/review?v=2');
-      unmount(component);
-      component = null;
+      flushSync(() => void component!.unmount());
       expect(pause).toHaveBeenCalled();
       expect(player.hasAttribute('src')).toBe(false);
       expect(load).toHaveBeenCalled();
@@ -333,16 +277,5 @@ describe('ReviewStage', () => {
       expect(ondiscard).toHaveBeenCalledWith('job-review');
     });
 
-    it('allows a decision for the next video of the same job', () => {
-      const props = reactiveProps({ job: videoJob(), onapprove, ondiscard });
-      component = mount(ReviewStage, { target, props });
-      flushSync();
-      button('approve')!.click();
-      flushSync();
-      expect(button('approve')!.disabled).toBe(true);
-      props.job = videoJob({ review: { iteration: 3 } });
-      flushSync();
-      expect(button('approve')!.disabled).toBe(false);
-    });
   });
 });

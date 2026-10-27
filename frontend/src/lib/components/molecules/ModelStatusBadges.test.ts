@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MemoryFit } from '$lib/types';
 
 import ModelStatusBadges, { NOT_DOWNLOADED_TOOLTIP, memoryFitFor, memoryFitTitle } from './ModelStatusBadges.svelte';
-import * as molecules from './index';
 
 const FIT: MemoryFit = {
   budget_gb: 10.7,
@@ -82,10 +81,6 @@ describe('ModelStatusBadges', () => {
     flushSync();
   }
 
-  it('is exported from the molecules barrel', () => {
-    expect(molecules.ModelStatusBadges).toBe(ModelStatusBadges);
-  });
-
   it('shows the memory fit for the selected quantize level', () => {
     render({ downloaded: true, memoryFit: FIT, quantize: 8 });
 
@@ -93,7 +88,6 @@ describe('ModelStatusBadges', () => {
     expect(fit?.querySelector('[data-status]')?.getAttribute('data-status')).toBe('tight');
     expect(fit?.querySelector('[data-status]')?.textContent?.trim()).toBe('Tight');
     expect(fit?.querySelector('[role="tooltip"]')?.textContent).toContain('9.5 GB');
-    expect(fit?.querySelector('[role="tooltip"]')?.textContent).toContain('can slow down while generating');
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
   });
 

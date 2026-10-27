@@ -95,13 +95,12 @@ describe('Toast', () => {
     expect(ondismiss).toHaveBeenCalledWith('1');
   });
 
-  it('shows how many repeats merged and how many toasts wait', () => {
+  it('shows how many repeats merged and how many toasts wait, and no counters for a lone toast', async () => {
     mountToast(toastItem({ count: 3 }), 2);
     expect(target.querySelector('[data-testid="toast-count"]')?.textContent).toBe('×3');
     expect(target.querySelector('[data-testid="toast-pending"]')?.textContent?.trim()).toBe('+2');
-  });
+    await unmount(app!);
 
-  it('shows no counters for a single toast with nothing waiting', () => {
     mountToast(toastItem());
     expect(target.querySelector('[data-testid="toast-count"]')).toBeNull();
     expect(target.querySelector('[data-testid="toast-pending"]')).toBeNull();

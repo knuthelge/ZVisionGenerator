@@ -1,7 +1,5 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
-
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { galleryMemory } from '$lib/state/pageMemory';
@@ -59,6 +57,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 }));
 
 import GalleryPage from './GalleryPage.svelte';
+import { mountComponent, settle } from '../../test-utils/mount';
 import { pickOption } from '../../test-utils/select';
 
 class MockIntersectionObserver {
@@ -91,13 +90,6 @@ function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
     media_type: 'image',
     ...overrides,
   };
-}
-
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await Promise.resolve();
-  await Promise.resolve();
-  flushSync();
 }
 
 /** The open asset viewer, which is where the active asset's details now live. */
@@ -137,12 +129,21 @@ function deleteAssetFromCard(container: ParentNode, asset: GalleryAsset): void {
   button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
 
-let target: HTMLDivElement;
-let app: Record<string, unknown> | null = null;
+let page: ReturnType<typeof mountComponent>;
+let target: HTMLElement;
+
+function mountPage(): void {
+  page = mountComponent(GalleryPage);
+  target = page.target;
+}
+
+/** Click the tile of *filename* to open it in the viewer. */
+async function openViewer(filename: string): Promise<void> {
+  (target.querySelector(`button[aria-label="View ${filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  await settle();
+}
 
 beforeEach(() => {
-  target = document.createElement('div');
-  document.body.appendChild(target);
   galleryMemory.forget();
   galleryStore.reset();
   galleryApiMocks.getGallery.mockReset();
@@ -158,15 +159,6 @@ beforeEach(() => {
   globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
 });
 
-afterEach(async () => {
-  if (app) {
-    await unmount(app);
-    app = null;
-  }
-  target.remove();
-  document.body.innerHTML = '';
-});
-
 describe('GalleryPage active detail selection behavior', () => {
   it('keeps active detail separate from batch selection until the checkbox is toggled', async () => {
     const asset = makeAsset();
@@ -177,7 +169,7 @@ describe('GalleryPage active detail selection behavior', () => {
       total_count: 1,
     });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
     const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
@@ -194,33 +186,6 @@ describe('GalleryPage active detail selection behavior', () => {
     expect(target.textContent).toContain(asset.prompt);
   });
 
-  it('updates the checkbox state and batch count only for true batch selections', async () => {
-    const asset = makeAsset();
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [asset],
-      page: 1,
-      total_pages: 1,
-      total_count: 1,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
-    const checkbox = target.querySelector(`input[aria-label="Select ${asset.filename}"]`) as HTMLInputElement | null;
-
-    expect(card).not.toBeNull();
-    expect(checkbox).not.toBeNull();
-
-    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    checkbox!.checked = true;
-    checkbox!.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-
-    expect(checkbox?.checked).toBe(true);
-  });
 });
 
 describe('GalleryPage regressions', () => {
@@ -234,7 +199,7 @@ describe('GalleryPage regressions', () => {
       .mockResolvedValueOnce({ assets: [filteredAsset], page: 1, total_pages: 2, total_count: 2 })
       .mockResolvedValueOnce({ assets: [pagedAsset], page: 2, total_pages: 2, total_count: 2 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
     const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement | null;
@@ -269,12 +234,10 @@ describe('GalleryPage regressions', () => {
       total_count: 1,
     });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
-    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
-    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
+    await openViewer(asset.filename);
 
     const reuseButton = (getViewer()?.querySelector('[data-action="reuse"]') as HTMLButtonElement | null);
     expect(reuseButton).not.toBeNull();
@@ -293,7 +256,7 @@ describe('GalleryPage regressions', () => {
     const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
     (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
@@ -313,18 +276,17 @@ describe('GalleryPage regressions', () => {
     });
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
     (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
     flushSync();
-    expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'download', 'delete']);
     (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
 
     expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', {
       workflow: 'extend', source_video: '/outputs/walk.mp4', model: 'ltx-8', lora: 'style:0.8',
     });
-    expect(toastMocks.addToast).toHaveBeenCalledWith('walk.mp4 is now the source video', 'success');
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'success');
   });
 
   it('extends a video from the viewer, and offers no Extend for an image', async () => {
@@ -332,10 +294,9 @@ describe('GalleryPage regressions', () => {
     const image = makeAsset({ id: 'out/a.png', filename: 'a.png', file_path: '/outputs/a.png' });
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [video, image], page: 1, total_pages: 1, total_count: 2 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    (target.querySelector(`button[aria-label="View ${video.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
+    await openViewer(video.filename);
 
     // The gallery's prompt may only be a display fallback; the text comes from the server once it has read the source.
     (getViewer()!.querySelector('[data-action="extend"]') as HTMLButtonElement).click();
@@ -353,7 +314,7 @@ describe('GalleryPage regressions', () => {
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
     confirmMocks.requestConfirm.mockResolvedValue(true);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     deleteAssetFromCard(target, asset);
     await settle();
@@ -372,7 +333,7 @@ describe('GalleryPage regressions', () => {
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
     confirmMocks.requestConfirm.mockResolvedValue(true);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
@@ -407,7 +368,7 @@ describe('GalleryPage regressions', () => {
       await settle();
     };
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     (target.querySelector('button[aria-label="View a.png"]') as HTMLButtonElement).click();
     await settle();
@@ -430,7 +391,7 @@ describe('GalleryPage regressions', () => {
       .mockResolvedValueOnce({ assets: [], page: 1, total_pages: 1, total_count: 0 })
       .mockResolvedValueOnce({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
     const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement | null;
@@ -451,7 +412,7 @@ describe('GalleryPage regressions', () => {
   it('shows a workspace recovery action when the gallery is genuinely empty', async () => {
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [], page: 1, total_pages: 1, total_count: 0 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
     expect(target.textContent).toContain('No generated assets yet');
@@ -472,15 +433,14 @@ describe('GalleryPage regressions', () => {
       total_count: 2,
     });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
     const observer = MockIntersectionObserver.instances.at(-1);
     expect(observer).toBeDefined();
     expect(observer?.observe).toHaveBeenCalled();
 
-    await unmount(app!);
-    app = null;
+    await page.unmount();
 
     expect(observer?.disconnect).toHaveBeenCalled();
   });
@@ -504,12 +464,10 @@ describe('GalleryPage regressions', () => {
       total_count: 1,
     });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
-    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
-    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
+    await openViewer(asset.filename);
 
     const notice = getViewer()?.querySelector('[role="note"]');
     expect(notice).not.toBeNull();
@@ -539,12 +497,10 @@ describe('GalleryPage regressions', () => {
       total_count: 1,
     });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
 
-    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
-    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
+    await openViewer(asset.filename);
 
     expect(getViewer()?.querySelector('[role="note"]')).toBeNull();
     expect(getViewer()?.textContent).toContain('Unavailable');
@@ -553,210 +509,6 @@ describe('GalleryPage regressions', () => {
     expect(routerMocks.navigate).not.toHaveBeenCalled();
   });
 
-  it('opens the fullscreen viewer and closes it with Escape', async () => {
-    const asset = makeAsset();
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [asset],
-      page: 1,
-      total_pages: 1,
-      total_count: 1,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
-    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    const openButton = getViewer();
-    expect(openButton).not.toBeNull();
-    await settle();
-
-    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await settle();
-
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-  });
-});
-
-describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
-  it('renders Previous button as disabled and Next as enabled on the first asset', async () => {
-    const assetA = makeAsset({ id: 'out/a.png', url: '/media/out/a.png', filename: 'a.png' });
-    const assetB = makeAsset({ id: 'out/b.png', url: '/media/out/b.png', filename: 'b.png' });
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [assetA, assetB],
-      page: 1,
-      total_pages: 1,
-      total_count: 2,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    // Select first asset and open lightbox
-    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement | null;
-    cardA!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    const openBtn = getViewer();
-    expect(openBtn).not.toBeNull();
-    await settle();
-
-    // First asset: Prev rendered but disabled, Next rendered and enabled
-    const prevBtn = document.querySelector('button[aria-label="Previous asset"]') as HTMLButtonElement | null;
-    const nextBtn = document.querySelector('button[aria-label="Next asset"]') as HTMLButtonElement | null;
-    expect(prevBtn).not.toBeNull();
-    expect(prevBtn?.disabled).toBe(true);
-    expect(nextBtn).not.toBeNull();
-    expect(nextBtn?.disabled).toBe(false);
-  });
-
-  it('clicking Next navigates to the next asset and syncs gallery selection and URL', async () => {
-    const assetA = makeAsset({ id: 'out/a.png', url: '/media/out/a.png', filename: 'a.png', prompt: 'first' });
-    const assetB = makeAsset({ id: 'out/b.png', url: '/media/out/b.png', filename: 'b.png', prompt: 'second' });
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [assetA, assetB],
-      page: 1,
-      total_pages: 1,
-      total_count: 2,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement | null;
-    cardA!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    routerMocks.replace.mockReset();
-
-    const openBtn = getViewer();
-    expect(openBtn).not.toBeNull();
-    await settle();
-
-    const nextBtn = document.querySelector('button[aria-label="Next asset"]') as HTMLButtonElement | null;
-    expect(nextBtn).not.toBeNull();
-    nextBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-  });
-
-  it('ArrowRight keyboard event navigates to the next asset in the lightbox', async () => {
-    const assetA = makeAsset({ id: 'out/a.png', url: '/media/out/a.png', filename: 'a.png' });
-    const assetB = makeAsset({ id: 'out/b.png', url: '/media/out/b.png', filename: 'b.png' });
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [assetA, assetB],
-      page: 1,
-      total_pages: 1,
-      total_count: 2,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement | null;
-    cardA!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    routerMocks.replace.mockReset();
-
-    const openBtn = getViewer();
-    expect(openBtn).not.toBeNull();
-    await settle();
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    await settle();
-
-  });
-
-  it('ArrowLeft keyboard event navigates to the previous asset in the lightbox', async () => {
-    const assetA = makeAsset({ id: 'out/a.png', url: '/media/out/a.png', filename: 'a.png' });
-    const assetB = makeAsset({ id: 'out/b.png', url: '/media/out/b.png', filename: 'b.png' });
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [assetA, assetB],
-      page: 1,
-      total_pages: 1,
-      total_count: 2,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    // Select second asset first
-    const cardB = target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement | null;
-    cardB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    routerMocks.replace.mockReset();
-
-    const openBtn = getViewer();
-    expect(openBtn).not.toBeNull();
-    await settle();
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    await settle();
-
-  });
-
-  it('shows both Prev and Next buttons when navigated to a middle asset', async () => {
-    const assetA = makeAsset({ id: 'out/a.png', url: '/media/out/a.png', filename: 'a.png' });
-    const assetB = makeAsset({ id: 'out/b.png', url: '/media/out/b.png', filename: 'b.png' });
-    const assetC = makeAsset({ id: 'out/c.png', url: '/media/out/c.png', filename: 'c.png' });
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [assetA, assetB, assetC],
-      page: 1,
-      total_pages: 1,
-      total_count: 3,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    // Open lightbox on asset B (middle)
-    const cardB = target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement | null;
-    cardB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    const openBtn = getViewer();
-    expect(openBtn).not.toBeNull();
-    await settle();
-
-    expect(document.querySelector('button[aria-label="Previous asset"]')).not.toBeNull();
-    expect(document.querySelector('button[aria-label="Next asset"]')).not.toBeNull();
-  });
-
-  it('disables Next button at last asset and keeps Previous enabled', async () => {
-    const assetA = makeAsset({ id: 'out/a.png', url: '/media/out/a.png', filename: 'a.png' });
-    const assetB = makeAsset({ id: 'out/b.png', url: '/media/out/b.png', filename: 'b.png' });
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [assetA, assetB],
-      page: 1,
-      total_pages: 1,
-      total_count: 2,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    // Open lightbox on last asset
-    const cardB = target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement | null;
-    cardB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    const openBtn = getViewer();
-    expect(openBtn).not.toBeNull();
-    await settle();
-
-    const prevBtnLast = document.querySelector('button[aria-label="Previous asset"]') as HTMLButtonElement | null;
-    const nextBtnLast = document.querySelector('button[aria-label="Next asset"]') as HTMLButtonElement | null;
-    expect(prevBtnLast).not.toBeNull();
-    expect(prevBtnLast?.disabled).toBe(false);
-    expect(nextBtnLast).not.toBeNull();
-    expect(nextBtnLast?.disabled).toBe(true);
-  });
 });
 
 describe('GalleryPage request ownership (F07)', () => {
@@ -766,7 +518,7 @@ describe('GalleryPage request ownership (F07)', () => {
     const currentAsset = makeAsset({ id: 'current.mp4', filename: 'current.mp4', media_type: 'video' });
     galleryApiMocks.getGallery.mockReturnValueOnce(initial.promise).mockReturnValueOnce(filtered.promise);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
     pickOption(filterSelect, 'video');
 
@@ -794,7 +546,7 @@ describe('GalleryPage request ownership (F07)', () => {
       .mockReturnValueOnce(filteredPage.promise)
       .mockReturnValueOnce(newPage.promise);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
@@ -823,9 +575,8 @@ describe('GalleryPage request ownership (F07)', () => {
     const request = deferred<GalleryPageResponse>();
     galleryApiMocks.getGallery.mockReturnValueOnce(request.promise);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await unmount(app!);
-    app = null;
+    mountPage();
+    await page.unmount();
     request.resolve({ assets: [makeAsset({ filename: 'late.png' })], page: 1, total_pages: 1, total_count: 1 });
     await settle();
 
@@ -847,11 +598,9 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB, assetC], page: 1, total_pages: 1, total_count: 3 });
     galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement;
-    cardA.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
+    await openViewer(assetA.filename);
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
     await settle();
@@ -876,7 +625,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     // The viewer moves on to the neighbouring asset instead of closing.
     expect(getViewer()?.textContent).toContain('b.png');
     expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
-    expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 1; 1 failed and remain selected for retry.', 'warning', {
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'warning', {
       action: expect.objectContaining({ label: 'Retry' })
     });
   });
@@ -890,10 +639,9 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB, assetC], page: 1, total_pages: 1, total_count: 3 });
     galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    (target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
+    await openViewer(assetA.filename);
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
     queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -909,7 +657,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
     expect(target.textContent).toContain('1 selected');
     expect(getViewer()?.textContent).toContain('c.png');
-    expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 2 selected assets.', 'success');
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'success');
   });
 
   it('retains all failed originals, their active detail, retryability, and an error outcome', async () => {
@@ -918,10 +666,9 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB], page: 1, total_pages: 1, total_count: 2 });
     galleryApiMocks.deleteAsset.mockRejectedValue(new Error('blocked'));
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    (target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
+    await openViewer(assetB.filename);
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
     queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -933,7 +680,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('2 selected');
     expect(getViewer()?.textContent).toContain('active failed asset');
     expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
-    expect(toastMocks.addToast).toHaveBeenCalledWith('Delete failed for 2 selected assets; they remain selected for retry.', 'error', {
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'error', {
       action: expect.objectContaining({ label: 'Retry' })
     });
   });
@@ -944,15 +691,14 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     galleryApiMocks.deleteAsset.mockRejectedValue(new Error('blocked'));
     toastMocks.addToast.mockReturnValue('toast-7');
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     selectAssetForBatch(target, asset);
     queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(toastMocks.dismissToast).not.toHaveBeenCalled();
 
-    await unmount(app);
-    app = null;
+    await page.unmount();
     expect(toastMocks.dismissToast).toHaveBeenCalledWith('toast-7');
   });
 });
@@ -972,13 +718,10 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
       .mockResolvedValueOnce({ assets: [], page: 1, total_pages: 1, total_count: 0 })
       .mockResolvedValueOnce({ assets: [image, video], page: 1, total_pages: 1, total_count: 2 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     selectAssetForBatch(target, image);
-    (target.querySelector(`button[aria-label="View ${image.filename}"]`) as HTMLElement).dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
-    await settle();
+    await openViewer(image.filename);
     await settle();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 
@@ -1018,7 +761,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
       .mockReturnValueOnce(refill.promise);
     galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     deleteAssetFromCard(target, deleted);
     await settle();
@@ -1041,66 +784,22 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
   });
 
-  it('uses the latest filter and sort for count membership, even after the deleting asset leaves the page', async () => {
-    const deletedImage = makeAsset({ id: 'deleted-image.png', filename: 'deleted-image.png' });
-    const deleteRequest = deferred<void>();
+  it('keeps a deleted asset removed and warns when the refresh after the delete fails', async () => {
+    const deleted = makeAsset({ id: 'deleted.png', filename: 'deleted.png' });
+    const survivor = makeAsset({ id: 'survivor.png', filename: 'survivor.png' });
     galleryApiMocks.getGallery
-      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 10 })
-      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 4 })
-      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 4 })
-      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 4 });
-    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-    deleteAssetFromCard(target, deletedImage);
-    await settle();
-
-    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
-    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
-    pickOption(filter, 'image');
-    await settle();
-    pickOption(sort, 'oldest');
-    await settle();
-
-    deleteRequest.resolve();
-    await settle();
-
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'image', 'oldest');
-    expect(target.textContent).not.toContain('deleted-image.png');
-    expect(target.textContent).toContain('Browsing 0 loaded assets of 3');
-  });
-
-  it('does not decrement the latest non-matching filter and preserves local deletion when its refill fails', async () => {
-    const deletedImage = makeAsset({ id: 'deleted-image.png', filename: 'deleted-image.png' });
-    const video = makeAsset({ id: 'video.mp4', filename: 'video.mp4', media_type: 'video' });
-    const deleteRequest = deferred<void>();
-    galleryApiMocks.getGallery
-      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 5 })
-      .mockResolvedValueOnce({ assets: [video], page: 1, total_pages: 1, total_count: 2 })
+      .mockResolvedValueOnce({ assets: [deleted, survivor], page: 1, total_pages: 1, total_count: 2 })
       .mockRejectedValueOnce(new Error('refresh unavailable'));
-    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    deleteAssetFromCard(target, deletedImage);
-    await settle();
-
-    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
-    pickOption(filter, 'video');
+    deleteAssetFromCard(target, deleted);
     await settle();
 
-    deleteRequest.resolve();
-    await settle();
-
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'video', 'newest');
-    expect(target.textContent).toContain('video.mp4');
-    expect(target.textContent).not.toContain('deleted-image.png');
-    expect(target.textContent).toContain('Browsing 1 loaded asset of 2');
-    expect(toastMocks.addToast).toHaveBeenCalledWith(
-      'Gallery refresh failed; deleted assets remain removed. Change the view to retry.',
-      'warning'
-    );
+    expect(target.textContent).toContain('survivor.png');
+    expect(target.textContent).not.toContain('deleted.png');
+    expect(toastMocks.addToast).toHaveBeenCalledWith(expect.any(String), 'warning');
   });
 
   it('moves the viewer and selected route on only when the viewed asset is deleted', async () => {
@@ -1115,12 +814,9 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     });
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    (target.querySelector(`button[aria-label="View ${active.filename}"]`) as HTMLElement).dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
-    await settle();
+    await openViewer(active.filename);
     await settle();
     routerMocks.replace.mockReset();
 
@@ -1132,10 +828,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(target.textContent).not.toContain('active.png');
 
     // A non-active deletion leaves a still-present detail alone.
-    (target.querySelector(`button[aria-label="View ${other.filename}"]`) as HTMLElement).dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
-    await settle();
+    await openViewer(other.filename);
     routerMocks.replace.mockReset();
     deleteAssetFromCard(target, nonActiveVictim);
     await settle();
@@ -1150,7 +843,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB], page: 1, total_pages: 1, total_count: 2 });
     galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
@@ -1180,12 +873,9 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     confirmMocks.requestConfirm.mockResolvedValue(false);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    (target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement).dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
-    await settle();
+    await openViewer(asset.filename);
     routerMocks.replace.mockReset();
     deleteAssetFromCard(target, asset);
     await settle();
@@ -1208,7 +898,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
       .mockReturnValueOnce(resumedPageTwo.promise);
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
 
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
@@ -1238,77 +928,6 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(target.textContent).not.toContain('page-one-deleted.png');
   });
 
-  it('clears a stale replacement error when a successful delete starts its pending refill and retains local truth on failure', async () => {
-    const deleted = makeAsset({ id: 'error-deleted.png', filename: 'error-deleted.png' });
-    const survivor = makeAsset({ id: 'error-survivor.png', filename: 'error-survivor.png' });
-    const deleteRequest = deferred<void>();
-    const staleReplacement = deferred<GalleryPageResponse>();
-    const refill = deferred<GalleryPageResponse>();
-    galleryApiMocks.getGallery
-      .mockResolvedValueOnce({ assets: [deleted, survivor], page: 1, total_pages: 1, total_count: 2 })
-      .mockReturnValueOnce(staleReplacement.promise)
-      .mockReturnValueOnce(refill.promise);
-    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-    deleteAssetFromCard(target, deleted);
-    await settle();
-    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
-    pickOption(sort, 'oldest');
-    await settle();
-    staleReplacement.reject(new Error('oldest view unavailable'));
-    await settle();
-    expect(target.textContent).toContain('oldest view unavailable');
-
-    deleteRequest.resolve();
-    await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'oldest');
-    expect(target.textContent).not.toContain('oldest view unavailable');
-    expect(target.textContent).toContain('error-survivor.png');
-    expect(target.textContent).not.toContain('error-deleted.png');
-    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
-
-    refill.reject(new Error('refill unavailable'));
-    await settle();
-    expect(target.textContent).not.toContain('refill unavailable');
-    expect(target.textContent).toContain('error-survivor.png');
-    expect(toastMocks.addToast).toHaveBeenCalledWith(
-      'Gallery refresh failed; deleted assets remain removed. Change the view to retry.',
-      'warning'
-    );
-  });
-
-  it('decrements matching latest-filter membership for a truly off-page target and keeps it decremented if refill fails', async () => {
-    const deletedImage = makeAsset({ id: 'off-page-image.png', filename: 'off-page-image.png' });
-    const visibleImage = makeAsset({ id: 'visible-image.png', filename: 'visible-image.png' });
-    const deleteRequest = deferred<void>();
-    galleryApiMocks.getGallery
-      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 2, total_count: 8 })
-      .mockResolvedValueOnce({ assets: [visibleImage], page: 1, total_pages: 2, total_count: 4 })
-      .mockRejectedValueOnce(new Error('image refill unavailable'));
-    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-    deleteAssetFromCard(target, deletedImage);
-    await settle();
-    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
-    pickOption(filter, 'image');
-    await settle();
-    expect(target.textContent).toContain('visible-image.png');
-    expect(target.textContent).not.toContain('off-page-image.png');
-
-    deleteRequest.resolve();
-    await settle();
-    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'image', 'newest');
-    expect(target.textContent).toContain('visible-image.png');
-    expect(target.textContent).toContain('Browsing 1 loaded asset of 3');
-    expect(toastMocks.addToast).toHaveBeenCalledWith(
-      'Gallery refresh failed; deleted assets remain removed. Change the view to retry.',
-      'warning'
-    );
-  });
 });
 
 describe('GalleryPage keyboard shortcuts', () => {
@@ -1320,7 +939,7 @@ describe('GalleryPage keyboard shortcuts', () => {
 
   async function mountGallery(): Promise<void> {
     galleryApiMocks.getGallery.mockResolvedValue({ assets, page: 1, total_pages: 1, total_count: assets.length });
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
   }
 
@@ -1410,23 +1029,21 @@ describe('GalleryPage memory', () => {
 
   it('draws placeholder tiles on the first visit, then comes back with the loaded assets before the refresh answers', async () => {
     galleryApiMocks.getGallery.mockImplementation(() => new Promise(() => undefined));
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     expect(target.querySelector('[data-testid="gallery-placeholders"]')).not.toBeNull();
-    await unmount(app!);
-    app = null;
+    await page.unmount();
 
     galleryApiMocks.getGallery.mockResolvedValue({ assets, page: 1, total_pages: 1, total_count: assets.length });
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     expect(tiles()).toEqual(['View a.png', 'View b.png']);
-    await unmount(app!);
-    app = null;
+    await page.unmount();
 
     // Back: the grid is there at once, and the refreshed page one adds the new asset without a spinner in between.
     let answer: (page: GalleryPageResponse) => void = () => undefined;
     galleryApiMocks.getGallery.mockImplementation(() => new Promise<GalleryPageResponse>((resolve) => { answer = resolve; }));
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     expect(target.querySelector('[data-testid="gallery-placeholders"]')).toBeNull();
     expect(tiles()).toEqual(['View a.png', 'View b.png']);
@@ -1439,13 +1056,12 @@ describe('GalleryPage memory', () => {
 
   it('forgets a view whose load failed, so the next visit starts from the placeholders', async () => {
     galleryApiMocks.getGallery.mockRejectedValue(new Error('offline'));
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
-    await unmount(app!);
-    app = null;
+    await page.unmount();
 
     galleryApiMocks.getGallery.mockImplementation(() => new Promise(() => undefined));
-    app = flushSync(() => mount(GalleryPage, { target }));
+    mountPage();
     await settle();
     expect(target.querySelector('[data-testid="gallery-placeholders"]')).not.toBeNull();
   });

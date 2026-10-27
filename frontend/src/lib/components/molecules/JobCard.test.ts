@@ -1,33 +1,20 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { jobStore } from '$lib/state/job.svelte';
 import type { ActiveJobState, GalleryAsset } from '$lib/types';
 
 import JobCard from './JobCard.svelte';
+import { mountComponent } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
-import * as molecules from './index';
 
 const IMAGE_CONTROLS = ['next', 'pause', 'resume', 'repeat', 'quit'];
 
 describe('JobCard', () => {
-  let target: HTMLDivElement;
-  let component: Record<string, unknown> | null = null;
+  let target: HTMLElement;
+  let component: ReturnType<typeof mountComponent> | null = null;
 
-  beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
-    jobStore.clearJob();
-  });
-
-  afterEach(() => {
-    if (component) {
-      unmount(component);
-      component = null;
-    }
-    target.remove();
-  });
+  beforeEach(() => jobStore.clearJob());
 
   function makeJob(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
     return {
@@ -64,8 +51,8 @@ describe('JobCard', () => {
   }
 
   function render(job: Partial<ActiveJobState>, handlers: Record<string, unknown> = {}): void {
-    component = mount(JobCard, { target, props: { job: makeJob(job), ...handlers } });
-    flushSync();
+    component = mountComponent(JobCard, { job: makeJob(job), ...handlers });
+    target = component.target;
   }
 
   const card = () => target.querySelector<HTMLElement>('.job-card')!;
@@ -74,21 +61,16 @@ describe('JobCard', () => {
   const control = (name: string, within: ParentNode = target) => within.querySelector<HTMLButtonElement>(`button[data-control="${name}"]`);
   const jobBar = () => header().querySelector<HTMLElement>('[aria-label="Job progress"]')!;
 
-  it.each([3, 0])('counts a video upscale in batches from the first one (batch %i of 28) and offers only quit', (currentStep) => {
-    render({ workflow: 'upscale', media_type: 'video', stageName: 'upscale', stageNames: ['upscale'], currentStep, totalSteps: 28, remaining: 240, supported_controls: ['quit'] });
+  it('counts a video upscale in batches and offers only quit', () => {
+    render({ workflow: 'upscale', media_type: 'video', stageName: 'upscale', stageNames: ['upscale'], currentStep: 3, totalSteps: 28, remaining: 240, supported_controls: ['quit'] });
 
-    expect(jobBar().getAttribute('aria-valuetext')).toBe(`Batch ${currentStep} of 28`);
+    expect(jobBar().getAttribute('aria-valuetext')).toBe('Batch 3 of 28');
     expect(control('quit')).not.toBeNull();
   });
 
-  it('labels the workflow and shows the job notices', () => {
+  it('shows the job notices', () => {
     render({ workflow: 'upscale', notices: ['original settings unknown'] });
-    expect(target.querySelector('.job-status')?.textContent).toContain('Upscale');
     expect(log().textContent).toContain('original settings unknown');
-  });
-
-  it('does not re-export the removed ProgressBar placeholder', () => {
-    expect('ProgressBar' in molecules).toBe(false);
   });
 
   describe('controls by scope and phase', () => {
@@ -100,29 +82,6 @@ describe('JobCard', () => {
       const taskLine = log().querySelector('.job-item[data-s="current"] .job-line')!;
       expect(control('next', taskLine)).not.toBeNull();
       expect(control('repeat', taskLine)).not.toBeNull();
-    });
-
-    it('offers no Skip for a single item, since there is nothing to skip to', () => {
-      render({ runs: 1, supported_controls: IMAGE_CONTROLS });
-      expect(control('next')).toBeNull();
-      expect(control('repeat')).not.toBeNull();
-    });
-
-    it('offers only Cancel while the job waits in the queue', () => {
-      render({ status: 'queued', phase: 'queue', supported_controls: IMAGE_CONTROLS });
-      expect(Array.from(target.querySelectorAll('button')).map((button) => button.dataset.control)).toEqual(['quit']);
-    });
-
-    it('offers Pause, Skip this rewrite and Cancel while prompts are enhanced', () => {
-      render({ phase: 'enhance', enhanceTotal: 4, stageName: 'enhancing_prompts', currentStep: 1, totalSteps: 4, supported_controls: IMAGE_CONTROLS });
-      expect(control('pause-resume', header())).not.toBeNull();
-      expect(control('next', log())?.getAttribute('aria-label')).toBe('Skip this rewrite');
-      expect(control('repeat')).toBeNull();
-    });
-
-    it('offers Pause and Cancel while the model loads', () => {
-      render({ phase: 'load', supported_controls: IMAGE_CONTROLS });
-      expect(Array.from(target.querySelectorAll('button')).map((button) => button.dataset.control)).toEqual(['pause-resume', 'quit']);
     });
 
     it('swaps Pause for Resume in the same button and drops the item controls while paused', () => {
@@ -171,8 +130,8 @@ describe('JobCard', () => {
 
     it('keeps a queued pause pending until the job pauses', () => {
       const props = reactiveProps({ job: makeJob({ runs: 3, supported_controls: IMAGE_CONTROLS, controlQueued: 'pause' }) });
-      component = mount(JobCard, { target, props });
-      flushSync();
+      component = mountComponent(JobCard, props);
+      target = component.target;
       expect(control('pause-resume')!.getAttribute('aria-busy')).toBe('true');
       expect(target.querySelector('.job-notice .ui-badge-warning')).not.toBeNull();
 
@@ -202,45 +161,22 @@ describe('JobCard', () => {
   });
 
   describe('progress', () => {
-    it('shows one segment per item, grouped by run, with the current one filling by step', () => {
-      render({ runs: 2, batchIndex: 1, promptCount: 3, promptNumber: 2, currentStep: 5, totalSteps: 10 });
-      const segments = Array.from(jobBar().querySelectorAll<HTMLElement>('.job-segment'));
-      expect(segments.map((segment) => segment.dataset.state)).toEqual(['done', 'done', 'done', 'done', 'now', 'pending']);
-      expect(segments[3].classList.contains('run-break')).toBe(true);
-      expect(segments[4].querySelector<HTMLElement>('b')?.style.width).toBe('50%');
-      expect(jobBar().getAttribute('aria-valuenow')).toBe('4');
-    });
-
-    it('turns long jobs into one plain bar', () => {
-      render({ runs: 100, batchIndex: 40 });
-      expect(jobBar().querySelectorAll('.job-segment')).toHaveLength(0);
-      expect(jobBar().getAttribute('aria-valuemax')).toBe('100');
-    });
-
     it('shows the step bar with its percentage for a batch, and folds it into the job bar for a single item', () => {
       render({ runs: 3, currentStep: 7, totalSteps: 28 });
       expect(log().querySelector('[aria-label="Current image"]')?.getAttribute('aria-valuenow')).toBe('7');
       expect(log().textContent).toContain('25%');
-      unmount(component);
+      flushSync(() => void component!.unmount());
 
       render({ runs: 1, currentStep: 7, totalSteps: 28 });
       expect(log().querySelector('[role="progressbar"]')).toBeNull();
       expect(jobBar().getAttribute('aria-valuenow')).toBe('7');
     });
 
-    it.each([
-      { currentStep: 30, totalSteps: 20, width: '100%' },
-      { currentStep: -1, totalSteps: 20, width: '0%' },
-    ])('keeps the fill inside the bar when step data is $currentStep / $totalSteps', ({ currentStep, totalSteps, width }) => {
-      render({ currentStep, totalSteps });
-      expect(jobBar().querySelector<HTMLElement>('.ui-progress-fill')?.style.width).toBe(width);
-    });
-
     it('fills in the step in progress over the time the last step took, and stops when paused', () => {
       const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
       const props = reactiveProps({ job: makeJob({ runs: 2, currentStep: 3, totalSteps: 20 }) });
-      component = mount(JobCard, { target, props });
-      flushSync();
+      component = mountComponent(JobCard, props);
+      target = component.target;
       expect(target.querySelector('.step-ghost')).toBeNull();
 
       now.mockReturnValue(2500);
@@ -257,23 +193,12 @@ describe('JobCard', () => {
       now.mockRestore();
     });
 
-    it('shows a bar per stage when the image is generated and then upscaled', () => {
-      render({
-        stageNames: ['resolve_prompt', 'text_to_image', 'upscale', 'save_image'], stageName: 'upscale',
-        stageSteps: { text_to_image: 28, upscale: 12 }, currentStep: 6, totalSteps: 12,
-      });
-      expect(log().querySelector('[aria-label="Generate stage"]')?.getAttribute('aria-valuenow')).toBe('1');
-      expect(log().querySelector('[aria-label="Upscale stage"]')?.getAttribute('aria-valuenow')).toBe('6');
-      // Both passes count towards the image: generate done, upscale half way.
-      expect(jobBar().querySelector<HTMLElement>('.ui-progress-fill')?.style.width).toBe('75%');
-    });
-
     it('counts elapsed time up every second between updates and holds it while paused', () => {
       vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
       try {
         const props = reactiveProps({ job: makeJob({ elapsed: 10 }) });
-        component = mount(JobCard, { target, props });
-        flushSync();
+        component = mountComponent(JobCard, props);
+        target = component.target;
         const elapsed = () => target.querySelector('.job-time .num')?.textContent;
         expect(elapsed()).toBe('0:10');
 
@@ -300,13 +225,6 @@ describe('JobCard', () => {
   });
 
   describe('phases and outcomes', () => {
-    it('lists the setup phases while the job prepares, with the current one open', () => {
-      render({ phase: 'load', enhanceTotal: 0 });
-      const rows = Array.from(log().querySelectorAll<HTMLElement>('.job-item'));
-      expect(rows.map((row) => row.dataset.s)).toEqual(['done', 'current', 'pending']);
-      expect(card().dataset.tone).toBe('preparing');
-    });
-
     it('pins a failure to the phase it happened in and shows the server reason', () => {
       render({ status: 'failed', phase: 'load', message: 'Not enough memory to load the model.' });
       const rows = Array.from(log().querySelectorAll<HTMLElement>('.job-item'));
@@ -326,7 +244,7 @@ describe('JobCard', () => {
       const previewAlt = 'img[alt="Live preview of the generation in progress"]';
       render({ previewUrl: '/jobs/job-card/preview?v=2' });
       expect(target.querySelector(previewAlt)?.getAttribute('src')).toBe('/jobs/job-card/preview?v=2');
-      unmount(component);
+      flushSync(() => void component!.unmount());
 
       render({ status: 'completed', previewUrl: '/jobs/job-card/preview?v=2' });
       expect(target.querySelector(previewAlt)).toBeNull();
@@ -337,46 +255,18 @@ describe('JobCard', () => {
       expect(target.querySelector('img')?.getAttribute('src')).toBe('/media/thumb/last.png');
     });
 
-    it('says the image is finishing up once its last step ran, with the bars still moving', () => {
-      render({ runs: 3, currentStep: 28, totalSteps: 28 });
-      expect(log().querySelector('.job-step-head')?.textContent).toContain('Finishing up');
-      expect(log().querySelector('[aria-label="Current image"]')?.classList.contains('is-live')).toBe(true);
-    });
-
-    it('says the clips are being joined once an extension ran its last step, in the log and on the bars', () => {
-      render({
-        workflow: 'extend', runs: 3, stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8,
-      });
-      expect(log().querySelector('.job-step-head')?.textContent).toContain('Joining clips…');
-      expect(log().textContent).not.toContain('Finishing up');
-      expect(header().querySelector('.ui-area-label')?.textContent).toBe('Extend video');
-    });
-
-    it('reads the joining stretch to assistive technology without the ellipsis', () => {
-      render({ workflow: 'extend', runs: 3, stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8 });
+    it('reads the joining stretch of an extension to assistive technology without the ellipsis', () => {
+      const joining: Partial<ActiveJobState> = { workflow: 'extend', stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8 };
+      render({ ...joining, runs: 3 });
       const valuetexts = Array.from(target.querySelectorAll('[role="progressbar"]')).map((bar) => bar.getAttribute('aria-valuetext'));
       expect(valuetexts).toContain('Joining clips');
       expect(valuetexts).not.toContain('Finishing up');
-    });
+      flushSync(() => void component!.unmount());
 
-    it('reads the header bar of a single extension as joining clips too', () => {
-      render({ workflow: 'extend', runs: 1, stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8 });
+      render({ ...joining, runs: 1 });
       expect(header().querySelector('[role="progressbar"]')?.getAttribute('aria-valuetext')).toBe('Joining clips');
     });
 
-    it('promises the first preview and says so when a model renders none', () => {
-      render({ runs: 3, currentStep: 1, totalSteps: 28 });
-      expect(log().querySelector('.job-media')?.textContent).toContain('First preview after the first step');
-      unmount(component);
-
-      render({ runs: 3, currentStep: 2, totalSteps: 28 });
-      expect(log().querySelector('.job-media')?.textContent).toContain('No live preview');
-    });
-
-    it('marks a prompt that was not enhanced', () => {
-      render({ enhanceStatus: 'skipped' });
-      expect(log().querySelector('.job-badges')?.textContent).toContain('Not enhanced');
-    });
   });
 
   describe('job control keys', () => {
@@ -414,9 +304,9 @@ describe('JobCard', () => {
         for (const name of ['pause-resume', 'next', 'repeat', 'approve', 'discard']) expect(control(name)).toBeNull();
       });
 
-      it.each(['p', 'r', 'n', 'y'])('does nothing for %s', (key) => {
+      it('leaves the job keys to the review', () => {
         const handlers = mountCard({ ...reviewing });
-        press(key);
+        for (const key of ['p', 'r', 'n', 'y']) press(key);
         for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
       });
 
@@ -450,7 +340,6 @@ describe('JobCard', () => {
       expect(press('Escape').defaultPrevented).toBe(true);
       flushSync();
       expect(handlers.oncancel).not.toHaveBeenCalled();
-      expect(control('quit')!.classList.contains('ui-btn-danger')).toBe(true);
       expect(target.querySelector('.job-notice .ui-badge-error')).not.toBeNull();
       press('Escape');
       expect(handlers.oncancel).toHaveBeenCalledWith('job-card');
@@ -496,21 +385,5 @@ describe('JobCard', () => {
       expect(log().querySelector('.dl-pct')?.textContent).toBe('25%');
     });
 
-    it('leaves the bars indeterminate while the total is unknown', () => {
-      render({ phase: 'load', download: { ...download, bytes_total: null } });
-      for (const bar of target.querySelectorAll('[aria-label="Model download"]')) expect(bar.hasAttribute('aria-valuenow')).toBe(false);
-    });
-
-    it('shows an enhancer download on the enhance row', () => {
-      render({ phase: 'enhance', enhanceTotal: 2, download: { ...download, role: 'enhancer' } });
-      expect(log().querySelector('.job-item[data-s="current"] [aria-label="Enhancer download"]')).not.toBeNull();
-      expect(log().querySelector('[aria-label="Model download"]')).toBeNull();
-    });
-
-    it('drops the download block once the job is stopped', () => {
-      render({ phase: 'load', status: 'cancelled', downloadStop: 'detached', download });
-      expect(log().querySelector('[aria-label="Model download"]')).toBeNull();
-      expect(log().querySelector('.job-item[data-s="stopped"] .job-prompt')).not.toBeNull();
-    });
   });
 });

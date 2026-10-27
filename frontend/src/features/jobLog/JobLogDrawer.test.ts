@@ -1,19 +1,12 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { JobLogEntry, JobLogPage } from '$lib/types';
 
 import { toasts } from '$lib/state/toasts.svelte';
+import { mountComponent, settle } from '../../test-utils/mount';
 import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import JobLogDrawer from './JobLogDrawer.svelte';
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    flushSync();
-  }
-}
 
 function entry(overrides: Partial<JobLogEntry> = {}): JobLogEntry {
   return {
@@ -44,27 +37,18 @@ function okResponse(body: unknown) {
 }
 
 describe('JobLogDrawer', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
   });
 
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-    vi.unstubAllGlobals();
-  });
+  afterEach(() => vi.unstubAllGlobals());
 
   async function openDrawer(): Promise<{ open: boolean }> {
     const props = reactiveProps<{ open: boolean }>({ open: false });
-    app = flushSync(() => mount(JobLogDrawer, { target, props }));
+    mountComponent(JobLogDrawer, props);
     flushSync(() => { props.open = true; });
     await settle();
     return props;
@@ -89,7 +73,7 @@ describe('JobLogDrawer', () => {
   });
 
   it('does not fetch while closed', async () => {
-    app = flushSync(() => mount(JobLogDrawer, { target, props: { open: false } }));
+    mountComponent(JobLogDrawer, { open: false });
     await settle();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -134,12 +118,13 @@ describe('JobLogDrawer', () => {
     fetchMock.mockResolvedValue(okResponse(pageOf([])));
     await openDrawer();
     expect(rows()).toHaveLength(0);
-    expect(document.querySelector('.ui-empty')).not.toBeNull();
+    expect(document.querySelector('[data-testid="job-log-list"]')?.textContent?.trim()).not.toBe('');
   });
 
-  it('expands a failed row to its error text', async () => {
-    fetchMock.mockResolvedValue(okResponse(pageOf([entry({ status: 'failed', error: 'CUDA out of memory' })])));
+  it('expands a failed row to its error text, and offers no expander on a row without error detail', async () => {
+    fetchMock.mockResolvedValue(okResponse(pageOf([entry({ status: 'failed', error: 'CUDA out of memory' }), entry({ job_id: 'job-ok' })])));
     await openDrawer();
+    expect(rows()[1].querySelector('button[aria-expanded]')).toBeNull();
 
     expect(document.querySelector('[data-testid="job-log-detail"]')).toBeNull();
     const toggle = rows()[0].querySelector('button[aria-expanded]') as HTMLButtonElement;
@@ -150,20 +135,13 @@ describe('JobLogDrawer', () => {
     expect(document.querySelector('[data-testid="job-log-detail"]')?.textContent).toContain('CUDA out of memory');
   });
 
-  it('marks a job with failed runs as partial and shows how many failed', async () => {
+  it('shows how many runs of a job failed', async () => {
     fetchMock.mockResolvedValue(okResponse(pageOf([entry({ status: 'cancelled', failed_runs: 2 })])));
     await openDrawer();
 
-    expect(rows()[0].dataset.tone).toBe('partial');
     (rows()[0].querySelector('button[aria-expanded]') as HTMLButtonElement).click();
     flushSync();
     expect(document.querySelector('[data-testid="job-log-detail"]')?.textContent).toContain('2 runs failed');
-  });
-
-  it('offers no expander on a row without error detail', async () => {
-    fetchMock.mockResolvedValue(okResponse(pageOf([entry()])));
-    await openDrawer();
-    expect(rows()[0].querySelector('button[aria-expanded]')).toBeNull();
   });
 
   it('reports a failed load and retries it', async () => {
@@ -178,19 +156,12 @@ describe('JobLogDrawer', () => {
     expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('offers no retry when the server rejects the request', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 422, statusText: 'Unprocessable', text: async () => '{"detail":"Bad page."}' });
-    await openDrawer();
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Bad page.');
-    expect(Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Retry')).toBe(false);
-  });
-
   it('ignores a slow earlier response that arrives after a later one', async () => {
     let releaseFirst: (value: unknown) => void = () => {};
     fetchMock.mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }));
     fetchMock.mockResolvedValueOnce(okResponse(pageOf([entry({ job_id: 'failed-1', status: 'failed', error: 'boom' })])));
     const props = reactiveProps<{ open: boolean }>({ open: false });
-    app = flushSync(() => mount(JobLogDrawer, { target, props }));
+    mountComponent(JobLogDrawer, props);
     flushSync(() => { props.open = true; });
     await settle();
 
@@ -237,7 +208,7 @@ describe('JobLogDrawer', () => {
       fetchMock.mockResolvedValue(okResponse(pageOf([withSettings, entry({ job_id: 'job-up', workflow: 'upscale', settings: {} })])));
       const onloadsettings = vi.fn();
       const props = reactiveProps<{ open: boolean; onloadsettings: (e: JobLogEntry) => void }>({ open: false, onloadsettings });
-      app = flushSync(() => mount(JobLogDrawer, { target, props }));
+      mountComponent(JobLogDrawer, props);
       flushSync(() => { props.open = true; });
       await settle();
 

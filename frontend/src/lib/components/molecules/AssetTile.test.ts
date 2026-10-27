@@ -1,10 +1,10 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { GalleryAsset } from '$lib/types';
 
 import AssetTile from './AssetTile.svelte';
+import { mountComponent } from '../../../test-utils/mount';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -29,22 +29,12 @@ function menuActions(): string[] {
 }
 
 describe('AssetTile', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
-  beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-  });
+  let page: ReturnType<typeof mountComponent>;
+  let target: HTMLElement;
 
   function mountTile(props: Record<string, unknown>): void {
-    app = flushSync(() => mount(AssetTile, { target, props }));
+    page = mountComponent(AssetTile, props);
+    target = page.target;
   }
 
   function openMenu(asset: GalleryAsset): void {
@@ -72,12 +62,12 @@ describe('AssetTile', () => {
     (target.querySelector(`button[aria-label="Reuse settings from ${asset.filename}"]`) as HTMLButtonElement).click();
     expect(onreuse).toHaveBeenCalledWith(asset);
 
-    await unmount(app!);
+    await page.unmount();
     mountTile({ asset: makeAsset({ has_reusable_config: false }), onreuse });
     expect((target.querySelector('button[aria-label="Reusable settings unavailable"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('leads the menu with Reuse settings when reuse is offered, disabled without a reusable config', () => {
+  it('leads the menu with Reuse settings when reuse is offered, disabled without a reusable config', async () => {
     const onreuse = vi.fn();
     const asset = makeAsset();
     mountTile({ asset, onreuse, ondelete: vi.fn() });
@@ -88,8 +78,7 @@ describe('AssetTile', () => {
     flushSync();
 
     const plain = makeAsset({ id: 'out/b.png', filename: 'b.png', has_reusable_config: false });
-    app && unmount(app);
-    app = null;
+    await page.unmount();
     mountTile({ asset: plain, onreuse });
     openMenu(plain);
     expect(document.querySelector('[data-action="reuse"]')?.getAttribute('aria-disabled')).toBe('true');
@@ -115,7 +104,7 @@ describe('AssetTile', () => {
     expect(ondelete).toHaveBeenCalledWith(asset);
   });
 
-  it('offers upscale factors after the reference actions, disabling one over a limit', () => {
+  it('runs an upscale from the menu, disabling a factor over a limit', () => {
     const asset = makeAsset({
       upscale: {
         factors: [
@@ -129,19 +118,11 @@ describe('AssetTile', () => {
     mountTile({ asset, onreference: vi.fn(), onupscale, ondelete: vi.fn() });
 
     openMenu(asset);
-    expect(menuActions()).toEqual(['reference-image', 'reference-video', 'upscale-creative-2', 'upscale-creative-4', 'download', 'delete']);
     expect(document.querySelector('[data-action="upscale-creative-4"]')?.getAttribute('aria-disabled')).toBe('true');
 
     (document.querySelector('[data-action="upscale-creative-2"]') as HTMLButtonElement).click();
     flushSync();
     expect(onupscale).toHaveBeenCalledWith(asset, 2, 'creative');
-  });
-
-  it('hides the upscale actions without upscale options', () => {
-    const asset = makeAsset();
-    mountTile({ asset, onupscale: vi.fn() });
-    openMenu(asset);
-    expect(menuActions()).toEqual(['download']);
   });
 
   it('hides the reference actions for videos', () => {
@@ -181,21 +162,21 @@ describe('AssetTile', () => {
       expect(onextend).not.toHaveBeenCalled();
     });
 
-    it.each([
-      ['an image', makeAsset({ extend: { available: true, reason: null } })],
-      ['a video where extending is unavailable on this machine', video({ extend: null })],
-    ])('has no Extend item for %s', (_name, asset) => {
-      mountTile({ asset, onextend: vi.fn() });
-      openMenu(asset);
-      expect(menuActions()).not.toContain('extend');
+    it('has no Extend item for an image, an unavailable video, or without a handler', async () => {
+      const cases: Array<[GalleryAsset, boolean]> = [
+        [makeAsset({ extend: { available: true, reason: null } }), true],
+        [video({ extend: null }), true],
+        [video(), false],
+      ];
+      for (const [asset, withHandler] of cases) {
+        mountTile({ asset, onextend: withHandler ? vi.fn() : undefined });
+        openMenu(asset);
+        expect(menuActions()).not.toContain('extend');
+        await page.unmount();
+        document.body.innerHTML = '';
+      }
     });
 
-    it('has no Extend item without a handler', () => {
-      const asset = video();
-      mountTile({ asset });
-      openMenu(asset);
-      expect(menuActions()).toEqual(['download']);
-    });
   });
 
   it('closes the menu with Escape and returns focus to its button', async () => {
@@ -218,7 +199,7 @@ describe('AssetTile', () => {
     mountTile({ asset });
     expect(target.querySelector('input[type="checkbox"]')).toBeNull();
 
-    await unmount(app!);
+    await page.unmount();
     mountTile({ asset, onselect });
     const checkbox = target.querySelector(`input[aria-label="Select ${asset.filename}"]`) as HTMLInputElement;
     checkbox.checked = true;
@@ -231,7 +212,7 @@ describe('AssetTile', () => {
     mountTile({ asset, density: 'compact' });
     expect(target.querySelector('img')?.getAttribute('src')).toBe(asset.thumbnail_url);
 
-    await unmount(app!);
+    await page.unmount();
     mountTile({ asset, density: 'stage' });
     expect(target.querySelector('img')?.getAttribute('src')).toBe(asset.url);
   });
@@ -242,11 +223,8 @@ describe('AssetTile', () => {
     const rightClick = (el: Element) => { const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }); el.dispatchEvent(event); flushSync(); return event; };
     expect(rightClick(target.querySelector('img')!).defaultPrevented).toBe(true);
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
-    await unmount(app!);
-    app = null;
+    await page.unmount();
     document.body.innerHTML = '';
-    target = document.createElement('div');
-    document.body.appendChild(target);
 
     const video = makeAsset({ id: 'out/clip.mp4', filename: 'clip.mp4', media_type: 'video' });
     mountTile({ asset: video, density: 'stage', ondelete: vi.fn() });

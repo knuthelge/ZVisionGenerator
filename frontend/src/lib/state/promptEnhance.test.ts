@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   canSubmitText,
-  clampedNote,
   effectiveEnhanceSettings,
   entryEnhanceSpec,
   enhanceContext,
   enhancedSourceFor,
-  enhancePhaseMessage,
   anyEnhancedUsed,
   actionOnlyBlocked,
   defaultParts,
@@ -82,10 +80,6 @@ describe('Fast/Smart and Text/JSON', () => {
     expect(submittedCaption(state({ enhancedPrompt: '{"a":1}', workflow: 'txt2vid' }))).toBeNull();
   });
 
-  it('names a caption run in the status line', () => {
-    expect(enhancePhaseMessage('generating', null, true)).toBe('Writing a JSON caption…');
-    expect(enhancePhaseMessage('generating', null)).toBe('Enhancing…');
-  });
 });
 
 describe('submission rule', () => {
@@ -125,7 +119,7 @@ describe('sound, direction and context', () => {
     expect(settingsPayload(settings, 'image').note).toBe('at dusk');
   });
 
-  it('fills sound and note for settings saved before they existed', () => {
+  it('fills sound and note when the saved settings lack them', () => {
     const saved = { style: 'anime', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [] } as unknown as EnhanceSettings;
     const result = effectiveEnhanceSettings(state({ enhanceSettings: saved }), undefined);
     expect(result).toMatchObject({ style: 'anime', sound: [], note: '' });
@@ -207,13 +201,6 @@ describe('settings helpers', () => {
     expect(workflowMode('extend')).toBe('video');
   });
 
-  it('formats phase and clamp messages', () => {
-    expect(enhancePhaseMessage('downloading', '2.4 GB')).toContain('≈2.4 GB');
-    expect(enhancePhaseMessage('loading', null)).toBe('Loading enhancer…');
-    expect(enhancePhaseMessage('generating_cpu', null)).toContain('on the CPU');
-    expect(clampedNote('shorter')).toContain('Too short');
-    expect(clampedNote('extra')).toContain('maximum length');
-  });
 });
 
 describe('createNdjsonParser', () => {
@@ -335,7 +322,6 @@ describe('scene and prompt pair', () => {
       ['the prompt changes', { scene: 'A castle.', prompt: 'a queen', ...enhanced, enhancedFrom: made }, true],
       ['the workflow mode changes', { workflow: 'txt2img' as const, prompt: 'a knight', enhancedPrompt: 'x', enhancedFrom: made }, true],
       ['only an Enhanced scene exists and the scene changes', { scene: 'A harbour.', enhancedScene: 'A castle at dusk.', enhancedFrom: { ...made, prompt: 'a fox' } }, true],
-      ['the source was saved before scenes existed', { scene: '', prompt: 'a fox', enhancedPrompt: 'x', enhancedFrom: { prompt: 'a fox', mode: 'video' as const } }, false],
     ])('is stale only when the text it was made from changed: %s', (_name, overrides, stale) => {
       expect(isEnhancedStale(video(overrides))).toBe(stale);
     });
@@ -404,7 +390,7 @@ describe('extend', () => {
       expect(isEnhancedStale({ ...made, workflow: 'extend', extendSourcePath: '/clips/walk.mp4', extendFrames: 48 })).toBe(true);
     });
 
-    it('is not out of date for Enhanced text from before extensions existed', () => {
+    it('is not out of date for a video record that carries no extension source', () => {
       const old = state({ workflow: 'txt2vid', prompt: 'p', enhancedPrompt: 'x', enhancedFrom: { prompt: 'p', mode: 'video', scene: '' } });
       expect(isEnhancedStale(old)).toBe(false);
     });

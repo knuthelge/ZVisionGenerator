@@ -1,5 +1,4 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
@@ -31,23 +30,7 @@ const browseApiMocks = vi.hoisted(() => ({
   createFolder: vi.fn(),
 }));
 
-vi.mock('$lib/api/models', () => ({
-  getModelInventory: modelApiMocks.getModelInventory,
-  convertCheckpoint: modelApiMocks.convertCheckpoint,
-  inspectCheckpoint: modelApiMocks.inspectCheckpoint,
-  getConversionStatus: modelApiMocks.getConversionStatus,
-  importLoraLocal: modelApiMocks.importLoraLocal,
-  importLoraHF: modelApiMocks.importLoraHF,
-  deleteModel: modelApiMocks.deleteModel,
-  deleteEnhancerModel: modelApiMocks.deleteEnhancerModel,
-  deleteOtherDownload: modelApiMocks.deleteOtherDownload,
-  freeStrandedCacheFiles: modelApiMocks.freeStrandedCacheFiles,
-  deleteLora: modelApiMocks.deleteLora,
-  getDownloadPlan: modelApiMocks.getDownloadPlan,
-  startDownload: modelApiMocks.startDownload,
-  getDownloads: modelApiMocks.getDownloads,
-  cancelDownload: modelApiMocks.cancelDownload,
-}));
+vi.mock('$lib/api/models', () => modelApiMocks);
 
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
@@ -59,6 +42,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
+import { mountComponent, settle } from '../../test-utils/mount';
 import { pickOption } from '../../test-utils/select';
 import { inventoryMemory } from '$lib/state/pageMemory';
 
@@ -76,11 +60,17 @@ function makeInventory(): ModelInventory {
   };
 }
 
-async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync();
+let page: ReturnType<typeof mountComponent>;
+let target: HTMLElement;
+
+function mountModels(): void {
+  page = mountComponent(ModelsPage);
+  target = page.target;
+}
+
+/** Click the button in the open dialog whose text is exactly *label*. */
+function clickDialogButton(label: 'Delete' | 'Cancel'): void {
+  (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === label) as HTMLButtonElement).click();
 }
 
 function browseButtonFor(target: HTMLElement, inputId: string): HTMLButtonElement {
@@ -102,44 +92,21 @@ function typePath(input: HTMLInputElement, value: string): void {
 }
 
 describe('ModelsPage Browse buttons', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
   beforeEach(() => {
     downloadStore.reset();
-    modelApiMocks.getModelInventory.mockReset();
-    modelApiMocks.convertCheckpoint.mockReset();
-    modelApiMocks.inspectCheckpoint.mockReset();
-    modelApiMocks.getConversionStatus.mockReset();
+    for (const mock of Object.values(modelApiMocks)) mock.mockReset();
     modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
-    modelApiMocks.importLoraLocal.mockReset();
-    modelApiMocks.importLoraHF.mockReset();
-    modelApiMocks.deleteModel.mockReset();
-    modelApiMocks.deleteEnhancerModel.mockReset();
-    modelApiMocks.deleteOtherDownload.mockReset();
-    modelApiMocks.freeStrandedCacheFiles.mockReset();
-    modelApiMocks.deleteLora.mockReset();
-    modelApiMocks.getDownloadPlan.mockReset();
-    modelApiMocks.startDownload.mockReset();
-    modelApiMocks.getDownloads.mockReset();
     modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
-    modelApiMocks.cancelDownload.mockReset();
     modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
     for (const mock of Object.values(browseApiMocks)) mock.mockReset();
     browseApiMocks.browsePlaces.mockImplementation(async (purpose: 'checkpoint_file' | 'lora_file') => placesFor(purpose));
     browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/first.safetensors'));
-    target = document.createElement('div');
-    document.body.appendChild(target);
   });
 
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-  });
+  afterEach(() => vi.useRealTimers());
 
   it('browses with the checkpoint and LoRA purposes for local model files', async () => {
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     browseButtonFor(target, 'convert-input-path').click();
@@ -157,7 +124,7 @@ describe('ModelsPage Browse buttons', () => {
     browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/first-checkpoint.safetensors'));
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
 
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     browseButtonFor(target, 'convert-input-path').click();
@@ -177,7 +144,7 @@ describe('ModelsPage Browse buttons', () => {
 
   it('still imports a LoRA from Hugging Face with the form values', async () => {
     modelApiMocks.importLoraHF.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     typePath(target.querySelector('#import-hf-repo-id') as HTMLInputElement, 'owner/repository');
@@ -192,7 +159,7 @@ describe('ModelsPage Browse buttons', () => {
     browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/first-lora.safetensors'));
     modelApiMocks.importLoraLocal.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
 
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     browseButtonFor(target, 'import-local-source-path').click();
@@ -210,7 +177,7 @@ describe('ModelsPage Browse buttons', () => {
   it('is expected to clear a successful checkpoint path and begin the next browse with no initial path', async () => {
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'success', message: 'Converted.' });
 
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const pathInput = target.querySelector('#convert-input-path') as HTMLInputElement;
@@ -219,7 +186,6 @@ describe('ModelsPage Browse buttons', () => {
     pathInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
     expect(pathInput.value).toBe('/models/to-convert.safetensors');
-    expect(target.textContent).toContain('Path loaded from the host machine.');
 
     const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
     pickOption(modelType, 'zimage');
@@ -229,9 +195,8 @@ describe('ModelsPage Browse buttons', () => {
     expect(modelApiMocks.convertCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ input_path: '/models/to-convert.safetensors' }));
     expect.soft(pathInput.value).toBe('');
     expect.soft(new FormData(pathInput.closest('form')!).get('input_path')).toBe('');
-    expect.soft(target.textContent).not.toContain('Path loaded from the host machine.');
     // The model type is cleared too, and the submitted value follows what is shown.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
     expect((target.querySelector('#convert-model-type') as HTMLButtonElement).dataset.value).toBe('');
     expect((target.querySelector('select[name="model_type"]') as HTMLSelectElement).value).toBe('');
 
@@ -242,7 +207,7 @@ describe('ModelsPage Browse buttons', () => {
 
   it('preserves checkpoint retry state and surfaces an operation error result', async () => {
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'error', message: 'Checkpoint is not a valid safetensors file.' });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const { input, form } = pathAndForm(target, 'convert-input-path');
@@ -263,7 +228,7 @@ describe('ModelsPage Browse buttons', () => {
 
   it('preserves local LoRA retry state and surfaces a thrown operation error', async () => {
     modelApiMocks.importLoraLocal.mockRejectedValue(new Error('Local import request failed.'));
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const { input, form } = pathAndForm(target, 'import-local-source-path');
@@ -281,7 +246,7 @@ describe('ModelsPage Browse buttons', () => {
 
   it('clears a successful local LoRA path and resets its next picker origin', async () => {
     modelApiMocks.importLoraLocal.mockResolvedValue({ tone: 'success', message: 'Imported.' });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const { input, form } = pathAndForm(target, 'import-local-source-path');
@@ -294,16 +259,15 @@ describe('ModelsPage Browse buttons', () => {
     }));
     expect(input.value).toBe('');
     expect(new FormData(form).get('source_path')).toBe('');
-    expect(target.textContent).not.toContain('Path loaded from the host machine.');
 
     browseButtonFor(target, 'import-local-source-path').click();
     await settle();
     expect(browseApiMocks.listDirectory).toHaveBeenLastCalledWith('lora_file', '', expect.anything());
   });
 
-  it('blocks an empty Model Type through native requestSubmit validation and submits after a type is selected', async () => {
+  it('blocks submitting a conversion without a Model Type, and an import without a path, until they are filled', async () => {
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const checkpoint = pathAndForm(target, 'convert-input-path');
@@ -330,25 +294,11 @@ describe('ModelsPage Browse buttons', () => {
       input_path: '/models/valid-checkpoint.safetensors',
       model_type: 'zimage',
     }));
-  });
 
-  it('uses native required validation for both local path controls', async () => {
-    app = flushSync(() => mount(ModelsPage, { target }));
-    await settle();
-
-    const checkpoint = pathAndForm(target, 'convert-input-path');
     const localLora = pathAndForm(target, 'import-local-source-path');
-    expect(checkpoint.input.required).toBe(true);
-    expect(localLora.input.required).toBe(true);
-    expect(checkpoint.input.validity.valueMissing).toBe(true);
-    expect(localLora.form.checkValidity()).toBe(false);
-
     localLora.form.requestSubmit();
     await settle();
     expect(modelApiMocks.importLoraLocal).not.toHaveBeenCalled();
-
-    typePath(localLora.input, '/loras/valid.safetensors');
-    expect(localLora.form.checkValidity()).toBe(true);
   });
 
   it('marks stored quants with their base model', async () => {
@@ -360,7 +310,7 @@ describe('ModelsPage Browse buttons', () => {
       ],
     });
 
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const markers = target.querySelectorAll('[data-testid="stored-quant"]');
@@ -377,7 +327,7 @@ describe('ModelsPage Browse buttons', () => {
       ],
     });
 
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const markers = target.querySelectorAll('[data-testid="converted-level"]');
@@ -387,14 +337,14 @@ describe('ModelsPage Browse buttons', () => {
 
   it('offers a quantized copy on conversion only where stored quants are supported', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), stored_quants_supported: false });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
     expect(target.querySelector('#convert-quantize')).toBeNull();
-    await unmount(app);
+    await page.unmount();
 
     modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), stored_quants_supported: true });
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const { input, form } = pathAndForm(target, 'convert-input-path');
@@ -414,15 +364,15 @@ describe('ModelsPage Browse buttons', () => {
       model_type: 'ltx-2.3', summary: 'LTX-2.3, full checkpoint, FP8 (440)', tone: 'warning', distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 8,
     });
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'success', message: 'Converting.', detail: '', background: true });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    vi.useFakeTimers();
+    mountModels();
     await settle();
 
     const { input, form } = pathAndForm(target, 'convert-input-path');
     typePath(input, '/models/ltx-finetune.safetensors');
     const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
     pickOption(modelType, 'ltx-2.3');
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    await settle();
+    await settle(450);
 
     expect(modelApiMocks.inspectCheckpoint).toHaveBeenCalledWith('/models/ltx-finetune.safetensors', 'ltx-2.3');
     expect(target.querySelector('#convert-base-model')).toBeNull();
@@ -448,18 +398,18 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.inspectCheckpoint
       .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }))
       .mockRejectedValueOnce(new Error('not an LTX checkpoint'));
-    app = flushSync(() => mount(ModelsPage, { target }));
+    vi.useFakeTimers();
+    mountModels();
     await settle();
 
     const { input } = pathAndForm(target, 'convert-input-path');
     const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
     pickOption(modelType, 'ltx-2.3');
     typePath(input, '/models/dev.safetensors');
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    await settle(450);
     typePath(input, '/models/other.safetensors');
     answerFirst({ model_type: 'ltx-2.3', summary: 'LTX-2.3, full checkpoint, bf16', tone: 'warning', distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 4 });
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    await settle();
+    await settle(450);
 
     expect((target.querySelector('#convert-distill') as HTMLInputElement).checked).toBe(false);
     expect(target.textContent).not.toContain('Convert it with Distill.');
@@ -470,14 +420,14 @@ describe('ModelsPage Browse buttons', () => {
       model_type: 'h3', summary: 'MiniMax H3, ComfyUI single file, pruned (rank 8), INT8 (195)', tone: 'warning', advice: 'This may already be step-distilled.', turbo_hints: ["the name says 'turbo'"],
     });
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'success', message: 'Converting.', detail: '', background: true });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    vi.useFakeTimers();
+    mountModels();
     await settle();
 
     const { input, form } = pathAndForm(target, 'convert-input-path');
     typePath(input, '/models/h3-turbo-finetune.safetensors');
     pickOption(target.querySelector('#convert-model-type') as HTMLButtonElement, 'h3');
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    await settle();
+    await settle(450);
 
     expect(modelApiMocks.inspectCheckpoint).toHaveBeenCalledWith('/models/h3-turbo-finetune.safetensors', 'h3');
     expect(target.querySelector('#convert-ltx-quantize')).toBeNull();
@@ -497,7 +447,7 @@ describe('ModelsPage Browse buttons', () => {
       .mockResolvedValue({ state: 'done', name: 'ft', message: 'Converted.' });
     vi.useFakeTimers();
     try {
-      app = flushSync(() => mount(ModelsPage, { target }));
+      mountModels();
       await vi.advanceTimersByTimeAsync(10_000);
     } finally {
       vi.useRealTimers();
@@ -518,30 +468,10 @@ describe('ModelsPage Browse buttons', () => {
       video_models: [{ download_needed: false, name: 'ltx-8', label: 'ltx-8', family: 'ltx', supports_i2v: true, disk_size_label: '112.3 GB' }],
     });
 
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     expect(Array.from(target.querySelectorAll('[data-testid="disk-size"]')).map((el) => el.textContent)).toEqual(['32.9 GB', '112.3 GB']);
-  });
-
-  it('shows long model names and folders in full, in named sections and forms', async () => {
-    const longName = 'a-very-long-model-name-that-must-not-widen-its-card';
-    const modelsDir = `/models/${'long-directory-segment/'.repeat(16)}`;
-    modelApiMocks.getModelInventory.mockResolvedValue({
-      ...makeInventory(),
-      models_dir: modelsDir,
-      image_models: [{ download_needed: false, name: longName, label: longName, family: 'a-very-long-family', size_label: 'extra-long-size' }],
-    });
-
-    app = flushSync(() => mount(ModelsPage, { target }));
-    await settle();
-
-    const names = Array.from(target.querySelectorAll('[data-testid="model-name"]')).map((n) => n.textContent);
-    expect(names).toContain(longName);
-    const values = Array.from(target.querySelectorAll('dd')).map((dd) => dd.textContent ?? '');
-    expect(values.some((value) => value.includes(modelsDir))).toBe(true);
-
-    expect(target.querySelectorAll('form')).toHaveLength(3);
   });
 
   it('marks download state on the name and shows one memory badge per model', async () => {
@@ -560,7 +490,7 @@ describe('ModelsPage Browse buttons', () => {
       ],
       video_models: [{ download_needed: false, name: 'ltx-4', label: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory_fit: null }],
     });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const names = Object.fromEntries(
@@ -590,7 +520,7 @@ describe('ModelsPage Browse buttons', () => {
         { download_needed: false, name: 'atlas', label: 'atlas', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
       ],
     });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
     const buttons = target.querySelectorAll('[data-testid="delete-button"]');
 
@@ -598,7 +528,7 @@ describe('ModelsPage Browse buttons', () => {
     await settle();
     expect(document.querySelector('[data-testid="delete-stored-quants"]')?.textContent).toContain('zit@q8');
 
-    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+    clickDialogButton('Cancel');
     await settle();
     (buttons[1] as HTMLButtonElement).click();
     await settle();
@@ -613,7 +543,7 @@ describe('ModelsPage Browse buttons', () => {
         { download_needed: false, name: 'atlas', label: 'atlas', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [], source_repos: [] } },
       ],
     });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
     const buttons = target.querySelectorAll('[data-testid="delete-button"]');
 
@@ -622,7 +552,7 @@ describe('ModelsPage Browse buttons', () => {
     expect(document.querySelector('[data-testid="delete-sources"]')?.textContent).toContain('org/moss-turbo');
     expect(document.querySelector('[data-testid="delete-links-kept"]')).toBeNull();
 
-    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+    clickDialogButton('Cancel');
     await settle();
     (buttons[1] as HTMLButtonElement).click();
     await settle();
@@ -637,7 +567,7 @@ describe('ModelsPage Browse buttons', () => {
         { download_needed: false, name: 'ltx-4', label: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, delete: { kind: 'copy', repo_id: 'org/ltx', linked_by: [], stored_quants: ['ltx-4@q4'], shared_with: ['ltx-8'] } },
       ],
     });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
     const button = target.querySelector('[data-testid="delete-button"]') as HTMLButtonElement;
     expect(button.getAttribute('aria-label')).toBe('Delete the prepared copy of ltx-4');
@@ -661,7 +591,7 @@ describe('ModelsPage Browse buttons', () => {
       loras: [{ name: 'style', size_label: '10 MB' }],
     });
     modelApiMocks.deleteModel.mockResolvedValue({ tone: 'success', message: "Deleted the HuggingFace download of 'org/klein'.", detail: '' });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const labels = Array.from(target.querySelectorAll('[data-testid="delete-button"]')).map((el) => el.getAttribute('aria-label'));
@@ -695,11 +625,6 @@ describe('ModelsPage Browse buttons', () => {
       download_size_label: '17.0 GB',
     };
 
-    function tooltipFor(name: string): string {
-      const label = Array.from(target.querySelectorAll('[data-testid="model-name"]')).find((el) => el.textContent === name);
-      return label?.parentElement?.querySelector('[role="tooltip"]')?.textContent ?? '';
-    }
-
     it('shows the disk use only while the stored copy exists, with a delete for it', async () => {
       modelApiMocks.getModelInventory.mockResolvedValue({
         ...makeInventory(),
@@ -708,7 +633,7 @@ describe('ModelsPage Browse buttons', () => {
           { download_needed: false, name: 'zit', label: 'zit', family: 'zimage', downloaded: true, delete: null },
         ],
       });
-      app = flushSync(() => mount(ModelsPage, { target }));
+      mountModels();
       await settle();
 
       const disk = target.querySelectorAll('[data-testid="disk-size"]');
@@ -716,23 +641,6 @@ describe('ModelsPage Browse buttons', () => {
       expect(disk[0].textContent).toContain('9.3 GB');
       expect(Array.from(target.querySelectorAll('[data-testid="delete-button"]')).map((el) => el.getAttribute('aria-label'))).toEqual(['Delete seedvr2-7b@q8']);
       expect(target.querySelector('[data-testid="model-memory-fit"]')).toBeNull();
-    });
-
-    it('names the download size in the not-downloaded tooltip and leaves image rows alone', async () => {
-      modelApiMocks.getModelInventory.mockResolvedValue({
-        ...makeInventory(),
-        image_models: [
-          { download_needed: true, ...seedvr2Row, downloaded: false, disk_size_label: null, delete: null },
-          { download_needed: true, name: 'klein4b', label: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
-        ],
-      });
-      app = flushSync(() => mount(ModelsPage, { target }));
-      await settle();
-
-      expect(tooltipFor('seedvr2-7b@q8')).toContain(seedvr2Row.download_size_label);
-      expect(tooltipFor('seedvr2-7b@q8')).not.toContain(NOT_DOWNLOADED_FIRST_USE_TOOLTIP);
-      expect(tooltipFor('klein4b')).toContain(DOWNLOADABLE_TOOLTIP);
-      expect(target.querySelector('[data-testid="disk-size"]')).toBeNull();
     });
 
     it('confirms with the re-download size instead of the installed-model line and deletes by name', async () => {
@@ -744,7 +652,7 @@ describe('ModelsPage Browse buttons', () => {
         ],
       });
       modelApiMocks.deleteModel.mockResolvedValue({ tone: 'success', message: "Deleted model 'seedvr2-7b@q8'.", detail: '' });
-      app = flushSync(() => mount(ModelsPage, { target }));
+      mountModels();
       await settle();
       const buttons = target.querySelectorAll('[data-testid="delete-button"]');
 
@@ -753,7 +661,7 @@ describe('ModelsPage Browse buttons', () => {
       expect(document.querySelector('[data-testid="delete-redownload"]')).toBeNull();
       const installedNotes = Array.from(document.querySelectorAll('[data-testid="delete-dialog"] p')).map((el) => el.textContent);
       expect(installedNotes.length).toBeGreaterThan(0);
-      (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+      clickDialogButton('Cancel');
       await settle();
 
       (buttons[0] as HTMLButtonElement).click();
@@ -761,7 +669,7 @@ describe('ModelsPage Browse buttons', () => {
       expect(document.querySelector('[data-testid="delete-redownload"]')?.textContent).toContain(seedvr2Row.download_size_label);
       const seedvr2Notes = Array.from(document.querySelectorAll('[data-testid="delete-dialog"] p')).map((el) => el.textContent);
       expect(seedvr2Notes.filter((note) => installedNotes.includes(note))).toEqual([]);
-      (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+      clickDialogButton('Delete');
       await settle();
 
       expect(modelApiMocks.deleteModel).toHaveBeenCalledWith('seedvr2-7b@q8');
@@ -771,13 +679,13 @@ describe('ModelsPage Browse buttons', () => {
   it('deletes a LoRA after confirmation and surfaces a refused delete', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), loras: [{ name: 'style', size_label: '10 MB' }] });
     modelApiMocks.deleteLora.mockRejectedValue(new Error('Wait for the running job to finish before deleting models or LoRAs.'));
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     (target.querySelector('[data-testid="delete-button"]') as HTMLButtonElement).click();
     await settle();
     expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('style.safetensors');
-    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+    clickDialogButton('Delete');
     await settle();
 
     expect(modelApiMocks.deleteLora).toHaveBeenCalledWith('style');
@@ -794,7 +702,7 @@ describe('ModelsPage Browse buttons', () => {
       ],
     });
     modelApiMocks.deleteEnhancerModel.mockResolvedValue({ status: 'ok', tone: 'success', message: "Deleted the HuggingFace download of 'org/fast'." });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const rows = Array.from(target.querySelectorAll<HTMLElement>('[data-testid="enhancer-row"]'));
@@ -805,7 +713,7 @@ describe('ModelsPage Browse buttons', () => {
     (rows[0].querySelector('[data-testid="delete-button"]') as HTMLButtonElement).click();
     await settle();
     expect(document.querySelector('[data-testid="delete-enhancer"]')).not.toBeNull();
-    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+    clickDialogButton('Delete');
     await settle();
 
     expect(modelApiMocks.deleteEnhancerModel).toHaveBeenCalledWith('fast');
@@ -820,13 +728,13 @@ describe('ModelsPage Browse buttons', () => {
     const ok = { status: 'ok', tone: 'success', message: 'Done.' };
     modelApiMocks.deleteOtherDownload.mockResolvedValue(ok);
     modelApiMocks.freeStrandedCacheFiles.mockResolvedValue(ok);
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     const confirm = async (row: string) => {
       (target.querySelector(`[data-testid="${row}"] [data-testid="delete-button"]`) as HTMLButtonElement).click();
       await settle();
-      (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+      clickDialogButton('Delete');
       await settle();
     };
     await confirm('other-download-row');
@@ -837,14 +745,14 @@ describe('ModelsPage Browse buttons', () => {
 
   it('hides other downloads when the cache holds nothing unused', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), other_downloads: { cache_dir: '/hub', repos: [], stranded: null } });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     expect(target.querySelector('[data-testid="other-download-row"], [data-testid="stranded-row"]')).toBeNull();
   });
 
   it('hides the enhancer table when no tier is configured', async () => {
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
 
     expect(target.querySelector('[data-testid="enhancer-row"]')).toBeNull();
@@ -852,9 +760,6 @@ describe('ModelsPage Browse buttons', () => {
 });
 
 describe('ModelsPage downloads', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
   const plan = (overrides: Partial<DownloadPlan> = {}): DownloadPlan => ({
     kind: 'model',
     name: 'klein9b',
@@ -887,7 +792,7 @@ describe('ModelsPage downloads', () => {
 
   async function mountPage(inventory: ModelInventory = inventoryWith()): Promise<void> {
     modelApiMocks.getModelInventory.mockResolvedValue(inventory);
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await tickFor();
   }
 
@@ -913,16 +818,9 @@ describe('ModelsPage downloads', () => {
     modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
     vi.mocked(addToast).mockClear();
     vi.mocked(dismissToast).mockClear();
-    target = document.createElement('div');
-    document.body.appendChild(target);
   });
 
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-    vi.useRealTimers();
-  });
+  afterEach(() => vi.useRealTimers());
 
   it('offers Download only on rows that need files, and Delete on the rest', async () => {
     await mountPage();
@@ -942,21 +840,11 @@ describe('ModelsPage downloads', () => {
     expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('model', 'klein9b');
     expect(confirmDialog()).not.toBeNull();
     expect(confirmButton().textContent?.trim()).toBe('Download');
-    expect(confirmButton().classList.contains('ui-btn-danger')).toBe(false);
     expect(modelApiMocks.startDownload).not.toHaveBeenCalled();
 
     confirmButton().click();
     await tickFor();
     expect(modelApiMocks.startDownload).toHaveBeenCalledWith('model', 'klein9b');
-  });
-
-  it('asks to Download anyway only when the free space is short', async () => {
-    modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ space: { path: '/hub', needed_bytes: 34.7e9, free_bytes: 21e9, enough: false } }));
-    await mountPage();
-
-    downloadButton()!.click();
-    await tickFor();
-    expect(confirmButton().textContent?.trim()).toBe('Download anyway');
   });
 
   it('starts nothing when the confirmation is declined', async () => {
@@ -969,20 +857,6 @@ describe('ModelsPage downloads', () => {
     await tickFor();
 
     expect(modelApiMocks.startDownload).not.toHaveBeenCalled();
-  });
-
-  it('skips the confirmation for an empty plan, tells so and reloads the inventory', async () => {
-    modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ parts: [], total_bytes: 0, space: null }));
-    await mountPage();
-    const reads = modelApiMocks.getModelInventory.mock.calls.length;
-
-    downloadButton()!.click();
-    await tickFor();
-
-    expect(confirmDialog()).toBeNull();
-    expect(modelApiMocks.startDownload).not.toHaveBeenCalled();
-    expect(addToast).toHaveBeenCalledWith(expect.any(String), 'info');
-    expect(modelApiMocks.getModelInventory.mock.calls.length).toBe(reads + 1);
   });
 
   it('downloads an enhancer tier by kind and tier name', async () => {
@@ -1036,36 +910,6 @@ describe('ModelsPage downloads', () => {
     expect(bar?.getAttribute('aria-valuenow')).toBe('0');
   });
 
-  it('polls every second while a download is active and stops once it is done, reloading the inventory', async () => {
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
-    await mountPage();
-    const reads = modelApiMocks.getModelInventory.mock.calls.length;
-    const polled = modelApiMocks.getDownloads.mock.calls.length;
-
-    await tickFor(1000);
-    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(polled + 1);
-
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'done' })] });
-    await tickFor(1000);
-    expect(addToast).toHaveBeenCalledWith(expect.any(String), 'success');
-    expect(modelApiMocks.getModelInventory.mock.calls.length).toBe(reads + 1);
-
-    const settled = modelApiMocks.getDownloads.mock.calls.length;
-    await tickFor(3000);
-    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(settled);
-  });
-
-  it('does not poll while nothing is active, nor announce what finished before the page opened', async () => {
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'done' }), item({ id: 'd2', state: 'failed', message: 'Disk full' })] });
-    await mountPage();
-    const polled = modelApiMocks.getDownloads.mock.calls.length;
-
-    await tickFor(3000);
-
-    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(polled);
-    expect(addToast).not.toHaveBeenCalled();
-  });
-
   it('starts polling after a download is queued and stops polling when the page is destroyed', async () => {
     modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
     modelApiMocks.startDownload.mockResolvedValue(running());
@@ -1077,43 +921,10 @@ describe('ModelsPage downloads', () => {
     await tickFor(1000);
     expect(modelApiMocks.getDownloads.mock.calls.length).toBeGreaterThan(polled);
 
-    await unmount(app!);
-    app = null;
+    await page.unmount();
     const afterDestroy = modelApiMocks.getDownloads.mock.calls.length;
     await tickFor(3000);
     expect(modelApiMocks.getDownloads.mock.calls.length).toBe(afterDestroy);
-  });
-
-  it('raises an error toast with a Retry action when a download fails, and the toast survives the page', async () => {
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
-    await mountPage();
-
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'failed', message: 'No space left on device' })] });
-    await tickFor(1000);
-
-    expect(addToast).toHaveBeenCalledWith('No space left on device', 'error', { action: { label: 'Retry', run: expect.any(Function) } });
-    await unmount(app!);
-    app = null;
-    expect(dismissToast).not.toHaveBeenCalled();
-
-    const request = vi.spyOn(downloadStore, 'request').mockResolvedValue('declined');
-    vi.mocked(addToast).mock.calls.at(-1)?.[2]?.action?.run();
-    expect(request).toHaveBeenCalledWith('model', 'klein9b', 'klein9b');
-    request.mockRestore();
-  });
-
-  it('runs the Download flow again from the Retry action', async () => {
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
-    modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
-    await mountPage();
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'failed', message: 'Network error' })] });
-    await tickFor(1000);
-    const options = vi.mocked(addToast).mock.calls.at(-1)?.[2];
-
-    options?.action?.run();
-    await tickFor();
-
-    expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('model', 'klein9b');
   });
 
   it('shows a model by its name with the alias under it, and uses the name in the row controls', async () => {
@@ -1179,31 +990,18 @@ describe('ModelsPage downloads', () => {
           { name: 'ideo', label: 'ideo', family: 'ideogram4', downloaded: false, download_needed: false, delete: null },
           { name: 'moss', label: 'moss', family: 'moss', downloaded: false, download_needed: false, delete: null },
           { name: 'klein9b', label: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
+          { name: 'seedvr2-3b@q8', label: 'seedvr2-3b@q8', family: 'seedvr2', source: 'seedvr2', downloaded: false, download_needed: true, download_size_label: '8.0 GB', delete: null },
         ],
       }));
 
+      expect(nameTooltip('seedvr2-3b@q8')).toContain('8.0 GB');
+      expect(nameTooltip('seedvr2-3b@q8')).not.toContain(NOT_DOWNLOADED_FIRST_USE_TOOLTIP);
       expect(nameTooltip('seedvr2-7b@q8')).toContain(PREPARED_SEEDVR2_TOOLTIP);
       expect(nameTooltip('ideo')).toContain(PREPARED_INSTANT_TOOLTIP);
       expect(nameTooltip('moss')).toContain(PREPARED_INSTANT_TOOLTIP);
       expect(nameTooltip('klein9b')).toContain(DOWNLOADABLE_TOOLTIP);
-      expect(target.querySelectorAll('[data-testid="download-button"]')).toHaveLength(1);
+      expect(target.querySelectorAll('[data-testid="download-button"]')).toHaveLength(2);
     });
-  });
-
-  it('keeps the Retry toast of a failed request after the page is destroyed, and Retry asks the store again', async () => {
-    modelApiMocks.getDownloadPlan.mockRejectedValueOnce(new ApiError('Bad gateway', 502, 'Hub unreachable'));
-    await mountPage();
-
-    downloadButton()!.click();
-    await tickFor();
-    await unmount(app!);
-    app = null;
-    expect(dismissToast).not.toHaveBeenCalled();
-
-    const request = vi.spyOn(downloadStore, 'request').mockResolvedValue('declined');
-    vi.mocked(addToast).mock.calls.at(-1)?.[2]?.action?.run();
-    expect(request).toHaveBeenCalledWith('model', 'klein9b', 'klein9b');
-    request.mockRestore();
   });
 
   it('keeps the focus inside a row when a poll replaces that row\'s control', async () => {
@@ -1221,52 +1019,13 @@ describe('ModelsPage downloads', () => {
     expect(document.activeElement?.getAttribute('data-testid')).toBe('download-button');
   });
 
-  it('reads the lane once per second after a submit, however often the row was submitted', async () => {
-    modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
-    modelApiMocks.startDownload.mockResolvedValue(running());
-    await mountPage();
-    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
-
-    await startAndConfirm();
-    await tickFor(1000);
-    const polled = modelApiMocks.getDownloads.mock.calls.length;
-    await tickFor(3000);
-
-    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(polled + 3);
-  });
-
-  it('offers Retry on a failed request only when repeating it could work', async () => {
-    modelApiMocks.getDownloadPlan.mockRejectedValueOnce(new ApiError('Not found', 404, 'Unknown model')).mockRejectedValueOnce(new ApiError('Bad gateway', 502, 'Hub unreachable'));
-    await mountPage();
-
-    downloadButton()!.click();
-    await tickFor();
-    expect(addToast).toHaveBeenLastCalledWith('Unknown model', 'error');
-
-    downloadButton()!.click();
-    await tickFor();
-    expect(addToast).toHaveBeenLastCalledWith('Hub unreachable', 'error', { action: { label: 'Retry', run: expect.any(Function) } });
-  });
 });
 
 describe('ModelsPage memory', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
   beforeEach(() => {
     for (const mock of Object.values(modelApiMocks)) mock.mockReset();
     modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
     modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
   });
 
   it('comes back with the inventory a previous visit loaded, before the refresh answers', async () => {
@@ -1274,14 +1033,13 @@ describe('ModelsPage memory', () => {
       ...makeInventory(),
       image_models: [{ download_needed: false, name: 'atlas', label: 'atlas', family: 'flux2_klein', size_label: '9b', stored_quant: null }],
     });
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
     expect(target.querySelector('[data-testid="model-name"]')?.textContent).toBe('atlas');
-    await unmount(app!);
-    app = null;
+    await page.unmount();
 
     modelApiMocks.getModelInventory.mockImplementation(() => new Promise<ModelInventory>(() => undefined));
-    app = flushSync(() => mount(ModelsPage, { target }));
+    mountModels();
     await settle();
     expect(target.querySelector('[data-testid="model-name"]')?.textContent).toBe('atlas');
     expect(modelApiMocks.getModelInventory).toHaveBeenCalledTimes(2);

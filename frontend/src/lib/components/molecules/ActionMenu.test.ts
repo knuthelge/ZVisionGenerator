@@ -1,44 +1,31 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const layoutMock = vi.hoisted(() => ({ compact: false, mode: 'wide', coarse: false }));
+
+vi.mock('$lib/state/layoutMode.svelte', () => ({ layout: layoutMock }));
+
+import { mountComponent, settle } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
 
 describe('ActionMenu', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
   const menu = () => document.querySelector<HTMLElement>('[role="menu"]');
   const row = (id: string) => document.querySelector<HTMLElement>(`[data-action="${id}"]`);
 
   beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
+    Object.assign(layoutMock, { compact: false, mode: 'wide', coarse: false });
   });
 
   function mountMenu(items: ActionMenuEntry[], onclose = vi.fn()) {
     const props = reactiveProps({ open: true, anchor: null as HTMLElement | null, items, label: 'Test menu', onclose });
-    app = flushSync(() => mount(ActionMenu, { target, props }));
+    mountComponent(ActionMenu, props);
     return props;
   }
 
-  it('keeps a plain item a menuitem', () => {
-    mountMenu([{ kind: 'item', id: 'a', label: 'A' }]);
-    expect(row('a')?.getAttribute('role')).toBe('menuitem');
-    expect(row('a')?.hasAttribute('aria-checked')).toBe(false);
-  });
-
-  it('renders a checked item as a menuitemradio with aria-checked', () => {
+  it('renders a plain item as a menuitem and a checked item as a menuitemradio with aria-checked', () => {
     mountMenu([
+      { kind: 'item', id: 'plain', label: 'Plain' },
       { kind: 'item', id: 'on', label: 'On', checked: true },
       { kind: 'item', id: 'off', label: 'Off', checked: false },
     ]);
@@ -46,8 +33,8 @@ describe('ActionMenu', () => {
     expect(row('on')?.getAttribute('aria-checked')).toBe('true');
     expect(row('off')?.getAttribute('role')).toBe('menuitemradio');
     expect(row('off')?.getAttribute('aria-checked')).toBe('false');
-    expect(row('on')?.querySelector('svg')).not.toBeNull();
-    expect(row('off')?.querySelector('svg')).toBeNull();
+    expect(row('plain')?.getAttribute('role')).toBe('menuitem');
+    expect(row('plain')?.hasAttribute('aria-checked')).toBe(false);
   });
 
   it('shows a hint after the label', () => {
@@ -142,5 +129,33 @@ describe('ActionMenu', () => {
       keydown('End');
       expect(document.activeElement).toBe(row('more'));
     });
+  });
+
+  it('shows groups, radios and hints in the action sheet on a compact layout and toggles a group in place', async () => {
+    Object.assign(layoutMock, { compact: true, mode: 'compact', coarse: true });
+    const onclose = vi.fn();
+    mountMenu([
+      { kind: 'item', id: 'a', label: 'A', checked: true },
+      { kind: 'group', id: 'more', label: 'More (1)', items: [{ kind: 'item', id: 'g1', label: 'G1', hint: 'LTX' }] },
+    ], onclose);
+    await settle();
+
+    const sheet = document.querySelector('[data-testid="action-sheet"]') as HTMLElement;
+    expect(sheet).not.toBeNull();
+    expect(sheet.querySelector('[data-action="a"]')?.getAttribute('role')).toBe('menuitemradio');
+    const group = sheet.querySelector('[data-action="more"]') as HTMLElement;
+    expect(group.getAttribute('aria-expanded')).toBe('false');
+
+    flushSync(() => group.click());
+    expect(group.getAttribute('aria-expanded')).toBe('true');
+    expect(sheet.querySelector('[data-action="g1"]')?.textContent).toContain('LTX');
+    expect(onclose).not.toHaveBeenCalled();
+
+    const panel = document.querySelector('[role="menu"]') as HTMLElement;
+    (sheet.querySelector('[data-action="a"]') as HTMLElement).focus();
+    flushSync(() => panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(document.activeElement).toBe(group);
+    flushSync(() => panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(document.activeElement).toBe(sheet.querySelector('[data-action="g1"]'));
   });
 });

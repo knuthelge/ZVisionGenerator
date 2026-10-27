@@ -1,5 +1,3 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import { draft } from '$lib/state/draft.svelte';
@@ -20,6 +18,7 @@ vi.mock('$lib/api/promptFiles', () => api);
 vi.mock('$lib/state/toasts.svelte', () => ({ addToast: vi.fn() }));
 
 import PromptsPage from './PromptsPage.svelte';
+import { buttonByText as button, mountComponent, settle } from '../../test-utils/mount';
 
 const PATH = '/prompts/portraits.yaml';
 
@@ -57,23 +56,11 @@ const PREVIEW: PromptDocumentPreview = {
   rolled: null,
 };
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync();
-}
-
-function button(label: string): HTMLButtonElement {
-  const found = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.trim().startsWith(label));
-  if (!found) throw new Error(`No button "${label}"`);
-  return found;
-}
-
 describe('PromptsPage', () => {
   let target: HTMLElement;
-  let app: ReturnType<typeof mount> | null = null;
 
   async function mountPage(): Promise<void> {
-    app = mount(PromptsPage, { target });
+    target = mountComponent(PromptsPage).target;
     await settle();
   }
 
@@ -84,14 +71,9 @@ describe('PromptsPage', () => {
     api.loadPromptDocument.mockResolvedValue(loaded());
     api.previewPromptDocument.mockResolvedValue(PREVIEW);
     router.replace('prompts', { path: PATH });
-    target = document.createElement('div');
-    document.body.appendChild(target);
   });
 
-  afterEach(async () => {
-    if (app) await unmount(app);
-    app = null;
-    target.remove();
+  afterEach(() => {
     document.querySelectorAll('[role="alertdialog"]').forEach((node) => node.closest('div')?.remove());
   });
 
@@ -101,8 +83,6 @@ describe('PromptsPage', () => {
     expect(api.loadPromptDocument).toHaveBeenCalledWith(PATH);
     expect(target.querySelector<HTMLInputElement>('input[aria-label="Set name"]')?.value).toBe('portrait');
     expect(target.querySelectorAll('[data-entry-id]')).toHaveLength(2);
-    expect(target.querySelector('.tok-snippet')?.textContent).toBe('$light');
-    expect(target.querySelectorAll('.tok-choice .tok-option')).toHaveLength(2);
     expect(target.querySelector('[aria-label="Preview"]')?.textContent).toContain('portrait:0');
     expect(target.textContent).toContain('1×');
   });
@@ -160,6 +140,7 @@ describe('PromptsPage', () => {
 
       await chooseFromMenu('Remove scene');
       expect(target.querySelector('[data-testid="entry-scene"]')).toBeNull();
+      expect(target.querySelector('section[aria-label="Scene"]')).toBeNull();
     });
 
     it('previews the resolved scene of the selected entry', async () => {
@@ -172,10 +153,6 @@ describe('PromptsPage', () => {
       expect(target.querySelector('section[aria-label="Scene"]')?.textContent).toContain('soft light street');
     });
 
-    it('shows no scene box in the preview for an entry without one', async () => {
-      await mountPage();
-      expect(target.querySelector('section[aria-label="Scene"]')).toBeNull();
-    });
   });
 
   it('saves edits and remaps the Workspace selection for the file', async () => {

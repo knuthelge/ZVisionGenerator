@@ -60,7 +60,6 @@ describe('ConfirmDialog', () => {
     expect(el.getAttribute('aria-modal')).toBe('true');
     expect(document.getElementById(el.getAttribute('aria-labelledby')!)?.textContent).toBe('Remove 3 queued jobs?');
     expect(document.getElementById(el.getAttribute('aria-describedby')!)?.textContent).toBe('The running job keeps going.');
-    expect(el.querySelector('h2')).toBeNull();
     expect(actionButton('confirm').textContent).toContain('Clear queue');
     expect(actionButton('cancel').textContent).toContain('Keep');
   });

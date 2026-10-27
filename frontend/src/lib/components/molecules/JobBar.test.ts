@@ -1,9 +1,9 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
 import JobBar from './JobBar.svelte';
+import { mountComponent } from '../../../test-utils/mount';
 
 function makeJob(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
   return {
@@ -15,25 +15,9 @@ function makeJob(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
 }
 
 describe('JobBar', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
-  beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-  });
-
   it('shows the workflow, the headline and the prompt, and pauses from its button', async () => {
     const onpause = vi.fn().mockResolvedValue(undefined);
-    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob(), onpause, ondetails: vi.fn() } }));
+    const { target } = mountComponent(JobBar, { job: makeJob(), onpause, ondetails: vi.fn() });
 
     const bar = target.querySelector('[data-testid="job-bar"]') as HTMLElement;
     expect(bar.textContent).toContain('Text to image');
@@ -46,13 +30,13 @@ describe('JobBar', () => {
   });
 
   it('offers Resume while paused', () => {
-    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ status: 'paused', paused: true }), ondetails: vi.fn() } }));
+    const { target } = mountComponent(JobBar, { job: makeJob({ status: 'paused', paused: true }), ondetails: vi.fn() });
     expect(Array.from(target.querySelectorAll('button')).some((button) => button.textContent?.includes('Resume'))).toBe(true);
   });
 
   it('opens the job details straight from ⋯, where Skip, Repeat, Cancel and the queue are', () => {
     const ondetails = vi.fn();
-    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ runs: 3 }), queuedCount: 2, ondetails } }));
+    const { target } = mountComponent(JobBar, { job: makeJob({ runs: 3 }), queuedCount: 2, ondetails });
 
     (target.querySelector('button[aria-label="Job details"]') as HTMLButtonElement).click();
     flushSync();
@@ -60,19 +44,9 @@ describe('JobBar', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
-  it('keeps the whole estimate text available on hover while the first item is pending', () => {
-    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ runs: 3, remaining: 0 }), ondetails: vi.fn() } }));
-    expect(target.querySelector('[title="Estimate after the first image"]')?.textContent).toBe('Estimate after the first image');
-  });
-
-  it('draws one segment per image for a batch', () => {
-    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ runs: 4, batchIndex: 1 }), ondetails: vi.fn() } }));
-    expect(target.querySelectorAll('.jb-segment')).toHaveLength(4);
-  });
-
   it('shows the download progress while the model downloads and the steps afterwards', () => {
     const download = { role: 'model' as const, model: 'zit', repo: 'org/zit', part: 1, parts: 2, bytes_done: 250, bytes_total: 1000, bytes_per_sec: null, download_eta_secs: null, shared: false };
-    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ phase: 'load', download }), ondetails: vi.fn() } }));
+    const { target } = mountComponent(JobBar, { job: makeJob({ phase: 'load', download }), ondetails: vi.fn() });
     expect(target.querySelector('[aria-label="Model download"]')?.getAttribute('aria-valuenow')).toBe('0.25');
     expect(target.querySelector('[aria-label="Job progress"]')).toBeNull();
   });

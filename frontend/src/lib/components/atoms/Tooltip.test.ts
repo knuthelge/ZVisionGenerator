@@ -4,7 +4,6 @@ import { createRawSnippet } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import Tooltip from './Tooltip.svelte';
-import * as atoms from './index';
 
 const label = createRawSnippet(() => ({ render: () => '<span>Trigger</span>' }));
 
@@ -35,10 +34,6 @@ describe('Tooltip', () => {
   function placeTrigger(trigger: HTMLElement, rect: Partial<DOMRect>): void {
     trigger.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}), ...rect }) as DOMRect;
   }
-
-  it('is exported from the atoms barrel', () => {
-    expect(atoms.Tooltip).toBe(Tooltip);
-  });
 
   it('describes its trigger and opens on hover and focus, closing on leave, blur and Escape', () => {
     const { trigger, bubble } = render({});

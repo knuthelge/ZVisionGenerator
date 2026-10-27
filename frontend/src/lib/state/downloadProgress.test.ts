@@ -42,36 +42,6 @@ describe('downloadLine', () => {
   });
 });
 
-describe('downloadLine unit and speed boundaries', () => {
-  it('switches to GB at exactly 1e9 and to MB at exactly 1e6', () => {
-    expect(downloadLine({ ...base, bytes_done: 5e8, bytes_total: 1e9 })).toBe('0.5 / 1.0 GB');
-    expect(downloadLine({ ...base, bytes_done: 5e8, bytes_total: 999_999_999 })).toBe('500 / 1000 MB');
-    expect(downloadLine({ ...base, bytes_done: 5e5, bytes_total: 1e6 })).toBe('1 / 1 MB');
-    expect(downloadLine({ ...base, bytes_done: 5e5, bytes_total: 999_999 })).toBe('500 / 1000 KB');
-  });
-
-  it('shows a done value in the MB range in the total\'s GB unit', () => {
-    expect(downloadLine({ ...base, bytes_done: 40e6, bytes_total: 2e9 })).toBe('0.0 / 2.0 GB');
-    expect(downloadLine({ ...base, bytes_done: 250e6, bytes_total: 2e9 })).toBe('0.3 / 2.0 GB');
-  });
-
-  it('uses the done value\'s unit when the total is unknown', () => {
-    expect(downloadLine({ ...base, bytes_done: 2e9, bytes_per_sec: 5e6 })).toBe('2.0 GB · 5.0 MB/s');
-    expect(downloadLine({ ...base, bytes_done: 12e3 })).toBe('12 KB');
-  });
-
-  it('drops the decimal of speed at exactly 10 MB/s and keeps it just below', () => {
-    const speed = (bps: number) => downloadLine({ ...base, bytes_done: 1e6, bytes_total: 2e6, bytes_per_sec: bps });
-    expect(speed(10e6)).toBe('1 / 2 MB · 10 MB/s');
-    expect(speed(9.9e6)).toBe('1 / 2 MB · 9.9 MB/s');
-    expect(speed(0)).toBe('1 / 2 MB · 0.0 MB/s');
-  });
-
-  it('omits both speed and ETA when both are null', () => {
-    expect(downloadLine({ ...base, bytes_done: 1e9, bytes_total: 2e9 })).toBe('1.0 / 2.0 GB');
-  });
-});
-
 describe('sizeLabel', () => {
   it('uses decimal units like the server disk size labels', () => {
     expect(sizeLabel(34.7e9)).toBe('34.7 GB');

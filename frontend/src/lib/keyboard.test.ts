@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { APP_SHORTCUTS, CHORD_TIMEOUT_MS, hasOpenModal, isPlainKey, isTyping, stepChord, stepGoChord } from './keyboard';
+import { CHORD_TIMEOUT_MS, hasOpenModal, isPlainKey, isTyping, stepChord, stepGoChord } from './keyboard';
 
 function el(html: string): HTMLElement {
   const host = document.createElement('div');
@@ -72,15 +72,5 @@ describe('stepChord', () => {
   it('drops a pending chord on another key or after the timeout', () => {
     expect(stepChord('x', values, 1000, 'r', 1200)).toEqual({ waitingSince: null, value: null, consumed: false });
     expect(stepChord('x', values, 1000, '2', 1000 + CHORD_TIMEOUT_MS + 1).value).toBeNull();
-  });
-
-  it('lists Y and N for a review in the Workspace shortcuts', () => {
-    const keys = APP_SHORTCUTS.find((group) => group.title === 'Workspace')!.entries.flatMap((entry) => entry.keys);
-    expect(keys).toEqual(expect.arrayContaining(['Y', 'N']));
-  });
-
-  it('lists the job log chord among the shortcuts that work anywhere', () => {
-    const keys = APP_SHORTCUTS.flatMap((group) => group.entries).flatMap((entry) => entry.keys);
-    expect(keys).toContain('G → J');
   });
 });

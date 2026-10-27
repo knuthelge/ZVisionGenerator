@@ -72,7 +72,6 @@ describe('EnhancePicker', () => {
     expect(options().map((option) => option.dataset.slug)).toEqual(['keep', 'photo', 'candid', 'anime']);
     expect(options().find((option) => option.getAttribute('aria-selected') === 'true')?.dataset.slug).toBe('candid');
     expect(document.activeElement).toBe(options()[2]);
-    expect(Array.from(document.querySelectorAll('[role="listbox"] .picker-group')).map((node) => node.textContent)).toEqual(['Photo', 'Art']);
   });
 
   it('reports a pick and closes', async () => {

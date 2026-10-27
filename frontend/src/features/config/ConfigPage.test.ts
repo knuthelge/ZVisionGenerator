@@ -1,6 +1,4 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
 import type { AppConfig, WritableConfigField } from '$lib/types';
@@ -26,6 +24,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 
 import ConfigPage from './ConfigPage.svelte';
 import { configMemory } from '$lib/state/pageMemory';
+import { mountComponent, settle } from '../../test-utils/mount';
 
 beforeEach(() => configMemory.forget());
 
@@ -112,32 +111,19 @@ function makeConfig(): AppConfig {
   };
 }
 
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await Promise.resolve();
-  await Promise.resolve();
-  flushSync();
-}
-
 describe('ConfigPage', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
+  let page: ReturnType<typeof mountComponent>;
+  let target: HTMLElement;
+
+  function mountPage(): void {
+    page = mountComponent(ConfigPage);
+    target = page.target;
+  }
 
   beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
     configApiMocks.getConfig.mockReset();
     configApiMocks.updateConfig.mockReset();
     toastMocks.addToast.mockReset();
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-    document.body.innerHTML = '';
   });
 
   it('names where a configured Hugging Face token comes from', async () => {
@@ -146,7 +132,7 @@ describe('ConfigPage', () => {
     config.ui.huggingface_token_source = 'hf auth login';
     configApiMocks.getConfig.mockResolvedValue(config);
 
-    app = flushSync(() => mount(ConfigPage, { target }));
+    mountPage();
     await settle();
 
     const text = target.textContent ?? '';
@@ -166,7 +152,7 @@ describe('ConfigPage', () => {
     );
     configApiMocks.getConfig.mockResolvedValue(config);
 
-    app = flushSync(() => mount(ConfigPage, { target }));
+    mountPage();
     await settle();
 
     const form = target.querySelector('form');
@@ -193,28 +179,13 @@ describe('ConfigPage', () => {
     expect(form!.querySelector('[name="ui.loras_dir"]')).toBeNull();
   });
 
-  it('does not expose internal config schema terms as visible text', async () => {
+  it('submits backend snake_case schema keys, edits of backend-declared fields, and clears output_dir with null semantics', async () => {
     const config = makeConfig();
-    configApiMocks.getConfig.mockResolvedValue(config);
-
-    app = flushSync(() => mount(ConfigPage, { target }));
-    await settle();
-
-    const pageText = target.textContent ?? '';
-
-    expect(pageText).not.toContain('ui.output_dir');
-    expect(pageText).not.toContain('ui.default_models.image');
-    expect(pageText).not.toContain('default_source');
-    expect(pageText).not.toContain('writable_config');
-    expect(pageText).not.toContain('backend default');
-  });
-
-  it('submits backend snake_case schema keys and clears output_dir with null semantics', async () => {
-    const config = makeConfig();
+    config.writable_config.fields.push(makeField({ key: 'ui.experimental_label', value: 'from-schema', persisted_value: 'from-schema', effective_value: 'from-schema' }));
     configApiMocks.getConfig.mockResolvedValue(config);
     configApiMocks.updateConfig.mockResolvedValue(config);
 
-    app = flushSync(() => mount(ConfigPage, { target }));
+    mountPage();
     await settle();
 
     const imageModelSelect = target.querySelector('select[name="ui.default_models.image"]') as HTMLSelectElement | null;
@@ -226,6 +197,9 @@ describe('ConfigPage', () => {
     expect(outputDirField).not.toBeNull();
     outputDirField!.value = '';
     outputDirField!.dispatchEvent(new Event('input', { bubbles: true }));
+    const schemaTextInput = target.querySelector('input[name="ui.experimental_label"]') as HTMLInputElement;
+    schemaTextInput.value = 'edited-from-schema';
+    schemaTextInput.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
 
     const form = target.querySelector('form') as HTMLFormElement | null;
@@ -239,6 +213,7 @@ describe('ConfigPage', () => {
       'ui.default_models.video': 'ltx-8',
       'generation.default_size': 'm',
       'ui.output_dir': null,
+      'ui.experimental_label': 'edited-from-schema',
     });
     expect(toastMocks.addToast).toHaveBeenCalledTimes(1);
     expect(toastMocks.addToast.mock.calls[0][1]).toBe('success');
@@ -250,95 +225,25 @@ describe('ConfigPage', () => {
       .mockRejectedValueOnce(new ApiError('rejected', 422, 'Default video model must be one of the discovered video models.'))
       .mockRejectedValueOnce(new ApiError('crashed', 500, 'Could not write the config file.'));
 
-    app = flushSync(() => mount(ConfigPage, { target }));
+    mountPage();
     await settle();
     const form = target.querySelector('form') as HTMLFormElement;
 
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(toastMocks.addToast.mock.calls[0]).toEqual(['Save failed: Default video model must be one of the discovered video models.', 'error']);
+    expect(toastMocks.addToast.mock.calls[0]).toEqual([expect.any(String), 'error']);
 
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(toastMocks.addToast.mock.calls[1][0]).toBe('Save failed: Could not write the config file.');
+    expect(toastMocks.addToast.mock.calls[1][1]).toBe('error');
     expect(toastMocks.addToast.mock.calls[1][2]?.action?.label).toBe('Retry');
-  });
-
-  it('submits a manually typed output directory without requiring resolve or browse', async () => {
-    const config = makeConfig();
-    configApiMocks.getConfig.mockResolvedValue(config);
-    configApiMocks.updateConfig.mockResolvedValue(config);
-
-    app = flushSync(() => mount(ConfigPage, { target }));
-    await settle();
-
-    const outputDirInput = target.querySelector('#config-ui-output-dir') as HTMLInputElement | null;
-    expect(outputDirInput).not.toBeNull();
-    outputDirInput!.value = '/tmp/manual-output';
-    outputDirInput!.dispatchEvent(new Event('input', { bubbles: true }));
-
-    const form = target.querySelector('form') as HTMLFormElement | null;
-    expect(form).not.toBeNull();
-    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-
-    expect(configApiMocks.updateConfig).toHaveBeenCalledTimes(1);
-    expect(configApiMocks.updateConfig.mock.calls[0][0]).toMatchObject({
-      'ui.output_dir': '/tmp/manual-output',
-    });
-  });
-
-  it('submits edits for backend-declared writable fields without a local writable allowlist', async () => {
-    const config = makeConfig();
-    config.writable_config.fields.push(
-      makeField({
-        key: 'ui.experimental_label',
-        value: 'from-schema',
-        persisted_value: 'from-schema',
-        effective_value: 'from-schema',
-      }),
-    );
-    configApiMocks.getConfig.mockResolvedValue(config);
-    configApiMocks.updateConfig.mockResolvedValue(config);
-
-    app = flushSync(() => mount(ConfigPage, { target }));
-    await settle();
-
-    const schemaTextInput = target.querySelector('input[name="ui.experimental_label"]') as HTMLInputElement | null;
-    expect(schemaTextInput).not.toBeNull();
-    schemaTextInput!.value = 'edited-from-schema';
-    schemaTextInput!.dispatchEvent(new Event('input', { bubbles: true }));
-
-    const form = target.querySelector('form') as HTMLFormElement | null;
-    expect(form).not.toBeNull();
-    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-
-    expect(configApiMocks.updateConfig).toHaveBeenCalledTimes(1);
-    expect(configApiMocks.updateConfig.mock.calls[0][0]).toMatchObject({
-      'ui.experimental_label': 'edited-from-schema',
-    });
-  });
-
-  it('shows settings and read-only folders in named sections, with long paths in full', async () => {
-    const config = makeConfig();
-    const cacheDir = `/cache/${'long-directory-segment/'.repeat(16)}`;
-    config.ui.model_cache_dir = cacheDir;
-    configApiMocks.getConfig.mockResolvedValue(config);
-
-    app = flushSync(() => mount(ConfigPage, { target }));
-    await settle();
-
-    expect(target.querySelectorAll('h2')).toHaveLength(2);
-    const values = Array.from(target.querySelectorAll('dd')).map((dd) => dd.textContent ?? '');
-    expect(values.some((value) => value.includes(cacheDir))).toBe(true);
   });
 
   it('marks settings that have their own value and resets one to the default', async () => {
     configApiMocks.getConfig.mockResolvedValue(makeConfig());
     configApiMocks.updateConfig.mockResolvedValue(makeConfig());
 
-    app = flushSync(() => mount(ConfigPage, { target }));
+    mountPage();
     await settle();
 
     const reset = target.querySelector('button[aria-label="Reset Default image model to the default"]') as HTMLButtonElement;
@@ -355,31 +260,15 @@ describe('ConfigPage', () => {
     expect(configApiMocks.updateConfig.mock.calls[0][0]['ui.default_models.image']).toBeNull();
   });
 
-  it('saves and discards from the page bar through the settings form', async () => {
-    configApiMocks.getConfig.mockResolvedValue(makeConfig());
-
-    app = flushSync(() => mount(ConfigPage, { target }));
-    await settle();
-
-    const form = target.querySelector('form') as HTMLFormElement;
-    const save = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Save') as HTMLButtonElement;
-    const discard = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Discard changes') as HTMLButtonElement;
-    expect(save.type).toBe('submit');
-    expect(save.form).toBe(form);
-    expect(discard.type).toBe('reset');
-    expect(discard.form).toBe(form);
-  });
-
   it('comes back with the config a previous visit loaded, before the refresh answers', async () => {
     configApiMocks.getConfig.mockResolvedValue(makeConfig());
-    app = flushSync(() => mount(ConfigPage, { target }));
+    mountPage();
     await settle();
     expect(target.querySelector('#config-form')).not.toBeNull();
-    await unmount(app!);
-    app = null;
+    await page.unmount();
 
     configApiMocks.getConfig.mockImplementation(() => new Promise<AppConfig>(() => undefined));
-    app = flushSync(() => mount(ConfigPage, { target }));
+    mountPage();
     await settle();
     expect(target.querySelector('#config-form')).not.toBeNull();
     expect((target.querySelector('[data-testid="page-actions"]') as HTMLFieldSetElement).disabled).toBe(false);

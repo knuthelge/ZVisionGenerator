@@ -1,5 +1,4 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const browseApiMocks = vi.hoisted(() => ({
@@ -11,15 +10,12 @@ const browseApiMocks = vi.hoisted(() => ({
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
 import { rememberRecentPath } from '$lib/state/pathBrowser';
+import { mountComponent, settle as settleWith } from '../../../test-utils/mount';
 import { placesFor } from '../../../test-utils/pathBrowser';
 import PathInput from './PathInput.svelte';
 
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  flushSync();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync();
-}
+/** Run the 200 ms completion debounce on the fake clock, then let the listing answer. */
+const settle = (): Promise<void> => settleWith(200, 2);
 
 const MODELS = {
   path: '/models', parent: '/', separator: '/', focus: null, hidden_count: 0,
@@ -31,33 +27,24 @@ const MODELS = {
 };
 
 describe('PathInput', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
+  let target: HTMLElement;
   let oninput: ReturnType<typeof vi.fn>;
   let onpick: ReturnType<typeof vi.fn>;
   let onkeydown: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     localStorage.clear();
     for (const mock of Object.values(browseApiMocks)) mock.mockReset();
     browseApiMocks.listDirectory.mockResolvedValue(MODELS);
     browseApiMocks.browsePlaces.mockResolvedValue({ ...placesFor('lora_file'), places: [{ id: 'home', label: 'Home', path: '/home/user', default: false }] });
-    target = document.createElement('div');
-    document.body.appendChild(target);
     oninput = vi.fn();
     onpick = vi.fn();
     onkeydown = vi.fn();
-    app = flushSync(() => mount(PathInput, { target, props: { id: 'p', value: '', purpose: 'lora_file', oninput, onpick, onkeydown } }));
+    target = mountComponent(PathInput, { id: 'p', value: '', purpose: 'lora_file', oninput, onpick, onkeydown }).target;
   });
 
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-    document.body.innerHTML = '';
-  });
+  afterEach(() => vi.useRealTimers());
 
   const input = () => target.querySelector<HTMLInputElement>('#p')!;
   const options = () => Array.from(document.querySelectorAll<HTMLElement>('#p-completions [role="option"]'));

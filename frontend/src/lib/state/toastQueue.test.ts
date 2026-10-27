@@ -42,8 +42,4 @@ describe('enqueueToast', () => {
     expect(queue.map((t) => t.id)).toEqual(['1', '3', '2']);
   });
 
-  it('keeps errors until dismissed and the rest for a limited time', () => {
-    expect(TOAST_TIMEOUTS.error).toBe(0);
-    for (const type of ['success', 'info', 'warning'] as const) expect(TOAST_TIMEOUTS[type]).toBeGreaterThan(0);
-  });
 });

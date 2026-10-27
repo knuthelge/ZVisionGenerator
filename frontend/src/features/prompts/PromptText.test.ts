@@ -1,45 +1,24 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PromptText from './PromptText.svelte';
+import { buttonByText as button, mountComponent, settle } from '../../test-utils/mount';
 
 const TEXT = 'a {red|blue} car';
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync();
-}
-
-function button(label: string): HTMLButtonElement {
-  const found = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.trim().startsWith(label));
-  if (!found) throw new Error(`No button "${label}"`);
-  return found;
-}
-
 describe('PromptText choices while typing', () => {
   let target: HTMLElement;
-  let app: ReturnType<typeof mount> | null = null;
   let onreplace: ReturnType<typeof vi.fn>;
   let onendedit: ReturnType<typeof vi.fn>;
   let textarea: HTMLTextAreaElement;
 
   beforeEach(async () => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
     onreplace = vi.fn();
     onendedit = vi.fn();
-    app = mount(PromptText, {
-      target,
-      props: { text: TEXT, editing: true, label: 'Prompt', snippets: [], onstartedit: vi.fn(), onendedit, ontype: vi.fn(), onreplace },
-    });
+    target = mountComponent(PromptText, { text: TEXT, editing: true, label: 'Prompt', snippets: [], onstartedit: vi.fn(), onendedit, ontype: vi.fn(), onreplace }).target;
     await settle();
     textarea = target.querySelector('textarea')!;
   });
 
-  afterEach(async () => {
-    if (app) await unmount(app);
-    app = null;
-    target.remove();
+  afterEach(() => {
     document.querySelectorAll('.choice-editor').forEach((node) => node.remove());
   });
 

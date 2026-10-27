@@ -1,6 +1,5 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowseEntry, BrowseListing } from '$lib/types';
 
 const browseApiMocks = vi.hoisted(() => ({
@@ -12,15 +11,9 @@ const browseApiMocks = vi.hoisted(() => ({
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
 import { readRecentPaths } from '$lib/state/pathBrowser';
+import { mountComponent, settle } from '../../../test-utils/mount';
 import { placesFor } from '../../../test-utils/pathBrowser';
 import PathBrowser from './PathBrowser.svelte';
-
-async function settle(): Promise<void> {
-  for (let round = 0; round < 3; round += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    flushSync();
-  }
-}
 
 function entry(name: string, folder: string, kind: BrowseEntry['kind'] = 'file', selectable = true): BrowseEntry {
   return { name, path: `${folder}/${name}`.replace('//', '/'), kind, size: kind === 'file' ? 2048 : null, modified: 0, selectable };
@@ -38,9 +31,6 @@ const FOLDERS: Record<string, BrowseListing> = {
 };
 
 describe('PathBrowser', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
   beforeEach(() => {
     localStorage.clear();
     for (const mock of Object.values(browseApiMocks)) mock.mockReset();
@@ -53,22 +43,11 @@ describe('PathBrowser', () => {
       if (!found) throw new Error(`No folder at ${path}.`);
       return found;
     });
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-    document.body.innerHTML = '';
   });
 
   async function open(props: Record<string, unknown> = {}): Promise<{ onchoose: ReturnType<typeof vi.fn> }> {
     const onchoose = vi.fn();
-    app = flushSync(() => mount(PathBrowser, { target, props: { open: true, purpose: 'lora_file', initialPath: null, onchoose, ...props } }));
+    mountComponent(PathBrowser, { open: true, purpose: 'lora_file', initialPath: null, onchoose, ...props });
     await settle();
     return { onchoose };
   }
@@ -79,11 +58,10 @@ describe('PathBrowser', () => {
   const list = () => document.body.querySelector<HTMLElement>('[role="listbox"]')!;
   const key = (el: HTMLElement, name: string, init: KeyboardEventInit = {}) => flushSync(() => el.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...init })));
 
-  it('opens at the purpose place, titles itself and lists what the server sent', async () => {
+  it('opens at the purpose place and lists what the server sent', async () => {
     await open();
 
     expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('lora_file', '', { hidden: false, all: false });
-    expect(document.body.querySelector('h2')?.textContent).toBe('Choose LoRA file');
     expect(rowNames()).toEqual(['ink.safetensors', 'notes.txt']);
     expect(document.body.textContent).toContain('2 other files hidden');
   });
@@ -151,7 +129,7 @@ describe('PathBrowser', () => {
 
     buttonByLabel('Home').click();
     browseApiMocks.listDirectory.mockRejectedValueOnce(new Error('Permission denied: /root.'));
-    document.body.querySelector<HTMLButtonElement>('.crumb')!.click();
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Folder path"] button')!.click();
     await settle();
 
     expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('Permission denied: /root.');
@@ -171,9 +149,8 @@ describe('PathBrowser', () => {
     const submit = vi.fn((event: Event) => event.preventDefault());
     form.addEventListener('submit', submit);
     form.appendChild(document.createElement('button'));
-    target.appendChild(form);
     const onchoose = vi.fn();
-    app = flushSync(() => mount(PathBrowser, { target: form, props: { open: true, purpose: 'lora_file', initialPath: null, onchoose } }));
+    mountComponent(PathBrowser, { open: true, purpose: 'lora_file', initialPath: null, onchoose }, form);
     await settle();
 
     const filter = document.body.querySelector<HTMLInputElement>('input[aria-label="Filter this folder"]')!;

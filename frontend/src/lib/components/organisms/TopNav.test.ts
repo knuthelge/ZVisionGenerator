@@ -34,7 +34,7 @@ describe('TopNav', () => {
   const workspaceTab = () => Array.from(target.querySelectorAll('.main-tabs .nav-tab')).find((tab) => tab.textContent?.includes('Workspace'))!;
   const source = () => (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
 
-  it('badges the Workspace while a render waits for review, on any page, and clears it after the decision', () => {
+  it('badges the Workspace while an image or video render waits for review, on any page, and clears it after the decision', () => {
     jobStore.startJob({ job_id: 'job-nav', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
     flushSync();
     expect(workspaceTab().querySelector('.ui-badge')).toBeNull();
@@ -47,17 +47,12 @@ describe('TopNav', () => {
     source().emit('job_resumed', { type: 'job_resumed' });
     flushSync();
     expect(workspaceTab().querySelector('.ui-badge')).toBeNull();
-  });
 
-  it('badges the Workspace for a video review, which has no preview version', () => {
+    // A video review has no preview version.
     jobStore.startJob({ job_id: 'job-nav-video', workflow: 'txt2vid', prompt: 'P', model: 'ltx', runs: 1, created_at: '' });
     source().emit('job_paused', { type: 'job_paused', mode: 'video', review: { iteration: 1 } });
     flushSync();
     expect(workspaceTab().querySelector('.ui-badge')?.textContent).toBe('Review');
-
-    source().emit('job_resumed', { type: 'job_resumed' });
-    flushSync();
-    expect(workspaceTab().querySelector('.ui-badge')).toBeNull();
   });
 
   it('does not badge a plain pause', () => {

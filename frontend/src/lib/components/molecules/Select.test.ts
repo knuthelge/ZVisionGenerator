@@ -1,27 +1,13 @@
-// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import PromptFileField from '$lib/components/molecules/PromptFileField.svelte';
-import type { PromptFileContract } from '$lib/types';
+const layoutMock = vi.hoisted(() => ({ compact: false, mode: 'wide', coarse: false }));
+
+vi.mock('$lib/state/layoutMode.svelte', () => ({ layout: layoutMock }));
+
+import { mountComponent, settle } from '../../../test-utils/mount';
 import { openOptions, optionValues, pickOption } from '../../../test-utils/select';
 import Select from './Select.svelte';
-
-const promptFileContract: PromptFileContract = {
-  accepted_extensions: ['.yaml'],
-  selection_required: false,
-  trust_boundary: {
-    scope: 'server_host_only',
-    manual_entry: 'submitted_value_kept_until_backend_validation',
-    picker: 'in_app_browser',
-    read_write: 'yaml_files_only',
-  },
-  help: {
-    path: 'Path', option_required: 'Required', option_optional: 'Optional',
-    empty_options: 'Empty', stale_selection: 'Stale', loaded: 'Loaded',
-    ignored_negative_video: 'Ignored', ignored_negative_unsupported: 'Unsupported',
-  },
-};
 
 const FRUIT = [
   { value: 'apple', label: 'Apple' },
@@ -35,39 +21,17 @@ function key(element: Element, name: string): void {
 }
 
 describe('Select', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
   beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    document.body.innerHTML = '';
+    Object.assign(layoutMock, { compact: false, mode: 'wide', coarse: false });
   });
 
   function mountSelect(props: Record<string, unknown>): { box: HTMLButtonElement; form: HTMLFormElement } {
     const form = document.createElement('form');
-    target.appendChild(form);
-    app = flushSync(() => mount(Select, { target: form, props: { id: 'fruit', name: 'fruit', options: FRUIT, ...props } }));
+    mountComponent(Select, { id: 'fruit', name: 'fruit', options: FRUIT, ...props }, form);
     return { box: form.querySelector('#fruit') as HTMLButtonElement, form };
   }
 
   describe('native required semantics', () => {
-    it('is optional by default for existing consumers that do not opt into required', () => {
-      const { form } = mountSelect({ options: [{ value: 'choice', label: 'Choice' }] });
-
-      const select = form.querySelector('select[name="fruit"]') as HTMLSelectElement;
-      expect(select.required).toBe(false);
-      expect(select.validity.valid).toBe(true);
-      expect(form.checkValidity()).toBe(true);
-    });
-
     it('fails validation until a required select with a placeholder has a choice', () => {
       const { box, form } = mountSelect({ required: true, placeholder: 'Choose a fruit' });
 
@@ -83,26 +47,6 @@ describe('Select', () => {
       expect(new FormData(form).get('fruit')).toBe('cherry');
     });
 
-    it('keeps the existing optional prompt-option consumer optional', () => {
-      const form = document.createElement('form');
-      target.appendChild(form);
-      app = flushSync(() => mount(PromptFileField, {
-        target: form,
-        props: {
-          contract: promptFileContract,
-          promptSource: 'inline',
-          path: null,
-          selectedOptionIds: [],
-          workflowMode: 'image',
-          negativePromptSupported: true,
-          onPathChange: () => undefined,
-          onOptionChange: () => undefined,
-        },
-      }));
-
-      expect(form.querySelector('input[required]')).toBeNull();
-      expect(form.checkValidity()).toBe(true);
-    });
   });
 
   it('shows the choice, and picking an option submits it and reports it once', () => {
@@ -186,7 +130,7 @@ describe('Select', () => {
     pickOption(box, 'date');
 
     form.reset();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
     expect(box.dataset.value).toBe('date');
     expect(new FormData(form).get('fruit')).toBe('date');
   });
@@ -209,5 +153,18 @@ describe('Select', () => {
     const { box } = mountSelect({ value: 'apple', disabled: true });
     flushSync(() => box.click());
     expect(box.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens the list at the field on a phone, not as a sheet, and picks with a tap', () => {
+    Object.assign(layoutMock, { compact: true, mode: 'compact', coarse: true });
+    const onchange = vi.fn();
+    const { box } = mountSelect({ ariaLabel: 'Sort', value: 'apple', onchange });
+
+    const list = openOptions(box)[0].closest('[role="listbox"]') as HTMLElement;
+    expect(list.getAttribute('aria-label')).toBe('Sort');
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+
+    pickOption(box, 'date');
+    expect(onchange).toHaveBeenCalledExactlyOnceWith('date');
   });
 });

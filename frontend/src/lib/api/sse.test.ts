@@ -85,29 +85,18 @@ describe('connectJobSSE', () => {
     subscription.close();
   });
 
-  it('closes connection on job_completed', () => {
+  it.each([
+    ['job_completed', 'onJobCompleted', { total_runs: 1, outputs: [] }],
+    ['job_cancelled', 'onJobCancelled', {}],
+  ] as const)('closes connection on %s', (type, handlerName, extra) => {
     const onClose = vi.fn();
-    const onJobCompleted = vi.fn();
-    const subscription = connectJobSSE('test-job', { onJobCompleted, onClose });
+    const handler = vi.fn();
+    const subscription = connectJobSSE('test-job', { [handlerName]: handler, onClose });
     // Before terminal event, onClose not called
     expect(onClose).not.toHaveBeenCalled();
     const mockES = latestEventSource();
-    mockES.emit('job_completed', { type: 'job_completed', job_id: 'test-job', total_runs: 1, outputs: [] });
-    expect(onJobCompleted).toHaveBeenCalledOnce();
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(mockES.closeCalls).toBe(1);
-    subscription.close();
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(mockES.closeCalls).toBe(1);
-  });
-
-  it('closes connection on job_cancelled', () => {
-    const onClose = vi.fn();
-    const onJobCancelled = vi.fn();
-    const subscription = connectJobSSE('test-job', { onJobCancelled, onClose });
-    const mockES = latestEventSource();
-    mockES.emit('job_cancelled', { type: 'job_cancelled', job_id: 'test-job' });
-    expect(onJobCancelled).toHaveBeenCalledOnce();
+    mockES.emit(type, { type, job_id: 'test-job', ...extra });
+    expect(handler).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
     expect(mockES.closeCalls).toBe(1);
     subscription.close();
@@ -117,13 +106,15 @@ describe('connectJobSSE', () => {
 
   it('leaves the EventSource open and does not report a close on a transient error', () => {
     const onClose = vi.fn();
-    const subscription = connectJobSSE('test-job', { onClose });
+    const onStreamLost = vi.fn();
+    const subscription = connectJobSSE('test-job', { onClose, onStreamLost });
     const mockES = latestEventSource();
 
     mockES.emitError();
 
     expect(mockES.closeCalls).toBe(0);
     expect(onClose).not.toHaveBeenCalled();
+    expect(onStreamLost).not.toHaveBeenCalled();
     subscription.close();
     expect(mockES.closeCalls).toBe(1);
     expect(onClose).toHaveBeenCalledOnce();
@@ -141,14 +132,6 @@ describe('connectJobSSE', () => {
     expect(onStreamLost).toHaveBeenCalledOnce();
     subscription.close();
     expect(onClose).toHaveBeenCalledOnce();
-  });
-
-  it('does not report a lost stream on a transient error', () => {
-    const onStreamLost = vi.fn();
-    const subscription = connectJobSSE('test-job', { onStreamLost });
-    latestEventSource().emitError();
-    expect(onStreamLost).not.toHaveBeenCalled();
-    subscription.close();
   });
 
   it('closes exactly once when a terminal handler throws', () => {
