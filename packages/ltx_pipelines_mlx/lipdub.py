@@ -40,6 +40,7 @@ from .iclora_utils import append_ic_lora_reference_video_conditionings
 from .scheduler import DISTILLED_SIGMAS, STAGE_2_SIGMAS, shorten_schedule
 from .utils.helpers import create_noised_state
 from .utils.samplers import denoise_loop
+from .utils.types import ImageConditioningInput
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,7 @@ class LipDubPipeline(ICLoraPipeline):
         height: int = 480,
         width: int = 704,
         reference_strength: float = 1.0,
-        images: list[tuple[str, int, float]] | None = None,
+        images: list[ImageConditioningInput | tuple[str, int, float]] | None = None,
         seed: int = 42,
         stage1_steps: int | None = None,
         stage2_steps: int | None = None,
@@ -223,7 +224,7 @@ class LipDubPipeline(ICLoraPipeline):
         stage_1_conditionings: list = []
         if images:
             normalized = [
-                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput(*img) for img in images
+                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput.at(*img) for img in images
             ]
             normalized = resolve_frame_indices(normalized, num_frames)
             # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
@@ -312,7 +313,7 @@ class LipDubPipeline(ICLoraPipeline):
         stage_2_conditionings: list = []
         if images:
             normalized = [
-                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput(*img) for img in images
+                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput.at(*img) for img in images
             ]
             normalized = resolve_frame_indices(normalized, num_frames)
             # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
@@ -422,7 +423,7 @@ class LipDubPipeline(ICLoraPipeline):
         height: int = 480,
         width: int = 704,
         reference_strength: float = 1.0,
-        images: list[tuple[str, int, float]] | None = None,
+        images: list[ImageConditioningInput | tuple[str, int, float]] | None = None,
         seed: int = 42,
         stage1_steps: int | None = None,
         stage2_steps: int | None = None,

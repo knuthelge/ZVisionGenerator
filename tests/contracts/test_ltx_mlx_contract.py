@@ -177,11 +177,13 @@ class TestReviewContract:
 
 
 class TestBlockContract:
-    def test_image_conditioning_input_fields(self):
-        assert {"path", "frame_idx", "strength"} <= set(ImageConditioningInput._fields)
+    def test_image_conditioning_input_is_built_with_at_and_exposes_its_frame_and_path(self):
+        _assert_params(ImageConditioningInput.at, "path", "frame_idx", "strength")
+        image = ImageConditioningInput.at("a.png", 0, 1.0)
+        assert (image.path, image.frame_idx, image.strength) == ("a.png", 0, 1.0)
 
     def test_a_last_frame_index_of_minus_one_resolves_to_the_last_pixel_frame(self):
-        resolved = resolve_frame_indices([ImageConditioningInput(path="a", frame_idx=0, strength=1.0), ImageConditioningInput(path="b", frame_idx=-1, strength=1.0)], 49)
+        resolved = resolve_frame_indices([ImageConditioningInput.at("a", 0, 1.0), ImageConditioningInput.at("b", -1, 1.0)], 49)
         assert [image.frame_idx for image in resolved] == [0, 48]
 
     def test_a_keyframe_conditioning_holds_its_latent_as_keyframe_latent(self):

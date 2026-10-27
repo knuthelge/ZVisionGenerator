@@ -53,8 +53,8 @@ check: lint format-check test frontend-test frontend-palette-check frontend-hove
 # ——— Vendored Dependencies ————————————————————————————————
 
 LTX_REPO   ?= https://github.com/dgrauet/ltx-2-mlx.git
-# v0.16.3 (2026-10-09)
-LTX_COMMIT ?= ae3b7ea9583db775bd4a1dfb506fb789585021e7
+# v0.18.0 + 4 commits (2026-10-26)
+LTX_COMMIT ?= 895201df379b079c2154738bcf92005b7a371923
 
 .PHONY: update-ltx
 

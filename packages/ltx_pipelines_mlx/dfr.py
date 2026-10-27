@@ -19,13 +19,15 @@ keyframes (plus an opening frame when no image anchors frame 0) are decoded one 
 the render's decoder, Lanczos-upsampled x2 and re-encoded as strength-1.0 keyframes; the H/2 latent
 is spatially upsampled and re-denoised window by window (one window per last-round temporal tile,
 each pinned to the previous one) with the detailing LoRA, the H/2 latent as the IC-LoRA reference
-and frozen stage-1 audio: one ancestral step on a 2x2 spatial grid, the remaining steps on 4x4. The
-re-encoded planes become the decoder keyframes.
+and frozen stage-1 audio: one ancestral step, then the remaining steps, on one spatial tile grid of
+tiles at most 32 latent cells per side (upstream v1.5.0). The re-encoded planes become the decoder
+keyframes.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import sys
 from collections.abc import Sequence
 from dataclasses import replace
@@ -61,7 +63,7 @@ from ltx_core_mlx.model.video_vae.tiling import DimensionTilingConfig, TileCount
 from ltx_core_mlx.utils.memory import aggressive_cleanup
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions
 from ltx_core_mlx.utils.weights import apply_quantization
-from ltx_pipelines_mlx._base import resolve_distilled_nag, unfused_loras_requested
+from ltx_pipelines_mlx._base import resolve_distilled_nag, streamed_lora_fuse, unfused_loras_requested
 from ltx_pipelines_mlx.dfr_layout import (
     TemporalTilePlan,
     TilePrefix,
@@ -104,13 +106,12 @@ TEMPORAL_SIGMAS: list[float] = list(LTX_2_5_DISTILLED_SIGMAS[4:])
 _MAX_CONDITIONING_FPS = 60.0
 _SNAP_CONDITIONING_FPS_ABOVE = 30.0
 
-#: Upstream ``EPILOGUE_SPATIAL_OVERLAP``: spatial tiles inside an epilogue window overlap by this
-#: many token-grid cells (clamped per-axis by :func:`clamp_tile_counts` on a small latent).
-EPILOGUE_SPATIAL_OVERLAP = 10
-#: Upstream ``EPILOGUE_SPATIAL_COARSE_TILES`` / ``EPILOGUE_SPATIAL_TILES``: the first detailing step
-#: of each window runs on a 2x2 grid, the remaining steps retile to 4x4.
-EPILOGUE_SPATIAL_COARSE_TILES = 2
-EPILOGUE_SPATIAL_TILES = 4
+#: Upstream ``EPILOGUE_SPATIAL_OVERLAP`` (v1.5.0): spatial tiles inside an epilogue window overlap by
+#: this many token-grid cells (64 px; clamped per-axis by :func:`clamp_tile_counts` on a small latent).
+EPILOGUE_SPATIAL_OVERLAP = 2
+#: Upstream ``EPILOGUE_TILE_CELLS``: every epilogue step uses one grid of tiles at most this many
+#: latent cells per side (:func:`epilogue_tile_count`).
+EPILOGUE_TILE_CELLS = 32
 #: Upstream ``_EPILOGUE_ANCESTRAL_NOISE_SEED_OFFSET``: the epilogue's ancestral loop seeds from
 #: ``seed + 30000 + call``, ``call`` counting every pass (window i: coarse 2i, fine 2i + 1).
 EPILOGUE_ANCESTRAL_NOISE_SEED_OFFSET = 30000
@@ -203,6 +204,15 @@ def clamp_tile_counts(tiling: TileCountConfig, latent_fhw: tuple[int, int, int])
         height=_clamp_dim_tiling(tiling.height, height, "Height"),
         width=_clamp_dim_tiling(tiling.width, width, "Width"),
     )
+
+
+def epilogue_tile_count(cells: int) -> int:
+    """Tiles along a latent axis of ``cells`` cells: the fewest whose overlapping tiles fit ``EPILOGUE_TILE_CELLS``.
+
+    Upstream ``epilogue_tile_count`` (v1.5.0), e.g. 1 tile up to 32 cells (1024 px), 2 up to 62.
+    """
+    stride = EPILOGUE_TILE_CELLS - EPILOGUE_SPATIAL_OVERLAP
+    return max(1, math.ceil((cells - EPILOGUE_SPATIAL_OVERLAP) / stride))
 
 
 def floor_to_multiple(value: int, multiple: int) -> int:
@@ -361,18 +371,51 @@ def plan_epilogue_windows(
 def rebase_image_conditionings(
     images: Sequence[ImageConditioningInput], *, pixel_scale: int, pixel_start: int = 0, pixel_end: int | None = None
 ) -> list[ImageConditioningInput]:
-    """Map ``ImageConditioningInput.frame_idx`` onto a temporally upsampled grid (upstream ``_rebase_image_conditionings``).
+    """Map ``ImageConditioningInput.frame_idx`` onto a temporally upsampled grid (upstream ``rebase_image_conditionings``).
 
     After ``r`` rounds a moment sits at ``frame_idx * 2**r``; with ``pixel_end`` only images inside
-    ``[pixel_start, pixel_end]`` are kept and their index becomes tile-local.
+    ``[pixel_start, pixel_end]`` are kept and their index becomes tile-local. The binding is kept
+    (upstream v1.5.0 ``map_frame_index``): a guide that lands on tile-local frame 0 stays a guide.
     """
     rebased = []
     for image in images:
         scaled = image.frame_idx * pixel_scale
         if pixel_end is not None and not (pixel_start <= scaled <= pixel_end):
             continue
-        rebased.append(image._replace(frame_idx=scaled - pixel_start))
+        rebased.append(image.with_frame_idx(scaled - pixel_start))
     return rebased
+
+
+def _refuse_replace_under_temporal_rounds(
+    images: Sequence[ImageConditioningInput] | None, num_frames: int | None = None
+) -> None:
+    """Refuse a ``replace`` binding off frame 0 before a temporal round would rebase it off the latent grid.
+
+    A round doubles the timeline, so pixel frame ``1 + 8 * k`` becomes ``2 + 16 * k``, which starts
+    no latent: upstream's ``map_frame_index`` raises there, after stage 1 and stage 2 have run. This
+    local guard raises before any model work instead.
+
+    Args:
+        images: Image conditioning inputs, ``frame_idx`` possibly negative (counted from the end).
+        num_frames: Requested pixel-frame count, or ``None`` while it is still to be predicted: a
+            negative index is then skipped here and checked again once the length is known.
+
+    Raises:
+        ValueError: on a ``replace`` binding that does not land on frame 0.
+    """
+    for image in images or ():
+        if not image.replaces:
+            continue
+        frame_idx = image.frame_idx
+        if frame_idx < 0:
+            if num_frames is None:
+                continue
+            frame_idx += num_frames
+        if frame_idx != 0:
+            raise ValueError(
+                f"--image {image.path}: a replace binding off frame 0 is not supported with DFR temporal rounds "
+                "(the doubled timeline moves it off the latent grid); use guide"
+            )
 
 
 class DFRPipeline(DistilledPipeline):
@@ -492,6 +535,7 @@ class DFRPipeline(DistilledPipeline):
                     block_prefix=LTXV_LORA_BLOCK_PREFIX,
                     strength=DETAILING_LORA_STRENGTH,
                     sd_ops=LTXV_LORA_COMFY_RENAMING_MAP,
+                    fuse=streamed_lora_fuse(self.lora_mode),
                 )
                 sources.append(source)
                 object.__setattr__(self.dit, "_lora_sources", sources)
@@ -540,10 +584,7 @@ class DFRPipeline(DistilledPipeline):
             return
         self.dit = None
         aggressive_cleanup()
-        transformer_path = self.model_dir / "transformer.safetensors"
-        if not transformer_path.exists():
-            transformer_path = self._resolve_safetensors(self.model_dir, "transformer-distilled")
-        self.dit = self._load_transformer_with_optional_streaming(transformer_path)
+        self.dit = self._load_transformer_with_optional_streaming(self._resolve_distilled_transformer(self.model_dir))
 
     # ---- temporal upsampler -----------------------------------------------------------
     def _resolve_temporal_upsampler_path(self) -> Path:
@@ -633,7 +674,8 @@ class DFRPipeline(DistilledPipeline):
                 :meth:`DistilledPipeline.generate_two_stage`: stage 1, stage 2, the temporal
                 rounds and the spatial epilogue all run with the negative prompt.
             **_unused_kwargs: Accepted (and ignored) for signature compatibility with
-                :meth:`DistilledPipeline.generate_two_stage`.
+                :meth:`DistilledPipeline.generate_two_stage`, except the stage-1 capture and
+                resume arguments (``return_stage1``, ``stage1``), which are refused.
 
         Returns:
             Tuple of (video_latent, audio_latent), trimmed back to the requested duration.
@@ -641,7 +683,8 @@ class DFRPipeline(DistilledPipeline):
         Raises:
             ValueError: on a pack without the keyframe embedding, when ``generated_keyframes``
                 is passed (DFR places its own slots from the canvas), when TeaCache is requested
-                when ``negative_prompt`` is set without ``nag`` (no CFG) or ``nag`` without it.
+                when ``negative_prompt`` is set without ``nag`` (no CFG) or ``nag`` without it,
+                or when ``return_stage1`` / ``stage1`` is passed (no stage-1 resume on DFR).
             FileNotFoundError: when the detailing LoRA cannot be resolved (raised up front,
                 before any prompt encoding).
             RuntimeError: when ``_stage1`` did not run the canvas hook, leaving the requested
@@ -652,6 +695,8 @@ class DFRPipeline(DistilledPipeline):
             raise ValueError("DFR places its keyframe slots from the canvas; --num-generated-keyframes does not apply")
         if enable_teacache:
             raise ValueError("TeaCache is not available on the DFR path (distilled flow)")
+        if _unused_kwargs.get("return_stage1") or _unused_kwargs.get("stage1") is not None:
+            raise ValueError("Stage-1 capture and resume (return_stage1 / stage1) are not supported on the DFR path")
         self._require_generated_keyframes_support([1])  # DFR always uses slots: refuse 2.3 packs up front
         self._require_num_frames_source(num_frames)
         if self.temporal_upscalings:
@@ -659,6 +704,7 @@ class DFRPipeline(DistilledPipeline):
                 raise ValueError("Prompt Relay (--segment) is not supported with DFR temporal rounds")
             if self._tile_count is not None:
                 raise ValueError("DFR temporal rounds do not support modality tiling (--tile-*)")
+            _refuse_replace_under_temporal_rounds(images, num_frames if isinstance(num_frames, int) else None)
             self._resolve_temporal_upsampler_path()  # fail before any Gemma load
         if self.spatial_upscalings == 2:
             if prompt_relay is not None:
@@ -679,6 +725,8 @@ class DFRPipeline(DistilledPipeline):
         def canvas_for(resolved_frames: int) -> tuple[int, list[int]]:
             """Pad the resolved clip length to whole keyframe segments (``_stage1`` hook)."""
             nonlocal requested
+            if self.temporal_upscalings:
+                _refuse_replace_under_temporal_rounds(images, resolved_frames)  # negative indices, now resolvable
             canvas_frames, segment, positions = resolve_canvas(resolved_frames)
             requested = resolved_frames
             if self.verbose:
@@ -1081,7 +1129,6 @@ class DFRPipeline(DistilledPipeline):
         conditionings: list,
         *,
         sigmas: list[float],
-        tiles: int,
         noise_scale: float,
         audio_tokens: mx.array,
         cond_fps: float,
@@ -1096,7 +1143,6 @@ class DFRPipeline(DistilledPipeline):
             latent: ``(1, 128, F, H, W)`` window latent the pass starts from.
             conditionings: The window's conditioning items, applied to a fresh state.
             sigmas: This pass's schedule (coarse ``sigmas[:2]`` or fine ``sigmas[1:]``).
-            tiles: Spatial tiles per axis (2 coarse, 4 fine), clamped to the latent.
             noise_scale: Initial noise blend (``sigmas[0]`` for the coarse pass, 0 for the fine one).
             audio_tokens: ``(1, T, 128)`` frozen audio tokens for the window.
             cond_fps: Transformer fps.
@@ -1108,11 +1154,12 @@ class DFRPipeline(DistilledPipeline):
             The denoised ``(1, 128, F, H, W)`` window latent.
         """
         F, H, W = latent.shape[2], latent.shape[3], latent.shape[4]
+        # One grid for both passes of a window (upstream v1.5.0 ``_run_epilogue_windows``).
         tiling = clamp_tile_counts(
             TileCountConfig(
                 frames=DimensionTilingConfig(1, 0),
-                height=DimensionTilingConfig(tiles, EPILOGUE_SPATIAL_OVERLAP),
-                width=DimensionTilingConfig(tiles, EPILOGUE_SPATIAL_OVERLAP),
+                height=DimensionTilingConfig(epilogue_tile_count(H), EPILOGUE_SPATIAL_OVERLAP),
+                width=DimensionTilingConfig(epilogue_tile_count(W), EPILOGUE_SPATIAL_OVERLAP),
             ),
             (F, H, W),
         )
@@ -1178,8 +1225,9 @@ class DFRPipeline(DistilledPipeline):
         The canvas is cut into ``2**T`` temporal windows on the last round's seams (one window without
         rounds), detailed one after the other. A non-first window starts on the last carry plane before
         its seam and pins its lead-in cells to the previous window's finished output, as the temporal
-        rounds do. Each window runs one ancestral step on a 2x2 spatial grid, then re-prepares the same
-        conditionings on that output (no new noise) and runs the remaining steps on a 4x4 grid; spatial
+        rounds do. Each window runs one ancestral step, then re-prepares the same conditionings on that
+        output (no new noise) and runs the remaining steps, both on one spatial grid of tiles at most
+        ``EPILOGUE_TILE_CELLS`` cells per side overlapping by ``EPILOGUE_SPATIAL_OVERLAP``; spatial
         tiles blend after every step, windows are never blended. Per window: user images on the final
         grid, the carry keyframes re-decoded, Lanczos x2 upsampled and re-encoded (strength 1.0) that
         sit after the resume point, an opening frame at frame 0 of the first window when no image
@@ -1367,7 +1415,6 @@ class DFRPipeline(DistilledPipeline):
                     window_latent,
                     conditionings,
                     sigmas=coarse_sigmas,
-                    tiles=EPILOGUE_SPATIAL_COARSE_TILES,
                     noise_scale=coarse_sigmas[0],
                     audio_tokens=audio_tokens,
                     cond_fps=cond_fps,
@@ -1382,7 +1429,6 @@ class DFRPipeline(DistilledPipeline):
                         window_latent,
                         conditionings,
                         sigmas=fine_sigmas,
-                        tiles=EPILOGUE_SPATIAL_TILES,
                         noise_scale=0.0,
                         audio_tokens=audio_tokens,
                         cond_fps=cond_fps,
@@ -1475,6 +1521,7 @@ __all__ = [
     "EPILOGUE_KEYFRAME_STRENGTH",
     "EPILOGUE_NOISE_SEED_OFFSET",
     "EPILOGUE_SPATIAL_OVERLAP",
+    "EPILOGUE_TILE_CELLS",
     "KEYFRAME_PLANE_DECODE_SEED_OFFSET",
     "TEMPORAL_ANCESTRAL_ETA",
     "TEMPORAL_SIGMAS",

@@ -51,6 +51,10 @@ class _ImageConditioningInput(NamedTuple):
     strength: float = 1.0
     crf: int | None = None
 
+    @classmethod
+    def at(cls, path: str, frame_idx: int, strength: float, crf: int | None = None) -> _ImageConditioningInput:
+        return cls(path=path, frame_idx=frame_idx, strength=strength, crf=crf)
+
 
 def _model_info(default_fps: int = 24) -> VideoModelInfo:
     return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=default_fps, frame_alignment=8, resolution_alignment=32)

@@ -146,6 +146,9 @@ class TI2VidTwoStagesHQPipeline(TI2VidTwoStagesPipeline):
         )
         num_text_tokens = video_embeds.shape[1]
         relay_mask = self._prompt_relay_mask_builder(prompt_relay, relay_token_ranges, num_text_tokens)
+        relay_audio_mask = self._prompt_relay_audio_mask_builder(
+            prompt_relay, relay_token_ranges, num_text_tokens, default_audio_strength=0.0
+        )
 
         # --- Load DiT + VAE encoder + upsampler ---
         if self.dit is None:
@@ -173,7 +176,7 @@ class TI2VidTwoStagesHQPipeline(TI2VidTwoStagesPipeline):
 
         # I2V conditioning at half resolution. ``images`` is the upstream-iso
         # multi-anchor list; ``image`` is the legacy single-image shorthand
-        # (frame_idx=0, strength=1.0).
+        # (``ImageConditioningInput.at(image, 0, 1.0)``, a frame-0 replace).
         from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
         from ltx_pipelines_mlx.utils.args import ImageConditioningInput, resolve_frame_indices
 
@@ -181,7 +184,7 @@ class TI2VidTwoStagesHQPipeline(TI2VidTwoStagesPipeline):
         enc_w_half = W_half * 32
         resolved_images = list(images) if images else []
         if image is not None and not resolved_images:
-            resolved_images = [ImageConditioningInput(path=image, frame_idx=0, strength=1.0)]
+            resolved_images = [ImageConditioningInput.at(image, 0, 1.0)]
         resolved_images = resolve_frame_indices(resolved_images, num_frames)
         # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
         resolved_images = self.image_conditioner.resolve_crf(resolved_images)
@@ -262,6 +265,7 @@ class TI2VidTwoStagesHQPipeline(TI2VidTwoStagesPipeline):
             video_guider_factory=video_factory,
             audio_guider_factory=audio_factory,
             video_cross_attention_mask=relay_mask(F, H_half, W_half, video_state.latent.shape[1]),
+            audio_cross_attention_mask=relay_audio_mask(F, audio_state),
             teacache=teacache_controller,
             tap=tap,
             on_step=self._stepwise_hook(F, H_half, W_half, stage=1),
@@ -273,8 +277,8 @@ class TI2VidTwoStagesHQPipeline(TI2VidTwoStagesPipeline):
         self._fuse_distilled_lora(self.dit)
 
         # --- Upscale with denormalize/renormalize ---
-        # Strip any appended keyframe tokens (multi-anchor with frame_idx>0
-        # appends via VideoConditionByKeyframeIndex; only the base
+        # Strip any appended keyframe tokens (guide-bound images append them
+        # via VideoConditionByKeyframeIndex; only the base
         # F*H*W tokens are spatial latent we need to unpatchify).
         self.generated_keyframes = extract_generated_keyframes(
             output_1.video_latent, video_state.generated_keyframe_layout, self.video_patchifier, (H_half, W_half)
@@ -358,6 +362,7 @@ class TI2VidTwoStagesHQPipeline(TI2VidTwoStagesPipeline):
             audio_text_embeds=audio_embeds,
             sigmas=sigmas_2,
             video_cross_attention_mask=relay_mask(F, H_full, W_full, video_state_2.latent.shape[1]),
+            audio_cross_attention_mask=relay_audio_mask(F, audio_state_2),
             on_step=self._stepwise_hook(F, H_full, W_full, stage=2),
         )
         if self.low_memory:

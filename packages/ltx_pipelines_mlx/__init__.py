@@ -12,9 +12,17 @@ Public pipeline classes mirror upstream Lightricks/LTX-2 pipelines 1:1:
 | ``ICLoraPipeline`` | ``ic_lora.ICLoraPipeline`` |
 | ``HDRICLoraPipeline`` | ``hdr_ic_lora.HDRICLoraPipeline`` |
 | ``LipDubPipeline`` | ``lipdub.LipDubPipeline`` |
-| ``KeyframeInterpolationPipeline`` | ``keyframe_interpolation.KeyframeInterpolationPipeline`` |
 | ``A2VidPipelineTwoStage`` | ``a2vid_two_stage.A2VidPipelineTwoStage`` |
 | ``RetakePipeline`` | ``retake.RetakePipeline`` (extend folded in) |
+
+Local pipelines, with no upstream class of their own (upstream reaches the same results
+through options of its ``DistilledPipeline`` / ``DFRPipeline``):
+
+| Public class | Command | Upstream mechanism |
+|---|---|---|
+| ``A2VidDistilledPipeline`` | ``a2v --distilled`` | ``DistilledPipeline`` with the audio frozen (``freeze_audio=True``) |
+| ``A2VidDFRPipeline`` | ``a2v --dfr`` | ``DFRPipeline`` with the audio frozen |
+| ``ExtendDistilledPipeline`` | ``extend --distilled`` | chunk continuation (``ltx_pipelines.chunks``) |
 
 The :class:`BasePipeline` class lives in the private ``_base`` module —
 it's the shared inheritance parent for all the public pipelines, with
@@ -24,12 +32,14 @@ supported on every public pipeline by passing ``image=...`` to
 """
 
 from ltx_pipelines_mlx._base import BasePipeline
+from ltx_pipelines_mlx.a2vid_dfr import A2VidDFRPipeline
+from ltx_pipelines_mlx.a2vid_distilled import A2VidDistilledPipeline
 from ltx_pipelines_mlx.a2vid_two_stage import A2VidPipelineTwoStage
 from ltx_pipelines_mlx.dfr import DFRPipeline
 from ltx_pipelines_mlx.distilled import DistilledPipeline
+from ltx_pipelines_mlx.extend_distilled import ExtendDistilledPipeline
 from ltx_pipelines_mlx.hdr_ic_lora import HDRICLoraPipeline
 from ltx_pipelines_mlx.ic_lora import ICLoraPipeline
-from ltx_pipelines_mlx.keyframe_interpolation import KeyframeInterpolationPipeline
 from ltx_pipelines_mlx.lipdub import LipDubPipeline
 from ltx_pipelines_mlx.retake import RetakePipeline
 from ltx_pipelines_mlx.ti2vid_one_stage import TI2VidOneStagePipeline
@@ -46,6 +56,8 @@ from ltx_pipelines_mlx.utils.blocks import (
 )
 
 __all__ = [
+    "A2VidDFRPipeline",
+    "A2VidDistilledPipeline",
     "A2VidPipelineTwoStage",
     # Composition blocks (mirror upstream utils/blocks.py)
     "AudioConditioner",
@@ -54,10 +66,10 @@ __all__ = [
     "DFRPipeline",
     "DistilledPipeline",
     "DurationPredictor",
+    "ExtendDistilledPipeline",
     "HDRICLoraPipeline",
     "ICLoraPipeline",
     "ImageConditioner",
-    "KeyframeInterpolationPipeline",
     "LipDubPipeline",
     "PromptEncoder",
     "RetakePipeline",

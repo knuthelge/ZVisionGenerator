@@ -173,6 +173,9 @@ class TI2VidOneStagePipeline(TI2VidTwoStagesPipeline):
         )
         num_text_tokens = video_embeds.shape[1]
         relay_mask = self._prompt_relay_mask_builder(prompt_relay, relay_token_ranges, num_text_tokens)
+        relay_audio_mask = self._prompt_relay_audio_mask_builder(
+            prompt_relay, relay_token_ranges, num_text_tokens, default_audio_strength=0.0
+        )
 
         # --- Load dev DiT + VAE encoder ---
         self.load()
@@ -199,7 +202,7 @@ class TI2VidOneStagePipeline(TI2VidTwoStagesPipeline):
         enc_w = W * 32
         resolved_images = list(images) if images else []
         if image is not None and not resolved_images:
-            resolved_images = [ImageConditioningInput(path=image, frame_idx=0, strength=1.0)]
+            resolved_images = [ImageConditioningInput.at(image, 0, 1.0)]
         resolved_images = resolve_frame_indices(resolved_images, num_frames)
         # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
         resolved_images = self.image_conditioner.resolve_crf(resolved_images)
@@ -288,13 +291,14 @@ class TI2VidOneStagePipeline(TI2VidTwoStagesPipeline):
             audio_guider_factory=audio_factory,
             sigmas=sigmas,
             video_cross_attention_mask=relay_mask(F, H, W, video_state.latent.shape[1]),
+            audio_cross_attention_mask=relay_audio_mask(F, audio_state),
             tap=tap,
             on_step=self._stepwise_hook(F, H, W),
         )
         if self.low_memory:
             aggressive_cleanup()
 
-        # Strip appended keyframe tokens (multi-anchor with frame_idx>0).
+        # Strip appended keyframe tokens (guide-bound images, generated keyframe slots).
         self.generated_keyframes = extract_generated_keyframes(
             output.video_latent, video_state.generated_keyframe_layout, self.video_patchifier, (H, W)
         )

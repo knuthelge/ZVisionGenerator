@@ -37,7 +37,7 @@ from ltx_core_mlx.model.upsampler import LatentUpsampler
 from ltx_core_mlx.utils.memory import aggressive_cleanup
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions
 from ltx_core_mlx.utils.weights import apply_quantization, load_split_safetensors
-from ltx_pipelines_mlx._base import BasePipeline, unfused_loras_requested
+from ltx_pipelines_mlx._base import BasePipeline, streamed_lora_fuse, unfused_loras_requested
 from ltx_pipelines_mlx.iclora_utils import (
     append_ic_lora_reference_video_conditionings,
     read_lora_reference_downscale_factor,
@@ -47,6 +47,7 @@ from ltx_pipelines_mlx.utils.blocks import snap_num_frames
 from ltx_pipelines_mlx.utils.helpers import create_noised_state
 from ltx_pipelines_mlx.utils.media_io import decode_video_by_frame, video_preprocess
 from ltx_pipelines_mlx.utils.samplers import denoise_loop
+from ltx_pipelines_mlx.utils.types import ImageConditioningInput
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +140,7 @@ class ICLoraPipeline(BasePipeline):
             if self.dev_mode and self.dev_transformer_name:
                 transformer_path = model_dir / self.dev_transformer_name
             else:
-                transformer_path = model_dir / "transformer.safetensors"
-                if not transformer_path.exists():
-                    transformer_path = self._resolve_safetensors(model_dir, "transformer-distilled")
+                transformer_path = self._resolve_distilled_transformer(model_dir)
             self.dit = self._load_transformer_with_optional_streaming(transformer_path)
 
         # VAE encoder (for encoding control videos and I2V images)
@@ -229,13 +228,16 @@ class ICLoraPipeline(BasePipeline):
             from ltx_core_mlx.loader.block_streaming import BlockLoraSource
 
             sources: list = list(object.__getattribute__(self.dit, "_lora_sources"))
-            for lora_path, strength in lora_paths:
+            n_task = len(self._lora_paths)  # _effective_lora_paths appends the distilled LoRA last
+            for i, (lora_path, strength) in enumerate(lora_paths):
                 sources.append(
                     BlockLoraSource(
                         lora_path,
                         block_prefix=LTXV_LORA_BLOCK_PREFIX,
                         strength=strength,
                         sd_ops=LTXV_LORA_COMFY_RENAMING_MAP,
+                        # Task IC-LoRAs follow LTX2_LORA_MODE; the distilled LoRA always fuses.
+                        fuse=streamed_lora_fuse(self.lora_mode) if i < n_task else True,
                     )
                 )
                 logger.info(f"Attached LoRA streamer: {lora_path} (strength={strength})")
@@ -321,10 +323,7 @@ class ICLoraPipeline(BasePipeline):
         self.dit = None
         aggressive_cleanup()
 
-        transformer_path = self.model_dir / "transformer.safetensors"
-        if not transformer_path.exists():
-            transformer_path = self._resolve_safetensors(self.model_dir, "transformer-distilled")
-        self.dit = self._load_transformer_with_optional_streaming(transformer_path)
+        self.dit = self._load_transformer_with_optional_streaming(self._resolve_distilled_transformer(self.model_dir))
         logger.info("Reloaded clean transformer for Stage 2")
 
     def _create_conditionings(
@@ -369,14 +368,13 @@ class ICLoraPipeline(BasePipeline):
         conditionings: list[object] = []
 
         # Image conditionings (I2V) — upstream-iso multi-anchor pattern.
-        # frame_idx==0 → VideoConditionByLatentIndex (replace);
-        # frame_idx>0 → VideoConditionByKeyframeIndex (guide).
+        # ImageReplace → VideoConditionByLatentIndex; ImageGuide → VideoConditionByKeyframeIndex.
         if images:
             from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
             from ltx_pipelines_mlx.utils.args import ImageConditioningInput, resolve_frame_indices
 
             normalized = [
-                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput(*img) for img in images
+                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput.at(*img) for img in images
             ]
             normalized = resolve_frame_indices(normalized, num_frames)
             # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
@@ -426,7 +424,7 @@ class ICLoraPipeline(BasePipeline):
         seed: int = 42,
         stage1_steps: int | None = None,
         stage2_steps: int | None = None,
-        images: list[tuple[str, int, float]] | None = None,
+        images: list[ImageConditioningInput | tuple[str, int, float]] | None = None,
         conditioning_attention_strength: float = 1.0,
         conditioning_attention_mask: mx.array | None = None,
         skip_stage_2: bool = False,
@@ -484,9 +482,8 @@ class ICLoraPipeline(BasePipeline):
             )
         num_frames = snap_num_frames(num_frames)
 
-        # Load text encoder, encode, free, then load generation components.
-        # Done manually instead of _encode_text_and_load() to avoid loading
-        # decoders (which we don't need until generate_and_save).
+        # Load text encoder, encode, free, then load generation components
+        # (not the decoders, which wait for generate_and_save).
         self._load_text_encoder()
         video_embeds, audio_embeds = self._encode_text(prompt)
         # NOTE: mx.eval is MLX graph evaluation, NOT Python eval()
@@ -631,14 +628,14 @@ class ICLoraPipeline(BasePipeline):
         enc_w_full = W_full * 32
 
         # Encode I2V images at upscaled resolution (if any) before freeing encoder.
-        # Upstream-iso multi-anchor pattern: frame_idx==0 → LatentIndex, else → KeyframeIndex.
+        # Upstream-iso multi-anchor pattern: ImageReplace → LatentIndex, ImageGuide → KeyframeIndex.
         conditionings_2 = []
         if images:
             from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
             from ltx_pipelines_mlx.utils.args import ImageConditioningInput, resolve_frame_indices
 
             normalized = [
-                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput(*img) for img in images
+                img if isinstance(img, ImageConditioningInput) else ImageConditioningInput.at(*img) for img in images
             ]
             normalized = resolve_frame_indices(normalized, num_frames)
             # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
@@ -687,6 +684,9 @@ class ICLoraPipeline(BasePipeline):
         # present to consume the re-appended reference tokens.
         if not self.dev_mode and not control_aware_refine:
             self._reload_clean_transformer()
+            # Stage 1's X0Model still wraps the transformer it was built on, which a reload (fused LoRAs on a
+            # resident model) replaces: stage 2 has to run on the reloaded one, or it keeps the IC-LoRA.
+            x0_model = X0Model(self.dit)
 
         video_tokens_up, _ = self.video_patchifier.patchify(video_upscaled)
 
@@ -768,7 +768,7 @@ class ICLoraPipeline(BasePipeline):
         seed: int = 42,
         stage1_steps: int | None = None,
         stage2_steps: int | None = None,
-        images: list[tuple[str, int, float]] | None = None,
+        images: list[ImageConditioningInput | tuple[str, int, float]] | None = None,
         conditioning_attention_strength: float = 1.0,
         skip_stage_2: bool = False,
         single_stage: bool = False,
