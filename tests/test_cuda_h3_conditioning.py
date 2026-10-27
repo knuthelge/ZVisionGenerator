@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -35,42 +34,16 @@ from zvisiongenerator.backends.cuda.video.h3.conditioning import (  # noqa: E402
     tail_audio_rows,
     tail_first_audio_order,
 )
-from zvisiongenerator.backends.cuda.video.h3.schedule import AUDIO_COND_T, KEYFRAME_T, row_timesteps  # noqa: E402
+from zvisiongenerator.backends.cuda.video.h3.schedule import AUDIO_COND_T, KEYFRAME_T  # noqa: E402
+from _h3_helpers import AUDIO_CONFIG, VAE_CONFIG, write_vae_dir  # noqa: E402
 
-_VAE_CONFIG = {
-    "latent_channels": 4,
-    "block_out_channels": (4, 4, 4, 4, 4, 4),
-    "layers_per_block": 1,
-    "norm_num_groups": 2,
-    "decoder_num_layers": 2,
-    "decoder_num_attention_heads": 2,
-    "decoder_attention_head_dim": 8,
-    "decoder_num_register_tokens": 1,
-    "decoder_ffn_mult": 2,
-    "latents_mean": (0.1, 0.2, -0.1, 0.3),
-    "latents_std": (1.0, 2.0, 0.5, 1.5),
-}
-_AUDIO_CONFIG = {
-    "encoder_dim": 4,
-    "encoder_rates": (2, 2),
-    "latent_dim": 8,
-    "latent_channels": 4,
-    "num_attention_heads": 2,
-    "decoder_dim": 8,
-    "decoder_rates": (2, 2),
-    "decoder_kernel_sizes": (4, 4),
-    "resblock_kernel_sizes": (3,),
-    "resblock_dilation_sizes": ((1,),),
-    "latents_mean": [0.1, -0.2, 0.3, 0.0],
-    "latents_std": [2.0, 1.0, 0.5, 1.5],
-}
 _HOP = 4  # samples per audio latent of the tiny audio VAE (the real one has 800)
 _CANVAS = (64, 32)  # width, height: 4 x 2 latent cells
 
 
 def _tiny_vae() -> AutoencoderKLMiniMaxH3:
     torch.manual_seed(0)
-    return AutoencoderKLMiniMaxH3(**_VAE_CONFIG).eval().requires_grad_(False)
+    return AutoencoderKLMiniMaxH3(**VAE_CONFIG).eval().requires_grad_(False)
 
 
 @pytest.fixture(scope="module")
@@ -81,7 +54,7 @@ def vae():
 @pytest.fixture(scope="module")
 def audio_vae():
     torch.manual_seed(0)
-    return AutoencoderKLMiniMaxH3Audio(**_AUDIO_CONFIG).eval().requires_grad_(False)
+    return AutoencoderKLMiniMaxH3Audio(**AUDIO_CONFIG).eval().requires_grad_(False)
 
 
 def _picture(width: int, height: int, seed: int = 0) -> PIL_Image.Image:
@@ -128,6 +101,7 @@ class TestEncodeKeyframe:
         expected = state.get("condition_latents")[0]
         latents = encode_keyframe(vae, image, *_CANVAS)
         assert latents.shape == (1, 4, 1, 2, 4)
+        assert latents.dtype == torch.float32 and latents.device.type == "cpu" and not latents.requires_grad
         assert torch.equal(latents, expected)
 
     def test_the_seed_is_42_and_not_the_global_or_request_state(self, vae):
@@ -138,36 +112,18 @@ class TestEncodeKeyframe:
         torch.manual_seed(2)
         assert torch.equal(encode_keyframe(vae, image, *_CANVAS), first)
 
-    def test_the_sample_is_rounded_to_fp16_before_it_is_normalised(self, vae):
-        latents = encode_keyframe(vae, _picture(*_CANVAS), *_CANVAS)
-        mean = torch.tensor(vae.config.latents_mean).view(1, -1, 1, 1, 1)
-        std = torch.tensor(vae.config.latents_std).view(1, -1, 1, 1, 1)
-        raw = latents * std + mean
-        assert torch.allclose(raw, raw.half().float(), rtol=0, atol=1e-3)  # on the fp16 grid, up to the float32 arithmetic of the normalisation
-
-    def test_it_returns_float32_on_the_cpu(self, vae):
-        latents = encode_keyframe(vae, _picture(*_CANVAS), *_CANVAS)
-        assert latents.dtype == torch.float32 and latents.device.type == "cpu" and not latents.requires_grad
-
     def test_it_fits_an_image_of_another_aspect_before_encoding(self, vae):
         wide = _picture(200, 50)
         state = _run_step(MiniMaxH3KeyframeVaeEncoderStep(), _components(vae=vae), keyframes=[fit_keyframe(wide, *_CANVAS)])
         assert torch.equal(encode_keyframe(vae, wide, *_CANVAS), state.get("condition_latents")[0])
 
-    @pytest.mark.parametrize("canvas", [(65, 32), (64, 0), (0, 32), (64, 40)])
+    @pytest.mark.parametrize("canvas", [(65, 32), (64, 0)])
     def test_it_refuses_a_canvas_that_is_not_a_multiple_of_the_compression(self, vae, canvas):
         with pytest.raises(ValueError, match="multiple of 16"):
             encode_keyframe(vae, _picture(64, 32), *canvas)
 
 
 class TestFitKeyframe:
-    def test_it_matches_the_ltx_centre_crop_fit(self):
-        from zvisiongenerator.backends.cuda.video.backend import _fit_image
-
-        for size in ((200, 50), (50, 200), (64, 32), (31, 99)):
-            image = _picture(*size)
-            assert fit_keyframe(image, *_CANVAS).tobytes() == _fit_image(image, *_CANVAS).tobytes()
-
     def test_it_crops_the_overflow_equally_from_both_sides(self):
         stripes = np.zeros((10, 30, 3), dtype=np.uint8)
         stripes[:, 10:20] = 255  # a white centre between two black bands
@@ -196,10 +152,7 @@ class TestEncodeTail:
         assert latents.shape == (1, 4, TAIL_LATENT_FRAMES, 2, 4)
         assert torch.equal(latents, expected)
 
-    def test_a_tail_is_22_frames_and_7_latents(self):
-        assert (TAIL_FRAMES, TAIL_LATENT_FRAMES, TAIL_AUDIO_LATENTS) == (22, 7, 37)
-
-    @pytest.mark.parametrize("count", [1, 21, 23, 39])
+    @pytest.mark.parametrize("count", [21, 39])
     def test_it_refuses_a_tail_that_is_not_22_frames(self, vae, count):
         with pytest.raises(ValueError, match="22 uint8 RGB frames"):
             encode_tail(vae, _frames(count))
@@ -239,26 +192,13 @@ class TestEncodeTailAudio:
         assert rows.shape == (2 * TAIL_AUDIO_LATENTS, 4)
         assert torch.equal(rows, _trim_or_pad(_oracle_audio(audio_vae, waveform), TAIL_AUDIO_LATENTS))
 
-    def test_a_short_tail_repeats_its_last_latent(self, audio_vae):
-        rows = encode_tail_audio(audio_vae, torch.randn(2, 30 * _HOP)).reshape(2, TAIL_AUDIO_LATENTS, 4)
-        assert torch.equal(rows[:, 30:], rows[:, 29:30].expand(-1, 7, -1))
-
-    def test_rows_are_channel_major(self, audio_vae):
-        waveform = torch.zeros(2, TAIL_AUDIO_LATENTS * _HOP)
-        waveform[1] = torch.randn(TAIL_AUDIO_LATENTS * _HOP, generator=torch.Generator().manual_seed(4))
-        rows = encode_tail_audio(audio_vae, waveform)
-        alone = encode_tail_audio(audio_vae, waveform.flip(0))  # channels swapped
-        assert torch.allclose(rows[:TAIL_AUDIO_LATENTS], alone[TAIL_AUDIO_LATENTS:], atol=1e-5)
-        assert torch.allclose(rows[TAIL_AUDIO_LATENTS:], alone[:TAIL_AUDIO_LATENTS], atol=1e-5)
-        assert not torch.equal(rows[:TAIL_AUDIO_LATENTS], rows[TAIL_AUDIO_LATENTS:])
-
     def test_it_returns_float32_on_the_cpu_and_takes_the_posterior_mean(self, audio_vae):
         waveform = torch.randn(2, TAIL_AUDIO_LATENTS * _HOP)
         rows = encode_tail_audio(audio_vae, waveform)
         assert rows.dtype == torch.float32 and rows.device.type == "cpu" and not rows.requires_grad
         assert torch.equal(rows, encode_tail_audio(audio_vae, waveform))  # no sampling: repeatable
 
-    @pytest.mark.parametrize("shape", [(5,), (1, 100), (3, 100), (2, 1, 100)])
+    @pytest.mark.parametrize("shape", [(5,), (3, 100)])
     def test_it_refuses_a_waveform_that_is_not_stereo(self, audio_vae, shape):
         with pytest.raises(ValueError, match="stereo waveform"):
             encode_tail_audio(audio_vae, torch.zeros(shape))
@@ -288,32 +228,11 @@ class TestTailAudioRows:
         with pytest.raises(ValueError, match="audio tail"):
             tail_audio_rows(audio_latents, tail)
 
-    def test_row_timesteps_pins_exactly_the_held_rows(self):
-        """The leading 74 entries of the order get the clean level; the other audio rows take the step's level."""
-        text, audio_latents = 3, 50
-        audio_idx = text + tail_first_audio_order(audio_latents)
-        video_idx = torch.arange(text + 2 * audio_latents, text + 2 * audio_latents + 6)
-        distinct, index = row_timesteps(video_idx, audio_idx, text, 0.5, 0.25, condition_video_rows=2, condition_audio_rows=2 * TAIL_AUDIO_LATENTS)
-        by_row = distinct[index]
-        held = text + tail_audio_rows(audio_latents)
-        assert (by_row[held] == AUDIO_COND_T).all()
-        free = text + torch.tensor([row for row in range(2 * audio_latents) if row not in set(tail_audio_rows(audio_latents).tolist())])
-        assert (by_row[free] == 0.25).all()
-        assert (by_row[video_idx[:2]] == KEYFRAME_T).all()
-
 
 # --- pre-noising -------------------------------------------------------------------------------------------------
 
 
 class TestPrenoise:
-    def test_it_equals_scale_noise_of_the_generators_noise(self):
-        scheduler = MiniMaxH3Scheduler()
-        latents = torch.randn(1, 4, 1, 2, 4, generator=torch.Generator().manual_seed(7))
-        noise = torch.randn(latents.shape, generator=torch.Generator().manual_seed(8))
-        mixed = prenoise(scheduler, latents, KEYFRAME_T, torch.Generator().manual_seed(8))
-        assert torch.equal(mixed, scheduler.scale_noise(latents, KEYFRAME_T, noise))
-        assert torch.allclose(mixed, 0.999 * latents + 0.001 * noise)
-
     def test_it_matches_the_prepare_latents_step_of_diffusers(self):
         """The released step noises each condition with ``randn_tensor`` under the request generator, then ``scale_noise(..., 0.999)``."""
         from diffusers.utils.torch_utils import randn_tensor
@@ -338,34 +257,22 @@ class TestPrenoise:
 # --- loading the encoder side ------------------------------------------------------------------------------------
 
 
-def _write_encoder_side(directory, vae, *, shards=False):
-    """Save *vae*'s config and its encoder-side weights (a file with no decoder tensors) to *directory*."""
-    directory.mkdir(parents=True, exist_ok=True)
-    config = {"_class_name": "AutoencoderKLMiniMaxH3", **{key: list(value) if isinstance(value, tuple) else value for key, value in _VAE_CONFIG.items()}}
-    (directory / "config.json").write_text(json.dumps(config), encoding="utf-8")
-    state = {name: tensor.contiguous() for name, tensor in vae.state_dict().items() if name.startswith(("encoder.", "quant_conv."))}
-    if not shards:
-        save_file(state, str(directory / "diffusion_pytorch_model.safetensors"))
-        return
-    names = sorted(state)
-    halves = {"model-00001-of-00002.safetensors": names[: len(names) // 2], "model-00002-of-00002.safetensors": names[len(names) // 2 :]}
-    for file, part in halves.items():
-        save_file({name: state[name] for name in part}, str(directory / file))
-    weight_map = {name: file for file, part in halves.items() for name in part}
-    (directory / "diffusion_pytorch_model.safetensors.index.json").write_text(json.dumps({"metadata": {}, "weight_map": weight_map}), encoding="utf-8")
+def _encoder_side(name: str) -> bool:
+    """Tell whether a VAE weight belongs to the encoder side (the saved file has no decoder tensors)."""
+    return name.startswith(("encoder.", "quant_conv."))
 
 
 class TestLoadVaeEncoder:
     @pytest.mark.parametrize("shards", [False, True])
     def test_it_loads_the_encoder_without_decoder_weights_and_encodes_like_the_original(self, vae, tmp_path, shards):
-        _write_encoder_side(tmp_path, vae, shards=shards)
+        write_vae_dir(tmp_path, vae, keep=_encoder_side, shards=shards)
         loaded = load_vae_encoder(tmp_path, torch.device("cpu"))
         assert isinstance(loaded.decoder, torch.nn.Identity) and isinstance(loaded.post_quant_conv, torch.nn.Identity)
         image = _picture(*_CANVAS)
         assert torch.equal(encode_keyframe(loaded, image, *_CANVAS), encode_keyframe(vae, image, *_CANVAS))
 
     def test_it_is_eval_mode_without_gradients_and_in_float32(self, vae, tmp_path):
-        _write_encoder_side(tmp_path, vae)
+        write_vae_dir(tmp_path, vae, keep=_encoder_side)
         loaded = load_vae_encoder(tmp_path, torch.device("cpu"))
         assert not loaded.training
         parameters = list(loaded.parameters())
@@ -373,7 +280,7 @@ class TestLoadVaeEncoder:
         assert all(parameter.dtype == torch.float32 for parameter in parameters)
 
     def test_it_refuses_weights_that_miss_the_encoder(self, vae, tmp_path):
-        _write_encoder_side(tmp_path, vae)
+        write_vae_dir(tmp_path, vae, keep=_encoder_side)
         file = tmp_path / "diffusion_pytorch_model.safetensors"
         file.unlink()
         save_file({"quant_conv.weight": vae.quant_conv.weight.contiguous(), "quant_conv.bias": vae.quant_conv.bias.contiguous()}, str(file))

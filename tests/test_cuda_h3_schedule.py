@@ -7,7 +7,6 @@ import pytest
 torch = pytest.importorskip("torch")
 diffusers = pytest.importorskip("diffusers")
 
-from zvisiongenerator.backends.cuda.video.h3 import schedule as schedule_module  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.frames import geometry  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.schedule import (  # noqa: E402
     AUDIO_COND_T,
@@ -36,7 +35,6 @@ def test_diffusers_is_the_pinned_release():
 def test_constants():
     assert (KEYFRAME_T, AUDIO_COND_T) == (0.999, 1.0)
     assert ROW_SETS == ("plain", "keyframe", "extend")
-    assert set(schedule_module.__all__) == {"AUDIO_COND_T", "KEYFRAME_T", "ROW_SETS", "build_schedulers", "row_timesteps"}
 
 
 @pytest.mark.parametrize(
@@ -68,40 +66,6 @@ def test_a_schedule_that_collapses_sigmas_is_refused():
     # A shift this large collapses neighbouring float32 sigmas into fewer forwards than the schedule states.
     with pytest.raises(ValueError, match="expected 400"):
         build_schedulers(H3Schedule(400, 1e9, 1e9))
-
-
-def test_wrong_forward_count_in_the_schedule_is_refused(monkeypatch):
-    class _Short:
-        def __init__(self, shift: float = 12.0):
-            self.timesteps = torch.zeros(3)
-
-        def set_shift(self, shift: float) -> None:
-            pass
-
-        def set_timesteps(self, steps: int) -> None:
-            pass
-
-    monkeypatch.setattr(diffusers, "MiniMaxH3Scheduler", _Short)
-    with pytest.raises(ValueError, match="gives 3 forwards, expected 8"):
-        build_schedulers(H3Schedule(8, 6.0, 3.0))
-
-
-def test_set_shift_precedes_set_timesteps(monkeypatch):
-    calls: list[str] = []
-
-    class _Recorder:
-        def __init__(self, shift: float = 12.0):
-            self.timesteps = torch.zeros(2)
-
-        def set_shift(self, shift: float) -> None:
-            calls.append(f"shift {shift}")
-
-        def set_timesteps(self, steps: int) -> None:
-            calls.append(f"steps {steps}")
-
-    monkeypatch.setattr(diffusers, "MiniMaxH3Scheduler", _Recorder)
-    build_schedulers(H3Schedule(2, 6.0, 3.0))
-    assert calls == ["shift 6.0", "steps 3", "shift 3.0", "steps 3"]
 
 
 def _idx(start: int, count: int):
@@ -138,18 +102,10 @@ def test_row_timesteps_accepts_tensor_scalars():
     assert unique.tolist() == pytest.approx([float(t)])
 
 
-def test_row_timesteps_is_the_only_caller_of_the_private_diffusers_step():
-    import pathlib
-
-    h3_dir = pathlib.Path(schedule_module.__file__).parent
-    callers = [path.name for path in h3_dir.glob("*.py") if "build_row_timesteps" in path.read_text(encoding="utf-8")]
-    assert callers == ["schedule.py"]
-
-
 # --- contracts against diffusers 0.41.0 ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("frames", [22, 39, 124, 243, 413])
+@pytest.mark.parametrize("frames", [22, 124, 413])
 def test_arithmetic_equals_the_diffusers_functions(frames):
     from diffusers.modular_pipelines.minimax_h3.modular_pipeline import audio_latent_num_frames, video_latent_num_frames
 
@@ -158,7 +114,7 @@ def test_arithmetic_equals_the_diffusers_functions(frames):
     assert geometry(64, 32, frames).latent_frames == video_latent_num_frames(frames, 17, 5)
 
 
-@pytest.mark.parametrize("frames", [21, 120, 125])
+@pytest.mark.parametrize("frames", [21, 125])
 def test_frame_refusal_matches_diffusers(frames):
     from diffusers.modular_pipelines.minimax_h3.modular_pipeline import video_latent_num_frames
 

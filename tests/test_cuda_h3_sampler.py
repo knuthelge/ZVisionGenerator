@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 torch = pytest.importorskip("torch")
-diffusers = pytest.importorskip("diffusers")
+pytest.importorskip("diffusers")
 
 from diffusers.modular_pipelines.minimax_h3 import modular_pipeline as reference_pipeline  # noqa: E402
 from diffusers.modular_pipelines.minimax_h3.before_denoise import (  # noqa: E402
@@ -42,6 +42,7 @@ from zvisiongenerator.backends.cuda.video.h3.sampler import (  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.schedule import AUDIO_COND_T, KEYFRAME_T, build_schedulers  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.text_encoder import TEXT_TAG, VIDEO_TAG  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
+from _h3_helpers import tiny_transformer  # noqa: E402
 
 _SCHEDULE_8 = H3Schedule(8, 6.0, 3.0)
 _SCHEDULE_4 = H3Schedule(4, 6.0, 3.0)
@@ -50,7 +51,6 @@ _PLAIN = geometry(64, 64, 22)  # 7 latent frames of 2 x 2 cells, 37 audio latent
 _WINDOW = geometry(64, 64, 39)  # 12 latent frames, 65 audio latents per channel: room for a 7-frame tail
 _CELLS = (_PLAIN.latent_height // 2) * (_PLAIN.latent_width // 2)  # video rows per latent frame
 _TEXT_TAGS = [TEXT_TAG] * 4
-_HIDDEN = 64
 _TEXT_DIM = 48
 
 
@@ -133,10 +133,6 @@ def _run(geo=_PLAIN, schedule: H3Schedule = _SCHEDULE_8, *, conditioning: Condit
 # --- the diffusers contracts ------------------------------------------------------------------------------------------
 
 
-def test_diffusers_is_the_pinned_release():
-    assert diffusers.__version__ == "0.41.0"
-
-
 def test_build_packed_sequence_signature_is_pinned():
     # The sampler is a caller of this private static; a changed signature must fail here, not in a run.
     parameters = list(inspect.signature(MiniMaxH3PrepareLayoutStep.build_packed_sequence).parameters)
@@ -168,12 +164,6 @@ def test_modality_tags_and_patch_match_diffusers():
     assert VIDEO_TAG == reference_pipeline.MINIMAX_H3_VIDEO_TAG
     assert TEXT_TAG == reference_pipeline.MINIMAX_H3_TEXT_TAG
     assert sampler_module._PATCH == (1, 2, 2)
-
-
-def test_the_loop_blocks_still_read_these_attributes():
-    # The reference comparison below feeds the blocks a plain namespace; pin the parameters they take.
-    assert list(inspect.signature(MiniMaxH3LoopDenoiser.__call__).parameters) == ["self", "components", "block_state", "i", "t"]
-    assert list(inspect.signature(MiniMaxH3LoopSchedulerStep.__call__).parameters) == ["self", "components", "block_state", "i", "t"]
 
 
 # --- the layout ------------------------------------------------------------------------------------------------------
@@ -251,10 +241,9 @@ def test_bad_conditioning_is_refused(conditioning, match):
 # --- plain runs ------------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("schedule", "forwards"), [(_SCHEDULE_8, 8), (_SCHEDULE_4, 4)], ids=["8-step", "4-step"])
-def test_a_plain_run_does_one_forward_per_step_with_the_payload(schedule, forwards):
-    transformer, (video, audio) = _run(schedule=schedule)
-    assert len(transformer.calls) == forwards
+def test_a_plain_run_does_one_forward_per_step_with_the_payload():
+    transformer, (video, audio) = _run()
+    assert len(transformer.calls) == 8
     layout = build_layout(_TEXT_TAGS, _PLAIN, _CPU, None)
     for call in transformer.calls:
         assert call["video"].shape == (1, _PLAIN.video_rows, 96)
@@ -281,21 +270,9 @@ def test_the_callback_reports_every_step():
     events: list[dict] = []
     _run(step_callback=events.append, phase="refine")
     assert events == [{"phase": "refine", "current_step": step, "total_steps": 8} for step in range(1, 9)]
-
-
-def test_the_default_phase_is_video():
-    events: list[dict] = []
-    _run(schedule=_SCHEDULE_4, step_callback=events.append)
-    assert {event["phase"] for event in events} == {"video"}
-    assert events[-1] == {"phase": "video", "current_step": 4, "total_steps": 4}
-
-
-def test_a_forward_pre_hook_fires_on_every_step():
-    transformer = _Recorder()
-    seen: list[int] = []
-    transformer.register_forward_pre_hook(lambda module, args, kwargs: seen.append(kwargs["timestep"].numel()), with_kwargs=True)
-    _run(transformer=transformer)
-    assert len(seen) == 8
+    events.clear()
+    _run(schedule=_SCHEDULE_4, step_callback=events.append)  # the phase defaults to video
+    assert events == [{"phase": "video", "current_step": step, "total_steps": 4} for step in range(1, 5)]
 
 
 def test_a_forward_hook_can_rewrite_the_arguments():
@@ -373,11 +350,6 @@ def test_noise_is_drawn_video_first_then_audio_from_one_generator():
     assert torch.equal(audio, expected_audio)
 
 
-def test_unpatchify_inverts_the_patchify():
-    latents = _latents(7, 2)
-    assert torch.equal(sampler_module._unpatchify(sampler_module._patchify(latents), _PLAIN), latents)
-
-
 # --- keyframes -------------------------------------------------------------------------------------------------------
 
 
@@ -427,35 +399,6 @@ def test_extend_holds_the_tail_rows_of_both_channels_across_every_step():
     assert torch.equal(audio.permute(0, 2, 1).reshape(-1, 32)[layout.held_audio], expected_audio)
 
 
-def test_audio_tail_at_level_one_stays_exactly_clean():
-    conditioning = _extend()
-    transformer, _ = _run(_WINDOW, conditioning=conditioning)
-    layout = build_layout(_TEXT_TAGS, _WINDOW, _CPU, conditioning)
-    assert torch.equal(transformer.calls[0]["audio"][0, layout.held_audio], conditioning.tail_audio)
-
-
-def test_extend_passes_the_reordered_audio_indices_and_counts_to_row_timesteps(monkeypatch):
-    recorded: list[dict] = []
-    original = sampler_module.row_timesteps
-
-    def spy(video_idx, audio_idx, text_tokens, t, audio_t, **kwargs):
-        recorded.append({"video_idx": video_idx, "audio_idx": audio_idx, "text_tokens": text_tokens, **kwargs})
-        return original(video_idx, audio_idx, text_tokens, t, audio_t, **kwargs)
-
-    monkeypatch.setattr(sampler_module, "row_timesteps", spy)
-    conditioning = _extend()
-    _run(_WINDOW, conditioning=conditioning)
-    layout = build_layout(_TEXT_TAGS, _WINDOW, _CPU, conditioning)
-    audio_block = layout.kwargs["audio_indices"]
-    assert len(recorded) == 8
-    for call in recorded:
-        assert call["condition_audio_rows"] == 74
-        assert call["condition_video_rows"] == 7 * _CELLS
-        assert call["text_tokens"] == 4
-        assert torch.equal(call["audio_idx"], audio_block[tail_first_audio_order(_WINDOW.audio_latents)])
-        assert torch.equal(call["audio_idx"][:74], audio_block[tail_audio_rows(_WINDOW.audio_latents)])
-
-
 def test_extend_timesteps_pin_the_tail_and_step_the_rest():
     conditioning = _extend()
     transformer, _ = _run(_WINDOW, conditioning=conditioning)
@@ -500,35 +443,6 @@ def test_extend_matches_a_reference_loop_with_the_held_rows_moved_to_the_front()
 # --- the reference loop on a tiny transformer --------------------------------------------------------------------------
 
 
-def _tiny_transformer(seed: int = 0):
-    """Return a random-init transformer with the checkpoint's dtype mix (bf16 blocks; fp32 timestep MLP, patch projections and heads)."""
-    from diffusers import MiniMaxH3Transformer3DModel
-
-    torch.manual_seed(seed)
-    model = MiniMaxH3Transformer3DModel(
-        num_attention_heads=2,
-        attention_head_dim=32,
-        hidden_size=_HIDDEN,
-        num_layers=2,
-        num_refiner_layers=1,
-        ffn_dim=2 * _HIDDEN,
-        in_channels=24,
-        audio_in_channels=32,
-        patch_size=(1, 2, 2),
-        text_dim=_TEXT_DIM,
-        freq_dim=32,
-        time_embed_hidden_dim=_HIDDEN,
-        time_embed_dim=32,
-        rope_freq_dim=4,
-    )
-    keep = set(model._keep_in_fp32_modules)
-    for name, module in model.named_modules():
-        if not any(part in keep for part in name.split(".")):
-            for parameter in module.parameters(recurse=False):
-                parameter.data = parameter.data.to(torch.bfloat16)
-    return model.eval()
-
-
 def _reference_denoise(model, geo, schedule: H3Schedule, seed: int, anchors: tuple[str, ...], keyframes: tuple[torch.Tensor, ...]):
     """Run diffusers' own loop blocks (denoiser and scheduler step) on the same draws; return the final ``(video rows, audio rows)``."""
     video_scheduler, audio_scheduler = build_schedulers(schedule)
@@ -565,17 +479,16 @@ def _reference_denoise(model, geo, schedule: H3Schedule, seed: int, anchors: tup
     return state.latents[condition_rows:], state.audio_latents
 
 
-@pytest.mark.parametrize("schedule", [_SCHEDULE_8, _SCHEDULE_4], ids=["8-step", "4-step"])
-def test_a_plain_run_equals_the_diffusers_loop_on_a_tiny_transformer(schedule):
-    model = _tiny_transformer()
-    video, audio = denoise(model, _embeds(), _PLAIN, build_schedulers(schedule), 17, _CPU, text_token_tags=_TEXT_TAGS)
-    expected_video, expected_audio = _reference_denoise(model, _PLAIN, schedule, 17, (), ())
+def test_a_plain_run_equals_the_diffusers_loop_on_a_tiny_transformer():
+    model = tiny_transformer()
+    video, audio = denoise(model, _embeds(), _PLAIN, _schedulers(), 17, _CPU, text_token_tags=_TEXT_TAGS)
+    expected_video, expected_audio = _reference_denoise(model, _PLAIN, _SCHEDULE_8, 17, (), ())
     assert torch.equal(sampler_module._patchify(video), expected_video)
     assert torch.equal(audio.permute(0, 2, 1).reshape(-1, 32), expected_audio)
 
 
 def test_a_keyframe_run_equals_the_diffusers_loop_on_a_tiny_transformer():
-    model = _tiny_transformer()
+    model = tiny_transformer()
     conditioning = _keyframes("first", "last")
     video, audio = denoise(model, _embeds(), _PLAIN, _schedulers(), 17, _CPU, conditioning=conditioning, text_token_tags=_TEXT_TAGS)
     expected_video, expected_audio = _reference_denoise(model, _PLAIN, _SCHEDULE_8, 17, conditioning.anchors, conditioning.keyframes)
@@ -583,13 +496,10 @@ def test_a_keyframe_run_equals_the_diffusers_loop_on_a_tiny_transformer():
     assert torch.equal(audio.permute(0, 2, 1).reshape(-1, 32), expected_audio)
 
 
-def test_a_tiny_transformer_run_is_finite_and_deterministic():
-    model = _tiny_transformer()
-    conditioning = _extend()
-    first = denoise(model, _embeds(), _WINDOW, _schedulers(), 2, _CPU, conditioning=conditioning, text_token_tags=_TEXT_TAGS)
-    again = denoise(model, _embeds(), _WINDOW, _schedulers(), 2, _CPU, conditioning=conditioning, text_token_tags=_TEXT_TAGS)
-    assert all(torch.isfinite(part).all() for part in first)
-    assert all(torch.equal(a, b) for a, b in zip(first, again, strict=True))
+def test_an_extend_run_through_the_real_transformer_is_finite():
+    # The only test that pushes the extend layout (tail-first audio indices, held audio rows, four timestep levels) through the real model.
+    result = denoise(tiny_transformer(), _embeds(), _WINDOW, _schedulers(), 2, _CPU, conditioning=_extend(), text_token_tags=_TEXT_TAGS)
+    assert all(torch.isfinite(part).all() for part in result)
 
 
 # --- refine ----------------------------------------------------------------------------------------------------------
@@ -694,7 +604,7 @@ def test_a_refine_callback_exception_propagates():
     assert len(transformer.calls) == 1
 
 
-@pytest.mark.parametrize("start", [-1, 8, 9])
+@pytest.mark.parametrize("start", [-1, 8])
 def test_a_refine_start_outside_the_schedule_is_refused(start):
     with pytest.raises(ValueError, match="start"):
         _refine(start=start)

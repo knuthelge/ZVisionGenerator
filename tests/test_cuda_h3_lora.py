@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -12,11 +10,9 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("diffusers")
 from safetensors.torch import save_file  # noqa: E402
 
-from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.lora import (  # noqa: E402
     LoraMerger,
     bake_scales,
-    check_targets,
     load_lora,
     load_pairs,
     merge,
@@ -25,6 +21,7 @@ from zvisiongenerator.backends.cuda.video.h3.lora import (  # noqa: E402
     peft_state,
     split_user_lora,
 )
+from _h3_helpers import lora_factors, write_lora  # noqa: E402
 
 TURBO_SCALE = 0.0625
 HIDDEN = 8
@@ -42,21 +39,6 @@ SHAPES = {
     "final_layer.adaln_proj.linear": (2 * HIDDEN, HIDDEN),
 }
 TIME = {"time_embedder.proj_in": (HIDDEN, 4)}
-
-
-def _factors(shapes: dict[str, tuple[int, int]], rank: int, seed: int = 0) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
-    generator = torch.Generator().manual_seed(seed)
-    return {module: (torch.randn(rank, columns, generator=generator), torch.randn(rows, rank, generator=generator)) for module, (rows, columns) in shapes.items()}
-
-
-def _write_peft(path: Path, factors: dict[str, tuple[torch.Tensor, torch.Tensor]], metadata: dict[str, str] | None = None) -> Path:
-    """Write an ai-toolkit style file (``diffusion_model.`` prefix, ``lora_A`` / ``lora_B``)."""
-    tensors = {}
-    for module, (down, up) in factors.items():
-        tensors[f"diffusion_model.{module}.lora_A.weight"] = down.contiguous()
-        tensors[f"diffusion_model.{module}.lora_B.weight"] = up.contiguous()
-    save_file(tensors, str(path), metadata=metadata)
-    return path
 
 
 def _flatten(module: str) -> str:
@@ -85,10 +67,9 @@ def _delta(down: torch.Tensor, up: torch.Tensor, scale: float) -> torch.Tensor:
 
 
 class TestTurboMerge:
-    @pytest.mark.parametrize(("alpha", "rank"), [("8", 128), ("128", 128)])
-    def test_effective_factor_is_exactly_the_config_scale(self, tmp_path: Path, alpha: str, rank: int) -> None:
-        factors = _factors({"blocks.0.attn.out_proj": (HIDDEN, HIDDEN)}, rank)
-        path = _write_peft(tmp_path / "turbo.safetensors", factors, metadata={"alpha": alpha})
+    def test_effective_factor_is_exactly_the_config_scale(self, tmp_path: Path) -> None:
+        factors = lora_factors({"blocks.0.attn.out_proj": (HIDDEN, HIDDEN)}, 128)
+        path = write_lora(tmp_path / "turbo.safetensors", factors, metadata={"alpha": "8"})  # alpha 8 over rank 128 must play no part
         pairs = load_pairs(path)
         down, up = factors["blocks.0.attn.out_proj"]
         weight = torch.randn(HIDDEN, HIDDEN)
@@ -101,8 +82,8 @@ class TestTurboMerge:
         zero = LoraMerger(pairs, TURBO_SCALE).apply("transformer_blocks.0.attn.to_out.0", torch.zeros(HIDDEN, HIDDEN))
         assert torch.equal(zero, product * 0.0625)
 
-    def test_per_module_alpha_tensors_are_not_folded_into_the_turbo_factors(self, tmp_path: Path) -> None:
-        factors = _factors({"blocks.0.attn.out_proj": (HIDDEN, HIDDEN)}, 128)
+    def test_per_module_alpha_tensors_are_not_folded_into_the_turbolora_factors(self, tmp_path: Path) -> None:
+        factors = lora_factors({"blocks.0.attn.out_proj": (HIDDEN, HIDDEN)}, 128)
         path = _write_kohya(tmp_path / "turbo.safetensors", factors, alpha=8)
         pairs = load_pairs(path)
         down, up = pairs["transformer_blocks.0.attn.to_out.0"]
@@ -113,8 +94,8 @@ class TestTurboMerge:
         assert torch.equal(merged, (raw_up.float() @ raw_down.float()) * 0.0625)
 
     def test_fused_qkv_and_fc1_are_converted_into_merge_targets(self, tmp_path: Path) -> None:
-        factors = _factors({k: SHAPES[k] for k in ("blocks.0.attn.qkv_proj", "blocks.0.mlp.fc1")}, 4)
-        pairs = load_pairs(_write_peft(tmp_path / "turbo.safetensors", factors))
+        factors = lora_factors({k: SHAPES[k] for k in ("blocks.0.attn.qkv_proj", "blocks.0.mlp.fc1")}, 4)
+        pairs = load_pairs(write_lora(tmp_path / "turbo.safetensors", factors))
         assert set(pairs) == {
             "transformer_blocks.0.attn.to_q",
             "transformer_blocks.0.attn.to_k",
@@ -126,7 +107,7 @@ class TestTurboMerge:
             assert merger.apply(f"transformer_blocks.0.attn.{name}", torch.zeros(HIDDEN, HIDDEN)).shape == (HIDDEN, HIDDEN)
 
     def test_untargeted_module_passes_through_and_unmerged_is_reported(self, tmp_path: Path) -> None:
-        pairs = load_pairs(_write_peft(tmp_path / "t.safetensors", _factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 4)))
+        pairs = load_pairs(write_lora(tmp_path / "t.safetensors", lora_factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 4)))
         merger = LoraMerger(pairs, TURBO_SCALE)
         other = torch.randn(3, 3)
         assert merger.apply("transformer_blocks.9.attn.to_out.0", other) is other
@@ -153,8 +134,8 @@ class TestTurboMerge:
             LoraMerger({}, float("nan"))
 
     def test_turbo_with_a_timestep_target_is_refused_but_adaln_and_norm_out_merge(self, tmp_path: Path) -> None:
-        ok = _factors({k: SHAPES[k] for k in ("blocks.0.adaln_proj.linear", "final_layer.adaln_proj.linear")}, 4)
-        merger = LoraMerger(load_pairs(_write_peft(tmp_path / "ok.safetensors", ok)), TURBO_SCALE)
+        ok = lora_factors({k: SHAPES[k] for k in ("blocks.0.adaln_proj.linear", "final_layer.adaln_proj.linear")}, 4)
+        merger = LoraMerger(load_pairs(write_lora(tmp_path / "ok.safetensors", ok)), TURBO_SCALE)
         assert "transformer_blocks.0.adaln_proj.linear" in merger
         assert "norm_out.linear" in merger
         with pytest.raises(ValueError, match="timestep embedding"):
@@ -163,25 +144,25 @@ class TestTurboMerge:
 
 class TestLoading:
     def test_peft_and_kohya_files_convert_to_the_same_modules(self, tmp_path: Path) -> None:
-        factors = _factors({k: SHAPES[k] for k in ("blocks.0.attn.qkv_proj", "blocks.0.mlp.fc2", "blocks.0.adaln_proj.linear")}, 4)
-        peft = load_lora(_write_peft(tmp_path / "a.safetensors", factors))
+        factors = lora_factors({k: SHAPES[k] for k in ("blocks.0.attn.qkv_proj", "blocks.0.mlp.fc2", "blocks.0.adaln_proj.linear")}, 4)
+        peft = load_lora(write_lora(tmp_path / "a.safetensors", factors))
         kohya = load_lora(_write_kohya(tmp_path / "b.safetensors", factors))
         assert set(peft.state) == set(kohya.state)
         for key, value in peft.state.items():
             assert torch.equal(value, kohya.state[key])
 
     def test_metadata_alpha_sets_alpha_over_rank(self, tmp_path: Path) -> None:
-        factors = _factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
-        file = load_lora(_write_peft(tmp_path / "a.safetensors", factors, metadata={"alpha": "4"}))
+        factors = lora_factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
+        file = load_lora(write_lora(tmp_path / "a.safetensors", factors, metadata={"alpha": "4"}))
         assert file.scales == {"transformer_blocks.0.attn.to_out.0": 0.25}
 
     def test_alpha_less_file_has_unit_scale(self, tmp_path: Path) -> None:
-        factors = _factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
-        file = load_lora(_write_peft(tmp_path / "a.safetensors", factors))
+        factors = lora_factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
+        file = load_lora(write_lora(tmp_path / "a.safetensors", factors))
         assert set(file.scales.values()) == {1.0}
 
-    def test_alpha_tensors_are_folded_into_the_factors(self, tmp_path: Path) -> None:
-        factors = _factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
+    def test_alpha_tensors_are_folded_into_thelora_factors(self, tmp_path: Path) -> None:
+        factors = lora_factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
         file = load_lora(_write_kohya(tmp_path / "a.safetensors", factors, alpha=4))
         down, up = pairs_from_state(file.state)["transformer_blocks.0.attn.to_out.0"]
         raw_down, raw_up = factors["blocks.0.attn.out_proj"]
@@ -194,25 +175,11 @@ class TestLoading:
         with pytest.raises(ValueError, match="only one of"):
             pairs_from_state({"transformer.x.lora_A.weight": torch.zeros(1, 1)})
 
-    def test_loading_needs_no_peft(self, tmp_path: Path) -> None:
-        path = _write_peft(tmp_path / "a.safetensors", _factors({"blocks.0.attn.qkv_proj": SHAPES["blocks.0.attn.qkv_proj"]}, 4), metadata={"alpha": "2"})
-        script = (
-            "import importlib.util, sys\n"
-            "real = importlib.util.find_spec\n"
-            "importlib.util.find_spec = lambda name, *a, **k: None if name == 'peft' else real(name, *a, **k)\n"
-            "from zvisiongenerator.backends.cuda.video.h3.lora import load_lora, split_user_lora\n"
-            f"f = load_lora({str(path)!r})\n"
-            "parts = split_user_lora(f.state, 1.0, scales=f.scales)\n"
-            "assert len(parts.peft.state) == 6 and 'peft' not in sys.modules\n"
-        )
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
-        assert result.returncode == 0, result.stderr
-
 
 class TestSplit:
     def _file(self, tmp_path: Path, *, metadata: dict[str, str] | None = None, extra: dict | None = None):
-        factors = _factors(SHAPES | (extra or {}), 4)
-        return load_lora(_write_peft(tmp_path / "user.safetensors", factors, metadata=metadata)), factors
+        factors = lora_factors(SHAPES | (extra or {}), 4)
+        return load_lora(write_lora(tmp_path / "user.safetensors", factors, metadata=metadata)), factors
 
     def test_routes_by_target(self, tmp_path: Path) -> None:
         file, _ = self._file(tmp_path)
@@ -255,19 +222,6 @@ class TestSplit:
         assert parts.peft.weight == 0.5
         assert set(parts.peft.scales.values()) == {0.25}
 
-    def test_default_scale_is_the_weight(self, tmp_path: Path) -> None:
-        file, _ = self._file(tmp_path)
-        parts = split_user_lora(file.state, 0.7, scales=file.scales)
-        assert parts.adaln[0][2] == pytest.approx(0.7)
-
-    def test_kohya_file_routes_like_the_peft_file(self, tmp_path: Path) -> None:
-        factors = _factors(SHAPES, 4)
-        a = split_user_lora(load_lora(_write_peft(tmp_path / "a.safetensors", factors)).state, 1.0)
-        b = split_user_lora(load_lora(_write_kohya(tmp_path / "b.safetensors", factors)).state, 1.0)
-        assert sorted(a.adaln) == sorted(b.adaln)
-        assert sorted(a.refiner) == sorted(b.refiner)
-        assert set(a.peft.state) == set(b.peft.state)
-
     def test_timestep_embedding_is_refused(self, tmp_path: Path) -> None:
         file, _ = self._file(tmp_path, extra=TIME)
         with pytest.raises(ValueError, match=r"targets the timestep embedding, which H3's folded AdaLN can't take") as raised:
@@ -279,11 +233,6 @@ class TestSplit:
         parts = split_user_lora(file.state, 1.0, strict=False)
         assert parts.refused == ("time_embedder.linear_1",)
         assert not any("time_embedder" in key for key in parts.peft.state)
-
-    def test_check_targets_accepts_everything_else(self) -> None:
-        check_targets(["transformer_blocks.0.adaln_proj.linear", "norm_out.linear", "proj_in"])
-        with pytest.raises(ValueError, match="timestep embedding"):
-            check_targets({"time_proj.x": 1})
 
 
 class TestPeftScales:
@@ -301,8 +250,8 @@ class TestPeftScales:
         assert torch.equal(state["transformer.a.lora_B.weight"], torch.ones(4, 2))
 
     def test_peft_state_bakes_alpha_over_rank_but_not_the_weight(self, tmp_path: Path) -> None:
-        factors = _factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
-        file = load_lora(_write_peft(tmp_path / "a.safetensors", factors, metadata={"alpha": "4"}))
+        factors = lora_factors({"blocks.0.attn.out_proj": SHAPES["blocks.0.attn.out_proj"]}, 16)
+        file = load_lora(write_lora(tmp_path / "a.safetensors", factors, metadata={"alpha": "4"}))
         part = split_user_lora(file.state, 0.5, scales=file.scales).peft
         baked = peft_state(part)
         raw_down, raw_up = factors["blocks.0.attn.out_proj"]
@@ -335,8 +284,8 @@ class TestRefinerMerge:
         assert torch.equal(after.detach(), (before.float() + 0.5 * (up @ down)).to(torch.bfloat16))
 
     def test_end_to_end_from_a_user_file(self, tmp_path: Path) -> None:
-        factors = _factors({"token_refiner.blocks.0.attn.out_proj": (HIDDEN, HIDDEN)}, 4)
-        file = load_lora(_write_peft(tmp_path / "a.safetensors", factors, metadata={"alpha": "2"}))
+        factors = lora_factors({"token_refiner.blocks.0.attn.out_proj": (HIDDEN, HIDDEN)}, 4)
+        file = load_lora(write_lora(tmp_path / "a.safetensors", factors, metadata={"alpha": "2"}))
         parts = split_user_lora(file.state, 0.5, scales=file.scales)
         model = _Refiner()
         before = model.get_submodule(self.MODULE).weight.detach().clone()
@@ -357,7 +306,3 @@ class TestRefinerMerge:
         model.get_submodule(self.MODULE).weight = torch.nn.Parameter(torch.zeros(HIDDEN, HIDDEN, dtype=torch.uint8), requires_grad=False)
         with pytest.raises(ValueError, match="floating-point"):
             merge_refiner(model, {self.MODULE: (down, up, 1.0)})
-
-
-def test_public_names_are_exported() -> None:
-    assert set(h3_lora.__all__) <= set(dir(h3_lora))

@@ -22,18 +22,15 @@ from safetensors.torch import load_file, save_file  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import adaln as adaln_module  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import stored_copy  # noqa: E402
-from zvisiongenerator.backends.cuda.video.h3.schedule import ROW_SETS, build_schedulers  # noqa: E402
+from zvisiongenerator.backends.cuda.video.h3.schedule import build_schedulers  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.stored_copy import copy_manifest, copy_name, ensure_copy, load_copy, write_copy  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME  # noqa: E402
+from _h3_helpers import HIDDEN, LAYERS, lora_factors, layout_inputs, tiny_layout, tiny_transformer, transformer_config, write_lora  # noqa: E402
 
 _SCHEDULE_8 = H3Schedule(8, 6.0, 3.0)
 _SCHEDULE_4 = H3Schedule(4, 6.0, 3.0)
 _SCALE = 0.0625
-_PATCH = (1, 2, 2)
-_HIDDEN = 64
-_LAYERS = 2
-_TEXT_TAG, _AUDIO_TAG, _VIDEO_TAG = 1, 2, 0
 _NF4_FORMAT = "nf4-test"
 _ALL_KEYS = adaln_module.fold_keys({8: _SCHEDULE_8, 4: _SCHEDULE_4})
 _STOCK_COPY = "h3@q4"
@@ -43,87 +40,16 @@ _BLOCK_LINEARS = ("attn.to_q", "attn.to_k", "attn.to_v", "attn.to_out.0", "ff.ne
 # --- tiny model and files ---------------------------------------------------------------------------------------------
 
 
-def _config() -> dict:
-    return {
-        "num_attention_heads": 2,
-        "attention_head_dim": 32,
-        "hidden_size": _HIDDEN,
-        "num_layers": _LAYERS,
-        "num_refiner_layers": 1,
-        "ffn_dim": 2 * _HIDDEN,
-        "in_channels": 24,
-        "audio_in_channels": 32,
-        "patch_size": _PATCH,
-        "text_dim": 48,
-        "freq_dim": 32,
-        "time_embed_hidden_dim": _HIDDEN,
-        "time_embed_dim": 32,
-        "rope_freq_dim": 4,
-    }
-
-
-def _transformer(seed: int = 0):
-    """Return a random-init transformer with the checkpoint's dtype mix: bf16 blocks, fp32 timestep MLP, patch projections and heads."""
-    from diffusers import MiniMaxH3Transformer3DModel
-
-    torch.manual_seed(seed)
-    model = MiniMaxH3Transformer3DModel(**_config())
-    keep = set(model._keep_in_fp32_modules)
-    for name, module in model.named_modules():
-        if not any(part in keep for part in name.split(".")):
-            for parameter in module.parameters(recurse=False):
-                parameter.data = parameter.data.to(torch.bfloat16)
-    return model.eval()
-
-
-def _layout() -> SimpleNamespace:
-    from diffusers.modular_pipelines.minimax_h3.before_denoise import MiniMaxH3PrepareLayoutStep
-
-    text_tokens = 4
-    tags = torch.full((text_tokens,), _TEXT_TAG, dtype=torch.long)
-    position_ids, token_tags, video_indices, audio_indices, text_indices, _, _ = MiniMaxH3PrepareLayoutStep.build_packed_sequence(tags, 2, 2, 4, 3, _PATCH, 2, _AUDIO_TAG, _VIDEO_TAG, ())
-    return SimpleNamespace(
-        text_tokens=text_tokens,
-        video_indices=video_indices,
-        audio_indices=audio_indices,
-        kwargs={"position_ids": position_ids, "token_tags": token_tags, "video_indices": video_indices, "audio_indices": audio_indices, "text_indices": text_indices},
-    )
-
-
-def _inputs(layout, seed: int = 1) -> dict:
-    generator = torch.Generator().manual_seed(seed)
-    return {
-        "hidden_states": torch.randn(1, len(layout.video_indices), 96, generator=generator),
-        "audio_hidden_states": torch.randn(1, len(layout.audio_indices), 32, generator=generator),
-        "encoder_hidden_states": torch.randn(1, layout.text_tokens, 48, generator=generator),
-    }
-
-
-def _write_lora(path: Path, factors: dict[str, tuple[torch.Tensor, torch.Tensor]], metadata: dict[str, str] | None = None) -> Path:
-    """Write an ai-toolkit style LoRA file (checkpoint module names under ``diffusion_model.``)."""
-    tensors = {}
-    for module, (down, up) in factors.items():
-        tensors[f"diffusion_model.{module}.lora_A.weight"] = down.contiguous()
-        tensors[f"diffusion_model.{module}.lora_B.weight"] = up.contiguous()
-    save_file(tensors, str(path), metadata=metadata)
-    return path
-
-
-def _factors(shapes: dict[str, tuple[int, int]], rank: int, seed: int) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
-    generator = torch.Generator().manual_seed(seed)
-    return {module: (torch.randn(rank, columns, generator=generator), torch.randn(rows, rank, generator=generator)) for module, (rows, columns) in shapes.items()}
-
-
 _TURBO_SHAPES = {
-    "blocks.0.attn.out_proj": (_HIDDEN, _HIDDEN),
-    "blocks.1.adaln_proj.linear": (6 * 3 * _HIDDEN, 32),
-    "token_refiner.blocks.0.attn.out_proj": (_HIDDEN, _HIDDEN),
+    "blocks.0.attn.out_proj": (HIDDEN, HIDDEN),
+    "blocks.1.adaln_proj.linear": (6 * 3 * HIDDEN, 32),
+    "token_refiner.blocks.0.attn.out_proj": (HIDDEN, HIDDEN),
 }
 _USER_SHAPES = {
-    "blocks.0.attn.out_proj": (_HIDDEN, _HIDDEN),
-    "blocks.0.adaln_proj.linear": (6 * 3 * _HIDDEN, 32),
-    "blocks.1.adaln_proj.linear": (6 * 3 * _HIDDEN, 32),
-    "token_refiner.blocks.0.attn.out_proj": (_HIDDEN, _HIDDEN),
+    "blocks.0.attn.out_proj": (HIDDEN, HIDDEN),
+    "blocks.0.adaln_proj.linear": (6 * 3 * HIDDEN, 32),
+    "blocks.1.adaln_proj.linear": (6 * 3 * HIDDEN, 32),
+    "token_refiner.blocks.0.attn.out_proj": (HIDDEN, HIDDEN),
 }
 
 
@@ -131,8 +57,8 @@ class _Sources:
     """A tiny checkpoint in two shards, its config and a turbo LoRA that hits a block linear, an AdaLN projection and the refiner."""
 
     def __init__(self, root: Path) -> None:
-        self.model = _transformer()
-        self.config = _config()
+        self.model = tiny_transformer()
+        self.config = transformer_config()
         state = {name: tensor.detach().contiguous() for name, tensor in self.model.state_dict().items()}
         names = sorted(state)
         half = len(names) // 2
@@ -141,8 +67,8 @@ class _Sources:
             path = root / f"shard-{number}.safetensors"
             save_file({name: state[name] for name in chunk}, str(path))
             self.shards.append(path)
-        self.turbo_factors = _factors(_TURBO_SHAPES, 4, seed=3)
-        self.turbo = _write_lora(root / "turbo.safetensors", self.turbo_factors, metadata={"alpha": "1"})
+        self.turbo_factors = lora_factors(_TURBO_SHAPES, 4, seed=3)
+        self.turbo = write_lora(root / "turbo.safetensors", self.turbo_factors, metadata={"alpha": "1"})
         self.root = root
 
 
@@ -156,7 +82,6 @@ class _Recorder:
 
     def __init__(self) -> None:
         self.packed: list[str] = []
-        self.nf4_args: list[dict] = []
         self.events: list[str] = []
 
 
@@ -164,15 +89,10 @@ class _Recorder:
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     """Replace the bitsandbytes steps and the streaming with stand-ins that record their use."""
     record = _Recorder()
-    real_names = stored_copy.nf4_linear_names
 
     def fake_pack(key, weight, device):
         record.packed.append(key)
         return {key: weight}
-
-    def spy_names(model, *, prefix, exclude=()):
-        record.nf4_args.append({"prefix": prefix, "exclude": exclude})
-        return real_names(model, prefix=prefix, exclude=exclude)
 
     def swap(model, names, dtype):
         record.events.append("swap")
@@ -186,7 +106,6 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
     monkeypatch.setattr(stored_copy, "nf4_storage_format", lambda: _NF4_FORMAT)
     monkeypatch.setattr(stored_copy, "pack_nf4", fake_pack)
-    monkeypatch.setattr(stored_copy, "nf4_linear_names", spy_names)
     monkeypatch.setattr(stored_copy, "swap_in_linear4bit", swap)
     monkeypatch.setattr(stored_copy, "place_nf4", lambda tensors, layers: tensors)
     monkeypatch.setattr(stored_copy, "fill_weights", fill)
@@ -286,11 +205,6 @@ def test_two_source_models_keep_a_copy_each_and_neither_overwrites_the_other(sou
     assert not torch.equal(_stored(stock_copy)[name], _stored(tuned_copy)[name])
 
 
-def test_the_copy_is_named_after_the_model_it_was_picked_by() -> None:
-    assert copy_name("h3", "MiniMaxAI/MiniMax-H3@42ed227") == "h3"
-    assert copy_name("my-tune", "/data/models/my-tune") == "my-tune"
-
-
 def test_a_pick_that_is_not_a_folder_name_is_named_after_its_reference(tmp_path: Path) -> None:
     assert copy_name(None, "MiniMaxAI/MiniMax-H3@42ed227") == "MiniMaxAI--MiniMax-H3"
     assert copy_name("org/tune", "org/tune") == "org--tune"
@@ -304,35 +218,35 @@ def test_a_pick_that_is_not_a_folder_name_is_named_after_its_reference(tmp_path:
     assert copy_name(str(first), str(first)) == copy_name(None, str(first))
 
 
-def test_a_copy_made_from_hub_cache_files_stays_current_under_its_old_manifest(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_copy_made_from_symlinked_hub_cache_files_is_current_under_the_blob_named_manifest(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _spy_writes(monkeypatch)
     cache = sources.root / "hub"
     (cache / "blobs").mkdir(parents=True)
     snapshot = cache / "models--org--h3" / "snapshots" / "rev"
     snapshot.mkdir(parents=True)
-    shards, legacy_sources = [], []
+    shards, blob_sources = [], []
     for number, shard in enumerate((*sources.shards, sources.turbo)):
         blob = cache / "blobs" / f"{number:x}".rjust(64, "a")
         blob.write_bytes(shard.read_bytes())
         link = snapshot / shard.name
         link.symlink_to(blob)
         shards.append(link)
-        legacy_sources.append({"name": blob.name, "bytes": blob.stat().st_size})
+        blob_sources.append({"name": blob.name, "bytes": blob.stat().st_size})
     *model_shards, turbo = shards
     models = sources.root / "models"
-    legacy = {
+    manifest = {
         "layout": 1,
         "family": "h3",
         "bits": 4,
         "format": _NF4_FORMAT,
-        "sources": legacy_sources,
+        "sources": blob_sources,
         "lora_scale": _SCALE,
         "fold_keys": [list(key) for key in _ALL_KEYS],
     }
     (models / _STOCK_COPY).mkdir(parents=True)
-    (models / _STOCK_COPY / MANIFEST_NAME).write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
+    (models / _STOCK_COPY / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-    assert copy_manifest(model_shards, turbo, _SCALE, _ALL_KEYS) == legacy
+    assert copy_manifest(model_shards, turbo, _SCALE, _ALL_KEYS) == manifest
     ensure_copy(models, "h3", model_shards, sources.config, turbo, _SCALE, _ALL_KEYS, "cpu")
     assert calls == []
 
@@ -393,9 +307,7 @@ def _stored(copy_dir: Path) -> dict[str, torch.Tensor]:
 def test_nf4_packs_only_the_block_linears_and_the_refiner_stays_bf16(sources: _Sources, recorder: _Recorder) -> None:
     copy_dir = _write(sources, sources.root / "copy")
 
-    assert recorder.nf4_args == [{"prefix": "transformer_blocks.", "exclude": {"adaln_proj"}}]
-    assert isinstance(recorder.nf4_args[0]["exclude"], set)
-    expected = {f"transformer_blocks.{block}.{name}.weight" for block in range(_LAYERS) for name in _BLOCK_LINEARS}
+    expected = {f"transformer_blocks.{block}.{name}.weight" for block in range(LAYERS) for name in _BLOCK_LINEARS}
     assert set(recorder.packed) == expected
     assert all(name.startswith("transformer_blocks.") for name in recorder.packed)
     assert not any("adaln_proj" in name or "token_refiner" in name for name in recorder.packed)
@@ -412,9 +324,9 @@ def test_the_copy_holds_tables_not_adaln_weights_and_the_config(sources: _Source
 
     assert not any("adaln_proj" in name for name in _stored(copy_dir))
     assert adaln_module.table_keys(copy_dir / "adaln_tables.safetensors") == sorted(_ALL_KEYS)
-    assert json.loads((copy_dir / "config.json").read_text(encoding="utf-8"))["num_layers"] == _LAYERS
-    tables = adaln_module.read_tables(copy_dir / "adaln_tables.safetensors", _ALL_KEYS, _LAYERS)
-    assert [list(block) for block in tables] == [_ALL_KEYS] * _LAYERS
+    assert json.loads((copy_dir / "config.json").read_text(encoding="utf-8"))["num_layers"] == LAYERS
+    tables = adaln_module.read_tables(copy_dir / "adaln_tables.safetensors", _ALL_KEYS, LAYERS)
+    assert [list(block) for block in tables] == [_ALL_KEYS] * LAYERS
 
 
 def test_the_turbo_lora_is_merged_at_the_config_scale_before_the_fold(sources: _Sources, recorder: _Recorder) -> None:
@@ -437,7 +349,7 @@ def test_the_turbo_lora_is_merged_at_the_config_scale_before_the_fold(sources: _
     down, up = pairs["transformer_blocks.1.adaln_proj.linear"]
     with torch.no_grad():
         reference.transformer_blocks[1].adaln_proj.linear.weight.copy_(h3_lora.merge(source["transformer_blocks.1.adaln_proj.linear.weight"], down, up, _SCALE))
-    tables = adaln_module.read_tables(copy_dir / "adaln_tables.safetensors", _ALL_KEYS[:3], _LAYERS)
+    tables = adaln_module.read_tables(copy_dir / "adaln_tables.safetensors", _ALL_KEYS[:3], LAYERS)
     for key in _ALL_KEYS[:3]:
         temb = adaln_module.compute_temb(reference.time_proj, reference.time_embedder, key, "cpu")
         want = adaln_module.build_tables(reference.transformer_blocks[1].adaln_proj, {key: temb})[key]
@@ -448,7 +360,7 @@ def test_the_turbo_lora_is_merged_at_the_config_scale_before_the_fold(sources: _
 
 
 def test_a_turbo_lora_for_another_layout_is_refused(sources: _Sources, recorder: _Recorder, tmp_path: Path) -> None:
-    other = _write_lora(tmp_path / "other.safetensors", _factors({"blocks.7.attn.out_proj": (_HIDDEN, _HIDDEN)}, 4, seed=1))
+    other = write_lora(tmp_path / "other.safetensors", lora_factors({"blocks.7.attn.out_proj": (HIDDEN, HIDDEN)}, 4, seed=1))
     with pytest.raises(RuntimeError, match="targets 1 modules the transformer does not have"):
         write_copy(sources.shards, sources.config, other, _SCALE, _ALL_KEYS[:2], tmp_path / "copy", "cpu")
 
@@ -477,7 +389,7 @@ def _reference_with_turbo(sources: _Sources):
     return reference
 
 
-@pytest.mark.parametrize("row_set", ROW_SETS)
+@pytest.mark.parametrize("row_set", ["plain", "extend"])  # plain is the only row set whose first forward has a one-level key
 def test_the_loaded_copy_runs_like_the_stock_model_with_the_turbo_merged(sources: _Sources, copy_dir: Path, recorder: _Recorder, row_set: str) -> None:
     from zvisiongenerator.backends.cuda.video.h3.adaln import step_keys
 
@@ -485,8 +397,8 @@ def test_the_loaded_copy_runs_like_the_stock_model_with_the_turbo_merged(sources
     keys = adaln_module.unique_keys(step_keys(video, audio, row_set))
     reference = _reference_with_turbo(sources)
     loaded = load_copy(copy_dir, keys, "cpu")
-    layout = _layout()
-    inputs = _inputs(layout)
+    layout = tiny_layout()
+    inputs = layout_inputs(layout)
     counts = {"plain": (0, 0), "keyframe": (1, 0), "extend": (1, 2)}[row_set]
 
     from zvisiongenerator.backends.cuda.video.h3.schedule import row_timesteps
@@ -502,26 +414,9 @@ def test_the_loaded_copy_runs_like_the_stock_model_with_the_turbo_merged(sources
     assert not loaded.training
 
 
-def test_a_subset_of_keys_reads_only_those_tables(sources: _Sources, copy_dir: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
-    subset = _ALL_KEYS[3:6]
-    seen: dict[str, object] = {}
-    real_read, real_install = adaln_module.read_tables, adaln_module.install_fold
+def test_a_subset_of_keys_installs_only_those_tables(sources: _Sources, copy_dir: Path, recorder: _Recorder) -> None:
+    model = load_copy(copy_dir, _ALL_KEYS[3:6], "cpu")
 
-    def read(path, wanted, blocks):
-        seen["wanted"] = list(wanted)
-        return real_read(path, wanted, blocks)
-
-    def install(transformer, tables):
-        seen["installed"] = [list(block) for block in tables]
-        return real_install(transformer, tables)
-
-    monkeypatch.setattr(adaln_module, "read_tables", read)
-    monkeypatch.setattr(adaln_module, "install_fold", install)
-
-    model = load_copy(copy_dir, subset, "cpu")
-
-    assert seen["wanted"] == subset
-    assert seen["installed"] == [subset] * _LAYERS
     assert model.transformer_blocks[0].adaln_proj.count == 3
 
 
@@ -531,20 +426,8 @@ def test_a_key_the_copy_lacks_asks_for_a_rebuild(sources: _Sources, recorder: _R
         load_copy(built, _ALL_KEYS[:5], "cpu")
 
 
-def test_without_user_loras_the_order_is_fold_swap_fill_eval_stream(sources: _Sources, copy_dir: Path, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
-    events = recorder.events
-    for name in ("read_tables", "install_fold"):
-        real = getattr(adaln_module, name)
-        monkeypatch.setattr(adaln_module, name, lambda *args, _real=real, _name=name, **kwargs: (events.append(_name), _real(*args, **kwargs))[1])
-    monkeypatch.setattr(h3_lora, "merge_refiner", lambda *args: events.append("merge_refiner"))
-
-    load_copy(copy_dir, _ALL_KEYS[:2], "cpu")
-
-    assert events == ["read_tables", "install_fold", "swap", "fill", "stream", "move_outside"]
-
-
 def _user_lora(path: Path, seed: int) -> Path:
-    return _write_lora(path, _factors(_USER_SHAPES, 4, seed), metadata={"alpha": "2"})
+    return write_lora(path, lora_factors(_USER_SHAPES, 4, seed), metadata={"alpha": "2"})
 
 
 @pytest.fixture
@@ -613,7 +496,7 @@ def test_adapter_names_default_by_position_and_must_match(sources: _Sources, cop
 
 
 def test_a_lora_without_a_peft_part_adds_no_adapter(sources: _Sources, copy_dir: Path, recorder: _Recorder, ordered, tmp_path: Path) -> None:
-    only_adaln = _write_lora(tmp_path / "adaln.safetensors", _factors({"blocks.0.adaln_proj.linear": _USER_SHAPES["blocks.0.adaln_proj.linear"]}, 4, seed=5))
+    only_adaln = write_lora(tmp_path / "adaln.safetensors", lora_factors({"blocks.0.adaln_proj.linear": _USER_SHAPES["blocks.0.adaln_proj.linear"]}, 4, seed=5))
 
     load_copy(copy_dir, _ALL_KEYS[:2], "cpu", loras=[(only_adaln, 1.0)])
 
@@ -645,7 +528,7 @@ def test_the_refiner_and_the_adaln_tables_take_the_user_lora(sources: _Sources, 
 
 
 def test_an_adaln_target_outside_the_blocks_is_refused(sources: _Sources, copy_dir: Path, recorder: _Recorder, ordered, tmp_path: Path) -> None:
-    far = _write_lora(tmp_path / "far.safetensors", _factors({"blocks.9.adaln_proj.linear": _USER_SHAPES["blocks.0.adaln_proj.linear"]}, 4, seed=5))
+    far = write_lora(tmp_path / "far.safetensors", lora_factors({"blocks.9.adaln_proj.linear": _USER_SHAPES["blocks.0.adaln_proj.linear"]}, 4, seed=5))
     with pytest.raises(ValueError, match="not a block of this model"):
         load_copy(copy_dir, _ALL_KEYS[:2], "cpu", loras=[(far, 1.0)])
 

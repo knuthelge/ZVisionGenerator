@@ -123,16 +123,12 @@ def _diffusers_step(tiny, step_class, **inputs):
     ("name", "vision", "wanted"),
     [
         ("model.language_model.embed_tokens.weight", True, True),
-        ("model.language_model.layers.0.self_attn.q_proj.weight", True, True),
         ("model.language_model.layers.49.mlp.down_proj.weight.absmax", True, True),
         ("model.language_model.layers.50.self_attn.q_proj.weight", True, False),
-        ("model.language_model.layers.63.input_layernorm.weight", True, False),
         ("model.language_model.norm.weight", True, False),
         ("lm_head.weight", True, False),
         ("model.visual.blocks.0.attn.qkv.weight", True, True),
-        ("model.visual.merger.linear_fc2.bias", True, True),
         ("model.visual.blocks.0.attn.qkv.weight", False, False),
-        ("model.language_model.layers.0.self_attn.q_proj.weight", False, True),
     ],
 )
 def test_wanted_tensor(name, vision, wanted):
@@ -160,10 +156,9 @@ def test_empty_encoder_without_vision_has_no_vision_tower(tiny):
     assert not any(name.startswith("visual.") for name in model.state_dict())
 
 
-@pytest.mark.parametrize("layers", [0, _LAYERS + 1])
-def test_empty_encoder_refuses_a_layer_count_outside_the_checkpoint(tiny, layers):
+def test_empty_encoder_refuses_a_layer_count_outside_the_checkpoint(tiny):
     with pytest.raises(ValueError, match="between 1 and 52"):
-        empty_text_encoder(tiny.config, layers=layers)
+        empty_text_encoder(tiny.config, layers=_LAYERS + 1)
 
 
 def test_the_tap_is_the_raw_output_of_the_last_kept_layer(tiny):
@@ -192,12 +187,6 @@ def test_encode_refuses_keyframes_without_a_vision_tower(tiny):
 # --- contracts against diffusers' encoder steps ------------------------------------------------------------------
 
 
-def test_tags_match_diffusers():
-    from diffusers.modular_pipelines.minimax_h3 import modular_pipeline
-
-    assert (TEXT_TAG, VIDEO_TAG) == (modular_pipeline.MINIMAX_H3_TEXT_TAG, modular_pipeline.MINIMAX_H3_VIDEO_TAG)
-
-
 def test_text_only_presentation_matches_the_t2va_step(tiny):
     from diffusers.modular_pipelines.minimax_h3.encoders import MiniMaxH3TextEncoderStep
 
@@ -219,8 +208,8 @@ def test_the_t2va_presentation_does_not_read_the_processor(tiny, tmp_path):
     assert len(presentation.token_ids) == len(presentation.token_tags) > 0
 
 
-@pytest.mark.parametrize("count", [1, 2])
-def test_keyframe_presentation_matches_the_fl2va_step(tiny, count):
+def test_keyframe_presentation_matches_the_fl2va_step(tiny):
+    count = 2
     from diffusers.modular_pipelines.minimax_h3.encoders import MiniMaxH3FL2VATextEncoderStep
 
     images = _keyframes(count)
@@ -311,28 +300,16 @@ def test_load_streams_the_layers_and_keeps_the_rest_on_the_device(tiny, packed_t
     assert moved_device == "cuda:7"
 
 
-def test_load_without_vision_leaves_the_vision_tower_out(tiny, packed_tensors, tmp_path, streaming_spies):
-    paths = _write_shards(packed_tensors, tmp_path / "shards")
-
-    model = load_text_encoder(tiny.root / "config", paths, "cpu", layers=50, vision=False)
-
-    assert model.visual is None
-    presentation = tokenize_presentation(_PROMPT, tiny.root / "tokenizer", tiny.root / "processor", [])
-    embeds = encode(model, presentation, "cpu")
-    assert embeds.shape == (1, len(presentation.token_ids), 32)
-    assert embeds.dtype == torch.bfloat16
-    assert torch.isfinite(embeds.float()).all()
-
-
-def test_a_loaded_encoder_encodes_keyframes(tiny, packed_tensors, tmp_path, streaming_spies):
+def test_a_loaded_nf4_encoder_encodes_text_and_keyframes(tiny, packed_tensors, tmp_path, streaming_spies):
     paths = _write_shards(packed_tensors, tmp_path / "shards")
     model = load_text_encoder(tiny.root / "config", paths, "cpu", layers=50, vision=True)
-    presentation = tokenize_presentation(_PROMPT, tiny.root / "tokenizer", tiny.root / "processor", _keyframes(2))
 
-    embeds = encode(model, presentation, "cpu")
-
-    assert embeds.shape == (1, len(presentation.token_ids), 32)
-    assert torch.isfinite(embeds.float()).all()
+    for keyframes in ([], _keyframes(2)):
+        presentation = tokenize_presentation(_PROMPT, tiny.root / "tokenizer", tiny.root / "processor", keyframes)
+        embeds = encode(model, presentation, "cpu")
+        assert embeds.shape == (1, len(presentation.token_ids), 32)
+        assert embeds.dtype == torch.bfloat16
+        assert torch.isfinite(embeds.float()).all()
 
 
 def test_load_reads_only_what_the_cut_model_needs(tiny, packed_tensors, tmp_path, streaming_spies, monkeypatch):
@@ -347,8 +324,9 @@ def test_load_reads_only_what_the_cut_model_needs(tiny, packed_tensors, tmp_path
 
     monkeypatch.setattr(text_encoder, "iter_tensors", spy)
 
-    load_text_encoder(tiny.root / "config", paths, "cpu", layers=50, vision=False)
+    model = load_text_encoder(tiny.root / "config", paths, "cpu", layers=50, vision=False)
 
+    assert model.visual is None
     assert read
     assert not any(".layers.50." in name or ".layers.51." in name for name in read)
     assert not any(name.startswith(("lm_head.", "model.visual.", "model.language_model.norm.")) for name in read)

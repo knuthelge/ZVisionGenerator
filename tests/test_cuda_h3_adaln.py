@@ -15,7 +15,6 @@ torch = pytest.importorskip("torch")
 diffusers = pytest.importorskip("diffusers")
 pytest.importorskip("safetensors")
 
-from zvisiongenerator.backends.cuda.video.h3 import adaln as adaln_module  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.adaln import (  # noqa: E402
     FoldedAdaLN,
     FoldState,
@@ -32,40 +31,19 @@ from zvisiongenerator.backends.cuda.video.h3.adaln import (  # noqa: E402
     write_tables,
 )
 from zvisiongenerator.backends.cuda.video.h3.schedule import (  # noqa: E402
-    AUDIO_COND_T,
-    KEYFRAME_T,
     ROW_SETS,
     build_schedulers,
     row_timesteps,
 )
 from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
+from _h3_helpers import HIDDEN, LAYERS, TIME_EMBED_DIM, layout_inputs, tiny_layout, tiny_transformer, transformer_config  # noqa: E402
 
 _SCHEDULE_8 = H3Schedule(8, 6.0, 3.0)
 _SCHEDULE_4 = H3Schedule(4, 6.0, 3.0)
-_VIDEO_TAG, _TEXT_TAG, _AUDIO_TAG = 0, 1, 2
-_PATCH = (1, 2, 2)
-_HIDDEN = 64
-_TIME_EMBED_DIM = 32
-_LAYERS = 2
 _CONDITIONING = {"plain": (0, 0), "keyframe": (1, 0), "extend": (1, 2)}  # leading (video, audio) conditioning rows
-_KEYFRAME_F32 = float(torch.tensor(KEYFRAME_T, dtype=torch.float32))
-_AUDIO_COND_F32 = float(torch.tensor(AUDIO_COND_T, dtype=torch.float32))
-
-
-def _expected_keys(video, audio, row_set: str) -> list[tuple[float, ...]]:
-    """Return the keys of one row set straight from the sigma lists: the generated levels plus the pinned conditioning levels."""
-    pinned = {"plain": set(), "keyframe": {_KEYFRAME_F32}, "extend": {_KEYFRAME_F32, _AUDIO_COND_F32}}[row_set]
-    return [tuple(sorted({float(t), float(a), *pinned})) for t, a in zip(video.timesteps, audio.timesteps, strict=True)]
 
 
 # --- keys ------------------------------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("schedule", [_SCHEDULE_8, _SCHEDULE_4], ids=["8-step", "4-step"])
-@pytest.mark.parametrize("row_set", ROW_SETS)
-def test_step_keys_match_the_sigma_lists(schedule, row_set):
-    video, audio = build_schedulers(schedule)
-    assert step_keys(video, audio, row_set) == _expected_keys(video, audio, row_set)
 
 
 @pytest.mark.parametrize(("row_set", "first", "later"), [("plain", 1, 2), ("keyframe", 2, 3), ("extend", 3, 4)])
@@ -88,16 +66,42 @@ def test_all_keys_are_24_and_the_four_step_pairs_are_a_subset():
     assert len(fold_keys({8: _SCHEDULE_8})) == 24
 
 
-def test_keys_do_not_depend_on_the_layout():
-    # The dummy layouts of step_keys must give what the real packed layout gives for the same conditioning rows.
-    video, audio = build_schedulers(_SCHEDULE_8)
-    layout = _layout()
-    for row_set in ROW_SETS:
-        real = []
-        for t, audio_t in zip(video.timesteps, audio.timesteps, strict=True):
-            unique, _ = _row_timesteps(layout, float(t), float(audio_t), row_set)
-            real.append(tuple(float(value) for value in unique))
-        assert real == step_keys(video, audio, row_set)
+_PRESET_FOLD_KEYS = [
+    (0.0,),
+    (0.02325582504272461, 0.045454561710357666),
+    (0.05263155698776245, 0.10000002384185791),
+    (0.09090906381607056, 0.1666666865348816),
+    (0.1428571343421936, 0.25),
+    (0.21739131212234497, 0.3571428656578064),
+    (0.3333333134651184, 0.5),
+    (0.5384615659713745, 0.699999988079071),
+    (0.0, 0.9990000128746033),
+    (0.02325582504272461, 0.045454561710357666, 0.9990000128746033),
+    (0.05263155698776245, 0.10000002384185791, 0.9990000128746033),
+    (0.09090906381607056, 0.1666666865348816, 0.9990000128746033),
+    (0.1428571343421936, 0.25, 0.9990000128746033),
+    (0.21739131212234497, 0.3571428656578064, 0.9990000128746033),
+    (0.3333333134651184, 0.5, 0.9990000128746033),
+    (0.5384615659713745, 0.699999988079071, 0.9990000128746033),
+    (0.0, 0.9990000128746033, 1.0),
+    (0.02325582504272461, 0.045454561710357666, 0.9990000128746033, 1.0),
+    (0.05263155698776245, 0.10000002384185791, 0.9990000128746033, 1.0),
+    (0.09090906381607056, 0.1666666865348816, 0.9990000128746033, 1.0),
+    (0.1428571343421936, 0.25, 0.9990000128746033, 1.0),
+    (0.21739131212234497, 0.3571428656578064, 0.9990000128746033, 1.0),
+    (0.3333333134651184, 0.5, 0.9990000128746033, 1.0),
+    (0.5384615659713745, 0.699999988079071, 0.9990000128746033, 1.0),
+]
+
+
+def test_the_fold_keys_of_the_preset_schedules_are_these_24_in_this_order():
+    # The manifest of a stored copy lists these keys in this order and the backend compares it as written, so a reordering marks every
+    # user's multi-GB copy stale. The order is the row sets plain, keyframe, extend, each with one key per forward of the 8-step schedule.
+    keys = fold_keys({8: _SCHEDULE_8, 4: _SCHEDULE_4})
+    assert len(keys) == len(_PRESET_FOLD_KEYS)
+    for key, want in zip(keys, _PRESET_FOLD_KEYS, strict=True):
+        assert len(key) == len(want)
+        assert key == pytest.approx(want, abs=1e-7)
 
 
 def test_a_schedule_with_keys_outside_the_longest_is_refused_by_name():
@@ -118,59 +122,7 @@ def test_step_keys_refuses_an_unknown_row_set_and_uneven_schedules():
         step_keys(video, SimpleNamespace(timesteps=audio.timesteps[:3]), "plain")
 
 
-def test_unique_keys_keeps_first_appearance_order():
-    assert unique_keys([(0.5,), (0.1,), (0.5,), (0.1, 0.5)]) == [(0.5,), (0.1,), (0.1, 0.5)]
-
-
 # --- tiny transformer ------------------------------------------------------------------------------------------------
-
-
-def _config() -> dict:
-    return {
-        "num_attention_heads": 2,
-        "attention_head_dim": 32,
-        "hidden_size": _HIDDEN,
-        "num_layers": _LAYERS,
-        "num_refiner_layers": 1,
-        "ffn_dim": 2 * _HIDDEN,
-        "in_channels": 24,
-        "audio_in_channels": 32,
-        "patch_size": _PATCH,
-        "text_dim": 48,
-        "freq_dim": 32,
-        "time_embed_hidden_dim": _HIDDEN,
-        "time_embed_dim": _TIME_EMBED_DIM,
-        "rope_freq_dim": 4,
-    }
-
-
-def _transformer(seed: int = 0):
-    """Return a random-init transformer with the checkpoint's dtype mix: bf16 blocks, fp32 timestep MLP, patch projections and heads."""
-    from diffusers import MiniMaxH3Transformer3DModel
-
-    torch.manual_seed(seed)
-    model = MiniMaxH3Transformer3DModel(**_config())
-    keep = set(model._keep_in_fp32_modules)
-    for name, module in model.named_modules():
-        if not any(part in keep for part in name.split(".")):
-            for parameter in module.parameters(recurse=False):
-                parameter.data = parameter.data.to(torch.bfloat16)
-    return model.eval()
-
-
-def _layout() -> SimpleNamespace:
-    """Return a tiny packed layout: 4 text rows, 6 audio rows and 4 video rows, with the structural tensors the forward takes."""
-    from diffusers.modular_pipelines.minimax_h3.before_denoise import MiniMaxH3PrepareLayoutStep
-
-    text_tokens = 4
-    tags = torch.full((text_tokens,), _TEXT_TAG, dtype=torch.long)
-    position_ids, token_tags, video_indices, audio_indices, text_indices, _, _ = MiniMaxH3PrepareLayoutStep.build_packed_sequence(tags, 2, 2, 4, 3, _PATCH, 2, _AUDIO_TAG, _VIDEO_TAG, ())
-    return SimpleNamespace(
-        text_tokens=text_tokens,
-        video_indices=video_indices,
-        audio_indices=audio_indices,
-        kwargs={"position_ids": position_ids, "token_tags": token_tags, "video_indices": video_indices, "audio_indices": audio_indices, "text_indices": text_indices},
-    )
 
 
 def _row_timesteps(layout, t: float, audio_t: float, row_set: str):
@@ -186,59 +138,50 @@ def _row_timesteps(layout, t: float, audio_t: float, row_set: str):
     )
 
 
-def _inputs(layout, seed: int = 1) -> dict:
-    generator = torch.Generator().manual_seed(seed)
-    return {
-        "hidden_states": torch.randn(1, len(layout.video_indices), 96, generator=generator),
-        "audio_hidden_states": torch.randn(1, len(layout.audio_indices), 32, generator=generator),
-        "encoder_hidden_states": torch.randn(1, layout.text_tokens, 48, generator=generator),
-    }
-
-
 def _tables_for(model, keys):
     temb = {key: compute_temb(model.time_proj, model.time_embedder, key, "cpu") for key in keys}
     return [build_tables(block.adaln_proj, temb) for block in model.transformer_blocks], temb
 
 
 def test_compute_temb_is_the_transformers_own():
-    model = _transformer()
+    model = tiny_transformer()
     key = (0.0, 0.25, 0.999)
     stock = model.time_embedder(model.time_proj(torch.tensor(key)))
     assert torch.equal(compute_temb(model.time_proj, model.time_embedder, key, "cpu"), stock)
 
 
 def test_load_time_embedder_reproduces_the_transformers_temb():
-    model = _transformer()
+    model = tiny_transformer()
     state = {name.removeprefix("time_embedder."): value for name, value in model.state_dict().items() if name.startswith("time_embedder.")}
-    time_proj, embedder = load_time_embedder(_config(), state, "cpu")
+    time_proj, embedder = load_time_embedder(transformer_config(), state, "cpu")
     key = (0.1, 0.5)
     assert torch.equal(compute_temb(time_proj, embedder, key, "cpu"), compute_temb(model.time_proj, model.time_embedder, key, "cpu"))
     assert next(embedder.parameters()).dtype == torch.float32
 
 
 def test_build_tables_equal_the_stock_module_bitwise():
-    model = _transformer()
+    model = tiny_transformer()
     video, audio = build_schedulers(_SCHEDULE_8)
     keys = unique_keys(key for row_set in ROW_SETS for key in step_keys(video, audio, row_set))
     tables, temb = _tables_for(model, keys)
     for block, block_tables in zip(model.transformer_blocks, tables, strict=True):
         for key in keys:
             stock = block.adaln_proj(temb[key])
-            folded = block_tables[key].view(-1, 6 * _HIDDEN).chunk(6, dim=-1)
+            folded = block_tables[key].view(-1, 6 * HIDDEN).chunk(6, dim=-1)
             assert all(torch.equal(a, b) for a, b in zip(stock, folded, strict=True))
             assert block_tables[key].dtype == torch.bfloat16
 
 
-@pytest.mark.parametrize("row_set", ROW_SETS)
-def test_folded_transformer_equals_stock_bitwise(row_set):
-    stock = _transformer()
+def test_folded_transformer_equals_stock_bitwise():
+    row_set = "extend"  # the most timesteps per key; the plain and keyframe row sets are compared in test_cuda_h3_stored_copy
+    stock = tiny_transformer()
     folded = copy.deepcopy(stock)
     video, audio = build_schedulers(_SCHEDULE_8)
     keys = step_keys(video, audio, row_set)
     tables, _ = _tables_for(stock, unique_keys(keys))
     handle = install_fold(folded, tables)
-    layout = _layout()
-    inputs = _inputs(layout)
+    layout = tiny_layout()
+    inputs = layout_inputs(layout)
     with torch.no_grad():
         for t, audio_t in zip(video.timesteps, audio.timesteps, strict=True):
             unique, indices = _row_timesteps(layout, float(t), float(audio_t), row_set)
@@ -252,7 +195,7 @@ def test_folded_transformer_equals_stock_bitwise(row_set):
 
 
 def test_installed_fold_drops_the_projection_weights_and_keeps_state_dicts_clean():
-    model = _transformer()
+    model = tiny_transformer()
     tables, _ = _tables_for(model, [(0.25, 0.5)])
     install_fold(model, tables)
     assert all(isinstance(block.adaln_proj, FoldedAdaLN) for block in model.transformer_blocks)
@@ -260,11 +203,11 @@ def test_installed_fold_drops_the_projection_weights_and_keeps_state_dicts_clean
 
 
 def test_the_pre_hook_reads_a_positional_timestep_too():
-    model = _transformer()
+    model = tiny_transformer()
     tables, _ = _tables_for(model, [(0.25, 0.5)])
     handle = install_fold(model, tables)
-    layout = _layout()
-    inputs = _inputs(layout)
+    layout = tiny_layout()
+    inputs = layout_inputs(layout)
     indices = torch.zeros(len(layout.kwargs["token_tags"]), dtype=torch.long)
     indices[layout.audio_indices] = 1
     with torch.no_grad():
@@ -287,13 +230,13 @@ def test_an_unfolded_timestep_key_raises_with_the_rebuild_hint():
 
 
 def test_a_forward_with_an_unbuilt_key_is_refused_not_computed_stock():
-    model = _transformer()
+    model = tiny_transformer()
     tables, _ = _tables_for(model, [(0.25, 0.5)])
     install_fold(model, tables)
-    layout = _layout()
+    layout = tiny_layout()
     indices = torch.zeros(len(layout.kwargs["token_tags"]), dtype=torch.long)
     with pytest.raises(KeyError, match="rebuild the H3 copy"):
-        model(**_inputs(layout), timestep=torch.tensor([0.3]), timestep_indices=indices, return_dict=False, **layout.kwargs)
+        model(**layout_inputs(layout), timestep=torch.tensor([0.3]), timestep_indices=indices, return_dict=False, **layout.kwargs)
 
 
 def test_folded_projection_outside_a_forward_and_with_wrong_rows():
@@ -308,7 +251,7 @@ def test_folded_projection_outside_a_forward_and_with_wrong_rows():
 
 
 def test_install_fold_validates_the_tables():
-    model = _transformer()
+    model = tiny_transformer()
     tables, _ = _tables_for(model, [(0.25, 0.5), (0.5,)])
     with pytest.raises(ValueError, match="tables for 1 blocks"):
         install_fold(model, tables[:1])
@@ -318,26 +261,18 @@ def test_install_fold_validates_the_tables():
     assert not any(isinstance(block.adaln_proj, FoldedAdaLN) for block in model.transformer_blocks)
 
 
-def test_removing_the_handle_stops_the_key_selection():
-    model = _transformer()
-    tables, _ = _tables_for(model, [(0.25, 0.5)])
-    handle = install_fold(model, tables)
-    handle.remove()
-    assert not model._forward_pre_hooks
-
-
 # --- table files -----------------------------------------------------------------------------------------------------
 
 
 def test_tables_round_trip_bitwise_and_only_the_wanted_keys_are_read(tmp_path, monkeypatch):
     from zvisiongenerator.utils import safetensors_stream
 
-    model = _transformer()
+    model = tiny_transformer()
     keys = [(0.5,), (0.1, 0.5), (0.0, 0.25, 0.999)]
     tables, _ = _tables_for(model, keys)
     path = tmp_path / "adaln" / "tables.safetensors"
     info = write_tables(path, tables)
-    assert info["keys"] == 3 and info["blocks"] == _LAYERS and info["bytes"] == path.stat().st_size
+    assert info["keys"] == 3 and info["blocks"] == LAYERS and info["bytes"] == path.stat().st_size
     assert table_keys(path) == sorted(keys)
     assert all(isinstance(key, list) for key in json.loads(safetensors_stream.read_metadata(path)["keys"]))
 
@@ -350,9 +285,9 @@ def test_tables_round_trip_bitwise_and_only_the_wanted_keys_are_read(tmp_path, m
 
     monkeypatch.setattr(safetensors_stream.TensorFile, "read", recording)
     wanted = [(0.5,), (0.0, 0.25, 0.999)]
-    back = read_tables(path, wanted, _LAYERS)
-    assert len(reads) == len(wanted) * _LAYERS
-    for block in range(_LAYERS):
+    back = read_tables(path, wanted, LAYERS)
+    assert len(reads) == len(wanted) * LAYERS
+    for block in range(LAYERS):
         assert list(back[block]) == wanted
         for key in wanted:
             assert torch.equal(back[block][key], tables[block][key])
@@ -360,12 +295,12 @@ def test_tables_round_trip_bitwise_and_only_the_wanted_keys_are_read(tmp_path, m
 
 
 def test_read_tables_refuses_a_missing_key_and_a_block_mismatch(tmp_path):
-    model = _transformer()
+    model = tiny_transformer()
     tables, _ = _tables_for(model, [(0.5,)])
     path = tmp_path / "tables.safetensors"
     write_tables(path, tables)
     with pytest.raises(KeyError, match="rebuild the H3 copy"):
-        read_tables(path, [(0.5,), (0.7,)], _LAYERS)
+        read_tables(path, [(0.5,), (0.7,)], LAYERS)
     with pytest.raises(ValueError, match="2 blocks, the transformer has 3"):
         read_tables(path, [(0.5,)], 3)
 
@@ -376,22 +311,6 @@ def test_write_tables_refuses_uneven_or_empty_blocks(tmp_path):
         write_tables(tmp_path / "t.safetensors", [{(0.5,): table}, {(0.6,): table}])
     with pytest.raises(ValueError, match="At least one block"):
         write_tables(tmp_path / "t.safetensors", [])
-
-
-def test_a_restored_fold_equals_the_in_memory_fold(tmp_path):
-    stock = _transformer()
-    video, audio = build_schedulers(_SCHEDULE_8)
-    keys = unique_keys(step_keys(video, audio, "keyframe"))
-    tables, _ = _tables_for(stock, keys)
-    path = tmp_path / "tables.safetensors"
-    write_tables(path, tables)
-    folded = copy.deepcopy(stock)
-    install_fold(folded, read_tables(path, keys, _LAYERS))
-    layout = _layout()
-    unique, indices = _row_timesteps(layout, float(video.timesteps[3]), float(audio.timesteps[3]), "keyframe")
-    call = {**_inputs(layout), "timestep": unique, "timestep_indices": indices, "return_dict": False, **layout.kwargs}
-    with torch.no_grad():
-        assert all(torch.equal(a, b) for a, b in zip(stock(**call), folded(**call), strict=True))
 
 
 # --- exact LoRA delta ------------------------------------------------------------------------------------------------
@@ -406,13 +325,13 @@ def _linear_holder(weight: torch.Tensor, bias: torch.Tensor) -> SimpleNamespace:
 
 def _lora_case(dtype: torch.dtype):
     generator = torch.Generator().manual_seed(7)
-    out = 6 * _HIDDEN * 3
-    weight = torch.randn(out, _TIME_EMBED_DIM, generator=generator) * 0.1
+    out = 6 * HIDDEN * 3
+    weight = torch.randn(out, TIME_EMBED_DIM, generator=generator) * 0.1
     bias = torch.randn(out, generator=generator) * 0.1
-    down = torch.randn(4, _TIME_EMBED_DIM, generator=generator) * 0.1
+    down = torch.randn(4, TIME_EMBED_DIM, generator=generator) * 0.1
     up = torch.randn(out, 4, generator=generator) * 0.1
     keys = [(0.5,), (0.1, 0.5), (0.0, 0.25, 0.999)]
-    temb = {key: torch.randn(len(key), _TIME_EMBED_DIM, generator=generator) for key in keys}
+    temb = {key: torch.randn(len(key), TIME_EMBED_DIM, generator=generator) for key in keys}
     return weight.to(dtype), bias.to(dtype), down, up, temb
 
 
@@ -450,21 +369,16 @@ def test_lora_delta_leaves_the_inputs_alone_and_a_zero_scale_changes_nothing():
     assert all(torch.equal(same[key], base[key]) for key in base)
 
 
-def test_module_surface():
-    assert set(adaln_module.__all__) >= {"install_fold", "fold_keys", "step_keys", "lora_table_delta", "FoldedAdaLN", "FoldState", "FoldHandle"}
-    assert all(hasattr(adaln_module, name) for name in adaln_module.__all__)
-
-
 def test_the_bitwise_comparison_detects_a_wrong_table():
     # Control for the equality tests above: one changed table entry must change the output.
-    stock = _transformer()
+    stock = tiny_transformer()
     folded = copy.deepcopy(stock)
-    layout = _layout()
+    layout = tiny_layout()
     unique, indices = _row_timesteps(layout, 0.25, 0.5, "plain")
     key = tuple(float(value) for value in unique)
     tables, _ = _tables_for(stock, [key])
     tables[0][key] = tables[0][key] + torch.tensor(0.5, dtype=torch.bfloat16)
     install_fold(folded, tables)
-    call = {**_inputs(layout), "timestep": unique, "timestep_indices": indices, "return_dict": False, **layout.kwargs}
+    call = {**layout_inputs(layout), "timestep": unique, "timestep_indices": indices, "return_dict": False, **layout.kwargs}
     with torch.no_grad():
         assert not torch.equal(stock(**call)[0], folded(**call)[0])

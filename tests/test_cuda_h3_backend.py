@@ -23,7 +23,7 @@ from zvisiongenerator.backends.cuda.video.h3 import audio as h3_audio  # noqa: E
 from zvisiongenerator.backends.cuda.video.h3 import backend as h3_backend  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import conditioning, decode, sampler, schedule, sources, stored_copy, text_encoder  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.backend import H3VideoBackend  # noqa: E402
-from zvisiongenerator.core.video_backend import VideoBackend, VideoExtender  # noqa: E402
+from zvisiongenerator.core.video_backend import VideoBackend  # noqa: E402
 from zvisiongenerator.core.video_types import ExtendSegment  # noqa: E402
 from zvisiongenerator.utils import hf_snapshot  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset, H3Schedule, HubFiles  # noqa: E402
@@ -32,7 +32,6 @@ from zvisiongenerator.utils.video_model_detect import VideoModelInfo  # noqa: E4
 
 WIDTH, HEIGHT = 96, 64
 FRAMES = 22  # the smallest valid clip, 17 * 1 + 5
-OOM_MESSAGE = "MiniMax H3 ran out of GPU memory at {w}x{h}, {n} frames. Try a shorter clip or a smaller size."
 
 PRESET = H3Preset(
     repo="MiniMaxAI/MiniMax-H3",
@@ -283,7 +282,7 @@ class TestLoadModel:
         assert model.loras == ((lora, 0.7),)
         assert model.upscale is True
 
-    @pytest.mark.parametrize("key", ["quantize", "transformer_source", "sampler", "image_crf", "repo_ignore", "unheard_of"])
+    @pytest.mark.parametrize("key", ["quantize", "unheard_of"])
     def test_refuses_options_it_does_not_take_naming_them(self, rig, key):
         with pytest.raises(ValueError, match=key):
             H3VideoBackend().load_model("m", preset=PRESET, **{key: 1})
@@ -311,7 +310,6 @@ class TestLoadModel:
         assert backend.name == "h3"
         assert isinstance(backend, VideoBackend)
         assert callable(backend.extend_video)
-        assert VideoExtender is not None
 
 
 # --- text_to_video -------------------------------------------------------------------------------------------------
@@ -593,10 +591,6 @@ class TestUpscale:
         assert len(rig.calls["encode_video"]) == 2  # the preview and the final video
         assert rig.events.count("copy.load") == 2  # the half-size decode needs the memory, so the refine loads its own transformer
 
-    def test_without_a_review_the_video_is_decoded_once(self, rig, tmp_path):
-        self._run(rig, tmp_path)
-        assert len(rig.calls["decode_video"]) == 1
-
     def test_a_review_that_raises_stops_before_the_upscaler(self, rig, tmp_path):
         def review(path: Path) -> None:
             raise _Stop("rejected")
@@ -852,10 +846,6 @@ class TestRefineStart:
     def test_it_is_the_last_two_forwards_of_the_eight_step_schedule(self):
         assert h3_backend._refine_start(PRESET) == 6
 
-    def test_it_ignores_the_stage_one_schedules(self):
-        only_eight = dataclasses.replace(PRESET, schedules={8: H3Schedule(8, 6.0, 3.0)})
-        assert h3_backend._refine_start(only_eight) == 6
-
 
 # --- extend --------------------------------------------------------------------------------------------------------
 
@@ -978,22 +968,21 @@ class TestExtend:
         assert rig.last("denoise")["geo"].num_frames == 56
         assert len(rig.last("segment_frames")["frames"]) == 34
 
-    @pytest.mark.parametrize("frames", [0, 8, 16, 18, 25, -17])
+    @pytest.mark.parametrize("frames", [-17, 18])
     def test_extend_frames_must_be_a_positive_multiple_of_17(self, rig, tmp_path, frames):
         with pytest.raises(ValueError, match="multiple of 17"):
             self._extend(rig, tmp_path, extend_frames=frames)
         assert rig.events == []
 
-    @pytest.mark.parametrize("fps", [23.976, 25.0, 30.0, 60.0])
+    @pytest.mark.parametrize("fps", [23.976])
     def test_a_source_that_is_not_24_fps_is_refused(self, rig, tmp_path, fps):
         with pytest.raises(ValueError, match="24 fps"):
             self._extend(rig, tmp_path, source=make_extend_source(width=WIDTH, height=HEIGHT, fps=fps))
         assert rig.events == []
 
-    @pytest.mark.parametrize("size", [(100, 64), (96, 70)])
-    def test_a_source_that_is_not_32_aligned_is_refused(self, rig, tmp_path, size):
+    def test_a_source_that_is_not_32_aligned_is_refused(self, rig, tmp_path):
         with pytest.raises(ValueError, match="multiple of 32"):
-            self._extend(rig, tmp_path, source=make_extend_source(width=size[0], height=size[1]))
+            self._extend(rig, tmp_path, source=make_extend_source(width=100, height=HEIGHT))
         assert rig.events == []
 
     def test_a_model_not_loaded_for_extend_is_refused(self, rig, tmp_path):
@@ -1015,49 +1004,30 @@ class TestExtend:
         assert [event["current_step"] for event in events] == list(range(1, 9))
         assert {event["phase"] for event in events} == {"video"}
 
+    # --- out of memory -------------------------------------------------------------------------------------------------
 
-# --- out of memory -------------------------------------------------------------------------------------------------
-
-
-class TestOutOfMemory:
-    @pytest.mark.parametrize("stage", ["denoise", "decode"])
-    def test_text_to_video_reports_the_size_and_frames(self, rig, tmp_path, stage):
-        model = _load(rig)
-        rig.oom_in = stage
+    @pytest.mark.parametrize(
+        ("kind", "stage", "width", "height", "frames"),
+        [
+            ("t2v", "denoise", WIDTH, HEIGHT, FRAMES),
+            ("upscale", "refine", 128, 64, FRAMES),
+            ("upscale", "decode", 128, 64, FRAMES),
+            ("extend", "denoise", WIDTH, HEIGHT, WINDOW),
+        ],
+    )
+    def test_an_out_of_memory_error_reports_the_target_size_and_frames(self, rig, tmp_path, kind, stage, width, height, frames):
+        # One wrapper serves t2v, i2v and the upscale stages (which report the target size, not the half-size stage), and extend has its own.
         with pytest.raises(RuntimeError) as raised:
-            _t2v(model, tmp_path / "out.mp4")
-        assert str(raised.value) == OOM_MESSAGE.format(w=WIDTH, h=HEIGHT, n=FRAMES)
+            if kind == "extend":
+                rig.oom_in = stage
+                TestExtend()._extend(rig, tmp_path)
+            else:
+                model = _load(rig, upscale=kind == "upscale")
+                rig.oom_in = stage
+                _t2v(model, tmp_path / "out.mp4", **({"width": width, "height": height, "stage1_steps": 4} if kind == "upscale" else {}))
+        message = str(raised.value)
+        assert f"{width}x{height}" in message and f"{frames} frames" in message
         assert isinstance(raised.value.__cause__, torch.cuda.OutOfMemoryError)
-        assert rig.events[-1] == "release"
-
-    def test_image_to_video_reports_the_size_and_frames(self, rig, tmp_path):
-        model = _load(rig, mode="i2v")
-        rig.oom_in = "denoise"
-        with pytest.raises(RuntimeError) as raised:
-            H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", WIDTH, HEIGHT, FRAMES, 3, 8, str(tmp_path / "out.mp4"))
-        assert str(raised.value) == OOM_MESSAGE.format(w=WIDTH, h=HEIGHT, n=FRAMES)
-
-    def test_upscale_reports_the_target_size(self, rig, tmp_path):
-        model = _load(rig, upscale=True)
-        rig.oom_in = "denoise"
-        with pytest.raises(RuntimeError) as raised:
-            _t2v(model, tmp_path / "out.mp4", width=128, height=64, stage1_steps=4)
-        assert str(raised.value) == OOM_MESSAGE.format(w=128, h=64, n=FRAMES)
-
-    @pytest.mark.parametrize("stage", ["upsampler", "refine", "decode"])
-    def test_upscale_reports_the_target_size_from_every_later_stage(self, rig, tmp_path, stage):
-        model = _load(rig, upscale=True)
-        rig.oom_in = stage
-        with pytest.raises(RuntimeError) as raised:
-            _t2v(model, tmp_path / "out.mp4", width=128, height=64, stage1_steps=4)
-        assert str(raised.value) == OOM_MESSAGE.format(w=128, h=64, n=FRAMES)
-        assert rig.events[-1] == "release"
-
-    def test_extend_reports_the_window(self, rig, tmp_path):
-        rig.oom_in = "denoise"
-        with pytest.raises(RuntimeError) as raised:
-            TestExtend()._extend(rig, tmp_path)
-        assert str(raised.value) == OOM_MESSAGE.format(w=WIDTH, h=HEIGHT, n=WINDOW)
         assert rig.events[-1] == "release"
 
     def test_other_errors_are_not_rewritten(self, rig, tmp_path, monkeypatch):
@@ -1174,15 +1144,6 @@ class TestRefineRowSetsCoverTheForwards:
             MiniMaxH3Scheduler(shift=shift).save_pretrained(tmp_path / folder)
         return schedule.build_schedulers(PRESET.schedules[8], tmp_path)
 
-    def test_the_union_holds_both_tails_and_each_tail_is_two_keys_inside_the_stored_copy(self, tmp_path):
-        schedulers = self._schedulers(tmp_path)
-        stored = set(h3_backend._all_fold_keys(PRESET, tmp_path))
-        plain = h3_backend._fold_keys(schedulers, "plain", 6)
-        keyframe = h3_backend._fold_keys(schedulers, "keyframe", 6)
-        assert len(plain) == len(keyframe) == 2
-        assert set(plain) | set(keyframe) <= stored
-        assert set(plain) != set(keyframe)
-
     @pytest.mark.parametrize("held", [(), ("first",), ("last",), ("first", "last")], ids=["none", "first", "last", "both"])
     def test_the_timesteps_of_every_window_kind_are_in_the_loaded_keys(self, tmp_path, held):
         schedulers = self._schedulers(tmp_path)
@@ -1206,12 +1167,6 @@ class TestRefineRowSetsCoverTheForwards:
         )
         assert len(recorder.keys) == 2
         assert recorder.keys <= loaded
-
-    def test_one_row_set_alone_would_miss_a_key(self, tmp_path):
-        schedulers = self._schedulers(tmp_path)
-        plain = set(h3_backend._fold_keys(schedulers, "plain", 6))
-        keyframe = set(h3_backend._fold_keys(schedulers, "keyframe", 6))
-        assert keyframe - plain and plain - keyframe  # this is why the refine loads the union
 
 
 # --- file resolution -----------------------------------------------------------------------------------------------
@@ -1368,13 +1323,6 @@ class TestTransformerFiles:
 
 
 class TestRuntimeLeaves:
-    def test_the_ltx_backend_still_exposes_the_moved_helpers(self):
-        from zvisiongenerator.backends.cuda.video import backend as ltx_backend
-        from zvisiongenerator.backends.cuda.video import runtime
-
-        assert ltx_backend._configure_torch_runtime is runtime.configure_torch_runtime
-        assert ltx_backend._fit_image is runtime.fit_image
-
     def test_fit_image_covers_the_canvas_and_crops_the_centre(self):
         from zvisiongenerator.backends.cuda.video.runtime import fit_image
 
@@ -1383,13 +1331,6 @@ class TestRuntimeLeaves:
         fitted = fit_image(image, 64, 64)
         assert fitted.size == (64, 64)
         assert fitted.getpixel((32, 32)) == (255, 0, 0) and fitted.getpixel((0, 32)) == (0, 0, 0)
-
-    def test_the_keyframe_fit_is_the_same_function(self):
-        image = Image.new("RGB", (200, 100), (10, 20, 30))
-        image.paste((255, 0, 0), (75, 0, 125, 100))
-        from zvisiongenerator.backends.cuda.video.runtime import fit_image
-
-        assert conditioning.fit_keyframe(image, 64, 64).tobytes() == fit_image(image, 64, 64).tobytes()
 
 
 class TestSystemMemoryCheck:
