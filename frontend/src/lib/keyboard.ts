@@ -114,6 +114,7 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: ['⌘/Ctrl+⇧+↵'], label: 'Generate with a new seed' },
       { keys: ['⌘/Ctrl+E'], label: 'Enhance the prompt' },
       { keys: ['Alt+1'], label: 'Focus the prompt' },
+      { keys: ['Alt+↑'], label: 'Recent prompts (in an empty prompt)' },
       { keys: ['Alt+2'], label: 'Focus the settings' },
       { keys: ['Alt+3'], label: 'Focus the gallery strip' },
       { keys: ['Alt+⇧+1', 'Alt+⇧+2'], label: 'Show or hide the sidebar' },

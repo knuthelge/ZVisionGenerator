@@ -14,7 +14,7 @@ import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJob
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { DownloadItem, EnhanceFrame, JobSnapshot, PromptEnhancerContract, WorkspaceContext, GalleryAsset } from '$lib/types';
+import type { DownloadItem, EnhanceFrame, JobSnapshot, PromptEnhancerContract, RecentPrompt, WorkspaceContext, GalleryAsset } from '$lib/types';
 import { workspaceMemory } from '$lib/state/pageMemory';
 
 import WorkspacePage from './WorkspacePage.svelte';
@@ -23,8 +23,8 @@ import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBr
 import { lastEventSource } from '../../test-utils/eventSource';
 import { optionLabels, optionValues, pickOption } from '../../test-utils/select';
 import { jobSnap, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, withEnhancer, withVideoEnhancer } from '../../test-utils/workspace';
-import { answerConfirm, choosePrompts, createHost, expectRenderedLabelsToResolveControls, field, mockClipboard, mountWorkspacePage, openEnhanceRun, pressKey, resetWorkspaceTest, settle, submitForm, type } from '../../test-utils/workspaceHarness';
-import { browseApiMocks, enhanceApiMocks, galleryApiMocks, modelApiMocks, promptFileApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { answerConfirm, choosePrompts, createHost, expectRenderedLabelsToResolveControls, fakeDebounceTimers, field, mockClipboard, mountWorkspacePage, openEnhanceRun, pressKey, resetWorkspaceTest, settle, submitForm, type, waitDebounce } from '../../test-utils/workspaceHarness';
+import { browseApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, promptFileApiMocks, recentPromptsApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -34,7 +34,7 @@ vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
     layout: {
       get mode() { return layoutProbe.compact ? 'compact' : 'wide'; },
       get compact() { return layoutProbe.compact; },
-      get coarse() { return layoutProbe.compact; },
+      get coarse() { return layoutProbe.compact || layoutProbe.coarse; },
     },
   };
 });
@@ -83,6 +83,8 @@ vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
   const { enhanceApiMocks } = await import('../../test-utils/workspaceMocks');
   return { ...actual, enhancePrompt: enhanceApiMocks.enhancePrompt };
 });
+
+vi.mock('$lib/api/recentPrompts', async () => (await import('../../test-utils/workspaceMocks')).recentPromptsApiMocks);
 
 vi.mock('$lib/api/browse', async () => (await import('../../test-utils/workspaceMocks')).browseApiMocks);
 
@@ -842,6 +844,434 @@ describe('WorkspacePage', () => {
     expect((enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { prompt: string }).prompt).toBe('a fox');
   });
 
+  it('keeps each rewrite of the same text in the draft history, with how it was written', async () => {
+    const rewrites = ['A fox in snow.', 'A fox at dusk.'];
+    enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+      (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', prompt: rewrites.shift()!, clamped: false, model: 'org/fast@r1' });
+    });
+    draft.update('prompt', 'a fox');
+    await mountWorkspace(withEnhancer(makeContext()));
+
+    (await openEnhanceRun()).click();
+    await settle();
+    // The popover may stay open between runs; open it only when it is closed.
+    const again = document.querySelector<HTMLButtonElement>('#ws-enhance-run') ?? (await openEnhanceRun());
+    again.click();
+    await settle();
+
+    expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['A fox in snow.', 'A fox at dusk.']);
+    expect(draft.state.enhancedHistory.map((entry) => entry.from.record?.model)).toEqual(['org/fast@r1', 'org/fast@r1']);
+    expect(draft.state.enhancedPrompt).toBe('A fox at dusk.');
+
+    draft.update('prompt', 'a cat');
+    rewrites.push('A cat on a sill.');
+    const third = document.querySelector<HTMLButtonElement>('#ws-enhance-run') ?? (await openEnhanceRun());
+    third.click();
+    await settle();
+    expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['A cat on a sill.']);
+  });
+
+  describe('recent prompts', () => {
+    const NOW_S = Date.now() / 1000;
+    const recent = (overrides: Partial<RecentPrompt> = {}): RecentPrompt => ({
+      format: 'text', prompt: 'A lighthouse at dusk', scene: '', negative_prompt: '', mode: 'image', used_at: NOW_S - 120, ...overrides,
+    });
+    const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'));
+    const listState = () => document.querySelector<HTMLElement>('[role="listbox"][aria-label="Recent prompts"]')?.dataset.state;
+    const filterInput = () => document.querySelector('input[aria-label="Filter recent prompts"]') as HTMLInputElement;
+    const clearButton = () => Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Clear recents') as HTMLButtonElement | undefined;
+    const historyButton = () => target.querySelector('#ws-recent-prompts') as HTMLButtonElement;
+    async function openRecents(): Promise<void> {
+      historyButton().click();
+      await settle();
+    }
+    function ideoContext(): WorkspaceContext {
+      const defaults = makeIdeogramDefaults();
+      return makeContext({ image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }], defaults, current_image_model: 'ideo', image_model_defaults: { ideo: defaults } });
+    }
+
+    it('lists the recent prompts newest first, newest selected, and asks the server for the whole list of the current mode', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ prompt: 'A lighthouse at dusk' }), recent({ prompt: 'A red fox', used_at: NOW_S - 7200 })] });
+      await mountWorkspace(makeContext());
+      await openRecents();
+
+      expect(recentPromptsApiMocks.getRecentPrompts).toHaveBeenCalledWith('', 'image');
+      expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining('A lighthouse at dusk'), expect.stringContaining('A red fox')]);
+      expect(rows().map((row) => row.getAttribute('aria-selected'))).toEqual(['true', 'false']);
+      expect(historyButton().getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('exposes the whole prompt of a row on hover, with the scene and the negative prompt on lines of their own', async () => {
+      const long = 'A lighthouse on a cliff at dusk, waves breaking below, gulls circling the lamp, warm light on wet rock, a small boat far out at sea, long exposure.';
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [
+        recent({ prompt: long, negative_prompt: 'blurry' }),
+        recent({ mode: 'video', scene: 'A night tram.', prompt: 'She turns to the window.' }),
+      ] });
+      await mountWorkspace(makeContext());
+      await openRecents();
+
+      expect(rows()[0].title).toBe(`${long}\nNegative: blurry`);
+      expect(rows()[1].title).toBe('She turns to the window.\nScene: A night tram.');
+    });
+
+    it('shows the negative prompt of a row, fills the prompt and the negative prompt on a pick, closes, and drops the Enhanced pair', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ prompt: 'A red fox', negative_prompt: 'blurry' })] });
+      draft.patch({ prompt: 'a cat', negativePrompt: '', enhancedPrompt: 'A cat, enhanced.', enhancedFrom: { prompt: 'a cat', scene: '', mode: 'image' } });
+      await mountWorkspace(withEnhancer(makeContext()));
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+      await openRecents();
+      expect(rows()[0].textContent).toContain('blurry');
+
+      rows()[0].click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ prompt: 'A red fox', negativePrompt: 'blurry', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, jsonPromptEnabled: false });
+      expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).toBeNull();
+      expect(target.querySelector('#ws-tab-prompt')?.getAttribute('aria-selected')).toBe('true');
+      expect(field('ws-prompt').value).toBe('A red fox');
+      const submitted = await submitForm(target);
+      expect(submitted.get('prompt')).toBe('A red fox');
+      expect(submitted.get('negative_prompt')).toBe('blurry');
+    });
+
+    it('fills the scene and the action of a video prompt', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ mode: 'video', scene: 'A night tram.', prompt: 'She turns to the window.' })] });
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      await openRecents();
+      expect(recentPromptsApiMocks.getRecentPrompts).toHaveBeenCalledWith('', 'video');
+      expect(rows()[0].textContent).toContain('A night tram.');
+
+      rows()[0].click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ scene: 'A night tram.', prompt: 'She turns to the window.' });
+    });
+
+    it('turns the JSON box on and fills it when a JSON caption is picked on a model that takes one', async () => {
+      const caption = '{"high_level_description": "A poster of a lighthouse"}';
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ format: 'json', prompt: caption })] });
+      draft.update('prompt', 'kept');
+      await mountWorkspace(ideoContext());
+      await openRecents();
+      expect(rows()[0].getAttribute('aria-disabled')).toBeNull();
+
+      rows()[0].click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ jsonPromptEnabled: true, jsonPrompt: caption, prompt: 'kept' });
+      expect((target.querySelector('#ws-json-prompt') as HTMLTextAreaElement).value).toBe(caption);
+      const submitted = await submitForm(target);
+      expect(submitted.get('json_prompt')).toBe(caption);
+    });
+
+    it('shows a JSON caption as disabled, with the reason, on a model without JSON captions', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ format: 'json', prompt: '{"a": 1}' })] });
+      draft.update('prompt', 'kept');
+      await mountWorkspace(makeContext());
+      await openRecents();
+
+      expect(rows()[0].getAttribute('aria-disabled')).toBe('true');
+      rows()[0].click();
+      await settle();
+      expect(draft.state.prompt).toBe('kept');
+      expect(draft.state.jsonPromptEnabled).toBe(false);
+    });
+
+    it('asks the server again, after a pause, with what is typed in the filter', async () => {
+      fakeDebounceTimers();
+      recentPromptsApiMocks.getRecentPrompts.mockImplementation(async (query) => ({ entries: query === 'fox' ? [recent({ prompt: 'A red fox' })] : [recent(), recent({ prompt: 'A red fox' })] }));
+      await mountWorkspace(makeContext());
+      await openRecents();
+      expect(rows()).toHaveLength(2);
+
+      filterInput().value = 'fox';
+      filterInput().dispatchEvent(new Event('input', { bubbles: true }));
+      await settle();
+      expect(recentPromptsApiMocks.getRecentPrompts).toHaveBeenCalledTimes(1);
+      await waitDebounce();
+
+      expect(recentPromptsApiMocks.getRecentPrompts).toHaveBeenLastCalledWith('fox', 'image');
+      expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining('A red fox')]);
+    });
+
+    it('picks from the filtered rows when Enter follows the typing before the result is in', async () => {
+      fakeDebounceTimers();
+      recentPromptsApiMocks.getRecentPrompts.mockImplementation(async (query) => ({ entries: query === 'fox' ? [recent({ prompt: 'A red fox' })] : [recent(), recent({ prompt: 'A red fox' })] }));
+      await mountWorkspace(makeContext());
+      await openRecents();
+
+      filterInput().value = 'fox';
+      filterInput().dispatchEvent(new Event('input', { bubbles: true }));
+      pressKey('Enter', {}, filterInput());
+      await settle();
+
+      expect(draft.state.prompt).toBe('A red fox');
+      expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).toBeNull();
+    });
+
+    it('picks from the newest filter when an older answer lands while the newer one is still being typed', async () => {
+      fakeDebounceTimers();
+      const answers = new Map<string, (value: { entries: RecentPrompt[] }) => void>();
+      recentPromptsApiMocks.getRecentPrompts.mockImplementation((query: string) => (query === '' ? Promise.resolve({ entries: [recent({ prompt: 'A lighthouse' })] }) : new Promise((resolve) => { answers.set(query, resolve); })));
+      await mountWorkspace(makeContext());
+      await openRecents();
+
+      const typeFilter = (value: string) => {
+        filterInput().value = value;
+        filterInput().dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      typeFilter('fo');
+      await waitDebounce();
+      // The fetch for "fo" is out when the next keystroke starts the debounce for "fox".
+      typeFilter('fox');
+      answers.get('fo')!({ entries: [recent({ prompt: 'A forest' })] });
+      await settle();
+      pressKey('Enter', {}, filterInput());
+      await settle();
+      expect(draft.state.prompt).toBe('');
+      answers.get('fox')!({ entries: [recent({ prompt: 'A red fox' }), recent({ prompt: 'Another fox' })] });
+      await settle();
+
+      expect(draft.state.prompt).toBe('A red fox');
+    });
+
+    it('keeps the touch keyboard down when the menu opens from its button on a touch screen, but not after Alt+↑', async () => {
+      layoutProbe.coarse = true;
+      await mountWorkspace(makeContext());
+      await openRecents();
+      expect(filterInput()).not.toBe(document.activeElement);
+      pressKey('Escape');
+      await settle();
+
+      pressKey('ArrowUp', { altKey: true }, field('ws-prompt'));
+      await settle();
+      expect(filterInput()).toBe(document.activeElement);
+    });
+
+    it('says so when nothing is recorded, when nothing matches, and when the list cannot be read', async () => {
+      fakeDebounceTimers();
+      await mountWorkspace(makeContext());
+      await openRecents();
+      expect(listState()).toBe('empty');
+      // Nothing to clear.
+      expect(clearButton()!.disabled).toBe(true);
+
+      recentPromptsApiMocks.getRecentPrompts.mockImplementation(async (query) => ({ entries: query ? [] : [recent()] }));
+      pressKey('Escape');
+      await settle();
+      await openRecents();
+      filterInput().value = 'zebra';
+      filterInput().dispatchEvent(new Event('input', { bubbles: true }));
+      await waitDebounce();
+      expect(listState()).toBe('nomatch');
+      expect(clearButton()!.disabled).toBe(false);
+
+      recentPromptsApiMocks.getRecentPrompts.mockRejectedValueOnce(new ApiError('Request failed', 500, 'Could not read or write the recent prompts: database is locked'));
+      filterInput().value = 'fox';
+      filterInput().dispatchEvent(new Event('input', { bubbles: true }));
+      await waitDebounce();
+      expect(listState()).toBe('error');
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('database is locked');
+      expect(clearButton()!.disabled).toBe(true);
+
+      const tryAgain = Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Try again') as HTMLButtonElement;
+      tryAgain.click();
+      await settle();
+      expect(listState()).toBe('nomatch');
+    });
+
+    it('moves over the enabled rows with the arrows and picks with Enter', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [
+        recent({ prompt: 'newest' }), recent({ format: 'json', prompt: '{"a": 1}' }), recent({ prompt: 'third' }),
+      ] });
+      await mountWorkspace(makeContext());
+      await openRecents();
+      expect(filterInput()).toBe(document.activeElement);
+
+      pressKey('ArrowDown', {}, filterInput());
+      await settle();
+      // The JSON row is disabled for this model, so the selection skips it.
+      expect(rows().map((row) => row.getAttribute('aria-selected'))).toEqual(['false', 'false', 'true']);
+      pressKey('ArrowUp', {}, filterInput());
+      pressKey('Enter', {}, filterInput());
+      await settle();
+
+      expect(draft.state.prompt).toBe('newest');
+    });
+
+    it('asks before clearing the recent prompts of this mode, then deletes them and says so', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent()] });
+      recentPromptsApiMocks.clearRecentPrompts.mockResolvedValue({ deleted_count: 1 });
+      await mountWorkspace(makeContext());
+      await openRecents();
+
+      clearButton()!.click();
+      await settle();
+      await answerConfirm(false);
+      expect(recentPromptsApiMocks.clearRecentPrompts).not.toHaveBeenCalled();
+
+      await openRecents();
+      clearButton()!.click();
+      await settle();
+      await answerConfirm(true);
+      expect(recentPromptsApiMocks.clearRecentPrompts).toHaveBeenCalledExactlyOnceWith('image');
+      expect(toasts.map((toast) => toast.type)).toContain('success');
+    });
+
+    describe('Alt+↑', () => {
+      it('opens the menu from an empty prompt, with the filter focused and Enter bringing back the newest', async () => {
+        recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ prompt: 'The last one' })] });
+        await mountWorkspace(makeContext());
+
+        const event = pressKey('ArrowUp', { altKey: true }, field('ws-prompt'));
+        await settle();
+        expect(event.defaultPrevented).toBe(true);
+        expect(filterInput()).toBe(document.activeElement);
+
+        pressKey('Enter', {}, filterInput());
+        await settle();
+        expect(field('ws-prompt').value).toBe('The last one');
+      });
+
+      it('leaves the key to the browser while the prompt has text', async () => {
+        draft.update('prompt', 'a fox');
+        await mountWorkspace(makeContext());
+        expect(pressKey('ArrowUp', { altKey: true }, field('ws-prompt')).defaultPrevented).toBe(false);
+        await settle();
+        expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).toBeNull();
+      });
+
+      it('opens from the Action of a video only while the Scene is empty too', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.update('scene', 'A night tram.');
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(pressKey('ArrowUp', { altKey: true }, field('ws-prompt')).defaultPrevented).toBe(false);
+        expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).toBeNull();
+
+        type('ws-scene', '');
+        await settle();
+        expect(pressKey('ArrowUp', { altKey: true }, field('ws-prompt')).defaultPrevented).toBe(true);
+        await settle();
+        expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).not.toBeNull();
+      });
+
+      it('returns focus to where the menu was opened on Escape, and to the prompt on Tab out of it', async () => {
+        await mountWorkspace(makeContext());
+        await openRecents();
+        pressKey('Escape');
+        await settle();
+        expect(document.activeElement).toBe(historyButton());
+
+        pressKey('ArrowUp', { altKey: true }, field('ws-prompt'));
+        await settle();
+        pressKey('Escape');
+        await settle();
+        expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).toBeNull();
+        expect(document.activeElement).toBe(field('ws-prompt'));
+
+        pressKey('ArrowUp', { altKey: true }, field('ws-prompt'));
+        await settle();
+        // With nothing recorded the filter is the last stop.
+        pressKey('Tab', {}, filterInput());
+        await settle();
+        expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).toBeNull();
+        expect(document.activeElement).toBe(field('ws-prompt'));
+      });
+    });
+  });
+
+  describe('status line and rewrite stepper', () => {
+    const statusLineEl = () => target.querySelector('[data-testid="prompt-statusline"]') as HTMLElement;
+    const lineState = () => statusLineEl().dataset.state;
+    const link = (label: string) => Array.from(statusLineEl().querySelectorAll('button')).find((el) => el.textContent?.trim() === label);
+    const stepper = () => target.querySelector('[role="group"][aria-label="Rewrites"]');
+    const step = (label: string) => stepper()!.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
+    const RECORD = { settings: {}, model: 'org/fast@r1', format: 'text' as const };
+    const FROM = { prompt: 'a fox', scene: '', mode: 'image' as const };
+
+    /** Two rewrites of "a fox", showing the second; the first was written by another model. */
+    function twoRewrites(): void {
+      const first = { prompt: 'A fox in snow.', scene: '', from: { ...FROM, record: { ...RECORD, model: 'org/smart@r2' } } };
+      const second = { prompt: 'A fox at dusk.', scene: '', from: { ...FROM, record: RECORD } };
+      draft.patch({ prompt: 'a fox', enhancedPrompt: second.prompt, enhancedFrom: second.from, enhancedHistory: [first, second] });
+    }
+    async function showEnhanced(): Promise<void> {
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+    }
+
+    it('says nothing while your own text is sent, and offers Use mine once the Enhanced text is', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      expect(lineState()).toBe('none');
+      expect(link('Use mine')).toBeUndefined();
+
+      draft.patch({ enhancedPrompt: 'A red fox in deep snow.', enhancedFrom: FROM });
+      await settle();
+      expect(lineState()).toBe('used');
+      expect(link('Use mine')).toBeDefined();
+      expect(target.querySelector('#ws-tab-prompt')?.textContent?.trim()).toBe('Prompt');
+      expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
+    });
+
+    it('drops the Enhanced text with Use mine, so Generate sends the prompt', async () => {
+      draft.update('prompt', 'a fox');
+      draft.patch({ enhancedPrompt: 'A red fox.', enhancedFrom: FROM });
+      await mountWorkspace(withEnhancer(makeContext()));
+      await showEnhanced();
+
+      (link('Use mine') as HTMLButtonElement).click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedFrom: null });
+      expect(target.querySelector('#ws-tab-prompt')?.getAttribute('aria-selected')).toBe('true');
+      expect((await submitForm(target)).get('prompt')).toBe('a fox');
+    });
+
+    it('offers Re-enhance and Use mine beside Out of date, in the Prompt view too', async () => {
+      enhanceApiMocks.enhancePrompt.mockResolvedValue();
+      draft.patch({ prompt: 'a cat', enhancedPrompt: 'A red fox.', enhancedFrom: FROM });
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      expect(target.querySelector('#ws-tab-prompt')?.getAttribute('aria-selected')).toBe('true');
+      expect(lineState()).toBe('stale');
+      expect(link('Use mine')).toBeDefined();
+      (link('Re-enhance') as HTMLButtonElement).click();
+      await settle();
+      expect((enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { prompt: string }).prompt).toBe('a cat');
+    });
+
+    it('marks the JSON box in the status line', async () => {
+      const defaults = makeIdeogramDefaults();
+      draft.patch({ jsonPromptEnabled: true, jsonPrompt: '{"a": 1}' });
+      await mountWorkspace(makeContext({ image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }], defaults, current_image_model: 'ideo', image_model_defaults: { ideo: defaults } }));
+      expect(lineState()).toBe('json');
+    });
+
+    it('steps through the rewrites, and Generate sends the one shown with how it was written', async () => {
+      twoRewrites();
+      await mountWorkspace(withEnhancer(makeContext()));
+      expect(stepper()).toBeNull();
+      await showEnhanced();
+
+      expect(step('Next rewrite').disabled).toBe(true);
+      step('Previous rewrite').click();
+      await settle();
+
+      expect(step('Previous rewrite').disabled).toBe(true);
+      expect(field('ws-enhanced-prompt').value).toBe('A fox in snow.');
+      const submitted = await submitForm(target);
+      expect(submitted.get('prompt')).toBe('A fox in snow.');
+      expect(JSON.parse(String(submitted.get('enhance_record'))).model).toBe('org/smart@r2');
+
+      step('Next rewrite').click();
+      await settle();
+      expect(JSON.parse(String((await submitForm(target)).get('enhance_record'))).model).toBe('org/fast@r1');
+    });
+  });
+
   describe('Fast/Smart and Text/JSON', () => {
     function ideoEnhancerContext(smart: PromptEnhancerContract['smart'] = null): WorkspaceContext {
       const ideogramDefaults = makeIdeogramDefaults();
@@ -1282,6 +1712,8 @@ describe('WorkspacePage', () => {
       const rowText = (id: string) => (labelRow(id).querySelector('.label-extras')?.textContent ?? '').replace(/\s+/g, ' ').trim();
       const useMine = (id: string) => Array.from(labelRow(id).querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Use mine') as HTMLButtonElement | undefined;
       const status = () => target.querySelector('[role="status"]')?.textContent?.trim();
+      const lineState = () => (target.querySelector('[data-testid="prompt-statusline"]') as HTMLElement).dataset.state;
+      const lineButtons = () => Array.from(target.querySelectorAll('[data-testid="prompt-statusline"] button')).map((el) => el.textContent?.trim());
 
       it('shows no marker, no Use mine and no pill on Your text when nothing is enhanced', async () => {
         draft.update('workflow', 'txt2vid');
@@ -1304,9 +1736,9 @@ describe('WorkspacePage', () => {
         expect(field('ws-prompt').getAttribute('aria-describedby')).toContain('ws-action-marker');
         expect(field('ws-enhanced-prompt').getAttribute('aria-describedby')).toContain('ws-action-marker');
         expect(field('ws-scene').getAttribute('aria-describedby')).toBeNull();
-        // The pill moves to the Enhanced tab only.
+        // The tabs carry no pills; the label rows say which part is used.
         expect(target.querySelector('#ws-tab-prompt')?.textContent?.trim()).toBe('Your text');
-        expect(target.querySelector('#ws-tab-enhanced')?.textContent).toContain('used');
+        expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
 
         (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
         await settle();
@@ -1342,36 +1774,55 @@ describe('WorkspacePage', () => {
         draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'Ignored.', enhanceAuto: true });
         await mountWorkspace(withVideoEnhancer(makeContext()));
         expect(rowText('ws-prompt')).not.toContain('Uses enhanced');
-        expect(target.querySelector('#ws-tab-enhanced')?.textContent).toContain('auto');
+        expect(lineState()).toBe('auto');
       });
 
-      it('marks a part out of date only while its pair is stale, and keeps the tab badge', async () => {
+      it('says Out of date in the status line, not on the part, only while its pair is stale', async () => {
         draft.update('workflow', 'txt2vid');
         draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(rowText('ws-prompt')).not.toContain('Out of date');
+        expect(lineState()).not.toBe('stale');
 
         type('ws-scene', 'A harbour.');
         await settle();
-        expect(rowText('ws-prompt')).toContain('Uses enhanced Out of date Use mine');
+        expect(rowText('ws-prompt')).toBe('Uses enhanced Use mine');
         // The scene is not enhanced, so what it sends is current.
         expect(rowText('ws-scene')).toBe('');
-        expect(target.querySelector('#ws-tab-enhanced')?.textContent).toContain('Out of date');
+        expect(lineState()).toBe('stale');
+        // The pair has its own Use mine links, so the status line offers Re-enhance only.
+        expect(lineButtons()).toEqual(['Re-enhance']);
 
         type('ws-scene', 'A castle.');
         await settle();
-        expect(rowText('ws-prompt')).not.toContain('Out of date');
+        expect(lineState()).not.toBe('stale');
       });
 
-      it('empties both Enhanced boxes with Clear, and Enhance again starts from the user text', async () => {
+      it('keeps Out of date and Re-enhance in the status line ahead of a notice', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        type('ws-scene', 'A harbour.');
+        await settle();
+        expect(lineState()).toBe('stale');
+
+        useMine('ws-scene')!.click();
+        await settle();
+
+        expect(draft.state.enhancedScene).toBe('');
+        expect(lineState()).toBe('stale');
+        expect(lineButtons()).toContain('Re-enhance');
+      });
+
+      it('empties both Enhanced boxes with the two Use mine links, and Enhance again starts from the user text', async () => {
         enhanceApiMocks.enhancePrompt.mockResolvedValue();
         draft.update('workflow', 'txt2vid');
         draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
         await mountWorkspace(withVideoEnhancer(makeContext()));
         (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
         await settle();
-        const clear = Array.from(target.querySelectorAll('.prompt-link')).find((el) => el.textContent?.trim() === 'Clear') as HTMLButtonElement;
-        clear.click();
+        useMine('ws-enhanced-scene')!.click();
+        await settle();
+        useMine('ws-enhanced-prompt')!.click();
         await settle();
         expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
 

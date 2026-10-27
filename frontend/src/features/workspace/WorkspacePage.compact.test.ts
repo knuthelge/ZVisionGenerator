@@ -6,7 +6,8 @@ import { draft } from '$lib/state/draft.svelte';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
-import type { JobSnapshot, WorkspaceContext } from '$lib/types';
+import type { JobSnapshot, RecentPrompt, WorkflowMode, WorkspaceContext } from '$lib/types';
+import { makeContext } from '../../test-utils/workspace';
 
 vi.mock('$lib/state/layoutMode.svelte', () => ({
   layout: { compact: true, mode: 'compact', coarse: true },
@@ -17,6 +18,13 @@ const workspaceApiMocks = vi.hoisted(() => ({
   parseUrlPrefill: vi.fn<() => Record<string, string>>(() => ({})),
   listJobs: vi.fn(async () => ({ active_job: null as JobSnapshot | null, queued_jobs: [] as JobSnapshot[] })),
 }));
+
+const recentPromptsMock = vi.hoisted(() => ({
+  getRecentPrompts: vi.fn<(query: string, mode: WorkflowMode) => Promise<{ entries: RecentPrompt[] }>>(),
+  clearRecentPrompts: vi.fn(),
+}));
+
+vi.mock('$lib/api/recentPrompts', () => recentPromptsMock);
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/workspace')>();
@@ -73,5 +81,24 @@ describe('WorkspacePage on a phone', () => {
     expect(target.querySelector('[data-testid="composer"]')).not.toBeNull();
     expect((target.querySelector('#ws-submit-compact') as HTMLButtonElement).disabled).toBe(true);
     expect((target.querySelector('.composer-summary') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('opens the recent prompts as a sheet, with the filter left unfocused so the keyboard stays down', async () => {
+    recentPromptsMock.getRecentPrompts.mockResolvedValue({ entries: [{ format: 'text', prompt: 'A red fox', scene: '', negative_prompt: '', mode: 'image', used_at: Date.now() / 1000 - 60 }] });
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext());
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+
+    (target.querySelector('#ws-recent-prompts') as HTMLButtonElement).click();
+    await settle();
+
+    const sheet = document.querySelector('[data-testid="sheet"] [role="dialog"][aria-label="Recent prompts"]');
+    expect(sheet).not.toBeNull();
+    expect(sheet!.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(document.activeElement).not.toBe(sheet!.querySelector('input'));
+
+    (sheet!.querySelector('[role="option"]') as HTMLElement).click();
+    await settle();
+    expect(draft.state.prompt).toBe('A red fox');
   });
 });

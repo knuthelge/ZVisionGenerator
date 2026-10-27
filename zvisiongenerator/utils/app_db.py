@@ -4,7 +4,8 @@ One SQLite file, ``ziv.sqlite3`` in the ZIV data directory, is shared by every f
 data. Features follow these rules:
 
 * Open one short-lived connection per operation with
-  ``with closing(app_db.connect(components=(MY_COMPONENT,))) as conn:``.
+  ``with closing(app_db.connect(components=(MY_COMPONENT,))) as conn:``, or run an operation through
+  :func:`run`, which also quarantines a corrupt file when the operation fails.
 * Never keep a module-global connection and never share a connection across threads.
 * Run every write inside ``with transaction(conn):`` (``BEGIN IMMEDIATE``, then ``COMMIT``, or ``ROLLBACK`` when
   the block raises) and keep it short, with no slow I/O inside it.
@@ -25,7 +26,7 @@ import sqlite3
 import time
 import warnings
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +55,7 @@ __all__ = [
     "quarantine",
     "recover_if_corrupt",
     "rollback",
+    "run",
     "stat_key",
     "transaction",
 ]
@@ -236,6 +238,35 @@ def connect(path: Path | None = None, *, components: Sequence[Component] = ()) -
             raise
         return _open_configured(path, components)
     return conn
+
+
+def _reason(exc: BaseException) -> str:
+    """Return the operating system's description of *exc* when it has one, else its text."""
+    return getattr(exc, "strerror", None) or str(exc)
+
+
+def run[T](path: Path, components: Sequence[Component], operation: Callable[[AppConnection], T], *, error: type[Exception]) -> T:
+    """Run *operation* on a new connection, quarantine a corrupt file when it fails, and close the connection.
+
+    Args:
+        path: Database file.
+        components: Components whose tables must be at their versions before *operation* runs.
+        operation: Called with the open connection; its result is returned.
+        error: The calling feature's exception type; a storage failure (``sqlite3.Error`` or ``OSError``)
+            is raised as ``error(reason)`` chained to the original. Other exceptions propagate unchanged.
+
+    Returns:
+        Whatever *operation* returns.
+    """
+    try:
+        with closing(connect(path, components=components)) as conn:
+            try:
+                return operation(conn)
+            except BaseException as exc:
+                recover_if_corrupt(conn, exc)
+                raise
+    except (sqlite3.Error, OSError) as exc:
+        raise error(_reason(exc)) from exc
 
 
 def is_corruption(exc: BaseException) -> bool:

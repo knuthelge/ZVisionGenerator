@@ -409,3 +409,17 @@ def test_transaction_commits_on_success_and_rolls_back_then_reraises_on_failure(
 
         assert not conn.in_transaction
         assert conn.execute("SELECT value FROM items").fetchall() == [("kept",)]
+
+
+def test_run_quarantines_a_corrupt_file_and_raises_the_features_error(tmp_path: Path) -> None:
+    path = tmp_path / "a.db"
+    path.touch()
+
+    def operation(conn: AppConnection) -> None:
+        raise _error(sqlite3.DatabaseError, sqlite3.SQLITE_CORRUPT)
+
+    with pytest.warns(UserWarning), pytest.raises(RuntimeError) as caught:
+        app_db.run(path, (), operation, error=RuntimeError)
+
+    assert isinstance(caught.value.__cause__, sqlite3.DatabaseError)
+    assert [p.name for p in tmp_path.iterdir() if ".corrupt-" in p.name]

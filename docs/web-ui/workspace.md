@@ -50,17 +50,37 @@ With a prompt file, *Compose* summarizes the prompts you chose. Click **Prompts�
 
 ### The prompt box
 
-The box has two tabs:
+The box has three bars, each with one job.
+
+**The tabs** say which text you are looking at:
 
 - **Prompt** (**Your text** for video) is what you wrote.
-- **Enhanced** is the [prompt enhancer](../concepts/prompt-enhancer.md)'s rewrite. When it has text, Generate uses it; **Use mine** goes back to your text.
+- **Enhanced** is the [prompt enhancer](../concepts/prompt-enhancer.md)'s rewrite. When it has text, Generate uses it.
 
-The tools row under the box has:
+In the **Enhanced** tab, `‹ 2 of 3 ›` at the right steps through the last five rewrites of the same text; Generate sends the one shown. See [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
+
+**The tools row** under the box holds what you can do with the text. With the JSON box on, **Enhance** and **Save…** are hidden:
 
 - ✨ **Enhance**: rewrite the prompt now, or with **Enhance each image when generating**, rewrite every image's prompt as the job runs. See [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
+- **{ } JSON** (Ideogram 4): swap the prompt for a structured caption.
+- 🕘 **Recent prompts**: bring back a prompt you generated before. See below.
 - **Save…**: append the prompt to a prompt file. See [Save a Workspace prompt](prompts.md#save-a-workspace-prompt).
 
+**The status line** under the box says what Generate sends and counts the words. It shows **Generate uses the Enhanced text** with **Use mine** to go back to your text; **Out of date** with **Re-enhance** and **Use mine**; or **Enhanced when the job runs** with auto-enhance on. Nothing shows while your own text is sent.
+
 For video, *Compose* has a **Scene** box above the **Action** box. See [Scene and action](../concepts/video.md#scene-and-action).
+
+### Recent prompts
+
+The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts while you work on an image workflow, video prompts (a scene and an action together) on a video workflow. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
+
+- **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text is dropped. A JSON caption turns on **{ } JSON** and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and workflow don't change.
+- **From the keyboard:** press ++alt+up++ in an empty prompt to open the list with the filter ready. ++up++ and ++down++ move, ++enter++ picks and ++esc++ closes and puts the cursor back in the prompt box (or on the button, if you opened the list with it).
+- **Clear recents** at the bottom of the list removes the prompts of the mode you are in, after asking. The other mode's prompts stay.
+
+![Recent prompts menu open over the prompt box](../assets/screenshots/placeholder.svg "recent-prompts")
+
+Recents are kept in the app database on the server, not in the browser, so they are the same on every device you open the Web UI from. Prompts that come from a prompt file are not recorded, and neither are refused or blank submits.
 
 ### First and last frame
 

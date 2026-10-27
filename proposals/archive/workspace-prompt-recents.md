@@ -1,6 +1,6 @@
 # Recent prompts, rewrite history and "save to a prompt file"
 
-**Status:** In progress (2026-10-21)
+**Status:** Done (2026-10-27, unreleased; branch `feat/workspace-prompt-recents`)
 
 ## Shipped in v0.13.0: save a Workspace prompt to a prompt file
 
@@ -10,7 +10,15 @@
 - The entry always goes to the end of a set named `prompts`, created at the end of the file when missing, rather than the last set or a set named after the model.
 - The route validates the whole resulting file and refuses with a message when it would have errors; the toast offers **Open in Prompts**.
 
-The shipped design differs from the original section 3 in these points. Sections 1 and 2 below are still open.
+## Shipped in `[Unreleased]`: recent prompts and the last five rewrites
+
+The design below is the original one; what shipped differs in these points.
+
+- **Recents live on the server**, in the app database (`recent_prompts_entries_v1` in `ziv.sqlite3`), so they are the same on every device. This reverses the first version's browser-only store (see Alternatives considered). `POST /api/generate` records every accepted inline submit, plain or JSON caption, before the job runs; `GET /api/recent-prompts?mode=&q=` filters on the server and returns the newest 50 of that mode; `DELETE /api/recent-prompts?mode=` clears that mode's. A prompt that only finished an Enhance is not recorded.
+- **The menu** sits under a `history` icon in the tools row, with a filter field and a `{ } JSON` badge per row; each mode has its own list. A JSON caption turns the `{ }` box on when picked, and is disabled with a reason on a model without JSON captions. Alt+↑ in an empty prompt opens it.
+- **The prompt box bars were restructured** alongside: the tabs only say which text is shown, the tools row holds actions only, and a status line under the box says what Generate sends, with **Re-enhance** and **Use mine** (the old **Clear**) beside **Out of date**.
+- **The rewrite history** keeps five rewrites of one text (`enhancedHistory`, with each rewrite's source and record) with a `‹ 2 of 3 ›` stepper in the Enhanced view. Generate sends the shown rewrite and its `enhance_record`.
+- **Cut:** pins and a fixed cap on recents, per-row delete, paging past 50, a mode filter in the menu (each mode lists its own), restoring settings with a prompt, and **Alternatives** (the three-rewrite batch). Re-enhance fills the history.
 
 ## Problem
 
@@ -35,7 +43,7 @@ The Workspace remembers one prompt: the one in the box. Typing a new one loses t
 
 - The draft keeps the last five rewrites of the current text (`enhancedHistory: {prompt, scene, settings, at}[]`) instead of one. The Enhanced tab gets a `‹ 2 of 3 ›` stepper; the shown rewrite is the one Generate uses.
 - The history is cleared when the source text changes, which is when the existing "Out of date" badge appears, so the two rules match.
-- **Alternatives** (moved from [prompt enhancer v3](archive/prompt-enhancer-v3.md)): a button in the Enhanced tab fills the history with three rewrites (seeds s, s+1, s+2) from one enhancer load.
+- **Alternatives** (moved from [prompt enhancer v3](prompt-enhancer-v3.md)): a button in the Enhanced tab fills the history with three rewrites (seeds s, s+1, s+2) from one enhancer load.
 
 ### Docs and changelog
 
@@ -50,7 +58,7 @@ The Workspace remembers one prompt: the one in the box. Typing a new one loses t
 
 ## Open questions
 
-- Should a prompt picked from recents also restore the settings used with it? Not in the first version; presets ([Settings presets](archive/settings-presets.md)) are the place for settings.
+- Should a prompt picked from recents also restore the settings used with it? Not in the first version; presets ([Settings presets](settings-presets.md)) are the place for settings.
 
 ## Out of scope
 

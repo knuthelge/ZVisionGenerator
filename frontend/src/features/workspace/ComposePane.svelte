@@ -1,14 +1,18 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts, workflowMode } from '$lib/state/promptEnhance';
   import { extendModelSupport, isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
+  import { layout } from '$lib/state/layoutMode.svelte';
   import { Icon } from '$lib/components/atoms';
+  import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import { PromptFileField, Segmented } from '$lib/components/molecules';
-  import type { DraftState, PromptSource, WorkspaceContext } from '$lib/types';
+  import { rewriteStepper } from '$lib/state/rewriteHistory';
+  import type { DraftState, PromptSource, RecentPrompt, WorkspaceContext } from '$lib/types';
   import PromptEnhancer from './PromptEnhancer.svelte';
+  import RecentPromptsMenu from './RecentPromptsMenu.svelte';
   import SavePromptMenu from './SavePromptMenu.svelte';
   import { promptToSave } from './savePrompt';
   import { workspaceCapabilities } from './capabilities';
@@ -52,6 +56,10 @@
   /** A result announced in the status line until the next edit or enhancement: a part switched to your text, a clip text restored. */
   let noticeText = $state<string | null>(null);
   let promptEl = $state<HTMLTextAreaElement | null>(null);
+  let recentsButton = $state<HTMLButtonElement | null>(null);
+  let recentsOpen = $state(false);
+  /** The prompt box when the menu was opened with Alt+↑ from it; Escape returns focus there instead of to the button. */
+  let recentsReturn = $state<HTMLElement | null>(null);
 
   /** Video workflows write a Scene beside the Prompt; the tabs then switch the pair. Images keep one prompt box. */
   const pairMode = $derived(caps.showScene && !promptFileMode && caps.showPromptInline);
@@ -64,7 +72,28 @@
   const saveSelection = $derived(
     promptToSave(s, { enhancedView: showingEnhanced, enhancing, jsonMode, pairMode, showNegative: caps.showNegativePrompt })
   );
-  const hasEnhanced = $derived(s.enhancedPrompt !== '' || (pairMode && s.enhancedScene !== ''));
+  /** Where the shown rewrite sits among the last five; only in the Enhanced view and while nothing is enhancing. */
+  const stepper = $derived(showingEnhanced && !enhancing ? rewriteStepper(s) : null);
+  type StatusKind = 'transient' | 'json' | 'auto' | 'stale' | 'used' | 'none';
+  /** What each fixed status says, with the icon and its tone where it has one. */
+  const STATUS_MESSAGES: Partial<Record<StatusKind, { text: string; icon?: IconName; tone?: 'on' | 'warn' }>> = {
+    json: { text: 'JSON object; replaces the prompt' },
+    auto: { text: 'Enhanced when the job runs', icon: 'sparkle', tone: 'on' },
+    stale: { text: 'Out of date', icon: 'alert', tone: 'warn' },
+    used: { text: 'Generate uses the Enhanced text', icon: 'check', tone: 'on' },
+  };
+  /** What the status line says, first match wins: progress, out of date, a result notice, JSON, auto-enhance, the Enhanced text in use. */
+  const statusKind = $derived<StatusKind>(
+    statusText ? 'transient'
+      : showTabs && !s.enhanceAuto && stale ? 'stale'
+      : noticeText ? 'transient'
+      : jsonMode ? 'json'
+      : showTabs && s.enhanceAuto ? 'auto'
+      : showTabs && enhancedUsed && !pairMode ? 'used'
+      : 'none'
+  );
+  const fixedStatus = $derived(STATUS_MESSAGES[statusKind]);
+  const statusMessage = $derived(statusKind === 'transient' ? statusText || noticeText || '' : fixedStatus?.text ?? '');
   // A video needs a scene or an action; Enhanced text in either box stands in for both.
   const textMissing = $derived(!enhancedUsed && !canSubmitText(s));
 
@@ -160,6 +189,43 @@
     activeTab = 'prompt';
   }
 
+  /** Show rewrite *index* (1-based); Generate then sends it. */
+  function showRewrite(index: number): void {
+    noticeText = null;
+    const entry = s.enhancedHistory[index - 1];
+    draft.patch({ enhancedPrompt: entry.prompt, enhancedScene: entry.scene, enhancedFrom: entry.from });
+  }
+
+  /** Bring a recent prompt back: its text into the boxes this workflow has, and no Enhanced text left over from the previous one. */
+  function pickRecent(entry: RecentPrompt): void {
+    const patch: Partial<DraftState> = { enhancedPrompt: '', enhancedScene: '', enhancedFrom: null };
+    if (entry.format === 'json') {
+      patch.jsonPromptEnabled = true;
+      patch.jsonPrompt = entry.prompt;
+    } else {
+      patch.jsonPromptEnabled = false;
+      patch.prompt = entry.prompt;
+      if (caps.showScene) patch.scene = entry.scene;
+    }
+    if (caps.showNegativePrompt) patch.negativePrompt = entry.negative_prompt;
+    draft.patch(patch);
+    activeTab = 'prompt';
+    noteText = null;
+    noticeText = null;
+    recentsOpen = false;
+    // A finger would raise the keyboard over the result.
+    if (!layout.coarse) void focusField(entry.format === 'json' ? 'ws-json-prompt' : 'ws-prompt', 'prompt');
+  }
+
+  // Alt+↑ in an empty prompt (and, for a video, an empty scene) opens the recent prompts; with text in it the browser keeps its caret movement.
+  function onPromptKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowUp' || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if ((event.currentTarget as HTMLTextAreaElement).value !== '' || (pairMode && s.scene !== '')) return;
+    event.preventDefault();
+    recentsReturn = event.currentTarget as HTMLElement;
+    recentsOpen = true;
+  }
+
   /** Bring a field forward on the tab that shows it, then focus it. */
   async function focusField(id: string, tab: 'prompt' | 'enhanced'): Promise<void> {
     if (showTabs) activeTab = tab;
@@ -215,29 +281,38 @@
 </script>
 
 {#snippet tabRow()}
-  <div class="prompt-tabs" class:pair-tabs={pairMode} role="tablist" aria-label={pairMode ? 'Text version' : 'Prompt version'}>
-    <button
-      type="button"
-      role="tab"
-      id="ws-tab-prompt"
-      class="prompt-tab"
-      aria-selected={activeTab === 'prompt'}
-      aria-controls={pairMode ? 'ws-text-panel' : 'ws-prompt'}
-      tabindex={activeTab === 'prompt' ? 0 : -1}
-      onclick={(e) => selectTab('prompt', e)}
-      onkeydown={onTabKeydown}
-    >{pairMode ? 'Your text' : 'Prompt'}{#if !pairMode && !enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{/if}</button>
-    <button
-      type="button"
-      role="tab"
-      id="ws-tab-enhanced"
-      class="prompt-tab"
-      aria-selected={activeTab === 'enhanced'}
-      aria-controls={pairMode ? 'ws-text-panel' : 'ws-enhanced-prompt'}
-      tabindex={activeTab === 'enhanced' ? 0 : -1}
-      onclick={(e) => selectTab('enhanced', e)}
-      onkeydown={onTabKeydown}
-    >Enhanced{#if enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{:else if pairMode && s.enhanceAuto}<span class="ui-badge ui-badge-info used-pill">auto</span>{/if}{#if stale && !s.enhanceAuto}<span class="ui-badge ui-badge-warning used-pill" title={pairMode ? 'Your text or the settings changed after this was enhanced. It is still used until you clear it.' : 'The prompt or workflow changed after this was enhanced. It is still used until you clear it.'}>Out of date</span>{/if}</button>
+  <div class="prompt-tab-row" class:pair-tabs={pairMode}>
+    <div class="prompt-tabs" role="tablist" aria-label={pairMode ? 'Text version' : 'Prompt version'}>
+      <button
+        type="button"
+        role="tab"
+        id="ws-tab-prompt"
+        class="prompt-tab"
+        aria-selected={activeTab === 'prompt'}
+        aria-controls={pairMode ? 'ws-text-panel' : 'ws-prompt'}
+        tabindex={activeTab === 'prompt' ? 0 : -1}
+        onclick={(e) => selectTab('prompt', e)}
+        onkeydown={onTabKeydown}
+      >{pairMode ? 'Your text' : 'Prompt'}</button>
+      <button
+        type="button"
+        role="tab"
+        id="ws-tab-enhanced"
+        class="prompt-tab"
+        aria-selected={activeTab === 'enhanced'}
+        aria-controls={pairMode ? 'ws-text-panel' : 'ws-enhanced-prompt'}
+        tabindex={activeTab === 'enhanced' ? 0 : -1}
+        onclick={(e) => selectTab('enhanced', e)}
+        onkeydown={onTabKeydown}
+      >Enhanced</button>
+    </div>
+    {#if stepper}
+      <div class="rewrite-stepper" role="group" aria-label="Rewrites" title="Earlier rewrites of this text">
+        <button type="button" class="ui-btn ui-btn-sm ui-btn-icon ui-btn-quiet" aria-label="Previous rewrite" disabled={stepper.index <= 1} onclick={() => showRewrite(stepper.index - 1)}><Icon name="chevleft" size={14} /></button>
+        <span class="rewrite-count" aria-live="polite"><span class="sr-only">Rewrite </span>{stepper.index} of {stepper.count}</span>
+        <button type="button" class="ui-btn ui-btn-sm ui-btn-icon ui-btn-quiet" aria-label="Next rewrite" disabled={stepper.index >= stepper.count} onclick={() => showRewrite(stepper.index + 1)}><Icon name="chevright" size={14} /></button>
+      </div>
+    {/if}
   </div>
 {/snippet}
 
@@ -258,7 +333,6 @@
         {#if used}
           <span id={`ws-${part}-marker`} class="label-marker">
             <span class="ui-badge ui-badge-info" title={`Generate uses the enhanced ${part}`}>Uses enhanced</span>
-            {#if stale}<span class="ui-badge ui-badge-warning" title={OUT_OF_DATE_TITLE}>Out of date</span>{/if}
           </span>
           <button type="button" class="prompt-link" title={`Clear the enhanced ${part}; Generate uses yours`} onclick={() => useMine(part)}>Use mine</button>
         {/if}
@@ -293,6 +367,7 @@
       required={textMissing}
       hidden={showingEnhanced}
       oninvalid={showPromptForValidation}
+      onkeydown={onPromptKeydown}
       value={s.prompt}
       use:autogrow={[s.prompt, showingEnhanced]}
       oninput={(e) => onPromptInput(e.currentTarget.value)}
@@ -351,19 +426,39 @@
         onclick={() => draft.update('jsonPromptEnabled', !s.jsonPromptEnabled)}
       >{'{ }'} JSON</button>
     {/if}
+    <span class="tools-spacer"></span>
+    <button
+      bind:this={recentsButton}
+      type="button"
+      id="ws-recent-prompts"
+      class="ui-btn ui-btn-sm ui-btn-icon"
+      aria-label="Recent prompts"
+      aria-haspopup="dialog"
+      aria-expanded={recentsOpen}
+      title="Recent prompts (Alt+↑ in an empty prompt)"
+      onclick={() => { recentsReturn = null; recentsOpen = !recentsOpen; }}
+    ><Icon name="history" size={14} /></button>
+    <RecentPromptsMenu open={recentsOpen} anchor={recentsButton} returnFocus={recentsReturn ?? recentsButton} mode={workflowMode(s.workflow)} jsonCapable={caps.supportsJsonPrompt} onpick={pickRecent} onclose={() => { recentsOpen = false; }} />
     {#if !jsonMode}
       <SavePromptMenu selection={saveSelection} workspaceFile={s.promptFilePath} enhancedView={showingEnhanced} />
     {/if}
-    {#if showingEnhanced && !s.enhanceAuto}
-      {#if stale}
+  </div>
+{/snippet}
+
+{#snippet statusLine()}
+  <!-- One line under the box that says what Generate sends. Its height is fixed, so no message moves what is below it. -->
+  <div class="prompt-statusline" data-testid="prompt-statusline" data-state={statusKind}>
+    <span class="statusline-msg">
+      {#if fixedStatus?.icon}<Icon name={fixedStatus.icon} size={12} class={`statusline-icon-${fixedStatus.tone}`} />{/if}
+      <!-- The region stays in the page, so assistive technology announces each message that fills it. -->
+      <span class="statusline-text" class:sr-only={!statusMessage} class:statusline-warn={statusKind === 'stale'} role="status" title={statusKind === 'stale' ? OUT_OF_DATE_TITLE : undefined}>{statusMessage}</span>
+      {#if statusKind === 'stale'}
         <button type="button" class="prompt-link" disabled={busy || jobsActive || enhancing} onclick={() => enhancer?.runEnhance()}>Re-enhance</button>
       {/if}
-      {#if hasEnhanced}
-        <button type="button" class="prompt-link" onclick={clearEnhanced}>Clear</button>
+      {#if (statusKind === 'stale' || statusKind === 'used') && !pairMode}
+        <button type="button" class="prompt-link" onclick={clearEnhanced}>Use mine</button>
       {/if}
-    {/if}
-    <!-- The region stays in the page, hidden visually while empty, so assistive technology announces what fills it. -->
-    <span class="prompt-status" class:sr-only={!(statusText ?? noticeText)} role="status">{statusText ?? noticeText ?? ''}</span>
+    </span>
     <span class="word-count">{wordCount} words</span>
   </div>
 {/snippet}
@@ -447,9 +542,7 @@
       </div>
     {/if}
 
-    {#if jsonMode}
-      <p class="ui-help">Must be a JSON object. Replaces the normal prompt.</p>
-    {/if}
+    {@render statusLine()}
     <!-- The region stays in the page so assistive technology announces the warning when it appears. -->
     <div aria-live="polite">
       {#if originalPromptShown}
@@ -463,8 +556,6 @@
     {/if}
     {#if noteText}
       <p class="ui-help">{noteText}</p>
-    {:else if enhancedUsed && !pairMode}
-      <p class="ui-help">The Enhanced text is generated instead of the prompt.</p>
     {/if}
   {/if}
 
@@ -537,13 +628,19 @@
   @media (max-width: 639px) {
     .collapse-toggle { display: none; }
   }
-  .prompt-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 4px 0; border-bottom: 1px solid var(--color-border-subtle); }
-  .prompt-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 6px; border-radius: 6px 6px 0 0; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); }
+  /* The tab row: the tablist, then the rewrite stepper at the right end outside it. Its height is reserved for the
+     stepper from the start (control height plus the tab row's padding), so the stepper appearing moves nothing. */
+  .prompt-tab-row { display: flex; align-items: flex-end; gap: 4px; min-height: calc(var(--spacing-control-sm) + 6px); padding: 4px 4px 0; border-bottom: 1px solid var(--color-border-subtle); }
+  .prompt-tabs { display: flex; flex: 1; min-width: 0; align-items: center; gap: 2px; }
+  /* The buttons and the counter share a centre line: the counter's line box is trimmed to the digit height, so no font's metrics shift it. */
+  .rewrite-stepper { display: flex; flex: none; align-self: center; align-items: center; gap: 2px; height: var(--spacing-control-sm); }
+  .rewrite-stepper :global(svg) { display: block; }
+  .rewrite-count { display: block; min-width: 3.25em; font-family: var(--font-mono); font-size: var(--text-meta); line-height: 1; text-align: center; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; text-box: trim-both cap alphabetic; }
+  .prompt-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 6px; border-radius: 6px 6px 0 0; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); }
   @media (hover: hover) { .prompt-tab:hover { color: var(--color-text-primary); } }
   .prompt-tab:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
   .prompt-tab[aria-selected='true'] { color: var(--color-text-primary); }
   .prompt-tab[aria-selected='true']::after { content: ''; position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--color-primary-main); }
-  .used-pill { height: 16px; padding: 0 4px; }
   /* Video: the tabs sit above the Scene and Prompt boxes and line up with them. */
   .pair-tabs { margin: 0 -4px; }
   .text-pair { display: flex; flex-direction: column; gap: 8px; }
@@ -567,8 +664,15 @@
   .prompt-link { font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); }
   @media (hover: hover) { .prompt-link:hover { color: var(--color-text-primary); } }
   .prompt-link:disabled { opacity: 0.5; }
-  .prompt-status { font-size: var(--text-meta); color: var(--color-text-muted); }
-  .word-count { margin-left: auto; padding-right: 4px; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
+  .tools-spacer { flex: 1; }
+  /* The status line under the box: a fixed-height row, the message on the left and the word count on the right. */
+  .prompt-statusline { display: flex; align-items: center; gap: 8px; min-height: var(--spacing-control-sm); margin-top: -2px; padding: 0 4px; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .statusline-msg { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; white-space: nowrap; }
+  .statusline-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-secondary); }
+  .prompt-statusline :global(.statusline-icon-on) { color: var(--color-primary-main); }
+  .prompt-statusline :global(.statusline-icon-warn) { color: var(--color-warning); }
+  .statusline-warn { font-weight: 600; color: var(--color-warning); }
+  .word-count { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .negative-text { min-height: 34px; max-height: 96px; resize: none; }
   /* Touch: 16px text, below which iOS zooms into a field as it focuses. */
   @media (pointer: coarse) {

@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { DownloadItem, GalleryPage, JobContext, JobSnapshot, SettingsPreset, WorkspaceContext } from '$lib/types';
+import type { DownloadItem, GalleryPage, JobContext, JobSnapshot, RecentPrompt, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
 
 // The API mocks of the Workspace page tests. A test file wires them in with `vi.mock(path, async () => ...)`
 // factories that import this module, because `vi.mock` only hoists inside a test file.
@@ -16,8 +16,8 @@ export const workspaceApiMocks = {
   skipFirstRun: vi.fn(async () => ({ skipped: true })),
 };
 
-/** Lets a test pick the phone layout; the page reads `layout.compact` once when it mounts. */
-export const layoutProbe = { compact: false };
+/** Lets a test pick the phone layout, or a touch screen at a wide width (`coarse`); the page reads them when it mounts. */
+export const layoutProbe = { compact: false, coarse: false };
 
 export const configApiMocks = {
   updateConfig: vi.fn(async () => ({})),
@@ -59,6 +59,11 @@ export const presetApiMocks = {
   updatePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, body: unknown) => Promise<SettingsPreset>>(),
   renamePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, name: string) => Promise<SettingsPreset>>(),
   deletePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string) => Promise<{ status: string }>>(),
+};
+
+export const recentPromptsApiMocks = {
+  getRecentPrompts: vi.fn<(query: string, mode: WorkflowMode) => Promise<{ entries: RecentPrompt[] }>>(),
+  clearRecentPrompts: vi.fn<(mode: WorkflowMode) => Promise<{ deleted_count: number }>>(),
 };
 
 export const modelApiMocks = {

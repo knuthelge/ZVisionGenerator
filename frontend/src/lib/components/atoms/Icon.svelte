@@ -52,6 +52,8 @@
     drive: 'M4 14h16v5H4zM6 14l2-9h8l2 9M16 16.5h.01',
     copy: 'M8 8h10a2 2 0 012 2v10a2 2 0 01-2 2H8a2 2 0 01-2-2V10a2 2 0 012-2zM16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2',
     clock: 'M12 4a8 8 0 110 16 8 8 0 010-16zM12 8v4l2.5 2.5',
+    // A clock with a counter-clockwise arrow: going back to earlier prompts (the Job log keeps the plain clock).
+    history: 'M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4v4.5h4.5M12 8v4l2.5 2.5',
   } as const;
 
   export type IconName = keyof typeof PATHS;
