@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import httpx
+from huggingface_hub.utils import httpx
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 

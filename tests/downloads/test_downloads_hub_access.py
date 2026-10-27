@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import httpx
+from huggingface_hub.utils import httpx
 import huggingface_hub
 import pytest
 from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError, RevisionNotFoundError

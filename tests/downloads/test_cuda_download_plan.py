@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import httpx
+from huggingface_hub.utils import httpx
 import pytest
 from huggingface_hub.errors import GatedRepoError
 from huggingface_hub.utils import filter_repo_objects

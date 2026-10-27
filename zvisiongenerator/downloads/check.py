@@ -60,7 +60,7 @@ def _refusal_text(exc: BaseException, target: DownloadTarget) -> str:
 
 def _is_unreachable(exc: BaseException) -> bool:
     """Return whether *exc* means offline mode or an unreachable Hub rather than a refusal."""
-    import httpx
+    from huggingface_hub.utils import httpx
     from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
     return isinstance(exc, OfflineModeIsEnabled | LocalEntryNotFoundError | httpx.ConnectError | httpx.TimeoutException)

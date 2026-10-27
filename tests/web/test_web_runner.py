@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
-import httpx
+from huggingface_hub.utils import httpx
 from huggingface_hub.errors import GatedRepoError
 from PIL import Image
 import pytest
