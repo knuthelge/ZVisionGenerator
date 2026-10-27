@@ -317,6 +317,28 @@ class TestLoadModel:
 
         assert handle.pipeline._pending_loras == loras
 
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_pipeline_is_built_with_unfused_loras_and_the_default_cleared_after(self, classes, monkeypatch, upscale):
+        monkeypatch.delenv("LTX2_LORA_MODE", raising=False)
+        seen = []
+        pipeline_class = classes.distilled if upscale else classes.base
+        pipeline_class.side_effect = lambda **_: seen.append(os.environ.get("LTX2_LORA_MODE")) or SimpleNamespace(model_dir="model/path")
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("model/path", upscale=upscale, loras=[("lora.safetensors", 1.0)])
+
+        assert seen == ["unfused"]
+        assert "LTX2_LORA_MODE" not in os.environ
+
+    def test_lora_mode_the_user_set_is_kept(self, classes, monkeypatch):
+        monkeypatch.setenv("LTX2_LORA_MODE", "fused")
+        seen = []
+        classes.base.side_effect = lambda **_: seen.append(os.environ.get("LTX2_LORA_MODE")) or SimpleNamespace(model_dir="model/path")
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("model/path")
+
+        assert seen == ["fused"]
+        assert os.environ["LTX2_LORA_MODE"] == "fused"
+
     def test_no_loras_leaves_pending_loras_unset(self, classes):
         with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             handle, _ = LtxVideoBackend().load_model("model/path")

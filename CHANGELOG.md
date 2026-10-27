@@ -26,6 +26,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 #### Web UI
 - **The prompt box bars are reorganised.** The tabs only say which text you see. A status line under the box says what Generate sends, with **Re-enhance** and **Use mine** beside **Out of date**. **Use mine** replaces **Clear**
 
+#### Video
+- **macOS: LTX LoRAs apply at full strength.** On `ltx-4`, `ltx-8` and `ltx25-4` a LoRA lost much of its effect to the model's quantization; it now shows fully, at about the same speed. A weight you raised to make up for it may now be too high
+
 #### Platforms and libraries
 - **Pillow 13**, which fixes heap overflows in its JPEG and FlashPix decoders that a crafted image could trigger
 - **Windows/Linux: diffusers 0.42**

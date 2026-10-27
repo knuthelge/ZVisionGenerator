@@ -41,6 +41,11 @@ _COMPUTE_DTYPE_ENV = "LTX2_COMPUTE_DTYPE"
 # The pipeline computes in float32 unless told otherwise. float16 is faster per step on Apple Silicon with
 # near-identical output, so a generation uses it unless the user has set the variable themselves.
 _DEFAULT_COMPUTE_DTYPE = "float16"
+# Environment variable the vendored pipeline reads, when it is constructed, to fuse LoRAs into the weights or attach them.
+_LORA_MODE_ENV = "LTX2_LORA_MODE"
+# Fusing re-quantizes the q4/q8 weights, which loses most of a small LoRA's update; run-time adapters keep it at about
+# the same speed. A pipeline is built with unfused LoRAs unless the user has set the variable themselves.
+_DEFAULT_LORA_MODE = "unfused"
 # Sample rate the audio VAE encoder reads.
 _AUDIO_ENCODER_RATE = 16000
 
@@ -705,19 +710,16 @@ def _generate_two_stage(
 
 
 @contextlib.contextmanager
-def _default_compute_dtype() -> Iterator[None]:
-    """Default the vendored pipeline's compute dtype to float16 for the block; a value the user already set is kept.
-
-    The pipeline reads the variable each time it loads the transformer, which happens inside a generation.
-    """
-    if _COMPUTE_DTYPE_ENV in os.environ:
+def _env_default(name: str, value: str) -> Iterator[None]:
+    """Set the environment variable *name* to *value* for the block; a value the user already set is kept."""
+    if name in os.environ:
         yield
         return
-    os.environ[_COMPUTE_DTYPE_ENV] = _DEFAULT_COMPUTE_DTYPE
+    os.environ[name] = value
     try:
         yield
     finally:
-        os.environ.pop(_COMPUTE_DTYPE_ENV, None)
+        os.environ.pop(name, None)
 
 
 @contextlib.contextmanager
@@ -732,7 +734,8 @@ def _generation_scope(model: _LtxModel) -> Iterator[None]:
 
         aggressive_cleanup()
     with contextlib.ExitStack() as stack:
-        stack.enter_context(_default_compute_dtype())
+        # The pipeline reads the compute dtype each time it loads the transformer, which happens inside a generation.
+        stack.enter_context(_env_default(_COMPUTE_DTYPE_ENV, _DEFAULT_COMPUTE_DTYPE))
         if model.low_ram_streaming:
             stack.enter_context(mlx_cache_limit(0))
         try:
@@ -811,8 +814,8 @@ class LtxVideoBackend:
         text_encoder = _text_encoder_options(model_dir, kwargs.get("mlx_text_encoder"))
 
         try:
-            # The constructor sets the MLX cache limit to 0 process-wide when streaming; scope it.
-            with mlx_cache_limit(0) if streaming else contextlib.nullcontext():
+            # The constructor reads the LoRA mode, and sets the MLX cache limit to 0 process-wide when streaming; scope both.
+            with _env_default(_LORA_MODE_ENV, _DEFAULT_LORA_MODE), mlx_cache_limit(0) if streaming else contextlib.nullcontext():
                 if upscale:
                     from ltx_pipelines_mlx import DistilledPipeline
 
@@ -833,7 +836,7 @@ class LtxVideoBackend:
             )
 
         if loras:
-            # ltx-pipelines-mlx fuses _pending_loras while it loads the transformer
+            # ltx-pipelines-mlx attaches (or, with LTX2_LORA_MODE=fused, fuses) _pending_loras while it loads the transformer
             pipeline._pending_loras = loras  # noqa: SLF001
 
         model_info = detect_video_model(model_path)
