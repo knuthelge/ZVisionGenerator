@@ -451,7 +451,7 @@ class TestRunVideoBatchReview:
         types = [e["type"] for e in events]
         assert types.index("job_paused") < types.index("job_resumed") < types.index("generation_finished")
         paused = next(e for e in events if e["type"] == "job_paused")
-        assert paused["review"] == {"iteration": 1}
+        assert paused["review"] == {"iteration": 1, "attempt": 1}
         assert paused["mode"] == "video"
         assert "preview" not in paused
         assert paused["review_path"] == str(Path("/tmp/ziv-review-x/small-render.mp4"))
@@ -540,6 +540,70 @@ class TestRunVideoBatchReview:
         _run_batch(_decided("approve"), callback=lambda event: None, backend=backend, workflow=workflow)
         assert path not in capsys.readouterr().out
 
+    @staticmethod
+    def _reviewing_workflow(skip: SkipSignal, queue_in_review: list[str], upscaled: list[int]):
+        """Return a workflow whose video renders its steps, then reviews, then "upscales" only when the review returns."""
+        workflow = MagicMock()
+        attempts = iter(range(1, 100))
+
+        def _run(request, artifacts):
+            attempt = next(attempts)
+            request.step_callback({"current_step": 1, "total_steps": 2})
+            if queue_in_review[attempt - 1]:
+                skip.queue_action(queue_in_review[attempt - 1])
+            request.review(Path("/tmp/ziv-review-x/small-render.mp4"))
+            upscaled.append(attempt)
+            return StageOutcome.success
+
+        workflow.run.side_effect = _run
+        return workflow
+
+    def test_a_next_queued_before_the_review_declines_it_and_the_upscale_never_runs(self):
+        events: list[dict] = []
+        skip = SkipSignal()
+        upscaled: list[int] = []
+        workflow = self._reviewing_workflow(skip, ["skip", ""], upscaled)
+        answers = iter(["approve"])
+        wait = skip.wait_for_review
+        skip.wait_for_review = lambda: wait() if skip.pending() == "skip" else next(answers)  # type: ignore[method-assign]
+
+        _run_batch(skip, prompts=2, callback=events.append, workflow=workflow)
+
+        assert upscaled == [2]
+        assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["skipped", "success"]
+        assert events[-1]["type"] == "batch_completed"
+        assert "batch_cancelled" not in [e["type"] for e in events]
+
+    def test_a_repeat_queued_during_the_review_applies_after_a_discard(self):
+        events: list[dict] = []
+        skip = SkipSignal()
+        upscaled: list[int] = []
+        workflow = self._reviewing_workflow(skip, ["repeat", ""], upscaled)
+        decisions = iter(["discard", "approve"])
+        skip.wait_for_review = lambda: next(decisions)  # type: ignore[method-assign]
+
+        _run_batch(skip, callback=events.append, workflow=workflow)
+
+        types = [e["type"] for e in events]
+        assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["skipped", "success"]
+        assert types.index("generation_finished") < types.index("generation_repeat")
+        assert workflow.run.call_count == 2
+        assert upscaled == [2]
+        assert types[-1] == "batch_completed"
+
+    def test_a_repeat_queued_during_the_review_is_dropped_after_a_next(self):
+        events: list[dict] = []
+        skip = SkipSignal()
+        upscaled: list[int] = []
+        workflow = self._reviewing_workflow(skip, ["repeat", ""], upscaled)
+        skip.wait_for_review = lambda: (skip.queue_action("skip"), "skip")[1]  # type: ignore[method-assign]
+
+        _run_batch(skip, callback=events.append, workflow=workflow)
+
+        assert upscaled == []
+        assert workflow.run.call_count == 1
+        assert "generation_repeat" not in [e["type"] for e in events]
+
     def test_the_quit_key_still_cancels_between_videos_without_review(self):
         events: list[dict] = []
         skip = SkipSignal()
@@ -560,8 +624,7 @@ class _FakeSkipSignal:
 
     instances: list[_FakeSkipSignal] = []
 
-    def __init__(self, *, quit_only: bool = False):
-        self.quit_only = quit_only
+    def __init__(self):
         self.calls: list[str] = []
         _FakeSkipSignal.instances.append(self)
 
@@ -600,12 +663,21 @@ class TestVideoCliReview:
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
-    def _patched_main(self, monkeypatch, tmp_path, order, *, batch_error: Exception | None = None):
+    def _patched_main(self, monkeypatch, order, *, batch_error: Exception | None = None):
         video_cli, captured, _workflows = patch_video_cli_for_preflight(monkeypatch, order)
         _FakeSkipSignal.instances.clear()
         monkeypatch.setattr(video_cli, "SkipSignal", _FakeSkipSignal)
         monkeypatch.setattr(video_cli, "supports_video_upscale_review", lambda: True)
         monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: order.append("ensure_ffmpeg"))
+        real_preflight = video_cli.run_preflight
+
+        def _run_preflight(*args, control=None, **kwargs):
+            order.append("run_preflight")
+            captured["preflight_control"] = control
+            captured["listener_calls_at_preflight"] = list(control.calls) if control is not None else None
+            return real_preflight(*args, control=control, **kwargs)
+
+        monkeypatch.setattr(video_cli, "run_preflight", _run_preflight)
 
         def _run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
             order.append("run_video_batch")
@@ -617,38 +689,34 @@ class TestVideoCliReview:
         monkeypatch.setattr(video_cli, "run_video_batch", _run_video_batch)
         return video_cli, captured
 
-    def test_the_listener_starts_after_preflight_and_stops_after_the_batch(self, monkeypatch, tmp_path):
+    @staticmethod
+    def _argv(tmp_path, *extra):
+        return ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--upscale", "2", "-o", str(tmp_path), *extra]
+
+    @pytest.mark.parametrize("extra", [[], ["--review"]])
+    def test_the_listener_starts_after_ffmpeg_and_stops_after_the_batch(self, monkeypatch, tmp_path, extra):
         order: list[str] = []
         _tty(monkeypatch)
-        video_cli, captured = self._patched_main(monkeypatch, tmp_path, order)
+        video_cli, captured = self._patched_main(monkeypatch, order)
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--upscale", "2", "--review", "-o", str(tmp_path)]):
+        with patch("sys.argv", self._argv(tmp_path, *extra)):
             video_cli.main()
 
         (listener,) = _FakeSkipSignal.instances
-        assert listener.quit_only is True
+        assert captured["preflight_control"] is listener
         assert captured["skip_signal"] is listener
+        assert captured["listener_calls_at_preflight"] == ["start"]
         assert captured["listener_calls_at_batch"] == ["start"]
         assert listener.calls == ["start", "stop"]
-        assert order.index("ensure_ffmpeg") < order.index("load_model") < order.index("run_video_batch")
+        assert order.index("ensure_ffmpeg") < order.index("run_preflight") < order.index("load_model") < order.index("run_video_batch")
 
-    def test_the_terminal_is_restored_when_the_batch_raises(self, monkeypatch, tmp_path):
+    def test_the_terminal_is_restored_when_the_batch_is_interrupted(self, monkeypatch, tmp_path):
         order: list[str] = []
         _tty(monkeypatch)
-        video_cli, _captured = self._patched_main(monkeypatch, tmp_path, order, batch_error=KeyboardInterrupt())
+        video_cli, _captured = self._patched_main(monkeypatch, order, batch_error=KeyboardInterrupt())
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--upscale", "2", "--review", "-o", str(tmp_path)]):
+        with patch("sys.argv", self._argv(tmp_path, "--review")):
             with pytest.raises(KeyboardInterrupt):
                 video_cli.main()
 
         assert _FakeSkipSignal.instances[0].calls == ["start", "stop"]
-
-    def test_no_listener_without_review(self, monkeypatch, tmp_path):
-        order: list[str] = []
-        video_cli, captured = self._patched_main(monkeypatch, tmp_path, order)
-
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--upscale", "2", "-o", str(tmp_path)]):
-            video_cli.main()
-
-        assert _FakeSkipSignal.instances == []
-        assert captured["skip_signal"] is None

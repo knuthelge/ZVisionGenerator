@@ -17,14 +17,8 @@ class SkipSignal:
     _REVIEW_DECISIONS = frozenset({"approve", "discard"})
     _REVIEW_POLL_SECONDS = 0.2
 
-    def __init__(self, *, quit_only: bool = False):
-        """Create the signal.
-
-        Args:
-            quit_only: Whether the keys ``n``, ``p`` and ``r`` are ignored outside a review, so that only ``q`` queues
-                an action. For video, where Next, Pause and Repeat do not exist.
-        """
-        self._quit_only = quit_only
+    def __init__(self):
+        """Create the signal."""
         self._action = None
         self._lock = threading.Lock()
         self._running = False
@@ -133,7 +127,7 @@ class SkipSignal:
 
         A Quit or Skip (Next) queued before the review returns at once and stays queued for the runner to consume (a
         decision already made wins over a Skip); a Skip ends the review without an upscale. A queued Pause or Repeat stays queued and takes effect after the
-        image, whichever way the review ends. The wait polls with a short timeout so Ctrl-C stays responsive on every
+        item, whichever way the review ends. The wait polls with a short timeout so Ctrl-C stays responsive on every
         platform.
         """
         with self._lock:
@@ -194,8 +188,6 @@ class SkipSignal:
 
     def _on_command_key(self, ch: str) -> str | None:
         """Queue the action for a command key and return the message to show (call with the lock held)."""
-        if self._quit_only and ch != "q":
-            return None
         if self._action == "quit" and ch in ("n", "p", "r"):
             return "⏹  quit already queued."
         if ch == "n":
@@ -206,10 +198,10 @@ class SkipSignal:
             return "⏹  [q] quit — queued, takes effect after current step."
         if ch == "p":
             self._set_action("pause")
-            return "⏸  [p] pause — queued, takes effect after current image."
+            return "⏸  [p] pause — queued, takes effect after the current item."
         if ch == "r":
             self._set_action("repeat")
-            return "♻  [r] repeat — queued, takes effect after current image."
+            return "♻  [r] repeat — queued, takes effect after the current item."
         return None
 
     def _listen(self):

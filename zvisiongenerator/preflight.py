@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends import prompt_enhancer_session, release_accelerator_memory, video_family_on_platform
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
+from zvisiongenerator.job_controls import pause_until_resumed, seed_range
 from zvisiongenerator.utils.prompt_compose import expand_random_choices, is_original_prompt
 from zvisiongenerator.utils.config import model_reference
 from zvisiongenerator.utils.enhance_record import enhancer_tier
@@ -153,7 +154,7 @@ def run_preflight(
     """
     if mode not in _MODES:
         raise ValueError(f"Preflight mode must be one of {', '.join(_MODES)}, got '{mode}'.")
-    generation = config.get("generation", {})
+    seed_min, seed_max = seed_range(config)
     disabled = bool(getattr(args, "no_enhance", False))
     override = getattr(args, "enhance", None)
     video = mode == "video"
@@ -161,8 +162,8 @@ def run_preflight(
         prompts_data,
         runs=args.runs,
         seed=args.seed,
-        seed_min=generation.get("seed_min", 4),
-        seed_max=generation.get("seed_max", 2**32 - 1),
+        seed_min=seed_min,
+        seed_max=seed_max,
         json_prompt=bool(getattr(args, "json_prompt_enabled", False)),
         disabled=disabled,
         override=override,
@@ -376,13 +377,7 @@ def _make_pause(control: SkipSignal | None, *, mode: str, total_iterations: int,
     def _pause() -> str | None:
         if control is None:
             return None
-        emit_progress(progress_callback, "job_paused", mode=mode, completed_iterations=0, total_iterations=total_iterations)
-        print("\n⏸ Paused. Press any key to continue...")
-        control.wait_for_key()
-        action = control.consume()
-        emit_progress(progress_callback, "job_resumed", mode=mode, completed_iterations=0, total_iterations=total_iterations)
-        print("▶ Resumed.\n")
-        return action
+        return pause_until_resumed(control, progress_callback=progress_callback, mode=mode, completed_iterations=0, total_iterations=total_iterations)
 
     return _pause
 

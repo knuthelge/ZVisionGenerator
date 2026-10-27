@@ -816,7 +816,7 @@ describe('WorkspacePage', () => {
 
         const region = target.querySelector<HTMLElement>('[data-testid="review-overlay"]')!;
         const video = region.querySelector('video')!;
-        expect(video.getAttribute('src')).toBe('/jobs/job-vreview/review?v=2');
+        expect(video.getAttribute('src')).toBe('/jobs/job-vreview/review?v=2-1');
         expect(video.autoplay).toBe(false);
         expect(video.controls).toBe(true);
         expect(video.muted).toBe(false);

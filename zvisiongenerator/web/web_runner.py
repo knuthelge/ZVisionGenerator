@@ -62,8 +62,7 @@ from zvisiongenerator.web.job_contract import (
     TERMINAL_EVENT_TYPES,
     TERMINAL_STATUSES,
     UPSCALE_SUPPORTED_CONTROLS,
-    image_supported_controls,
-    video_supported_controls,
+    generation_supported_controls,
     public_job_snapshot,
 )
 from zvisiongenerator.video_runner import run_video_batch
@@ -216,7 +215,7 @@ class _JobRecord:
     result_path: str | None = None
     outputs: list[dict[str, Any]] = field(default_factory=list)
     paused: bool = False
-    # ``{"iteration": n}`` from the pause of a render until ``job_resumed``; reconnecting browsers see it in the snapshot.
+    # ``{"iteration": n, "attempt": k}`` from the pause of a render until ``job_resumed``; reconnecting browsers see it in the snapshot.
     review: dict[str, Any] | None = None
     review_decided: bool = False
     # Temporary video of the small render under review; server-side only, never in events or snapshots.
@@ -303,7 +302,7 @@ class WebRunner:
             job_type="image",
             exclusive=True,
             control_signal=control_signal,
-            supported_controls=supported_controls if supported_controls is not None else image_supported_controls(review=review_enabled(args)),
+            supported_controls=supported_controls if supported_controls is not None else generation_supported_controls(review=review_enabled(args)),
             context={"output_dir": getattr(args, "output", None), **(context or {})},
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_image_request(
@@ -335,15 +334,15 @@ class WebRunner:
     ) -> str:
         """Queue the video job; the worker loads the model and runs the batch loop.
 
-        Quit is supported, and with a review also approve and discard. *supported_controls* defaults to the controls
-        the job's ``args`` imply.
+        The job supports the same controls as an image job, and with a review also approve and discard.
+        *supported_controls* defaults to the controls the job's ``args`` imply.
         """
         control_signal = SkipSignal()
         return self._submit_job(
             job_type="video",
             exclusive=True,
             control_signal=control_signal,
-            supported_controls=supported_controls if supported_controls is not None else video_supported_controls(review=review_enabled(args)),
+            supported_controls=supported_controls if supported_controls is not None else generation_supported_controls(review=review_enabled(args)),
             context={"output_dir": getattr(args, "output", None), **(context or {})},
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_video_request(
@@ -563,7 +562,7 @@ class WebRunner:
         return self.list_jobs()["active_job"]
 
     def queue_job_control(self, job_id: str, action: str) -> dict[str, Any]:
-        """Queue a supported control action for an active image job; quitting a queued job removes it."""
+        """Queue a supported control action for an active job; quitting a queued job removes it."""
         normalized = action.strip().lower()
         if normalized == "quit" and self.cancel_queued(job_id):
             return {"job_id": job_id, "action": normalized, "status": "cancelled"}

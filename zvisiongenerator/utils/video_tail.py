@@ -118,7 +118,7 @@ def _stream_frames(command: list[str], width: int, height: int) -> Iterator[byte
     """
     frame_bytes = width * height * 3
     with tempfile.TemporaryFile() as stderr:
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=stderr)
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr)
         try:
             assert process.stdout is not None
             while chunk := process.stdout.read(frame_bytes):
@@ -155,7 +155,7 @@ def read_source_tail_audio(source: ExtendSource, sample_rate: int, frames: int =
     """
     import numpy as np
 
-    result = subprocess.run(build_tail_audio_command(source, sample_rate, frames), capture_output=True, check=False)
+    result = subprocess.run(build_tail_audio_command(source, sample_rate, frames), stdin=subprocess.DEVNULL, capture_output=True, check=False)
     if result.returncode != 0:
         raise tool_error("ffmpeg could not read the video's audio", result.stderr)
     samples = np.frombuffer(result.stdout[: len(result.stdout) // 8 * 8], dtype=np.float32).reshape(-1, 2).T.copy()

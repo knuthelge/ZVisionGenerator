@@ -457,7 +457,7 @@ def _decode_source_tail(source: ExtendSource, samples: int, tail_samples: int) -
     frame = 2 * 4  # bytes of one stereo float32 sample
     total, tail = 0, b""
     with tempfile.TemporaryFile() as errors:
-        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors) as process:
+        with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors) as process:
             assert process.stdout is not None
             while chunk := process.stdout.read(1 << 20):
                 total += len(chunk)
@@ -500,7 +500,7 @@ def run_ffmpeg(command: list[str], message: str = "ffmpeg could not join the cli
     Raises:
         RuntimeError: If ffmpeg exits with an error; *message* leads the error text.
     """
-    result = subprocess.run(command, capture_output=True, check=False)
+    result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, check=False)
     if result.returncode != 0:
         raise tool_error(message, result.stderr)
 

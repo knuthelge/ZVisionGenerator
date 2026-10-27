@@ -66,7 +66,11 @@ function eventReview(event: Record<string, unknown> | null | undefined): JobRevi
   const value = event?.review;
   if (!value || typeof value !== 'object') return null;
   const iteration = (value as { iteration?: unknown }).iteration;
-  return { iteration: typeof iteration === 'number' && Number.isFinite(iteration) ? iteration : 0 };
+  const attempt = (value as { attempt?: unknown }).attempt;
+  return {
+    iteration: typeof iteration === 'number' && Number.isFinite(iteration) ? iteration : 0,
+    attempt: typeof attempt === 'number' && Number.isFinite(attempt) ? attempt : 1,
+  };
 }
 
 const ENHANCE_STATUSES: ReadonlySet<string> = new Set(['off', 'enhanced', 'failed', 'skipped']);
@@ -221,7 +225,7 @@ function makeInitialJobState(ctx: JobContext): ActiveJobState {
 function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
   const lastEvent = snapshot.last_event ?? null;
   const isPaused = snapshot.paused || snapshot.status === 'paused';
-  const review = isPaused && snapshot.review ? { iteration: snapshot.review.iteration } : null;
+  const review = isPaused && snapshot.review ? { iteration: snapshot.review.iteration, attempt: snapshot.review.attempt ?? 1 } : null;
   const batchIndex = eventFieldNumber(lastEvent, 'run_index');
   const completedIterations = eventFieldNumber(lastEvent, 'completed_iterations');
   const totalIterations = eventFieldNumber(lastEvent, 'total_iterations');

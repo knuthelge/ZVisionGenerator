@@ -654,14 +654,14 @@ class TestHistoryReplacement:
             job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.0)
             wait_for_status(runner, job_id, "completed")
             record = runner._get_job(job_id)
-            record.review = {"iteration": 1}
+            record.review = {"iteration": 1, "attempt": 1}
             record.preview_jpeg = b"jpeg"
             runner._publish_event(job_id, _downloading(10))
             kept = (record.review, record.preview_jpeg)
         finally:
             runner.shutdown()
 
-        assert kept == ({"iteration": 1}, b"jpeg")
+        assert kept == ({"iteration": 1, "attempt": 1}, b"jpeg")
 
     @pytest.mark.parametrize("mode", ["image", "video"])
     def test_the_hook_labels_its_events_with_the_mode_and_counts_every_planned_iteration_across_sets_and_runs(self, monkeypatch, mode):

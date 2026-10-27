@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import warnings
 from dataclasses import replace
 from unittest.mock import MagicMock, patch
@@ -320,7 +321,7 @@ class TestRunnerOutcome:
 
         plan = _make_plan(_prompts(1), _make_args(seed=seed), config=_CONFIG)
         # Mock random.randint to return a controlled value for the repeat
-        with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip, patch("zvisiongenerator.image_runner.random.randint", side_effect=[200]) as randint:
+        with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip, patch("zvisiongenerator.job_controls.random.randint", side_effect=[200]) as randint:
             skip_inst = MockSkip.return_value
             # None: nothing queued before each generation; then the post-generation action.
             skip_inst.consume.side_effect = [None, "repeat", None, "skip"]
@@ -359,6 +360,54 @@ class TestRunnerOutcome:
             run_batch(backend, model, _prompts(3), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(3), _make_args(), config=_CONFIG))
 
         assert wf.stages[0].call_count == 1
+
+
+class TestIterationAccounting:
+    """A Next-stopped image stays out of the ETA, and Repeats keep the ETA and the final counts consistent."""
+
+    @staticmethod
+    def _run(stage, *, prompts, skip):
+        events: list[dict[str, object]] = []
+        args = _make_args()
+        with patch("zvisiongenerator.image_runner.build_workflow", return_value=GenerationWorkflow(name="test", stages=[stage])):
+            run_batch(
+                MagicMock(),
+                MagicMock(spec=[]),
+                _prompts(prompts),
+                _CONFIG,
+                args,
+                model_info=_MODEL_INFO,
+                progress_callback=events.append,
+                skip_signal=skip,
+                plan=_make_plan(_prompts(prompts), args, config=_CONFIG),
+            )
+        return events
+
+    def test_a_next_stopped_image_adds_no_time_to_the_average(self):
+        stage = MagicMock(side_effect=[StageOutcome.skipped, StageOutcome.success])
+
+        events = self._run(stage, prompts=2, skip=SkipSignal())
+
+        assert [e["avg_secs"] for e in events if e["type"] == "prompt_started"] == [None, None]
+        assert events[-1]["completed_iterations"] == 2
+
+    def test_repeats_keep_the_eta_positive_and_the_final_counts_within_the_total(self):
+        skip = SkipSignal()
+        calls = 0
+
+        def _stage(request, artifacts):
+            nonlocal calls
+            calls += 1
+            time.sleep(0.001)
+            if calls <= 2:
+                skip.queue_action("repeat")
+            return StageOutcome.success
+
+        events = self._run(_stage, prompts=2, skip=skip)
+
+        second = [e for e in events if e["type"] == "prompt_started"][1]
+        assert second["eta_secs"] == pytest.approx(second["avg_secs"])
+        assert {key: events[-1][key] for key in ("type", "completed_iterations", "total_iterations")} == {"type": "batch_completed", "completed_iterations": 4, "total_iterations": 4}
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +546,39 @@ class TestQueuedPauseBeforeGeneration:
 
         event_types = [event["type"] for event in events]
         assert event_types.index("job_paused") < event_types.index("job_resumed") < event_types.index("generation_finished")
+        assert stage.call_count == 1
+
+
+class TestPauseAfterFailedGeneration:
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_pause_queued_during_a_failed_generation_waits_and_a_quit_while_paused_cancels(self, mock_build_wf):
+        skip = SkipSignal()
+        stage = MagicMock(side_effect=lambda request, artifacts: skip.queue_action("pause") or StageOutcome.failed)
+        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
+        events: list[dict[str, object]] = []
+
+        def _quit_when_paused(event):
+            events.append(event)
+            if event["type"] == "job_paused":
+                skip.queue_action("quit")
+                skip.resume()
+
+        with pytest.warns(UserWarning, match="failed"):
+            run_batch(
+                MagicMock(),
+                MagicMock(spec=[]),
+                _prompts(2),
+                _CONFIG,
+                _make_args(),
+                model_info=_MODEL_INFO,
+                progress_callback=_quit_when_paused,
+                skip_signal=skip,
+                plan=_make_plan(_prompts(2), _make_args(), config=_CONFIG),
+            )
+
+        event_types = [event["type"] for event in events]
+        assert "job_paused" in event_types
+        assert event_types[-1] == "batch_cancelled"
         assert stage.call_count == 1
 
 
@@ -639,7 +721,7 @@ class TestReviewBeforeUpscale:
         types = [event["type"] for event in events]
         assert types.index("job_paused") < types.index("job_resumed") < types.index("generation_finished")
         paused = next(event for event in events if event["type"] == "job_paused")
-        assert paused["review"] == {"iteration": 1}
+        assert paused["review"] == {"iteration": 1, "attempt": 1}
         assert paused["preview"].size == (8, 8)
         finished = next(event for event in events if event["type"] == "generation_finished")
         assert finished["status"] == "success"
@@ -758,6 +840,7 @@ class TestReviewBeforeUpscale:
         assert types.index("generation_finished") < types.index("generation_repeat")
         statuses = [event["status"] for event in events if event["type"] == "generation_finished"]
         assert statuses == ["skipped", "success"]
+        assert [event["review"] for event in events if event["type"] == "job_paused"] == [{"iteration": 1, "attempt": 1}, {"iteration": 1, "attempt": 2}]
         upscale.assert_called_once()
         assert types[-1] == "batch_completed"
 

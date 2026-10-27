@@ -250,15 +250,15 @@ class TestDiscardedReviewReleasesTheModel:
         assert run.stage2_saw is not None
 
 
-class TestCacheIsClearedBeforeAReviewedGeneration:
-    """What a discarded video left in the MLX cache is freed once its traceback is gone, before stage 1 loads anything."""
+class TestCacheIsClearedBeforeAGeneration:
+    """What an aborted video left in the MLX cache is freed once its traceback is gone, before stage 1 loads anything."""
 
     @pytest.mark.parametrize(
         ("low_memory", "review", "expected"),
-        [(True, True, ["cleanup", "generate"]), (True, False, ["generate"]), (False, True, ["generate"])],
-        ids=["review_low_memory", "no_review", "no_low_memory"],
+        [(True, True, ["cleanup", "generate"]), (True, False, ["cleanup", "generate"]), (False, True, ["generate"])],
+        ids=["review_low_memory", "no_review_low_memory", "no_low_memory"],
     )
-    def test_cleanup_runs_before_generate_and_save_only_for_a_reviewed_low_memory_run(self, monkeypatch, tmp_path, low_memory, review, expected):
+    def test_cleanup_runs_before_generate_and_save_only_under_low_memory(self, monkeypatch, tmp_path, low_memory, review, expected):
         run = _Run(monkeypatch, tmp_path, low_memory=low_memory)
         events: list[str] = []
         monkeypatch.setattr("ltx_core_mlx.utils.memory.aggressive_cleanup", lambda: events.append("cleanup"))

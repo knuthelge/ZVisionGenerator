@@ -38,9 +38,10 @@
   let root = $state<HTMLElement | null>(null);
   let failedUrl = $state<string | null>(null);
   // The decision sent and the reason the server refused one; both belong to the review they were made for. Each
-  // review has its own iteration and, when it has a preview, its own preview version.
-  let sending = $state<{ jobId: string; render: string | null; iteration: number } | null>(null);
-  let rejected = $state<{ jobId: string; render: string | null; iteration: number; reason: string } | null>(null);
+  // review has its own iteration and attempt (a repeat after a discard is another attempt of the same iteration)
+  // and, when it has a preview, its own preview version.
+  let sending = $state<{ jobId: string; render: string | null; iteration: number; attempt: number } | null>(null);
+  let rejected = $state<{ jobId: string; render: string | null; iteration: number; attempt: number; reason: string } | null>(null);
 
   const mediaUrl = $derived(videoUrl ?? job.previewUrl);
   const width = $derived(videoUrl ? videoWidth : naturalWidth);
@@ -48,16 +49,17 @@
   const size = $derived<ReviewSize | null>(width > 0 && height > 0 ? { width, height } : null);
   const line = $derived(reviewLine(job, size));
   const iteration = $derived(job.review?.iteration ?? 0);
-  const busy = $derived(sending?.jobId === job.job_id && sending.render === mediaUrl && sending.iteration === iteration);
+  const attempt = $derived(job.review?.attempt ?? 1);
+  const busy = $derived(sending?.jobId === job.job_id && sending.render === mediaUrl && sending.iteration === iteration && sending.attempt === attempt);
   const refusal = $derived(
-    rejected?.jobId === job.job_id && rejected.render === mediaUrl && rejected.iteration === iteration ? rejected : null
+    rejected?.jobId === job.job_id && rejected.render === mediaUrl && rejected.iteration === iteration && rejected.attempt === attempt ? rejected : null
   );
   const shownUrl = $derived(mediaUrl && failedUrl !== mediaUrl ? mediaUrl : null);
 
   async function decide(action: Decision): Promise<void> {
     if (busy || offline || !decisions.includes(action)) return;
     const callback = action === 'approve' ? onapprove : ondiscard;
-    const target = { jobId: job.job_id, render: mediaUrl, iteration };
+    const target = { jobId: job.job_id, render: mediaUrl, iteration, attempt };
     rejected = null;
     sending = target;
     try {
@@ -81,6 +83,7 @@
   // while a dialog (the asset viewer) is open, since an Enter there must not approve a render nobody has seen.
   $effect(() => {
     void iteration;
+    void attempt;
     const active = document.activeElement;
     const idle = !active || active === document.body || active === document.documentElement
       || !!root?.contains(active) || (active instanceof HTMLButtonElement && active.disabled);
@@ -122,7 +125,7 @@
   });
 </script>
 
-<div bind:this={root} class="review-stage" role="dialog" aria-modal="false" aria-label="Review" data-review={iteration}>
+<div bind:this={root} class="review-stage" role="dialog" aria-modal="false" aria-label="Review" data-review={`${iteration}-${attempt}`}>
   <div class="review-media">
     {#if shownUrl && videoUrl}
       <div class="review-player">

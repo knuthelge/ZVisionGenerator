@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+#### Video
+- **Next, Pause and Repeat for video jobs.** Video jobs in the Web UI and `ziv-video` (**n**, **p**, **r**, **q**, with or without `--review`) take the same controls as image jobs. Next stops the current video at its next step and moves on, Pause waits after the current video, and Repeat makes the same prompt again with a new seed. During a review, Next declines the upscale. A Next or Quit pressed on a video's final step saves the video first. On a Mac, MiniMax H3 text to video cannot stop mid-clip, so Next and Quit take effect when the clip finishes
+
+### Fixed
+- **Pause after a failed image pauses the job.** A Pause pressed while an image fails now pauses the job, instead of leaving the Pause button stuck on "Pausing"
+- **The remaining-time estimate stays sensible.** An image skipped with Next no longer pulls the estimate down, and after Repeats it can no longer go negative; the final count includes the repeats
+- **A repeated image can always be reviewed.** When you discard an image and Repeat it, Approve and Discard no longer stay disabled for the new render if the Web UI lost its connection meanwhile
+
 ## [0.14.0b1] - 2026-10-26
 
 ### Added

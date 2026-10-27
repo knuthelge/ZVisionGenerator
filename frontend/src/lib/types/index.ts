@@ -913,6 +913,8 @@ export interface JobContext {
 export interface JobReview {
   /** 1-based position of the generation under review within the job. */
   iteration: number;
+  /** 1-based attempt at that generation: a repeat after a discard is a new attempt of the same iteration; a missing value is 1. */
+  attempt?: number;
 }
 
 /** Form fields a job was submitted with; a field sent more than once is a list. */
@@ -989,7 +991,7 @@ export interface ActiveJobState extends JobContext {
   stageSteps?: Record<string, number>;
   /** Backend phase of the last step event, e.g. "image_upscale" or "video_upscale_stage_1". */
   stepPhase?: string;
-  /** A control the server accepted that has not taken effect yet (pause waits for the current image). */
+  /** A control the server accepted that has not taken effect yet (pause waits for the current image or video). */
   controlQueued?: JobControlAction | null;
   /** 'reconnecting' while the event stream is down and the shown progress may be stale. */
   connection?: 'live' | 'reconnecting';

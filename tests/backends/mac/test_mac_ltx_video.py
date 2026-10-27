@@ -228,7 +228,7 @@ class TestComputeDtypeScope:
         monkeypatch.delenv("LTX2_COMPUTE_DTYPE", raising=False)
 
     def test_defaults_to_float16_inside_the_scope_and_clears_it_after(self):
-        with _generation_scope(_handle(MagicMock())):
+        with _generation_scope(_handle(MagicMock(low_memory=False))):
             assert os.environ["LTX2_COMPUTE_DTYPE"] == "float16"
 
         assert "LTX2_COMPUTE_DTYPE" not in os.environ
@@ -237,16 +237,36 @@ class TestComputeDtypeScope:
     def test_keeps_a_value_the_user_set(self, monkeypatch, value):
         monkeypatch.setenv("LTX2_COMPUTE_DTYPE", value)
 
-        with _generation_scope(_handle(MagicMock())):
+        with _generation_scope(_handle(MagicMock(low_memory=False))):
             assert os.environ["LTX2_COMPUTE_DTYPE"] == value
 
         assert os.environ["LTX2_COMPUTE_DTYPE"] == value
 
     def test_clears_the_default_even_when_the_generation_fails(self):
-        with pytest.raises(RuntimeError), _generation_scope(_handle(MagicMock())):
+        with pytest.raises(RuntimeError), _generation_scope(_handle(MagicMock(low_memory=False))):
             raise RuntimeError("boom")
 
         assert "LTX2_COMPUTE_DTYPE" not in os.environ
+
+
+class TestAbortedGenerationScope:
+    """A generation that stops early under low_memory frees what a finished one frees."""
+
+    @pytest.mark.parametrize("error", [RuntimeError("boom"), KeyboardInterrupt()], ids=["failure", "quit"])
+    def test_low_memory_releases_the_model_and_reraises(self, ltx, error):
+        pipe = _pipeline(ltx, low_memory=True)
+        pipe.dit = pipe.upsampler = pipe.vae_decoder = pipe.audio_decoder = pipe.vocoder = "resident"
+        pipe._loaded = True
+
+        with pytest.raises(type(error)), _generation_scope(_handle(pipe)):
+            ltx.memory.aggressive_cleanup.assert_called_once_with()
+            raise error
+
+        assert (pipe.dit, pipe.upsampler, pipe.vae_decoder, pipe.audio_decoder, pipe.vocoder) == (None,) * 5
+        assert pipe._loaded is False
+        pipe.prompt_encoder.free.assert_called_once_with()
+        pipe.image_conditioner.free.assert_called_once_with()
+        assert ltx.memory.aggressive_cleanup.call_count == 2
 
 
 class TestLoadModel:

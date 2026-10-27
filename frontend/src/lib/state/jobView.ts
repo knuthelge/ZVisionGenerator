@@ -346,8 +346,8 @@ function supports(job: ActiveJobState, action: JobControlAction): boolean {
 /**
  * Controls the server honours right now, split by scope.
  *
- * Pause waits for the current image (or rewrite) and is queued during model load; Skip interrupts the current image or
- * rewrite; Repeat waits for the current image. A queued job offers only Cancel; a paused one only Resume and Cancel.
+ * Pause waits for the current image or video (or rewrite) and is queued during model load; Skip interrupts the current
+ * image, video or rewrite; Repeat waits for the current image or video. A queued job offers only Cancel; a paused one only Resume and Cancel.
  */
 export function jobControls(job: ActiveJobState): JobControls {
   if (!isActive(job)) return { job: [], item: [] };
@@ -400,7 +400,7 @@ export function reviewFactor(job: ActiveJobState): number | null {
 /** The video under review, served by the job's review route; null for an image, whose render is the job preview. */
 export function reviewVideoUrl(job: ActiveJobState): string | null {
   if (!isReviewing(job) || !isVideo(job)) return null;
-  return jobReviewUrl(job.job_id, job.review?.iteration ?? 0);
+  return jobReviewUrl(job.job_id, job.review?.iteration ?? 0, job.review?.attempt ?? 1);
 }
 
 /** Whether the video under review keeps its sound: only when the job was submitted with Audio on. */

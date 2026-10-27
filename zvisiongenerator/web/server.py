@@ -124,7 +124,7 @@ from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_promp
 from zvisiongenerator.web.presets import create_preset, delete_preset, list_presets, rename_preset, update_preset
 from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, enhancer_delete_target, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.review import review_enabled
-from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, image_supported_controls, video_supported_controls
+from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, generation_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
 from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response, find_other_downloads
 from zvisiongenerator.utils.hf_cache import free_stranded_shared_files
@@ -1196,7 +1196,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         output_dir=args.output,
         uploads={"image_path": args.image_path},
     )
-    supported_controls = image_supported_controls(review=review_enabled(args))
+    supported_controls = generation_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_image_request_job(
         request=request,
         prompts_data=prompts_data,
@@ -1354,7 +1354,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         output_dir=args.output,
         uploads={"image_path": image_path, "end_image_path": end_image_path},
     )
-    supported_controls = video_supported_controls(review=review_enabled(args))
+    supported_controls = generation_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_video_request_job(
         request=request,
         prompts_data=prompts_data,

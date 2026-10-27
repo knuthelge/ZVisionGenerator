@@ -17,6 +17,7 @@ zvisiongenerator/
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── video_file_upscale_runner.py   Upscale one existing video: check it, stream its frames through SeedVR2, keep its sound and settings
 ├── review.py                      Shared wait for a review decision
+├── job_controls.py                Shared pause and repeat steps of the image and video runners
 ├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)

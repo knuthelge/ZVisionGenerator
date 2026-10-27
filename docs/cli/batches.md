@@ -37,18 +37,18 @@ fox:
 
 ## Controls during a run
 
-While `ziv-image` runs a batch, single keys control it:
+While `ziv-image` or `ziv-video` runs a batch, single keys control it:
 
 | Key | Action | What happens |
 |---|---|---|
-| ++n++ | Skip | Stops the current image and moves to the next prompt |
-| ++q++ | Quit | Stops the current image and ends the batch |
-| ++p++ | Pause | Finishes the current image, then waits for a key |
-| ++r++ | Repeat | Finishes the current image, then makes it again with a new seed (same random choices and enhanced prompt) |
+| ++n++ | Skip | Stops the current image or video and moves to the next prompt |
+| ++q++ | Quit | Stops the current image or video and ends the batch |
+| ++p++ | Pause | Finishes the current image or video, then waits for a key |
+| ++r++ | Repeat | Finishes the current image or video, then makes it again with a new seed (same random choices and enhanced prompt) |
 
 The keys also work while prompts are enhanced and while the model loads. During enhancement, ++n++ skips the current rewrite (that image uses your original prompt), ++q++ stops before the model loads, ++p++ pauses, and ++r++ does nothing.
 
-`ziv-video` stops with ++ctrl+c++.
+`ziv-video` reads the keys in an interactive terminal, with or without `--review`. See [Controls while a video runs](../concepts/video.md#controls-while-a-video-runs).
 
 ## Enhance a batch
 

@@ -165,7 +165,7 @@ In an image run, an entry whose `enhance:` sets only video options (`camera`, `p
 
 ## While prompts are enhanced
 
-Jobs rewrite every prompt before the model loads. During that time, image jobs respond to:
+Jobs rewrite every prompt before the model loads. During that time, jobs respond to:
 
 - **Skip** (++n++): skip the current rewrite; that image uses your prompt.
 - **Quit** (++q++): stop before the model loads.

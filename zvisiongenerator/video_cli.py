@@ -556,21 +556,31 @@ def main(*, prog: str = "ziv-video") -> None:
         scene_by_set = inspection.scene_by_set
         prompts_data = inspection.prompts_data
         enhance_by_set = inspection.enhance_by_set
+    # The key listener starts after ensure_ffmpeg, whose input() prompt it would compete with, and covers the preflight and
+    # model load too, so the keys work while prompts are enhanced.
+    skip = SkipSignal()
+    skip.start()
+    if stdin_is_interactive():
+        print("Commands: [n] skip  [q] quit  [p] pause  [r] repeat\n")
     try:
-        plan = run_preflight(prompts_data, config, args, mode="video", model_family=model_info.family, enhance_by_set=enhance_by_set, scene=args.scene, scene_by_set=scene_by_set)
-    except (ValueError, RuntimeError) as e:
-        logger.exception("Prompt preflight failed")
-        parser.error(str(e))
-    if plan.cancelled:
-        return
+        try:
+            plan = run_preflight(
+                prompts_data,
+                config,
+                args,
+                mode="video",
+                model_family=model_info.family,
+                enhance_by_set=enhance_by_set,
+                scene=args.scene,
+                scene_by_set=scene_by_set,
+                control=skip,
+            )
+        except (ValueError, RuntimeError) as e:
+            logger.exception("Prompt preflight failed")
+            parser.error(str(e))
+        if plan.cancelled:
+            return
 
-    # The key listener only runs for a review: it would otherwise take over the terminal for nothing. It starts after
-    # ensure_ffmpeg and the preflight, which can both prompt with input().
-    skip = SkipSignal(quit_only=True) if args.review else None
-    if skip is not None:
-        skip.start()
-        print("Commands: [q] quit")
-    try:
         # Load model
         print(f"Loading {model_info.family.upper()} video model: {args.model}")
         try:
@@ -601,8 +611,7 @@ def main(*, prog: str = "ziv-video") -> None:
             skip_signal=skip,
         )
     finally:
-        if skip is not None:
-            skip.stop()
+        skip.stop()
 
 
 if __name__ == "__main__":

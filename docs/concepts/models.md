@@ -142,7 +142,7 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
     - **Download and first use:** about 107 GB. The first run converts the text encoder once into a 4-bit copy of about 15 GB (`h3@mlx-te4`).
     - **Memory and time:** a 5 s clip at `s` is estimated at about 15 GiB and 23 minutes with 8 steps, 14 minutes with 4. At `l` it is about 18 GiB and 77 minutes. The image modes need about the same as text to video: a 3 s image-to-video clip at `s` with 8 steps took about 10 minutes and peaked at about 14 GiB with no swapping, and is estimated at about 14 minutes. First and last frame and Extend peak at about the same, and a LoRA adds about 1.5 GiB. A Mac with 32 GB is the target.
     - **Extend** continues from the source's last frame alone, so the seam is weaker than on Windows and Linux.
-    - **No upscale or review.** Image to video, first and last frame and Extend show a step counter and stop at a step boundary; text to video shows its phases but no step counter, and **Quit** takes effect between clips.
+    - **No upscale or review.** Image to video, first and last frame and Extend show a step counter and stop at a step boundary; text to video shows its phases but no step counter, and **Next** and **Quit** take effect when the clip finishes ([Controls while a video runs](video.md#controls-while-a-video-runs)).
     - **A local folder** given to `-m` can carry its own INT8 transformer in the MLX port's layout. A folder with a bf16 transformer is refused; [convert](../cli/models.md#minimax-h3-video-fine-tunes) a fine-tune instead.
 
 === "Windows and Linux"
