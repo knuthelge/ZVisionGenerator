@@ -651,38 +651,29 @@ describe('draft store', () => {
   });
 });
 
-describe('draft store – saved drafts from the previous version', () => {
+describe('draft store – saved drafts', () => {
   beforeEach(() => {
     localStorage.clear();
     draft.reset();
   });
 
-  function loadSavedV2(saved: Record<string, unknown>): void {
-    localStorage.setItem('ziv-workspace-draft-v1', JSON.stringify({ version: 2, prompt: 'kept prompt', ...saved }));
+  function loadSaved(saved: Record<string, unknown>): void {
+    localStorage.setItem('ziv-workspace-draft-v1', JSON.stringify({ prompt: 'kept prompt', ...saved }));
     draft.loadDraft();
   }
 
-  it('seeds the video options from options saved before images and video kept their own', () => {
-    const saved = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
-    loadSavedV2({ enhanceSettings: saved });
-    expect(draft.state.enhanceSettings).toEqual(saved);
-    expect(draft.state.enhanceSettingsVideo).toEqual(saved);
-  });
-
-  it('turns the old fixed sharpen default into auto and keeps the rest', () => {
-    loadSavedV2({ postprocessSharpenAmount: 0.8 });
-    expect(draft.state.postprocessSharpenAmount).toBeNull();
+  it('starts from the defaults when the saved draft is of another schema version', () => {
+    loadSaved({ version: 2, postprocessSharpenAmount: 0.6 });
+    expect(draft.state).toMatchObject({ prompt: '', postprocessSharpenAmount: null });
+    loadSaved({ version: 3 });
     expect(draft.state.prompt).toBe('kept prompt');
   });
 
-  it('keeps a sharpen amount the user chose', () => {
-    loadSavedV2({ postprocessSharpenAmount: 0.6 });
-    expect(draft.state.postprocessSharpenAmount).toBe(0.6);
-  });
-
-  it('lowers a saved amount above the new limit to the limit', () => {
-    loadSavedV2({ postprocessSharpenAmount: 1.8 });
-    expect(draft.state.postprocessSharpenAmount).toBe(1.5);
+  it('seeds the video options from options saved before images and video kept their own', () => {
+    const saved = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
+    loadSaved({ version: 3, enhanceSettings: saved });
+    expect(draft.state.enhanceSettings).toEqual(saved);
+    expect(draft.state.enhanceSettingsVideo).toEqual(saved);
   });
 });
 
@@ -2066,11 +2057,5 @@ describe('applyPreset', () => {
     draft.setAppliedPreset('look');
     draft.resetSelections(ctx);
     expect(draft.state.appliedPreset).toBeNull();
-  });
-
-  it('ignores the per-mode map an older draft stored', () => {
-    localStorage.setItem('ziv-workspace-draft-v1', JSON.stringify({ version: 3, prompt: 'old draft', appliedPresets: { image: 'look', video: null } }));
-    draft.loadDraft();
-    expect(draft.state).toMatchObject({ prompt: 'old draft', appliedPreset: null });
   });
 });

@@ -7,8 +7,6 @@ import type { DraftState, ExtendSourceInfo, FrameRule, SettingsPreset, Workspace
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
-// Version 2 drafts always carried a sharpen amount: the old fixed default 0.8 now means "follow the config".
-const LEGACY_SHARPEN_DEFAULT = 0.8;
 /** Highest sharpen amount the backend accepts (`MAX_SHARPEN_AMOUNT` in utils/config.py). */
 export const MAX_SHARPEN_AMOUNT = 1.5;
 
@@ -446,20 +444,11 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftS
   return nextState;
 }
 
-/** Upgrade a saved draft from the previous schema; other versions pass through unchanged. */
-function _migrateDraft<T extends Partial<DraftState>>(saved: T): T {
-  if (saved.version !== 2) return saved;
-  const amount = saved.postprocessSharpenAmount;
-  // The old control allowed up to 2; the server now rejects amounts above MAX_SHARPEN_AMOUNT.
-  const kept = amount === LEGACY_SHARPEN_DEFAULT || amount == null ? null : Math.min(amount, MAX_SHARPEN_AMOUNT);
-  return { ...saved, version: SCHEMA_VERSION, postprocessSharpenAmount: kept };
-}
-
 function loadFromStorage(): DraftState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_DRAFT };
-    const parsed = _migrateDraft(JSON.parse(raw) as Partial<DraftState> & { promptFileOptionId?: string | null });
+    const parsed = JSON.parse(raw) as Partial<DraftState> & { promptFileOptionId?: string | null };
     if (parsed.version !== SCHEMA_VERSION) return { ...DEFAULT_DRAFT };
     const { promptFileOptionId, ...saved } = parsed;
     return {
