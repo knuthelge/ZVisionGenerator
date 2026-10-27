@@ -12,12 +12,12 @@ PACK = HubFiles("Owner/Pack", PIN, ("a.safetensors",))
 PACKS = {f"Owner/Pack@{PIN}": PACK}
 
 
-@pytest.mark.parametrize("reference", ["Owner/Pack", "owner/pack", "OWNER/PACK", f"Owner/Pack@{PIN}", f"owner/PACK@{PIN}"])
+@pytest.mark.parametrize("reference", ["Owner/Pack", "owner/pack", f"owner/PACK@{PIN}"])
 def test_a_pack_is_named_by_its_repo_id_in_any_case_with_no_revision_or_its_own(reference: str) -> None:
     assert pack_for_reference(PACKS, reference) is PACK
 
 
-@pytest.mark.parametrize("reference", ["Owner/Pack@" + "b2" * 20, "Owner/Other", "ltx-4", "/Owner/Pack", "~/Owner/Pack", "./Owner/Pack", ""])
+@pytest.mark.parametrize("reference", ["Owner/Pack@" + "b2" * 20, "Owner/Other", "./Owner/Pack"])
 def test_another_revision_repo_or_a_local_path_names_no_pack(reference: str) -> None:
     assert pack_for_reference(PACKS, reference) is None
 

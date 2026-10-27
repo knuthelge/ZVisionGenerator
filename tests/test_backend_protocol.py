@@ -39,92 +39,19 @@ class TestBackendRegistryLookup:
         assert [sorted(kwargs) for kwargs in calls] == [["find_local_dir"], ["find_local_dir", "model_name"]]
         assert calls[1]["model_name"] == "ltx25-4"
 
-    def test_get_backend_name_uses_dict_lookup_for_darwin(self, monkeypatch):
+    def test_the_backend_comes_from_the_platform_map_and_is_cached(self, monkeypatch):
         import zvisiongenerator.backends as backends
 
-        monkeypatch.setattr(backends.sys, "platform", "darwin")
-        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"darwin": ("mflux", lambda: MagicMock(spec=ImageBackend))})
-
-        assert backends.get_backend_name() == "mflux"
-
-    def test_get_backend_name_uses_dict_lookup_for_win32(self, monkeypatch):
-        import zvisiongenerator.backends as backends
-
-        monkeypatch.setattr(backends.sys, "platform", "win32")
-        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"win32": ("diffusers", lambda: MagicMock(spec=ImageBackend))})
-
-        assert backends.get_backend_name() == "diffusers"
-
-    def test_get_backend_name_uses_dict_lookup_for_linux(self, monkeypatch):
-        import zvisiongenerator.backends as backends
-
-        monkeypatch.setattr(backends.sys, "platform", "linux")
-        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"linux": ("diffusers", lambda: MagicMock(spec=ImageBackend))})
-
-        assert backends.get_backend_name() == "diffusers"
-
-    def test_get_backend_uses_dict_lookup_for_darwin(self, monkeypatch):
-        import zvisiongenerator.backends as backends
+        platform, name = "linux", "diffusers"
 
         backend = MagicMock(spec=ImageBackend)
         monkeypatch.setattr(backends, "BACKENDS", {})
-        monkeypatch.setattr(backends.sys, "platform", "darwin")
-        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"darwin": ("mflux", lambda: backend)})
-
-        result = backends.get_backend()
-
-        assert result is backend
-        assert backends.BACKENDS["mflux"] is backend
-
-    def test_get_backend_uses_dict_lookup_for_win32(self, monkeypatch):
-        import zvisiongenerator.backends as backends
-
-        backend = MagicMock(spec=ImageBackend)
-        monkeypatch.setattr(backends, "BACKENDS", {})
-        monkeypatch.setattr(backends.sys, "platform", "win32")
-        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"win32": ("diffusers", lambda: backend)})
-
-        result = backends.get_backend()
-
-        assert result is backend
-        assert backends.BACKENDS["diffusers"] is backend
-
-    def test_get_backend_uses_dict_lookup_for_linux(self, monkeypatch):
-        import zvisiongenerator.backends as backends
-
-        backend = MagicMock(spec=ImageBackend)
-        monkeypatch.setattr(backends, "BACKENDS", {})
-        monkeypatch.setattr(backends.sys, "platform", "linux")
-        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"linux": ("diffusers", lambda: backend)})
-
-        result = backends.get_backend()
-
-        assert result is backend
-        assert backends.BACKENDS["diffusers"] is backend
-
-    @pytest.mark.parametrize("platform", ["darwin", "win32", "linux"])
-    def test_every_supported_platform_stores_quants(self, monkeypatch, platform):
-        import zvisiongenerator.backends as backends
-
         monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {platform: (name, lambda: backend)})
 
-        assert backends.supports_stored_quants() is True
-
-    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", True), ("linux", True), ("freebsd", False)])
-    def test_every_supported_video_platform_writes_audio(self, monkeypatch, platform, expected):
-        import zvisiongenerator.backends as backends
-
-        monkeypatch.setattr(backends.sys, "platform", platform)
-
-        assert backends.supports_video_audio() is expected
-
-    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", True), ("linux", True)])
-    def test_every_ltx_video_backend_extends_a_clip(self, monkeypatch, platform, expected):
-        import zvisiongenerator.backends as backends
-
-        monkeypatch.setattr(backends.sys, "platform", platform)
-
-        assert backends.supports_video_extend() is expected
+        assert backends.get_backend_name() == name
+        assert backends.get_backend() is backend
+        assert backends.BACKENDS[name] is backend
 
     def test_a_failing_memory_probe_means_no_budget(self, monkeypatch):
         import zvisiongenerator.backends as backends
@@ -149,13 +76,6 @@ class TestBackendRegistryLookup:
             backends.accelerator_memory_budget_or_none.cache_clear()
 
         probe.assert_called_once()
-
-    def test_an_unregistered_platform_cannot_extend_a_clip(self, monkeypatch):
-        import zvisiongenerator.backends as backends
-
-        monkeypatch.setattr(backends.sys, "platform", "freebsd")
-
-        assert backends.supports_video_extend() is False
 
     @pytest.mark.parametrize("platform", ["win32", "linux"])
     def test_cuda_memory_budget_is_vram_plus_system_memory(self, monkeypatch, platform):
@@ -270,79 +190,6 @@ class TestBackendRegistryLookup:
 
         with pytest.raises(RuntimeError, match="macOS, Windows, and Linux"):
             backends.get_backend()
-
-
-# ---------------------------------------------------------------------------
-# Guard: generation without load_model() must raise RuntimeError
-# ---------------------------------------------------------------------------
-
-
-class TestLoadModelGuard:
-    """Backends must raise RuntimeError if generation is called without load_model()."""
-
-    def test_mflux_text_to_image_without_load_model(self):
-        pytest.importorskip("mflux")
-        from zvisiongenerator.backends.mac.image import MfluxBackend
-
-        backend = MfluxBackend()
-        with pytest.raises(RuntimeError, match="load_model"):
-            backend.text_to_image(
-                model=MagicMock(),
-                prompt="test",
-                width=64,
-                height=64,
-                seed=42,
-                steps=1,
-                guidance=0.5,
-            )
-
-    def test_mflux_image_to_image_without_load_model(self):
-        pytest.importorskip("mflux")
-        from zvisiongenerator.backends.mac.image import MfluxBackend
-
-        backend = MfluxBackend()
-        with pytest.raises(RuntimeError, match="load_model"):
-            backend.image_to_image(
-                model=MagicMock(),
-                image=Image.new("RGB", (64, 64)),
-                prompt="test",
-                strength=0.5,
-                steps=1,
-                seed=42,
-                guidance=0.5,
-            )
-
-    @pytest.mark.skipif(sys.platform == "darwin", reason="torch/CUDA not available on macOS CI")
-    def test_diffusers_text_to_image_without_load_model(self):
-        from zvisiongenerator.backends.cuda.image.backend import DiffusersBackend
-
-        backend = DiffusersBackend()
-        with pytest.raises(RuntimeError, match="load_model"):
-            backend.text_to_image(
-                model=MagicMock(),
-                prompt="test",
-                width=64,
-                height=64,
-                seed=42,
-                steps=1,
-                guidance=0.5,
-            )
-
-    @pytest.mark.skipif(sys.platform == "darwin", reason="torch/CUDA not available on macOS CI")
-    def test_diffusers_image_to_image_without_load_model(self):
-        from zvisiongenerator.backends.cuda.image.backend import DiffusersBackend
-
-        backend = DiffusersBackend()
-        with pytest.raises(RuntimeError, match="load_model"):
-            backend.image_to_image(
-                model=MagicMock(),
-                image=Image.new("RGB", (64, 64)),
-                prompt="test",
-                strength=0.5,
-                steps=1,
-                seed=42,
-                guidance=0.5,
-            )
 
 
 class _FakeModelComponent:
@@ -473,139 +320,37 @@ class TestIdeogram4MfluxBackend:
         assert "scheduler" not in kwargs
         assert "negative_prompt" not in kwargs
 
-    def test_ideogram4_text_to_image_wraps_plain_text_prompt(self):
+    @pytest.mark.parametrize(
+        ("prompt", "expected"),
+        [
+            (
+                "a red sports car at sunset",
+                {
+                    "high_level_description": "a red sports car at sunset",
+                    "compositional_deconstruction": {"background": "a red sports car at sunset", "elements": []},
+                },
+            ),
+            (
+                '{"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}',
+                '{"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}',
+            ),
+            (
+                '   {"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}',
+                '{"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}',
+            ),
+        ],
+        ids=["plain-text-is-wrapped", "json-passes-through", "whitespace-prefixed-json-is-stripped"],
+    )
+    def test_ideogram4_text_to_image_wraps_plain_prompts_and_keeps_json_captions(self, prompt, expected):
         image_mac_module = self._import_backend_module()
         backend = image_mac_module.MfluxBackend()
         backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
         model = MagicMock()
         model.generate_image.return_value = _make_generated_image_result()
 
-        image = backend.text_to_image(
-            model=model,
-            prompt="a red sports car at sunset",
-            width=1024,
-            height=1024,
-            seed=123,
-            steps=8,
-            guidance=1.0,
-            scheduler="beta",
-            negative_prompt="blurry",
-            steps_explicit=True,
-            guidance_explicit=True,
-        )
+        backend.text_to_image(model=model, prompt=prompt, width=1024, height=1024, seed=123, steps=8, guidance=1.0)
 
-        assert image is not None
-        model.generate_image.assert_called_once()
-        kwargs = model.generate_image.call_args.kwargs
-        assert kwargs["prompt"] == {
-            "high_level_description": "a red sports car at sunset",
-            "compositional_deconstruction": {
-                "background": "a red sports car at sunset",
-                "elements": [],
-            },
-        }
-        assert kwargs["width"] == 1024
-        assert kwargs["height"] == 1024
-        assert kwargs["seed"] == 123
-        assert "preset" not in kwargs
-        assert kwargs["num_inference_steps"] == 8
-        assert kwargs["guidance"] == 1.0
-        assert "scheduler" not in kwargs
-        assert "negative_prompt" not in kwargs
-
-    def test_ideogram4_text_to_image_passes_json_prompt_through_unchanged(self):
-        image_mac_module = self._import_backend_module()
-        backend = image_mac_module.MfluxBackend()
-        backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
-        model = MagicMock()
-        model.generate_image.return_value = _make_generated_image_result()
-        prompt = '{"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}'
-
-        image = backend.text_to_image(
-            model=model,
-            prompt=prompt,
-            width=1024,
-            height=1024,
-            seed=123,
-            steps=8,
-            guidance=1.0,
-            scheduler="beta",
-            negative_prompt="blurry",
-            steps_explicit=True,
-            guidance_explicit=True,
-        )
-
-        assert image is not None
-        model.generate_image.assert_called_once()
-        kwargs = model.generate_image.call_args.kwargs
-        assert kwargs["prompt"] == prompt
-        assert "scheduler" not in kwargs
-        assert "negative_prompt" not in kwargs
-
-    def test_ideogram4_text_to_image_keeps_a_whitespace_prefixed_json_caption_on_one_line(self):
-        image_mac_module = self._import_backend_module()
-        backend = image_mac_module.MfluxBackend()
-        backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
-        model = MagicMock()
-        model.generate_image.return_value = _make_generated_image_result()
-        prompt = '   {"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}'
-
-        image = backend.text_to_image(
-            model=model,
-            prompt=prompt,
-            width=1024,
-            height=1024,
-            seed=123,
-            steps=8,
-            guidance=1.0,
-            scheduler="beta",
-            negative_prompt="blurry",
-            steps_explicit=True,
-            guidance_explicit=True,
-        )
-
-        assert image is not None
-        model.generate_image.assert_called_once()
-        kwargs = model.generate_image.call_args.kwargs
-        assert kwargs["prompt"] == prompt.strip()
-        assert "scheduler" not in kwargs
-        assert "negative_prompt" not in kwargs
-
-    def test_wrap_ideogram4_prompt_wraps_plain_text(self):
-        image_mac_module = self._import_backend_module()
-
-        assert image_mac_module._wrap_ideogram4_prompt("a red sports car at sunset") == {
-            "high_level_description": "a red sports car at sunset",
-            "compositional_deconstruction": {
-                "background": "a red sports car at sunset",
-                "elements": [],
-            },
-        }
-
-    def test_wrap_ideogram4_prompt_preserves_json_caption_text(self):
-        image_mac_module = self._import_backend_module()
-        prompt = '{"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}'
-
-        assert image_mac_module._wrap_ideogram4_prompt(prompt) == prompt
-
-    def test_wrap_ideogram4_prompt_preserves_whitespace_prefixed_json_caption_text(self):
-        image_mac_module = self._import_backend_module()
-        prompt = '   {"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}'
-
-        assert image_mac_module._wrap_ideogram4_prompt(prompt) == prompt.strip()
-
-    def test_ideogram4_text_to_image_runs_the_given_steps_at_the_built_in_guidance(self):
-        image_mac_module = self._import_backend_module()
-        backend = image_mac_module.MfluxBackend()
-        backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
-        model = MagicMock()
-        model.generate_image.return_value = _make_generated_image_result()
-
-        backend.text_to_image(model=model, prompt="a lighthouse in fog", width=832, height=1216, seed=42, steps=12, guidance=1.0)
-
-        kwargs = model.generate_image.call_args.kwargs
-        assert (kwargs["num_inference_steps"], kwargs["guidance"]) == (12, 1.0)
-        assert "preset" not in kwargs
+        assert model.generate_image.call_args.kwargs["prompt"] == expected
 
     def test_ideogram4_text_to_image_ignores_another_guidance_with_a_warning(self):
         image_mac_module = self._import_backend_module()

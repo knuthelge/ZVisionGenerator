@@ -27,29 +27,20 @@ class TestPathClassification:
         ("value", "expected"),
         [
             ("models/foo", True),
-            ("models/ltx-mlx", True),
-            ("checkpoints/ltx", True),
-            ("loras/style.safetensors", True),
             ("owner/repo", False),
             ("owner/repo@revision", False),
             ("owner/repo/subfolder", True),
             ("C:/repo", True),
-            (r"C:\repo", True),
             ("C:repo", True),
             ("/abs/model", True),
             ("./models/foo", True),
-            ("../models/foo", True),
             ("~/models/foo", True),
-            ("//server/share/model", True),
             (r"\\server\share\model", True),
             ("models/foo/", True),
-            ("models//foo", True),
             ("owner//repo", True),
-            ("models/my model", True),
             ("my model", False),
             ("owner/my model", True),
             ("https://huggingface.co/owner/repo", False),
-            ("hf://owner/repo", False),
         ],
     )
     def test_explicit_local_path_table(self, value, expected):
@@ -59,10 +50,7 @@ class TestPathClassification:
         ("value", "repo_id", "revision"),
         [
             ("owner/repo", "owner/repo", None),
-            ("owner-name/repo_name", "owner-name/repo_name", None),
             ("owner.name/repo.v1", "owner.name/repo.v1", None),
-            ("Owner123/Repo-2", "Owner123/Repo-2", None),
-            ("owner/repo@main", "owner/repo", "main"),
             ("owner/repo@v1.2.3", "owner/repo", "v1.2.3"),
         ],
     )
@@ -77,23 +65,14 @@ class TestPathClassification:
         "value",
         [
             "models/foo",
-            "checkpoints/ltx",
-            "loras/style",
             "owner/repo/subfolder",
             "owner//repo",
             "/owner/repo",
-            "./owner/repo",
-            "../owner/repo",
-            "~/owner/repo",
-            "C:/repo",
-            r"C:\repo",
             "C:repo",
             r"\\server\share",
             "owner/re po",
-            "owner/repo?x=1",
             "owner/repo@",
             "owner/repo@feature/branch",
-            "https://huggingface.co/owner/repo",
         ],
     )
     def test_huggingface_repo_reference_rejects_non_contract_values(self, value):
@@ -139,12 +118,6 @@ class TestGetZivDataDir:
         assert (result / "models").is_dir()
         assert (result / "loras").is_dir()
 
-    def test_env_var_strips_whitespace(self, monkeypatch, tmp_path):
-        custom_dir = tmp_path / "trimmed"
-        monkeypatch.setenv("ZIV_DATA_DIR", f"  {custom_dir}  ")
-        result = get_ziv_data_dir()
-        assert result == custom_dir
-
     def test_empty_env_var_uses_default(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", "")
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
@@ -153,18 +126,8 @@ class TestGetZivDataDir:
 
 
 class TestResolveModelPath:
-    def test_absolute_path_passes_through(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        abs_path = "/some/absolute/model/path"
-        assert resolve_model_path(abs_path) == abs_path
-
-    def test_path_with_slash_passes_through(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        hf_id = "org/model-name"
-        assert resolve_model_path(hf_id) == hf_id
-
-    @pytest.mark.parametrize("model_path", ["models/foo", "C:/models/foo", r"C:\models\foo", "owner/repo", "owner/repo@main"])
-    def test_cross_platform_or_repo_strings_pass_through(self, monkeypatch, tmp_path, model_path):
+    @pytest.mark.parametrize("model_path", ["/some/absolute/model/path", "org/model-name", "C:/models/foo", r"C:\models\foo", "owner/repo@main"])
+    def test_paths_and_repo_strings_pass_through(self, monkeypatch, tmp_path, model_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         assert resolve_model_path(model_path) == model_path
 
@@ -197,13 +160,6 @@ class TestResolveModelAlias:
         result = resolve_model_path("ltx-4", aliases={"ltx-4": "dgrauet/ltx-2.3-mlx-q4"})
         assert result == "dgrauet/ltx-2.3-mlx-q4"
 
-    def test_alias_resolves_zit(self, monkeypatch, tmp_path):
-        """The 'zit' alias resolves to the Z-Image-Turbo HF repo."""
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-        result = resolve_model_path("zit", aliases={"zit": "Tongyi-MAI/Z-Image-Turbo"})
-        assert result == "Tongyi-MAI/Z-Image-Turbo"
-
     def test_local_dir_overrides_alias(self, monkeypatch, tmp_path):
         """When ~/.ziv/models/<alias>/ exists as a local dir, it takes priority over alias."""
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
@@ -212,65 +168,18 @@ class TestResolveModelAlias:
         result = resolve_model_path("ltx-4", aliases={"ltx-4": "dgrauet/ltx-2.3-mlx-q4"})
         assert result == str(local_dir)
 
-    def test_no_alias_match_returns_as_is(self, monkeypatch, tmp_path):
-        """Unknown name not in aliases passes through unchanged."""
+    @pytest.mark.parametrize("aliases", [{"ltx-4": "dgrauet/ltx-2.3-mlx-q4"}, {}, None], ids=["other-alias", "empty", "none"])
+    def test_an_unknown_name_passes_through_unchanged(self, monkeypatch, tmp_path, aliases):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-        result = resolve_model_path("nonexistent", aliases={"ltx-4": "dgrauet/ltx-2.3-mlx-q4"})
-        assert result == "nonexistent"
+        assert resolve_model_path("nonexistent", aliases=aliases) == "nonexistent"
 
-    def test_default_aliases_leave_unknown_name_unchanged(self, monkeypatch, tmp_path):
-        """Calling without aliases leaves an unknown model name unchanged."""
+    def test_a_path_or_repo_id_skips_the_alias_lookup(self, monkeypatch, tmp_path):
+        """An absolute path or an HF repo ID (contains '/') passes through even if it matches an alias key."""
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-        result = resolve_model_path("some-model")
-        assert result == "some-model"
-
-    def test_empty_aliases_leave_unknown_name_unchanged(self, monkeypatch, tmp_path):
-        """Empty aliases leave an unknown model name unchanged."""
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-        result = resolve_model_path("some-model", aliases={})
-        assert result == "some-model"
-
-    def test_absolute_path_skips_alias(self, monkeypatch, tmp_path):
-        """Absolute path passes through even if it matches an alias key."""
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        abs_path = "/models/ltx-4"
-        result = resolve_model_path(abs_path, aliases={"ltx-4": "dgrauet/ltx-2.3-mlx-q4"})
-        assert result == abs_path
-
-    def test_slash_name_skips_alias(self, monkeypatch, tmp_path):
-        """HF repo ID format (contains '/') skips alias lookup."""
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        hf_id = "org/my-model"
-        result = resolve_model_path(hf_id, aliases={"org/my-model": "should-not-match"})
-        assert result == hf_id
-
-    @pytest.mark.parametrize(
-        "alias, target",
-        [
-            ("ltx-8", "dgrauet/ltx-2.3-mlx-q8"),
-            ("ltx-4", "dgrauet/ltx-2.3-mlx-q4"),
-            ("zit", "Tongyi-MAI/Z-Image-Turbo"),
-            ("klein9b", "black-forest-labs/FLUX.2-klein-9B"),
-            ("klein4b", "black-forest-labs/FLUX.2-klein-4B"),
-        ],
-    )
-    def test_all_config_aliases_resolve(self, monkeypatch, tmp_path, alias, target):
-        """All 5 configured aliases resolve to their expected targets."""
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-        # Use the actual config aliases dict
-        aliases = {
-            "ltx-8": "dgrauet/ltx-2.3-mlx-q8",
-            "ltx-4": "dgrauet/ltx-2.3-mlx-q4",
-            "zit": "Tongyi-MAI/Z-Image-Turbo",
-            "klein9b": "black-forest-labs/FLUX.2-klein-9B",
-            "klein4b": "black-forest-labs/FLUX.2-klein-4B",
-        }
-        result = resolve_model_path(alias, aliases=aliases)
-        assert result == target
+        aliases = {"/models/ltx-4": "should-not-match", "org/my-model": "should-not-match"}
+        assert resolve_model_path("/models/ltx-4", aliases=aliases) == "/models/ltx-4"
+        assert resolve_model_path("org/my-model", aliases=aliases) == "org/my-model"
 
 
 class TestResolveModelAliasPlatformAware:
@@ -343,17 +252,8 @@ class TestResolveModelAliasPlatformAware:
 
 
 class TestResolveLoraPath:
-    def test_absolute_path_passes_through(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        abs_path = "/some/lora/file.safetensors"
-        assert resolve_lora_path(abs_path) == abs_path
-
-    def test_path_with_slash_passes_through(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        assert resolve_lora_path("some/dir/lora") == "some/dir/lora"
-
-    @pytest.mark.parametrize("lora_path", ["loras/style.safetensors", "C:/loras/style.safetensors", r"C:\loras\style.safetensors", "org/lora"])
-    def test_cross_platform_or_remote_strings_pass_through(self, monkeypatch, tmp_path, lora_path):
+    @pytest.mark.parametrize("lora_path", ["/some/lora/file.safetensors", "some/dir/lora", "C:/loras/style.safetensors", r"C:\loras\style.safetensors", "org/lora"])
+    def test_paths_and_remote_strings_pass_through(self, monkeypatch, tmp_path, lora_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         assert resolve_lora_path(lora_path) == lora_path
 

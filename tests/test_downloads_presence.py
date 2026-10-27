@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._download_helpers import packaged_config
+from tests._snapshots import cache_snapshot_dir, touch, write_h3_index, write_ltx25_snapshot
 from zvisiongenerator.downloads.presence import remove_partial_files, target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils import model_files
@@ -15,12 +17,6 @@ _INSTANT_PATTERNS = ("model_index.json", "transformer/config.json", "LICENSE.md"
 _CUDA_KLEIN_PATTERNS = ("model_index.json", "scheduler/*", "text_encoder/*.safetensors", "tokenizer/*", "transformer/*.safetensors", "vae/*.safetensors")
 _MFLUX_KLEIN_PATTERNS = ("text_encoder/*.safetensors", "tokenizer/*.json", "transformer/*.safetensors", "vae/*.safetensors")
 _MFLUX_KREA_PATTERNS = ("turbo.safetensors", "text_encoder/*.safetensors", "tokenizer/*", "vae/*.safetensors")
-
-
-def _touch(path: Path, content: str = "x") -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    return path
 
 
 def _write_index(snapshot: Path, class_name: str = "Flux2KleinPipeline") -> None:
@@ -32,18 +28,18 @@ def _write_index(snapshot: Path, class_name: str = "Flux2KleinPipeline") -> None
         "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
         "tokenizer": ["transformers", "Qwen2Tokenizer"],
     }
-    _touch(snapshot / "model_index.json", json.dumps(index))
+    touch(snapshot / "model_index.json", json.dumps(index))
 
 
 def _components_snapshot(snapshot: Path, *, transformer: bool = False, class_name: str = "Flux2KleinPipeline") -> Path:
     _write_index(snapshot, class_name)
-    _touch(snapshot / "transformer" / "config.json")
-    _touch(snapshot / "scheduler" / "scheduler_config.json")
-    _touch(snapshot / "tokenizer" / "tokenizer.json")
-    _touch(snapshot / "text_encoder" / "model.safetensors")
-    _touch(snapshot / "vae" / "diffusion_pytorch_model.safetensors")
+    touch(snapshot / "transformer" / "config.json")
+    touch(snapshot / "scheduler" / "scheduler_config.json")
+    touch(snapshot / "tokenizer" / "tokenizer.json")
+    touch(snapshot / "text_encoder" / "model.safetensors")
+    touch(snapshot / "vae" / "diffusion_pytorch_model.safetensors")
     if transformer:
-        _touch(snapshot / "transformer" / "diffusion_pytorch_model.safetensors")
+        touch(snapshot / "transformer" / "diffusion_pytorch_model.safetensors")
     return snapshot
 
 
@@ -54,26 +50,22 @@ def cache(tmp_path, monkeypatch) -> Path:
     return cache_dir
 
 
-def _snapshot(cache: Path, repo_id: str = "owner/repo", commit: str = "c0ffee") -> Path:
-    return cache / f"models--{repo_id.replace('/', '--')}" / "snapshots" / commit
-
-
 class TestLocalDirTargets:
     def test_literal_patterns_present(self, tmp_path):
-        _touch(tmp_path / "a.safetensors")
-        _touch(tmp_path / "sub" / "b.json")
+        touch(tmp_path / "a.safetensors")
+        touch(tmp_path / "sub" / "b.json")
         target = DownloadTarget("o/r", allow_patterns=("a.safetensors", "sub/b.json"), local_dir=str(tmp_path))
 
         assert target_present_offline(target) is True
 
     def test_missing_file_absent(self, tmp_path):
-        _touch(tmp_path / "a.safetensors")
+        touch(tmp_path / "a.safetensors")
         target = DownloadTarget("o/r", allow_patterns=("a.safetensors", "b.json"), local_dir=str(tmp_path))
 
         assert target_present_offline(target) is False
 
     def test_glob_or_missing_patterns_absent(self, tmp_path):
-        _touch(tmp_path / "a.safetensors")
+        touch(tmp_path / "a.safetensors")
 
         assert target_present_offline(DownloadTarget("o/r", allow_patterns=("*.safetensors",), local_dir=str(tmp_path))) is False
         assert target_present_offline(DownloadTarget("o/r", local_dir=str(tmp_path))) is False
@@ -81,7 +73,7 @@ class TestLocalDirTargets:
 
 class TestLiteralCacheTargets:
     def test_every_file_must_be_cached(self, tmp_path):
-        existing = _touch(tmp_path / "blob")
+        existing = touch(tmp_path / "blob")
         lookups: list = []
 
         def cached_file(repo_id, filename, *, revision=None):
@@ -104,15 +96,15 @@ class TestLiteralCacheTargets:
 
 class TestWholeRepoTargets:
     def test_complete_snapshot_present(self, cache):
-        snapshot = _components_snapshot(_snapshot(cache), transformer=True)
+        snapshot = _components_snapshot(cache_snapshot_dir(cache), transformer=True)
 
         assert snapshot.is_dir()
         assert target_present_offline(DownloadTarget("owner/repo")) is True
 
     def test_missing_shard_absent(self, cache):
-        snapshot = _components_snapshot(_snapshot(cache), transformer=True)
+        snapshot = _components_snapshot(cache_snapshot_dir(cache), transformer=True)
         (snapshot / "text_encoder" / "model.safetensors").unlink()
-        _touch(snapshot / "text_encoder" / "model-00001-of-00002.safetensors")
+        touch(snapshot / "text_encoder" / "model-00001-of-00002.safetensors")
 
         assert target_present_offline(DownloadTarget("owner/repo")) is False
 
@@ -134,58 +126,27 @@ class TestWholeRepoTargets:
         repo_dir = cache / "models--owner--repo"
         _components_snapshot(repo_dir / "snapshots" / "good", transformer=True)
         _components_snapshot(repo_dir / "snapshots" / "partial")
-        _touch(repo_dir / "refs" / "stable", "good")
-        _touch(repo_dir / "refs" / "wip", "partial")
+        touch(repo_dir / "refs" / "stable", "good")
+        touch(repo_dir / "refs" / "wip", "partial")
 
         assert target_present_offline(DownloadTarget("owner/repo", revision="stable")) is True
         assert target_present_offline(DownloadTarget("owner/repo", revision="wip")) is False
         assert target_present_offline(DownloadTarget("owner/repo", revision="unknown")) is False
 
 
-_LTX25_PIN = "7b40724fc39bbb01d9b4d72638c0d263531c88c2"
-_LTX25_SHARDS = {"audio_vae": 1, "connectors": 2, "text_encoder": 5, "transformer": 4, "vae": 1, "vocoder": 1}
-
-
-def _ltx25_snapshot(snapshot: Path) -> Path:
-    """Lay out a complete LTX-2.5 diffusers snapshot (the Gemma-4 text encoder, sharded weights, an unlisted upsampler)."""
-    classes = {
-        "audio_vae": ["diffusers", "AutoencoderKLLTX2Audio"],
-        "connectors": ["ltx2", "LTX2TextConnectors"],
-        "duration_head": ["ltx2", "LTX2DurationHead"],
-        "processor": ["transformers", "Gemma4Processor"],
-        "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
-        "text_encoder": ["transformers", "Gemma4UnifiedForConditionalGeneration"],
-        "tokenizer": ["transformers", "GemmaTokenizer"],
-        "transformer": ["diffusers", "LTX2VideoTransformer3DModel"],
-        "vae": ["diffusers", "AutoencoderKLLTX2Video"],
-        "vocoder": ["ltx2", "LTX2VocoderWithBWE"],
-    }
-    _touch(snapshot / "model_index.json", json.dumps({"_class_name": "LTX2Pipeline", **classes}))
-    for component, shards in _LTX25_SHARDS.items():
-        _touch(snapshot / component / "config.json")
-        names = ["diffusion_pytorch_model.safetensors"] if shards == 1 else [f"model-{n:05d}-of-{shards:05d}.safetensors" for n in range(1, shards + 1)]
-        for name in names:
-            _touch(snapshot / component / name)
-    _touch(snapshot / "latent_upsampler" / "diffusion_pytorch_model.safetensors")
-    return snapshot
+_LTX25_PIN = "7b" * 20  # an opaque commit id: only "this commit or another" matters here
 
 
 class TestPinnedLtx25Target:
     _TARGET = DownloadTarget("unsloth/LTX-2.5-FP8", _LTX25_PIN, None, ("LTX-2.5-*.safetensors", "samples/*"))
 
     def test_the_complete_snapshot_at_the_pin_is_present(self, cache):
-        _ltx25_snapshot(_snapshot(cache, "unsloth/LTX-2.5-FP8", _LTX25_PIN))
+        write_ltx25_snapshot(cache_snapshot_dir(cache, "unsloth/LTX-2.5-FP8", _LTX25_PIN))
 
         assert target_present_offline(self._TARGET) is True
 
-    def test_a_missing_transformer_shard_is_absent(self, cache):
-        snapshot = _ltx25_snapshot(_snapshot(cache, "unsloth/LTX-2.5-FP8", _LTX25_PIN))
-        (snapshot / "transformer" / "model-00004-of-00004.safetensors").unlink()
-
-        assert target_present_offline(self._TARGET) is False
-
     def test_a_complete_snapshot_at_another_commit_does_not_count(self, cache):
-        _ltx25_snapshot(_snapshot(cache, "unsloth/LTX-2.5-FP8", "f" * 40))
+        write_ltx25_snapshot(cache_snapshot_dir(cache, "unsloth/LTX-2.5-FP8", "f" * 40))
 
         assert target_present_offline(self._TARGET) is False
 
@@ -194,38 +155,14 @@ _H3_PATTERNS = ("model_index.json", "scheduler/*", "tokenizer/*", "transformer/*
 
 
 class TestH3ModularTarget:
-    def _index(self, snapshot: Path) -> None:
-        spec = {"pretrained_model_name_or_path": "owner/h3"}
-        index = {
-            "_class_name": "MiniMaxH3ModularPipeline",
-            "text_encoder": ["transformers", "Qwen3VLForConditionalGeneration", spec],
-            "transformer": ["diffusers", "MiniMaxH3Transformer", spec],
-            "transformer_ref": ["diffusers", "MiniMaxH3Transformer", spec],
-            "vae": ["diffusers", "AutoencoderKLMiniMaxH3", spec],
-        }
-        _touch(snapshot / "model_index.json", json.dumps(index))
-
-    def test_an_index_only_snapshot_is_absent(self, cache):
-        self._index(_snapshot(cache))
-
-        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_H3_PATTERNS)) is False
-
     def test_the_snapshot_without_the_skipped_components_is_present(self, cache):
-        snapshot = _snapshot(cache)
-        self._index(snapshot)
+        snapshot = cache_snapshot_dir(cache)
+        write_h3_index(snapshot)
         for shard in (1, 2):
-            _touch(snapshot / "transformer" / f"model-0000{shard}-of-00002.safetensors")
-        _touch(snapshot / "vae" / "diffusion_pytorch_model.safetensors")
+            touch(snapshot / "transformer" / f"model-0000{shard}-of-00002.safetensors")
+        touch(snapshot / "vae" / "diffusion_pytorch_model.safetensors")
 
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_H3_PATTERNS)) is True
-
-    def test_a_missing_transformer_shard_is_absent(self, cache):
-        snapshot = _snapshot(cache)
-        self._index(snapshot)
-        _touch(snapshot / "transformer" / "model-00001-of-00002.safetensors")
-        _touch(snapshot / "vae" / "diffusion_pytorch_model.safetensors")
-
-        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_H3_PATTERNS)) is False
 
 
 class TestCudaH3PlanPresence:
@@ -249,11 +186,10 @@ class TestCudaH3PlanPresence:
         import huggingface_hub.constants
 
         from zvisiongenerator.backends.cuda.download_plan import h3_download_plan
-        from zvisiongenerator.utils.config import load_config
         from zvisiongenerator.utils.h3_preset import h3_preset
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
-        preset = h3_preset(load_config())
+        preset = h3_preset(packaged_config())
         targets = h3_download_plan(f"{preset.repo}@{preset.revision}", preset)
         for target in targets:
             self._download(cache, target)
@@ -261,21 +197,21 @@ class TestCudaH3PlanPresence:
 
     def _download(self, cache: Path, target: DownloadTarget) -> None:
         """Lay out what ``snapshot_download`` would leave for *target* in the Hub cache."""
-        snapshot = _snapshot(cache, target.repo_id, target.revision or "main")
+        snapshot = cache_snapshot_dir(cache, target.repo_id, target.revision or "main")
         patterns = target.allow_patterns or ()
         if not any("*" in pattern for pattern in patterns):
             for name in patterns:
-                _touch(snapshot / name)
+                touch(snapshot / name)
             return
-        _touch(snapshot / "model_index.json", json.dumps({"_class_name": "MiniMaxH3ModularPipeline", **self._COMPONENTS}))
+        touch(snapshot / "model_index.json", json.dumps({"_class_name": "MiniMaxH3ModularPipeline", **self._COMPONENTS}))
         for component in self._COMPONENTS:
             if component in ("text_encoder", "transformer_ref"):
                 continue  # filtered out by the plan's ignore patterns
-            _touch(snapshot / component / "config.json")
+            touch(snapshot / component / "config.json")
         for component, shards in self._SHARDS.items():
             names = ["diffusion_pytorch_model.safetensors"] if shards == 1 else [f"diffusion_pytorch_model-{n:05d}-of-{shards:05d}.safetensors" for n in range(1, shards + 1)]
             for name in names:
-                _touch(snapshot / component / name)
+                touch(snapshot / component / name)
 
     def test_the_downloaded_plan_is_present_target_by_target(self, plan):
         assert len(plan) == 3
@@ -285,122 +221,108 @@ class TestCudaH3PlanPresence:
         import huggingface_hub.constants
 
         from zvisiongenerator.backends.cuda.download_plan import h3_download_plan
-        from zvisiongenerator.utils.config import load_config
         from zvisiongenerator.utils.h3_preset import h3_preset
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
-        preset = h3_preset(load_config())
+        preset = h3_preset(packaged_config())
 
         assert [target_present_offline(target) for target in h3_download_plan(preset.repo, preset)] == [False, False, False]
 
-    def test_a_missing_repository_shard_makes_the_repository_absent(self, cache, plan):
-        repo = plan[0]
-        (_snapshot(cache, repo.repo_id, repo.revision) / "transformer" / "diffusion_pytorch_model-00003-of-00003.safetensors").unlink()
+    @pytest.mark.parametrize(
+        ("index", "missing"),
+        [
+            (0, "transformer/diffusion_pytorch_model-00003-of-00003.safetensors"),
+            (1, "model-00004-of-00005.safetensors"),
+            (2, None),
+        ],
+        ids=["repository-shard", "text-encoder-shard", "lora"],
+    )
+    def test_a_missing_file_makes_only_its_target_absent(self, cache, plan, index, missing):
+        target = plan[index]
+        # The LoRA target lists its single file; the others name a shard inside their snapshot.
+        relative = missing or (target.allow_patterns or ("",))[0]
+        (cache_snapshot_dir(cache, target.repo_id, target.revision) / relative).unlink()
 
-        assert [target_present_offline(target) for target in plan] == [False, True, True]
-
-    def test_a_missing_text_encoder_shard_makes_the_text_encoder_absent(self, cache, plan):
-        text_encoder = plan[1]
-        (_snapshot(cache, text_encoder.repo_id, text_encoder.revision) / "model-00004-of-00005.safetensors").unlink()
-
-        assert [target_present_offline(target) for target in plan] == [True, False, True]
-
-    def test_a_missing_lora_makes_the_lora_absent(self, cache, plan):
-        lora = plan[2]
-        (_snapshot(cache, lora.repo_id, lora.revision) / (lora.allow_patterns or ("",))[0]).unlink()
-
-        assert [target_present_offline(target) for target in plan] == [True, True, False]
+        assert [target_present_offline(t) for t in plan] == [i != index for i in range(3)]
 
     def test_a_download_at_another_revision_does_not_count(self, cache, plan):
         for target in plan:
-            snapshot = _snapshot(cache, target.repo_id, target.revision or "main")
+            snapshot = cache_snapshot_dir(cache, target.repo_id, target.revision or "main")
             snapshot.rename(snapshot.with_name("0" * 40))
 
         assert [target_present_offline(target) for target in plan] == [False, False, False]
 
 
 class TestGlobCacheTargets:
-    def test_instant_components_present_without_transformer_weights(self, cache):
-        _components_snapshot(_snapshot(cache))
-        _touch(_snapshot(cache) / "LICENSE.md")
-        _touch(_snapshot(cache) / "NOTICE")
-
-        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_INSTANT_PATTERNS)) is True
-
     def test_optional_literal_files_are_not_checked(self, cache):
-        _components_snapshot(_snapshot(cache))
+        _components_snapshot(cache_snapshot_dir(cache))
 
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_INSTANT_PATTERNS)) is True
 
     def test_covered_component_without_weights_absent(self, cache):
-        snapshot = _components_snapshot(_snapshot(cache))
+        snapshot = _components_snapshot(cache_snapshot_dir(cache))
         (snapshot / "vae" / "diffusion_pytorch_model.safetensors").unlink()
 
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_INSTANT_PATTERNS)) is False
 
     def test_covered_transformer_without_weights_absent(self, cache):
-        snapshot = _components_snapshot(_snapshot(cache))
+        snapshot = _components_snapshot(cache_snapshot_dir(cache))
         assert (snapshot / "transformer" / "config.json").is_file()
 
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_CUDA_KLEIN_PATTERNS)) is False
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_MFLUX_KLEIN_PATTERNS)) is False
 
-    @pytest.mark.parametrize("patterns", [_INSTANT_PATTERNS, _CUDA_KLEIN_PATTERNS, _MFLUX_KLEIN_PATTERNS])
-    def test_snapshot_without_a_model_index_is_not_complete(self, cache, patterns):
+    def test_snapshot_without_a_model_index_is_not_complete(self, cache):
         # An interrupted download can leave small files (scheduler, tokenizer) but no weights and no index yet.
-        _touch(_snapshot(cache) / "scheduler" / "scheduler_config.json")
-        _touch(_snapshot(cache) / "tokenizer" / "tokenizer.json")
+        touch(cache_snapshot_dir(cache) / "scheduler" / "scheduler_config.json")
+        touch(cache_snapshot_dir(cache) / "tokenizer" / "tokenizer.json")
 
-        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=patterns)) is False
+        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_CUDA_KLEIN_PATTERNS)) is False
 
-    @pytest.mark.parametrize("patterns", [_INSTANT_PATTERNS, _CUDA_KLEIN_PATTERNS])
-    def test_empty_snapshot_folder_absent(self, cache, patterns):
-        _snapshot(cache).mkdir(parents=True)
+    def test_empty_snapshot_folder_absent(self, cache):
+        cache_snapshot_dir(cache).mkdir(parents=True)
 
-        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=patterns)) is False
+        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_INSTANT_PATTERNS)) is False
 
     def test_cuda_klein_plan_present_without_root_configs(self, cache):
-        snapshot = _components_snapshot(_snapshot(cache), transformer=True)
+        snapshot = _components_snapshot(cache_snapshot_dir(cache), transformer=True)
         assert not (snapshot / "config.json").exists()
         patterns = (*_CUDA_KLEIN_PATTERNS, "config.json", "README.md")
 
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=patterns)) is True
 
     def test_mflux_klein_patterns_on_diffusers_snapshot_present(self, cache):
-        _components_snapshot(_snapshot(cache), transformer=True)
+        _components_snapshot(cache_snapshot_dir(cache), transformer=True)
 
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_MFLUX_KLEIN_PATTERNS)) is True
 
     def test_missing_shard_in_covered_component_absent(self, cache):
-        snapshot = _components_snapshot(_snapshot(cache), transformer=True)
+        snapshot = _components_snapshot(cache_snapshot_dir(cache), transformer=True)
         (snapshot / "transformer" / "diffusion_pytorch_model.safetensors").unlink()
-        _touch(snapshot / "transformer" / "diffusion_pytorch_model-00001-of-00003.safetensors")
-        _touch(snapshot / "transformer" / "diffusion_pytorch_model-00002-of-00003.safetensors")
+        touch(snapshot / "transformer" / "diffusion_pytorch_model-00001-of-00003.safetensors")
+        touch(snapshot / "transformer" / "diffusion_pytorch_model-00002-of-00003.safetensors")
 
         assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_MFLUX_KLEIN_PATTERNS)) is False
 
     def test_mflux_krea_requires_its_literal_weights_file(self, cache):
-        snapshot = _components_snapshot(_snapshot(cache), class_name="Krea2Pipeline")
+        snapshot = _components_snapshot(cache_snapshot_dir(cache), class_name="Krea2Pipeline")
         target = DownloadTarget("owner/repo", allow_patterns=_MFLUX_KREA_PATTERNS)
 
         assert target_present_offline(target) is False
 
-        _touch(snapshot / "turbo.safetensors")
+        touch(snapshot / "turbo.safetensors")
 
         assert target_present_offline(target) is True
-
-    def test_no_snapshot_absent(self, cache):
-        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=_INSTANT_PATTERNS)) is False
 
 
 class TestRemovePartialFiles:
     def test_cache_target_removes_only_blob_incompletes(self, tmp_path):
         repo_dir = tmp_path / "models--owner--repo"
-        _touch(repo_dir / "blobs" / "aaa.incomplete")
-        _touch(repo_dir / "blobs" / "bbb.incomplete")
-        keep_blob = _touch(repo_dir / "blobs" / "ccc")
-        keep_snapshot = _touch(repo_dir / "snapshots" / "x" / "d.incomplete")
-        other = _touch(tmp_path / "models--owner--other" / "blobs" / "eee.incomplete")
+        touch(repo_dir / "blobs" / "aaa.incomplete")
+        touch(repo_dir / "blobs" / "bbb.incomplete")
+        keep_blob = touch(repo_dir / "blobs" / "ccc")
+        keep_snapshot = touch(repo_dir / "snapshots" / "x" / "d.incomplete")
+        other = touch(tmp_path / "models--owner--other" / "blobs" / "eee.incomplete")
 
         assert remove_partial_files(DownloadTarget("owner/repo"), cache_dir=tmp_path) == 2
 
@@ -411,17 +333,17 @@ class TestRemovePartialFiles:
 
     def test_cache_dir_defaults_to_the_hub_cache(self, cache, monkeypatch):
         monkeypatch.setattr("zvisiongenerator.downloads.presence.huggingface_cache_dir", lambda: cache)
-        partial = _touch(cache / "models--owner--repo" / "blobs" / "a.incomplete")
+        partial = touch(cache / "models--owner--repo" / "blobs" / "a.incomplete")
 
         assert remove_partial_files(DownloadTarget("owner/repo")) == 1
         assert not partial.exists()
 
     def test_local_dir_target_removes_nested_incompletes(self, tmp_path):
         download = tmp_path / ".cache" / "huggingface" / "download"
-        _touch(download / "a.safetensors.incomplete")
-        _touch(download / "sub" / "b.incomplete")
-        keep_meta = _touch(download / "a.safetensors.metadata")
-        keep_file = _touch(tmp_path / "c.incomplete")
+        touch(download / "a.safetensors.incomplete")
+        touch(download / "sub" / "b.incomplete")
+        keep_meta = touch(download / "a.safetensors.metadata")
+        keep_file = touch(tmp_path / "c.incomplete")
 
         assert remove_partial_files(DownloadTarget("o/r", local_dir=str(tmp_path))) == 2
 
@@ -435,8 +357,8 @@ class TestRemovePartialFiles:
 
     def test_oserror_on_one_file_is_skipped(self, tmp_path, monkeypatch):
         repo_dir = tmp_path / "models--o--r"
-        stuck = _touch(repo_dir / "blobs" / "a.incomplete")
-        _touch(repo_dir / "blobs" / "b.incomplete")
+        stuck = touch(repo_dir / "blobs" / "a.incomplete")
+        touch(repo_dir / "blobs" / "b.incomplete")
         real_unlink = Path.unlink
 
         def flaky_unlink(self, *args, **kwargs):

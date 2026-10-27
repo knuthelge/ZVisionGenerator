@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import warnings
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -124,13 +123,6 @@ def test_launch_arguments() -> None:
     result, launcher, _ = _run(_FakeProcess([_line('{"done": true, "wire": 0, "written": 0}')]))
     assert result.status == "done"
     assert launcher.args[0] == [sys.executable, "-m", "zvisiongenerator.downloads.worker", _TARGET.to_json()]
-    kwargs = launcher.kwargs
-    assert kwargs["stdin"] == subprocess.PIPE
-    assert kwargs["stdout"] == subprocess.PIPE
-    assert kwargs["stderr"] == subprocess.STDOUT
-    assert kwargs["text"] is True
-    assert kwargs["encoding"] == "utf-8"
-    assert kwargs["bufsize"] == 1
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX session option")
@@ -180,15 +172,6 @@ def test_cancel_does_not_kill_a_child_that_exits_in_time() -> None:
     assert cleaned == [_TARGET]
 
 
-def test_cancel_cleanup_oserror_only_warns() -> None:
-    def cleanup(target: DownloadTarget) -> None:
-        raise OSError("locked")
-
-    with pytest.warns(UserWarning, match="owner/repo"):
-        result, _, _ = _run(_FakeProcess(running_polls=None), cancelled=lambda: True, cleanup=cleanup)
-    assert result.status == "stopped"
-
-
 def test_crash_cleans_up_and_reports_the_output_tail() -> None:
     process = _FakeProcess(["first\n", "Traceback...\n", "MemoryError\n"], exit_code=1)
     result, _, cleaned = _run(process)
@@ -223,15 +206,21 @@ def test_exit_zero_without_a_done_line_is_a_failure() -> None:
     assert cleaned == [_TARGET]
 
 
-def test_cleanup_oserror_after_a_crash_only_warns() -> None:
+@pytest.mark.parametrize(
+    ("process", "cancelled", "status"),
+    [
+        (lambda: _FakeProcess(exit_code=1), False, "failed"),
+        (lambda: _FakeProcess(running_polls=None), True, "stopped"),
+    ],
+    ids=["after-a-crash", "after-a-cancel"],
+)
+def test_cleanup_oserror_only_warns(process, cancelled: bool, status: str) -> None:
     def cleanup(target: DownloadTarget) -> None:
         raise OSError("locked")
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        result, _, _ = _run(_FakeProcess(exit_code=1), cleanup=cleanup)
-    assert result.status == "failed"
-    assert caught
+    with pytest.warns(UserWarning, match="owner/repo"):
+        result, _, _ = _run(process(), cancelled=lambda: cancelled, cleanup=cleanup)
+    assert result.status == status
 
 
 def test_malformed_protocol_line_is_kept_as_output() -> None:

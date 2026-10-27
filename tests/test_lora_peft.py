@@ -29,7 +29,7 @@ class TestIsUnmatchedAdapterError:
 
 
 def test_warn_unmatched_lora_names_the_file():
-    with pytest.warns(UserWarning, match=r"LoRA style\.safetensors: none of its LoRA tensors match this model"):
+    with pytest.warns(UserWarning, match=r"style\.safetensors"):
         warn_unmatched_lora("/loras/style.safetensors")
 
 

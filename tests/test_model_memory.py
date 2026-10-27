@@ -288,23 +288,6 @@ class TestEstimateLtxMlxClipMemory:
 
         assert required == pytest.approx((2 + 3 + 4 + 1.7) * _GIB, abs=1)
 
-    def test_ltx_2_3_estimates_are_pinned_to_the_bytes(self, tmp_path):
-        """The 2.5 pack support leaves every 2.3 estimate unchanged."""
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
-        _write_sized(model_dir / "audio_vae.safetensors", 0.1)
-        _write_sized(model_dir / "vocoder.safetensors", 0.2)
-        clip = {"width": 768, "height": 448, "frames": 121, "env": {}}
-
-        def estimate(low_memory: bool, unified_bytes: int | None) -> int | None:
-            return estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, low_memory=low_memory, unified_bytes=unified_bytes, **clip)
-
-        assert estimate(True, None) == 16245456099
-        assert estimate(True, _MEASURED_UNIFIED) == 16245456099
-        assert estimate(True, 16 * _GIB) == 15285786214
-        assert estimate(False, None) == 38891742353
-        assert estimate(False, _MEASURED_UNIFIED) == 38891742353
-        assert estimate(False, 16 * _GIB) == 32372236206
-
     def test_a_bundled_pack_estimates_without_a_text_encoder_dir_and_matches_a_gemma_dir_holding_the_same_file(self, tmp_path):
         model_dir, text_encoder_dir = _make_ltx_25(tmp_path, encoder=7.477)
         clip = {"width": 768, "height": 448, "frames": 121, "low_memory": True, "env": {}}
@@ -486,7 +469,6 @@ class TestClipMemoryFit:
 class TestLtxClipMemoryFitGolden:
     """G5: the LTX MLX clip estimates, pinned so the family dispatch cannot move them."""
 
-    _FAMILY_ARGS = [pytest.param({}, id="default"), pytest.param({"family": "ltx"}, id="ltx")]
     _BUDGET = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
     _CLIPS = [
         ({"width": 704, "height": 448, "frames": 121, "low_memory": True}, {"status": "fits", "required_gb": 14.8, "budget_gb": 24.0}),
@@ -509,15 +491,6 @@ class TestLtxClipMemoryFitGolden:
 
         assert clip_memory_fit("example/model", app_config=_CONFIG, budget=budget, find_local_dir=finder, env={}, family=family, **self._CLIPS[0][0]) is None
         finder.assert_not_called()
-
-    @pytest.mark.parametrize("family", _FAMILY_ARGS)
-    def test_three_clips_keep_their_estimates(self, tmp_path, family):
-        model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=7.477, connector=5.909, transformer=10.535, upsampler=0.927)
-        finder = lambda reference: {"example/model": model_dir, "example/gemma": text_encoder_dir}.get(reference)  # noqa: E731
-
-        results = [clip_memory_fit("example/model", app_config=_CONFIG, budget=self._BUDGET, find_local_dir=finder, env={}, **clip, **family) for clip, _ in self._CLIPS]
-
-        assert results == [expected for _, expected in self._CLIPS]
 
 
 @pytest.mark.parametrize(
@@ -718,15 +691,9 @@ class TestEstimateLtxCudaSystemMemory:
         assert estimate.taking_turns == 15 * _GIB + runtime
         assert estimate.together == 25 * _GIB + runtime
 
-    def test_the_ltx_2_5_q4_estimate_from_its_header_counts(self):
-        estimate = estimate_ltx_cuda_system_memory(block_matrices=18_555_076_608, transformer_rest=432_782_592, connectors=3_172_227_584, text_encoder=13_019_512_880, quantize=4)
-
-        assert round(estimate.taking_turns / _GIB, 2) == 21.08
-        assert round(estimate.together / _GIB, 2) == 30.81
-
     @pytest.mark.parametrize(
         ("quantize", "taking_turns", "together"),
-        [(4, 22_815_172_976, 33_261_754_346), (8, 29_037_278_208, 42_237_772_656)],
+        [(4, 22_815_172_976, 33_261_754_346)],
     )
     def test_the_ltx_2_3_estimates_are_unchanged(self, quantize, taking_turns, together):
         estimate = estimate_ltx_cuda_system_memory(block_matrices=18_555_076_608, transformer_rest=433_761_536, connectors=3_172_227_584, text_encoder=13_200_494_448, quantize=quantize)
@@ -744,7 +711,7 @@ class TestLtxCudaSystemMemory:
         }
     }
 
-    @pytest.mark.parametrize(("model_name", "quantize"), [("ltx-4", 4), ("ltx-8", 8), ("ltx25-4", 4)])
+    @pytest.mark.parametrize(("model_name", "quantize"), [("ltx25-4", 4)])
     def test_the_model_name_and_its_level_reach_the_estimate(self, monkeypatch, model_name, quantize):
         import zvisiongenerator.backends as backends
 

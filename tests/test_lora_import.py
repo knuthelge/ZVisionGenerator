@@ -18,40 +18,24 @@ from zvisiongenerator.converters.lora_import import (
 
 
 class TestValidateName:
-    def test_valid_name_passes(self):
-        assert _validate_name("my-lora") == "my-lora"
+    @pytest.mark.parametrize(("name", "expected"), [("my-lora", "my-lora"), ("my-lora.safetensors", "my-lora"), ("v1.0", "v1.0")])
+    def test_valid_names_are_normalised(self, name, expected):
+        assert _validate_name(name) == expected
 
-    def test_strips_safetensors_suffix(self):
-        assert _validate_name("my-lora.safetensors") == "my-lora"
-
-    def test_empty_name_raises(self):
-        with pytest.raises(ValueError, match="must not be empty"):
-            _validate_name("")
-
-    def test_only_extension_raises(self):
-        # ".safetensors" stripped → empty string
-        with pytest.raises(ValueError, match="must not be empty"):
-            _validate_name(".safetensors")
-
-    def test_slash_raises(self):
-        with pytest.raises(ValueError, match="Invalid LoRA name"):
-            _validate_name("path/name")
-
-    def test_backslash_raises(self):
-        with pytest.raises(ValueError, match="Invalid LoRA name"):
-            _validate_name("path\\name")
-
-    def test_dotdot_raises(self):
-        with pytest.raises(ValueError, match="Invalid LoRA name"):
-            _validate_name("..sneaky")
-
-    def test_null_byte_raises(self):
-        with pytest.raises(ValueError, match="Invalid LoRA name"):
-            _validate_name("bad\x00name")
-
-    def test_plain_dots_ok(self):
-        # A single dot or dots that aren't ".." should be fine
-        assert _validate_name("v1.0") == "v1.0"
+    @pytest.mark.parametrize(
+        ("name", "message"),
+        [
+            ("", "must not be empty"),
+            (".safetensors", "must not be empty"),  # stripped to an empty name
+            ("path/name", "Invalid LoRA name"),
+            ("path\\name", "Invalid LoRA name"),
+            ("..sneaky", "Invalid LoRA name"),
+            ("bad\x00name", "Invalid LoRA name"),
+        ],
+    )
+    def test_invalid_names_raise(self, name, message):
+        with pytest.raises(ValueError, match=message):
+            _validate_name(name)
 
 
 # ── import_lora_local ────────────────────────────────────────────────────────
@@ -178,24 +162,14 @@ class TestImportLoraHf:
 
     @patch("huggingface_hub.hf_hub_download")
     @patch("huggingface_hub.list_repo_files")
-    def test_explicit_filename(self, mock_list: MagicMock, mock_dl: MagicMock, tmp_path: Path):
-        mock_dl.side_effect = _download_into_local_dir(b"data")
-
-        dest_dir = tmp_path / "loras"
-        result = import_lora_hf("user/repo", dest_dir, filename="specific.safetensors")
-
-        assert result == dest_dir / "specific.safetensors"
-        mock_list.assert_not_called()  # should skip listing when filename given
-
-    @patch("huggingface_hub.hf_hub_download")
-    @patch("huggingface_hub.list_repo_files")
-    def test_custom_name(self, mock_list: MagicMock, mock_dl: MagicMock, tmp_path: Path):
+    def test_explicit_filename_and_custom_name(self, mock_list: MagicMock, mock_dl: MagicMock, tmp_path: Path):
         mock_dl.side_effect = _download_into_local_dir(b"data")
 
         dest_dir = tmp_path / "loras"
         result = import_lora_hf("user/repo", dest_dir, filename="orig.safetensors", name="renamed")
 
         assert result == dest_dir / "renamed.safetensors"
+        mock_list.assert_not_called()  # no listing when the file is named
 
     @patch("huggingface_hub.hf_hub_download")
     @patch("huggingface_hub.list_repo_files")

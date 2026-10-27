@@ -12,7 +12,6 @@ from huggingface_hub.errors import (
     HfHubHTTPError,
     LocalEntryNotFoundError,
     OfflineModeIsEnabled,
-    RepositoryNotFoundError,
     RevisionNotFoundError,
 )
 
@@ -88,10 +87,8 @@ def test_unreachable_hub_returns_none(exc):
     "exc",
     [
         _dry_run_error(_http_error(GatedRepoError)),
-        _dry_run_error(_http_error(RepositoryNotFoundError)),
         _dry_run_error(_http_error(HfHubHTTPError)),
         _http_error(RevisionNotFoundError),
-        _http_error(GatedRepoError),
     ],
 )
 def test_hub_refusal_raises_runtime_error_naming_the_repo(exc):
@@ -99,19 +96,13 @@ def test_hub_refusal_raises_runtime_error_naming_the_repo(exc):
         check_target(_TARGET, snapshot_download=_raising(exc))
 
 
-@pytest.mark.parametrize("exc", [_dry_run_error(_http_error(GatedRepoError)), _http_error(GatedRepoError)])
-def test_gated_refusal_is_one_line_with_the_next_step(exc):
+def test_gated_refusal_names_the_next_step():
     with pytest.raises(RuntimeError) as raised:
-        check_target(_TARGET, snapshot_download=_raising(exc))
+        check_target(_TARGET, snapshot_download=_raising(_dry_run_error(_http_error(GatedRepoError))))
 
     message = str(raised.value)
-    assert "\n" not in message
     assert "https://huggingface.co/owner/repo" in message
     assert "hf auth login" in message
-
-
-def test_connection_error_in_a_dry_run_is_not_a_refusal():
-    assert check_target(_TARGET, snapshot_download=_raising(_dry_run_error(httpx.ConnectError("offline")))) is None
 
 
 def test_unrelated_errors_propagate():

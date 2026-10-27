@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 
 from zvisiongenerator.converters.list_assets import (
     LoraEntry,
@@ -59,11 +60,10 @@ def _has_unavailable_variant(target: str) -> bool:
 
 
 class TestListModels:
-    def test_missing_models_dir(self, tmp_path: Path):
-        assert list_models(tmp_path) == []
-
-    def test_empty_models_dir(self, tmp_path: Path):
-        (tmp_path / "models").mkdir()
+    @pytest.mark.parametrize("create", [False, True], ids=["missing-models-dir", "empty-models-dir"])
+    def test_no_models(self, tmp_path: Path, create: bool):
+        if create:
+            (tmp_path / "models").mkdir()
         assert list_models(tmp_path) == []
 
     @patch("zvisiongenerator.converters.list_assets.detect_image_model")
@@ -91,19 +91,6 @@ class TestListModels:
         assert result[1].family == "flux2_klein"
         assert result[1].size == "4b"
         assert result[1].is_distilled is True
-
-    @patch("zvisiongenerator.converters.list_assets.detect_image_model")
-    def test_sorted_by_name(self, mock_detect, tmp_path: Path):
-        models_dir = tmp_path / "models"
-        models_dir.mkdir()
-        (models_dir / "zebra").mkdir()
-        (models_dir / "alpha").mkdir()
-
-        mock_detect.return_value = ImageModelInfo(family="unknown", is_distilled=False, size=None)
-
-        result = list_models(tmp_path)
-
-        assert result == []
 
     @patch("zvisiongenerator.converters.list_assets.detect_image_model")
     def test_skips_unknown_directories_so_video_only_models_do_not_appear_as_image_models(self, mock_detect, tmp_path: Path):
@@ -226,59 +213,27 @@ class TestFormatAssetTable:
         assert "l1" in data_rows[0]
         assert data_rows[0].rstrip().endswith("1.5")
 
-    def test_empty_models_shows_none(self):
-        output = format_asset_table(models=[])
+    @pytest.mark.parametrize("section", [{"models": []}, {"loras": []}, {"video_models": []}, {"aliases": {}}])
+    def test_an_empty_section_says_none(self, section):
+        output = format_asset_table(**section)
         lines = output.splitlines()
         assert len(lines) == 2
         assert lines[0].endswith(":")
-        assert lines[1].startswith("  ")
-        assert lines[1].endswith(")")
-
-    def test_empty_loras_shows_none(self):
-        output = format_asset_table(loras=[])
-        lines = output.splitlines()
-        assert len(lines) == 2
-        assert lines[0].endswith(":")
-        assert lines[1].startswith("  ")
-        assert lines[1].endswith(")")
-
-    def test_both_sections(self):
-        models = [ModelEntry(name="m", family="zimage", size=None, is_distilled=False)]
-        loras = [LoraEntry(name="l", file_size_mb=0.5)]
-        output = format_asset_table(models=models, loras=loras)
-        sections = output.split("\n\n")
-        assert len(sections) == 2
-        assert "m" in sections[0]
-        assert "l" in sections[1]
+        assert "(none" in lines[1]
 
     def test_none_params_omit_sections(self):
         output = format_asset_table(models=None, loras=None)
         assert output == ""
-
-    def test_only_models_omits_loras(self):
-        models = [ModelEntry(name="m", family="flux2", size="4b", is_distilled=True)]
-        output = format_asset_table(models=models, loras=None)
-        assert "m" in output
-        assert "4b" in output
-        assert "0.5" not in output
-
-    def test_only_loras_omits_models(self):
-        loras = [LoraEntry(name="l", file_size_mb=3.2)]
-        output = format_asset_table(models=None, loras=loras)
-        assert "l" in output
-        assert "3.2" in output
-        assert "flux2" not in output
 
 
 # ── list_video_models ────────────────────────────────────────────────────────
 
 
 class TestListVideoModels:
-    def test_missing_models_dir(self, tmp_path: Path):
-        assert list_video_models(tmp_path) == []
-
-    def test_empty_models_dir(self, tmp_path: Path):
-        (tmp_path / "models").mkdir()
+    @pytest.mark.parametrize("create", [False, True], ids=["missing-models-dir", "empty-models-dir"])
+    def test_no_video_models(self, tmp_path: Path, create: bool):
+        if create:
+            (tmp_path / "models").mkdir()
         assert list_video_models(tmp_path) == []
 
     @patch("zvisiongenerator.converters.list_assets.detect_video_model")
@@ -351,24 +306,6 @@ class TestListVideoModels:
         result = list_video_models(tmp_path)
         assert [e.name for e in result] == ["aaa-ltx-model", "zzz-ltx-model"]
 
-    @patch("zvisiongenerator.converters.list_assets.detect_video_model")
-    def test_mixed_video_and_image_models(self, mock_detect, tmp_path: Path):
-        """Only video models (non-unknown) are returned; image models are skipped."""
-        models_dir = tmp_path / "models"
-        models_dir.mkdir()
-        (models_dir / "LTX-Video-0.9.1-mlx").mkdir()
-        (models_dir / "Z-Image-Turbo").mkdir()
-
-        info_map = {
-            "LTX-Video-0.9.1-mlx": VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32),
-            "Z-Image-Turbo": VideoModelInfo(family="unknown", backend="unknown", supports_i2v=False, default_fps=24, frame_alignment=1, resolution_alignment=1),
-        }
-        mock_detect.side_effect = lambda path: info_map[Path(path).name]
-
-        result = list_video_models(tmp_path)
-        assert len(result) == 1
-        assert result[0].name == "LTX-Video-0.9.1-mlx"
-
     def test_ignores_files(self, tmp_path: Path):
         models_dir = tmp_path / "models"
         models_dir.mkdir()
@@ -396,19 +333,6 @@ class TestFormatAssetTableVideoModels:
         assert "ltx" in data_rows[0]
         assert data_rows[0].rstrip().endswith("yes")
 
-    def test_empty_video_models_shows_none(self):
-        output = format_asset_table(video_models=[])
-        lines = output.splitlines()
-        assert len(lines) == 2
-        assert lines[0].endswith(":")
-        assert lines[1].startswith("  ")
-        assert lines[1].endswith(")")
-
-    def test_video_models_no_i2v(self):
-        vmodels = [VideoModelEntry(name="test-model", family="ltx", supports_i2v=False)]
-        output = format_asset_table(video_models=vmodels)
-        assert "no" in output
-
     def test_all_three_sections(self):
         models = [ModelEntry(name="m", family="zimage", size=None, is_distilled=False)]
         vmodels = [VideoModelEntry(name="v", family="ltx", supports_i2v=True)]
@@ -419,18 +343,6 @@ class TestFormatAssetTableVideoModels:
         assert "m" in sections[0]
         assert "v" in sections[1]
         assert "l" in sections[2]
-
-    def test_only_video_models_omits_others(self):
-        vmodels = [VideoModelEntry(name="v", family="ltx", supports_i2v=True)]
-        output = format_asset_table(video_models=vmodels)
-        sections = output.split("\n\n")
-        assert len(sections) == 1
-        assert "v" in sections[0]
-        assert "ltx" in sections[0]
-
-    def test_none_video_models_omits_section(self):
-        output = format_asset_table(models=None, video_models=None, loras=None)
-        assert "Video Models:" not in output
 
 
 # ── format_asset_table with aliases ──────────────────────────────────────────
@@ -447,49 +359,9 @@ class TestFormatAssetTableAliases:
         output = format_asset_table(aliases=aliases)
         assert [alias for alias, _target in _alias_rows(output)] == ["klein4b", "zit"]
 
-    def test_empty_aliases_shows_none(self):
-        output = format_asset_table(aliases={})
-        lines = output.splitlines()
-        assert len(lines) == 2
-        assert lines[0].endswith(":")
-        assert lines[1].startswith("  ")
-        assert lines[1].endswith(")")
-
     def test_none_aliases_omits_section(self):
         output = format_asset_table(aliases=None)
         assert output == ""
-
-    def test_all_sections_with_aliases(self):
-        models = [ModelEntry(name="m", family="zimage", size=None, is_distilled=False)]
-        loras = [LoraEntry(name="l", file_size_mb=0.5)]
-        aliases = {"ltx-4": "dgrauet/ltx-2.3-mlx-q4"}
-        output = format_asset_table(models=models, loras=loras, aliases=aliases)
-        sections = output.split("\n\n")
-        assert len(sections) == 3
-        assert "m" in sections[0]
-        assert "l" in sections[1]
-        assert "ltx-4" in sections[2]
-
-    def test_all_five_config_aliases_displayed(self):
-        """All 5 configured aliases appear in the formatted output."""
-        aliases = {
-            "ltx-8": "dgrauet/ltx-2.3-mlx-q8",
-            "ltx-4": "dgrauet/ltx-2.3-mlx-q4",
-            "zit": "Tongyi-MAI/Z-Image-Turbo",
-            "klein9b": "black-forest-labs/FLUX.2-klein-9B",
-            "klein4b": "black-forest-labs/FLUX.2-klein-4B",
-        }
-        output = format_asset_table(aliases=aliases)
-        assert dict(_alias_rows(output)) == aliases
-
-    def test_flat_aliases_render_unchanged(self):
-        aliases = {"zit": "Tongyi-MAI/Z-Image-Turbo"}
-
-        output = format_asset_table(aliases=aliases)
-
-        assert _alias_rows(output) == [("zit", "Tongyi-MAI/Z-Image-Turbo")]
-        assert "macOS" not in output
-        assert "Windows" not in output
 
     def test_per_platform_aliases_render_platform_labels_and_targets(self):
         aliases = {

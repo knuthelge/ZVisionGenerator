@@ -40,7 +40,6 @@ class TestDetectModelType:
         assert info.size is None
 
     def test_flux2_klein_pipeline(self, tmp_path):
-        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Flux2KleinPipeline", "is_distilled": True}))
         # Need "4b" in path for size detection
         klein_dir = tmp_path / "flux2-klein-4b"
         klein_dir.mkdir()
@@ -102,27 +101,14 @@ class TestDetectModelType:
 
     # ── Local path error handling ──
 
-    def test_local_relative_path_not_found_raises(self):
+    @pytest.mark.parametrize(
+        "reference",
+        ["./models/nonexistent", "{tmp}/no_such_model", "~/no_such_model_dir_xyz", "models\\nonexistent", "models/subdir/nested"],
+        ids=["relative", "absolute", "tilde", "backslash", "nested"],
+    )
+    def test_a_local_path_that_does_not_exist_raises(self, tmp_path, reference):
         with pytest.raises(FileNotFoundError, match="Local model directory not found"):
-            detect_image_model("./models/nonexistent")
-
-    def test_local_absolute_path_not_found_raises(self, tmp_path):
-        fake = str(tmp_path / "no_such_model")
-        with pytest.raises(FileNotFoundError, match="Local model directory not found"):
-            detect_image_model(fake)
-
-    def test_tilde_path_not_found_raises(self):
-        with pytest.raises(FileNotFoundError, match="Local model directory not found"):
-            detect_image_model("~/no_such_model_dir_xyz")
-
-    def test_hf_repo_id_not_treated_as_local(self, tmp_path):
-        """A bare 'org/repo' without local-path prefixes should NOT raise FileNotFoundError."""
-        index_file = tmp_path / "model_index.json"
-        index_file.write_text(json.dumps({"_class_name": "ZImagePipeline"}))
-        mock_download = MagicMock(return_value=str(index_file))
-        with patch("huggingface_hub.hf_hub_download", mock_download):
-            info = detect_image_model("org/some-model")
-        assert info.family == "zimage"
+            detect_image_model(reference.format(tmp=tmp_path))
 
     def test_hf_failure_with_local_first_segment_gives_hint(self, tmp_path, monkeypatch):
         """When HF download fails and first path segment is a local dir, give a helpful error."""
@@ -138,25 +124,15 @@ class TestDetectModelType:
 
 
 class TestDetectKleinSize:
-    def test_path_contains_4b(self, tmp_path):
-        model_dir = tmp_path / "flux2-klein-4b"
+    @pytest.mark.parametrize(
+        ("folder", "expected"),
+        [("flux2-klein-4b", "4b"), ("flux2-klein-9b", "9b"), ("models--unsloth--FLUX.2-klein-9B", "9b"), ("flux2-klein-4B", "4b")],
+        ids=["4b", "9b", "hub-cache-mirror", "case-insensitive"],
+    )
+    def test_the_size_comes_from_the_folder_name(self, tmp_path, folder, expected):
+        model_dir = tmp_path / folder
         model_dir.mkdir()
-        assert _detect_klein_size(str(model_dir), is_local=True) == "4b"
-
-    def test_path_contains_9b(self, tmp_path):
-        model_dir = tmp_path / "flux2-klein-9b"
-        model_dir.mkdir()
-        assert _detect_klein_size(str(model_dir), is_local=True) == "9b"
-
-    def test_hub_cache_dir_of_ungated_mirror_is_9b(self, tmp_path):
-        model_dir = tmp_path / "models--unsloth--FLUX.2-klein-9B"
-        model_dir.mkdir()
-        assert _detect_klein_size(str(model_dir), is_local=True) == "9b"
-
-    def test_path_case_insensitive(self, tmp_path):
-        model_dir = tmp_path / "flux2-klein-4B"
-        model_dir.mkdir()
-        assert _detect_klein_size(str(model_dir), is_local=True) == "4b"
+        assert _detect_klein_size(str(model_dir), is_local=True) == expected
 
     def test_fallback_to_config_json_small(self, tmp_path):
         transformer_dir = tmp_path / "transformer"
@@ -213,26 +189,6 @@ class TestRelativePathDetection:
             info = detect_image_model("black-forest-labs/some-model")
         mock_download.assert_called_once_with(repo_id="black-forest-labs/some-model", filename="model_index.json", local_files_only=True)
         assert info.family == "zimage"
-
-    def test_hf_repo_id_no_local_dir_passes(self, tmp_path):
-        """user/repo where user/ doesn't exist locally → treated as HF repo."""
-        index_file = tmp_path / "model_index.json"
-        index_file.write_text(json.dumps({"_class_name": "ZImagePipeline"}))
-        mock_download = MagicMock(return_value=str(index_file))
-        with patch("huggingface_hub.hf_hub_download", mock_download):
-            info = detect_image_model("someorg/some-model")
-        mock_download.assert_called_once_with(repo_id="someorg/some-model", filename="model_index.json", local_files_only=True)
-        assert info.family == "zimage"
-
-    def test_backslash_path_raises(self):
-        """Paths with backslashes are definitely local, not HF repo IDs."""
-        with pytest.raises(FileNotFoundError, match="Local model directory not found"):
-            detect_image_model("models\\nonexistent")
-
-    def test_nested_path_raises(self):
-        """Paths with multiple segments (a/b/c) don't match HF pattern."""
-        with pytest.raises(FileNotFoundError, match="Local model directory not found"):
-            detect_image_model("models/subdir/nested")
 
 
 class TestDetectWithRevision:

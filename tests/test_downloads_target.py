@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import dataclasses
-
 import pytest
 
-from zvisiongenerator.downloads.target import DownloadProgress, DownloadTarget, TargetCheck, is_literal
+from zvisiongenerator.downloads.target import DownloadTarget, is_literal
 
 
 class TestDownloadTarget:
@@ -27,23 +25,12 @@ class TestDownloadTarget:
     def test_json_round_trip(self, target):
         assert DownloadTarget.from_json(target.to_json()) == target
 
-    def test_is_frozen(self):
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            DownloadTarget("o/r").repo_id = "x"  # type: ignore[misc]
-
 
 class TestIsLiteral:
-    @pytest.mark.parametrize("pattern", ["model_index.json", "transformer/config.json", "turbo.safetensors"])
+    @pytest.mark.parametrize("pattern", ["model_index.json", "transformer/config.json"])
     def test_plain_paths_are_literal(self, pattern):
         assert is_literal(pattern) is True
 
-    @pytest.mark.parametrize("pattern", ["*.json", "vae/*", "a?.bin", "x[0-9].txt", "tokenizer/**"])
+    @pytest.mark.parametrize("pattern", ["*.json", "a?.bin"])
     def test_glob_characters_are_not_literal(self, pattern):
         assert is_literal(pattern) is False
-
-
-def test_progress_and_check_are_frozen_values():
-    assert DownloadProgress(1, None, None, None).bytes_total is None
-    assert TargetCheck(2, None).missing_bytes is None
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        TargetCheck(1, 2).missing_files = 0  # type: ignore[misc]

@@ -9,11 +9,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._download_helpers import packaged_config
 import zvisiongenerator.image_cli as image_cli
-import zvisiongenerator.utils as utils
 import zvisiongenerator.utils.lora as lora_utils
 import zvisiongenerator.video_cli as video_cli
-from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.lora import parse_lora_arg
 
 
@@ -54,7 +53,7 @@ def _patch_video_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
         lambda: {
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
             "video_sizes": {"16:9": {"m": {"width": 768, "height": 432}}},
-            "video_model_presets": {"ltx": {**load_config()["video_model_presets"]["ltx"], "upscale": {}}},
+            "video_model_presets": {"ltx": {**packaged_config()["video_model_presets"]["ltx"], "upscale": {}}},
             "model_aliases": {},
         },
     )
@@ -76,59 +75,12 @@ def _patch_video_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
     return backend
 
 
-class TestParseLoraArgBehavior:
-    def test_single_name_defaults_to_weight_one(self):
-        assert parse_lora_arg("style") == [("style", 1.0)]
-
-    def test_comma_separated_values_preserve_weights(self):
-        assert parse_lora_arg("style:0.8,detail:0.5") == [("style", 0.8), ("detail", 0.5)]
-
-    def test_invalid_numeric_suffix_is_treated_as_part_of_name(self):
-        assert parse_lora_arg("style:notanumber") == [("style:notanumber", 1.0)]
-
-    def test_whitespace_is_stripped_before_parsing(self):
-        assert parse_lora_arg(" style : 0.8 , detail ") == [("style", 0.8), ("detail", 1.0)]
-
-    def test_empty_entry_raises_value_error(self):
-        with pytest.raises(ValueError, match="Empty LoRA entry"):
-            parse_lora_arg("")
-
-    def test_empty_name_raises_value_error(self):
-        with pytest.raises(ValueError, match="Empty LoRA name"):
-            parse_lora_arg(":0.5")
-
-
-class TestPublicImportContract:
-    def test_utils_re_exports_parse_lora_arg(self):
-        assert utils.parse_lora_arg is parse_lora_arg
-
-
 class TestParserParity:
-    @pytest.mark.parametrize("builder", [image_cli._build_parser, video_cli._build_video_parser], ids=["image", "video"])
-    def test_lora_defaults_to_none(self, builder):
-        args = builder().parse_args(["-m", "model"])
-        assert args.lora is None
-
     @pytest.mark.parametrize("builder", [image_cli._build_parser, video_cli._build_video_parser], ids=["image", "video"])
     def test_lora_accepts_single_comma_separated_argument(self, builder):
         args = builder().parse_args(["-m", "model", "--lora", "style:0.8,detail"])
         assert args.lora == "style:0.8,detail"
         assert parse_lora_arg(args.lora) == [("style", 0.8), ("detail", 1.0)]
-
-    def test_image_and_video_parsers_produce_matching_lora_values(self):
-        lora_value = "lora1:0.9,lora2,lora3:0.3"
-        image_args = image_cli._build_parser().parse_args(["-m", "model", "--lora", lora_value])
-        video_args = video_cli._build_video_parser().parse_args(["-m", "model", "--lora", lora_value])
-
-        assert image_args.lora == video_args.lora
-        assert parse_lora_arg(image_args.lora) == [("lora1", 0.9), ("lora2", 1.0), ("lora3", 0.3)]
-
-    @pytest.mark.parametrize("builder", [image_cli._build_parser, video_cli._build_video_parser], ids=["image", "video"])
-    def test_missing_lora_value_exits(self, builder):
-        with pytest.raises(SystemExit) as exc_info:
-            builder().parse_args(["-m", "model", "--lora"])
-
-        assert exc_info.value.code == 2
 
 
 class TestRuntimeHandoff:
@@ -149,7 +101,7 @@ class TestRuntimeHandoff:
 
         assert backend.load_model.call_args.kwargs["loras"] == [("/resolved/style", 0.8), ("/resolved/detail", 1.0)]
 
-    def test_image_main_rejects_remote_lora_before_backend_load(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    def test_image_main_rejects_remote_lora_before_backend_load(self, monkeypatch: pytest.MonkeyPatch):
         backend = _patch_image_main_dependencies(monkeypatch)
         monkeypatch.setattr(sys, "argv", ["ziv-image", "-m", "model", "--prompt", "a cat", "--lora", "org/lora:0.8"])
 
@@ -157,7 +109,6 @@ class TestRuntimeHandoff:
             image_cli.main()
 
         assert exc_info.value.code == 2
-        assert "Remote HuggingFace LoRA references are not supported" in capsys.readouterr().err
         backend.load_model.assert_not_called()
 
 

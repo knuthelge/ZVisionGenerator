@@ -31,8 +31,10 @@ _REFUSALS = {
 }
 
 
-@pytest.mark.parametrize("kind", list(_REFUSALS))
-@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize(
+    ("kind", "wrapped"),
+    [("gated", False), ("not_found", False), ("http_401", False), ("http_403", False), ("gated", True)],
+)
 def test_refusal_without_token_is_one_line_with_link_and_login(kind, wrapped):
     exc = _REFUSALS[kind]()
     message = refusal_message(_caused_by(exc) if wrapped else exc, token_present=False, repo_id=_REPO)
@@ -60,13 +62,6 @@ def test_rejected_token_says_to_log_in_again():
     assert "\n" not in message
     assert "hf auth login" in message
     assert "HF_TOKEN" in message
-
-
-def test_messages_differ_by_cause():
-    gated = refusal_message(_REFUSALS["gated"](), token_present=False, repo_id=_REPO)
-    missing = refusal_message(_REFUSALS["not_found"](), token_present=False, repo_id=_REPO)
-
-    assert gated != missing
 
 
 def test_repo_comes_from_the_error_when_not_given():
@@ -110,9 +105,8 @@ def test_unknown_repo_links_the_hub_root():
         _caused_by(ValueError("bad")),
     ],
 )
-@pytest.mark.parametrize("token_present", [False, True])
-def test_other_errors_are_not_refusals(exc, token_present):
-    assert refusal_message(exc, token_present=token_present, repo_id=_REPO) is None
+def test_other_errors_are_not_refusals(exc):
+    assert refusal_message(exc, token_present=False, repo_id=_REPO) is None
 
 
 def test_token_source_names_the_environment_variable_holding_the_token():

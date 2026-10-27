@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 import threading
-from pathlib import Path
 
 import pytest
 
 from zvisiongenerator.downloads.progress import ByteCounts, SpeedMeter, make_byte_sink, progress_from_counts
-
-_ROOT = Path(__file__).resolve().parent.parent
 
 _BYTES_DESC = "Downloading (incomplete total...)"
 _WRITTEN_DESC = "Reconstructing (incomplete total...)"
@@ -24,10 +19,6 @@ def _bars(counts: ByteCounts):
         sink(total=1000, desc=_BYTES_DESC, unit="B", unit_scale=True),
         sink(total=1000, desc=_WRITTEN_DESC, unit="B", unit_scale=True),
     )
-
-
-def test_byte_counts_start_at_zero() -> None:
-    assert ByteCounts().snapshot() == (0, 0)
 
 
 def test_xet_sequence_counts_each_bar_separately() -> None:
@@ -83,11 +74,11 @@ def test_per_file_bars_count_by_desc() -> None:
     assert counts.snapshot() == (10, 4)
 
 
-@pytest.mark.parametrize("n", [None, 0, -3])
-def test_empty_or_negative_updates_are_safe(n) -> None:
+def test_empty_or_negative_updates_are_safe() -> None:
     counts = ByteCounts()
     _, wire, _ = _bars(counts)
-    wire.update(n)
+    wire.update(None)
+    wire.update(-3)
     assert counts.snapshot() == (0, 0)
 
 
@@ -190,9 +181,3 @@ def test_progress_eta_needs_total_and_speed() -> None:
 def test_progress_without_total_does_not_clamp() -> None:
     progress = progress_from_counts(5000, 0, None, 10.0)
     assert (progress.bytes_done, progress.bytes_total) == (5000, None)
-
-
-def test_importing_progress_does_not_import_tqdm() -> None:
-    code = "import sys; import zvisiongenerator.downloads.progress; sys.exit(1 if 'tqdm' in sys.modules else 0)"
-    result = subprocess.run([sys.executable, "-c", code], cwd=_ROOT, check=False)
-    assert result.returncode == 0

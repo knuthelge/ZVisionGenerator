@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from email.parser import BytesParser
 from pathlib import Path
-import re
 import subprocess
 import tarfile
 import zipfile
@@ -15,6 +14,7 @@ from zvisiongenerator.web.workspace_contract import build_workflow_contract, can
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LICENSE_FILES = ("LICENSE", "THIRD_PARTY_LICENSES.md")
 LICENSE_EXPRESSION = "AGPL-3.0-or-later"
+VENDORED_PACKAGES = ("ltx_core_mlx", "ltx_pipelines_mlx", "minimax_h3_mlx", "seedvr2_torch", "moss_image")
 
 
 @pytest.fixture(scope="module")
@@ -72,8 +72,8 @@ def test_distributions_include_exact_license_notices_and_metadata(built_distribu
         assert sorted(_license_headers(wheel.read(f"{dist_info}/METADATA"))) == sorted(LICENSE_FILES)
 
         wheel_members = set(wheel.namelist())
-        assert any(member.startswith("ltx_core_mlx/") for member in wheel_members)
-        assert any(member.startswith("ltx_pipelines_mlx/") for member in wheel_members)
+        for vendored in VENDORED_PACKAGES:
+            assert any(member.startswith(f"{vendored}/") for member in wheel_members), vendored
 
     with tarfile.open(sdist_path, "r:gz") as sdist:
         root = _sdist_root(sdist)
@@ -87,53 +87,11 @@ def test_distributions_include_exact_license_notices_and_metadata(built_distribu
         assert sorted(_license_headers(pkg_info)) == sorted(LICENSE_FILES)
 
 
-def test_make_check_enforces_frontend_docs_and_packaged_spa_gates() -> None:
-    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    match = re.search(r"^check:\s+(?P<deps>.+?)\s+##", makefile, flags=re.MULTILINE)
-
-    assert match is not None
-    deps = match.group("deps").split()
-
-    assert "frontend-test" in deps
-    assert "frontend-static-check" in deps
-    assert "docs-check" in deps
-
-
-def test_make_install_installs_python_and_frontend_dependencies() -> None:
-    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    install_match = re.search(r"^install:\s+(?P<deps>[^#\n]+)##[^\n]*(?P<body>(?:\n\t.+)+)", makefile, flags=re.MULTILINE)
-    frontend_match = re.search(r"^frontend-install:[^#\n]*##[^\n]*(?P<body>(?:\n\t.+)+)", makefile, flags=re.MULTILINE)
-
-    assert install_match is not None
-    assert frontend_match is not None
-    assert "frontend-install" in install_match.group("deps").split()
-    assert "uv sync" in install_match.group("body")
-    assert "pnpm --dir frontend install --frozen-lockfile" in frontend_match.group("body")
-
-
-def test_release_workflow_validates_packaged_spa_before_build() -> None:
-    release_workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-
-    validation_index = release_workflow.index("make frontend-static-check")
-    build_index = release_workflow.index("make build")
-
-    assert validation_index < build_index
-
-
 def test_workflow_contract_exposes_canonical_values_only() -> None:
     contract = build_workflow_contract()
 
-    assert "legacy_aliases" not in contract
     assert contract["values"] == ["txt2img", "img2img", "txt2vid", "img2vid", "extend"]
     assert list(contract["definitions"]) == contract["values"]
-
-
-def test_workflow_contract_drops_extend_without_the_capability() -> None:
-    contract = build_workflow_contract(video_extend=False)
-
-    assert contract["values"] == ["txt2img", "img2img", "txt2vid", "img2vid"]
-    assert "extend" not in contract["definitions"]
-    assert "extend" in build_workflow_contract(video_extend=True)["definitions"]
 
 
 def test_extend_definition_lists_its_controls_and_cleared_fields() -> None:

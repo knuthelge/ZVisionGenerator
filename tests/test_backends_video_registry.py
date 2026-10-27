@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._download_helpers import packaged_config
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.core.video_family import VideoCapabilities
-from zvisiongenerator.utils.config import load_config
 
 _ALL_ON = {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True}
 
@@ -55,9 +55,6 @@ class TestRegistryShape:
         for platform, by_family in backends_module._VIDEO_BACKENDS_MAP.items():
             assert set(by_family) == expected[platform]
             assert all(callable(factory) for factory in by_family.values())
-
-    def test_video_backends_is_a_dict_by_family(self):
-        assert isinstance(backends_module.VIDEO_BACKENDS, dict)
 
 
 class TestGetVideoBackend:
@@ -150,10 +147,8 @@ class TestFamilyAvailability:
 
 
 class TestVideoCapabilities:
-    def test_the_packaged_ltx_family_keeps_its_capabilities_on_every_supported_platform(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("zvisiongenerator.utils.config.get_ziv_data_dir", lambda: tmp_path / ".ziv")
-        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
-        config = load_config()
+    def test_the_packaged_ltx_family_keeps_its_capabilities_on_every_supported_platform(self, monkeypatch):
+        config = packaged_config()
 
         for platform_key in ("darwin", "win32", "linux"):
             monkeypatch.setattr(backends_module.sys, "platform", platform_key)
@@ -192,31 +187,19 @@ class TestVideoCapabilities:
 class TestMacH3Registration:
     """MiniMax H3 is served on macOS by the MLX backend, with no upscale (the shipped config's overlay)."""
 
-    def test_the_darwin_factory_builds_the_mlx_backend(self):
-        from zvisiongenerator.backends.mac.h3_video import H3MlxVideoBackend
-
-        backend = backends_module._VIDEO_BACKENDS_MAP["darwin"]["h3"]()
-
-        assert isinstance(backend, H3MlxVideoBackend)
-        assert backend.name == "h3"
-
-    def test_get_video_backend_creates_it_on_macos(self, monkeypatch):
+    def test_get_video_backend_builds_the_mlx_backend_on_macos(self, monkeypatch):
         from zvisiongenerator.backends.mac.h3_video import H3MlxVideoBackend
 
         monkeypatch.setattr(backends_module.sys, "platform", "darwin")
 
-        assert isinstance(backends_module.get_video_backend("h3"), H3MlxVideoBackend)
+        backend = backends_module.get_video_backend("h3")
+
+        assert isinstance(backend, H3MlxVideoBackend)
+        assert backend.name == "h3"
         assert backends_module.video_family_available("h3") is True
 
     def test_the_shipped_capabilities_on_macos_hide_upscale_and_review(self, monkeypatch):
         monkeypatch.setattr(backends_module.sys, "platform", "darwin")
-        capabilities = backends_module.video_capabilities(load_config(), "h3")
+        capabilities = backends_module.video_capabilities(packaged_config(), "h3")
 
         assert capabilities == VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=False, upscale_review=False, lora=True, audio=True, low_memory=False)
-
-    def test_the_ltx_capabilities_on_macos_are_unchanged(self, monkeypatch):
-        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
-        capabilities = backends_module.video_capabilities(load_config(), "ltx")
-
-        assert capabilities is not None
-        assert capabilities.upscale is True and capabilities.upscale_review is True

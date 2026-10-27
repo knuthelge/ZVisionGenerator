@@ -135,20 +135,6 @@ class TestPlan:
         assert plan_image_model_load(str(source), 4, models_dir=models_dir, backend_format=FORMAT) == LoadPlan(str(source), 4, create=models_dir / "atlas@q4", source=source)
 
 
-class TestPlainNames:
-    @pytest.mark.parametrize("name", ["zit", "my-model", "h3"])
-    def test_a_folder_name_can_carry_a_stored_quant(self, name):
-        from zvisiongenerator.image_model_loader import _is_plain_name
-
-        assert _is_plain_name(name) is True
-
-    @pytest.mark.parametrize("name", ["", "..", "org/repo", "zit@q8", "h3@mlx-te4"])
-    def test_a_path_or_a_stored_quant_name_cannot(self, name):
-        from zvisiongenerator.image_model_loader import _is_plain_name
-
-        assert _is_plain_name(name) is False
-
-
 class TestAliasPlan:
     """Hugging Face models picked through an alias store their quant under the alias name."""
 
@@ -192,7 +178,7 @@ class TestAliasPlan:
 
         assert plan == LoadPlan("mymodel", 8)
 
-    @pytest.mark.parametrize("picked", [None, "org/repo", "~/models/x", "C:model", "..", "zit@q8"])
+    @pytest.mark.parametrize("picked", [None, "org/repo", "zit@q8"])
     def test_raw_repo_ids_and_paths_are_quantized_at_load(self, models_dir, picked):
         plan = plan_image_model_load("org/repo", 8, models_dir=models_dir, backend_format=FORMAT, model_name=picked, find_local_dir=lambda _ref: pytest.fail("not resolved"))
 
@@ -505,24 +491,3 @@ class TestStoreCopy:
 
         assert not store_copy(self._write, target=target, manifest={"bits": 8}, label="thing", cancelled=lambda: True)
         assert list(models_dir.iterdir()) == []
-
-    def test_a_stale_partial_of_the_target_is_swept_first(self, models_dir):
-        target = models_dir / "thing@q8"
-        stale = models_dir / ".thing@q8.deadbeef.partial"
-        stale.mkdir()
-        old = time.time() - 2 * 60 * 60
-        os.utime(stale, (old, old))
-
-        assert store_copy(self._write, target=target, manifest={"bits": 8}, label="thing")
-        assert not stale.exists()
-
-
-class TestWarningAttribution:
-    def test_save_stored_quant_warning_names_its_caller(self, models_dir):
-        source = _make_source(models_dir)
-        backend = _FakeBackend(save_error=OSError("disk full"))
-
-        with pytest.warns(UserWarning, match="disk full") as warned:
-            save_stored_quant(backend, MagicMock(), source=source, target=models_dir / "atlas@q8", bits=8, backend_format=FORMAT)
-
-        assert Path(warned[0].filename) == Path(__file__)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import time
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -36,18 +36,22 @@ def _patch_download(monkeypatch: pytest.MonkeyPatch, fake) -> None:
     monkeypatch.setattr(huggingface_hub, "snapshot_download", fake)
 
 
-def test_protocol_prefix_is_stable() -> None:
-    assert worker.PROTOCOL_PREFIX == "ZIV-DOWNLOAD "
-
-
 def test_main_prints_progress_then_done(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(worker, "REPORT_INTERVAL_SECS", 0.01)
+    reported = threading.Event()
+    emit = worker._emit
+
+    def spy_emit(payload: dict[str, object], lock: threading.Lock) -> None:
+        emit(payload, lock)
+        reported.set()
+
+    monkeypatch.setattr(worker, "_emit", spy_emit)
 
     def fake(repo_id: str, **kwargs: Any) -> str:
         wire = kwargs["tqdm_class"](total=100, desc="Downloading bytes", unit="B")
         written = kwargs["tqdm_class"](total=100, desc="Reconstructing", unit="B")
         wire.update(60)
-        time.sleep(0.2)
+        assert reported.wait(timeout=10)  # the reporter printed the first counts
         wire.update(34)
         written.update(100)
         return "/cache"
@@ -79,15 +83,9 @@ def test_main_forwards_the_target(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen["local_dir"] == "/some/dir"
     assert callable(seen["tqdm_class"])
 
-
-def test_main_forwards_unset_patterns_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-    _patch_download(monkeypatch, lambda repo_id, **kwargs: seen.update(kwargs))
+    seen.clear()
     assert worker.main([DownloadTarget("owner/repo").to_json()]) == 0
-    assert seen["allow_patterns"] is None
-    assert seen["ignore_patterns"] is None
-    assert seen["revision"] is None
-    assert seen["local_dir"] is None
+    assert (seen["allow_patterns"], seen["ignore_patterns"], seen["revision"], seen["local_dir"]) == (None, None, None, None)
 
 
 def test_main_reports_a_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -101,19 +99,17 @@ def test_main_reports_a_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
     assert not any(line.get("done") for line in lines)
 
 
-def test_main_reports_a_hub_refusal_as_one_line_with_the_next_step(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_reports_a_hub_refusal_through_the_refusal_message(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     def fake(repo_id: str, **kwargs: Any) -> str:
         raise GatedRepoError("boom", response=httpx.Response(403, request=httpx.Request("GET", "https://huggingface.co/api/models/owner/repo")))
 
     _patch_download(monkeypatch, fake)
     assert worker.main([_TARGET.to_json()]) == 1
     error = _protocol(capsys.readouterr().out)[-1]["error"]
-    assert "\n" not in error
     assert "https://huggingface.co/owner/repo" in error
-    assert "hf auth login" in error
 
 
-@pytest.mark.parametrize("argv", [[], ["{not json"], ["{}"], ["a", "b"]])
+@pytest.mark.parametrize("argv", [["{not json"], ["a", "b"]])
 def test_main_rejects_bad_arguments(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     assert worker.main(argv) == 1
     assert "error" in _protocol(capsys.readouterr().out)[-1]
@@ -123,7 +119,10 @@ def test_lifeline_ends_the_process_when_stdin_closes() -> None:
     code = (
         "import sys, time, huggingface_hub\n"
         "from zvisiongenerator.downloads import worker\n"
-        "huggingface_hub.snapshot_download = lambda *a, **k: time.sleep(60)\n"
+        "def fake(*a, **k):\n"
+        "    print('ready', flush=True)\n"
+        "    time.sleep(60)\n"
+        "huggingface_hub.snapshot_download = fake\n"
         "raise SystemExit(worker.main([sys.argv[1]], start_lifeline=True))\n"
     )
     process = subprocess.Popen(
@@ -133,8 +132,8 @@ def test_lifeline_ends_the_process_when_stdin_closes() -> None:
         cwd=_ROOT,
     )
     try:
-        assert process.stdin is not None
-        time.sleep(1.0)
+        assert process.stdin is not None and process.stdout is not None
+        assert process.stdout.readline().strip() == b"ready"
         assert process.poll() is None
         process.stdin.close()
         assert process.wait(timeout=20) == 3

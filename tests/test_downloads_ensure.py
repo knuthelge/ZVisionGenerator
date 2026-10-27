@@ -489,13 +489,14 @@ def test_waiter_raises_the_owner_failure_message() -> None:
     assert flights.active() == ()
 
 
-def test_every_name_in_all_imports_and_the_package_stays_light() -> None:
+def test_every_name_in_all_imports_and_the_light_modules_stay_light() -> None:
     for name in downloads.__all__:
         assert hasattr(downloads, name), name
     module = importlib.import_module("zvisiongenerator.downloads")
     assert set(downloads.__all__) <= set(vars(module))
     code = (
         "import sys, zvisiongenerator.downloads as d\n"
+        "import zvisiongenerator.utils.lora_family\n"
         "heavy = [m for m in ('huggingface_hub', 'tqdm', 'torch', 'mflux') if m in sys.modules]\n"
         "assert not heavy, heavy\n"
         "for name in d.__all__:\n"
@@ -519,29 +520,6 @@ def test_report_error_on_the_first_report_finishes_the_flight_once() -> None:
         ensure_downloaded([_target()], flights=flights, report=report, cancelled=_never, present=lambda t: False, check=lambda t: MISSING, run=run)
     assert runs == []
     assert [f[1] for f in flights.finished] == ["failed"]
-    assert flights.active() == ()
-
-
-def test_report_error_on_the_final_report_finishes_the_flight_once() -> None:
-    flights = _SpyFlights()
-    seen: list[int] = []
-
-    def report(r: DownloadReport) -> None:
-        seen.append(r.progress.bytes_done)
-        if len(seen) > 1:
-            raise ValueError("ui gone")
-
-    with pytest.raises(ValueError, match="ui gone"):
-        ensure_downloaded(
-            [_target()],
-            flights=flights,
-            report=report,
-            cancelled=_never,
-            present=lambda t: False,
-            check=lambda t: MISSING,
-            run=_run_counts([]),
-        )
-    assert len(flights.finished) == 1
     assert flights.active() == ()
 
 

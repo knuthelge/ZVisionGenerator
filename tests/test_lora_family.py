@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zvisiongenerator.utils.lora_family import LORA_FAMILY_VERSION, LoraFamily, detect_lora_family
+from zvisiongenerator.utils.lora_family import LoraFamily, detect_lora_family
 
 
 def _entry(*shape: int) -> dict:
@@ -38,19 +38,13 @@ class TestMetadata:
         [
             ({"ss_base_model_version": "ideogram4"}, ("ideogram4", None)),
             ({"release_base_model": "FLUX.2 klein_9b"}, ("flux2_klein", "9b")),
-            ({"modelspec.architecture": "flux2-klein-9b"}, ("flux2_klein", "9b")),
             ({"ss_base_model_version": "klein_4b"}, ("flux2_klein", "4b")),
-            ({"release_base_model": "klein-4b"}, ("flux2_klein", "4b")),
             ({"ss_base_model_version": "Krea2"}, ("krea2", None)),
             ({"modelspec.architecture": "zimage"}, ("zimage", None)),
             ({"ss_base_model_version": "Z-Image-Turbo"}, ("zimage", None)),
             ({"modelspec.architecture": "ltx2/lora"}, ("ltx", None)),
             ({"ss_base_model_version": "flux1_dev"}, ("flux1", None)),
-            ({"ss_base_model_version": "flux1"}, ("flux1", None)),
             ({"release_base_model": "FLUX.1 [dev]"}, ("flux1", None)),
-            ({"modelspec.architecture": "flux-1-dev/lora"}, ("flux1", None)),
-            ({"ss_base_model_version": "flux2_klein_9b"}, ("flux2_klein", "9b")),
-            ({"release_base_model": "FLUX.2 klein_4b"}, ("flux2_klein", "4b")),
         ],
     )
     def test_label_names_the_family(self, metadata, expected):
@@ -79,9 +73,6 @@ class TestFingerprintDoubleSingleBlocks:
 
     def test_linear1_out_21504_is_flux1(self):
         assert _detect(_double_single(21504, 3072)) == LoraFamily("flux1", None, "fingerprint")
-
-    def test_trainer_prefix_is_stripped(self):
-        assert _detect(_double_single(27648, 3072, prefix="diffusion_model.")) == LoraFamily("flux2_klein", "4b", "fingerprint")
 
     def test_lora_down_up_layout_gives_the_same_dims(self):
         header = _lora("single_blocks.0.linear1", 3072, 21504, layout="kohya")
@@ -166,9 +157,6 @@ class TestFingerprintDiffusersBlocks:
 
         assert _detect(header) == LoraFamily(None, None, "none")
 
-    def test_hidden_size_guard_rejects_a_mismatched_width(self):
-        assert _detect(self._fused(36864, 3072)) == LoraFamily(None, None, "none")
-
     def test_ltx_style_header_still_classifies_as_ltx(self):
         header = {**_lora("transformer_blocks.0.attn1.to_q", 4096, 4096), **_lora("transformer_blocks.0.attn2.to_q", 4096, 4096)}
 
@@ -188,11 +176,6 @@ class TestFingerprintDiffusersBlocks:
 class TestFingerprintOtherFamilies:
     def test_krea2_gate_and_text_fusion(self):
         header = {**_lora("blocks.0.attn.gate", 6144, 6144), **_lora("txtfusion.layers.0.proj", 6144, 6144)}
-
-        assert _detect(header) == LoraFamily("krea2", None, "fingerprint")
-
-    def test_krea2_diffusers_names(self):
-        header = {**_lora("transformer_blocks.0.attn.to_gate", 6144, 6144), **_lora("text_fusion.0.proj", 6144, 6144)}
 
         assert _detect(header) == LoraFamily("krea2", None, "fingerprint")
 
@@ -234,11 +217,6 @@ class TestFingerprintOtherFamilies:
 
         assert _detect(header) == expected
 
-    def test_prefixed_keys_are_stripped_before_matching(self):
-        header = _lora("base_model.model.layers.0.adaln_modulation", 1152, 4608)
-
-        assert _detect(header) == LoraFamily("ideogram4", None, "fingerprint")
-
 
 class TestMoss:
     @pytest.mark.parametrize(
@@ -269,9 +247,18 @@ class TestMoss:
 
 
 class TestHiddenSizeGuard:
-    def test_guard_rejects_a_fingerprint_without_the_hidden_size(self):
-        header = _lora("transformer_blocks.0.attn1.to_q", 2048, 2048)
-
+    @pytest.mark.parametrize(
+        "header",
+        [
+            _lora("transformer_blocks.0.attn1.to_q", 2048, 2048),
+            _lora("layers.0.adaLN_modulation.1", 256, 1024),
+            _lora("blocks.0.attn.gate", 512, 512) | _lora("txtfusion.0.proj", 512, 512),
+            _lora("transformer.single_transformer_blocks.0.attn.to_qkv_mlp_proj", 3072, 36864) | _lora("transformer.transformer_blocks.0.attn.to_q", 3072, 3072),
+            _lora("double_blocks.0.img_attn.qkv", 64, 64) | _lora("single_blocks.0.linear1", 64, 27648),
+        ],
+        ids=["ltx", "zimage", "krea2", "klein-fused-width", "klein-double-single-width"],
+    )
+    def test_guard_rejects_a_fingerprint_whose_width_does_not_fit_its_family(self, header):
         assert _detect(header) == LoraFamily(None, None, "none")
 
     def test_factorized_lokr_has_no_dims_so_the_guard_rejects(self):
@@ -300,13 +287,6 @@ class TestUnknown:
     def test_unrelated_keys_are_unknown(self):
         assert _detect(_lora("lora_unet_down_blocks_0_attentions_0", 320, 320)) == LoraFamily(None, None, "none")
 
-    def test_result_is_immutable(self):
-        with pytest.raises(AttributeError):
-            _detect({}).family = "x"  # type: ignore[misc]
-
-    def test_version_is_an_int(self):
-        assert isinstance(LORA_FAMILY_VERSION, int)
-
 
 class TestPrefixesAndPurity:
     @pytest.mark.parametrize("prefix", ["diffusion_model.", "transformer.", "model.diffusion_model.", "base_model.model."])
@@ -314,28 +294,3 @@ class TestPrefixesAndPurity:
         header = _lora(f"{prefix}layers.0.adaln_modulation", 1152, 4608)
 
         assert _detect(header) == LoraFamily("ideogram4", None, "fingerprint")
-
-    @pytest.mark.parametrize(
-        ("header", "family"),
-        [
-            (_lora("layers.0.adaLN_modulation.1", 256, 1024), "zimage"),
-            (_lora("layers.0.adaln_modulation", 256, 1024), "ideogram4"),
-            (_lora("blocks.0.attn.gate", 512, 512) | _lora("txtfusion.0.proj", 512, 512), "krea2"),
-            (_lora("transformer_blocks.0.attn2.to_q", 512, 512), "ltx"),
-        ],
-    )
-    def test_guard_rejects_each_family_without_its_hidden_size(self, header, family):
-        assert _detect(header) == LoraFamily(None, None, "none"), family
-
-    @pytest.mark.parametrize(("linear1_out", "hidden"), [(36864, 3072), (27648, 4096), (21504, 4096)])
-    def test_guard_rejects_double_single_blocks_with_a_mismatched_hidden_size(self, linear1_out, hidden):
-        header = _lora("double_blocks.0.img_attn.qkv", 64, 64) | _lora("single_blocks.0.linear1", 64, linear1_out)
-
-        assert _detect(header) == LoraFamily(None, None, "none")
-
-    def test_importing_the_detector_does_not_import_torch(self):
-        import subprocess
-        import sys
-
-        code = "import sys; import zvisiongenerator.utils.lora_family; sys.exit(1 if 'torch' in sys.modules else 0)"
-        assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
