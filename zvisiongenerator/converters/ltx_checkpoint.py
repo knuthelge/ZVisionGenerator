@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CHECKPOINT_PREFIX",
+    "CONNECTOR_PREFIXES",
     "LtxCheckpoint",
     "check_lora",
     "checkpoint_config",
@@ -50,7 +51,9 @@ __all__ = [
 CHECKPOINT_PREFIX = "model.diffusion_model."
 _EXPORT_PREFIX = "diffusion_model."
 _PROJECTION_PREFIX = "text_embedding_projection."
-_CONNECTOR_PREFIXES = (f"{CHECKPOINT_PREFIX}video_embeddings_connector.", f"{CHECKPOINT_PREFIX}audio_embeddings_connector.", _PROJECTION_PREFIX)
+# The text connectors inside the transformer's prefix; diffusers' single-file conversion drops them from the transformer.
+CONNECTOR_PREFIXES = (f"{CHECKPOINT_PREFIX}video_embeddings_connector.", f"{CHECKPOINT_PREFIX}audio_embeddings_connector.")
+_CONNECTOR_PREFIXES = (*CONNECTOR_PREFIXES, _PROJECTION_PREFIX)
 # The native transformer's top-level modules: an unprefixed export is recognised by them.
 _NATIVE_MODULES = frozenset(
     {

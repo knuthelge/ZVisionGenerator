@@ -142,6 +142,36 @@ class TestElementCounts:
 
         assert weights.count_transformer_elements(shapes) == (12, 7 + 24 + 1 + 12)
 
+    def test_a_checkpoint_counts_as_it_does_under_its_diffusers_names(self, tmp_path):
+        # One name per top-level group of the stock LTX-2.3 checkpoint, the renamed in-block names, and other components.
+        shapes = {
+            **{_PREFIX + f"{group}.linear.weight": [8, 4] for group in ("adaln_single", "audio_adaln_single", "prompt_adaln_single", "audio_prompt_adaln_single")},
+            **{_PREFIX + f"av_ca_{kind}_adaln_single.linear.weight": [6, 4] for kind in ("video_scale_shift", "a2v_gate", "audio_scale_shift", "v2a_gate")},
+            _PREFIX + "patchify_proj.weight": [4, 2],
+            _PREFIX + "audio_patchify_proj.weight": [4, 3],
+            _PREFIX + "proj_out.weight": [2, 4],
+            _PREFIX + "audio_proj_out.bias": [3],
+            _PREFIX + "scale_shift_table": [6, 4],
+            _PREFIX + "audio_scale_shift_table": [6, 3],
+            _PREFIX + "video_embeddings_connector.learnable_registers": [16, 4],
+            _PREFIX + "audio_embeddings_connector.transformer_1d_blocks.0.attn1.to_q.weight": [4, 4],
+            _PREFIX + "transformer_blocks.0.attn1.to_q.weight": [4, 4],
+            _PREFIX + "transformer_blocks.0.attn1.q_norm.weight": [4],
+            _PREFIX + "transformer_blocks.0.attn1.k_norm.weight": [4],
+            _PREFIX + "transformer_blocks.0.scale_shift_table": [6, 4],
+            _PREFIX + "transformer_blocks.0.scale_shift_table_a2v_ca_video": [5, 4],
+            _PREFIX + "transformer_blocks.0.scale_shift_table_a2v_ca_audio": [5, 3],
+            "vae.decoder.conv_in.conv.weight": [3, 3],
+            "text_embedding_projection.video_aggregate_embed.weight": [4, 4],
+        }
+        header = json.dumps({name: {"dtype": "BF16", "shape": shape, "data_offsets": [0, 0]} for name, shape in shapes.items()}).encode()
+        checkpoint = tmp_path / "ltx.safetensors"
+        checkpoint.write_bytes(len(header).to_bytes(8, "little") + header)
+
+        renamed = weights.count_transformer_elements((name, shapes[original]) for original, name in weights.transformer_name_map(shapes).items())
+
+        assert weights.transformer_elements(checkpoint) == renamed
+
 
 class TestEnsurePrepared:
     def _source(self, tmp_path, content=b"weights"):
