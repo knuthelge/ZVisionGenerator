@@ -7,7 +7,7 @@ import warnings
 import pytest
 
 from zvisiongenerator.core.video_family import ANY_FRAMES, FrameRule
-from zvisiongenerator.utils.alignment import align_frames, aligned_video_dims
+from zvisiongenerator.utils.alignment import align_frames, align_resolution, aligned_video_dims
 
 _LTX_RULE = FrameRule(8, 1, "nearest")
 _H3_RULE = FrameRule(17, 5, "up")
@@ -99,24 +99,6 @@ def test_the_nearest_rule_rounds_halves_to_even():
     assert (align_frames(13, _LTX_RULE), align_frames(21, _LTX_RULE)) == (17, 17)
 
 
-def test_a_frame_correction_warns_with_the_pinned_text_attributed_to_aligned_video_dims():
-    with warnings.catch_warnings(record=True) as seen:
-        warnings.simplefilter("always")
-        assert aligned_video_dims(704, 448, 50, upscale=False, resolution_alignment=32, frame_rule=_LTX_RULE, family="LTX") == (704, 448, 49)
-
-    assert [str(item.message) for item in seen] == ["Video model requires frames = 8k+1. Adjusted 50 -> 49"]
-    assert seen[0].filename.endswith("utils/alignment.py")
-    assert seen[0].lineno == _line_of_aligned_video_dims_call("_align_frames_warning(")
-
-
-def test_the_warning_names_the_rule_it_corrected_to():
-    with warnings.catch_warnings(record=True) as seen:
-        warnings.simplefilter("always")
-        assert aligned_video_dims(704, 448, 121, upscale=False, resolution_alignment=32, frame_rule=_H3_RULE, family="H3") == (704, 448, 124)
-
-    assert [str(item.message) for item in seen] == ["Video model requires frames = 17k+5. Adjusted 121 -> 124"]
-
-
 def test_a_valid_clip_is_unchanged_and_silent():
     with warnings.catch_warnings(record=True) as seen:
         warnings.simplefilter("always")
@@ -125,8 +107,33 @@ def test_a_valid_clip_is_unchanged_and_silent():
     assert seen == []
 
 
-def _line_of_aligned_video_dims_call(text: str) -> int:
-    import inspect
+def test_a_frame_correction_warns_and_returns_the_corrected_count():
+    with pytest.warns(UserWarning) as seen:
+        assert aligned_video_dims(704, 448, 121, upscale=False, resolution_alignment=32, frame_rule=_H3_RULE, family="H3") == (704, 448, 124)
 
-    source, start = inspect.getsourcelines(aligned_video_dims)
-    return start + next(index for index, line in enumerate(source) if text in line)
+    assert len(seen) == 1
+    assert seen[0].filename.endswith("alignment.py")  # attributed to the helper, not to the warnings module
+
+
+def test_the_models_resolution_alignment_rounds_both_sides_and_the_frames():
+    with pytest.warns(UserWarning):
+        assert aligned_video_dims(720, 450, 52, upscale=False, resolution_alignment=32, frame_rule=_LTX_RULE, family="LTX") == (736, 448, 49)
+
+
+def test_an_upscaled_clip_aligns_the_size_to_64():
+    with pytest.warns(UserWarning):
+        assert aligned_video_dims(720, 450, 52, upscale=True, resolution_alignment=32, frame_rule=_LTX_RULE, family="LTX") == (704, 448, 49)
+
+
+def test_a_size_on_the_grid_is_unchanged_and_silent():
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        assert align_resolution(704, 480, 32, "Test") == (704, 480)
+
+    assert seen == []
+
+
+@pytest.mark.parametrize(("size", "expected"), [((700, 475), (704, 480)), ((710, 490), (704, 480)), ((100, 100), (96, 96))])
+def test_a_size_off_the_grid_rounds_to_the_nearest_multiple(size, expected):
+    with pytest.warns(UserWarning):
+        assert align_resolution(*size, 32, "Test") == expected

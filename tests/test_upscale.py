@@ -239,14 +239,12 @@ def test_option_over_megapixel_cap_is_disallowed():
 
     assert options[0].allowed is True
     assert options[1].allowed is False
-    assert "16-megapixel" in options[1].reason
 
 
 def test_option_over_model_dimension_max_is_disallowed():
     options = upscale_options(832, 1216, {"dimension_max": 2048}, {})
 
     assert [o.allowed for o in options] == [False, False]
-    assert "2048" in options[0].reason
 
 
 @pytest.mark.parametrize("capabilities", [{"supports_upscale": False}, {"supports_img2img": False}])

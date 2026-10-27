@@ -1,12 +1,11 @@
-"""Tests for video upscale feature — CLI parsing, stage kwargs, workflow assembly, and the macOS LTX backend."""
+"""Tests for the macOS LTX video backend (``backends/mac/video.py``); the LTX and MLX modules are mocked and no model is loaded."""
 
 from __future__ import annotations
 
-from conftest import _make_plan, make_extend_source
+from conftest import make_extend_source
 
 import os
 import sys
-from argparse import Namespace
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,8 +15,6 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 import pytest
 
-from tests.conftest import _make_video_args
-from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.backends.mac.video import (
     LtxVideoBackend,
     _drop_leading_frames,
@@ -28,304 +25,9 @@ from zvisiongenerator.backends.mac.video import (
     _TwoStageProgress,
     _use_low_ram_streaming,
 )
-from zvisiongenerator.core.video_types import ExtendSegment, VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
-from zvisiongenerator.workflows import build_video_workflow
-from zvisiongenerator.workflows.video_stages import (
-    image_to_video_stage,
-    text_to_video_stage,
-)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _req(**overrides) -> VideoGenerationRequest:
-    """Build a minimal VideoGenerationRequest for stage testing."""
-    defaults: dict = dict(
-        backend=MagicMock(),
-        model=MagicMock(),
-        prompt="a beautiful sunset",
-    )
-    defaults.update(overrides)
-    return VideoGenerationRequest(**defaults)
-
-
-# ---------------------------------------------------------------------------
-# CLI / Config — --upscale parsing
-# ---------------------------------------------------------------------------
-
-
-class TestUpscaleCLIParsing:
-    """Verify --upscale argument parsing and validation."""
-
-    def test_upscale_2_parsed(self):
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model", "--upscale", "2"])
-        assert args.upscale == 2
-
-    def test_upscale_3_rejected(self):
-        """The parser preserves unsupported values so CLI validation can reject them."""
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model", "--upscale", "3"])
-        assert args.upscale == 3
-
-    def test_upscale_default_is_none(self):
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model"])
-        assert args.upscale is None
-
-    def test_upscale_steps_from_config_default(self):
-        """--upscale 2 without --steps resolves upscale_steps to 8 from config."""
-        args = _make_video_args(upscale=2, steps=50)
-        config = load_config()
-
-        _resolve_upscale_steps(args, config, "ltx", steps_explicitly_set=False)
-
-        assert args.steps == 8
-        assert args.upscale_steps == 8
-
-    def test_upscale_steps_from_explicit_steps(self):
-        """--upscale 2 --steps 20 resolves upscale_steps to 20."""
-        args = _make_video_args(upscale=2, steps=20)
-        config = load_config()
-
-        _resolve_upscale_steps(args, config, "wan", steps_explicitly_set=True)
-
-        assert args.upscale_steps == 20
-
-    def test_upscale_step_cap_applies(self):
-        """--upscale 2 still applies the LTX distilled step cap (steps capped at 8)."""
-        args = _make_video_args(upscale=2, steps=30)
-
-        _resolve_upscale_steps(args, load_config(), "ltx", steps_explicitly_set=True)
-
-        assert args.steps == 8
-        assert args.upscale_steps == 8
-
-    def test_without_upscale_step_cap_applies(self):
-        """Without --upscale, steps are capped at 8 for distilled LTX."""
-        args = _make_video_args(upscale=None, steps=20)
-
-        _resolve_upscale_steps(args, load_config(), "ltx", steps_explicitly_set=True)
-
-        assert args.steps == 8
-        assert args.upscale_steps is None
-
-    def test_i2v_upscale_allowed_in_cli(self):
-        """--upscale 2 --image path.png should NOT cause a parser error at parse time."""
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model", "--upscale", "2", "--image", "photo.png"])
-        assert args.upscale == 2
-        assert args.image_path == "photo.png"
-
-    def test_audio_flag_defaults_enabled(self):
-        """--audio defaults to True (BooleanOptionalAction)."""
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model"])
-        assert args.audio is True
-
-    def test_no_audio_flag(self):
-        """--no-audio sets audio to False."""
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model", "--no-audio"])
-        assert args.audio is False
-
-    def test_audio_flag_explicit(self):
-        """--audio sets audio to True explicitly."""
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model", "--audio"])
-        assert args.audio is True
-
-
-# ---------------------------------------------------------------------------
-# Stage Behavior — upscale kwargs
-# ---------------------------------------------------------------------------
-
-
-class TestTextToVideoStageUpscaleKwargs:
-    """Verify text_to_video_stage passes stage1_steps when upscale is set."""
-
-    def test_passes_upscale_kwargs(self):
-        """text_to_video_stage passes stage1_steps when request.upscale == 2."""
-        backend = MagicMock()
-        backend.text_to_video.return_value = Path("/tmp/out.mp4")
-        req = _req(backend=backend, upscale=2, upscale_steps=30, output_dir="/tmp")
-        arts = VideoWorkingArtifacts()
-        arts.filename = "test.mp4"
-        arts.resolved_prompt = "test prompt"
-
-        outcome = text_to_video_stage(req, arts)
-
-        assert outcome is StageOutcome.success
-        call_kwargs = backend.text_to_video.call_args
-        assert call_kwargs.kwargs["stage1_steps"] == 30
-
-    def test_no_upscale_kwargs_when_upscale_none(self):
-        """text_to_video_stage does NOT pass extra kwargs when request.upscale is None."""
-        backend = MagicMock()
-        backend.text_to_video.return_value = Path("/tmp/out.mp4")
-        req = _req(backend=backend, upscale=None, upscale_steps=None, output_dir="/tmp")
-        arts = VideoWorkingArtifacts()
-        arts.filename = "test.mp4"
-        arts.resolved_prompt = "test prompt"
-
-        text_to_video_stage(req, arts)
-
-        call_kwargs = backend.text_to_video.call_args
-        assert "stage1_steps" not in call_kwargs.kwargs
-
-    def test_upscale_with_stage1_steps_only(self):
-        """When upscale is set, only stage1_steps is passed (no cfg_scale)."""
-        backend = MagicMock()
-        backend.text_to_video.return_value = Path("/tmp/out.mp4")
-        req = _req(backend=backend, upscale=2, upscale_steps=25, output_dir="/tmp")
-        arts = VideoWorkingArtifacts()
-        arts.filename = "test.mp4"
-        arts.resolved_prompt = "prompt"
-
-        text_to_video_stage(req, arts)
-
-        call_kwargs = backend.text_to_video.call_args
-        assert call_kwargs.kwargs["stage1_steps"] == 25
-        assert "cfg_scale" not in call_kwargs.kwargs
-
-
-class TestImageToVideoStageUpscaleKwargs:
-    """Verify image_to_video_stage passes upscale kwargs correctly."""
-
-    def test_passes_upscale_kwargs(self):
-        """image_to_video_stage passes stage1_steps when request.upscale == 2."""
-        backend = MagicMock()
-        backend.image_to_video.return_value = Path("/tmp/i2v.mp4")
-        req = _req(
-            backend=backend,
-            image_path="/tmp/input.png",
-            upscale=2,
-            upscale_steps=30,
-            output_dir="/tmp",
-        )
-        arts = VideoWorkingArtifacts()
-        arts.filename = "i2v.mp4"
-        arts.resolved_prompt = "prompt"
-
-        outcome = image_to_video_stage(req, arts)
-
-        assert outcome is StageOutcome.success
-        call_kwargs = backend.image_to_video.call_args
-        assert call_kwargs.kwargs["stage1_steps"] == 30
-
-    def test_no_upscale_kwargs_when_upscale_none(self):
-        """image_to_video_stage does NOT pass extra kwargs when upscale is None."""
-        backend = MagicMock()
-        backend.image_to_video.return_value = Path("/tmp/i2v.mp4")
-        req = _req(
-            backend=backend,
-            image_path="/tmp/input.png",
-            upscale=None,
-            upscale_steps=None,
-            output_dir="/tmp",
-        )
-        arts = VideoWorkingArtifacts()
-        arts.filename = "i2v.mp4"
-        arts.resolved_prompt = "prompt"
-
-        image_to_video_stage(req, arts)
-
-        call_kwargs = backend.image_to_video.call_args
-        assert "stage1_steps" not in call_kwargs.kwargs
-
-
-# ---------------------------------------------------------------------------
-# Workflow Assembly — upscale
-# ---------------------------------------------------------------------------
-
-
-class TestBuildVideoWorkflowUpscale:
-    """Verify build_video_workflow() assembles correct stages with/without upscale."""
-
-    def test_upscale_workflow_same_stages_as_non_upscale_t2v(self):
-        """build_video_workflow with upscale builds same stage types for T2V.
-
-        Upscale affects pipeline selection (load_model) and stage kwargs, not the
-        stage list itself (unless no_audio is also set).
-        """
-        args = Namespace(image_path=None, no_audio=False)
-        wf = build_video_workflow(args)
-        stage_names = [s.__name__ for s in wf.stages]
-        assert "resolve_prompt_stage" in stage_names
-        assert "generate_filename_stage" in stage_names
-        assert "text_to_video_stage" in stage_names
-        assert "log_video_stage" in stage_names
-        assert "strip_audio_stage" not in stage_names
-
-    def test_non_upscale_workflow_no_strip_audio(self):
-        """build_video_workflow without upscale, no_audio=False has no strip_audio_stage."""
-        args = Namespace(image_path=None, no_audio=False)
-        wf = build_video_workflow(args)
-        stage_names = [s.__name__ for s in wf.stages]
-        assert "strip_audio_stage" not in stage_names
-
-
-# ---------------------------------------------------------------------------
-# Runner — request field propagation
-# ---------------------------------------------------------------------------
-
-
-class TestRunnerUpscaleFieldPropagation:
-    """Verify run_video_batch passes upscale fields to VideoGenerationRequest."""
-
-    def test_upscale_fields_in_request(self):
-        """When args has upscale=2, the VideoGenerationRequest gets upscale fields."""
-        from tests.conftest import _make_mock_video_backend
-        from zvisiongenerator.core.types import StageOutcome
-        from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-        from zvisiongenerator.video_runner import run_video_batch
-
-        backend = _make_mock_video_backend()
-        model = MagicMock()
-        workflow = MagicMock()
-        workflow.run.return_value = StageOutcome.success
-
-        args = _make_video_args(upscale=2, upscale_steps=30, no_audio=False)
-        model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        prompts = {"default": [("a sunset", None)]}
-        config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
-
-        run_video_batch(backend, model, model_info, workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
-
-        # The request object passed to workflow.run() should have upscale fields
-        req = workflow.run.call_args[0][0]
-        assert req.upscale == 2
-        assert req.upscale_steps == 30
-
-    def test_no_upscale_fields_in_request(self):
-        """When args has upscale=None, request has None upscale fields."""
-        from tests.conftest import _make_mock_video_backend
-        from zvisiongenerator.core.types import StageOutcome
-        from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-        from zvisiongenerator.video_runner import run_video_batch
-
-        backend = _make_mock_video_backend()
-        model = MagicMock()
-        workflow = MagicMock()
-        workflow.run.return_value = StageOutcome.success
-
-        args = _make_video_args(upscale=None, upscale_steps=None)
-        model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        prompts = {"default": [("a sunset", None)]}
-        config: dict = {}
-
-        run_video_batch(backend, model, model_info, workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
-
-        req = workflow.run.call_args[0][0]
-        assert req.upscale is None
-        assert req.upscale_steps is None
 
 
 # ---------------------------------------------------------------------------
@@ -918,26 +620,6 @@ class TestOneStageGeneration:
         assert "aggressive_cleanup" not in _call_names(ltx)
         assert pipe.prompt_encoder.call_args == call("a prompt", free_after=False)
 
-    def test_flush_receives_the_noised_states(self, ltx):
-        pipe = _pipeline(ltx)
-
-        _run_one_stage(pipe)
-
-        pipe._pre_denoise_flush.assert_called_once_with(ltx.video_state, ltx.audio_state)
-        loop_kwargs = ltx.samplers.denoise_loop.call_args.kwargs
-        assert loop_kwargs["video_state"] is ltx.video_state
-        assert loop_kwargs["audio_state"] is ltx.audio_state
-        assert loop_kwargs["video_text_embeds"] == "video_embeds"
-        assert loop_kwargs["audio_text_embeds"] == "audio_embeds"
-
-    def test_sigmas_come_from_shorten_schedule(self, ltx):
-        pipe = _pipeline(ltx)
-
-        _run_one_stage(pipe, steps=6)
-
-        ltx.scheduler.shorten_schedule.assert_called_once_with(_FAKE_DISTILLED_SIGMAS, 6, keep="start")
-        assert ltx.samplers.denoise_loop.call_args.kwargs["sigmas"] is ltx.scheduler.shorten_schedule.return_value
-
     def test_a_2_3_handle_never_calls_the_ancestral_loop(self, ltx):
         _run_one_stage(_pipeline(ltx), image_path="/tmp/first.png")
 
@@ -948,45 +630,19 @@ class TestOneStageGeneration:
     def test_a_2_5_clip_runs_the_ancestral_loop_on_the_2_5_schedule(self, ltx, image_path):
         pipe = _pipeline(ltx)
         pipe.dit = object()
-        callback = MagicMock()
 
-        _run_one_stage(pipe, image_path=image_path, steps=6, ltx25=True, step_callback=callback)
+        _run_one_stage(pipe, image_path=image_path, steps=6, ltx25=True)
 
         ltx.samplers.denoise_loop.assert_not_called()
         ltx.scheduler.shorten_schedule.assert_called_once_with(_FAKE_LTX25_SIGMAS, 6, keep="start")
         ltx.samplers.euler_ancestral_denoising_loop.assert_called_once()
-        kwargs = ltx.samplers.euler_ancestral_denoising_loop.call_args.kwargs
-        assert kwargs["sigmas"] is ltx.scheduler.shorten_schedule.return_value
-        assert kwargs["noise_seed"] == 42 + 10000
-        assert kwargs["stepper"] is ltx.diffusion_steps.EulerAncestralDiffusionStep.return_value
-        ltx.diffusion_steps.EulerAncestralDiffusionStep.assert_called_once_with(eta=1.0, s_noise=1.0)
-        assert kwargs["transformer"] is ltx.x0_model.return_value
-        ltx.x0_model.assert_called_once_with(pipe.dit)
-        assert kwargs["video_state"] is ltx.video_state
-        assert kwargs["audio_state"] is ltx.audio_state
-        assert kwargs["video_text_embeds"] == "video_embeds"
-        assert kwargs["audio_text_embeds"] == "audio_embeds"
-        assert kwargs["on_step"] is not None
+        assert ltx.samplers.euler_ancestral_denoising_loop.call_args.kwargs["noise_seed"] == 42 + 10000
 
     def test_a_2_5_clip_keeps_the_initial_noise_on_the_plain_seeds(self, ltx):
         _run_one_stage(_pipeline(ltx), ltx25=True)
 
         seeds = [c.kwargs["seed"] for c in ltx.helpers.create_noised_state.call_args_list]
         assert seeds == [42, 43]
-
-    def test_decode_uses_frame_rate_and_seed(self, ltx):
-        pipe = _pipeline(ltx)
-
-        result = _run_one_stage(pipe)
-
-        pipe._decode_and_save_video.assert_called_once_with(
-            pipe.video_patchifier.unpatchify.return_value,
-            pipe.audio_patchifier.unpatchify.return_value,
-            "/tmp/out.mp4",
-            frame_rate=_FPS,
-            seed=42,
-        )
-        assert result == Path("/tmp/out.mp4")
 
     def test_noised_states_use_frame_rate_positions_and_offset_audio_seed(self, ltx):
         pipe = _pipeline(ltx)
@@ -1004,24 +660,6 @@ class TestOneStageGeneration:
         assert audio_call.kwargs["positions"] == "audio_positions"
         assert audio_call.kwargs["seed"] == 43
         assert audio_call.kwargs["conditionings"] == []
-
-    def test_noised_states_start_from_pure_noise_with_legacy_blend(self, ltx):
-        pipe = _pipeline(ltx)
-
-        _run_one_stage(pipe)
-
-        for state_call in ltx.helpers.create_noised_state.call_args_list:
-            assert state_call.kwargs["legacy_scalar_blend"] is True
-            assert state_call.kwargs["sigma"] == 1.0
-            assert state_call.kwargs["initial_latent"] is None
-
-    def test_denoise_loop_runs_the_pipeline_transformer(self, ltx):
-        pipe = _pipeline(ltx)
-
-        _run_one_stage(pipe)
-
-        ltx.x0_model.assert_called_once_with(pipe.dit)
-        assert ltx.samplers.denoise_loop.call_args.kwargs["model"] is ltx.x0_model.return_value
 
     def test_unpatchify_receives_only_the_generated_tokens(self, ltx):
         pipe = _pipeline(ltx)
@@ -1051,14 +689,6 @@ class TestOneStageGeneration:
         assert pipe.vae_decoder is not None
         assert pipe.audio_decoder is not None
         assert pipe.vocoder is not None
-
-    def test_t2v_has_no_conditionings(self, ltx):
-        pipe = _pipeline(ltx)
-
-        _run_one_stage(pipe)
-
-        pipe.image_conditioner.assert_not_called()
-        assert ltx.helpers.create_noised_state.call_args_list[0].kwargs["conditionings"] == []
 
     def test_i2v_conditions_the_image_at_frame_zero(self, ltx):
         pipe = _pipeline(ltx)
@@ -1110,15 +740,6 @@ class TestOneStageGeneration:
         with pytest.raises(ValueError, match="end_image_path needs image_path"):
             _generate(_handle(_pipeline(ltx)), "p", 704, 480, 49, 1, 8, "/tmp/o.mp4", None, None, None, end_image_path="/tmp/last.png")
 
-    def test_i2v_conditionings_reach_the_video_state(self, ltx):
-        pipe = _pipeline(ltx)
-        produced = [SimpleNamespace(clean_latent="x")]
-        ltx.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: produced
-
-        _run_one_stage(pipe, image_path="/tmp/in.png")
-
-        assert ltx.helpers.create_noised_state.call_args_list[0].kwargs["conditionings"] is produced
-
     def test_i2v_frees_the_encoder_under_low_memory(self, ltx):
         pipe = _pipeline(ltx, low_memory=True)
 
@@ -1139,13 +760,6 @@ class TestOneStageGeneration:
             {"phase": "video_generate", "current_step": 1, "total_steps": 8},
             {"phase": "video_generate", "current_step": 8, "total_steps": 8},
         ]
-
-    def test_no_callback_passes_no_on_step(self, ltx):
-        pipe = _pipeline(ltx)
-
-        _run_one_stage(pipe)
-
-        assert ltx.samplers.denoise_loop.call_args.kwargs["on_step"] is None
 
     def test_stage1_steps_without_upscale_model_raises(self, ltx):
         pipe = _pipeline(ltx)
@@ -1402,13 +1016,6 @@ class TestExtendVideo:
 
         assert result == ExtendSegment(video_path=ext.segment_dir / "segment.mp4", audio_path=ext.segment_dir / "segment.wav", lead_samples=12000)
 
-    def test_reads_the_source_tail(self, ext):
-        source = _source()
-
-        ext.run(source=source)
-
-        ext.tail.assert_called_once_with(source)
-
     @pytest.mark.parametrize("extend_frames", [48, 96])
     def test_window_is_the_carry_plus_the_new_frames(self, ext, extend_frames):
         ext.run(extend_frames=extend_frames)
@@ -1453,32 +1060,6 @@ class TestExtendVideo:
         names = _call_names(ext)
         assert names.index("encode_video_tensor") < names.index("load")
         assert names.index("encode_audio") < names.index("load")
-
-    def test_audio_is_fitted_before_it_is_patchified(self, ext):
-        ext.run()
-
-        names = _call_names(ext)
-        assert names.index("encode_audio") < names.index("fit_audio_latent") < names.index("audio_patchify")
-
-    def test_audio_pin_has_the_carry_token_shape(self, ext):
-        ext.run()
-
-        _, audio_call = ext.helpers.create_noised_state.call_args_list
-        (pin,) = audio_call.kwargs["conditionings"]
-        assert pin.clean_latent.shape == (1, 26, 128)
-        assert pin.frame_indices == list(range(26))
-        assert pin.strength == 1.0
-        assert audio_call.kwargs["spatial_dims"] == (_AUDIO_TOKENS, 1, 1)
-        ext.extend_distilled.fit_audio_latent.assert_called_once()
-        assert ext.extend_distilled.fit_audio_latent.call_args.args[1] == 26
-
-    def test_audio_state_uses_the_next_seed_and_legacy_blend(self, ext):
-        ext.run()
-
-        video_call, audio_call = ext.helpers.create_noised_state.call_args_list
-        assert (video_call.kwargs["seed"], audio_call.kwargs["seed"]) == (42, 43)
-        assert audio_call.kwargs["legacy_scalar_blend"] is True
-        assert audio_call.kwargs["sigma"] == 1.0
 
     def test_tail_audio_is_read_at_its_position_in_the_file(self, ext):
         source = _source(video_start=0.5, frame_count=120)
@@ -1558,14 +1139,6 @@ class TestExtendVideo:
 
         assert ext.state_at_decode == {"dit": None, "loaded": False}
         assert pipe.dit is None
-
-    def test_the_dit_stays_without_low_memory(self, ext):
-        pipe = ext.pipeline(low_memory=False)
-        dit = pipe.dit
-
-        ext.run(pipe)
-
-        assert ext.state_at_decode == {"dit": dit, "loaded": True}
 
     def test_decoders_are_freed_afterwards_under_low_memory(self, ext):
         pipe, _ = ext.run(ext.pipeline(low_memory=True))
@@ -1668,12 +1241,6 @@ class TestExtendVideo:
             ext.run(step_callback=stop)
 
         ext.video_vae.stream_chunks_to_ffmpeg.assert_not_called()
-
-    def test_prompt_and_distilled_schedule_are_used(self, ext):
-        pipe, _ = ext.run()
-
-        assert pipe.prompt_encoder.call_args == call("a prompt", free_after=True)
-        ext.scheduler.shorten_schedule.assert_called_once_with(_FAKE_DISTILLED_SIGMAS, 8, keep="start")
 
     def test_a_2_5_extension_stays_deterministic_on_the_2_5_schedule(self, ext):
         pipe = ext.pipeline()

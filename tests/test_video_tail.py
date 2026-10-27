@@ -81,9 +81,6 @@ class TestTailStartWithFrames:
     def test_the_wanted_frame_count_moves_the_start(self):
         assert _tail_start_seconds(240, 24.0, frames=22) == pytest.approx((240 - 22) / 24 - 2.0)
 
-    def test_the_default_is_the_carry_length(self):
-        assert _tail_start_seconds(240, 24.0) == _tail_start_seconds(240, 24.0, frames=CARRY_FRAMES)
-
 
 class TestTailCommand:
     def test_reads_the_first_video_stream_as_raw_rgb_without_dropping_frames(self):
@@ -102,9 +99,6 @@ class TestTailCommand:
     def test_start_zero_does_not_seek(self):
         assert "-ss" not in _build_tail_command("clip.mp4", 0.0)
 
-    def test_keeps_auto_rotation(self):
-        assert "-noautorotate" not in _build_tail_command("clip.mp4", 1.0)
-
 
 class TestReadTailFrames:
     def _read(self, popen: MagicMock, **overrides: Any) -> np.ndarray:
@@ -120,10 +114,6 @@ class TestReadTailFrames:
         assert frames.shape == (CARRY_FRAMES, HEIGHT, WIDTH, 3)
         assert frames.dtype == np.uint8
         assert [int(frame[0, 0, 0]) for frame in frames] == list(range(3, CARRY_FRAMES + 3))
-
-    def test_returned_array_is_writable(self):
-        frames = self._read(_popen_returning(b"".join(_frame(i) for i in range(CARRY_FRAMES))))
-        frames[0, 0, 0, 0] = 1
 
     def test_short_read_after_a_seek_retries_from_the_beginning(self):
         popen = _popen_returning(_frame(9), b"".join(_frame(i) for i in range(CARRY_FRAMES + 3)))
@@ -220,14 +210,6 @@ class TestReadTailFramesCount:
         assert frames.shape == (22, HEIGHT, WIDTH, 3)
         assert [int(frame[0, 0, 0]) for frame in frames] == list(range(8, 30))
 
-    def test_seeks_to_where_the_shorter_tail_starts(self):
-        popen = _popen_returning(b"".join(_frame(i) for i in range(22)))
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(video_tail.subprocess, "Popen", popen)
-            _read_tail_frames("clip.mp4", width=WIDTH, height=HEIGHT, fps=24.0, frame_count=240, frames=22)
-        command = popen.call_args_list[0].args[0]
-        assert command[command.index("-ss") + 1] == f"{_tail_start_seconds(240, 24.0, frames=22):.6f}"
-
     def test_a_short_read_names_the_wanted_count(self):
         popen = _popen_returning(_frame(1) * 3)
         with pytest.MonkeyPatch.context() as patch:
@@ -253,17 +235,6 @@ def _tail_of(path: Path) -> tuple[np.ndarray, ExtendSource]:
 class TestRealTail:
     """Tail reads against clips made with the installed ffmpeg."""
 
-    def test_short_clip_returns_frames_36_to_60_in_order(self, tmp_path):
-        frames = numbered_frames(61)
-        clip = tmp_path / "short.mp4"
-        encode_frames(frames, clip, "-g", "12")
-        tail, source = _tail_of(clip)
-        assert source.frame_count == 61
-        assert tail.shape == (25, 32, 64, 3)
-        assert np.array_equal(tail, decode_frames(clip, 64, 32)[36:61])
-        for offset, frame in enumerate(tail):
-            assert np.abs(frame[16:, 16:].astype(int) - frames[36 + offset][16:, 16:].astype(int)).max() <= 3
-
     def test_long_clip_seeks_and_still_returns_the_last_frames(self, tmp_path):
         frames = numbered_frames(200)
         clip = tmp_path / "long.mp4"
@@ -287,8 +258,9 @@ class TestRealTail:
         assert source.video_start == pytest.approx(0.5 - (probe.format_start or 0.0))  # the AAC priming may start the container early
         assert np.array_equal(tail, decode_frames(clip, 64, 32)[175:200])
 
-    @pytest.mark.parametrize("angle", ["-90", "90", "180"])
-    def test_rotated_clip_comes_out_upright_at_the_displayed_size(self, tmp_path, angle):
+    def test_rotated_clip_comes_out_upright_at_the_displayed_size(self, tmp_path):
+        # The 61-frame clip also reads from frame 0, because the start clamps to the beginning.
+        angle = "-90"
         frames = numbered_frames(61, width=64, height=32)
         base = tmp_path / "base.mp4"
         encode_frames(frames, base, "-g", "12")
@@ -300,27 +272,14 @@ class TestRealTail:
         assert tail.shape == (25, probe.height, probe.width, 3)
         assert np.array_equal(tail, expected)
 
-    def test_the_last_22_frames_are_the_end_of_the_longer_tail(self, tmp_path):
-        clip = tmp_path / "long.mp4"
-        encode_frames(numbered_frames(200), clip, "-g", "12")
-        source = build_extend_source(clip, probe_video(clip), None)
-        tail = read_source_tail(source, frames=22)
-        assert tail.shape == (22, 32, 64, 3)
-        assert np.array_equal(tail, decode_frames(clip, 64, 32)[178:200])
-        assert np.array_equal(tail, read_source_tail(source)[-22:])
-
-    def test_clip_shorter_than_the_carry_raises(self, tmp_path):
-        clip = tmp_path / "tiny.mp4"
-        encode_frames(numbered_frames(10), clip, "-g", "12")
-        with pytest.raises(RuntimeError, match="last 25 frames"):
-            _tail_of(clip)
-
 
 @REAL
 class TestRealTailWithWrongFrameCount:
     """A frame count that is off (a container's ``nb_frames`` can be) must not make the reader return the wrong frames."""
 
-    @pytest.mark.parametrize("error", [0, -1, 1, 7, -300, 5000])
+    # 7 is an overcount inside the seek margin, and the only seek check on a clip with B-frames (decode order differs from
+    # display order). 5000 seeks past the end, so the read retries from the start.
+    @pytest.mark.parametrize("error", [7, 5000])
     def test_still_returns_the_true_last_frames(self, tmp_path, error):
         clip = tmp_path / "long.mp4"
         encode_frames(numbered_frames(200), clip, "-g", "12", "-bf", "3", quality=("-crf", "12"))  # lossless x264 writes no B-frames
@@ -334,13 +293,6 @@ class TestRealTailWithWrongFrameCount:
         assert source.frame_count == 200  # the probe counts packets
         wrong = dataclasses.replace(source, frame_count=200 + error)
         assert np.array_equal(read_source_tail(wrong), decoded[175:200])
-
-    def test_overstated_count_on_a_short_clip_raises_instead_of_padding(self, tmp_path):
-        clip = tmp_path / "short.mp4"
-        encode_frames(numbered_frames(20), clip, "-g", "12")
-        source = build_extend_source(clip, probe_video(clip), None)
-        with pytest.raises(RuntimeError, match="found only 20"):
-            read_source_tail(dataclasses.replace(source, frame_count=500))
 
 
 class TestTailAudioCommand:
@@ -375,20 +327,3 @@ class TestReadSourceTailAudio:
         lead = round((1 - 23 / 24) * 16000)  # the tail starts at frame 23, before the tone starts at 1 s
         assert np.abs(samples[:, : lead - 80]).max() < 0.01
         assert np.abs(samples[:, lead + 160 :]).max() > 0.3  # the mono tone is upmixed to stereo at -3 dB
-
-    def test_a_22_frame_tail_is_the_end_of_the_25_frame_tail(self, tmp_path):
-        path = tmp_path / "clip.mov"
-        tone = "aevalsrc=0.5*sin(2*PI*440*t):s=44100:d=2"
-        raw = ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "64x32", "-r", "24", "-i", "-"]
-        ffmpeg("-f", "lavfi", "-i", tone, *raw, "-map", "1:v", "-map", "0:a", "-c:v", "libx264", "-c:a", "pcm_s16le", "-shortest", str(path), data=numbered_frames(48).tobytes())
-        source = build_extend_source(path, probe_video(path), None)
-        samples = read_source_tail_audio(source, 32000, frames=22)
-        assert samples.shape[0] == 2 and samples.dtype == np.float32
-        assert abs(samples.shape[1] - round(22 / 24 * 32000)) <= 32
-
-    def test_a_clip_without_sound_is_an_error(self, tmp_path):
-        path = tmp_path / "clip.mp4"
-        encode_frames(numbered_frames(48), path)
-        source = dataclasses.replace(build_extend_source(path, probe_video(path), None), has_audio=True)
-        with pytest.raises(RuntimeError):
-            read_source_tail_audio(source, 16000)

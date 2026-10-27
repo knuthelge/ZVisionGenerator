@@ -8,7 +8,7 @@ Four upstream projects are copied into `packages/` because they are not on PyPI 
 
 - **Pin.** `LTX_COMMIT` in the `Makefile` must be the commit of a release tag; the comment above it names the tag.
 - **Update.** `make update-ltx` replaces both packages with the pinned commit. It does not carry their dependencies: mirror the `dependencies` of upstream's `packages/*/pyproject.toml` into ours by hand, macOS-only and capped at the minor version that upstream's `uv.lock` tests (for example `mlx-arsenal>=0.2.4,<0.3`).
-- **Internals we rely on.** `backends/mac/video.py` uses upstream attributes and call shapes that are not public API. Re-check each on every bump. `tests/test_ltx_mlx_contract.py` pins their names and signatures by introspection, and the mocked tests in `tests/test_video_upscale.py` cover our calls:
+- **Internals we rely on.** `backends/mac/video.py` uses upstream attributes and call shapes that are not public API. Re-check each on every bump. `tests/test_ltx_mlx_contract.py` pins their names and signatures by introspection, and the mocked tests in `tests/test_mac_ltx_video.py` cover our calls:
     - `_pending_loras` on the pipeline (LoRAs applied at load)
     - the duck-typed `stepwise` slot and its `bind(..., stage=)` contract, which returns the stage's `on_step` callable
     - `_pre_denoise_flush(video_state, audio_state)` (guards against the Metal watchdog) and `_decode_and_save_video(frame_rate=, seed=)`

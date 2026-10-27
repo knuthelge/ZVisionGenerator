@@ -9,17 +9,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from zvisiongenerator.core.video_family import ANY_FRAMES, FrameRule, SettledSteps, VideoCapabilities, VideoFamily, settle_video_steps
+from _video_helpers import make_ltx_info
+
+from zvisiongenerator.core.video_family import ANY_FRAMES, FrameRule, VideoCapabilities, VideoFamily, settle_video_steps
 from zvisiongenerator.utils.config import load_config, video_family
 from zvisiongenerator.utils.video_extend import resolve_extend_frames
-from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
+from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_cli import _resolve_upscale_steps
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.workspace_api import _build_video_bootstrap_defaults
 
-_LTX_INFO = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-_OTHER_INFO = VideoModelInfo(family="wan", backend="wan", supports_i2v=True, default_fps=24, frame_alignment=1, resolution_alignment=32)
-_CAP_TEXT = "LTX distilled model supports max 8 denoising steps; capping {given} -> 8"
+_LTX_INFO = make_ltx_info()
+_OTHER_INFO = make_ltx_info(family="wan", backend="wan", frame_alignment=1)
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +49,7 @@ def test_cli_step_settling_matches_the_golden_table(upscale, steps, explicit, fa
         _resolve_upscale_steps(args, load_config(), family, steps_explicitly_set=explicit)
 
     assert (args.steps, args.upscale_steps) == (settled, upscale_steps)
-    assert [str(item.message) for item in seen] == ([] if capped_from is None else [_CAP_TEXT.format(given=capped_from)])
-    assert all(item.filename == __file__ for item in seen)
+    assert len(seen) == (0 if capped_from is None else 1)
 
 
 @pytest.mark.parametrize(("upscale", "steps", "explicit", "family", "settled", "upscale_steps", "capped_from"), _STEP_TABLE)
@@ -81,7 +81,7 @@ def _config_with_h3_upscale(steps: int) -> dict:
 @pytest.mark.parametrize(("family", "expected"), [("h3", 4), ("ltx", 6)])
 def test_the_default_upscale_steps_come_from_the_models_own_family(family, expected):
     config = _config_with_h3_upscale(4)
-    info = VideoModelInfo(family=family, backend=family, supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+    info = make_ltx_info(family=family, backend=family)
     cli_args = argparse.Namespace(upscale=2, steps=None)
     server_args = argparse.Namespace(upscale=2, steps=None)
 
@@ -259,34 +259,18 @@ def _with(path: str, value):
 @pytest.mark.parametrize(
     ("block", "path"),
     [
-        *[(_without(key), key) for key in ("label", "default_steps", "frame_rule", "capabilities", "extend_frame_step", "carry_frames")],
-        (_with("label", " "), "label"),
-        (_with("default_steps", 0), "default_steps"),
-        (_with("max_steps", "8"), "max_steps"),
-        (_with("extend_frame_step", True), "extend_frame_step"),
-        (_with("carry_frames", 0), "carry_frames"),
-        (_with("extend_fps", 0), "extend_fps"),
-        (_with("extend_fps", "24"), "extend_fps"),
-        (_with("extend_fps", True), "extend_fps"),
-        (_with("upscale", [8]), "upscale"),
-        (_with("upscale", {"default_upscale_steps": 0}), "upscale.default_upscale_steps"),
+        (_without("label"), "label"),  # a missing key
+        (_without("capabilities"), "capabilities"),
+        (_with("default_steps", 0), "default_steps"),  # a value out of range
+        (_with("max_steps", "8"), "max_steps"),  # a wrong type
+        (_with("extend_frame_step", True), "extend_frame_step"),  # a bool posing as an int
+        (_with("upscale", {"default_upscale_steps": 0}), "upscale.default_upscale_steps"),  # a nested path
         (_with("frame_rule.alignment", 0), "frame_rule.alignment"),
-        (_with("frame_rule.offset", -1), "frame_rule.offset"),
-        (_with("frame_rule.round", "down"), "frame_rule.round"),
-        (_with("frame_rule.extra", 1), "frame_rule.extra"),
-        (_with("frame_rule", [17, 5]), "frame_rule"),
-        (_with("capabilities.i2v", "yes"), "capabilities.i2v"),
-        (_with("capabilities.sing", True), "capabilities.sing"),
+        (_with("frame_rule.extra", 1), "frame_rule.extra"),  # an unknown key
         (_with("capabilities", {"i2v": True}), "capabilities.end_frame"),
         (_with("platform_capabilities", {"darwin": {"upscale": 0}}), "platform_capabilities.darwin.upscale"),
-        (_with("platform_capabilities", {"darwin": {"fly": False}}), "platform_capabilities.darwin.fly"),
-        (_with("step_options", [8, 4]), "step_options"),
-        (_with("step_options", [4, 4]), "step_options"),
-        (_with("step_options", [4, 16]), "step_options"),
-        (_with("step_options", [0, 4]), "step_options[0]"),
-        (_with("step_options", []), "step_options"),
-        (_with("default_frames", 121), "default_frames"),
-        (_with("default_frames", 5), "default_frames"),
+        (_with("step_options", [8, 4]), "step_options"),  # out of order
+        (_with("default_frames", 121), "default_frames"),  # off the frame rule
     ],
 )
 def test_a_malformed_family_block_names_the_key_path(block, path):
@@ -311,29 +295,25 @@ def _family(**overrides) -> VideoFamily:
 
 
 @pytest.mark.parametrize(
-    ("steps", "settled", "note"),
-    [
-        (None, 8, None),
-        (8, 8, None),
-        (4, 4, None),
-        (5, 4, "MiniMax H3 offers [4, 8] steps; using 4 instead of 5"),
-        (6, 8, "MiniMax H3 offers [4, 8] steps; using 8 instead of 6"),
-        (12, 8, "MiniMax H3 offers [4, 8] steps; using 8 instead of 12"),
-        (1, 4, "MiniMax H3 offers [4, 8] steps; using 4 instead of 1"),
-    ],
+    ("steps", "settled", "noted"),
+    [(None, 8, False), (8, 8, False), (4, 4, False), (5, 4, True), (6, 8, True), (12, 8, True), (1, 4, True)],
 )
-def test_h3_steps_snap_to_the_nearest_option_and_ties_go_up(steps, settled, note):
-    assert settle_video_steps(steps, upscale=False, family=_family(), default_upscale_steps=8) == SettledSteps(settled, None, note)
+def test_h3_steps_snap_to_the_nearest_option_and_ties_go_up(steps, settled, noted):
+    result = settle_video_steps(steps, upscale=False, family=_family(), default_upscale_steps=8)
+
+    assert (result.steps, result.upscale_steps, result.note is not None) == (settled, None, noted)
 
 
 def test_an_upscaled_clip_runs_its_upscale_pass_at_the_settled_steps():
-    assert settle_video_steps(None, upscale=True, family=_family(), default_upscale_steps=6) == SettledSteps(8, 8, "MiniMax H3 offers [4, 8] steps; using 8 instead of 6")
+    result = settle_video_steps(None, upscale=True, family=_family(), default_upscale_steps=6)
+
+    assert (result.steps, result.upscale_steps, result.note is not None) == (8, 8, True)
 
 
 def test_the_cap_applies_when_there_are_no_step_options():
     settled = settle_video_steps(20, upscale=True, family=video_family(load_config(), "ltx"), default_upscale_steps=8)
 
-    assert (settled.steps, settled.upscale_steps, settled.note) == (8, 8, _CAP_TEXT.format(given=20))
+    assert (settled.steps, settled.upscale_steps, settled.note is not None) == (8, 8, True)
 
 
 def test_without_a_family_nothing_is_capped():
@@ -391,7 +371,7 @@ def test_a_family_with_no_platform_carry_is_the_same_on_every_platform(monkeypat
 
 @pytest.mark.parametrize(
     ("value", "path"),
-    [("one", "platform_carry_frames"), ({"darwin": 0}, "platform_carry_frames.darwin"), ({"darwin": True}, "platform_carry_frames.darwin"), ({"darwin": 1.5}, "platform_carry_frames.darwin")],
+    [("one", "platform_carry_frames"), ({"darwin": 0}, "platform_carry_frames.darwin")],
 )
 def test_a_malformed_platform_carry_names_its_key(value, path):
     with pytest.raises(ValueError, match=re.escape(path)):

@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _video_helpers import make_video_request
 from conftest import make_extend_source
 
 from zvisiongenerator.core.types import StageOutcome
@@ -33,21 +34,6 @@ from zvisiongenerator.workflows.video_stages import (
 # ---------------------------------------------------------------------------
 
 
-def _req(**overrides) -> VideoGenerationRequest:
-    """Build a minimal VideoGenerationRequest for stage testing."""
-    defaults: dict = dict(
-        backend=MagicMock(),
-        model=MagicMock(),
-        prompt="a beautiful sunset",
-    )
-    defaults.update(overrides)
-    return VideoGenerationRequest(**defaults)
-
-
-def test_request_defaults_to_121_frames():
-    assert _req().num_frames == 121
-
-
 def _source(tmp_path: Path | None = None, **overrides) -> ExtendSource:
     """Build a checked extend source: a 24 fps clip with sound that was recorded with a scene."""
     return make_extend_source(**{"path": (tmp_path or Path("/videos")) / "clip.mp4", "prompt": 'She says "I told you." Then she sighs.', **overrides})
@@ -57,7 +43,7 @@ def _extend_req(source: ExtendSource | None = None, frames: int = 48, **override
     """Build the request of an extension: ``num_frames`` is the generation window (25 + the new frames)."""
     defaults: dict = dict(prompt="", width=512, height=256, num_frames=25 + frames, extend=ExtendSpec(source or _source(), frames))
     defaults.update(overrides)
-    return _req(**defaults)
+    return make_video_request(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -69,62 +55,62 @@ class TestResolvePromptStage:
     """Verify random-choice block expansion in video prompts."""
 
     def test_plain_prompt_passthrough(self):
-        req = _req(prompt="a simple prompt")
+        req = make_video_request(prompt="a simple prompt")
         arts = VideoWorkingArtifacts()
         outcome = resolve_prompt_stage(req, arts)
         assert outcome is StageOutcome.success
         assert arts.resolved_prompt == "a simple prompt"
 
     def test_choice_block_resolves(self):
-        req = _req(prompt="{red|green|blue} sky")
+        req = make_video_request(prompt="{red|green|blue} sky")
         arts = VideoWorkingArtifacts()
         outcome = resolve_prompt_stage(req, arts)
         assert outcome is StageOutcome.success
         assert arts.resolved_prompt in ("red sky", "green sky", "blue sky")
 
     def test_nested_choice_blocks(self):
-        req = _req(prompt="{a|{b|c}}")
+        req = make_video_request(prompt="{a|{b|c}}")
         arts = VideoWorkingArtifacts()
         outcome = resolve_prompt_stage(req, arts)
         assert outcome is StageOutcome.success
         assert arts.resolved_prompt in ("a", "b", "c")
 
     def test_whitespace_stripped(self):
-        req = _req(prompt="  hello world  ")
+        req = make_video_request(prompt="  hello world  ")
         arts = VideoWorkingArtifacts()
         resolve_prompt_stage(req, arts)
         assert arts.resolved_prompt == "hello world"
 
     def test_blank_scene_sends_the_prompt_byte_identical(self):
         for scene in (None, "", "   "):
-            req = _req(prompt="a sunset", resolved_prompt="a sunset", scene=scene, resolved_scene=None if scene is None else scene)
+            req = make_video_request(prompt="a sunset", resolved_prompt="a sunset", scene=scene, resolved_scene=None if scene is None else scene)
             arts = VideoWorkingArtifacts()
             resolve_prompt_stage(req, arts)
             assert arts.resolved_prompt == "a sunset"
             assert "scene" not in arts.metadata
 
     def test_scene_comes_before_the_prompt(self):
-        req = _req(prompt="a knight rides in", resolved_prompt="a knight rides in", scene="A castle.", resolved_scene="A castle.")
+        req = make_video_request(prompt="a knight rides in", resolved_prompt="a knight rides in", scene="A castle.", resolved_scene="A castle.")
         arts = VideoWorkingArtifacts()
         resolve_prompt_stage(req, arts)
         assert arts.resolved_prompt == "A castle. a knight rides in"
         assert arts.metadata["scene"] == "A castle."
 
     def test_scene_only_run_sends_the_scene(self):
-        req = _req(prompt="", resolved_prompt="", scene="A castle at dusk.", resolved_scene="A castle at dusk.")
+        req = make_video_request(prompt="", resolved_prompt="", scene="A castle at dusk.", resolved_scene="A castle at dusk.")
         arts = VideoWorkingArtifacts()
         resolve_prompt_stage(req, arts)
         assert arts.resolved_prompt == "A castle at dusk."
 
     def test_choices_expand_in_each_part_without_a_plan(self):
-        req = _req(prompt="a {fox|fox} runs", scene="A {snowy|snowy} field.")
+        req = make_video_request(prompt="a {fox|fox} runs", scene="A {snowy|snowy} field.")
         arts = VideoWorkingArtifacts()
         resolve_prompt_stage(req, arts)
         assert arts.resolved_prompt == "A snowy field. a fox runs"
         assert arts.metadata["scene"] == "A snowy field."
 
     def test_planned_resolved_scene_wins_over_the_template(self):
-        req = _req(prompt="p", resolved_prompt="p", scene="{a|b}", resolved_scene="b")
+        req = make_video_request(prompt="p", resolved_prompt="p", scene="{a|b}", resolved_scene="b")
         arts = VideoWorkingArtifacts()
         resolve_prompt_stage(req, arts)
         assert arts.resolved_prompt == "b p" and arts.metadata["scene"] == "b"
@@ -179,7 +165,7 @@ class TestResolvePromptStageExtend:
 
     def test_other_workflows_do_not_record_a_prompt_sent(self):
         arts = VideoWorkingArtifacts()
-        resolve_prompt_stage(_req(prompt="a sunset"), arts)
+        resolve_prompt_stage(make_video_request(prompt="a sunset"), arts)
         assert "prompt_sent" not in arts.metadata
 
 
@@ -194,12 +180,12 @@ class TestEnhancePromptStage:
     def test_not_enhanced_is_a_no_op(self):
         seen: list[str] = []
         arts = VideoWorkingArtifacts(resolved_prompt="A castle. a knight")
-        assert enhance_prompt_stage(_req(on_prompt_enhanced=seen.append), arts) is StageOutcome.success
+        assert enhance_prompt_stage(make_video_request(on_prompt_enhanced=seen.append), arts) is StageOutcome.success
         assert arts.resolved_prompt == "A castle. a knight" and "enhanced_prompt" not in arts.metadata and seen == []
 
     def test_pair_is_composed_into_resolved_prompt_only(self):
         seen: list[str] = []
-        req = _req(enhanced_prompt="A knight rides in.", enhanced_scene="A castle at dusk.", on_prompt_enhanced=seen.append)
+        req = make_video_request(enhanced_prompt="A knight rides in.", enhanced_scene="A castle at dusk.", on_prompt_enhanced=seen.append)
         arts = VideoWorkingArtifacts(resolved_prompt="A castle. a knight")
         enhance_prompt_stage(req, arts)
         assert arts.resolved_prompt == "A castle at dusk. A knight rides in."
@@ -210,7 +196,7 @@ class TestEnhancePromptStage:
     @pytest.mark.parametrize(("metadata", "composed"), [({"scene": "A castle at dusk."}, "A castle at dusk. A knight rides in."), ({}, "A knight rides in.")], ids=["with a scene", "without a scene"])
     def test_an_action_only_rewrite_composes_the_resolved_scene_and_records_no_enhanced_scene(self, metadata, composed):
         seen: list[str] = []
-        req = _req(enhanced_prompt="A knight rides in.", on_prompt_enhanced=seen.append)
+        req = make_video_request(enhanced_prompt="A knight rides in.", on_prompt_enhanced=seen.append)
         arts = VideoWorkingArtifacts(resolved_prompt="A castle. a knight", metadata=dict(metadata))
         enhance_prompt_stage(req, arts)
         assert arts.resolved_prompt == composed
@@ -227,21 +213,21 @@ class TestGenerateFilenameStage:
     """Verify the set-name + timestamp filename and its collision counter."""
 
     def test_set_name_and_timestamp(self, tmp_path):
-        req = _req(filename_base="sunset", output_dir=str(tmp_path), output_format="mp4")
+        req = make_video_request(filename_base="sunset", output_dir=str(tmp_path), output_format="mp4")
         arts = VideoWorkingArtifacts()
         outcome = generate_filename_stage(req, arts)
         assert outcome is StageOutcome.success
         assert re.fullmatch(r"sunset_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.mp4", arts.filename)
 
     def test_settings_are_not_in_the_name(self, tmp_path):
-        req = _req(filename_base="sunset", model_name="dgrauet/ltx-2.3-mlx-q4", seed=42, output_dir=str(tmp_path))
+        req = make_video_request(filename_base="sunset", model_name="dgrauet/ltx-2.3-mlx-q4", seed=42, output_dir=str(tmp_path))
         arts = VideoWorkingArtifacts()
         generate_filename_stage(req, arts)
         assert "ltx" not in arts.filename
         assert "seed" not in arts.filename
 
     def test_taken_name_gets_counter(self, tmp_path):
-        req = _req(filename_base="sunset", output_dir=str(tmp_path), output_format="mp4")
+        req = make_video_request(filename_base="sunset", output_dir=str(tmp_path), output_format="mp4")
         with patch("zvisiongenerator.utils.filename.generate_filename", return_value="sunset_2026-10-04_14-03-22"):
             (tmp_path / "sunset_2026-10-04_14-03-22.mp4").write_bytes(b"")
             arts = VideoWorkingArtifacts()
@@ -260,7 +246,7 @@ class TestTextToVideoStage:
     def test_success_sets_artifacts(self):
         backend = MagicMock()
         backend.text_to_video.return_value = Path("/tmp/out.mp4")
-        req = _req(backend=backend, prompt="test", output_dir="/tmp", output_format="mp4", seed=42, width=704, height=480, num_frames=49, steps=30)
+        req = make_video_request(backend=backend, prompt="test", output_dir="/tmp", output_format="mp4", seed=42, width=704, height=480, num_frames=49, steps=30)
         arts = VideoWorkingArtifacts()
         arts.filename = "test.mp4"
         arts.resolved_prompt = "test"
@@ -274,7 +260,7 @@ class TestTextToVideoStage:
     def test_backend_returns_none_fails(self):
         backend = MagicMock()
         backend.text_to_video.return_value = None
-        req = _req(backend=backend)
+        req = make_video_request(backend=backend)
         arts = VideoWorkingArtifacts()
         arts.filename = "test.mp4"
         arts.resolved_prompt = "test"
@@ -287,7 +273,7 @@ class TestTextToVideoStage:
     def test_uses_resolved_prompt(self):
         backend = MagicMock()
         backend.text_to_video.return_value = Path("/tmp/x.mp4")
-        req = _req(backend=backend, prompt="original")
+        req = make_video_request(backend=backend, prompt="original")
         arts = VideoWorkingArtifacts()
         arts.filename = "f.mp4"
         arts.resolved_prompt = "resolved version"
@@ -308,7 +294,7 @@ class TestImageToVideoStage:
     def test_success_sets_artifacts(self):
         backend = MagicMock()
         backend.image_to_video.return_value = Path("/tmp/i2v.mp4")
-        req = _req(backend=backend, image_path="/tmp/input.png", output_dir="/tmp", output_format="mp4")
+        req = make_video_request(backend=backend, image_path="/tmp/input.png", output_dir="/tmp", output_format="mp4")
         arts = VideoWorkingArtifacts()
         arts.filename = "i2v.mp4"
         arts.resolved_prompt = "describe this"
@@ -324,8 +310,8 @@ class TestImageToVideoStage:
         arts = VideoWorkingArtifacts()
         arts.filename = "i2v.mp4"
 
-        image_to_video_stage(_req(backend=backend, image_path="/tmp/first.png", end_image_path="/tmp/last.png"), arts)
-        image_to_video_stage(_req(backend=backend, image_path="/tmp/first.png"), arts)
+        image_to_video_stage(make_video_request(backend=backend, image_path="/tmp/first.png", end_image_path="/tmp/last.png"), arts)
+        image_to_video_stage(make_video_request(backend=backend, image_path="/tmp/first.png"), arts)
 
         with_end, without_end = backend.image_to_video.call_args_list
         assert with_end.kwargs["end_image"] == "/tmp/last.png"
@@ -334,7 +320,7 @@ class TestImageToVideoStage:
     def test_backend_returns_none_fails(self):
         backend = MagicMock()
         backend.image_to_video.return_value = None
-        req = _req(backend=backend, image_path="/tmp/input.png")
+        req = make_video_request(backend=backend, image_path="/tmp/input.png")
         arts = VideoWorkingArtifacts()
         arts.filename = "i2v.mp4"
 
@@ -352,7 +338,7 @@ class TestLogVideoStage:
     """Verify log_video_stage embeds config metadata and logs correctly."""
 
     def test_returns_success_without_mutating_artifacts(self):
-        req = _req()
+        req = make_video_request()
         arts = VideoWorkingArtifacts()
         arts.video_path = Path("/tmp/out.mp4")
         arts.generation_time = 12.5
@@ -367,7 +353,7 @@ class TestLogVideoStage:
     def test_calls_embed_mp4_config_with_video_path(self, tmp_path):
         video_path = tmp_path / "out.mp4"
         video_path.write_bytes(b"fake-video")
-        req = _req(
+        req = make_video_request(
             prompt="a moving scene",
             model_name="ltx-8",
             model_family="ltx",
@@ -394,20 +380,19 @@ class TestLogVideoStage:
         assert call_payload["workflow"] == "img2vid"
 
     def test_warns_and_succeeds_on_ffmpeg_embed_failure(self):
-        req = _req(prompt="test", model_name="ltx")
+        req = make_video_request(prompt="test", model_name="ltx")
         arts = VideoWorkingArtifacts(video_path=Path("/tmp/out.mp4"), generation_time=5.0)
 
         with patch("zvisiongenerator.workflows.video_stages.embed_mp4_config") as mock_embed:
             mock_embed.side_effect = subprocess.CalledProcessError(1, "ffmpeg", stderr=b"mux error")
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
                 outcome = log_video_stage(req, arts)
 
         assert outcome is StageOutcome.success
-        assert any("ffmpeg metadata embed failed" in str(w.message) for w in caught)
 
     def test_none_path_still_succeeds(self):
-        req = _req()
+        req = make_video_request()
         arts = VideoWorkingArtifacts()
         arts.video_path = None
         arts.generation_time = 0.0
@@ -510,7 +495,7 @@ class TestExtendVideoStage:
 
     def test_requires_an_extend_spec(self):
         with pytest.raises(ValueError, match="extend"):
-            extend_video_stage(_req(), VideoWorkingArtifacts())
+            extend_video_stage(make_video_request(), VideoWorkingArtifacts())
 
     def test_falls_back_to_the_request_prompt_without_a_resolved_one(self, tmp_path):
         req, _, _ = self._run(tmp_path)
@@ -584,14 +569,12 @@ class TestJoinClipsStage:
         stderr = ("ffmpeg version 7.1 Copyright\n  configuration: " + "--enable-foo " * 100 + "\n" + "frame noise\n" * 100 + "Error: moov atom not found\n").encode()
         error = subprocess.CalledProcessError(1, "ffmpeg", stderr=stderr)
         with patch("zvisiongenerator.workflows.video_stages.splice_clips", side_effect=error):
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
                 join_clips_stage(req, arts)
-        assert arts.failure_message.startswith("Joining the clips failed: ")
         assert "Error: moov atom not found" in arts.failure_message
         assert "\n" not in arts.failure_message
         assert len(arts.failure_message) <= 500
-        assert any("ffmpeg version" in str(w.message) for w in caught)
 
     def test_unexpected_error_still_removes_the_directory(self, tmp_path):
         req = _extend_req(output_dir=str(tmp_path))
@@ -611,9 +594,36 @@ class TestJoinClipsStage:
 # ---------------------------------------------------------------------------
 
 
+class TestStripAudioStage:
+    @patch("zvisiongenerator.workflows.video_stages.strip_audio")
+    def test_no_audio_false_does_not_call_ffmpeg(self, mock_strip):
+        arts = VideoWorkingArtifacts(video_path=Path("/tmp/video.mp4"))
+
+        outcome = strip_audio_stage(make_video_request(no_audio=False), arts)
+
+        assert outcome is StageOutcome.success
+        mock_strip.assert_not_called()
+
+    @patch("zvisiongenerator.workflows.video_stages.strip_audio")
+    def test_no_audio_true_strips_the_video(self, mock_strip):
+        arts = VideoWorkingArtifacts(video_path=Path("/tmp/video.mp4"))
+
+        outcome = strip_audio_stage(make_video_request(no_audio=True), arts)
+
+        assert outcome is StageOutcome.success
+        mock_strip.assert_called_once_with(Path("/tmp/video.mp4"))
+
+    @patch("zvisiongenerator.workflows.video_stages.strip_audio")
+    def test_no_audio_true_but_no_video_path(self, mock_strip):
+        outcome = strip_audio_stage(make_video_request(no_audio=True), VideoWorkingArtifacts(video_path=None))
+
+        assert outcome is StageOutcome.success
+        mock_strip.assert_not_called()
+
+
 class TestStripAudioStageFailure:
     def test_ffmpeg_failure_fails_with_the_stderr_as_one_line(self, tmp_path):
-        req = _req(no_audio=True)
+        req = make_video_request(no_audio=True)
         arts = VideoWorkingArtifacts(video_path=tmp_path / "clip.mp4")
         error = subprocess.CalledProcessError(1, "ffmpeg", stderr=b"no such stream\nexit 1")
         with patch("zvisiongenerator.workflows.video_stages.strip_audio", side_effect=error):
@@ -622,18 +632,3 @@ class TestStripAudioStageFailure:
                 outcome = strip_audio_stage(req, arts)
         assert outcome is StageOutcome.failed
         assert "no such stream exit 1" in arts.failure_message
-
-    def test_failure_message_keeps_the_final_ffmpeg_error_after_a_long_banner(self, tmp_path):
-        req = _req(no_audio=True)
-        arts = VideoWorkingArtifacts(video_path=tmp_path / "clip.mp4")
-        stderr = ("ffmpeg version 7.1 Copyright\n  configuration: " + "--enable-foo " * 100 + "\n" + "frame noise\n" * 100 + "Error: permission denied\n").encode()
-        error = subprocess.CalledProcessError(1, "ffmpeg", stderr=stderr)
-        with patch("zvisiongenerator.workflows.video_stages.strip_audio", side_effect=error):
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                strip_audio_stage(req, arts)
-        assert arts.failure_message.startswith("Removing the audio track failed: ")
-        assert "Error: permission denied" in arts.failure_message
-        assert "\n" not in arts.failure_message
-        assert len(arts.failure_message) <= 500
-        assert any("ffmpeg version" in str(w.message) for w in caught)

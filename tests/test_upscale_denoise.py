@@ -29,17 +29,6 @@ def config():
     }
 
 
-class TestCliDefault:
-    """CLI parser must default --upscale-denoise to None."""
-
-    def test_default_is_none(self):
-        from zvisiongenerator.image_cli import _build_parser
-
-        parser = _build_parser()
-        args = parser.parse_args(["-m", "model"])
-        assert args.upscale_denoise is None
-
-
 class TestRunnerResolvesDenoise:
     """run_batch() must resolve upscale_denoise from config when not explicit."""
 
@@ -56,8 +45,13 @@ class TestRunnerResolvesDenoise:
             upscale_sharpen=True,
         )
 
-    def test_runner_resolves_2x_denoise_from_config(self, mock_args, config):
-        from zvisiongenerator.core.image_types import ImageGenerationRequest
+    @pytest.mark.parametrize(
+        ("factor", "explicit", "expected"),
+        [(2, None, 0.25), (4, None, 0.45), (2, 0.7, 0.7)],
+        ids=["2x from config", "4x from config", "explicit wins"],
+    )
+    def test_the_runner_resolves_the_denoise_into_the_request(self, mock_args, config, factor, explicit, expected):
+        from zvisiongenerator.core.types import StageOutcome
         from zvisiongenerator.image_runner import run_batch
         from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
@@ -65,80 +59,13 @@ class TestRunnerResolvesDenoise:
         mock_backend.name = "mock"
         model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
         prompts_data = {"test_set": [("a cat", None)]}
-        mock_args.upscale = 2
-        mock_args.upscale_denoise = None
-
-        captured_requests: list[ImageGenerationRequest] = []
-
-        def capture_workflow_run(request, artifacts):
-            captured_requests.append(request)
-            from zvisiongenerator.core.types import StageOutcome
-
-            return StageOutcome.success
-
+        mock_args.upscale = factor
+        mock_args.upscale_denoise = explicit
         mock_workflow = MagicMock()
-        mock_workflow.run.side_effect = capture_workflow_run
+        mock_workflow.run.return_value = StageOutcome.success
 
         with patch("zvisiongenerator.image_runner.build_workflow", return_value=mock_workflow):
             run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info, plan=_make_plan(prompts_data, mock_args, config=config))
 
-        assert len(captured_requests) == 1
-        assert captured_requests[0].upscale_denoise == 0.25
-
-    def test_runner_resolves_4x_denoise_from_config(self, mock_args, config):
-        from zvisiongenerator.core.image_types import ImageGenerationRequest
-        from zvisiongenerator.image_runner import run_batch
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        mock_backend = MagicMock()
-        mock_backend.name = "mock"
-        model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        prompts_data = {"test_set": [("a cat", None)]}
-        mock_args.upscale = 4
-        mock_args.upscale_denoise = None
-
-        captured_requests: list[ImageGenerationRequest] = []
-
-        def capture_workflow_run(request, artifacts):
-            captured_requests.append(request)
-            from zvisiongenerator.core.types import StageOutcome
-
-            return StageOutcome.success
-
-        mock_workflow = MagicMock()
-        mock_workflow.run.side_effect = capture_workflow_run
-
-        with patch("zvisiongenerator.image_runner.build_workflow", return_value=mock_workflow):
-            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info, plan=_make_plan(prompts_data, mock_args, config=config))
-
-        assert len(captured_requests) == 1
-        assert captured_requests[0].upscale_denoise == 0.45
-
-    def test_runner_explicit_denoise_wins(self, mock_args, config):
-        from zvisiongenerator.core.image_types import ImageGenerationRequest
-        from zvisiongenerator.image_runner import run_batch
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        mock_backend = MagicMock()
-        mock_backend.name = "mock"
-        model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        prompts_data = {"test_set": [("a cat", None)]}
-        mock_args.upscale = 2
-        mock_args.upscale_denoise = 0.7
-
-        captured_requests: list[ImageGenerationRequest] = []
-
-        def capture_workflow_run(request, artifacts):
-            captured_requests.append(request)
-            from zvisiongenerator.core.types import StageOutcome
-
-            return StageOutcome.success
-
-        mock_workflow = MagicMock()
-        mock_workflow.run.side_effect = capture_workflow_run
-
-        with patch("zvisiongenerator.image_runner.build_workflow", return_value=mock_workflow):
-            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info, plan=_make_plan(prompts_data, mock_args, config=config))
-
-        assert len(captured_requests) == 1
-        assert captured_requests[0].upscale_denoise == 0.7
+        (call,) = mock_workflow.run.call_args_list
+        assert call.args[0].upscale_denoise == expected

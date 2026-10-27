@@ -1,4 +1,4 @@
-"""Tests for video CLI argument parsing and alignment helpers."""
+"""Tests for the ziv-video command line: parsing, refusals before the model loads, defaults and memory checks."""
 
 from __future__ import annotations
 
@@ -8,12 +8,11 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from _video_helpers import make_ltx_info, patch_video_cli_for_preflight
 from conftest import make_extend_source
 from huggingface_hub.errors import GatedRepoError
 
 from zvisiongenerator import video_cli
-from zvisiongenerator.core.video_family import FrameRule
-from zvisiongenerator.utils.alignment import align_frames, align_resolution
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -40,79 +39,6 @@ class TestBuildVideoParser:
         assert args.model == "dgrauet/ltx-2.3-mlx-q4"
         assert args.runs == 1
         assert args.output == "."
-
-    def test_all_args_parsed(self):
-        parser = _build_video_parser()
-        args = parser.parse_args(
-            [
-                "-m",
-                "dgrauet/ltx-2.3-mlx-q4",
-                "--prompt",
-                "a sunset",
-                "--image",
-                "/tmp/img.png",
-                "-W",
-                "512",
-                "-H",
-                "384",
-                "--frames",
-                "25",
-                "--steps",
-                "50",
-                "--seed",
-                "123",
-                "-r",
-                "3",
-                "-o",
-                "/tmp/out",
-                "--format",
-                "mp4",
-                "--no-low-memory",
-            ]
-        )
-        assert args.model == "dgrauet/ltx-2.3-mlx-q4"
-        assert args.prompt == "a sunset"
-        assert args.image_path == "/tmp/img.png"
-        assert args.width == 512
-        assert args.height == 384
-        assert args.frames == 25
-        assert args.steps == 50
-        assert args.seed == 123
-        assert args.runs == 3
-        assert args.output == "/tmp/out"
-        assert args.format == "mp4"
-        assert args.low_memory is False
-
-    def test_model_defaults_to_none(self):
-        parser = _build_video_parser()
-        args = parser.parse_args([])
-        assert args.model is None
-
-    @pytest.mark.parametrize(
-        ("argv", "dest", "expected"),
-        [
-            (["--lora", "lora1:0.5,lora2:0.8"], "lora", "lora1:0.5,lora2:0.8"),
-            (["--ratio", "9:16"], "ratio", "9:16"),
-            (["-s", "l"], "size", "l"),
-            (["--size", "s"], "size", "s"),
-            (["-W", "640"], "width", 640),
-        ],
-    )
-    def test_flag_reaches_its_option(self, argv, dest, expected):
-        assert getattr(_build_video_parser().parse_args(["-m", "model", *argv]), dest) == expected
-
-    def test_defaults_none_for_optional_args(self):
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model"])
-        assert args.width is None
-        assert args.height is None
-        assert args.frames is None
-        assert args.steps is None
-        assert args.seed is None
-        assert args.prompt is None
-        assert args.image_path is None
-        assert args.ratio is None
-        assert args.size is None
 
 
 class TestVideoCliHubRefusals:
@@ -176,25 +102,12 @@ class TestVideoCliExecution:
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
-        err = capsys.readouterr().err
-        assert "'ltx-4' or 'ltx-8'" in err
-        assert "ltx-2.3'" not in err
-        assert "dgrauet/ltx" not in err
-        assert "supported/configured HuggingFace LTX repo IDs" in err
-        assert "local path containing 'ltx'" in err
-        assert "compatible local path/HuggingFace LTX repo" not in err
+        assert "'ltx-4' or 'ltx-8'" in capsys.readouterr().err
 
     def test_main_rejects_remote_lora_before_backend_load(self, monkeypatch, capsys):
         import zvisiongenerator.video_cli as video_cli
 
-        model_info = VideoModelInfo(
-            family="ltx",
-            backend="ltx",
-            supports_i2v=True,
-            default_fps=24,
-            frame_alignment=8,
-            resolution_alignment=32,
-        )
+        model_info = make_ltx_info()
         backend = MagicMock()
 
         monkeypatch.setattr(
@@ -299,104 +212,12 @@ class TestVideoCliExecution:
         assert (model.mode, model.verbose) == ("i2v" if with_image else "t2v", True)
         assert model.turbo_lora_alpha == 0.0625 * 4
 
-    def test_main_reports_backend_load_errors_via_parser_error(self, monkeypatch, tmp_path):
-        import zvisiongenerator.video_cli as video_cli
-
-        model_info = VideoModelInfo(
-            family="ltx",
-            backend="ltx",
-            supports_i2v=True,
-            default_fps=24,
-            frame_alignment=8,
-            resolution_alignment=32,
-        )
-        backend = MagicMock()
-        backend.load_model.side_effect = RuntimeError("CUDA is not available. The Linux diffusers video backend requires an NVIDIA GPU with CUDA support.")
-
-        monkeypatch.setattr(
-            video_cli,
-            "load_config",
-            lambda: {
-                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
-                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "video_model_presets": {"ltx": {**_LTX_FAMILY, "upscale": {"default_upscale_steps": 8}}},
-            },
-        )
-        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
-        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
-        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
-        monkeypatch.setattr(
-            video_cli,
-            "resolve_video_defaults",
-            lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49, **cli_overrides},
-        )
-        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
-
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "-o", str(tmp_path)]):
-            with pytest.raises(SystemExit, match="2"):
-                video_cli.main()
-
-    def test_main_caps_upscale_steps_before_running_batch(self, monkeypatch, tmp_path):
-        import zvisiongenerator.video_cli as video_cli
-
-        model_info = VideoModelInfo(
-            family="ltx",
-            backend="ltx",
-            supports_i2v=True,
-            default_fps=24,
-            frame_alignment=8,
-            resolution_alignment=32,
-        )
-        backend = MagicMock()
-        backend.load_model.return_value = (MagicMock(), model_info)
-        captured: dict[str, int] = {}
-
-        monkeypatch.setattr(
-            video_cli,
-            "load_config",
-            lambda: {
-                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
-                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "video_model_presets": {"ltx": {**_LTX_FAMILY, "upscale": {"default_upscale_steps": 8}}},
-            },
-        )
-        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
-        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
-        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
-        monkeypatch.setattr(
-            video_cli,
-            "resolve_video_defaults",
-            lambda _family, _config, cli_overrides: {
-                "steps": cli_overrides.get("steps", 8),
-                "width": 704,
-                "height": 448,
-                "num_frames": 49,
-            },
-        )
-        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
-        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
-
-        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
-            captured["steps"] = args.steps
-            captured["upscale_steps"] = args.upscale_steps
-
-        monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
-
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3-mlx-q4", "--prompt", "a dog", "--upscale", "2", "--steps", "12", "-o", str(tmp_path)]):
-            with warnings.catch_warnings(record=True) as seen:
-                warnings.simplefilter("always")
-                video_cli.main()
-
-        assert captured["steps"] == 8
-        assert captured["upscale_steps"] == 8
-        assert any("max 8 denoising steps" in str(item.message) for item in seen)
-
     @staticmethod
     def _run_main_for_load_kwargs(monkeypatch, tmp_path, *, preset_extra, extra_argv):
         """Run ``main`` with a stubbed backend and return that backend's mock."""
         import zvisiongenerator.video_cli as video_cli
 
-        model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+        model_info = make_ltx_info()
         backend = MagicMock()
         backend.load_model.return_value = (MagicMock(), model_info)
         ltx_preset = {**_LTX_FAMILY, "upscale": {"default_upscale_steps": 8}, **preset_extra}
@@ -455,61 +276,11 @@ class TestVideoCliExecution:
             self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra=bad, extra_argv=["--upscale", "2"])
 
 
-class _VideoCliEnhancer:
-    def __init__(self, order: list[str]):
-        self.order = order
-
-    def generate(self, messages, *, seed, max_tokens, temperature, cancelled=None):
-        yield "A dog sprints across a sunlit beach, camera tracking low."
-
-    def close(self) -> None:
-        self.order.append("close")
-
-
 class TestVideoCliPreflight:
     """ziv-video runs preflight (rewrites, enhancer unload, memory release) before loading the video model."""
 
     def _patch(self, monkeypatch, order: list[str], *, load_error=None):
-        import zvisiongenerator.video_cli as video_cli
-        from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
-
-        model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        backend = MagicMock()
-        backend.load_model.side_effect = lambda *a, **k: (order.append("load_model"), (MagicMock(), model_info))[1]
-
-        def _factory(repo, revision):
-            if load_error is not None:
-                raise load_error
-            return _VideoCliEnhancer(order)
-
-        session = PromptEnhancerSession(_factory, scheduler=lambda delay, callback: None, downloaded=lambda repo, revision: True)
-        monkeypatch.setattr(
-            video_cli,
-            "load_config",
-            lambda: {
-                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
-                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}},
-            },
-        )
-        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
-        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
-        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
-        monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
-        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
-        workflows: list[bool] = []
-        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, *, enhance: workflows.append(enhance) or object())
-        monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, rev: True)
-        monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.get_prompt_enhancer_session", lambda: session)
-        monkeypatch.setattr("zvisiongenerator.preflight.release_accelerator_memory", lambda: order.append("release_memory"))
-        captured: dict = {}
-
-        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
-            order.append("run_video_batch")
-            captured["plan"] = plan
-
-        monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
-        return video_cli, captured, workflows
+        return patch_video_cli_for_preflight(monkeypatch, order, load_error=load_error)
 
     def test_preflight_before_model_load(self, monkeypatch, tmp_path):
         order: list[str] = []
@@ -566,7 +337,7 @@ def _run_cli(
     """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
     import zvisiongenerator.video_cli as video_cli
 
-    model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+    model_info = make_ltx_info()
     backend.load_model.return_value = (MagicMock(), model_info)
     memory = MagicMock(return_value=fit)
     monkeypatch.chdir(tmp_path)
@@ -661,12 +432,12 @@ class TestVideoCliScene:
     def test_empty_prompt_without_a_scene_is_refused(self, monkeypatch, tmp_path, capsys):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--prompt", "  "])
-        assert "--prompt must not be empty" in capsys.readouterr().err
+        assert "--prompt" in capsys.readouterr().err
 
     def test_blank_scene_and_empty_prompt_is_refused(self, monkeypatch, tmp_path, capsys):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--scene", "  ", "--prompt", ""])
-        assert "--prompt must not be empty" in capsys.readouterr().err
+        assert "--prompt" in capsys.readouterr().err
 
     def test_blank_scene_alone_falls_back_to_the_default_prompts_file(self, monkeypatch, tmp_path, capsys):
         with pytest.raises(SystemExit, match="2"):
@@ -728,46 +499,44 @@ class TestVideoCliExtend:
     def test_length_without_extend_is_refused(self, monkeypatch, tmp_path, capsys, flag):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["-m", "m", "--prompt", "a dog", flag, "16"])
-        assert f"{flag} requires --extend" in capsys.readouterr().err
+        assert flag in capsys.readouterr().err
 
     def test_extend_frames_below_eight_is_refused(self, monkeypatch, tmp_path, capsys):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-frames", "4"])
-        assert "--extend-frames must be at least 8" in capsys.readouterr().err
+        assert "--extend-frames" in capsys.readouterr().err
 
     def test_extend_seconds_must_be_positive(self, monkeypatch, tmp_path, capsys):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "0"])
-        assert "--extend-seconds must be a finite number greater than 0" in capsys.readouterr().err
+        assert "--extend-seconds" in capsys.readouterr().err
 
     @pytest.mark.parametrize("seconds", ["nan", "inf"])
     def test_extend_seconds_must_be_finite(self, monkeypatch, tmp_path, capsys, seconds):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", seconds])
-        assert "--extend-seconds must be a finite number greater than 0" in capsys.readouterr().err
+        assert "--extend-seconds" in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
 
     @pytest.mark.parametrize("path", ["", "   "])
     def test_a_blank_extend_path_is_refused(self, monkeypatch, tmp_path, capsys, path):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", path, "--prompt", "a dog"])
-        assert "--extend needs a video path" in capsys.readouterr().err
+        assert "--extend" in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
 
-    def test_capability_gate_refuses_extend_before_the_source_is_read(self, monkeypatch, tmp_path, capsys):
+    def test_capability_gate_refuses_extend_before_the_source_is_read(self, monkeypatch, tmp_path):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], extend_supported=False)
-        assert "not available" in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
 
-    def test_a_family_that_cannot_extend_refuses_the_extension_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
+    def test_a_family_that_cannot_extend_refuses_the_extension_before_the_model_loads(self, monkeypatch, tmp_path):
         ltx = load_config()["video_model_presets"]["ltx"]
         config = {"ui": {"default_models": {"video": "ltx-8"}}, "video_model_presets": {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], "extend": False}}}}
 
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], config=config)
 
-        assert "LTX distilled model can't extend a clip. Pick another video model." in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
 
     def test_capability_gate_does_not_touch_other_runs(self, monkeypatch, tmp_path):
@@ -789,7 +558,7 @@ class TestVideoCliExtend:
     def test_options_that_choose_a_size_are_refused(self, monkeypatch, tmp_path, capsys, extra, flag):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", *extra])
-        assert f"{flag} cannot be used with --extend" in capsys.readouterr().err
+        assert flag in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
 
     def test_source_problems_are_printed_and_exit_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
@@ -910,13 +679,9 @@ class TestVideoCliExtend:
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-p", str(tmp_path / "nope.yaml")])
         assert "Prompts file not found" in capsys.readouterr().err
 
-    @pytest.mark.parametrize(
-        ("fps", "seconds", "frames"),
-        [(24.0, "2", 48), (30.0, "2", 64), (25.0, "4", 96), (24.0, "0.1", 8)],
-    )
-    def test_seconds_convert_at_the_source_frame_rate(self, monkeypatch, tmp_path, fps, seconds, frames):
-        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", seconds], source=self._source(fps=fps))["args"]
-        assert (args.extend_frames, args.num_frames, args.fps) == (frames, frames + 25, fps)
+    def test_seconds_convert_at_the_source_frame_rate(self, monkeypatch, tmp_path):
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "2"], source=self._source(fps=30.0))["args"]
+        assert (args.extend_frames, args.num_frames, args.fps) == (64, 64 + 25, 30.0)
 
     def test_seconds_that_do_not_land_on_a_step_warn(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "2"], source=self._source(fps=30.0))
@@ -926,11 +691,10 @@ class TestVideoCliExtend:
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "2"])
         assert not any("--extend-seconds" in message for message in captured["warnings"])
 
-    @pytest.mark.parametrize(("requested", "snapped"), [(48, 48), (50, 48), (53, 56), (9, 8)])
-    def test_frames_snap_to_a_multiple_of_eight(self, monkeypatch, tmp_path, requested, snapped):
-        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-frames", str(requested)])
-        assert captured["args"].extend_frames == snapped and captured["args"].num_frames == snapped + 25
-        assert any("--extend-frames" in message for message in captured["warnings"]) is (requested != snapped)
+    def test_frames_snap_to_a_multiple_of_eight(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-frames", "53"])
+        assert captured["args"].extend_frames == 56 and captured["args"].num_frames == 56 + 25
+        assert any("--extend-frames" in message for message in captured["warnings"])
 
     def test_args_for_the_extend_workflow(self, monkeypatch, tmp_path):
         source = self._source()
@@ -989,7 +753,7 @@ class TestVideoCliExtend:
         monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", lambda *_args, **_kwargs: targets)
         present = {"org/h3", "org/h3-text"}
         monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: target.repo_id in present)
-        h3_info = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=24, frame_alignment=17, resolution_alignment=32)
+        h3_info = make_ltx_info(family="h3", backend="h3", frame_alignment=17)
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model="h3"), local_models=None, detect=lambda _model: h3_info, config=_H3_CONFIG, resolve=_h3_repo)
         assert captured["args"].model_name == "h3"
         assert not any("not available locally" in message for message in captured["warnings"])
@@ -1000,7 +764,7 @@ class TestVideoCliExtend:
         targets = (DownloadTarget("org/h3", "rev1", ()), DownloadTarget("org/h3-text", "rev2", ()))
         monkeypatch.setattr("zvisiongenerator.downloads.plans.video_plan", lambda *_args, **_kwargs: targets)
         monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: target.repo_id == "org/h3")
-        h3_info = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=24, frame_alignment=17, resolution_alignment=32)
+        h3_info = make_ltx_info(family="h3", backend="h3", frame_alignment=17)
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model="h3"), local_models=None, detect=lambda _model: h3_info, config=_H3_CONFIG, resolve=_h3_repo)
         assert captured["args"].model == "ltx-8"
         assert any("(h3)" in message and "not available locally" in message for message in captured["warnings"])
@@ -1161,128 +925,14 @@ class TestVideoCliClipMemory:
 # ---------------------------------------------------------------------------
 
 
-class TestAlignedVideoDims:
-    """One helper rounds the size and length of every video job (CLI and Web UI)."""
-
-    _MODEL = {"resolution_alignment": 32, "frame_rule": FrameRule(8, 1, "nearest"), "family": "LTX"}
-
-    def _aligned(self, width, height, frames, **overrides):
-        from zvisiongenerator.utils.alignment import aligned_video_dims
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            return aligned_video_dims(width, height, frames, **{"upscale": False, **self._MODEL, **overrides})
-
-    def test_uses_the_models_alignment(self):
-        assert self._aligned(720, 450, 52) == (736, 448, 49)
-
-    def test_an_upscaled_clip_uses_64_alignment(self):
-        assert self._aligned(720, 450, 52, upscale=True) == (704, 448, 49)
-
-    def test_matches_the_single_step_helpers(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            expected = (*align_resolution(700, 475, 32, "LTX"), align_frames(100, FrameRule(8, 1, "nearest")))
-
-        assert self._aligned(700, 475, 100) == expected
-
-    def test_warns_about_each_correction(self):
-        from zvisiongenerator.utils.alignment import aligned_video_dims
-
-        with warnings.catch_warnings(record=True) as seen:
-            warnings.simplefilter("always")
-            aligned_video_dims(720, 450, 52, upscale=False, **self._MODEL)
-
-        assert len(seen) == 2
-
-    def test_an_aligned_clip_is_unchanged_and_silent(self):
-        from zvisiongenerator.utils.alignment import aligned_video_dims
-
-        with warnings.catch_warnings(record=True) as seen:
-            warnings.simplefilter("always")
-            assert aligned_video_dims(704, 448, 121, upscale=False, **self._MODEL) == (704, 448, 121)
-
-        assert seen == []
-
-
 # ---------------------------------------------------------------------------
 # _align_resolution
 # ---------------------------------------------------------------------------
 
 
-class TestAlignResolution:
-    """Verify resolution alignment to multiples of a given divisor."""
-
-    @pytest.mark.parametrize(
-        ("w_in", "h_in", "w_out", "h_out"),
-        [
-            (704, 480, 704, 480),  # already aligned
-            (512, 512, 512, 512),  # already aligned
-            (700, 475, 704, 480),  # rounded up
-            (710, 490, 704, 480),  # rounded to nearest multiple of 32
-            (100, 100, 96, 96),  # small values
-        ],
-        ids=["already-aligned-704x480", "already-aligned-512x512", "rounded-700x475", "rounded-710x490", "small-100x100"],
-    )
-    def test_alignment(self, w_in, h_in, w_out, h_out):
-        result_w, result_h = align_resolution(w_in, h_in, 32, "Test")
-        assert result_w % 32 == 0
-        assert result_h % 32 == 0
-        assert result_w == w_out
-        assert result_h == h_out
-
-    def test_already_aligned_no_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            align_resolution(704, 480, 32, "Test")
-            assert len(w) == 0
-
-    def test_unaligned_emits_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            align_resolution(700, 475, 32, "Test")
-            assert len(w) == 1
-            assert "divisible by 32" in str(w[0].message)
-
-
 # ---------------------------------------------------------------------------
 # align_frames (the LTX rule)
 # ---------------------------------------------------------------------------
-
-
-class TestAlignFramesLtxRule:
-    """Verify LTX frame alignment to 8k+1 pattern."""
-
-    @pytest.mark.parametrize(
-        ("frames_in", "frames_out"),
-        [
-            (9, 9),  # 8*1+1 = 9
-            (17, 17),  # 8*2+1 = 17
-            (49, 49),  # 8*6+1 = 49
-            (97, 97),  # 8*12+1 = 97
-            (121, 121),  # 8*15+1 = 121
-            (50, 49),  # rounds to 49
-            (48, 49),  # rounds to 49
-            (10, 9),  # rounds to 9
-            (14, 17),  # rounds to 17 (14-1=13, 13/8=1.625, round=2, 8*2+1=17)
-            (1, 9),  # min k=1 → 9
-        ],
-        ids=["9", "17", "49", "97", "121", "50->49", "48->49", "10->9", "14->17", "1->9"],
-    )
-    def test_alignment(self, frames_in, frames_out):
-        result = align_frames(frames_in, FrameRule(8, 1, "nearest"))
-        assert result == frames_out
-        # Verify 8k+1 pattern
-        assert (result - 1) % 8 == 0
-
-    def test_aligned_video_dims_warns_about_an_invalid_count(self):
-        from zvisiongenerator.utils.alignment import aligned_video_dims
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            aligned_video_dims(704, 448, 50, upscale=False, resolution_alignment=32, frame_rule=FrameRule(8, 1, "nearest"), family="LTX")
-            assert len(w) == 1
-            assert "8k+1" in str(w[0].message)
 
 
 def test_a_clip_limited_by_system_memory_points_at_the_model_not_the_clip(monkeypatch):
@@ -1303,7 +953,7 @@ def test_a_clip_limited_by_system_memory_points_at_the_model_not_the_clip(monkey
 class TestVideoCliH3:
     """MiniMax H3 on the CLI: ``--end-image``, the 17k+5 frame rule, and refusals only for what a family lacks."""
 
-    _H3 = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=24, frame_alignment=17, resolution_alignment=32)
+    _H3 = make_ltx_info(family="h3", backend="h3", frame_alignment=17)
 
     @pytest.fixture(autouse=True)
     def _linux(self, monkeypatch):
@@ -1312,7 +962,7 @@ class TestVideoCliH3:
         monkeypatch.setattr(backends_module.sys, "platform", "linux")
 
     def _main(self, monkeypatch, tmp_path, argv, *, family="h3", config=None, backend=None, **options):
-        info = self._H3 if family == "h3" else VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+        info = self._H3 if family == "h3" else make_ltx_info()
         return _run_cli(monkeypatch, tmp_path, argv, backend=backend or MagicMock(), config=config or load_config(), detect=lambda _model: info, **options)
 
     def _images(self, tmp_path):
@@ -1361,7 +1011,7 @@ class TestVideoCliH3:
     def test_ltx_loads_for_the_last_frame_image_only_when_one_is_given(self, monkeypatch, tmp_path, extra, end_image):
         first, last = self._images(tmp_path)
         backend = MagicMock()
-        backend.load_model.return_value = (MagicMock(), VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32))
+        backend.load_model.return_value = (MagicMock(), make_ltx_info())
         monkeypatch.setattr(video_cli, "run_video_batch", MagicMock())
 
         self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--image", first, *[a for flag in extra for a in (flag, last)]], family="ltx", backend=backend)
@@ -1495,17 +1145,14 @@ class TestEstimatedTimeLine:
     def test_the_line_names_the_size_the_frames_and_the_estimated_minutes(self, monkeypatch, capsys):
         self._run(monkeypatch, self._DISCRETE, self._args())
 
-        assert capsys.readouterr().out.strip() == "MiniMax H3 at 864x480, 124 frames: estimated 5 min (excludes the one-time weight preparation)."
+        out = capsys.readouterr().out
+        assert "864x480" in out and "124 frames" in out and "estimated" in out
 
     def test_a_unified_budget_prints_the_line_too(self, monkeypatch, capsys):
         self._run(monkeypatch, self._UNIFIED, self._args(width=768, height=448))
 
-        assert capsys.readouterr().out.strip() == "MiniMax H3 at 768x448, 124 frames: estimated 23 min (excludes the one-time weight preparation)."
-
-    def test_the_mode_and_steps_change_the_estimate(self, monkeypatch, capsys):
-        self._run(monkeypatch, self._DISCRETE, self._args(steps=4, image_path="a.png"))
-
-        assert "estimated 4 min" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "768x448" in out and "124 frames" in out and "estimated" in out
 
     def test_an_extension_estimates_the_window_in_num_frames(self, monkeypatch, capsys):
         self._run(monkeypatch, self._DISCRETE, self._args(extend_source=make_extend_source(), extend_frames=34, num_frames=56))

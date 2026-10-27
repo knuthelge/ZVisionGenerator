@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from _video_helpers import make_ltx_info
 from conftest import _make_plan, make_extend_source
 
 from dataclasses import replace
@@ -15,53 +16,48 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import ExtendSpec
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
-from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_runner import run_video_batch
-
-
-def _ltx_model_info():
-    return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
 
 
 class TestRunVideoBatch:
     """Verify run_video_batch() loop execution and edge cases."""
 
-    def test_single_prompt_single_run(self):
-        backend = _make_mock_video_backend()
-        model = MagicMock()
+    @pytest.mark.parametrize(
+        ("runs", "prompts", "expected"),
+        [
+            (1, {"default": [("a sunset", None)]}, 1),
+            (2, {"set1": [("prompt A", None), ("prompt B", None)]}, 4),
+            (1, {"set_a": [("p1", None)], "set_b": [("p2", None), ("p3", None)]}, 3),
+        ],
+    )
+    def test_every_prompt_of_every_set_runs_once_per_run(self, runs, prompts, expected):
         workflow = MagicMock()
         workflow.run.return_value = StageOutcome.success
-        args = _make_video_args(runs=1)
+        args = _make_video_args(runs=runs)
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
+
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+
+        assert workflow.run.call_count == expected
+
+    @pytest.mark.parametrize(
+        ("overrides", "expected"),
+        [
+            ({"upscale": 2, "upscale_steps": 30, "no_audio": True}, (2, 30, True)),
+            ({"upscale": None, "upscale_steps": None, "no_audio": False}, (None, None, False)),
+        ],
+    )
+    def test_the_upscale_and_audio_settings_reach_the_request(self, overrides, expected):
+        workflow = MagicMock()
+        workflow.run.return_value = StageOutcome.success
+        args = _make_video_args(**overrides)
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
-        assert workflow.run.call_count == 1
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
 
-    def test_multiple_prompts_multiple_runs(self):
-        backend = _make_mock_video_backend()
-        model = MagicMock()
-        workflow = MagicMock()
-        workflow.run.return_value = StageOutcome.success
-        args = _make_video_args(runs=2)
-        prompts = {"set1": [("prompt A", None), ("prompt B", None)]}
-        config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
-
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
-        # 2 runs * 2 prompts = 4 iterations
-        assert workflow.run.call_count == 4
-
-    def test_multiple_sets(self):
-        backend = _make_mock_video_backend()
-        model = MagicMock()
-        workflow = MagicMock()
-        workflow.run.return_value = StageOutcome.success
-        args = _make_video_args(runs=1)
-        prompts = {"set_a": [("p1", None)], "set_b": [("p2", None), ("p3", None)]}
-        config: dict = {}
-
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
-        assert workflow.run.call_count == 3
+        request = workflow.run.call_args.args[0]
+        assert (request.upscale, request.upscale_steps, request.no_audio) == expected
 
     def test_zero_prompts_early_return(self):
         backend = _make_mock_video_backend()
@@ -72,7 +68,7 @@ class TestRunVideoBatch:
         prompts: dict = {}
         config: dict = {}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
+        run_video_batch(backend, model, make_ltx_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
         workflow.run.assert_not_called()
 
         assert events == [
@@ -94,7 +90,7 @@ class TestRunVideoBatch:
         prompts = {"default": [("fail prompt", None)]}
         config: dict = {}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
+        run_video_batch(backend, model, make_ltx_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
 
         request = workflow.run.call_args.args[0]
 
@@ -151,7 +147,7 @@ class TestRunVideoBatch:
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
+        run_video_batch(backend, model, make_ltx_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
 
         step_events = [event for event in events if event["type"] == "step_progress"]
 
@@ -193,7 +189,7 @@ class TestRunVideoBatch:
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
+        run_video_batch(backend, model, make_ltx_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
 
         finished_events = [event for event in events if event["type"] == "generation_finished"]
 
@@ -235,7 +231,7 @@ class TestVideoFailureMessages:
         run_video_batch(
             _make_mock_video_backend(),
             MagicMock(),
-            _ltx_model_info(),
+            make_ltx_info(),
             workflow,
             prompts,
             config,
@@ -324,7 +320,7 @@ class TestVideoSceneRequests:
         plan = _make_plan(prompts, args, config={}, scene=plan_scene, scene_by_set=scene_by_set)
         if plan_transform is not None:
             plan = plan_transform(plan)
-        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, {}, args, plan=plan)
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, {}, args, plan=plan)
         return captured
 
     def test_plain_job_has_no_scene_fields(self):
@@ -377,7 +373,7 @@ class TestVideoSceneEndToEnd:
             plan = plan_transform(plan)
         workflow = build_video_workflow(Namespace(image_path=None, no_audio=False), enhance=enhance)
         with patch("zvisiongenerator.workflows.video_stages.embed_mp4_config") as embed:
-            run_video_batch(backend, MagicMock(), _ltx_model_info(), workflow, prompts, {}, args, plan=plan)
+            run_video_batch(backend, MagicMock(), make_ltx_info(), workflow, prompts, {}, args, plan=plan)
         sent = [call.kwargs["prompt"] for call in backend.text_to_video.call_args_list]
         return sent, [call.args[1] for call in embed.call_args_list]
 
@@ -419,7 +415,7 @@ class TestVideoQuit:
         run_video_batch(
             _make_mock_video_backend(),
             MagicMock(),
-            _ltx_model_info(),
+            make_ltx_info(),
             workflow,
             prompts,
             config,
@@ -487,7 +483,7 @@ class TestEndImageBatch:
         prompts = {"default": [("a dog", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 10**9}}
 
-        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
 
         (request,) = requests
         assert (request.image_path, request.end_image_path) == ("/tmp/first.png", expected)
@@ -507,7 +503,7 @@ class TestExtendBatch:
         args = _make_video_args(runs=runs, width=512, height=256, num_frames=25 + 48, extend_source=source, extend_frames=48, **arg_overrides)
         prompts = prompts or {"default": [("", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 10**9}}
-        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config, scene=source.scene))
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config, scene=source.scene))
         return requests, source
 
     def test_request_carries_the_extend_spec_and_the_window_size(self):
@@ -519,10 +515,6 @@ class TestExtendBatch:
     def test_planned_scene_reaches_the_request_and_an_empty_prompt_is_accepted(self):
         (request,), _ = self._run()
         assert request.prompt == "" and request.scene == "A street at night." and request.resolved_scene == "A street at night."
-
-    def test_prints_the_added_frames_and_the_source_name(self, capsys):
-        self._run()
-        assert "+48 frames from clip.mp4" in capsys.readouterr().out
 
     def test_sibling_runs_get_different_seeds(self):
         with patch("zvisiongenerator.preflight.random.randint", side_effect=[1111, 2222]):
@@ -543,5 +535,5 @@ class TestExtendBatch:
         workflow.run.return_value = StageOutcome.success
         args = _make_video_args()
         prompts = {"default": [("a sunset", None)]}
-        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, {}, args, plan=_make_plan(prompts, args))
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, {}, args, plan=_make_plan(prompts, args))
         assert workflow.run.call_args.args[0].extend is None

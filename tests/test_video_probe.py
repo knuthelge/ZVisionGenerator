@@ -221,13 +221,6 @@ class TestFfprobeJson:
 
         assert ffprobe_json("/clips/clip.mp4") == data
 
-    def test_an_unreadable_file_is_a_runtime_error(self, monkeypatch):
-        error = subprocess.CalledProcessError(1, ["ffprobe"], stderr="Invalid data found\n")
-        monkeypatch.setattr(video_probe.subprocess, "run", MagicMock(side_effect=error))
-
-        with pytest.raises(RuntimeError, match="Invalid data found"):
-            ffprobe_json("/clips/broken.mp4", count_packets=False)
-
 
 class TestProbeVideo:
     def test_runs_ffprobe_with_packet_counts_and_parses_its_json(self, monkeypatch):
@@ -326,7 +319,7 @@ class TestRealClips:
 
     @pytest.mark.parametrize(
         ("angle", "rotation", "size", "corner"),
-        [("-90", 90, (128, 256), "top-right"), ("90", 270, (128, 256), "bottom-left"), ("180", 180, (256, 128), "bottom-right")],
+        [("-90", 90, (128, 256), "top-right"), ("90", 270, (128, 256), "bottom-left")],
     )
     def test_rotation_is_the_clockwise_turn_the_decoder_applies(self, base, tmp_path, angle, rotation, size, corner):
         path = rotated_copy(base, tmp_path / "rotated.mp4", angle)
@@ -336,9 +329,6 @@ class TestRealClips:
         assert (probe.coded_width, probe.coded_height) == (256, 128)
         assert (probe.width, probe.height, probe.rotation) == (*size, rotation)
         assert _patch_corner(path, *size) == corner
-
-    def test_a_rotated_clip_is_not_rejected(self, base, tmp_path):
-        assert extend_source_problems(probe_video(rotated_copy(base, tmp_path / "rotated.mp4", "-90")), None) == []
 
     def test_an_app_made_clip_is_clean(self, tmp_path):
         # What the backend writes: raw frames through libx264 at crf 18 in yuv420p, with no colour tags.

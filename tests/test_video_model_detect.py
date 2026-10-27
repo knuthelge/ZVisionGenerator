@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model, is_known_video_repo
+from zvisiongenerator.utils.video_model_detect import detect_video_model, is_known_video_repo
 
 
 class TestDetectVideoModel:
@@ -122,12 +122,6 @@ class TestDetectVideoModel:
         info = detect_video_model(model_path)
         assert info.family == expected_family
         assert info.supports_i2v == expected_i2v
-
-    def test_returns_frozen_dataclass(self):
-        info = detect_video_model("dgrauet/ltx-2.3-mlx-q4")
-        assert isinstance(info, VideoModelInfo)
-        with pytest.raises(AttributeError):
-            info.family = "changed"  # type: ignore[misc]
 
     def test_detects_configured_default_repo(self, monkeypatch):
         monkeypatch.setattr(

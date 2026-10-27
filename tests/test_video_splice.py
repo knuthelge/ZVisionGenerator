@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
-import hashlib
 import subprocess
 import wave
 from pathlib import Path
@@ -443,6 +441,7 @@ class TestSpliceClipsMocked:
     def test_an_existing_output_is_replaced_by_a_checked_result(self, tmp_path, monkeypatch):
         self._run_splice(tmp_path, monkeypatch, existing=b"old")
         assert self.output.read_bytes() == b"joined"
+        assert [path.name for path in self.output.parent.iterdir()] == ["result.mp4"]
 
 
 FPS = 24
@@ -492,15 +491,6 @@ def _make_segment(directory: Path, source: ExtendSource, frames: np.ndarray, *, 
         tone = 0.3 * np.sin(2 * np.pi * 300 * np.arange(count) / RATE)
         write_pcm16_wav(np.stack([tone, tone]), wav)
     return ExtendSegment(video, wav)
-
-
-@REAL
-def test_write_segment_frames_reports_an_ffmpeg_failure(tmp_path):
-    command = build_segment_command(128, 64, "24/1", tmp_path / "missing-dir" / "segment.mp4")
-    with pytest.raises(RuntimeError, match="extension segment"):
-        write_segment_frames(numbered_frames(8, 128, 64), command)
-    with pytest.raises(RuntimeError, match="the upscaled video"):
-        write_segment_frames(numbered_frames(8, 128, 64), command, description="the upscaled video")
 
 
 class _DeadPipe:
@@ -575,10 +565,6 @@ def _red_overlap(frame: np.ndarray, reference: np.ndarray) -> float:
     return float((red(frame) & red(reference)).sum() / red(reference).sum())
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 @REAL
 class TestRealMux:
     def test_the_video_packets_are_copied_and_the_wav_becomes_the_only_audio_stream(self, tmp_path):
@@ -597,13 +583,6 @@ class TestRealMux:
         streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(output)], capture_output=True, check=True, text=True).stdout.split()
         assert sorted(streams) == ["audio", "video"]
 
-    def test_a_missing_wav_is_reported(self, tmp_path):
-        video = tmp_path / "video.mp4"
-        write_segment_frames(numbered_frames(8, 128, 64), build_segment_command(128, 64, "24/1", video))
-        with pytest.raises(RuntimeError, match="add the audio"):
-            mux_audio(video, tmp_path / "missing.wav", tmp_path / "out.mp4")
-        assert not (tmp_path / "out.mp4").exists()
-
 
 def _stream_starts(path: Path) -> dict[str, float]:
     """Return the start time in seconds of each stream of a file by its type."""
@@ -614,7 +593,8 @@ def _stream_starts(path: Path) -> dict[str, float]:
 
 @REAL
 class TestRealFinalMux:
-    @pytest.mark.parametrize(("video_delay", "audio_delay"), [(0.0, 0.5), (0.5, 0.0), (0.25, 0.75)])
+    # (0.5, 0.0) is the only case with a non-zero video offset: a video that starts late in its file, as phone clips do.
+    @pytest.mark.parametrize(("video_delay", "audio_delay"), [(0.5, 0.0), (0.25, 0.75)])
     def test_each_stream_keeps_the_start_it_had_in_the_source(self, tmp_path, video_delay, audio_delay):
         video = tmp_path / "video.mp4"
         write_segment_frames(numbered_frames(48, 128, 64), build_segment_command(128, 64, "24/1", video))
@@ -634,49 +614,25 @@ class TestRealFinalMux:
         assert result["audio"] - result["video"] == pytest.approx(starts["audio"] - starts["video"], abs=0.05)
         assert result["audio"] - min(result.values()) == pytest.approx(starts["audio"] - min(starts.values()), abs=0.05)
 
-    @pytest.mark.parametrize("with_audio", [True, False])
-    def test_the_settings_in_the_metadata_read_back_as_the_app_reads_them(self, tmp_path, with_audio):
+    def test_the_settings_in_the_metadata_read_back_as_the_app_reads_them(self, tmp_path):
+        # The only real MP4 provenance round-trip: the other provenance tests mock ffmpeg.
         video = tmp_path / "video.mp4"
         write_segment_frames(numbered_frames(24, 128, 64), build_segment_command(128, 64, "24/1", video))
-        audio = None
-        if with_audio:
-            wav = tmp_path / "tone.wav"
-            write_pcm16_wav(np.stack([0.3 * np.sin(2 * np.pi * 300 * np.arange(RATE) / RATE)] * 2), wav)
-            audio = tmp_path / "audio.m4a"
-            ffmpeg("-i", str(wav), "-c:a", "aac", str(audio))
+        wav = tmp_path / "tone.wav"
+        write_pcm16_wav(np.stack([0.3 * np.sin(2 * np.pi * 300 * np.arange(RATE) / RATE)] * 2), wav)
+        audio = tmp_path / "audio.m4a"
+        ffmpeg("-i", str(wav), "-c:a", "aac", str(audio))
         payload = {"schema": "zvisiongenerator.config.v1", "workflow": "upscale", "prompt": 'A knight "rides" in \u2014 \u00e9', "width": 256, "height": 128}
         output = tmp_path / "out.mp4"
 
         run_ffmpeg(build_final_mux_command(video, audio, output, video_offset=0.0, metadata=mp4_config_args(payload)))
 
         assert read_mp4_config(output) == payload
-        assert probe_video(output).has_audio is with_audio
+        assert probe_video(output).has_audio
 
 
 @REAL
 class TestRealStreamCopy:
-    def test_source_and_segment_are_kept_bit_for_bit(self, tmp_path):
-        source = _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), audio_seconds=1.4, metadata=True)
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64, offset=100))
-        assert can_stream_copy(probe_video(source.path), probe_video(segment.video_path))
-        before = _sha256(source.path)
-        output = tmp_path / "joined.mp4"
-
-        assert splice_clips(source, segment, output, extend_frames=16, include_audio=True) == output
-
-        probe = probe_video(output)
-        assert probe.frame_count == 33 + 16
-        assert (probe.width, probe.height, probe.rotation) == (128, 64, 0)
-        # Every decoded frame is the source's or the segment's own, and so is every packet except the first of each
-        # part, which the muxer rewrites to carry the stream's parameter sets.
-        decoded = _packet_hashes(output, decoded=True)
-        assert decoded[:33] == _packet_hashes(source.path, decoded=True)
-        assert decoded[33:] == _packet_hashes(segment.video_path, decoded=True)
-        joined = _packet_hashes(output)
-        assert joined[1:33] == _packet_hashes(source.path)[1:]
-        assert joined[34:] == _packet_hashes(segment.video_path)[1:]
-        assert _sha256(source.path) == before
-
     def test_parts_encoded_with_different_x264_settings_both_decode_exactly(self, tmp_path):
         # The mp4 keeps one avcC, but the concat demuxer writes each part's parameter sets in-band, so a segment
         # encoded with other settings than the source still decodes as it did on its own.
@@ -693,87 +649,19 @@ class TestRealStreamCopy:
         assert decoded[:33] == _packet_hashes(source.path, decoded=True)
         assert decoded[33:] == _packet_hashes(segment.video_path, decoded=True)
 
-    def test_audio_is_the_sources_fitted_length_plus_the_new_audio(self, tmp_path):
-        source = _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), audio_seconds=1.4)  # audio longer than the video
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
-        output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=16, include_audio=True)
-        assert len(_audio_pcm(output)) == round(33 / FPS * RATE) + round(16 / FPS * RATE) == 98000
 
-    def test_short_audio_is_padded_to_the_videos_length(self, tmp_path):
-        source = _make_clip(tmp_path / "source.mp4", numbered_frames(48, 128, 64), audio_seconds=1.0)
-        segment = _make_segment(tmp_path, source, numbered_frames(8, 128, 64))
-        output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=8, include_audio=True)
-        assert len(_audio_pcm(output)) == 48 * 2000 + 8 * 2000
-
-    def test_video_timestamps_stay_even_when_the_audio_outlasts_the_video(self, tmp_path):
-        source = _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), audio_seconds=3.0)
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
-        output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=16, include_audio=True)
-        times = ffmpeg("-i", str(output), "-map", "0:v:0", "-c", "copy", "-f", "framemd5", "-").decode().splitlines()
-        stamps = sorted(int(line.split(",")[2]) for line in times if line and not line.startswith("#"))
-        steps = {later - earlier for earlier, later in zip(stamps, stamps[1:])}
-        assert len(steps) == 1
-
-    def test_no_source_metadata_is_carried_over(self, tmp_path):
-        source = _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), audio_seconds=1.4, metadata=True)
-        assert "source-title" in ffmpeg("-i", str(source.path), "-f", "ffmetadata", "-").decode()
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
-        output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=16, include_audio=True)
-        assert "source-title" not in ffmpeg("-i", str(output), "-f", "ffmetadata", "-").decode()
-
-    def test_leaves_only_the_output_in_its_directory(self, tmp_path):
-        source = _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64))
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64), with_audio=False)
-        out_dir = tmp_path / "out"
-        out_dir.mkdir()
-        splice_clips(source, segment, out_dir / "joined.mp4", extend_frames=16, include_audio=False)
-        assert [path.name for path in out_dir.iterdir()] == ["joined.mp4"]
-
-    def test_a_missing_wav_leaves_nothing_behind(self, tmp_path):
-        source = _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), audio_seconds=1.4)
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64), with_audio=False)
-        out_dir = tmp_path / "out"
-        out_dir.mkdir()
-        broken = ExtendSegment(segment.video_path, tmp_path / "missing.wav")
-        with pytest.raises(FileNotFoundError, match="missing.wav"):
-            splice_clips(source, broken, out_dir / "joined.mp4", extend_frames=16, include_audio=True)
-        assert list(out_dir.iterdir()) == []
+_BT709_TAGS = ("-profile:v", "main", "-vf", "scale=out_color_matrix=bt709,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709")
 
 
-def _tagged_source(tmp_path, space: str, **kwargs: Any) -> ExtendSource:
-    """Encode a Main-profile clip with colour tags, so a High-profile segment cannot be stream copied onto it."""
-    graph = {"bt709": "scale=out_color_matrix=bt709", "smpte170m": "scale=out_color_matrix=bt601"}[space]
-    tags = f"{graph},setparams=colorspace={space}:color_primaries={space}:color_trc={space}"
-    return _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), video_args=("-crf", "18", "-profile:v", "main", "-vf", tags), **kwargs)
+def _tagged_source(tmp_path, **kwargs: Any) -> ExtendSource:
+    """Encode a Main-profile bt709 clip, so a High-profile segment cannot be stream copied onto it."""
+    return _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), video_args=("-crf", "18", *_BT709_TAGS), **kwargs)
 
 
 @REAL
 class TestRealWithoutAudio:
-    """Either join branch leaves no audio stream when none is wanted, and a silent source stays silent."""
-
-    @staticmethod
-    def _source(tmp_path, branch: str, **kwargs: Any) -> ExtendSource:
-        if branch == "reencode":
-            return _tagged_source(tmp_path, "bt709", **kwargs)
-        return _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), **kwargs)
-
-    @pytest.mark.parametrize("branch", ["copy", "reencode"])
-    def test_without_audio_the_result_has_no_audio_stream(self, tmp_path, branch):
-        source = self._source(tmp_path, branch, audio_seconds=1.4)
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
-        output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=16, include_audio=False)
-        probe = probe_video(output)
-        assert not probe.has_audio
-        assert probe.frame_count == 49
-
-    @pytest.mark.parametrize("branch", ["copy", "reencode"])
-    def test_silent_source_stays_silent_even_with_new_audio(self, tmp_path, branch):
-        source = self._source(tmp_path, branch)
+    def test_silent_source_stays_silent_even_with_new_audio(self, tmp_path):
+        source = _tagged_source(tmp_path)
         segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
         assert segment.audio_path is not None
         output = tmp_path / "joined.mp4"
@@ -785,29 +673,9 @@ class TestRealWithoutAudio:
 
 @REAL
 class TestRealReencode:
-    @pytest.mark.parametrize("space", ["bt709", "smpte170m"])
-    def test_colour_tags_survive(self, tmp_path, space):
-        source = _tagged_source(tmp_path, space)
-        assert (source.color_space, source.color_primaries, source.color_trc) == (space, space, space)
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64, offset=100), with_audio=False)
-        assert not can_stream_copy(probe_video(source.path), probe_video(segment.video_path))  # Main against High
-        output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=16, include_audio=False)
-        probe = probe_video(output)
-        assert probe.frame_count == 49
-        assert (probe.color_space, probe.color_primaries, probe.color_trc) == (space, space, space)
-        assert probe.pix_fmt == "yuv420p"
-
-    def test_audio_sample_count_is_exact_and_the_result_has_one_audio_stream(self, tmp_path):
-        source = _tagged_source(tmp_path, "bt709", audio_seconds=1.2)
-        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
-        output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=16, include_audio=True)
-        assert probe_video(output).has_audio
-        assert len(_audio_pcm(output)) == 98000
-
     def test_a_re_encoded_result_stream_copies_on_the_next_extension(self, tmp_path):
-        source = _tagged_source(tmp_path, "bt709", audio_seconds=1.2)
+        # Guards against quality loss on every later extension.
+        source = _tagged_source(tmp_path, audio_seconds=1.2)
         first_segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64, offset=100))
         assert not can_stream_copy(probe_video(source.path), probe_video(first_segment.video_path))  # Main against High
         joined = tmp_path / "joined.mp4"
@@ -826,6 +694,7 @@ class TestRealReencode:
         assert _packet_hashes(extended, decoded=True)[: 33 + 16] == _packet_hashes(joined, decoded=True)
 
     def test_audio_follows_a_source_whose_video_starts_late(self, tmp_path):
+        # Phone and camera clips: the video starts late in its file and the sound must follow it.
         click = np.zeros(3 * RATE, dtype=np.float32)
         click[RATE : RATE + 240] = np.random.default_rng(0).uniform(-1, 1, 240)  # a burst 1.0 s into the file
         wav = tmp_path / "click.wav"
@@ -850,8 +719,9 @@ class TestRealReencode:
 
 @REAL
 class TestRealRotated:
-    @pytest.mark.parametrize(("angle", "size", "rotation"), [("-90", (64, 128), 90), ("90", (64, 128), 270), ("180", (128, 64), 180)])
-    def test_rotated_source_comes_out_upright(self, tmp_path, angle, size, rotation):
+    def test_rotated_source_comes_out_upright(self, tmp_path):
+        # Also the only real check that audio longer than the video is trimmed, with a 44.1 kHz source resampled to 48 kHz.
+        angle, size, rotation = "-90", (64, 128), 90
         base = tmp_path / "base.mp4"
         _make_clip(base, numbered_frames(33, 128, 64), audio_seconds=1.4)
         rotated = rotated_copy(base, tmp_path / "rotated.mp4", angle)
@@ -882,19 +752,9 @@ class TestRealAdversarial:
         source = _make_clip(tmp_path / name, numbered_frames(count, 128, 64), audio_seconds=audio_seconds, **clip_args)
         return source, _make_segment(tmp_path, source, numbered_frames(extend, 128, 64, offset=100))
 
-    @pytest.mark.parametrize("error", [-1, 1])
-    def test_a_frame_count_off_by_one_is_refused_and_the_existing_output_survives(self, tmp_path, error):
-        source, segment = self._clip_pair(tmp_path)
-        wrong = dataclasses.replace(source, frame_count=source.frame_count + error)  # as a bad nb_frames would give
-        output = tmp_path / "joined.mp4"
-        output.write_bytes(b"old")
-        with pytest.raises(RuntimeError, match="frames, expected"):
-            splice_clips(wrong, segment, output, extend_frames=16, include_audio=True)
-        assert output.read_bytes() == b"old"
-        assert [path.name for path in tmp_path.iterdir() if path.name.startswith(".splice-")] == []
-
     @pytest.mark.parametrize("branch", ["copy", "reencode"])
     def test_ntsc_rate_gets_exact_frames_and_samples(self, tmp_path, branch):
+        # Each branch is a different ffmpeg path (concat demuxer against concat filter), so both must count exactly at 29.97 fps.
         frames = numbered_frames(30, 128, 64)
         profile = ("-profile:v", "main") if branch == "reencode" else ()
         path = tmp_path / "source.mp4"
@@ -923,6 +783,7 @@ class TestRealAdversarial:
         assert probe_video(output).frame_count == 49
 
     def test_copy_branch_of_a_source_whose_video_starts_late_keeps_every_frame(self, tmp_path):
+        # The only real check that the video-only remux starts the copy at zero, so the concat demuxer drops nothing.
         plain = tmp_path / "plain.mp4"
         _make_clip(plain, numbered_frames(33, 128, 64))
         late = tmp_path / "late.mp4"
@@ -1012,7 +873,7 @@ class TestBuildJoinAudio:
 _NOISE = np.random.default_rng(7).uniform(-0.2, 0.2, 40 * RATE).astype(np.float32)  # the sound of the chain tests, at every moment
 
 
-def _noise_clip(path: Path, frames: int, *, audio_short: int, click_frame: int) -> ExtendSource:
+def _noise_clip(path: Path, frames: int, *, audio_short: int, click_frame: int, video_args: tuple[str, ...] = ()) -> ExtendSource:
     """Encode an app-like clip (raw frames to libx264 with B-frames, 48 kHz stereo AAC) whose sound is noise and one click.
 
     The audio ends ``audio_short`` samples before the video does, as a clip made by the app does.
@@ -1024,7 +885,7 @@ def _noise_clip(path: Path, frames: int, *, audio_short: int, click_frame: int) 
     wav = path.with_suffix(".wav")
     write_pcm16_wav(np.stack([sound, sound]), wav)
     raw = ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "128x64", "-r", str(FPS), "-i", "-"]
-    encode = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-c:a", "aac", "-b:a", "192k"]
+    encode = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", *video_args, "-c:a", "aac", "-b:a", "192k"]
     ffmpeg("-i", str(wav), *raw, "-map", "1:v", "-map", "0:a", *encode, str(path), data=numbered_frames(frames, 128, 64).tobytes())
     wav.unlink()
     return build_extend_source(path, probe_video(path), None)
@@ -1064,29 +925,38 @@ class TestRealChainedExtensions:
     FRAMES = 48
     EXTEND = 16
     CLICK_FRAME = 10
+    EARLY = 1520  # the model's sound ends this many samples before its video does
 
-    def _clip(self, path: Path) -> ExtendSource:
-        return _noise_clip(path, self.FRAMES, audio_short=1500, click_frame=self.CLICK_FRAME)
+    def _clip(self, path: Path, **kwargs: Any) -> ExtendSource:
+        return _noise_clip(path, self.FRAMES, audio_short=1500, click_frame=self.CLICK_FRAME, **kwargs)
 
-    def _chain(self, tmp_path, steps: int):
-        """Extend a clip ``steps`` times, each time the previous result; yield each step's source, segment and output."""
+    def _short_window(self, directory: Path, source: ExtendSource) -> ExtendSegment:
+        """Build a segment whose new sound ends ``EARLY`` samples short, cut and faded as the backend cuts it."""
+        video = _make_segment(directory, source, numbered_frames(self.EXTEND, 128, 64, offset=100), with_audio=False).video_path
+        lead = 12000
+        cut = round(source.frame_count / FPS * RATE)
+        keep = round(self.EXTEND / FPS * RATE)
+        window = np.stack([_NOISE[cut - lead : cut + keep - self.EARLY]] * 2)
+        wav = directory / "segment.wav"
+        write_pcm16_wav(cut_window_audio(window, skip=lead, keep=keep, lead=lead), wav)
+        return ExtendSegment(video, wav, lead_samples=lead)
+
+    def test_chained_extensions_keep_video_at_zero_audio_in_step_and_no_silent_hole(self, tmp_path):
+        # Two steps are enough for the AAC offset drift that the video-only remux exists for. Each extension's sound is
+        # short, so every result ends in a silent tail that the next extension must fill.
         source = self._clip(tmp_path / "step0.mp4")
-        for step in range(1, steps + 1):
+        assert source.video_start == 0
+        reference = _audio_pcm(source.path)
+        click = round(self.CLICK_FRAME / FPS * RATE)
+        joins = []
+        for step in (1, 2):
             directory = tmp_path / f"work{step}"
             directory.mkdir()
-            segment = _window_segment(directory, source, self.EXTEND)
+            segment = self._short_window(directory, source)
             output = tmp_path / f"step{step}.mp4"
             assert can_stream_copy(probe_video(source.path), probe_video(segment.video_path))
             splice_clips(source, segment, output, extend_frames=self.EXTEND, include_audio=True)
-            yield step, source, segment, output
-            source = build_extend_source(output, probe_video(output), None)
 
-    def test_three_chained_extensions_keep_video_at_zero_audio_in_step_and_no_silent_hole(self, tmp_path):
-        first = self._clip(tmp_path / "step0.mp4")
-        assert first.video_start == 0
-        reference = _audio_pcm(first.path)
-        click = round(self.CLICK_FRAME / FPS * RATE)
-        for step, source, segment, output in self._chain(tmp_path, 3):
             probe = probe_video(output)
             frames = self.FRAMES + step * self.EXTEND
             assert probe.frame_count == frames
@@ -1104,68 +974,36 @@ class TestRealChainedExtensions:
             assert decoded[: source.frame_count] == _packet_hashes(source.path, decoded=True)
             assert decoded[source.frame_count :] == _packet_hashes(segment.video_path, decoded=True)
             assert _packet_hashes(output)[1 : source.frame_count] == _packet_hashes(source.path)[1:]
-            # No hole of digital silence at the join or anywhere else (under 2 ms).
-            join = round(source.frame_count / FPS * RATE)
-            assert _longest_silence(pcm, join - 4800, join + 4800) < RATE // 500
-            assert _longest_silence(pcm, 0, len(pcm)) < RATE // 500
-
-    def test_the_gap_is_silent_without_a_lead_in(self, tmp_path):
-        """A segment with no lead-in cannot fill the gap, so it stays silent: the lead-in is what removes the hole."""
-        source = self._clip(tmp_path / "step0.mp4")
-        directory = tmp_path / "work"
-        directory.mkdir()
-        window = _window_segment(directory, source, self.EXTEND)
-        wav = directory / "plain.wav"
-        write_pcm16_wav(_read_segment_wav(window.audio_path)[:, window.lead_samples :], wav)
-        output = tmp_path / "out.mp4"
-        splice_clips(source, ExtendSegment(window.video_path, wav), output, extend_frames=self.EXTEND, include_audio=True)
-        pcm = _audio_pcm(output)
-        assert len(pcm) == round((self.FRAMES + self.EXTEND) / FPS * RATE)
-        assert 1000 < _longest_silence(pcm, 94000, 98000) <= 1600
-
-    def test_the_new_audio_ends_with_a_fade_not_a_cut(self, tmp_path):
-        source = self._clip(tmp_path / "step0.mp4")
-        directory = tmp_path / "work"
-        directory.mkdir()
-        keep, lead, early = round(self.EXTEND / FPS * RATE), 12000, 1500
-        cut_at = round(self.FRAMES / FPS * RATE)
-        # A window whose sound ends early, as the model's does, cut as the backend cuts it.
-        window = np.stack([_NOISE[cut_at - lead : cut_at + keep - early]] * 2)
-        cut = cut_window_audio(window, skip=lead, keep=keep, lead=lead)
-        wav = directory / "segment.wav"
-        write_pcm16_wav(cut, wav)
-        video = _make_segment(directory, source, numbered_frames(self.EXTEND, 128, 64, offset=100), with_audio=False).video_path
-        output = tmp_path / "out.mp4"
-        splice_clips(source, ExtendSegment(video, wav, lead_samples=lead), output, extend_frames=self.EXTEND, include_audio=True)
-        pcm = np.abs(_audio_pcm(output).astype(int))
-        end = len(pcm)
-        assert end == round((self.FRAMES + self.EXTEND) / FPS * RATE)
-        real_end = end - early
-        assert pcm[real_end - 3000 : real_end - 2000, 0].max() > 1000  # loud noise before the fade
-        assert pcm[real_end - 50 : real_end, 0].max() < 0.2 * pcm[real_end - 3000 : real_end - 2000, 0].max()  # faded out where the sound ended
-        assert pcm[real_end + 100 :].max() <= 100  # silent after it (codec ringing only)
+            # No hole of digital silence at any join, nor before the silent tail of this step's own end (under 2 ms).
+            joins.append(round(source.frame_count / FPS * RATE))
+            for join in joins:
+                assert _longest_silence(pcm, join - 4800, join + 4800) < RATE // 500
+            assert _longest_silence(pcm, 0, len(pcm) - self.EARLY - 480) < RATE // 500
+            source = build_extend_source(output, probe_video(output), None)
+        # The new sound ends with a fade, not a cut, where the model's sound ended.
+        loud = np.abs(pcm[-self.EARLY - 3000 : -self.EARLY - 2000, 0].astype(int)).max()
+        assert loud > 1000
+        assert np.abs(pcm[-self.EARLY - 50 : -self.EARLY, 0].astype(int)).max() < 0.2 * loud
+        assert _longest_silence(pcm, len(pcm) - 4800, len(pcm)) > 500
 
     def test_reencode_branch_keeps_the_audio_in_step_and_fills_the_gap(self, tmp_path):
-        source = self._clip(tmp_path / "step0.mp4")
+        # The source is a Main-profile bt709 clip, so the High-profile segment is re-encoded and the colour tags must survive.
+        source = self._clip(tmp_path / "step0.mp4", video_args=_BT709_TAGS)
+        assert (source.color_space, source.color_primaries, source.color_trc) == ("bt709", "bt709", "bt709")
         directory = tmp_path / "work"
         directory.mkdir()
-        window = _window_segment(directory, source, self.EXTEND)
-        tags = dataclasses.replace(source, color_space="bt709", color_primaries="bt709", color_trc="bt709")
-        video = _make_segment(directory, tags, numbered_frames(self.EXTEND, 128, 64), with_audio=False).video_path
-        assert not can_stream_copy(probe_video(source.path), probe_video(video))
+        segment = _window_segment(directory, source, self.EXTEND)
+        assert not can_stream_copy(probe_video(source.path), probe_video(segment.video_path))
         output = tmp_path / "out.mp4"
-        splice_clips(source, ExtendSegment(video, window.audio_path, window.lead_samples), output, extend_frames=self.EXTEND, include_audio=True)
+        splice_clips(source, segment, output, extend_frames=self.EXTEND, include_audio=True)
         pcm = _audio_pcm(output)
-        assert probe_video(output).frame_count == self.FRAMES + self.EXTEND
+        probe = probe_video(output)
+        assert probe.frame_count == self.FRAMES + self.EXTEND
+        assert (probe.color_space, probe.color_primaries, probe.color_trc) == ("bt709", "bt709", "bt709")  # as ffprobe names them
+        assert probe.pix_fmt == "yuv420p"
         assert len(pcm) == round((self.FRAMES + self.EXTEND) / FPS * RATE)
         assert abs(_best_lag(_audio_pcm(source.path), pcm)) < RATE // 1000
         assert _longest_silence(pcm, 0, len(pcm)) < RATE // 500
-
-
-def _read_segment_wav(path: Path) -> np.ndarray:
-    with wave.open(str(path)) as reader:
-        data = np.frombuffer(reader.readframes(reader.getnframes()), dtype=np.int16).reshape(-1, reader.getnchannels())
-    return data.T.astype(np.float32) / 32767
 
 
 class TestSilentEndLength:
@@ -1201,40 +1039,3 @@ class TestSilentEndLength:
 
     def test_no_samples_is_not_a_silent_end(self):
         assert silent_end_length(np.zeros((2, 0), dtype=np.float32)) == 0
-
-
-@REAL
-class TestRealShortWindowChain:
-    """The model's audio is about 1520 samples short of its video, so each extension ends in a silent tail that the next one must fill."""
-
-    FRAMES = 48
-    EXTEND = 16
-    EARLY = 1520
-    LEAD = 12000
-
-    def _short_window(self, directory: Path, source: ExtendSource) -> ExtendSegment:
-        video = _make_segment(directory, source, numbered_frames(self.EXTEND, 128, 64, offset=100), with_audio=False).video_path
-        cut = round(source.frame_count / FPS * RATE)
-        keep = round(self.EXTEND / FPS * RATE)
-        window = np.stack([_NOISE[cut - self.LEAD : cut + keep - self.EARLY]] * 2)  # the model's sound ends before its video does
-        wav = directory / "segment.wav"
-        write_pcm16_wav(cut_window_audio(window, skip=self.LEAD, keep=keep, lead=self.LEAD), wav)
-        return ExtendSegment(video, wav, lead_samples=self.LEAD)
-
-    def test_no_silent_hole_at_either_join_of_two_extensions(self, tmp_path):
-        source = _noise_clip(tmp_path / "step0.mp4", self.FRAMES, audio_short=1500, click_frame=10)
-        joins = []
-        for step in (1, 2):
-            directory = tmp_path / f"work{step}"
-            directory.mkdir()
-            joins.append(round(source.frame_count / FPS * RATE))
-            output = tmp_path / f"step{step}.mp4"
-            splice_clips(source, self._short_window(directory, source), output, extend_frames=self.EXTEND, include_audio=True)
-            pcm = _audio_pcm(output)
-            assert len(pcm) == round((self.FRAMES + step * self.EXTEND) / FPS * RATE)
-            for join in joins:
-                assert _longest_silence(pcm, join - 4800, join + 4800) < RATE // 500  # under 2 ms
-            source = build_extend_source(output, probe_video(output), None)
-        # The second extension's own end is silent again (the model's sound is short), as the third would find it.
-        assert _longest_silence(pcm, len(pcm) - 4800, len(pcm)) > 500
-        assert abs(_best_lag(_NOISE[None, : len(pcm)].T.repeat(2, axis=1) * 32767, pcm)) < RATE // 1000

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _media import REAL, ffmpeg
 
-from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg, require_ffmpeg, strip_ffmpeg_banner, tool_error
+from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, ensure_ffmpeg, require_ffmpeg, staging_path, strip_audio, strip_ffmpeg_banner, tool_error
 
 
 class TestRequireFfmpeg:
@@ -255,10 +258,6 @@ class TestStripFfmpegBanner:
         "line",
         [
             "libavutil      59. 39.100 / 59. 39.100",
-            "libavcodec     61.  3.100 / 61.  3.100",
-            "libavformat    61.  1.100 / 61.  1.100",
-            "libswscale      8.  1.100 /  8.  1.100",
-            "libswresample   5.  1.100 /  5.  1.100",
             "libpostproc    58.  1.100 / 58.  1.100",
         ],
     )
@@ -268,3 +267,83 @@ class TestStripFfmpegBanner:
     @pytest.mark.parametrize("line", ["libavcodec: bad thing happened", "libpostproc: bad thing happened"])
     def test_error_lines_naming_a_library_are_kept(self, line):
         assert strip_ffmpeg_banner(f"ffmpeg version 7.1\n{line}") == line
+
+
+def _fake_ffmpeg_writing(content: bytes, error: Exception | None = None):
+    """Return a ``subprocess.run`` stand-in that writes ``content`` to the last argument, as ffmpeg writes its output."""
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(content)
+        if error is not None:
+            raise error
+        return MagicMock(returncode=0)
+
+    return fake_run
+
+
+class TestStripAudio:
+    @patch("zvisiongenerator.utils.ffmpeg.subprocess.run")
+    def test_replaces_original_file(self, mock_run, tmp_path):
+        video = tmp_path / "output.mp4"
+        video.write_bytes(b"original data")
+        mock_run.side_effect = _fake_ffmpeg_writing(b"stripped data")
+
+        strip_audio(video)
+
+        assert video.read_bytes() == b"stripped data"
+        assert not staging_path(video).exists()
+        command = mock_run.call_args.args[0]
+        assert "-an" in command  # drops the audio...
+        assert command[command.index("-c:v") + 1] == "copy"  # ...without re-encoding the picture
+
+    @patch("zvisiongenerator.utils.ffmpeg.subprocess.run")
+    def test_writes_to_hidden_staging_file(self, mock_run, tmp_path):
+        video = tmp_path / "output.mp4"
+        video.write_bytes(b"original data")
+        mock_run.side_effect = _fake_ffmpeg_writing(b"stripped data")
+
+        strip_audio(video)
+
+        staged = Path(mock_run.call_args[0][0][-1])
+        assert staged == tmp_path / f"{STAGING_FILE_PREFIX}output.mp4"
+        assert staged.suffix == ".mp4"
+
+    @patch("zvisiongenerator.utils.ffmpeg.subprocess.run")
+    def test_failure_removes_staging_file(self, mock_run, tmp_path):
+        video = tmp_path / "output.mp4"
+        video.write_bytes(b"original data")
+        mock_run.side_effect = _fake_ffmpeg_writing(b"partial", RuntimeError("ffmpeg failed"))
+
+        with pytest.raises(RuntimeError, match="ffmpeg failed"):
+            strip_audio(video)
+
+        assert video.read_bytes() == b"original data"
+        assert not staging_path(video).exists()
+
+    @REAL
+    def test_a_real_clip_loses_its_sound_and_keeps_its_picture(self, tmp_path):
+        clip = tmp_path / "clip.mp4"
+        ffmpeg(
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x32:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-t",
+            "1",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-pix_fmt",
+            "yuv420p",
+            str(clip),
+        )
+
+        strip_audio(clip)
+
+        streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(clip)], capture_output=True, check=True, text=True).stdout.split()
+        assert streams == ["video"]

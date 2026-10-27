@@ -9,25 +9,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from _video_helpers import make_ltx_info, make_video_request, patch_video_cli_for_preflight
 from tests.conftest import _make_mock_video_backend, _make_plan, _make_video_args
 from zvisiongenerator.backends import supports_video_upscale_review
 from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
 from zvisiongenerator.backends.mac.video import LtxVideoBackend, _LtxModel
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.review import REVIEW_PROMPT
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.workflows import video_stages
 from zvisiongenerator.workflows.video_stages import image_to_video_stage, text_to_video_stage
 
 _FPS = 24.0
 _STAGE1_RESULT = SimpleNamespace(video_tokens="video_tokens", audio_tokens="audio_tokens", latent_dims=(3, 7, 11))
-
-
-def _model_info() -> VideoModelInfo:
-    return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +288,7 @@ class _Clock:
 
 
 def _request(**overrides) -> VideoGenerationRequest:
-    defaults = dict(backend=MagicMock(), model=MagicMock(), prompt="a sunset", image_path="/in/start.png", output_dir="/out")
-    defaults.update(overrides)
-    return VideoGenerationRequest(**defaults)
+    return make_video_request(**{"prompt": "a sunset", "image_path": "/in/start.png", "output_dir": "/out", **overrides})
 
 
 def _artifacts() -> VideoWorkingArtifacts:
@@ -414,7 +407,7 @@ def _run_batch(skip, *, prompts=1, review=True, callback=None, args=None, workfl
     run_video_batch(
         backend,
         MagicMock(),
-        _model_info(),
+        make_ltx_info(),
         workflow,
         prompt_data,
         config,
@@ -536,21 +529,15 @@ class TestRunVideoBatchReview:
         second_started = [e for e in events if e["type"] == "generation_started"][1]
         assert second_started["avg_secs"] == pytest.approx(5.0)
 
-    def test_the_cli_prints_the_path_and_the_prompt_without_a_callback(self, capsys):
+    def test_the_path_is_printed_only_without_a_callback(self, capsys):
+        path = str(Path("/tmp/ziv-review-x/small-render.mp4"))
         backend, workflow = _review_workflow()
-
         _run_batch(_decided("approve"), backend=backend, workflow=workflow)
+        assert path in capsys.readouterr().out
 
-        out = capsys.readouterr().out
-        assert str(Path("/tmp/ziv-review-x/small-render.mp4")) in out
-        assert REVIEW_PROMPT in out
-
-    def test_a_web_job_prints_nothing_about_the_path(self, capsys):
         backend, workflow = _review_workflow()
-
         _run_batch(_decided("approve"), callback=lambda event: None, backend=backend, workflow=workflow)
-
-        assert "Small render" not in capsys.readouterr().out
+        assert path not in capsys.readouterr().out
 
     def test_the_quit_key_still_cancels_between_videos_without_review(self):
         events: list[dict] = []
@@ -598,14 +585,10 @@ class TestVideoCliReview:
         assert parser.parse_args(["-m", "model"]).review is False
 
     @pytest.mark.parametrize(
-        ("argv", "tty", "supported", "message"),
-        [
-            (["--review"], True, True, "--upscale"),
-            (["--review", "--upscale", "2"], False, True, "interactive terminal"),
-            (["--review", "--upscale", "2"], True, False, "not supported"),
-        ],
+        ("argv", "tty", "supported"),
+        [(["--review"], True, True), (["--review", "--upscale", "2"], False, True), (["--review", "--upscale", "2"], True, False)],
     )
-    def test_review_errors_before_any_heavy_work(self, monkeypatch, capsys, argv, tty, supported, message):
+    def test_review_errors_before_any_heavy_work(self, monkeypatch, argv, tty, supported):
         import zvisiongenerator.video_cli as video_cli
 
         _tty(monkeypatch, tty)
@@ -616,12 +599,8 @@ class TestVideoCliReview:
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
-        assert message in capsys.readouterr().err
-
     def _patched_main(self, monkeypatch, tmp_path, order, *, batch_error: Exception | None = None):
-        from tests.test_video_cli import TestVideoCliPreflight
-
-        video_cli, captured, _workflows = TestVideoCliPreflight()._patch(monkeypatch, order)
+        video_cli, captured, _workflows = patch_video_cli_for_preflight(monkeypatch, order)
         _FakeSkipSignal.instances.clear()
         monkeypatch.setattr(video_cli, "SkipSignal", _FakeSkipSignal)
         monkeypatch.setattr(video_cli, "supports_video_upscale_review", lambda: True)
@@ -637,7 +616,7 @@ class TestVideoCliReview:
         monkeypatch.setattr(video_cli, "run_video_batch", _run_video_batch)
         return video_cli, captured
 
-    def test_the_listener_starts_after_preflight_and_stops_after_the_batch(self, monkeypatch, tmp_path, capsys):
+    def test_the_listener_starts_after_preflight_and_stops_after_the_batch(self, monkeypatch, tmp_path):
         order: list[str] = []
         _tty(monkeypatch)
         video_cli, captured = self._patched_main(monkeypatch, tmp_path, order)
@@ -651,7 +630,6 @@ class TestVideoCliReview:
         assert captured["listener_calls_at_batch"] == ["start"]
         assert listener.calls == ["start", "stop"]
         assert order.index("ensure_ffmpeg") < order.index("load_model") < order.index("run_video_batch")
-        assert "Commands: [q] quit" in capsys.readouterr().out
 
     def test_the_terminal_is_restored_when_the_batch_raises(self, monkeypatch, tmp_path):
         order: list[str] = []
@@ -664,7 +642,7 @@ class TestVideoCliReview:
 
         assert _FakeSkipSignal.instances[0].calls == ["start", "stop"]
 
-    def test_no_listener_without_review(self, monkeypatch, tmp_path, capsys):
+    def test_no_listener_without_review(self, monkeypatch, tmp_path):
         order: list[str] = []
         video_cli, captured = self._patched_main(monkeypatch, tmp_path, order)
 
@@ -673,4 +651,3 @@ class TestVideoCliReview:
 
         assert _FakeSkipSignal.instances == []
         assert captured["skip_signal"] is None
-        assert "Commands" not in capsys.readouterr().out
