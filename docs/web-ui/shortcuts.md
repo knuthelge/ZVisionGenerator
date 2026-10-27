@@ -17,6 +17,7 @@ Press <kbd>?</kbd> anywhere outside a text field to see every shortcut. ++cmd++ 
 | ++cmd+enter++ | Generate |
 | ++cmd+shift+enter++ | Generate with a new seed (re-rolls a locked seed) |
 | ++cmd+e++ | Enhance the prompt |
+| ++alt+up++ | Open the recent prompts (in an empty prompt box) |
 | ++alt+1++ / ++alt+2++ | Focus the prompt / the settings (expands the sidebar) |
 | ++alt+3++ | Focus the newest Gallery strip tile (expands the strip; ++left++ / ++right++ move between tiles) |
 | ++alt+shift+1++ / ++alt+shift+2++ | Show or hide the sidebar (focuses the prompt / the settings when shown) |

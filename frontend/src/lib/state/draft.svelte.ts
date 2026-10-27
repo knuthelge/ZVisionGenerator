@@ -71,6 +71,7 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedPrompt: '',
   enhancedScene: '',
   enhancedFrom: null,
+  enhancedHistory: [],
   enhanceSettings: null,
   enhanceSettingsVideo: null,
   enhanceAuto: false,
@@ -412,6 +413,9 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftS
   // An Enhanced JSON caption only means something to a model that takes JSON captions.
   const imageTakesJson = !isVideoMode && (modelDefaults as ImageModelDefaults | null)?.supports_json_prompt === true;
   if (!imageTakesJson && isJsonCaption(nextState.enhancedPrompt)) nextState = { ...nextState, enhancedPrompt: '', enhancedFrom: null };
+  if (!imageTakesJson && nextState.enhancedHistory.some((entry) => isJsonCaption(entry.prompt))) {
+    nextState = { ...nextState, enhancedHistory: nextState.enhancedHistory.filter((entry) => !isJsonCaption(entry.prompt)) };
+  }
   if (isVideoMode) {
     nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
     // A kept or restored count may predate snapping; show the count the server will generate.
@@ -696,6 +700,7 @@ export const draft = {
       enhancedPrompt: s.enhancedPrompt,
       enhancedScene: s.enhancedScene,
       enhancedFrom: s.enhancedFrom,
+      enhancedHistory: s.enhancedHistory,
     };
     this.saveDraft();
   },

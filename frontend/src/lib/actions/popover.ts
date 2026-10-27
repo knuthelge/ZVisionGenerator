@@ -8,6 +8,8 @@ export interface PopoverOptions {
   align?: PopoverAlign;
   /** Called when the popover should close: outside click, Escape, or the page scrolling or resizing. */
   onclose: () => void;
+  /** Where Escape puts focus; the anchor when absent. */
+  returnFocus?: HTMLElement | null;
   /**
    * Stay open when the page scrolls or resizes and move with the anchor instead. For a popover opened by a tap, where
    * the phone's keyboard sliding away (it resizes and scrolls the page) would otherwise close it as it opens.
@@ -45,7 +47,7 @@ export function placePopover(anchor: Box, popover: Box, viewport: { width: numbe
  * Show an element as a popover next to its anchor.
  *
  * Moves the element to `<body>` so scrolling or overflow on its ancestors cannot clip it, fixes it
- * beside the anchor, and closes it on an outside click, Escape (returning focus to the anchor), or
+ * beside the anchor, and closes it on an outside click, Escape (returning focus to the anchor, or to `returnFocus`), or
  * when the page scrolls or resizes, since a fixed popover cannot follow its anchor.
  */
 export function popover(node: HTMLElement, initial: PopoverOptions): { update: (next: PopoverOptions) => void; destroy: () => void } {
@@ -80,7 +82,7 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
   // Escape closes the popover when it is the innermost overlay, so a dialog behind it stays open.
   function onEscape(): void {
     options.onclose();
-    options.anchor?.focus();
+    (options.returnFocus ?? options.anchor)?.focus();
   }
 
   function onViewportChange(event: Event): void {

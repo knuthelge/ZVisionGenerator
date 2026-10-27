@@ -127,10 +127,11 @@ Action only needs a scene; with a blank one, both parts are written. Style, Mood
 
 ## In the Web UI
 
-- **Enhance now:** click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. Enhancing again always starts from your text; **Clear** empties the Enhanced text.
+- **Enhance now:** click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. Enhancing again always starts from your text; **Use mine** drops the Enhanced text.
 - **The popover** groups the options as **Look** (Style, Mood, Theme), **Focus on**, **Motion** and **Sound** for video, and **Output** (Rewrite or Write as, and Length), then Direction. **Reset** puts every option back. **Enhancer** (Fast or Smart) sits next to **Enhance prompt**. Images and video remember their own options.
-- **What Generate sends:** for each part, the Enhanced text when it has any, otherwise your text. A part that uses its Enhanced text shows **Uses enhanced**, with **Use mine** to go back to yours.
-- **Out of date:** if you change your text or switch workflows afterwards, the Enhanced text is marked **Out of date**. It is still used until you choose **Use mine**, **Re-enhance** or **Clear**.
+- **What Generate sends:** for each part, the Enhanced text when it has any, otherwise your text. The line under the prompt box says **Generate uses the Enhanced text**, with **Use mine** to go back to yours. In video, each part that uses its Enhanced text shows **Uses enhanced** with its own **Use mine**.
+- **Out of date:** if you change your text or switch workflows afterwards, the line under the box says **Out of date**, in either tab. The Enhanced text is still used until you choose **Use mine** or **Re-enhance**.
+- **The last five rewrites:** each time you enhance the same text, the rewrite is kept, up to five. In the **Enhanced** tab, `‹ 2 of 3 ›` steps back and forward through them, and Generate sends the one shown, recording how it was written. The stepper is hidden while auto-enhance is on, while the text is out of date and after you edit the Enhanced text by hand. Enhancing a different text starts a new list. The rewrites are kept in the browser with the rest of the form, not on the server.
 - **Random choices** are picked before the rewrite, so the Enhanced prompt has none left. Enhance again for a different pick.
 - **Enhance each image when generating** rewrites every image's prompt as part of the job, after its random choices are picked. It works with inline prompts and prompt files. The job card shows *Enhancing prompt N of M*; a prompt that couldn't be enhanced is generated from the original.
 

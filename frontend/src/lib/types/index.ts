@@ -417,6 +417,14 @@ export interface EnhanceRecord {
   format: EnhanceFormat;
 }
 
+/** One rewrite kept in the history of the current text: the Enhanced pair and the source and record it was made with. */
+export interface EnhancedRewrite {
+  prompt: string;
+  /** The Enhanced scene of a video; empty for images. */
+  scene: string;
+  from: EnhancedSource;
+}
+
 /**
  * One line of the enhance stream. Video frames carry the server's split `scene` and `prompt`;
  * image frames carry only `prompt` on `done` (and neither part on `text`).
@@ -829,6 +837,8 @@ export interface DraftState {
   /** The Enhanced scene of a video; used together with the Enhanced prompt. */
   enhancedScene: string;
   enhancedFrom: EnhancedSource | null;
+  /** The last rewrites of one source text, oldest first; browser-local. Written only by Enhance, Reset and the JSON capability gate. */
+  enhancedHistory: EnhancedRewrite[];
   /** Last-used enhancement options for images; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;
   /** Last-used enhancement options for video, with the Rewrite choice of each video workflow; null until any are picked. */
@@ -1381,4 +1391,17 @@ export interface ModelInventory {
   stored_quants_supported?: boolean;
   huggingface_configured: boolean;
   huggingface_token_source: string | null;
+}
+
+/** One prompt the server accepted, as the recent prompts list returns it. */
+export interface RecentPrompt {
+  format: EnhanceFormat;
+  /** The prompt, or the JSON caption text when *format* is `json`. */
+  prompt: string;
+  /** The video scene; empty otherwise. */
+  scene: string;
+  negative_prompt: string;
+  mode: WorkflowMode;
+  /** Server time of the submit, in epoch seconds. */
+  used_at: number;
 }

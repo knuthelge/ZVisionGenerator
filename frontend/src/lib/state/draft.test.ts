@@ -1809,6 +1809,7 @@ describe('applyPreset', () => {
     seed: 42, referenceImagePath: '/refs/ref.png', endImagePath: '/refs/end.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
+    enhancedHistory: [{ prompt: 'plain rewrite', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }, { prompt: '{"caption":"x"}', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }],
     enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],
     enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
     extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
@@ -1851,6 +1852,8 @@ describe('applyPreset', () => {
     expect(after.model).toBe('plain-model');
     // The gates of a manual model switch: the JSON caption and box, the negative prompt, the first sigma.
     expect(after).toMatchObject({ enhancedPrompt: '', enhancedFrom: null, jsonPromptEnabled: false, jsonPrompt: '', negativePrompt: '', firstSigma: null });
+    // The rewrite history keeps its plain rewrites and loses the JSON captions.
+    expect(after.enhancedHistory.map((entry) => entry.prompt)).toEqual(['plain rewrite']);
     // Everything else stays: prompt, scene, seed, prompt source, enhance options, workflow, reference, extend source.
     for (const key of ['prompt', 'scene', 'seed', 'promptSource', 'promptFilePath', 'promptFileOptionIds', 'enhancedScene', 'enhanceSettings', 'enhanceSettingsVideo', 'enhanceAuto',
       'enhanceModel', 'enhanceFormat', 'workflow', 'referenceImagePath', 'extendSourcePath', 'extendFrames', 'sidebarCollapsed'] as (keyof DraftState)[]) {

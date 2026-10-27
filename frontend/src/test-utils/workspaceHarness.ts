@@ -18,7 +18,7 @@ import type { WorkspaceContext } from '$lib/types';
 import { makeGalleryPage } from './workspace';
 import {
   browseApiMocks, configApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, modelApiMocks,
-  presetApiMocks, promptFileApiMocks, videoMemoryApiMocks, workspaceApiMocks,
+  presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, videoMemoryApiMocks, workspaceApiMocks,
 } from './workspaceMocks';
 
 // The timer that is real while a test fakes the debounce timers.
@@ -27,6 +27,7 @@ const realSetTimeout = globalThis.setTimeout;
 /** Return every store and API mock to its starting state: empty stores, no server-side queue, one gallery page. */
 export function resetWorkspaceTest(): void {
   layoutProbe.compact = false;
+  layoutProbe.coarse = false;
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();
@@ -50,6 +51,9 @@ export function resetWorkspaceTest(): void {
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
     videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
   ]) mock.mockReset();
+  recentPromptsApiMocks.getRecentPrompts.mockReset();
+  recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [] });
+  recentPromptsApiMocks.clearRecentPrompts.mockReset();
   workspaceApiMocks.clearQueue.mockClear();
   workspaceApiMocks.cancelJob.mockClear();
   workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });

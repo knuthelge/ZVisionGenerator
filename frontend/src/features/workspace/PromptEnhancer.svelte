@@ -11,6 +11,7 @@
   import { enhancePrompt } from '$lib/api/promptEnhance';
   import { extendEnhanceHint, extendGuard, type ExtendModelSupport } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
+  import { pushRewrite } from '$lib/state/rewriteHistory';
   import { EnhanceChoice, EnhanceOptions, EnhanceRewrite, InspectorRow } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
@@ -186,7 +187,9 @@
             // A caption arrives on one line; it is laid out for reading, and Generate sends it as the JSON prompt.
             const prompt = runCaption ? prettyCaption(frame.prompt) : frame.prompt;
             const record = frame.model ? { settings: settingsPayload(requested, mode, audio), model: frame.model, format: runCaption ? ('json' as const) : ('text' as const) } : undefined;
-            draft.patch({ enhancedPrompt: prompt, enhancedScene: source.mode === 'video' ? frame.scene ?? '' : '', enhancedFrom: record ? { ...source, record } : source });
+            const scene = source.mode === 'video' ? frame.scene ?? '' : '';
+            const from = record ? { ...source, record } : source;
+            draft.patch({ enhancedPrompt: prompt, enhancedScene: scene, enhancedFrom: from, enhancedHistory: pushRewrite(draft.state.enhancedHistory, { prompt, scene, from }) });
             const notes = [frame.clamped ? clampedNote(requested.length) : null, frame.warning ?? null].filter((note) => note !== null);
             noteText = notes.length > 0 ? notes.join(' ') : null;
             downloadedTiers.add(runTier);

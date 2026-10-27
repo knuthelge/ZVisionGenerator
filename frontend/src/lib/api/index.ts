@@ -10,3 +10,4 @@ export * from './videoMemory';
 export * from './browse';
 export * from './jobLog';
 export * from './presets';
+export * from './recentPrompts';

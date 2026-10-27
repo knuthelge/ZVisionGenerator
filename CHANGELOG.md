@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+#### Web UI
+- **Recent prompts.** A history button in the prompt box lists the prompts you generated in the current mode (image prompts, or video scenes and actions), newest first, with a filter that searches all of that mode's prompts. Pick one to bring it back: the prompt, a video's scene and the negative prompt, or a JSON caption into the `{ }` box on Ideogram 4. Press Alt+↑ in an empty prompt to open it. **Clear recents** removes the current mode's. They are kept on the server, so they are the same on every device
+- **The last five rewrites.** In the Enhanced tab, a `‹ 2 of 3 ›` stepper moves through the last five rewrites of the same text; Generate sends the one shown, with how it was written
+
+### Changed
+
+#### Web UI
+- **The prompt box bars are reorganised.** The tabs only say which text you see. A status line under the box says what Generate sends, with **Re-enhance** and **Use mine** beside **Out of date**. **Use mine** replaces **Clear**
+
 ## [0.14.0b1] - 2026-10-26
 
 ### Added
