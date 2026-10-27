@@ -398,8 +398,8 @@ export type EnhanceFormat = 'text' | 'json';
 /** What an Enhanced prompt (or Enhanced scene and prompt) was produced from; null for hand-typed text (never out of date). */
 export interface EnhancedSource {
   prompt: string;
-  /** The scene it was produced beside; missing in drafts saved before scenes existed. */
-  scene?: string;
+  /** The scene it was produced beside; empty for images. */
+  scene: string;
   mode: WorkflowMode;
   /** Extend only: the source video it was produced for; a different source makes it out of date. */
   sourceVideoPath?: string | null;

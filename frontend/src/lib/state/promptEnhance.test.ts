@@ -97,7 +97,7 @@ describe('submission rule', () => {
 });
 
 describe('isEnhancedStale', () => {
-  const made = { prompt: 'a fox', mode: 'image' as const };
+  const made = { prompt: 'a fox', scene: '', mode: 'image' as const };
 
   it.each([
     ['hand-typed text', { enhancedPrompt: 'typed', enhancedFrom: null }, false],

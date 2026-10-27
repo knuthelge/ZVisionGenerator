@@ -935,7 +935,7 @@ describe('WorkspacePage', () => {
   it('submits the Enhanced prompt instead of the prompt when it has text', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'A red fox in deep snow, golden light.');
-    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     await mountWorkspace(withEnhancer(makeContext()));
 
     const enhanced = target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement | null;
@@ -950,7 +950,7 @@ describe('WorkspacePage', () => {
   it('marks the Enhanced prompt out of date after the prompt changes', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'A red fox.');
-    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     await mountWorkspace(withEnhancer(makeContext()));
     expect(target.textContent).not.toContain('Out of date');
 
@@ -979,7 +979,7 @@ describe('WorkspacePage', () => {
     const writeText = mockClipboard();
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'A red fox in deep snow.');
-    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     await mountWorkspace(withEnhancer(makeContext()));
 
     (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
@@ -1163,7 +1163,7 @@ describe('WorkspacePage', () => {
 
     it('records the user text and how an enhanced image prompt was made', async () => {
       const record = { settings: { style: 'photo' }, model: 'org/fast@r1', format: 'text' as const };
-      draft.patch({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
+      draft.patch({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', scene: '', mode: 'image', record } });
       await mountWorkspace(withEnhancer(makeContext()));
 
       const submitted = await submitForm(target);
@@ -1174,7 +1174,7 @@ describe('WorkspacePage', () => {
 
     it('records the text an out-of-date rewrite was made from, not the changed Your text', async () => {
       const record = { settings: { style: 'photo' }, model: 'org/fast@r1', format: 'text' as const };
-      draft.patch({ prompt: 'a wolf in rain', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
+      draft.patch({ prompt: 'a wolf in rain', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', scene: '', mode: 'image', record } });
       await mountWorkspace(withEnhancer(makeContext()));
 
       const submitted = await submitForm(target);
@@ -1184,7 +1184,7 @@ describe('WorkspacePage', () => {
 
     it('sends no enhance record once the Enhanced text is edited by hand', async () => {
       const record = { settings: { style: 'photo' }, model: 'org/fast@r1', format: 'text' as const };
-      draft.patch({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
+      draft.patch({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', scene: '', mode: 'image', record } });
       await mountWorkspace(withEnhancer(makeContext()));
       const enhanced = target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement;
       enhanced.value = 'A red fox curls up in deep snow, my own words.';

@@ -448,16 +448,9 @@ function loadFromStorage(): DraftState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_DRAFT };
-    const parsed = JSON.parse(raw) as Partial<DraftState> & { promptFileOptionId?: string | null };
+    const parsed = JSON.parse(raw) as Partial<DraftState>;
     if (parsed.version !== SCHEMA_VERSION) return { ...DEFAULT_DRAFT };
-    const { promptFileOptionId, ...saved } = parsed;
-    return {
-      ...DEFAULT_DRAFT,
-      ...saved,
-      // Drafts saved before images and video kept their own enhance options seed both from the one set.
-      enhanceSettingsVideo: saved.enhanceSettingsVideo !== undefined ? saved.enhanceSettingsVideo : saved.enhanceSettings ?? null,
-      promptFileOptionIds: saved.promptFileOptionIds ?? (promptFileOptionId ? [promptFileOptionId] : []),
-    };
+    return { ...DEFAULT_DRAFT, ...parsed };
   } catch {
     return { ...DEFAULT_DRAFT };
   }

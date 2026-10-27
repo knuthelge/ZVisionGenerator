@@ -268,7 +268,7 @@ export function isEnhancedStale(state: DraftState): boolean {
   if (source === null) return false;
   const mode = workflowMode(state.workflow);
   if (state.enhancedPrompt.trim() === '' && (mode !== 'video' || state.enhancedScene.trim() === '')) return false;
-  if (source.prompt !== state.prompt || source.mode !== mode || (mode === 'video' && (source.scene ?? '') !== state.scene)) return true;
+  if (source.prompt !== state.prompt || source.mode !== mode || (mode === 'video' && source.scene !== state.scene)) return true;
   // Outside an extension the source and length mean nothing, so an Enhanced pair made for one is out of date once the workflow is another.
   const extending = state.workflow === 'extend';
   return (source.sourceVideoPath ?? null) !== (extending ? state.extendSourcePath : null) || (source.extendFrames ?? null) !== (extending ? state.extendFrames : null);

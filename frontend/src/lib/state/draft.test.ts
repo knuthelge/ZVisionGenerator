@@ -668,13 +668,6 @@ describe('draft store – saved drafts', () => {
     loadSaved({ version: 3 });
     expect(draft.state.prompt).toBe('kept prompt');
   });
-
-  it('seeds the video options from options saved before images and video kept their own', () => {
-    const saved = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
-    loadSaved({ version: 3, enhanceSettings: saved });
-    expect(draft.state.enhanceSettings).toEqual(saved);
-    expect(draft.state.enhanceSettingsVideo).toEqual(saved);
-  });
 });
 
 describe('draft store – prompt enhancer fields', () => {
@@ -685,19 +678,19 @@ describe('draft store – prompt enhancer fields', () => {
 
   it('persists enhancer fields', () => {
     draft.update('enhancedPrompt', 'A fox in snow.');
-    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     draft.update('enhanceAuto', true);
     draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' });
     draft.loadDraft();
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
-    expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', mode: 'image' });
+    expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', scene: '', mode: 'image' });
     expect(draft.state.enhanceAuto).toBe(true);
     expect(draft.state.enhanceSettings?.style).toBe('photo');
   });
 
   it('clears the Enhanced box when a prompt is reused from the URL', () => {
     draft.update('enhancedPrompt', 'Old enhanced text');
-    draft.update('enhancedFrom', { prompt: 'old', mode: 'image' });
+    draft.update('enhancedFrom', { prompt: 'old', scene: '', mode: 'image' });
     draft.loadFromUrl({ prompt: 'reused prompt' }, makeContext());
     expect(draft.state.prompt).toBe('reused prompt');
     expect(draft.state.enhancedPrompt).toBe('');
@@ -791,12 +784,12 @@ describe('draft store – prompt enhancer fields', () => {
     const ctx = makeContext();
     draft.hydrateFromContext(ctx, null);
     draft.update('enhancedPrompt', 'A fox in snow.');
-    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     draft.update('enhanceAuto', true);
     draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' });
     draft.resetSelections(ctx);
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
-    expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', mode: 'image' });
+    expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', scene: '', mode: 'image' });
     expect(draft.state.enhanceAuto).toBe(false);
     expect(draft.state.enhanceSettings).toBeNull();
   });
@@ -1062,7 +1055,7 @@ describe('extend', () => {
     });
 
     it('clears the Enhanced pair when the boxes are filled', () => {
-      draft.patch({ enhancedPrompt: 'x', enhancedScene: 'y', enhancedFrom: { prompt: '', mode: 'video' } });
+      draft.patch({ enhancedPrompt: 'x', enhancedScene: 'y', enhancedFrom: { prompt: '', scene: '', mode: 'video' } });
       draft.applyExtendSource(sceneSource());
       expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedScene: '', enhancedFrom: null });
     });
