@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tests._server_helpers import FakeProcess, Launcher
 from zvisiongenerator.downloads import child
 from zvisiongenerator.downloads.child import ChildResult, child_env, run_in_child
 from zvisiongenerator.downloads.target import DownloadTarget
@@ -19,78 +19,12 @@ _ROOT = Path(__file__).resolve().parent.parent
 _TARGET = DownloadTarget("owner/repo", allow_patterns=("*.safetensors",))
 
 
+_FakeProcess = FakeProcess
+_Launcher = Launcher
+
+
 def _line(text: str) -> str:
     return PROTOCOL_PREFIX + text + "\n"
-
-
-class _Stdin:
-    def __init__(self) -> None:
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
-
-
-class _Stdout:
-    def __init__(self, lines: Iterable[str]) -> None:
-        self._lines = list(lines)
-
-    def __iter__(self):
-        return iter(self._lines)
-
-    def close(self) -> None:
-        pass
-
-
-class _FakeProcess:
-    """A scripted ``Popen``: prints *lines*, runs for *running_polls* polls, then exits with *exit_code*."""
-
-    def __init__(self, lines: Iterable[str] = (), *, running_polls: int | None = 0, exit_code: int = 0, wait_timeouts: int = 0) -> None:
-        self.stdin = _Stdin()
-        self.stdout = _Stdout(lines)
-        self._running_polls = running_polls
-        self._exit_code = exit_code
-        self._wait_timeouts = wait_timeouts
-        self.returncode: int | None = None
-        self.calls: list[str] = []
-
-    def poll(self) -> int | None:
-        if self.returncode is not None:
-            return self.returncode
-        if self._running_polls is None:
-            return None
-        if self._running_polls == 0:
-            self.returncode = self._exit_code
-            return self.returncode
-        self._running_polls -= 1
-        return None
-
-    def terminate(self) -> None:
-        self.calls.append("terminate")
-
-    def kill(self) -> None:
-        self.calls.append("kill")
-        self.returncode = -9
-
-    def wait(self, timeout: float | None = None) -> int:
-        self.calls.append("wait")
-        if self._wait_timeouts:
-            self._wait_timeouts -= 1
-            raise subprocess.TimeoutExpired("fake", timeout or 0)
-        if self.returncode is None:
-            self.returncode = -15
-        return self.returncode
-
-
-class _Launcher:
-    def __init__(self, process: _FakeProcess) -> None:
-        self.process = process
-        self.args: tuple[Any, ...] = ()
-        self.kwargs: dict[str, Any] = {}
-
-    def __call__(self, *args: Any, **kwargs: Any) -> _FakeProcess:
-        self.args, self.kwargs = args, kwargs
-        return self.process
 
 
 def _run(process: _FakeProcess, *, cancelled=lambda: False, cleanup=None, counts: list | None = None, **kwargs: Any) -> tuple[ChildResult, _Launcher, list]:

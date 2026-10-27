@@ -9,7 +9,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
-from tests.test_h3_checkpoint import _TINY, _diffusers_state, _native
+from tests._mac_helpers import _TINY, _diffusers_state, _native
 from zvisiongenerator.backends.cuda.video.h3 import backend as h3_backend
 from zvisiongenerator.backends.cuda.video.h3 import converted
 from zvisiongenerator.converters import h3_checkpoint

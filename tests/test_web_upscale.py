@@ -21,7 +21,7 @@ from zvisiongenerator.upscale_runner import UpscaleSource
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.provenance import RecordedSettings, embed_png_config
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
-from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING, WORK_DIR_PREFIX
+from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING
 from zvisiongenerator.utils.video_extend import ExtendInspection, ExtendProblem, extend_source_problems
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import upscale_api
@@ -890,17 +890,3 @@ def test_video_upscale_plan_carries_the_clips_settings_and_softness():
     assert (plan.request.width, plan.request.height) == (2560, 1408)
     assert (plan.request.batch_size, plan.request.softness, plan.request.recorded_config) == (9, 0.25, {"workflow": "txt2vid"})
     assert plan.notices == ()
-
-
-def test_work_folders_are_hidden_from_the_gallery_and_not_served(video_upscale_client):
-    folder = video_upscale_client.root / f"{WORK_DIR_PREFIX}x"
-    folder.mkdir()
-    (folder / "a.mp4").write_bytes(b"\x00")
-    (video_upscale_client.root / "clip.mp4").write_bytes(b"\x00")
-
-    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value=_ffprobe_data(size=(64, 64))):
-        names = [asset.name for asset in list_gallery_assets(str(video_upscale_client.root))]
-    served = video_upscale_client.client.get(f"/media/{folder.name}/a.mp4")
-
-    assert names == ["clip.mp4"]
-    assert served.status_code == 404

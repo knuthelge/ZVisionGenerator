@@ -18,6 +18,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.utils import app_db
+from zvisiongenerator.utils.upscale import WORK_DIR_PREFIX
 from zvisiongenerator.utils.provenance import build_video_upscale_payload, embed_png_config
 from zvisiongenerator.web import gallery
 from zvisiongenerator.web.config import WebUiDefaultModels
@@ -491,7 +492,7 @@ def test_reuse_of_an_extend_output_without_the_capability_falls_back_to_text_to_
     assert payload["extend"] is None
 
 
-@pytest.mark.parametrize("directory", [".web_uploads", ".splice-x9y8z7"])
+@pytest.mark.parametrize("directory", [".web_uploads", ".splice-x9y8z7", f"{WORK_DIR_PREFIX}x"])
 def test_staging_and_scratch_directories_never_list_as_gallery_assets(tmp_path, directory):
     (tmp_path / "clip.mp4").write_bytes(b"\x00" * 8)
     (tmp_path / directory).mkdir()

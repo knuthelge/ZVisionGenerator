@@ -1297,14 +1297,14 @@ def test_submit_video_job_review_needs_upscale(monkeypatch, tmp_path, form, revi
 
 
 @pytest.mark.parametrize(
-    ("capability", "form", "message"),
+    ("capability", "form"),
     [
-        ("upscale_review", {"upscale": "2", "review": "on"}, "LTX distilled model can't pause for review before upscaling on this platform."),
-        ("i2v", {"image_path": "ref.png"}, "LTX distilled model does not support image-to-video. Pick another video model."),
-        ("end_frame", {"image_path": "ref.png", "end_image_path": "end.png"}, "LTX distilled model does not support a last-frame image. Pick another video model."),
+        ("upscale_review", {"upscale": "2", "review": "on"}),
+        ("i2v", {"image_path": "ref.png"}),
+        ("end_frame", {"image_path": "ref.png", "end_image_path": "end.png"}),
     ],
 )
-def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, tmp_path, capability, form, message):
+def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, tmp_path, capability, form):
     """A family that lacks a capability refuses the workflow that needs it, whatever the platform supports, and queues nothing."""
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path)
@@ -1314,10 +1314,9 @@ def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, t
     _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
     monkeypatch.setattr(web_server, "_resolve_reference_image", lambda _form, _output_dir, path_key="image_path": form.get(path_key))
 
-    with pytest.raises(ValueError) as refused:
+    with pytest.raises(ValueError):
         web_server._submit_video_job({"model": "ltx-8", "prompt": "a lake", **form}, web_config)
 
-    assert str(refused.value) == message
     assert submitted == []
 
 

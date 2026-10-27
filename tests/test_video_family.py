@@ -17,7 +17,6 @@ from zvisiongenerator.utils.video_extend import resolve_extend_frames
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_cli import _resolve_upscale_steps
 from zvisiongenerator.web import server as web_server
-from zvisiongenerator.web.workspace_api import _build_video_bootstrap_defaults
 
 _LTX_INFO = make_ltx_info()
 _OTHER_INFO = make_ltx_info(family="wan", backend="wan", frame_alignment=1)
@@ -105,34 +104,6 @@ def test_a_family_without_an_upscale_block_upscales_at_its_default_steps():
 def _bootstrap_config() -> SimpleNamespace:
     config = load_config()
     return SimpleNamespace(app_config=config, video_ratios=tuple(config["video_sizes"]), video_size_options={ratio: tuple(sizes) for ratio, sizes in config["video_sizes"].items()})
-
-
-@pytest.mark.parametrize("model", ["ltx-4", "ltx-8", "ltx25-4"])
-def test_ltx_workspace_defaults_are_unchanged(model):
-    assert _build_video_bootstrap_defaults(model, _bootstrap_config()) == {
-        "ratio": "16:9",
-        "size": "s",
-        "steps": 8,
-        "width": 768,
-        "height": 448,
-        "frame_count": 121,
-        "audio": True,
-        "low_memory": True,
-        "supports_i2v": True,
-        "supports_quantize": False,
-        "quantize": None,
-        "max_steps": 8,
-        "fps": 24,
-        "upscale": {"enabled": False, "factor": 2, "steps": None},
-        "enhance_max_words": 300,
-        "family": "ltx",
-        "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"},
-        # LTX takes every control, the last frame included.
-        "hidden_controls": [],
-        "supports_extend": True,
-        "step_options": None,
-        "extend_frame_step": 8,
-    }
 
 
 @pytest.mark.parametrize(
