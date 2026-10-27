@@ -17,6 +17,10 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // VM threads build jsdom once per worker instead of once per file (about 60% less CPU); a worker that grows past
+    // the limit is replaced, so memory stays bounded.
+    pool: 'vmThreads',
+    vmMemoryLimit: '512MB',
     setupFiles: ['./src/test-setup.ts'],
     globals: true
   }
