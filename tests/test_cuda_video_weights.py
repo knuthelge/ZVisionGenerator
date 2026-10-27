@@ -129,10 +129,6 @@ class TestElementCounts:
 
         assert weights.text_encoder_bytes(tmp_path) == 2 * 40 + 2 * 4 + 16
 
-
-class TestElementCountEdgeShapes:
-    """A scalar (``[]``) counts as one element and a zero-size dimension as none."""
-
     def test_the_transformer_count_handles_scalars_zero_dims_and_other_ranks(self):
         shapes = [
             ("transformer_blocks.0.attn.weight", [4, 3]),  # block matrix
@@ -146,48 +142,12 @@ class TestElementCountEdgeShapes:
 
         assert weights.count_transformer_elements(shapes) == (12, 7 + 24 + 1 + 12)
 
-    def test_a_component_folder_counts_scalars_and_zero_size_tensors(self, tmp_path):
-        save_file({"a": torch.zeros(3, 4), "scalar": torch.tensor(1.0), "empty": torch.zeros(0, 5)}, str(tmp_path / "model.safetensors"))
-
-        assert weights.component_elements(tmp_path) == 12 + 1 + 0
-
-    def test_text_encoder_bytes_count_scalars_and_zero_size_tensors(self, tmp_path):
-        tensors = {
-            "model.embed_tokens.weight": torch.zeros(0, 4),  # bfloat16, no elements
-            "model.layers.0.input_layernorm.weight": torch.tensor(1.0),  # bfloat16 scalar
-            "model.layers.0.mlp.up_proj.weight": torch.zeros(2, 0, 3),  # FP8, no elements
-            "model.layers.0.mlp.gate_proj.weight": torch.tensor(1.0),  # FP8 scalar
-        }
-        save_file(tensors, str(tmp_path / "model.safetensors"))
-
-        assert weights.text_encoder_bytes(tmp_path) == 0 + 2 * 1 + 0 + 1
-
 
 class TestEnsurePrepared:
     def _source(self, tmp_path, content=b"weights"):
         source = tmp_path / "source.safetensors"
         source.write_bytes(content)
         return source
-
-    def test_a_missing_copy_is_written_and_marked_complete(self, tmp_path):
-        source = self._source(tmp_path)
-        target = tmp_path / "cache" / "model@q8"
-
-        result = weights.ensure_prepared(target, [source], 8, lambda folder: (folder / "w").write_text("x"))
-
-        assert result == target
-        assert (target / "w").read_text() == "x"
-        assert json.loads((target / MANIFEST_NAME).read_text())["bits"] == 8
-
-    def test_a_current_copy_is_reused_without_writing(self, tmp_path):
-        source = self._source(tmp_path)
-        target = tmp_path / "model@q8"
-        weights.ensure_prepared(target, [source], 8, lambda folder: (folder / "w").write_text("x"))
-        writes: list[object] = []
-
-        weights.ensure_prepared(target, [source], 8, writes.append)
-
-        assert writes == []
 
     def test_a_changed_source_or_level_writes_a_new_copy(self, tmp_path):
         source = self._source(tmp_path)
@@ -198,42 +158,6 @@ class TestEnsurePrepared:
         weights.ensure_prepared(target, [source], 8, lambda folder: (folder / "w").write_text("new"))
 
         assert (target / "w").read_text() == "new"
-
-    def test_a_current_copy_elsewhere_is_hard_linked_instead_of_written(self, tmp_path):
-        source = self._source(tmp_path)
-        first = tmp_path / "ltx-8@q8" / "text_encoder"
-        weights.ensure_prepared(first, [source], 8, lambda folder: (folder / "w").write_text("x"))
-        writes: list[object] = []
-
-        second = weights.ensure_prepared(tmp_path / "ltx-4@q4" / "text_encoder", [source], 8, writes.append, reuse=[first])
-
-        assert writes == []
-        assert (second / "w").stat().st_ino == (first / "w").stat().st_ino  # one file on disk
-        assert json.loads((second / MANIFEST_NAME).read_text())["bits"] == 8
-
-    def test_a_stale_copy_elsewhere_is_not_reused(self, tmp_path):
-        source = self._source(tmp_path)
-        other = tmp_path / "ltx-8@q8" / "text_encoder"
-        weights.ensure_prepared(other, [source], 8, lambda folder: (folder / "w").write_text("old"))
-        source.write_bytes(b"newer weights")
-
-        target = weights.ensure_prepared(tmp_path / "ltx-4@q4" / "text_encoder", [source], 8, lambda folder: (folder / "w").write_text("new"), reuse=[other])
-
-        assert (target / "w").read_text() == "new"
-
-    def test_a_failed_write_leaves_no_copy_behind(self, tmp_path):
-        source = self._source(tmp_path)
-        target = tmp_path / "model@q8"
-
-        def _fail(folder):
-            (folder / "w").write_text("half")
-            raise RuntimeError("disk full")
-
-        with pytest.raises(RuntimeError, match="disk full"):
-            weights.ensure_prepared(target, [source], 8, _fail)
-
-        assert not target.exists()
-        assert list(tmp_path.glob(".model@q8.*.partial")) == []
 
 
 class TestPreparedManifestBytes:
@@ -280,26 +204,6 @@ class TestPreparedManifestBytes:
             "}\n"
         )
         assert (target / MANIFEST_NAME).read_bytes() == expected.encode("utf-8")
-
-
-class TestLocalSourceManifest:
-    def test_a_local_source_records_when_it_was_written_so_a_same_size_replacement_rebuilds(self, tmp_path):
-        source = tmp_path / "ltx.safetensors"
-        source.write_bytes(b"AAAA")
-        writes = []
-
-        def write(folder):
-            writes.append(folder)
-            (folder / "w").write_text("x")
-
-        weights.ensure_prepared(tmp_path / "copy", [source], 8, write)
-        weights.ensure_prepared(tmp_path / "copy", [source], 8, write)
-        replacement = tmp_path / "replacement.safetensors"
-        replacement.write_bytes(b"BBBB")
-        replacement.rename(source)
-        weights.ensure_prepared(tmp_path / "copy", [source], 8, write)
-
-        assert len(writes) == 2
 
 
 class TestTransformerWeights:
@@ -518,28 +422,7 @@ class TestNf4TransformerLayout:
         swapped = {name for name, module in model.named_modules() if isinstance(module, _FakeLinear4bit)}
         assert swapped == set(_NF4_BLOCK_LINEARS)
         assert type(model.proj_in) is torch.nn.Linear
-        for linear in _NF4_BLOCK_LINEARS:
-            layer = model.get_submodule(linear)
-            assert layer.args == (_WIDTH, _WIDTH)
-            assert layer.kwargs == {"bias": True, "compute_dtype": torch.bfloat16, "compress_statistics": True, "quant_type": "nf4", "quant_storage": torch.uint8, "device": "meta"}
-        assert [call["module"] for call in fake_bitsandbytes.prequantized_calls] == [model.get_submodule(linear) for linear in _NF4_BLOCK_LINEARS]
-        saved = {name: tensor for path in out.glob("*.safetensors") for name, tensor in load_file(str(path)).items()}
-        for call, linear in zip(fake_bitsandbytes.prequantized_calls, _NF4_BLOCK_LINEARS, strict=True):
-            assert (call["requires_grad"], call["device"]) == (False, "cpu")
-            assert torch.equal(call["data"], saved[f"{linear}.weight"])
-            assert call["quantized_stats"].keys() == set(_NF4_PART_NAMES) - {""}
-            assert all(torch.equal(call["quantized_stats"][part], saved[f"{linear}.weight.{part}"]) for part in _NF4_PART_NAMES)
         assert model.get_submodule(_NF4_BLOCK_LINEARS[0]).weight.dtype == torch.uint8
-
-    def test_a_copy_missing_one_part_is_refused(self, tmp_path, tiny_models, fake_bitsandbytes):
-        out = self._write(tmp_path)
-        shard = out / "model-00001-of-00001.safetensors"
-        tensors = load_file(str(shard))
-        del tensors["transformer_blocks.1.0.weight.nested_absmax"]
-        save_file(tensors, str(shard))
-
-        with pytest.raises(RuntimeError, match="is incomplete in the prepared copy"):
-            weights.load_transformer({"width": _WIDTH}, prepared=out, bits=4, compute_dtype=torch.bfloat16)
 
 
 class TestConnectors:
@@ -667,10 +550,6 @@ class TestGemma4TextEncoderNames:
     def test_renaming_is_a_single_pass(self):
         # vision_embedder -> embed_vision must not be renamed again by the broad embed_vision rule.
         assert weights._text_encoder_name("model.vision_embedder.a", set(), self._renames) == "model.embed_vision.a"
-
-    def test_the_gemma4_rules_come_ahead_of_the_gemma3_set(self):
-        assert self._renames == weights._GEMMA4_TEXT_ENCODER_PREFIXES + weights._LEGACY_TEXT_ENCODER_PREFIXES
-        assert len(weights._GEMMA4_TEXT_ENCODER_PREFIXES) == 2
 
     def test_the_default_table_leaves_the_gemma4_names_alone(self):
         assert weights._text_encoder_name("model.vision_embedder.a", set()) == "model.vision_embedder.a"

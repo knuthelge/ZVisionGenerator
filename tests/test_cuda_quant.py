@@ -36,7 +36,8 @@ def libs():
         "safetensors": MagicMock(torch=safetensors_torch),
         "safetensors.torch": safetensors_torch,
     }
-    with patch.dict(sys.modules, fakes):
+    # The real release_memory runs gc.collect() and the real drop_cached_files fsyncs each file; the copy layout does not need either.
+    with patch.dict(sys.modules, fakes), patch.object(quant, "release_memory"), patch.object(quant, "drop_cached_files"):
         yield SimpleNamespace(torch=torch_mod, diffusers=diffusers_mod, transformers=transformers_mod, safetensors=safetensors_torch)
 
 

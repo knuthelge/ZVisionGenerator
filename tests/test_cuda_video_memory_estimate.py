@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from _cuda_helpers import _converted_folder, _patch_memory
 from zvisiongenerator.backends.cuda.video import memory_estimate
+from zvisiongenerator.backends.cuda.video.backend import _check_system_memory
 from zvisiongenerator.utils.model_memory import estimate_ltx_cuda_system_memory
 
 _GIB = 1024**3
@@ -131,3 +133,23 @@ class TestLtx25Estimate:
         assert estimate is not None
         assert round(estimate.taking_turns / _GIB, 2) == 21.08
         assert round(estimate.together / _GIB, 2) == 30.81
+
+
+class TestConvertedFolderEstimate:
+    """A converted LTX folder is estimated from its manifest, like the alias it was made from."""
+
+    def test_a_stock_converted_folder_is_estimated_like_the_alias(self, monkeypatch, tmp_path):
+        _patch_memory(monkeypatch, total_gib=64, block_matrices=123, rest=45, connectors=6, text_encoder=7)
+
+        stock = memory_estimate.ltx_system_estimate(Path("/fake/repo"), Path("/fake/ckpt"), 4)
+        converted = memory_estimate.converted_ltx_system_estimate(tmp_path, {"bits": 4, "block_matrices": 123, "transformer_rest": 45})
+
+        assert converted == stock
+
+    def test_a_converted_q8_folder_that_does_not_fit_advises_converting_again_at_q4(self, monkeypatch, tmp_path):
+        _patch_memory(monkeypatch, total_gib=12)
+        estimate = memory_estimate.converted_ltx_system_estimate(_converted_folder(tmp_path, bits=8), {"bits": 8, "block_matrices": 10 * _GIB, "transformer_rest": 0})
+
+        with pytest.raises(RuntimeError, match="--quantize 4") as raised:
+            _check_system_memory(estimate, 8, converted=True)
+        assert "ltx-4" not in str(raised.value)

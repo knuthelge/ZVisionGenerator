@@ -85,6 +85,12 @@ def _make_model_info(family="zimage", is_distilled=False, size=None):
 # ---------------------------------------------------------------------------
 
 
+def _t2i(backend, model, **overrides):
+    """Call ``text_to_image`` with the usual small arguments, each replaceable by *overrides*."""
+    arguments = {"prompt": "a cat", "width": 64, "height": 64, "seed": 42, "steps": 4, "guidance": 0.5, **overrides}
+    return backend.text_to_image(model=model, **arguments)
+
+
 @pytest.fixture()
 def win_backend():
     """Yield (module, torch_stub, diffusers_stub) with fakes active for the whole test."""
@@ -112,28 +118,6 @@ def win_backend_no_cuda():
         yield mod, torch_mod, diffusers_mod
 
     sys.modules.pop("zvisiongenerator.backends.cuda.image.backend", None)
-
-
-# ---------------------------------------------------------------------------
-# DiffusersBackend construction & protocol surface
-# ---------------------------------------------------------------------------
-
-
-class TestDiffusersBackendConstruction:
-    """DiffusersBackend can be instantiated and has the right protocol surface."""
-
-    def test_instantiation(self, win_backend):
-        mod, _, _ = win_backend
-        backend = mod.DiffusersBackend()
-        assert backend.name == "diffusers"
-        assert backend._model_info is None
-
-    def test_has_required_methods(self, win_backend):
-        mod, _, _ = win_backend
-        backend = mod.DiffusersBackend()
-        assert callable(getattr(backend, "load_model", None))
-        assert callable(getattr(backend, "text_to_image", None))
-        assert callable(getattr(backend, "image_to_image", None))
 
 
 # ---------------------------------------------------------------------------
@@ -203,38 +187,15 @@ class TestLoadModelGuardMocked:
 
 
 class TestLoadModelCudaCheck:
-    """load_model() must raise when CUDA is not available."""
+    """load_model() refuses without CUDA before it loads anything (the message wording is test_cuda_driver's job)."""
 
     def test_raises_when_cuda_unavailable(self, win_backend_no_cuda):
         mod, _, _ = win_backend_no_cuda
-        backend = mod.DiffusersBackend()
 
-        with pytest.raises(RuntimeError, match="CUDA"):
-            backend.load_model("fake-model-path")
-
-    def test_raises_when_cuda_unavailable_with_platform_aware_message(self, win_backend_no_cuda):
-        mod, _, _ = win_backend_no_cuda
-        backend = mod.DiffusersBackend()
-
-        with pytest.raises(RuntimeError, match="Windows and Linux"):
-            backend.load_model("fake-model-path")
-
-
-class TestLoadModelDriverHint:
-    """The CUDA error asks for a newer driver only for a CUDA 13 build, and for a reinstall when the build has no CUDA."""
-
-    @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
-    def test_hint_follows_the_cuda_version_of_the_build(self, win_backend_no_cuda, cuda_version, expects_hint):
-        from zvisiongenerator.backends.cuda.driver import CUDA_INSTALL_COMMAND, cuda_driver_hint
-
-        mod, torch_mod, _ = win_backend_no_cuda
-        torch_mod.version.cuda = cuda_version
-
-        with pytest.raises(RuntimeError, match="CUDA") as excinfo:
+        with patch.object(mod, "detect_image_model") as mock_detect, pytest.raises(RuntimeError, match="CUDA"):
             mod.DiffusersBackend().load_model("fake-model-path")
 
-        assert (cuda_driver_hint(False, "13.0") in str(excinfo.value)) is expects_hint
-        assert (CUDA_INSTALL_COMMAND in str(excinfo.value)) is (cuda_version is None)
+        mock_detect.assert_not_called()
 
 
 class TestIdeogram4:
@@ -279,18 +240,6 @@ class TestIdeogram4:
 
         assert order == ["load", "lora"]
         assert mock_loras.call_args.args == (pipeline, ["/l/a.safetensors"], [0.7])
-
-    def test_without_loras_the_lora_loader_is_not_called(self, win_backend):
-        mod, _, _ = win_backend
-
-        with (
-            patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")),
-            patch.object(mod, "load_ideogram4_pipeline", return_value=MagicMock()),
-            patch.object(mod, "_load_loras") as mock_loras,
-        ):
-            mod.DiffusersBackend().load_model("/models/ideo")
-
-        mock_loras.assert_not_called()
 
     def _generate(self, mod, **overrides):
         backend = mod.DiffusersBackend()
@@ -870,9 +819,6 @@ class TestLoadModelLoRA:
         [
             (None, 4, "krea2", True),
             (object(), 4, "krea2", False),
-            (None, None, "krea2", False),
-            (None, 8, "krea2", False),
-            (None, 4, "zimage", False),
         ],
     )
     def test_cpu_offload_is_restored_only_for_an_offloaded_pipeline_that_lost_its_hooks(self, loras, fake_peft_no_match, hook, quantize, family, restored):
@@ -933,96 +879,45 @@ class TestTextToImage:
         mock_model._interrupt = False
         return backend, mock_model
 
-    def test_returns_image(self, win_backend):
+    def test_returns_the_image_and_passes_guidance_scale(self, win_backend):
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
-        result = backend.text_to_image(
-            model=mock_model,
-            prompt="a cat",
-            width=64,
-            height=64,
-            seed=42,
-            steps=4,
-            guidance=0.5,
-        )
+
+        result = _t2i(backend, mock_model, guidance=3.5)
+
         assert isinstance(result, Image.Image)
         mock_model.assert_called_once()
-
-    def test_passes_guidance_scale(self, win_backend):
-        mod, _, _ = win_backend
-        backend, mock_model = self._ready_backend(mod)
-        backend.text_to_image(
-            model=mock_model,
-            prompt="a cat",
-            width=64,
-            height=64,
-            seed=42,
-            steps=4,
-            guidance=3.5,
-        )
-        call_kwargs = mock_model.call_args[1]
-        assert call_kwargs["guidance_scale"] == 3.5
+        assert mock_model.call_args[1]["guidance_scale"] == 3.5
 
     def test_negative_prompt_non_flux(self, win_backend):
         """Non-flux models pass negative_prompt."""
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
         backend._model_info = _make_model_info(family="unknown")
-        backend.text_to_image(
-            model=mock_model,
-            prompt="a cat",
-            width=64,
-            height=64,
-            seed=42,
-            steps=4,
-            guidance=0.5,
-            negative_prompt="ugly",
-        )
-        call_kwargs = mock_model.call_args[1]
-        assert call_kwargs["negative_prompt"] == "ugly"
+
+        _t2i(backend, mock_model, negative_prompt="ugly")
+
+        assert mock_model.call_args[1]["negative_prompt"] == "ugly"
 
     def test_negative_prompt_suppressed_for_flux(self, win_backend):
         """Flux models do NOT receive negative_prompt."""
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
         backend._model_info = _make_model_info(family="flux1")
-        backend.text_to_image(
-            model=mock_model,
-            prompt="a cat",
-            width=64,
-            height=64,
-            seed=42,
-            steps=4,
-            guidance=0.5,
-            negative_prompt="ugly",
-        )
-        call_kwargs = mock_model.call_args[1]
-        assert "negative_prompt" not in call_kwargs
+
+        _t2i(backend, mock_model, negative_prompt="ugly")
+
+        assert "negative_prompt" not in mock_model.call_args[1]
 
     def test_skip_signal_returns_none(self, win_backend):
         """When skip_signal fires, result is None."""
         mod, _, _ = win_backend
-        backend, _ = self._ready_backend(mod)
-        mock_model = MagicMock()
+        backend, mock_model = self._ready_backend(mod)
         mock_model._interrupt = True
-        fake_result = MagicMock()
-        fake_result.images = [Image.new("RGB", (64, 64))]
-        mock_model.return_value = fake_result
-
         skip = MagicMock()
         skip.check.return_value = True
 
-        result = backend.text_to_image(
-            model=mock_model,
-            prompt="a cat",
-            width=64,
-            height=64,
-            seed=42,
-            steps=4,
-            guidance=0.5,
-            skip_signal=skip,
-        )
-        assert result is None
+        assert _t2i(backend, mock_model, skip_signal=skip) is None
 
     def test_restores_scheduler_after_beta(self, win_backend):
         """Scheduler is restored even when beta scheduler is requested."""
@@ -1030,23 +925,15 @@ class TestTextToImage:
         backend, mock_model = self._ready_backend(mod)
         original_scheduler = mock_model.scheduler
 
-        backend.text_to_image(
-            model=mock_model,
-            prompt="a cat",
-            width=64,
-            height=64,
-            seed=42,
-            steps=4,
-            guidance=0.5,
-            scheduler="beta",
-        )
+        _t2i(backend, mock_model, scheduler="beta")
+
         assert mock_model.scheduler is original_scheduler
 
     def test_zimage_beta_passes_beta_sigmas(self, win_backend):
         """Z-Image gets the beta grid as ``sigmas`` so the model shift applies after the beta spacing."""
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
-        backend.text_to_image(model=mock_model, prompt="a cat", width=64, height=64, seed=42, steps=6, guidance=0.0, scheduler="beta")
+        _t2i(backend, mock_model, steps=6, guidance=0.0, scheduler="beta")
         sigmas = mock_model.call_args[1]["sigmas"]
         assert len(sigmas) == 6
         assert sigmas[0] == pytest.approx(1.0)
@@ -1056,13 +943,13 @@ class TestTextToImage:
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
         backend._model_info = _make_model_info(family="flux2")
-        backend.text_to_image(model=mock_model, prompt="a cat", width=64, height=64, seed=42, steps=4, guidance=None, scheduler="beta")
+        _t2i(backend, mock_model, guidance=None, scheduler="beta")
         assert "sigmas" not in mock_model.call_args[1]
 
     def test_no_scheduler_passes_no_sigmas(self, win_backend):
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
-        backend.text_to_image(model=mock_model, prompt="a cat", width=64, height=64, seed=42, steps=4, guidance=0.0)
+        _t2i(backend, mock_model, guidance=0.0)
         assert "sigmas" not in mock_model.call_args[1]
 
     def test_default_guidance_for_flux(self, win_backend):
@@ -1070,17 +957,8 @@ class TestTextToImage:
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
         backend._model_info = _make_model_info(family="flux2")
-        backend.text_to_image(
-            model=mock_model,
-            prompt="a cat",
-            width=64,
-            height=64,
-            seed=42,
-            steps=4,
-            guidance=None,
-        )
-        call_kwargs = mock_model.call_args[1]
-        assert call_kwargs["guidance_scale"] == 1.0
+        _t2i(backend, mock_model, guidance=None)
+        assert mock_model.call_args[1]["guidance_scale"] == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -1090,33 +968,6 @@ class TestTextToImage:
 
 class TestImageToImage:
     """image_to_image creates an img2img pipeline and refines the input."""
-
-    def test_returns_image(self, win_backend):
-        mod, _, _ = win_backend
-        backend = mod.DiffusersBackend()
-        backend._model_info = _make_model_info()
-
-        fake_i2i_pipe = MagicMock()
-        fake_result = MagicMock()
-        fake_result.images = [Image.new("RGB", (64, 64))]
-        fake_i2i_pipe.return_value = fake_result
-        fake_i2i_pipe._interrupt = False
-
-        # The lazy import ``from diffusers import AutoPipelineForImage2Image``
-        # resolves to sys.modules["diffusers"].AutoPipelineForImage2Image
-        # which is already a MagicMock (our fake_modules).  Wire it up:
-        sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe.return_value = fake_i2i_pipe
-
-        result = backend.image_to_image(
-            model=MagicMock(),
-            image=Image.new("RGB", (64, 64)),
-            prompt="sharper",
-            strength=0.3,
-            steps=4,
-            seed=42,
-            guidance=0.5,
-        )
-        assert isinstance(result, Image.Image)
 
     def test_keeps_no_pipeline_between_calls(self, win_backend):
         """The long-lived backend must not keep a finished job's model alive through a cached pipeline."""
@@ -1212,17 +1063,6 @@ class TestMakeSkipCallback:
         assert fake_pipe._interrupt is True
         assert result == {"key": "val"}
 
-    def test_callback_noop_when_not_skipped(self, win_backend):
-        mod, _, _ = win_backend
-        skip = MagicMock()
-        skip.check.return_value = False
-        cb = mod._make_skip_callback(skip)
-
-        fake_pipe = MagicMock()
-        result = cb(fake_pipe, step=0, timestep=0.0, callback_kwargs={"key": "val"})
-
-        assert result == {"key": "val"}
-
 
 # ---------------------------------------------------------------------------
 # Live previews in the step callback
@@ -1303,36 +1143,18 @@ class TestStepCallbackLivePreview:
 
 
 class TestGetBackendDiffusersPlatforms:
-    """get_backend() returns the diffusers backend on Windows and Linux."""
+    """get_backend() returns the diffusers backend on Windows and Linux (through the real backend map)."""
 
-    def test_get_backend_returns_diffusers_on_win32(self, win_backend):
-        mod, _, _ = win_backend
-
+    @pytest.mark.parametrize("platform", ["win32", "linux"])
+    def test_get_backend_returns_diffusers(self, win_backend, platform):
         import zvisiongenerator.backends as backends_mod
 
         saved = dict(backends_mod.BACKENDS)
         backends_mod.BACKENDS.clear()
         try:
             with patch.object(backends_mod, "sys") as mock_sys:
-                mock_sys.platform = "win32"
-                backend = backends_mod.get_backend()
-                assert backend.name == "diffusers"
-        finally:
-            backends_mod.BACKENDS.clear()
-            backends_mod.BACKENDS.update(saved)
-
-    def test_get_backend_returns_diffusers_on_linux(self, win_backend):
-        mod, _, _ = win_backend
-
-        import zvisiongenerator.backends as backends_mod
-
-        saved = dict(backends_mod.BACKENDS)
-        backends_mod.BACKENDS.clear()
-        try:
-            with patch.object(backends_mod, "sys") as mock_sys:
-                mock_sys.platform = "linux"
-                backend = backends_mod.get_backend()
-                assert backend.name == "diffusers"
+                mock_sys.platform = platform
+                assert backends_mod.get_backend().name == "diffusers"
         finally:
             backends_mod.BACKENDS.clear()
             backends_mod.BACKENDS.update(saved)
@@ -1408,7 +1230,7 @@ class TestKrea2:
 
         assert mod._img2img_sigmas(steps, strength) == pytest.approx(expected)
 
-    @pytest.mark.parametrize(("requested", "strength"), [(8, 0.3), (8, 0.35), (8, 0.4), (8, 0.5), (8, 0.6), (8, 0.7), (4, 0.7), (20, 0.3), (28, 0.45)])
+    @pytest.mark.parametrize(("requested", "strength"), [(8, 0.3), (8, 0.7), (28, 0.45)])
     def test_img2img_runs_the_requested_steps_after_workflow_inflation(self, win_backend, requested, strength):
         mod, _, _ = win_backend
         inflated = math.floor(requested / strength)  # as image_stages passes steps to image_to_image

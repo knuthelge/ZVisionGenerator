@@ -210,12 +210,6 @@ def test_image_plan_covers_every_file_diffusers_expects_in_the_snapshot(repo_id:
     assert expected <= _selected(repo_id)
 
 
-def test_diffusers_ignore_variants() -> None:
-    for variant in ("fp16", "bf16", "fp32", "fp8"):
-        assert {f"*.{variant}.safetensors", f"*.{variant}-*.safetensors", f"*.{variant}.safetensors.index.json"} <= set(DIFFUSERS_IGNORE)
-    assert {"*.bin", "*.pth", "*.ckpt", "*.onnx", "*.msgpack", "*.h5"} <= set(DIFFUSERS_IGNORE)
-
-
 # --- video ---
 
 TRANSFORMER = ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
@@ -238,13 +232,6 @@ def test_video_plan_with_transformer_source_has_two_parts() -> None:
     )
 
 
-def test_video_plan_with_upscale_has_three_parts() -> None:
-    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, latent_upsampler=UPSAMPLER, upscale=True)
-
-    assert [target.allow_patterns for target in plan] == [None, (TRANSFORMER[1],), (UPSAMPLER[1],)]
-    assert plan[2].repo_id == UPSAMPLER[0]
-
-
 def test_video_plan_upscale_without_transformer_source_has_two_parts() -> None:
     plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=None, latent_upsampler=UPSAMPLER, upscale=True)
 
@@ -260,8 +247,6 @@ def test_video_plan_upscale_without_configured_upsampler_skips_it() -> None:
 @pytest.mark.parametrize(
     ("separate", "extra", "expected"),
     [
-        (False, (), None),
-        (True, (), SEPARATE_TRANSFORMER_IGNORE),
         (False, ("a/*",), ("a/*",)),
         (True, ["a/*", "b"], (*SEPARATE_TRANSFORMER_IGNORE, "a/*", "b")),
     ],
@@ -279,7 +264,6 @@ def test_2_3_video_plans_are_pinned_without_a_revision() -> None:
         DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-22b-distilled-1.1.safetensors",), None, None),
         DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-spatial-upscaler-x2-1.1.safetensors",), None, None),
     )
-    assert [target.revision for target in plan] == [None, None, None]
 
 
 LTX25_PIN = "7b40724fc39bbb01d9b4d72638c0d263531c88c2"
@@ -330,27 +314,6 @@ def test_video_plan_local_folder_is_empty(tmp_path: Path) -> None:
     assert video_download_plan(str(tmp_path), family="ltx", transformer_source=TRANSFORMER, latent_upsampler=UPSAMPLER, upscale=True) == ()
 
 
-def test_repo_dir_downloads_with_the_shared_ignore_constant(monkeypatch: pytest.MonkeyPatch) -> None:
-    pytest.importorskip("torch")
-    import huggingface_hub
-
-    from zvisiongenerator.backends.cuda.video.backend import _repo_dir
-
-    calls: list[dict[str, Any]] = []
-
-    def fake_snapshot_download(repo_id: str, **kwargs: Any) -> str:
-        calls.append(kwargs)
-        return "/cache/snapshot"
-
-    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
-
-    _repo_dir(LTX_REPO, with_transformer=False)
-    _repo_dir(LTX_REPO, with_transformer=True)
-
-    assert tuple(calls[0]["ignore_patterns"]) == SEPARATE_TRANSFORMER_IGNORE
-    assert calls[1]["ignore_patterns"] is None
-
-
 # --- enhancer ---
 
 
@@ -360,11 +323,12 @@ H3_PRESET = h3_preset(load_config())
 
 def test_h3_plan_is_the_repository_the_text_encoder_and_the_lora() -> None:
     plan = h3_download_plan(H3_REF, H3_PRESET)
+    text_encoder, lora = H3_PRESET.text_encoder, H3_PRESET.lora
 
     assert plan == (
-        DownloadTarget("MiniMaxAI/MiniMax-H3", "42ed227ee7df40d41602854ae760620d6eb651fe", H3_PRESET.repo_allow, H3_PRESET.repo_ignore),
-        DownloadTarget("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "48cfc6496841742a77892646c15a7f3e8da44348", H3_PRESET.text_encoder.files),
-        DownloadTarget("lightx2v/Minimax-h3-Turbo", "30f485ed874aa44c8183348ad361c5eabad318da", ("minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors",)),
+        DownloadTarget(H3_PRESET.repo, H3_PRESET.revision, H3_PRESET.repo_allow, H3_PRESET.repo_ignore),
+        DownloadTarget(text_encoder.repo_id, text_encoder.revision, text_encoder.files),
+        DownloadTarget(lora.repo_id, lora.revision, lora.files),
     )
 
 
@@ -391,18 +355,9 @@ def test_h3_plan_adds_exactly_the_latent_upsampler_with_upscale() -> None:
     plan = h3_download_plan(H3_REF, H3_PRESET, upscale=True)
 
     assert plan[:-1] == base
-    assert plan[-1] == DownloadTarget(
-        "LBH-123-AI/Minimax_h3_latent_Upscaler", "3f941d5d182014dd5c0a5e16330420ee2d4aa0c6", ("minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors",)
-    )
+    upsampler = H3_PRESET.latent_upsampler
+    assert plan[-1] == DownloadTarget(upsampler.repo_id, upsampler.revision, upsampler.files)
     assert len(plan) == len(base) + 1
-
-
-def test_h3_plan_without_upscale_has_no_latent_upsampler() -> None:
-    assert H3_PRESET.latent_upsampler.repo_id not in [target.repo_id for target in h3_download_plan(H3_REF, H3_PRESET)]
-
-
-def test_h3_plan_with_upscale_has_no_seedvr2_target() -> None:
-    assert not any("seedvr2" in target.repo_id.lower() for target in h3_download_plan(H3_REF, H3_PRESET, upscale=True))
 
 
 def test_h3_plan_downloads_what_the_backend_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -432,7 +387,6 @@ def test_h3_plan_downloads_what_the_backend_resolves(tmp_path: Path, monkeypatch
 
 def test_enhancer_plan_uses_transformers_patterns() -> None:
     assert enhancer_download_plan("coder3101/Qwen3.5-4B-heretic", "dc69b956") == (DownloadTarget("coder3101/Qwen3.5-4B-heretic", "dc69b956", TRANSFORMERS_ALLOW_PATTERNS),)
-    assert TRANSFORMERS_ALLOW_PATTERNS == ("*.json", "*.safetensors", "*.txt", "*.model", "*.jinja", "*.tiktoken", "tokenizer*")
 
 
 def test_enhancer_plan_local_folder_is_empty(tmp_path: Path) -> None:

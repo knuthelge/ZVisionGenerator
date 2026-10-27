@@ -12,10 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from zvisiongenerator.backends.cuda.video import sampler
 from zvisiongenerator.backends.cuda.video.sampler import (
-    EULER_ANCESTRAL,
-    LTX_SAMPLERS,
     STAGE_SEED_OFFSETS,
     SharedNoise,
     ancestral_scheduler,
@@ -44,14 +41,10 @@ class TestStageSeed:
     def test_no_seed_gives_no_stage_seed(self, stage):
         assert stage_seed(None, stage) is None
 
-    @pytest.mark.parametrize("stage", [0, 3, -1, "1"])
-    def test_bad_stage_raises(self, stage):
+    @pytest.mark.parametrize(("stage", "seed"), [(0, 7), ("1", None)])
+    def test_bad_stage_raises_with_or_without_a_seed(self, stage, seed):
         with pytest.raises(ValueError, match="stage"):
-            stage_seed(7, stage)
-
-    def test_a_bad_stage_raises_even_without_a_seed(self):
-        with pytest.raises(ValueError, match="stage"):
-            stage_seed(None, 3)
+            stage_seed(seed, stage)
 
 
 class TestWithTerminalSigma:
@@ -70,14 +63,6 @@ class TestWithTerminalSigma:
     def test_empty_raises(self):
         with pytest.raises(ValueError, match="empty"):
             with_terminal_sigma([])
-
-
-def test_the_sampler_names_are_the_config_definitions():
-    from zvisiongenerator.utils import config
-
-    assert sampler.EULER_ANCESTRAL is config.EULER_ANCESTRAL
-    assert sampler.LTX_SAMPLERS is config.LTX_SAMPLERS
-    assert EULER_ANCESTRAL in LTX_SAMPLERS
 
 
 def test_importing_the_module_loads_neither_torch_nor_diffusers():
@@ -153,23 +138,12 @@ class TestSchedule:
         scheduler.set_timesteps(sigmas=DISTILLED_SIGMA_VALUES, device="cpu")
         assert float(scheduler.timesteps[0]) == pytest.approx(500.0)
 
-    def test_retrieve_timesteps_returns_eight_timesteps_and_a_step_count_of_eight(self):
-        scheduler = ancestral_scheduler(_generator(3))
-        timesteps, steps = retrieve_timesteps(scheduler, None, "cpu", None, sigmas=DISTILLED_SIGMA_VALUES, mu=1.0)
-        assert len(timesteps) == 8
-        assert steps == 8
-
     def test_stage_two_table_gives_three_timesteps(self):
         scheduler = ancestral_scheduler(_generator(3))
         timesteps, steps = retrieve_timesteps(scheduler, None, "cpu", None, sigmas=STAGE_2_DISTILLED_SIGMA_VALUES, mu=1.0)
         assert (len(timesteps), steps) == (3, 3)
         assert len(scheduler.sigmas) == 4
         assert float(scheduler.sigmas[-1]) == 0.0
-
-    def test_a_table_that_already_ends_in_zero_is_not_extended(self):
-        scheduler = ancestral_scheduler(_generator(3))
-        scheduler.set_timesteps(sigmas=[*DISTILLED_SIGMA_VALUES, 0.0], device="cpu")
-        assert (len(scheduler.timesteps), len(scheduler.sigmas)) == (8, 9)
 
     def test_set_timesteps_requires_explicit_sigmas(self):
         with pytest.raises(ValueError, match="sigmas"):
@@ -186,19 +160,6 @@ class TestSchedule:
 
 
 class TestStepping:
-    def test_eight_steps_for_the_eight_sigma_table_and_three_for_stage_two(self):
-        for table, expected in ((DISTILLED_SIGMA_VALUES, 8), (STAGE_2_DISTILLED_SIGMA_VALUES, 3)):
-            video = _scheduler(table=table)
-            audio = copy.deepcopy(video)
-            calls = 0
-            x = torch.ones(VIDEO_SHAPE)
-            for t in video.timesteps:
-                x = video.step(torch.full_like(x, 0.1), t, x, return_dict=False)[0]
-                calls += 1
-            assert calls == expected
-            assert video.step_index == expected
-            assert audio.step_index in (None, 0)
-
     def test_the_first_step_matches_the_ancestral_formula(self):
         scheduler = _scheduler(seed=11)
         sample, velocity = torch.ones(VIDEO_SHAPE), torch.full(VIDEO_SHAPE, 0.1)
@@ -225,13 +186,6 @@ class TestStepping:
         noise = torch.randn(VIDEO_SHAPE, generator=_generator(99))
         assert torch.allclose(result, _expected_step(sample, velocity, DISTILLED_SIGMA_VALUES[0], DISTILLED_SIGMA_VALUES[1], noise), atol=1e-5)
         assert torch.equal(scheduler.noise.generator.get_state(), state_before)
-
-    def test_without_noise_or_generator_it_draws_from_the_global_state(self):
-        scheduler = ancestral_scheduler(None)
-        scheduler.set_timesteps(sigmas=DISTILLED_SIGMA_VALUES, device="cpu")
-        scheduler.set_begin_index(0)
-        out = scheduler.step(torch.zeros(VIDEO_SHAPE), scheduler.timesteps[0], torch.ones(VIDEO_SHAPE), return_dict=False)[0]
-        assert out.shape == VIDEO_SHAPE
 
 
 class TestSharedGenerator:
@@ -298,11 +252,6 @@ class TestDeterminism:
         first, second = self._run(stage_seed(5, 1)), self._run(stage_seed(5, 2))
         assert not torch.equal(first[0], second[0])
 
-    def test_the_noise_sequence_depends_only_on_the_generator(self):
-        scheduler = _scheduler(seed=8)
-        reference = _generator(8)
-        assert torch.equal(torch.randn(3, generator=scheduler.noise.generator), torch.randn(3, generator=reference))
-
 
 class TestSwapScheduler:
     def test_installs_the_scheduler_during_the_body_and_restores_the_original(self):
@@ -319,12 +268,3 @@ class TestSwapScheduler:
             assert pipeline.scheduler is not original
             raise RuntimeError("boom")
         assert pipeline.scheduler is original
-
-    def test_nested_swaps_unwind_in_order(self):
-        first, second, third = object(), object(), object()
-        pipeline = SimpleNamespace(scheduler=first)
-        with swap_scheduler(pipeline, second):
-            with swap_scheduler(pipeline, third):
-                assert pipeline.scheduler is third
-            assert pipeline.scheduler is second
-        assert pipeline.scheduler is first

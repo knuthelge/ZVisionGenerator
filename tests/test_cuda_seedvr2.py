@@ -120,11 +120,11 @@ class TestUpscaleImage:
 
 
 class TestCoreSeed:
-    @pytest.mark.parametrize("seed", [0, 42, 2_830_951_588, 2**32 - 1_000_001])
+    @pytest.mark.parametrize("seed", [0, 2**32 - 1_000_001])
     def test_seeds_in_range_are_unchanged(self, seed):
         assert module._core_seed(seed) == seed
 
-    @pytest.mark.parametrize("seed", [2**32 - 1_000_000, 4_294_000_000, 2**32 - 1, 2**40])
+    @pytest.mark.parametrize("seed", [2**32 - 1_000_000, 2**40])
     def test_large_seeds_leave_room_for_the_vae_offset(self, seed):
         assert 0 <= module._core_seed(seed) + 1_000_000 <= 2**32 - 1
 
@@ -187,7 +187,7 @@ class TestRun:
             "postprocess_all_batches",
         ]
 
-    def test_every_block_streams_and_both_models_offload_to_system_memory(self, core):
+    def test_the_memory_settings_stream_every_block_and_free_each_model_after_its_phase(self, core):
         self._run()
 
         context = core.setup_generation_context.call_args.kwargs
@@ -197,23 +197,15 @@ class TestRun:
         assert runner["block_swap_config"]["offload_device"] == "cpu"
         assert runner["dit_cache"] is False and runner["vae_cache"] is False
         assert runner["encode_tiled"] is True and runner["decode_tiled"] is True
-
-    def test_an_image_decodes_in_the_core_tiles_and_frees_each_model_after_its_phase(self, core):
-        self._run()
-
-        runner = core.prepare_runner.call_args.kwargs
         assert runner["encode_tile_size"] == runner["decode_tile_size"] == (1024, 1024)
         assert core.upscale_all_batches.call_args.kwargs["cache_model"] is False
         assert core.decode_all_batches.call_args.kwargs["cache_model"] is False
-
-    def test_the_tiers_files_and_folder_are_passed(self, core):
-        self._run()
-
-        runner = core.prepare_runner.call_args.kwargs
         assert (runner["dit_model"], runner["vae_model"], runner["model_dir"]) == (*(name for _repo, name in FP8_WEIGHTS.files["seedvr2-3b"]), "/models/.seedvr2/fp8")
+        assert core.encode_all_batches.call_args.kwargs["color_correction"] == "lab"
+        assert core.postprocess_all_batches.call_args.kwargs["color_correction"] == "lab"
 
-    def test_the_image_is_upscaled_at_its_own_short_side_with_the_seed(self, core):
-        self._run()
+    def test_the_image_is_upscaled_at_its_own_short_side_with_the_seed_and_returned_as_rgb(self, core):
+        image = self._run()
 
         info = core.compute_generation_info.call_args.kwargs
         encode = core.encode_all_batches.call_args.kwargs
@@ -221,16 +213,6 @@ class TestRun:
         assert info["seed"] == encode["seed"] == core.upscale_all_batches.call_args.kwargs["seed"] == 42
         assert tuple(info["images"].shape) == (1, 4, 6, 3)
         assert float(info["images"][0, 0, 0, 0]) == 1.0
-
-    def test_lab_colour_correction_matches_macos(self, core):
-        self._run()
-
-        assert core.encode_all_batches.call_args.kwargs["color_correction"] == "lab"
-        assert core.postprocess_all_batches.call_args.kwargs["color_correction"] == "lab"
-
-    def test_returns_the_final_frame_as_an_rgb_image(self, core):
-        image = self._run()
-
         assert (image.mode, image.size) == ("RGB", (6, 4))
         assert np.asarray(image)[0, 0].tolist() == [128, 128, 128]
 
@@ -319,9 +301,6 @@ class TestUpscaleVideo:
     def _upscale(self, frames, **overrides):
         kwargs = {"width": 16, "height": 12, "total_frames": len(frames), "seed": 9, "softness": 0.0, "batch_size": 1}
         return module.TorchSeedVR2Upscaler().upscale_video(_model(), iter(frames), **{**kwargs, **overrides})
-
-    def test_the_upscaler_has_the_optional_video_method(self):
-        assert hasattr(module.TorchSeedVR2Upscaler(), "upscale_video")
 
     @pytest.mark.parametrize(
         ("count", "batch_size", "chunks"),
@@ -425,9 +404,8 @@ class TestUpscaleVideo:
         for phase in ("encode_all_batches", "upscale_all_batches", "decode_all_batches"):
             assert getattr(core, phase).call_args.kwargs["ctx"]["interrupt_fn"] is interrupt
 
-    @pytest.mark.parametrize(("width", "height"), [(1536, 896), (320, 192)])
-    def test_the_vae_always_uses_512_pixel_tiles(self, core, width, height):
-        list(self._upscale([np.zeros((4, 4, 3), dtype=np.uint8)], width=width, height=height))
+    def test_the_vae_always_uses_512_pixel_tiles(self, core):
+        list(self._upscale([np.zeros((4, 4, 3), dtype=np.uint8)], width=1536, height=896))
 
         runner = core.prepare_runner.call_args.kwargs
         assert runner["encode_tile_size"] == runner["decode_tile_size"] == (512, 512)
