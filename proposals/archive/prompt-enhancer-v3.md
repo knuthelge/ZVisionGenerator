@@ -264,7 +264,7 @@ Enhancer [Fast | Smart]                [ Enhance prompt ]
 - About 460px tall for an image, 720px for a video with audio; on a phone it is the existing bottom sheet.
 
 **Related work in other proposals.**
-- **Alternatives.** Moved to [rewrite history](../workspace-prompt-recents.md): an **Alternatives** button that fills it with three rewrites (seeds s, s+1, s+2) from one model load.
+- **Alternatives.** Moved to [rewrite history](workspace-prompt-recents.md): an **Alternatives** button that fills it with three rewrites (seeds s, s+1, s+2) from one model load.
 - **Presets.** [Named presets](settings-presets.md) asks whether a preset should store enhance options; the shipped presets leave the enhance options out.
 
 ---

@@ -1,6 +1,6 @@
 # Backlog from the v1 review
 
-**Status:** Backlog (2026-10-25)
+**Status:** Backlog (2026-10-27)
 
 Findings from the pre-v1 codebase review that were verified but deliberately left out of v1. Each is small enough to pick up on its own; none has a proposal of its own. Items are grouped by area, and each says what a user sees, where it sits, and what the fix would be. Decisions taken at the review are noted.
 
@@ -14,6 +14,7 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 - **Background-thread failures in the download lane and video conversion are not logged**; only `str(exc)` is kept (`web/download_lane.py`, `web/video_conversion.py`). Add `logger.exception` so a bug report has a traceback.
 - **Deleting `ltx-4` on Windows/Linux also deletes `ltx-8`'s files** (found 2026-10-26). Both aliases point at the same ~104 GB diffusers download; `ltx-4` only adds a 4-bit stored copy. `model_delete_target` (`web/model_delete.py`) keeps a shared download only while another alias has stored quants, so deleting `ltx-4` removes the download `ltx-8` loads from, and the dialog never names `ltx-8`. Decision: "last holder takes the shared files". An alias holds a shared download once it was used (a job ran with it, or its row's Download was pressed) and not deleted since, recorded in the app database. Deleting a holder while another holder remains removes only its own files (its stored copies) and shows it as not downloaded; deleting the last holder removes the download too; an alias that was never used does not hold it. The same rule could replace MOSS-Image's built-folder rule. Its own standard run (discovery, PRD, review).
 - **No test ties the frontend's SSE listener list to the server's event names.** `sse.ts` hand-lists the event types; a renamed or new server event is dropped silently. Correct today; add a contract test.
+- **The docs screenshots of the prompt box are out of date.** `docs/assets/screenshots/workspace.webp` and `phone-workspace.webp` still show the old bars (the "used" pill, Clear and the word count in the tools row) from before the bars were restructured, and the Recent prompts section in `docs/web-ui/workspace.md` still uses the `placeholder.svg` "recent-prompts" shot. Retake them with the screenshot process in `docs/developer/docs.md`, using invented prompts and test images.
 
 ## CLI
 
