@@ -12,6 +12,7 @@ from tests._factories import load_packaged_config
 
 from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, seedvr2_plan, video_model_downloaded, video_plan
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils.paths import split_huggingface_revision
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, write_build_record
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SEEDVR2_MIXED_REPO, SEEDVR2_REPO
 
@@ -360,9 +361,9 @@ class TestThroughTheRealDispatch:
         plan = video_plan(repo, family="ltx", config=config, model_name=name, upscale=True)
 
         assert plan == (
-            DownloadTarget(repo, None, None, ("transformer/*.safetensors", "transformer/*.safetensors.index.json"), None),
-            DownloadTarget(transformer["repo"], None, (transformer["filename"],), None, None),
-            DownloadTarget(upsampler["repo"], None, (upsampler["filename"],), None, None),
+            DownloadTarget(*split_huggingface_revision(repo), None, ("transformer/*.safetensors", "transformer/*.safetensors.index.json"), None),
+            DownloadTarget(*split_huggingface_revision(transformer["repo"]), (transformer["filename"],), None, None),
+            DownloadTarget(*split_huggingface_revision(upsampler["repo"]), (upsampler["filename"],), None, None),
         )
 
     def test_a_macos_version_alias_plans_no_gemma_3_and_keeps_its_revision(self, monkeypatch):

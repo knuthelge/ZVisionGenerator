@@ -732,8 +732,8 @@ class TestLtxLatentUpsamplerSource:
     def test_packaged_config_ships_upsampler_and_distilled_default_repo(self, packaged_config):
         config = packaged_config
 
-        assert ltx_latent_upsampler_source(config) == ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
-        assert config["video_model_presets"]["ltx"]["diffusers"]["default_repo"] == "diffusers/LTX-2.3-Distilled-Diffusers"
+        assert ltx_latent_upsampler_source(config) == ("Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+        assert config["video_model_presets"]["ltx"]["diffusers"]["default_repo"] == "diffusers/LTX-2.3-Distilled-Diffusers@432e0d3c2d1769aaa4d295f9243f7062bf6b47ee"
 
     @pytest.mark.parametrize("config", [{}, {"video_model_presets": {}}, {"video_model_presets": {"ltx": {"diffusers": {}}}}])
     def test_absent_key_returns_none(self, config):
@@ -759,7 +759,7 @@ class TestLtxTransformerSource:
         return {"video_model_presets": {"ltx": {"diffusers": {"transformer": value}}}}
 
     def test_packaged_config_ships_the_distilled_1_1_transformer(self, packaged_config):
-        assert ltx_transformer_source(packaged_config) == ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
+        assert ltx_transformer_source(packaged_config) == ("Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9", "ltx-2.3-22b-distilled-1.1.safetensors")
 
     @pytest.mark.parametrize("config", [{}, {"video_model_presets": {"ltx": {"diffusers": {}}}}, _config.__func__(None)])
     def test_absent_or_null_key_uses_the_repos_own_transformer(self, config):
@@ -836,9 +836,10 @@ class TestLtxLoadOptions:
 _LTX25_PIN = "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"
 _LTX25_UPSAMPLER = (_LTX25_PIN, "latent_upsampler/diffusion_pytorch_model.safetensors")
 _LTX25_MAC_PIN = "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
-_LTX23_REPO = "diffusers/LTX-2.3-Distilled-Diffusers"
-_LTX23_TRANSFORMER = ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
-_LTX23_UPSAMPLER = ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+_LTX23_REPO = "diffusers/LTX-2.3-Distilled-Diffusers@432e0d3c2d1769aaa4d295f9243f7062bf6b47ee"
+_LTX23_LIGHTRICKS = "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
+_LTX23_TRANSFORMER = (_LTX23_LIGHTRICKS, "ltx-2.3-22b-distilled-1.1.safetensors")
+_LTX23_UPSAMPLER = (_LTX23_LIGHTRICKS, "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
 
 
 def _versioned(**version):
@@ -1133,7 +1134,7 @@ class TestLtxVersionAwareAccessors:
 
         config = packaged_config
 
-        assert ltx_distilled_lora_source(config) == ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
+        assert ltx_distilled_lora_source(config) == (_LTX23_LIGHTRICKS, "ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
         assert ltx_diffusers_repo(config) == _LTX23_REPO
         assert ltx_companion_repos(config, _LTX25_PIN) == ()
         assert ltx_companion_repos(config, _LTX23_REPO) == ("Lightricks/LTX-2.3",)

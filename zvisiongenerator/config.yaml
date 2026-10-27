@@ -365,12 +365,13 @@ video_model_presets:
     capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true }
     diffusers:
       # Distilled LTX 2.3 in diffusers format, used on Windows/Linux (8 steps, guidance 1.0). Distilled checkpoints only.
+      # Every LTX-2.3 source is pinned: Lightricks deletes and moves files in its repo.
       # Its text encoder, connectors, VAEs and vocoder are used; the transformer comes from the file below.
-      default_repo: "diffusers/LTX-2.3-Distilled-Diffusers"
+      default_repo: "diffusers/LTX-2.3-Distilled-Diffusers@432e0d3c2d1769aaa4d295f9243f7062bf6b47ee"
       # The distilled transformer: one single-file LTX-2 checkpoint in a Hugging Face repo (1.1 matches macOS).
       # Leave it out to use the default repo's own transformer.
       transformer:
-        repo: "Lightricks/LTX-2.3"
+        repo: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
         filename: "ltx-2.3-22b-distilled-1.1.safetensors"
       # Quantize level per model alias: 4 = NF4 transformer, 8 = FP8 transformer; both with an FP8 text encoder
       # and connectors. Only these names load on Windows/Linux. Prepared copies are the alias's stored copy, ~/.ziv/models/<alias>@q<bits>.
@@ -379,14 +380,14 @@ video_model_presets:
         ltx-8: 8
       # 2x spatial latent upsampler for --upscale 2: one safetensors file in a Hugging Face repo.
       latent_upsampler:
-        repo: "Lightricks/LTX-2.3"
+        repo: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
         filename: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
     upscale:
       default_upscale_steps: 8
     # Lightricks' distilled LoRA: `ziv model model --model-type ltx-2.3 --distill` merges it into a plain-dev
     # checkpoint, which otherwise renders broken at the 8 steps the app runs LTX at.
     distilled_lora:
-      repo: "Lightricks/LTX-2.3"
+      repo: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
       filename: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
     # macOS: the pinned MLX pack of each quantize level (the ltx-4 and ltx-8 aliases), and the folder a converted
     # checkpoint takes its VAEs, vocoder, upsampler and configs from. A pack is downloaded as exactly the files of
