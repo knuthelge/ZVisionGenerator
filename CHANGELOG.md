@@ -6,11 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
-### Changed
-
-#### Web UI
-- **A workspace draft saved by 0.12 is no longer carried over.** The Image and Video pages start from the defaults once, instead of converting the old draft
-
 ## [0.14.0b1] - 2026-10-26
 
 ### Added
