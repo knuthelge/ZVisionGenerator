@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from tests._download_helpers import packaged_config
+from tests._factories import load_packaged_config
 from tests._snapshots import cache_snapshot_dir, touch, write_h3_index, write_ltx25_snapshot
+
 from zvisiongenerator.downloads.presence import remove_partial_files, target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils import model_files
@@ -189,7 +190,7 @@ class TestCudaH3PlanPresence:
         from zvisiongenerator.utils.h3_preset import h3_preset
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
-        preset = h3_preset(packaged_config())
+        preset = h3_preset(load_packaged_config())
         targets = h3_download_plan(f"{preset.repo}@{preset.revision}", preset)
         for target in targets:
             self._download(cache, target)
@@ -224,7 +225,7 @@ class TestCudaH3PlanPresence:
         from zvisiongenerator.utils.h3_preset import h3_preset
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
-        preset = h3_preset(packaged_config())
+        preset = h3_preset(load_packaged_config())
 
         assert [target_present_offline(target) for target in h3_download_plan(preset.repo, preset)] == [False, False, False]
 

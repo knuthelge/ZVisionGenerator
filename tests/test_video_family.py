@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from _video_helpers import make_ltx_info
+
+from tests._video_helpers import make_ltx_info
 
 from zvisiongenerator.core.video_family import ANY_FRAMES, FrameRule, VideoCapabilities, VideoFamily, settle_video_steps
 from zvisiongenerator.utils.config import load_config, video_family

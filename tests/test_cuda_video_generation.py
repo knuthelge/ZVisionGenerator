@@ -6,12 +6,7 @@ from __future__ import annotations
 import pytest
 from PIL import Image
 
-from zvisiongenerator.backends.cuda.video.backend import (
-    _DISTILLED_GUIDANCE,
-    DiffusersVideoBackend,
-    _stage1_sigmas,
-)
-from _cuda_helpers import (
+from tests._cuda_helpers import (
     install_fake_weights,
     _AudioTextPipeline,
     _DISTILLED_SIGMAS,
@@ -26,6 +21,12 @@ from _cuda_helpers import (
     _patch_runtime,
     _patch_upsampler_io,
     _text_to_video_args,
+)
+
+from zvisiongenerator.backends.cuda.video.backend import (
+    _DISTILLED_GUIDANCE,
+    DiffusersVideoBackend,
+    _stage1_sigmas,
 )
 
 

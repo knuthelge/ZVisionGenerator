@@ -16,14 +16,16 @@ from typing import Any
 
 import numpy as np
 import pytest
-from _media import REAL, ffmpeg, numbered_frames
-from conftest import make_extend_source
 from PIL import Image
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("diffusers")
 from safetensors import safe_open  # noqa: E402
 from safetensors.torch import load_file, save_file  # noqa: E402
+
+from tests._factories import make_extend_source  # noqa: E402
+from tests._media import REAL, ffmpeg, numbered_frames  # noqa: E402
+from tests._paths import REPO_ROOT  # noqa: E402
 
 from zvisiongenerator.backends.mac import h3_video  # noqa: E402
 from zvisiongenerator.backends.mac.h3_video import (  # noqa: E402
@@ -42,7 +44,6 @@ from zvisiongenerator.utils.video_extend import build_extend_source  # noqa: E40
 from zvisiongenerator.utils.video_probe import probe_video  # noqa: E402
 from zvisiongenerator.utils.video_splice import splice_clips  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
 HIDDEN = 8
 FF = 6
 # projection -> (output rows, input columns)
@@ -127,7 +128,7 @@ def _raw_delta(tensors: dict[str, torch.Tensor], module: str, scale: float) -> t
 
 def _provider_key_pattern() -> re.Pattern[str]:
     """Return the key regex of the vendored ``TurboLoRAProvider``, read from its source without importing mlx."""
-    tree = ast.parse((ROOT / "packages" / "minimax_h3_mlx" / "turbo_lora.py").read_text(encoding="utf-8"))
+    tree = ast.parse((REPO_ROOT / "packages" / "minimax_h3_mlx" / "turbo_lora.py").read_text(encoding="utf-8"))
     node = next(n for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_KEY" for t in n.targets))
     return re.compile(ast.literal_eval(node.value.args[0]))
 

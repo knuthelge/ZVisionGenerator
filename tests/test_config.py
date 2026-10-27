@@ -32,11 +32,6 @@ from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 
-import _prompt_helpers
-
-packaged_config = _prompt_helpers.packaged_config
-packaged_config_shared = _prompt_helpers.packaged_config_shared
-
 
 _SEEDVR2_BLOCK = {
     "model": "auto",

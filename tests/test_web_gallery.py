@@ -17,6 +17,8 @@ import pytest
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
+from tests._paths import FIXTURES
+
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.upscale import WORK_DIR_PREFIX
 from zvisiongenerator.utils.provenance import build_video_upscale_payload, embed_png_config
@@ -442,9 +444,6 @@ def test_a_video_without_embedded_settings_still_shows_its_file_name(tmp_path):
     assert set(_reuse_params(payload)) == {"workflow"}
 
 
-_FIXTURES = Path(__file__).parent / "fixtures"
-
-
 @pytest.mark.parametrize(
     ("case", "config"),
     [
@@ -458,7 +457,7 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 def test_extend_reuse_params_match_the_shared_fixture_the_frontend_loads(tmp_path, monkeypatch, case, config):
     """``frontend/src/lib/state/extendFlow.test.ts`` feeds this same file into ``loadFromUrl``; change both together."""
     monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
-    expected = json.loads((_FIXTURES / "extend_reuse_params.json").read_text(encoding="utf-8"))[case]
+    expected = json.loads((FIXTURES / "extend_reuse_params.json").read_text(encoding="utf-8"))[case]
 
     payload, params = _video_reuse(tmp_path, _extend_config(Path("/clips/walk.mp4"), **config))
 

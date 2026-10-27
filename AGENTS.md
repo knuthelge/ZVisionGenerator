@@ -50,5 +50,5 @@ Run `make check` before finishing. It is the full CI gate: ruff lint and format 
 ## Testing
 
 - Tests live in `tests/` as `test_<module>.py`; frontend tests sit next to their source as `*.test.ts`.
-- Never load real backends or models. Use `MagicMock` with controlled return values and `conftest.py::_make_args(**overrides)` for CLI args.
+- Never load real backends or models. Use `MagicMock` with controlled return values and `tests/_factories.py::_make_args(**overrides)` for CLI args.
 - Test behavior and machine-readable contracts (routes, config keys, event names, enum values, statuses), not prose, help text, CSS classes, or source text.

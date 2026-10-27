@@ -9,38 +9,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests._download_helpers import packaged_config
+from tests._factories import _patch_image_main_dependencies, load_packaged_config
+
 import zvisiongenerator.image_cli as image_cli
 import zvisiongenerator.utils.lora as lora_utils
 import zvisiongenerator.video_cli as video_cli
 from zvisiongenerator.utils.lora import parse_lora_arg
-
-
-def _patch_image_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    backend = MagicMock()
-    backend.name = "stub-image-backend"
-    backend.load_model = MagicMock(return_value=(object(), MagicMock(family="zimage", size=None)))
-
-    monkeypatch.setattr(
-        image_cli,
-        "load_config",
-        lambda: {
-            "generation": {"default_ratio": "2:3", "default_size": "m"},
-            "sizes": {"2:3": {"m": {"width": 832, "height": 1216}}},
-            "model_aliases": {},
-            "schedulers": {},
-        },
-    )
-    monkeypatch.setattr(image_cli, "select_ratio_size_defaults", lambda *args, **kwargs: ("2:3", "m"))
-    monkeypatch.setattr(image_cli, "resolve_model_path", lambda model, **kwargs: model)
-    monkeypatch.setattr(image_cli, "resolve_defaults", lambda *args, **kwargs: {"steps": 10, "guidance": 0.5, "scheduler": None})
-    monkeypatch.setattr(image_cli, "validate_scheduler", lambda *args, **kwargs: None)
-    monkeypatch.setattr(image_cli, "detect_image_model", lambda _: MagicMock(family="zimage", size=None))
-    monkeypatch.setattr(image_cli, "get_backend", lambda: backend)
-    monkeypatch.setattr(lora_utils, "resolve_lora_path", lambda name: f"/resolved/{Path(name).name}")
-    monkeypatch.setattr(image_cli, "run_batch", MagicMock())
-    monkeypatch.setattr(lora_utils.os.path, "isfile", lambda _path: True)
-    return backend
 
 
 def _patch_video_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
@@ -53,7 +27,7 @@ def _patch_video_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
         lambda: {
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
             "video_sizes": {"16:9": {"m": {"width": 768, "height": 432}}},
-            "video_model_presets": {"ltx": {**packaged_config()["video_model_presets"]["ltx"], "upscale": {}}},
+            "video_model_presets": {"ltx": {**load_packaged_config()["video_model_presets"]["ltx"], "upscale": {}}},
             "model_aliases": {},
         },
     )

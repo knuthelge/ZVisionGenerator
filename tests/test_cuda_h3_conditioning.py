@@ -20,6 +20,8 @@ from diffusers.modular_pipelines.minimax_h3.encoders import (  # noqa: E402
 )
 from safetensors.torch import save_file  # noqa: E402
 
+from tests._h3_helpers import AUDIO_CONFIG, VAE_CONFIG, write_vae_dir  # noqa: E402
+
 from zvisiongenerator.backends.cuda.video.h3.conditioning import (  # noqa: E402
     KEYFRAME_ENCODE_SEED,
     TAIL_AUDIO_LATENTS,
@@ -35,7 +37,6 @@ from zvisiongenerator.backends.cuda.video.h3.conditioning import (  # noqa: E402
     tail_first_audio_order,
 )
 from zvisiongenerator.backends.cuda.video.h3.schedule import AUDIO_COND_T, KEYFRAME_T  # noqa: E402
-from _h3_helpers import AUDIO_CONFIG, VAE_CONFIG, write_vae_dir  # noqa: E402
 
 _HOP = 4  # samples per audio latent of the tiny audio VAE (the real one has 800)
 _CANVAS = (64, 32)  # width, height: 4 x 2 latent cells

@@ -10,9 +10,10 @@ from __future__ import annotations
 import ast
 import importlib
 import re
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from tests._paths import REPO_ROOT
+
+ROOT = REPO_ROOT
 PACKAGE = ROOT / "packages" / "moss_image"
 MAKEFILE = ROOT / "Makefile"
 PIPELINE = PACKAGE / "pipeline_moss_image.py"

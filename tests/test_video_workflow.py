@@ -7,7 +7,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import make_extend_source
+
+from tests._factories import make_extend_source
 
 from zvisiongenerator.core.progress_events import _stage_label
 from zvisiongenerator.core.types import StageOutcome

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from conftest import _make_args, _make_plan
+from tests._factories import _make_args, _make_plan
 
 
 @pytest.fixture()

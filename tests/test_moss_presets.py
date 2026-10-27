@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import re
 import warnings
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import _make_args, _make_plan
+
+from tests._factories import _make_args, _make_plan
+from tests._paths import REPO_ROOT
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.types import StageOutcome
@@ -20,7 +21,7 @@ from zvisiongenerator.utils.moss_build import moss_source
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.web import workspace_api as workspace_api_module
 
-_MAKEFILE = Path(__file__).resolve().parent.parent / "Makefile"
+_MAKEFILE = REPO_ROOT / "Makefile"
 
 _TURBO = ImageModelInfo(family="moss", is_distilled=True, size=None)
 _SFT = ImageModelInfo(family="moss", is_distilled=False, size=None)

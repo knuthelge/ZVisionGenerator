@@ -9,7 +9,8 @@ from __future__ import annotations
 import warnings
 from unittest.mock import MagicMock, patch
 
-from conftest import _make_args, _make_plan
+from tests._factories import _make_args, _make_plan
+
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.image_runner import run_batch

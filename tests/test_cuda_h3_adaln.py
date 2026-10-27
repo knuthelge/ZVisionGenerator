@@ -15,6 +15,8 @@ torch = pytest.importorskip("torch")
 diffusers = pytest.importorskip("diffusers")
 pytest.importorskip("safetensors")
 
+from tests._h3_helpers import HIDDEN, LAYERS, TIME_EMBED_DIM, layout_inputs, tiny_layout, tiny_transformer, transformer_config  # noqa: E402
+
 from zvisiongenerator.backends.cuda.video.h3.adaln import (  # noqa: E402
     FoldedAdaLN,
     FoldState,
@@ -36,7 +38,6 @@ from zvisiongenerator.backends.cuda.video.h3.schedule import (  # noqa: E402
     row_timesteps,
 )
 from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
-from _h3_helpers import HIDDEN, LAYERS, TIME_EMBED_DIM, layout_inputs, tiny_layout, tiny_transformer, transformer_config  # noqa: E402
 
 _SCHEDULE_8 = H3Schedule(8, 6.0, 3.0)
 _SCHEDULE_4 = H3Schedule(4, 6.0, 3.0)

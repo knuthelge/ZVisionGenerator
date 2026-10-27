@@ -6,7 +6,8 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from _web_helpers import packaged_config
+
+from tests._factories import load_packaged_config
 
 from zvisiongenerator import backends
 from zvisiongenerator.core.video_family import VideoCapabilities
@@ -20,7 +21,7 @@ _END_CONTROLS = ["end_image", "end_image_clear", "end_image_path"]
 
 
 def _web_config(config: dict | None = None) -> SimpleNamespace:
-    config = config if config is not None else packaged_config()
+    config = config if config is not None else load_packaged_config()
     return SimpleNamespace(app_config=config, video_ratios=tuple(config["video_sizes"]), video_size_options={ratio: tuple(sizes) for ratio, sizes in config["video_sizes"].items()})
 
 
@@ -132,7 +133,7 @@ def test_an_h3_payload_on_macos_also_hides_the_upscale_controls(monkeypatch):
 
 def test_a_default_frame_count_off_the_rule_is_aligned(monkeypatch):
     _patch_h3(monkeypatch, "linux")
-    config = packaged_config()
+    config = load_packaged_config()
     del config["video_model_presets"]["h3"]["default_frames"]
 
     # The size table's 121 frames is not a count of 17k + 5; the next one is.

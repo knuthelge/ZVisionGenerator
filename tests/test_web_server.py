@@ -22,6 +22,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 import pytest
 
+
 from tests._server_helpers import post_video, stub_video_submission, make_resolved_image_defaults, make_web_config, make_workspace_bootstrap_view, patch_image_submit_dependencies, write_png
 
 from zvisiongenerator.downloads.space import SpaceNeed
@@ -1763,7 +1764,7 @@ def test_a_job_snapshot_carries_the_model_label_and_falls_back_to_the_model():
 
 @pytest.mark.parametrize("amount", [-0.1, 1.6])
 def test_generate_rejects_sharpen_amounts_outside_the_safe_range(amount):
-    from conftest import _make_args
+    from tests._factories import _make_args
 
     with pytest.raises(ValueError, match="Sharpen amount must be between 0 and 1.5"):
         web_server._validate_image_args(_make_args(sharpen=amount, image_strength=0.5, quantize=None, runs=1))

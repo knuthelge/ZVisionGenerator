@@ -9,8 +9,9 @@ import httpx
 import pytest
 from huggingface_hub.errors import GatedRepoError
 
+from tests._factories import _patch_image_main_dependencies
+
 import zvisiongenerator.image_cli as image_cli
-from tests.test_lora_unification import _patch_image_main_dependencies
 from zvisiongenerator.cli import main
 from zvisiongenerator.web import main as web_main
 

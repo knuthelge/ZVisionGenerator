@@ -19,6 +19,8 @@ pytest.importorskip("diffusers")
 pytest.importorskip("safetensors")
 from safetensors.torch import load_file, save_file  # noqa: E402
 
+from tests._h3_helpers import HIDDEN, LAYERS, lora_factors, layout_inputs, tiny_layout, tiny_transformer, transformer_config, write_lora  # noqa: E402
+
 from zvisiongenerator.backends.cuda.video.h3 import adaln as adaln_module  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import stored_copy  # noqa: E402
@@ -26,7 +28,6 @@ from zvisiongenerator.backends.cuda.video.h3.schedule import build_schedulers  #
 from zvisiongenerator.backends.cuda.video.h3.stored_copy import copy_manifest, copy_name, ensure_copy, load_copy, write_copy  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME  # noqa: E402
-from _h3_helpers import HIDDEN, LAYERS, lora_factors, layout_inputs, tiny_layout, tiny_transformer, transformer_config, write_lora  # noqa: E402
 
 _SCHEDULE_8 = H3Schedule(8, 6.0, 3.0)
 _SCHEDULE_4 = H3Schedule(4, 6.0, 3.0)

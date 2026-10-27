@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from _media import REAL, encode_frames, ffmpeg, first_frame, numbered_frames, rotated_copy
+
+from tests._media import REAL, encode_frames, ffmpeg, first_frame, numbered_frames, rotated_copy
 
 from zvisiongenerator.utils import video_probe
 from zvisiongenerator.utils.video_extend import extend_source_problems

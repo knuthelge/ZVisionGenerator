@@ -8,14 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from PIL import Image
-from conftest import make_extend_source
 
-import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
-import zvisiongenerator.backends.cuda.video.sampler as _sampler_module
-from zvisiongenerator.backends.cuda.video.backend import (
-    DiffusersVideoBackend,
-)
-from _cuda_helpers import (
+from tests._cuda_helpers import (
     install_fake_weights,
     _FakeConditionPipeline,
     _FakeImagePipeline,
@@ -27,6 +21,13 @@ from _cuda_helpers import (
     _patch_runtime,
     _patch_upsampler_io,
     _text_to_video_args,
+)
+from tests._factories import make_extend_source
+
+import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
+import zvisiongenerator.backends.cuda.video.sampler as _sampler_module
+from zvisiongenerator.backends.cuda.video.backend import (
+    DiffusersVideoBackend,
 )
 
 

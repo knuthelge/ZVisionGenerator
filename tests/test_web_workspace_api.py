@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests._server_helpers import make_resolved_image_defaults, make_web_config, make_workspace_bootstrap_view
 
+from tests._server_helpers import make_resolved_image_defaults, make_web_config, make_workspace_bootstrap_view
 
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry

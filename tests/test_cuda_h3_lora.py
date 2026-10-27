@@ -10,6 +10,8 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("diffusers")
 from safetensors.torch import save_file  # noqa: E402
 
+from tests._h3_helpers import lora_factors, write_lora  # noqa: E402
+
 from zvisiongenerator.backends.cuda.video.h3.lora import (  # noqa: E402
     LoraMerger,
     bake_scales,
@@ -21,7 +23,6 @@ from zvisiongenerator.backends.cuda.video.h3.lora import (  # noqa: E402
     peft_state,
     split_user_lora,
 )
-from _h3_helpers import lora_factors, write_lora  # noqa: E402
 
 TURBO_SCALE = 0.0625
 HIDDEN = 8

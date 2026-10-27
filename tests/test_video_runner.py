@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from _video_helpers import make_ltx_info
-from conftest import _make_plan, make_extend_source
 
 from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.conftest import _make_mock_video_backend, _make_video_args
+from tests._factories import _make_plan, make_extend_source
+from tests._factories import _make_mock_video_backend, _make_video_args
+from tests._video_helpers import make_ltx_info
+
 from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import ExtendSpec

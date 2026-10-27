@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 
-from conftest import _make_args, _make_plan
+from tests._factories import _make_args, _make_plan
+
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal

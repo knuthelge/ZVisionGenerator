@@ -7,9 +7,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from _web_helpers import packaged_config
-from conftest import make_extend_source
 from PIL import Image
+
+from tests._factories import load_packaged_config
+from tests._factories import make_extend_source
 
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.utils.config import load_config
@@ -27,7 +28,7 @@ def _linux(monkeypatch):
 
 def _web_config(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
-        app_config=packaged_config(),
+        app_config=load_packaged_config(),
         output_dir=str(tmp_path),
         default_models=WebUiDefaultModels(image="zit", video="h3"),
         video_model_options=("h3", "ltx-8"),

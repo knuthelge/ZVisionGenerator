@@ -9,9 +9,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import make_extend_source
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
+
+from tests._factories import make_extend_source
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
@@ -674,7 +675,7 @@ class TestBuildVideoUpscalePayload:
         assert (settings.workflow, settings.frame_count, settings.source["workflow"]) == ("upscale", 121, "txt2vid")
 
     def test_extend_refuses_the_result_as_upscaled(self):
-        from conftest import make_probe
+        from tests._factories import make_probe
         from zvisiongenerator.utils.video_extend import extend_source_problems
 
         problems = extend_source_problems(

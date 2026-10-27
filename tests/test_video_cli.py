@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from _video_helpers import make_ltx_info, patch_video_cli_for_preflight
-from conftest import make_extend_source
 from huggingface_hub.errors import GatedRepoError
+
+from tests._factories import make_extend_source
+from tests._video_helpers import make_ltx_info, patch_video_cli_for_preflight
 
 from zvisiongenerator import video_cli
 from zvisiongenerator.utils.config import load_config

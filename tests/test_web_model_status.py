@@ -7,7 +7,8 @@ import struct
 from pathlib import Path
 
 import pytest
-from _web_helpers import packaged_config
+
+from tests._factories import load_packaged_config
 
 from zvisiongenerator.utils.model_memory import CudaMemoryEstimate, LtxCudaMemoryEstimate, MemoryBudget
 from zvisiongenerator.web import model_status
@@ -52,7 +53,7 @@ def darwin(monkeypatch):
 
 def _ltx_status(name, pack, *, gemma=None, present=None, budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), **extra):
     """Describe the macOS alias *name* whose pinned pack is the folder *pack*; *gemma* is the Gemma 3 folder when it is on disk."""
-    config = packaged_config()
+    config = load_packaged_config()
     ref = config["model_aliases"][name]["darwin"]
     folders = {ref: pack, **({_GEMMA_REPO: gemma} if gemma is not None else {})}
     present = present or (lambda target: target.repo_id != _GEMMA_REPO or gemma is not None)
@@ -89,7 +90,7 @@ class TestDescribeMlxVideoStatus:
     @pytest.mark.parametrize("unpinned", [False, True])
     def test_a_custom_name_for_the_bundled_pack_is_downloaded_with_no_gemma_3_cached(self, tmp_path, unpinned):
         pack = _make_mlx_pack(tmp_path, bundled=True)
-        config = packaged_config()
+        config = load_packaged_config()
         ref = config["model_aliases"]["ltx25-4"]["darwin"]
         ref = ref.split("@")[0] if unpinned else ref
         seen = []
@@ -141,7 +142,7 @@ class TestDescribeMlxVideoStatus:
         }
 
     def test_a_pack_that_is_not_on_disk_is_not_downloaded(self):
-        config = packaged_config()
+        config = load_packaged_config()
         ref = config["model_aliases"]["ltx-8"]["darwin"]
 
         status = describe_model_status(
@@ -162,7 +163,7 @@ class TestTrimmedPackOnDisk:
         from zvisiongenerator.utils.config import ltx_mlx_packs
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(tmp_path / "cache"))
-        config = packaged_config()
+        config = load_packaged_config()
         files = ltx_mlx_packs(config)[config["model_aliases"]["ltx-4"]["darwin"]]
         snapshot = tmp_path / "cache" / f"models--{files.repo_id.replace('/', '--')}" / "snapshots" / files.revision
         for name in files.files:
@@ -174,7 +175,7 @@ class TestTrimmedPackOnDisk:
     def _status(snapshot, tmp_path):
         from zvisiongenerator.downloads.presence import target_present_offline
 
-        config = packaged_config()
+        config = load_packaged_config()
         ref = config["model_aliases"]["ltx-4"]["darwin"]
         gemma = tmp_path / "gemma"
         gemma.mkdir(exist_ok=True)
@@ -215,7 +216,7 @@ class TestH3Status:
             budget=budget,
             find_local_dir=lambda reference: None,
             model_name="h3",
-            app_config=packaged_config(),
+            app_config=load_packaged_config(),
             family="h3",
             target_present=present,
             **extra,
@@ -283,7 +284,7 @@ class TestH3Status:
         cache = tmp_path / "cache"
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
         monkeypatch.setattr(model_files, "huggingface_cache_dir", lambda: cache)
-        config = packaged_config()
+        config = load_packaged_config()
         ref = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
 
         def no_network(**_kwargs):

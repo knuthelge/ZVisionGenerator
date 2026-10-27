@@ -10,17 +10,7 @@ from typing import Any
 import pytest
 from PIL import Image
 
-import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
-import zvisiongenerator.backends.cuda.video.sampler as _sampler_module
-from zvisiongenerator.backends.cuda.video.backend import (
-    DiffusersVideoBackend,
-    _absent_optional_components,
-    _pass_scheduler,
-    _repo_dir,
-    _resolve_upsampler_weights,
-    _stage1_sigmas,
-)
-from _cuda_helpers import (
+from tests._cuda_helpers import (
     install_fake_weights,
     _DISTILLED_SIGMAS,
     _FakeScheduler,
@@ -33,6 +23,17 @@ from _cuda_helpers import (
     _patch_upsampler_io,
     _text_to_video_args,
     real_download_hub_file,
+)
+
+import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
+import zvisiongenerator.backends.cuda.video.sampler as _sampler_module
+from zvisiongenerator.backends.cuda.video.backend import (
+    DiffusersVideoBackend,
+    _absent_optional_components,
+    _pass_scheduler,
+    _repo_dir,
+    _resolve_upsampler_weights,
+    _stage1_sigmas,
 )
 
 

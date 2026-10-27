@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+from tests._paths import REPO_ROOT
+
+ROOT = REPO_ROOT
 PACKAGE = ROOT / "packages" / "minimax_h3_mlx"
 MAKEFILE = ROOT / "Makefile"
 BACKEND = ROOT / "zvisiongenerator" / "backends" / "mac" / "h3_video.py"

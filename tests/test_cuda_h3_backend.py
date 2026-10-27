@@ -14,10 +14,11 @@ from typing import Any
 
 import numpy as np
 import pytest
-from conftest import make_extend_source
 from PIL import Image
 
 torch = pytest.importorskip("torch")
+
+from tests._factories import make_extend_source  # noqa: E402
 
 from zvisiongenerator.backends.cuda.video.h3 import audio as h3_audio  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import backend as h3_backend  # noqa: E402

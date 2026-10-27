@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tests.conftest import _make_plan
+from tests._factories import _make_plan
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module

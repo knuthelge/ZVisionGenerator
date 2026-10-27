@@ -6,17 +6,17 @@ import json
 import subprocess
 import sys
 import threading
-from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from huggingface_hub.errors import GatedRepoError
 
+from tests._paths import REPO_ROOT
+
 from zvisiongenerator.downloads import worker
 from zvisiongenerator.downloads.target import DownloadTarget
 
-_ROOT = Path(__file__).resolve().parent.parent
 _TARGET = DownloadTarget(
     "owner/repo",
     revision="v1",
@@ -129,7 +129,7 @@ def test_lifeline_ends_the_process_when_stdin_closes() -> None:
         [sys.executable, "-c", code, DownloadTarget("owner/repo").to_json()],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        cwd=_ROOT,
+        cwd=REPO_ROOT,
     )
     try:
         assert process.stdin is not None and process.stdout is not None
@@ -152,7 +152,7 @@ def test_running_the_module_emits_no_runtime_warning() -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        cwd=_ROOT,
+        cwd=REPO_ROOT,
     )
     try:
         assert process.stdout is not None and process.stderr is not None

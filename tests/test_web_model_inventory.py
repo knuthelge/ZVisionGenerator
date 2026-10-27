@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from _web_helpers import packaged_config as _packaged_config
+
+from tests._factories import load_packaged_config
 
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.web import model_inventory as model_inventory_module
@@ -17,7 +18,7 @@ from zvisiongenerator.web.model_inventory import ImageInventoryEntry, discover_v
 def packaged_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     """Return the packaged config with the user's data dir (and so any user config) swapped for an empty one."""
     monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "ziv"))
-    return _packaged_config()
+    return load_packaged_config()
 
 
 def _video_inventory(config: dict[str, Any], tmp_path: Path, platform: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:

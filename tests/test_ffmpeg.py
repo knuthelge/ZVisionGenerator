@@ -7,7 +7,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from _media import REAL, ffmpeg
+
+from tests._media import REAL, ffmpeg
 
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, ensure_ffmpeg, require_ffmpeg, staging_path, strip_audio, strip_ffmpeg_banner, tool_error
 

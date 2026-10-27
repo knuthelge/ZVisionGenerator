@@ -12,8 +12,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from _media import REAL, decode_frames, encode_frames, ffmpeg, numbered_frames, rotated_copy
-from conftest import make_extend_source
+from tests._factories import make_extend_source
+from tests._media import REAL, decode_frames, encode_frames, ffmpeg, numbered_frames, rotated_copy
+
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils import video_tail
 from zvisiongenerator.utils.video_extend import build_extend_source

@@ -8,7 +8,8 @@ import httpx
 import pytest
 from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
-from tests._download_helpers import packaged_config
+from tests._factories import load_packaged_config
+
 from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, seedvr2_plan, video_model_downloaded, video_plan
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, write_build_record
@@ -163,7 +164,7 @@ class TestVideoPlan:
         from zvisiongenerator.utils.h3_preset import h3_preset
 
         monkeypatch.setattr(backends.sys, "platform", "linux")
-        config = packaged_config()
+        config = load_packaged_config()
         upscale = True
         target = DownloadTarget("owner/h3")
         h3_backend = _patch_backend(monkeypatch, "h3_download_plan", (target,))
@@ -180,7 +181,7 @@ class TestVideoPlan:
         from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
 
         monkeypatch.setattr(backends.sys, "platform", "darwin")
-        config = packaged_config()
+        config = load_packaged_config()
 
         plan = video_plan("MiniMaxAI/MiniMax-H3@rev", family="h3", config=config, model_name="h3", upscale=False)
 
@@ -337,7 +338,7 @@ class TestThroughTheRealDispatch:
     @staticmethod
     def _config(monkeypatch, platform_key: str):
         monkeypatch.setattr("zvisiongenerator.backends.sys.platform", platform_key)
-        return packaged_config()
+        return load_packaged_config()
 
     def test_the_ltx25_plan_is_the_pinned_repo_alone_with_and_without_upscale(self, monkeypatch):
         config = self._config(monkeypatch, "linux")

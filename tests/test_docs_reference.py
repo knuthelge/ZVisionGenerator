@@ -11,12 +11,14 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests._paths import REPO_ROOT
+
 from zvisiongenerator.converters.convert_checkpoint import _build_model_parser
 from zvisiongenerator.image_cli import _build_parser as _build_image_parser
 from zvisiongenerator.video_cli import _build_video_parser
 from zvisiongenerator.web import _build_parser as _build_ui_parser
 
-_DOCS = Path(__file__).resolve().parent.parent / "docs"
+_DOCS = REPO_ROOT / "docs"
 _CLI_REFERENCE = _DOCS / "cli" / "reference.md"
 _CONFIG_REFERENCE = _DOCS / "concepts" / "configuration.md"
 

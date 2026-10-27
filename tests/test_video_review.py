@@ -9,8 +9,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from _video_helpers import make_ltx_info, make_video_request, patch_video_cli_for_preflight
-from tests.conftest import _make_mock_video_backend, _make_plan, _make_video_args
+from tests._factories import _make_mock_video_backend, _make_plan, _make_video_args
+from tests._video_helpers import make_ltx_info, make_video_request, patch_video_cli_for_preflight
+
 from zvisiongenerator.backends import supports_video_upscale_review
 from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
 from zvisiongenerator.backends.mac.video import LtxVideoBackend, _LtxModel

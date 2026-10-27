@@ -10,7 +10,8 @@ from unittest.mock import MagicMock
 import huggingface_hub
 import huggingface_hub.constants
 import pytest
-from _web_helpers import packaged_config
+
+from tests._factories import load_packaged_config
 
 from zvisiongenerator.backends.cuda import download_plan as cuda_plan
 from zvisiongenerator.downloads.space import SpaceNeed
@@ -177,7 +178,7 @@ class TestDownloadNeeded:
 
     def test_the_ltx25_row_plans_one_pinned_target_and_is_needed_until_it_is_present(self, env, monkeypatch):
         monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "linux")
-        config = packaged_config()
+        config = load_packaged_config()
         pin = config["model_aliases"]["ltx25-4"]["linux"]
         web_config = _web_config(env, video=[_video("ltx25-4", pin)], app_config=config)
         target = DownloadTarget("unsloth/LTX-2.5-FP8", "7b40724fc39bbb01d9b4d72638c0d263531c88c2", None, ("LTX-2.5-*.safetensors", "samples/*"))

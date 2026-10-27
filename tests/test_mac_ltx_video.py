@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from conftest import make_extend_source
 
 import os
 import sys
@@ -14,6 +13,8 @@ from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
+
+from tests._factories import make_extend_source
 
 from zvisiongenerator.backends.mac.video import (
     LtxVideoBackend,

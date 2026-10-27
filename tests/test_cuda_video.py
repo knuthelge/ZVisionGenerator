@@ -8,16 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
-from zvisiongenerator.backends.cuda.video.backend import (
-    DiffusersVideoBackend,
-    _UPSAMPLER_CONFIG,
-    _resolve_pipeline_classes,
-    _resolve_upsampler_weights,
-    _TextEncoderSource,
-    _validate_diffusers_version,
-)
-from _cuda_helpers import (
+from tests._cuda_helpers import (
     install_fake_weights,
     _FakeTextPipeline,
     _FakeTorch,
@@ -40,6 +31,16 @@ from _cuda_helpers import (
     real_place_components,
     real_place_transformer,
     real_prepared_weights,
+)
+
+import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
+from zvisiongenerator.backends.cuda.video.backend import (
+    DiffusersVideoBackend,
+    _UPSAMPLER_CONFIG,
+    _resolve_pipeline_classes,
+    _resolve_upsampler_weights,
+    _TextEncoderSource,
+    _validate_diffusers_version,
 )
 
 

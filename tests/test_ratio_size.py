@@ -11,21 +11,19 @@ Covers:
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import _make_plan
 
-import _prompt_helpers
+from tests._factories import _make_plan
+from tests._paths import REPO_ROOT
+
 from zvisiongenerator.image_cli import _build_parser, main
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
-packaged_config = _prompt_helpers.packaged_config
-packaged_config_shared = _prompt_helpers.packaged_config_shared
 
-_IMAGES_DOC = Path(__file__).resolve().parent.parent / "docs" / "concepts" / "images.md"
+_IMAGES_DOC = REPO_ROOT / "docs" / "concepts" / "images.md"
 
 # The few presets the runner and default-resolution tests look up, as (width, height).
 _SIZES_UNDER_TEST = {
@@ -170,7 +168,7 @@ class TestRunnerSizeLookup:
         from zvisiongenerator.core.workflow import GenerationWorkflow
         from zvisiongenerator.image_runner import run_batch
         from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-        from conftest import _make_args
+        from tests._factories import _make_args
 
         captured = {}
 
@@ -246,7 +244,7 @@ class TestRunnerFilenameIntegration:
         from zvisiongenerator.core.workflow import GenerationWorkflow
         from zvisiongenerator.image_runner import run_batch
         from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-        from conftest import _make_args
+        from tests._factories import _make_args
 
         captured = {}
 

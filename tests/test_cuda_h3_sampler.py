@@ -24,6 +24,8 @@ from diffusers.modular_pipelines.minimax_h3.before_denoise import (  # noqa: E40
 from diffusers.modular_pipelines.minimax_h3.denoise import MiniMaxH3LoopDenoiser, MiniMaxH3LoopSchedulerStep  # noqa: E402
 from diffusers.utils.torch_utils import randn_tensor  # noqa: E402
 
+from tests._h3_helpers import tiny_transformer  # noqa: E402
+
 from zvisiongenerator.backends.cuda.video.h3 import sampler as sampler_module  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.conditioning import (  # noqa: E402
     TAIL_AUDIO_LATENTS,
@@ -42,7 +44,6 @@ from zvisiongenerator.backends.cuda.video.h3.sampler import (  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.schedule import AUDIO_COND_T, KEYFRAME_T, build_schedulers  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.text_encoder import TEXT_TAG, VIDEO_TAG  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
-from _h3_helpers import tiny_transformer  # noqa: E402
 
 _SCHEDULE_8 = H3Schedule(8, 6.0, 3.0)
 _SCHEDULE_4 = H3Schedule(4, 6.0, 3.0)

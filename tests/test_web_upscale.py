@@ -14,7 +14,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from conftest import make_extend_source, make_probe
+
+from tests._factories import make_extend_source, make_probe
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.upscale_runner import UpscaleSource

@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from conftest import _make_args, _make_plan, _make_video_args
+from tests._factories import _make_args, _make_plan, _make_video_args
+
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome

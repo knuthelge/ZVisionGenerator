@@ -14,8 +14,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import _make_args, make_extend_source
+from tests._factories import _make_args, make_extend_source
 from tests._server_helpers import make_web_config, patch_image_submit_dependencies
+
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
@@ -574,7 +575,7 @@ class TestWebPreflight:
         monkeypatch.setattr(web_runner_module, "require_ffmpeg", lambda: order.append("require_ffmpeg"))
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         try:
-            from tests.conftest import _make_video_args
+            from tests._factories import _make_video_args
 
             request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", model_family="ltx")
             args = _make_video_args(enhance=EnhanceSettings(), no_enhance=False)

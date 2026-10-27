@@ -5,15 +5,15 @@ from __future__ import annotations
 import functools
 import json
 import os
-from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pytest
-from conftest import make_probe
 
+
+from tests._factories import make_probe
+from tests._paths import FIXTURES
 from tests._server_helpers import post_video, stub_video_submission, make_web_config
-
 
 from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import server as web_server
@@ -114,7 +114,7 @@ def test_a_source_that_changed_since_it_was_inspected_is_checked_again(clip):
 
 def test_inspect_route_reports_the_facts_recorded_prompts_and_defaults_of_a_good_source(clip):
     """The response is the shape the frontend types are checked against: ``frontend/src/lib/state/extend.test.ts`` loads this same file as an ``ExtendSourceInfo``; change both together."""
-    fixture = json.loads((Path(__file__).parent / "fixtures" / "extend_source_response.json").read_text(encoding="utf-8"))
+    fixture = json.loads((FIXTURES / "extend_source_response.json").read_text(encoding="utf-8"))
 
     payload = _inspect({"path": str(clip.path)}).json()
 

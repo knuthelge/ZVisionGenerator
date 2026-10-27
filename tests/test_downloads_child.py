@@ -9,13 +9,14 @@ from typing import Any
 
 import pytest
 
+from tests._paths import REPO_ROOT
 from tests._server_helpers import FakeProcess, Launcher
+
 from zvisiongenerator.downloads import child
 from zvisiongenerator.downloads.child import ChildResult, child_env, run_in_child
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.downloads.protocol import PROTOCOL_PREFIX
 
-_ROOT = Path(__file__).resolve().parent.parent
 _TARGET = DownloadTarget("owner/repo", allow_patterns=("*.safetensors",))
 
 
@@ -210,7 +211,7 @@ raise SystemExit(worker.main([sys.argv[1]], start_lifeline=True))
 
 def _real_popen(release: Path, mode: str):
     def popen(command: list[str], **kwargs: Any) -> subprocess.Popen[str]:
-        return subprocess.Popen([sys.executable, "-c", _WRAPPER, command[-1], str(release), mode], cwd=_ROOT, **kwargs)
+        return subprocess.Popen([sys.executable, "-c", _WRAPPER, command[-1], str(release), mode], cwd=REPO_ROOT, **kwargs)
 
     return popen
 

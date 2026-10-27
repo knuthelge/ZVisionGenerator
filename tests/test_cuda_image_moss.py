@@ -21,6 +21,8 @@ from moss_image.pipeline_moss_image import MOSSImageScheduler, MOSSImageTransfor
 from PIL import Image
 from torch import nn
 
+from tests._paths import REPO_ROOT
+
 import zvisiongenerator.backends.cuda.image.moss as moss
 from zvisiongenerator.backends.cuda.image.moss_sampler import Conditioning, initial_noise, noised
 from zvisiongenerator.backends.cuda import quant
@@ -789,7 +791,7 @@ class TestKeepLists:
             _forward(model)
 
 
-_VENDORED = Path(__file__).resolve().parent.parent / "packages" / "moss_image" / "pipeline_moss_image.py"
+_VENDORED = REPO_ROOT / "packages" / "moss_image" / "pipeline_moss_image.py"
 # The module path each vendored class has inside the transformer ("*" stands for a layer index).
 _CLASS_PREFIX = {"MOSSImageTransformer": "", "_Block": "layers.*.", "_TextProjection": "text_embedder."}
 

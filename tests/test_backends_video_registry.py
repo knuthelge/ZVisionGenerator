@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests._download_helpers import packaged_config
+from tests._factories import load_packaged_config
+
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.core.video_family import VideoCapabilities
 
@@ -148,7 +149,7 @@ class TestFamilyAvailability:
 
 class TestVideoCapabilities:
     def test_the_packaged_ltx_family_keeps_its_capabilities_on_every_supported_platform(self, monkeypatch):
-        config = packaged_config()
+        config = load_packaged_config()
 
         for platform_key in ("darwin", "win32", "linux"):
             monkeypatch.setattr(backends_module.sys, "platform", platform_key)
@@ -200,6 +201,6 @@ class TestMacH3Registration:
 
     def test_the_shipped_capabilities_on_macos_hide_upscale_and_review(self, monkeypatch):
         monkeypatch.setattr(backends_module.sys, "platform", "darwin")
-        capabilities = backends_module.video_capabilities(packaged_config(), "h3")
+        capabilities = backends_module.video_capabilities(load_packaged_config(), "h3")
 
         assert capabilities == VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=False, upscale_review=False, lora=True, audio=True, low_memory=False)

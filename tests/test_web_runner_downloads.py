@@ -11,8 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests.conftest import _make_args, _make_video_args
+from tests._factories import _make_args, _make_video_args
 from tests._server_helpers import FakeProcess, Launcher, sse_payload, stub_request_job, wait_for_status
+
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest

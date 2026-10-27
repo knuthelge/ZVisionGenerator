@@ -11,7 +11,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from conftest import make_extend_source, make_probe
+
+from tests._factories import make_extend_source, make_probe
 
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils import video_extend

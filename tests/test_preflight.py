@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import make_extend_source
+
+from tests._factories import make_extend_source
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus

@@ -10,9 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._factories import _patch_image_main_dependencies
+
 import zvisiongenerator.image_cli as image_cli
 from zvisiongenerator import moss_builder
-from tests.test_lora_unification import _patch_image_main_dependencies
 from zvisiongenerator.backends.cuda.download_plan import image_download_plan
 from zvisiongenerator.built_models import ensure_built_model
 from zvisiongenerator.downloads.plans import built_model_plan, image_plan

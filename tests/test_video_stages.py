@@ -11,8 +11,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from _video_helpers import make_video_request
-from conftest import make_extend_source
+
+from tests._factories import make_extend_source
+from tests._video_helpers import make_video_request
 
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts

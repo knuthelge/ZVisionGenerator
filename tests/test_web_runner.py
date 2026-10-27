@@ -20,10 +20,11 @@ from huggingface_hub.errors import GatedRepoError
 from PIL import Image
 import pytest
 
+from tests._factories import _make_args
+from tests._factories import _make_plan
+from tests._factories import _make_video_args, make_extend_source
 from tests._server_helpers import sse_payload, stub_request_job, wait_for_status
-from tests.conftest import _make_args
-from tests.conftest import _make_plan
-from tests.conftest import _make_video_args, make_extend_source
+
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.target import DownloadTarget

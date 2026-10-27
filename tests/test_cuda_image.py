@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
+import zvisiongenerator.schedulers.beta_sigmas  # noqa: F401  (import scipy for real here; its first import under the fake ``torch`` fails and corrupts numpy)
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
 

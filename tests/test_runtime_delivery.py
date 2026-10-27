@@ -8,10 +8,11 @@ import zipfile
 
 import pytest
 
+from tests._paths import REPO_ROOT
+
 from zvisiongenerator.web.workspace_contract import build_workflow_contract, canonicalize_workflow, workflow_mode
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 LICENSE_FILES = ("LICENSE", "THIRD_PARTY_LICENSES.md")
 LICENSE_EXPRESSION = "AGPL-3.0-or-later"
 VENDORED_PACKAGES = ("ltx_core_mlx", "ltx_pipelines_mlx", "minimax_h3_mlx", "seedvr2_torch", "moss_image")

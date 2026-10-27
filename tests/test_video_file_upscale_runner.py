@@ -13,7 +13,8 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from conftest import make_extend_source, make_probe
+
+from tests._factories import make_extend_source, make_probe
 
 from zvisiongenerator import video_file_upscale_runner as runner
 from zvisiongenerator.core.types import StageOutcome

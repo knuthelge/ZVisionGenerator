@@ -11,12 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import _prompt_helpers
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession, ensure_available, smart_budget_bytes
 from zvisiongenerator.utils.config import resolve_enhancer_model, smart_unavailable, split_model_revision
-
-packaged_config = _prompt_helpers.packaged_config
-packaged_config_shared = _prompt_helpers.packaged_config_shared
 
 
 # ── mlx-lm adapter ──────────────────────────────────────────────────────────

@@ -12,6 +12,8 @@ np = pytest.importorskip("numpy")
 
 from diffusers import AutoencoderKLMiniMaxH3, AutoencoderKLMiniMaxH3Audio  # noqa: E402
 
+from tests._h3_helpers import AUDIO_CONFIG, VAE_CONFIG, write_vae_dir  # noqa: E402
+
 from zvisiongenerator.backends.cuda.video.h3.audio import AUDIO_SAMPLE_RATE, decode_audio, load_audio_vae  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.decode import (  # noqa: E402
     PIXEL_MEAN,
@@ -21,7 +23,6 @@ from zvisiongenerator.backends.cuda.video.h3.decode import (  # noqa: E402
     load_video_vae,
     to_uint8,
 )
-from _h3_helpers import AUDIO_CONFIG, VAE_CONFIG, write_vae_dir  # noqa: E402
 
 
 def _tiny_vae() -> AutoencoderKLMiniMaxH3:

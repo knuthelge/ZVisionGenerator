@@ -13,6 +13,8 @@ import pytest
 from huggingface_hub.errors import GatedRepoError
 from huggingface_hub.utils import filter_repo_objects
 
+from tests._paths import FIXTURES
+
 from zvisiongenerator.backends.cuda.download_plan import (
     DIFFUSERS_IGNORE,
     DIFFUSERS_ROOT_FILES,
@@ -30,7 +32,7 @@ from zvisiongenerator.utils import hf_snapshot
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.h3_preset import h3_preset
 
-_LISTINGS = json.loads((Path(__file__).parent / "fixtures" / "diffusers_repo_listings.json").read_text(encoding="utf-8"))
+_LISTINGS = json.loads((FIXTURES / "diffusers_repo_listings.json").read_text(encoding="utf-8"))
 KLEIN = "black-forest-labs/FLUX.2-klein-9B"
 ZIMAGE = "Tongyi-MAI/Z-Image-Turbo"
 KREA = "unsloth/Krea-2-Turbo"

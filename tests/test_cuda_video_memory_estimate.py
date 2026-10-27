@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from _cuda_helpers import _converted_folder, _patch_memory
+from tests._cuda_helpers import _converted_folder, _patch_memory
+
 from zvisiongenerator.backends.cuda.video import memory_estimate
 from zvisiongenerator.backends.cuda.video.backend import _check_system_memory
 from zvisiongenerator.utils.model_memory import estimate_ltx_cuda_system_memory

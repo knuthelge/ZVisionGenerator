@@ -9,8 +9,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-from _media import REAL, ffmpeg, first_frame, numbered_frames, rotated_copy
-from conftest import make_extend_source, make_probe
+
+from tests._factories import make_extend_source, make_probe
+from tests._media import REAL, ffmpeg, first_frame, numbered_frames, rotated_copy
 
 from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource
 from zvisiongenerator.utils import video_splice
