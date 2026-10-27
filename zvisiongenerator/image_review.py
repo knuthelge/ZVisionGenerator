@@ -46,6 +46,7 @@ def make_image_review(
     *,
     progress_callback: ProgressCallback | None,
     ran_iterations: int,
+    attempt: int,
     completed_iterations: Callable[[], int],
     total_iterations: int,
 ) -> Callable[[Image.Image], bool]:
@@ -61,6 +62,7 @@ def make_image_review(
         progress_callback: Receives ``job_paused`` (with ``review`` and the render as ``preview``) and ``job_resumed``.
             Without one the job runs in a terminal: the render goes to a temporary PNG whose path is printed.
         ran_iterations: The 1-based iteration under review.
+        attempt: The 1-based attempt within that iteration (a Repeat or retry starts the next one).
         completed_iterations: Returns the finished iterations when the review starts.
         total_iterations: Iterations in the batch.
     """
@@ -78,7 +80,7 @@ def make_image_review(
                 mode="image",
                 completed_iterations=completed_iterations(),
                 total_iterations=total_iterations,
-                review={"iteration": ran_iterations},
+                review={"iteration": ran_iterations, "attempt": attempt},
                 preview=image,
             )
         finally:

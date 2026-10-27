@@ -25,8 +25,8 @@ Press <kbd>?</kbd> anywhere outside a text field to see every shortcut. ++cmd++ 
 | ++left++ / ++right++ | Step through earlier outputs in the preview |
 | ++esc++ ++esc++ | Stop the running job (press twice) |
 | ++p++ | Pause or resume the running job |
-| ++n++ | Skip to the next image; during a review, discard the small render |
-| ++r++ | Repeat the current image |
+| ++n++ | Skip to the next image or video; during a review, discard the small render |
+| ++r++ | Repeat the current image or video |
 | ++y++ | Approve the small render for upscaling (during a review) |
 
 ## Prompts page
@@ -70,4 +70,4 @@ Press <kbd>?</kbd> anywhere outside a text field to see every shortcut. ++cmd++ 
 
 ## Command line
 
-`ziv-image` reads keys while a batch runs. See [Controls during a run](../cli/batches.md#controls-during-a-run).
+`ziv-image` and `ziv-video` read keys while a batch runs. See [Controls during a run](../cli/batches.md#controls-during-a-run).

@@ -1188,7 +1188,7 @@ describe('jobStore review before upscaling', () => {
     it('holds a review pause that carries no preview, and serves the render from the review route', () => {
       source().emit('job_paused', videoPause);
       expect(jobStore.current).toMatchObject({ status: 'paused', paused: true, review: { iteration: 2 }, previewUrl: null });
-      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-video/review?v=2');
+      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-video/review?v=2-1');
     });
 
     it('follows the next video of the batch to its own URL, and drops the URL once resumed', () => {
@@ -1196,7 +1196,15 @@ describe('jobStore review before upscaling', () => {
       source().emit('job_resumed', { type: 'job_resumed' });
       expect(reviewVideoUrl(jobStore.current!)).toBeNull();
       source().emit('job_paused', { ...videoPause, review: { iteration: 3 } });
-      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-video/review?v=3');
+      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-video/review?v=3-1');
+    });
+
+    it('gives the repeat of a discarded video its own URL', () => {
+      source().emit('job_paused', { ...videoPause, review: { iteration: 2, attempt: 1 } });
+      source().emit('job_resumed', { type: 'job_resumed' });
+      source().emit('job_paused', { ...videoPause, review: { iteration: 2, attempt: 2 } });
+      expect(jobStore.current?.review).toEqual({ iteration: 2, attempt: 2 });
+      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-video/review?v=2-2');
     });
 
     it('restores a waiting review from a reconnect snapshot, including after the first decision and before job_resumed', async () => {
@@ -1207,7 +1215,7 @@ describe('jobStore review before upscaling', () => {
         supported_controls: ['approve', 'discard', 'quit'], last_event: { type: 'job_paused', event_id: 7, review: { iteration: 2 } },
       } });
       expect(jobStore.current).toMatchObject({ paused: true, review: { iteration: 2 }, previewUrl: null });
-      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-vsnap/review?v=2');
+      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-vsnap/review?v=2-1');
       source().emit('job_resumed', { type: 'job_resumed', event_id: 8 });
       expect(jobStore.current?.review).toBeNull();
     });

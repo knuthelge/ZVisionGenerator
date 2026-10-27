@@ -96,7 +96,7 @@ Keep the last few rewrites of the current prompt in the draft, with ‹ › to s
 - **Negative-prompt generation.** The default video and most image models run distilled at guidance 1, where negatives do little.
 - **User-defined Style and Mood options in config.** Possible later (the axes are data already), but item 5 covers most one-off needs without a config format.
 - **Prompt caching across a batch.** The shared system prompt is about 200 tokens; prefill is a small part of each rewrite.
-- **Stop and skip for video jobs while enhancing.** Already covered by [Controls for Web UI video jobs](../video-job-controls.md).
+- **Stop and skip for video jobs while enhancing.** Already covered by [Controls for Web UI video jobs](video-job-controls.md).
 
 ## Testing
 

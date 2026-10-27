@@ -981,7 +981,14 @@ class TestWebRunner:
                 progress_callback({"type": "prompt_started", "mode": "image", "ran_iterations": iteration, "total_iterations": rounds, "prompt": "p"})
                 skip_signal.begin_review()
                 progress_callback(
-                    {"type": "job_paused", "mode": "image", "completed_iterations": iteration - 1, "total_iterations": rounds, "review": {"iteration": iteration}, "preview": Image.new("RGB", (8, 8))}
+                    {
+                        "type": "job_paused",
+                        "mode": "image",
+                        "completed_iterations": iteration - 1,
+                        "total_iterations": rounds,
+                        "review": {"iteration": iteration, "attempt": 1},
+                        "preview": Image.new("RGB", (8, 8)),
+                    }
                 )
                 reached.set()
                 decision = skip_signal.wait_for_review()
@@ -1030,7 +1037,7 @@ class TestWebRunner:
             snapshot = runner.get_job_snapshot(job_id)
             assert snapshot["status"] == "paused"
             assert snapshot["paused"] is True
-            assert snapshot["review"] == {"iteration": 1}
+            assert snapshot["review"] == {"iteration": 1, "attempt": 1}
             assert snapshot["preview_version"] == 1
             assert runner.get_job_preview(job_id) is not None
 
@@ -1056,7 +1063,7 @@ class TestWebRunner:
             for action in ("resume", "next", "pause", "repeat"):
                 with pytest.raises(web_runner_module.UnsupportedJobControlError):
                     runner.queue_job_control(job_id, action)
-            assert runner.get_job_snapshot(job_id)["review"] == {"iteration": 1}
+            assert runner.get_job_snapshot(job_id)["review"] == {"iteration": 1, "attempt": 1}
             assert decisions == []
 
             runner.queue_job_control(job_id, "approve")
@@ -1094,9 +1101,9 @@ class TestWebRunner:
             runner.queue_job_control(job_id, "discard")
             assert reached.wait(timeout=1.0)
             deadline = time.monotonic() + 1.0
-            while runner.get_job_snapshot(job_id)["review"] != {"iteration": 2} and time.monotonic() < deadline:
+            while runner.get_job_snapshot(job_id)["review"] != {"iteration": 2, "attempt": 1} and time.monotonic() < deadline:
                 time.sleep(0.01)
-            assert runner.get_job_snapshot(job_id)["review"] == {"iteration": 2}
+            assert runner.get_job_snapshot(job_id)["review"] == {"iteration": 2, "attempt": 1}
             runner.queue_job_control(job_id, "approve")
 
             assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
@@ -1114,7 +1121,7 @@ class TestWebRunner:
 
             paused = runner.get_job_snapshot(job_id)["last_event"]
             assert paused["type"] == "job_paused"
-            assert paused["review"] == {"iteration": 1}
+            assert paused["review"] == {"iteration": 1, "attempt": 1}
             assert "preview" not in paused
             assert paused["preview_version"] == 1
             assert str(tmp_path) not in json.dumps(runner.get_job_snapshot(job_id)["review"])
@@ -1129,7 +1136,7 @@ class TestWebRunner:
         def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
             skip_signal.begin_review()
-            progress_callback({"type": "job_paused", "mode": "video", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1}, "review_path": small_render})
+            progress_callback({"type": "job_paused", "mode": "video", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1, "attempt": 1}, "review_path": small_render})
             reached.set()
             decisions.append(skip_signal.wait_for_review())
             progress_callback({"type": "job_resumed", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
@@ -1143,7 +1150,7 @@ class TestWebRunner:
             assert reached.wait(timeout=1.0)
 
             snapshot = runner.get_job_snapshot(job_id)
-            assert snapshot["review"] == {"iteration": 1}
+            assert snapshot["review"] == {"iteration": 1, "attempt": 1}
             assert snapshot["last_event"]["type"] == "job_paused"
             assert "review_path" not in snapshot["last_event"]
             assert small_render not in json.dumps(snapshot)
@@ -1167,7 +1174,7 @@ class TestWebRunner:
         def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             skip_signal.begin_review()
-            progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1}, "preview": Image.new("RGB", (8, 8))})
+            progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1, "attempt": 1}, "preview": Image.new("RGB", (8, 8))})
             reached.set()
             skip_signal.wait_for_review()
             proceed.wait(timeout=2.0)
@@ -1184,7 +1191,7 @@ class TestWebRunner:
 
             snapshot = runner.get_job_snapshot(job_id)
             assert snapshot["paused"] is True
-            assert snapshot["review"] == {"iteration": 1}
+            assert snapshot["review"] == {"iteration": 1, "attempt": 1}
             with pytest.raises(web_runner_module.UnsupportedJobControlError):
                 runner.queue_job_control(job_id, "discard")
             with pytest.raises(web_runner_module.UnsupportedJobControlError):
@@ -1209,8 +1216,8 @@ class TestWebRunner:
         assert wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
         assert decisions == ["quit"]
 
-    def test_video_jobs_accept_quit_and_refuse_other_controls(self, monkeypatch):
-        """A running video job can be cancelled; its batch sees the queued Quit and ends the job."""
+    def test_video_jobs_accept_the_image_controls_and_quit_cancels(self, monkeypatch):
+        """A running video job takes the image job's controls; its batch sees the queued Quit and ends the job."""
         started = threading.Event()
 
         def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback, skip_signal):
@@ -1226,10 +1233,10 @@ class TestWebRunner:
         try:
             job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
             assert started.wait(timeout=1.0)
-            assert runner.get_job_snapshot(job_id)["supported_controls"] == ["quit"]
+            assert runner.get_job_snapshot(job_id)["supported_controls"] == ["next", "pause", "resume", "repeat", "quit"]
 
-            with pytest.raises(web_runner_module.UnsupportedJobControlError):
-                runner.queue_job_control(job_id, "pause")
+            for action in ("next", "pause", "repeat"):
+                assert runner.queue_job_control(job_id, action)["status"] == "queued"
             assert runner.queue_job_control(job_id, "quit") == {"job_id": job_id, "action": "quit", "status": "queued"}
 
             assert wait_for_status(runner, job_id, "cancelled")["terminal_event"] == "job_cancelled"
@@ -1761,7 +1768,9 @@ def test_a_video_review_over_http_serves_the_small_render_until_the_job_resumes(
         progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 2, "total_runs": 1})
         for index, render in enumerate(renders):
             skip_signal.begin_review()
-            progress_callback({"type": "job_paused", "mode": "video", "completed_iterations": index, "total_iterations": 2, "review": {"iteration": index + 1}, "review_path": str(render)})
+            progress_callback(
+                {"type": "job_paused", "mode": "video", "completed_iterations": index, "total_iterations": 2, "review": {"iteration": index + 1, "attempt": 1}, "review_path": str(render)}
+            )
             reached[index].set()
             decisions.append(skip_signal.wait_for_review())
             proceed[index].wait(timeout=2.0)
@@ -1780,7 +1789,7 @@ def test_a_video_review_over_http_serves_the_small_render_until_the_job_resumes(
             assert (first.status_code, first.content, first.headers["cache-control"]) == (200, b"first-render", "no-store")
             # A reconnecting browser sees the review in the snapshot, without any filesystem path.
             snapshot = client.get(f"/jobs/{job_id}")
-            assert snapshot.json()["review"] == {"iteration": 1}
+            assert snapshot.json()["review"] == {"iteration": 1, "attempt": 1}
             assert str(tmp_path) not in snapshot.text
             assert client.post(f"/jobs/{job_id}/controls/resume").status_code == 409
             assert client.post(f"/jobs/{job_id}/controls/pause").status_code == 409
@@ -1788,13 +1797,13 @@ def test_a_video_review_over_http_serves_the_small_render_until_the_job_resumes(
             assert client.post(f"/jobs/{job_id}/controls/approve").status_code == 200
             assert client.post(f"/jobs/{job_id}/controls/discard").status_code == 409
             assert client.get(f"/jobs/{job_id}/review?v=1").content == b"first-render"
-            assert client.get(f"/jobs/{job_id}").json()["review"] == {"iteration": 1}
+            assert client.get(f"/jobs/{job_id}").json()["review"] == {"iteration": 1, "attempt": 1}
 
             proceed[0].set()
             assert reached[1].wait(timeout=1.0)
             second = client.get(f"/jobs/{job_id}/review?v=2")
             assert second.content == b"second-render"
-            assert client.get(f"/jobs/{job_id}").json()["review"] == {"iteration": 2}
+            assert client.get(f"/jobs/{job_id}").json()["review"] == {"iteration": 2, "attempt": 1}
 
             assert client.post(f"/jobs/{job_id}/controls/discard").status_code == 200
             proceed[1].set()

@@ -1278,10 +1278,10 @@ def _patch_video_submit_dependencies(monkeypatch, *, review_supported: bool, sub
 @pytest.mark.parametrize(
     ("form", "review", "controls"),
     [
-        ({"upscale": "2", "review": "on"}, True, ["approve", "discard", "quit"]),
-        ({"upscale": "2"}, False, ["quit"]),
-        ({"review": "on"}, False, ["quit"]),
-        ({"upscale": "2", "review": "off"}, False, ["quit"]),
+        ({"upscale": "2", "review": "on"}, True, ["next", "pause", "resume", "repeat", "approve", "discard", "quit"]),
+        ({"upscale": "2"}, False, ["next", "pause", "resume", "repeat", "quit"]),
+        ({"review": "on"}, False, ["next", "pause", "resume", "repeat", "quit"]),
+        ({"upscale": "2", "review": "off"}, False, ["next", "pause", "resume", "repeat", "quit"]),
     ],
 )
 def test_submit_video_job_review_needs_upscale(monkeypatch, tmp_path, form, review, controls):
@@ -1784,7 +1784,7 @@ def test_generate_endpoint_answers_400_for_a_video_review_the_platform_cannot_pa
 
     assert refused.status_code == 400
     assert ignored.status_code == 200
-    assert ignored.json()["supported_controls"] == ["quit"]
+    assert ignored.json()["supported_controls"] == ["next", "pause", "resume", "repeat", "quit"]
     assert len(submitted) == 1
 
 

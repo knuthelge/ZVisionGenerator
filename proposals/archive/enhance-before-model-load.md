@@ -10,7 +10,7 @@ Shipped in v0.13.0b8 as a general **preflight** phase (`zvisiongenerator/preflig
 - Each iteration reports `enhance_status` (`off`, `enhanced`, `failed`, `skipped`), and the Web UI marks prompts that were not enhanced.
 - Identical rewrites are not deduplicated.
 - Repeat and retries keep the planned text and always draw a new random seed, even when a seed is set.
-- Controls for Web UI video jobs are deferred to [video-job-controls.md](../video-job-controls.md).
+- Controls for Web UI video jobs are deferred to [video-job-controls.md](video-job-controls.md).
 
 ## Problem
 

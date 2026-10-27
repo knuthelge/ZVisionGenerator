@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 
+import threading
+import time
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -404,13 +407,19 @@ class TestVideoSceneEndToEnd:
         assert not {"scene", "scene_input", "prompt_input"} & payload.keys()
 
 
-class TestVideoQuit:
-    """Verify a queued Quit stops a video batch before the next video or mid-video."""
+class TestVideoControls:
+    """Verify the queued controls (Next, Pause, Repeat, Quit) act on a video batch as they do on an image batch."""
 
     @staticmethod
-    def _run(workflow, *, runs: int, skip_signal):
+    def _run(workflow, *, runs: int, skip_signal, on_event=None, **arg_overrides):
         events: list[dict[str, object]] = []
-        args = _make_video_args(runs=runs, steps=8)
+
+        def _record(event):
+            events.append(event)
+            if on_event is not None:
+                on_event(event)
+
+        args = _make_video_args(runs=runs, steps=8, **arg_overrides)
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
         run_video_batch(
@@ -421,11 +430,22 @@ class TestVideoQuit:
             prompts,
             config,
             args,
-            progress_callback=events.append,
+            progress_callback=_record,
             plan=_make_plan(prompts, args, config=config),
             skip_signal=skip_signal,
         )
         return events
+
+    @staticmethod
+    def _resume_once_waiting(skip_signal) -> None:
+        """Resume *skip_signal* from a thread as soon as it waits for a key."""
+
+        def _resume():
+            while not skip_signal.is_waiting_for_resume():
+                time.sleep(0.001)
+            skip_signal.resume()
+
+        threading.Thread(target=_resume, daemon=True).start()
 
     def test_quit_queued_before_a_video_stops_the_batch_without_running_it(self):
         skip_signal = SkipSignal()
@@ -460,16 +480,250 @@ class TestVideoQuit:
         assert events[-1]["type"] == "batch_cancelled"
         assert events[-1]["completed_iterations"] == 0
 
-    def test_other_actions_are_ignored_for_video(self):
+    def test_quit_after_a_finished_video_cancels_with_it_counted(self):
         skip_signal = SkipSignal()
-        skip_signal.queue_action("pause")
         workflow = MagicMock()
-        workflow.run.return_value = StageOutcome.success
+        workflow.run.side_effect = lambda request, artifacts: skip_signal.queue_action("quit") or StageOutcome.success
 
         events = self._run(workflow, runs=2, skip_signal=skip_signal)
 
-        assert workflow.run.call_count == 2
+        assert workflow.run.call_count == 1
+        assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["success"]
+        assert events[-1] == {"type": "batch_cancelled", "mode": "video", "completed_iterations": 1, "total_iterations": 2}
+
+    def test_next_stops_the_running_video_and_the_batch_goes_on(self):
+        skip_signal = SkipSignal()
+        calls = 0
+
+        def _denoise(request, artifacts):
+            nonlocal calls
+            calls += 1
+            for step in range(1, 5):
+                if calls == 1 and step == 2:
+                    skip_signal.queue_action("skip")
+                    time.sleep(0.01)
+                request.step_callback({"current_step": step, "total_steps": 4})
+            artifacts.video_path = "/out/clip.mp4"
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _denoise
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        finished = [e for e in events if e["type"] == "generation_finished"]
+        assert [e["status"] for e in finished] == ["skipped", "success"]
+        assert finished[0]["generation_time"] > 0
+        assert not finished[0].get("output_path")
+        assert finished[1]["output_path"] == "/out/clip.mp4"
         assert events[-1]["type"] == "batch_completed"
+        assert events[-1]["completed_iterations"] == 2
+        assert "batch_cancelled" not in [e["type"] for e in events]
+
+    def test_a_next_before_a_video_or_on_its_last_step_is_dropped_and_the_video_stays_saved(self):
+        skip_signal = SkipSignal()
+        skip_signal.queue_action("skip")
+
+        def _denoise(request, artifacts):
+            request.step_callback({"current_step": 1, "total_steps": 2})
+            skip_signal.queue_action("skip")
+            request.step_callback({"current_step": 2, "total_steps": 2})
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _denoise
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["success", "success"]
+        assert events[-1]["type"] == "batch_completed"
+
+    def test_a_quit_on_the_last_step_saves_the_video_and_then_cancels(self):
+        skip_signal = SkipSignal()
+
+        def _denoise(request, artifacts):
+            request.step_callback({"current_step": 0, "total_steps": 1})
+            skip_signal.queue_action("quit")
+            request.step_callback({"current_step": 1, "total_steps": 1})
+            artifacts.video_path = "/out/clip.mp4"
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _denoise
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["success"]
+        assert workflow.run.call_count == 1
+        assert events[-1] == {"type": "batch_cancelled", "mode": "video", "completed_iterations": 1, "total_iterations": 2}
+
+    def test_a_next_at_the_end_of_the_first_stage_of_a_two_stage_render_still_stops_it(self):
+        skip_signal = SkipSignal()
+        steps_seen: list[int] = []
+
+        def _denoise(request, artifacts):
+            # Two stages report summed totals (4 + 3), so the end of stage 1 is not the end of the render.
+            for step in range(1, 8):
+                if step == 4:
+                    skip_signal.queue_action("skip")
+                request.step_callback({"current_step": step, "total_steps": 7})
+                steps_seen.append(step)
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _denoise
+
+        events = self._run(workflow, runs=1, skip_signal=skip_signal)
+
+        assert steps_seen == [1, 2, 3]
+        assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["skipped"]
+
+    def test_pause_queued_before_and_during_a_video_waits_before_and_after_it(self):
+        skip_signal = SkipSignal()
+        skip_signal.queue_action("pause")
+        workflow = MagicMock()
+        workflow.run.side_effect = lambda request, artifacts: skip_signal.queue_action("pause") or StageOutcome.success
+
+        def _on_event(event):
+            if event["type"] == "job_paused":
+                self._resume_once_waiting(skip_signal)
+
+        events = self._run(workflow, runs=1, skip_signal=skip_signal, on_event=_on_event)
+
+        types = [e["type"] for e in events]
+        assert types.count("job_paused") == types.count("job_resumed") == 2
+        assert {e["mode"] for e in events if e["type"] in ("job_paused", "job_resumed")} == {"video"}
+        assert types.index("job_paused") < types.index("job_resumed") < types.index("generation_started")
+        assert types.index("generation_finished") < len(types) - 1 - types[::-1].index("job_paused")
+        assert workflow.run.call_count == 1
+        assert types[-1] == "batch_completed"
+
+    def test_quit_while_paused_cancels_and_no_second_video_starts(self):
+        skip_signal = SkipSignal()
+        workflow = MagicMock()
+        workflow.run.side_effect = lambda request, artifacts: skip_signal.queue_action("pause") or StageOutcome.success
+
+        def _on_event(event):
+            if event["type"] == "job_paused":
+                skip_signal.queue_action("quit")
+                skip_signal.resume()
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal, on_event=_on_event)
+
+        assert workflow.run.call_count == 1
+        assert events[-1] == {"type": "batch_cancelled", "mode": "video", "completed_iterations": 1, "total_iterations": 2}
+
+    def test_repeat_after_a_video_renders_the_same_prompt_again_with_a_new_seed(self):
+        skip_signal = SkipSignal()
+        requests = []
+
+        def _generate(request, artifacts):
+            requests.append(request)
+            if len(requests) == 1:
+                skip_signal.queue_action("repeat")
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _generate
+
+        with patch("zvisiongenerator.job_controls.random.randint", return_value=77):
+            events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        types = [e["type"] for e in events]
+        assert len(requests) == 3
+        assert [r.prompt for r in requests] == ["a sunset"] * 3
+        assert requests[1].seed == 77
+        assert requests[1].resolved_prompt == requests[0].resolved_prompt
+        assert types.count("prompt_started") == 2
+        assert types.count("generation_started") == 3
+        repeat = types.index("generation_repeat")
+        assert [e["seed"] for e in events if e["type"] == "generation_started"][1] == 77
+        assert [e["seed"] for e in events if e["type"] == "generation_finished"][1] == 77
+        assert types.index("generation_finished") < repeat < types.index("generation_started", repeat)
+        assert events[-1]["type"] == "batch_completed"
+        assert events[-1]["completed_iterations"] == 3
+
+    def test_pause_after_a_failed_video_is_honoured_and_repeat_is_dropped(self):
+        for action, paused in (("pause", True), ("repeat", False)):
+            skip_signal = SkipSignal()
+            workflow = MagicMock()
+            workflow.run.side_effect = lambda request, artifacts, action=action, skip_signal=skip_signal: skip_signal.queue_action(action) or StageOutcome.failed
+
+            def _on_event(event, skip_signal=skip_signal):
+                if event["type"] == "job_paused":
+                    self._resume_once_waiting(skip_signal)
+
+            events = self._run(workflow, runs=2, skip_signal=skip_signal, on_event=_on_event)
+
+            types = [e["type"] for e in events]
+            assert workflow.run.call_count == 2
+            assert ("job_paused" in types) is paused
+            assert "generation_repeat" not in types
+
+    def test_a_next_stopped_video_stays_out_of_the_eta_and_a_batch_with_no_success_and_a_failure_fails(self):
+        skip_signal = SkipSignal()
+        calls = 0
+
+        def _denoise(request, artifacts):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                skip_signal.queue_action("skip")
+                time.sleep(0.01)
+                request.step_callback({"current_step": 1, "total_steps": 4})
+            return StageOutcome.failed
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _denoise
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["skipped", "failed"]
+        assert [e["avg_secs"] for e in events if e["type"] == "prompt_started"] == [None, None]
+        assert events[-1]["type"] == "batch_failed"
+
+    def test_repeats_keep_the_eta_positive_and_the_final_counts_within_the_total(self):
+        skip_signal = SkipSignal()
+        calls = 0
+
+        def _generate(request, artifacts):
+            nonlocal calls
+            calls += 1
+            time.sleep(0.001)
+            if calls <= 2:
+                skip_signal.queue_action("repeat")
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _generate
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        second = [e for e in events if e["type"] == "prompt_started"][1]
+        assert second["eta_secs"] == pytest.approx(second["avg_secs"])
+        assert {key: events[-1][key] for key in ("type", "completed_iterations", "total_iterations")} == {"type": "batch_completed", "completed_iterations": 4, "total_iterations": 4}
+
+    def test_a_repeat_after_a_discarded_review_is_a_new_attempt_of_the_same_iteration(self):
+        skip_signal = SkipSignal()
+        decisions = iter(["discard", "approve"])
+
+        def _render(request, artifacts):
+            request.review(Path("small.mp4"))
+            return StageOutcome.success
+
+        def _on_event(event):
+            if event["type"] == "job_paused" and "review" in event:
+                decision = next(decisions)
+                if decision == "discard":
+                    skip_signal.queue_action("repeat")
+                skip_signal.set_review_decision(decision)
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _render
+
+        events = self._run(workflow, runs=1, skip_signal=skip_signal, on_event=_on_event, upscale=2, review=True)
+
+        assert [e["review"] for e in events if e["type"] == "job_paused"] == [{"iteration": 1, "attempt": 1}, {"iteration": 1, "attempt": 2}]
 
 
 class TestEndImageBatch:

@@ -18,9 +18,8 @@ STARTED_EVENT = "job_started"
 DOWNLOADING_EVENT = "model_downloading"
 # ``reason`` of a ``job_cancelled`` event for a job removed from the queue before it started.
 REMOVED_REASON = "removed"
-IMAGE_SUPPORTED_CONTROLS = ("next", "pause", "resume", "repeat", "quit")
+GENERATION_CONTROLS = ("next", "pause", "resume", "repeat", "quit")
 REVIEW_DECISION_CONTROLS = ("approve", "discard")
-VIDEO_SUPPORTED_CONTROLS = ("quit",)
 UPSCALE_SUPPORTED_CONTROLS = ("quit",)
 
 
@@ -31,14 +30,9 @@ def _with_review_decisions(controls: tuple[str, ...], *, review: bool) -> tuple[
     return (*controls[:-1], *REVIEW_DECISION_CONTROLS, controls[-1])
 
 
-def image_supported_controls(*, review: bool) -> tuple[str, ...]:
-    """Return the controls of an image job; with *review* on, they include approve and discard before quit."""
-    return _with_review_decisions(IMAGE_SUPPORTED_CONTROLS, review=review)
-
-
-def video_supported_controls(*, review: bool) -> tuple[str, ...]:
-    """Return the controls of a video job; with *review* on, they include approve and discard before quit."""
-    return _with_review_decisions(VIDEO_SUPPORTED_CONTROLS, review=review)
+def generation_supported_controls(*, review: bool) -> tuple[str, ...]:
+    """Return the controls of an image or video job; with *review* on, they include approve and discard before quit."""
+    return _with_review_decisions(GENERATION_CONTROLS, review=review)
 
 
 def terminal_event_for_status(status: str) -> str | None:
@@ -87,7 +81,7 @@ def public_job_snapshot(
         "supported_controls": list(supported_controls),
         "supports_controls": list(supported_controls),
         "paused": paused,
-        # ``{"iteration": n}`` while a render waits for approve or discard, else None; never a filesystem path.
+        # ``{"iteration": n, "attempt": k}`` while a render waits for approve or discard, else None; never a filesystem path.
         "review": dict(review) if review is not None else None,
         "result_path": result_path,
         "outputs": outputs or [],

@@ -89,6 +89,19 @@ With the [prompt enhancer](prompt-enhancer.md#sound), the **Sound** options add 
 
 **Low memory** (`--low-memory`) is on by default for LTX; MiniMax H3 always streams its blocks. It frees each part of the model once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk while generating, which cuts the memory held; steps are slightly slower, and about twice as slow with a LoRA. Turn it off to keep every part loaded.
 
+## Controls while a video runs
+
+Video jobs take the same controls as image jobs, and each acts on the video being made:
+
+- **Next** stops the video at its next step and moves on. The video is reported as skipped and nothing is saved for it, unless it was on its final step: that video is saved first.
+- **Pause** waits after the current video, until you resume.
+- **Repeat** makes the same prompt again with a new seed, after the current video finishes (or is discarded in a review).
+- **Cancel** (**Quit** in the terminal) stops the video at its next step and ends the job (a video on its final step is saved first).
+
+During a [review before upscaling](upscaling.md#review-before-upscaling), **Next** discards the small render, so the video is not upscaled.
+
+On a Mac, MiniMax H3 text to video cannot stop in the middle of a clip, so **Next** and **Quit** take effect when the clip finishes, and the clip is kept.
+
 ## Extending a video
 
 Extend continues a clip from where it ends: it generates what happens next, with sound, and writes a new file. Your original clip is never changed.

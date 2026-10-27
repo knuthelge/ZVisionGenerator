@@ -153,7 +153,7 @@ def ffprobe_json(path: str | Path, *, count_packets: bool = True) -> dict[str, A
     """
     command = ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", *(["-count_packets"] if count_packets else []), str(path)]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True)
         return json.loads(result.stdout)
     except subprocess.CalledProcessError as exc:
         raise tool_error(f"ffprobe could not read {path}", exc.stderr, limit=500) from exc
@@ -182,7 +182,7 @@ def audio_decodes(path: str | Path, *, start: float, duration: float) -> bool:
         duration: Length of the stretch in seconds.
     """
     command = ["ffmpeg", "-v", "error", "-ss", f"{max(0.0, start):.6f}", "-t", f"{max(0.0, duration):.6f}", "-i", str(path), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"]
-    result = subprocess.run(command, capture_output=True, check=False)
+    result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, check=False)
     return result.returncode == 0 and bool(result.stdout)
 
 

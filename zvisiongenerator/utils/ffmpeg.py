@@ -65,6 +65,7 @@ def strip_audio(video_path: Path) -> None:
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-an", "-c:v", "copy", str(tmp)],
+            stdin=subprocess.DEVNULL,
             check=True,
             capture_output=True,
         )

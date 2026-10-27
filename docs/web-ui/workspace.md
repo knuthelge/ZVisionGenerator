@@ -152,12 +152,12 @@ The **job card** beside it shows the progress, the time left and each phase with
 
 | Control | Does | Key |
 |---|---|---|
-| **Pause** | Waits after the current image, until you resume | ++p++ |
+| **Pause** | Waits after the current image or video, until you resume | ++p++ |
 | **Cancel** | Stops the job at its next step | ++esc++ ++esc++ |
-| **Skip** | Stops the current image and moves to the next | ++n++ |
-| **Repeat** | Makes the current image again with a new seed, after it finishes | ++r++ |
+| **Skip** | Stops the current image or video and moves to the next | ++n++ |
+| **Repeat** | Makes the current image or video again with a new seed, after it finishes | ++r++ |
 
-Video jobs offer **Cancel** only. With [review before upscaling](../concepts/upscaling.md#review-before-upscaling) on, the card also offers **Approve** (++y++) and **Discard** (++n++).
+Video jobs have the same controls; see [Controls while a video runs](../concepts/video.md#controls-while-a-video-runs). With [review before upscaling](../concepts/upscaling.md#review-before-upscaling) on, the card also offers **Approve** (++y++) and **Discard** (++n++).
 
 !!! note "Cancelling during a download"
     Cancel stops a download at once. Finished files are kept and the file in progress starts over next time. A job that only waits for a download started from the Models page is cancelled, and the download keeps going.

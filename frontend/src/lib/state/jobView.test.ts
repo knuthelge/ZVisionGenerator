@@ -86,7 +86,7 @@ describe('jobView', () => {
       expect(jobControls(job({ phase: 'load' }))).toEqual({ job: ['pause', 'quit'], item: [] });
       expect(jobControls(batch({ status: 'paused', paused: true }))).toEqual({ job: ['resume', 'quit'], item: [] });
       expect(jobControls(job({ workflow: 'upscale', supported_controls: ['quit'] }))).toEqual({ job: ['quit'], item: [] });
-      expect(jobControls(batch({ workflow: 'txt2vid', supported_controls: ['quit'] }))).toEqual({ job: ['quit'], item: [] });
+      expect(jobControls(batch({ workflow: 'txt2vid', supported_controls: IMAGE_CONTROLS }))).toEqual({ job: ['pause', 'quit'], item: ['next', 'repeat'] });
       expect(jobControls(batch({ status: 'completed' }))).toEqual({ job: [], item: [] });
     });
   });
@@ -365,8 +365,9 @@ describe('review before upscaling', () => {
     const video = (overrides: Partial<ActiveJobState> = {}) => reviewing({ workflow: 'txt2vid', supported_controls: ['approve', 'discard', 'quit'], settings: { upscale: '2', audio: ['on', 'false'] }, ...overrides });
 
     it('serves the render from the review route, one URL per video of the batch', () => {
-      expect(reviewVideoUrl(video())).toBe('/jobs/j/review?v=3');
-      expect(reviewVideoUrl(video({ review: { iteration: 4 } }))).toBe('/jobs/j/review?v=4');
+      expect(reviewVideoUrl(video())).toBe('/jobs/j/review?v=3-1');
+      expect(reviewVideoUrl(video({ review: { iteration: 4 } }))).toBe('/jobs/j/review?v=4-1');
+      expect(reviewVideoUrl(video({ review: { iteration: 3, attempt: 2 } }))).toBe('/jobs/j/review?v=3-2');
     });
 
     it('has no video URL for an image, outside a review, or after the job ended', () => {

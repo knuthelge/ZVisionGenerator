@@ -11,6 +11,7 @@ import pytest
 from tests._media import REAL, ffmpeg
 
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, ensure_ffmpeg, require_ffmpeg, staging_path, strip_audio, strip_ffmpeg_banner, tool_error
+from zvisiongenerator.utils.video_splice import run_ffmpeg
 
 
 class TestRequireFfmpeg:
@@ -348,3 +349,13 @@ class TestStripAudio:
 
         streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(clip)], capture_output=True, check=True, text=True).stdout.split()
         assert streams == ["video"]
+
+
+class TestToolsDoNotReadTheTerminal:
+    """The video CLI's key listener owns the terminal's input, so no ffmpeg or ffprobe we launch may inherit it."""
+
+    def test_the_subprocess_gets_no_stdin(self):
+        with patch("zvisiongenerator.utils.video_splice.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")) as mock_run:
+            run_ffmpeg(["ffmpeg", "-i", "x"])
+
+        assert mock_run.call_args.kwargs["stdin"] == subprocess.DEVNULL

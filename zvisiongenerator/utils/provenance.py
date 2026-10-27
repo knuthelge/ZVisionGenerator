@@ -263,6 +263,7 @@ def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-c", "copy", *mp4_config_args(payload), str(tmp)],
+            stdin=subprocess.DEVNULL,
             check=True,
             capture_output=True,
         )
@@ -277,6 +278,7 @@ def read_mp4_config(video_path: str | Path) -> dict[str, Any] | None:
     """Read the zvisiongenerator.config payload from MP4 container metadata, or None if absent."""
     result = subprocess.run(
         ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(video_path)],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         check=True,

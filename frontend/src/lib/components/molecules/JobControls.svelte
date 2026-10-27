@@ -10,9 +10,9 @@
 
   interface Props {
     controls: JobControlAction[];
-    /** Accessible name of the group, e.g. "Job controls" or "Current image". */
+    /** Accessible name of the group, e.g. "Job controls" or "Current image or video". */
     label: string;
-    /** Tooltip and accessible name per control, e.g. "Skip this image". */
+    /** Tooltip and accessible name per control, e.g. "Skip this image or video". */
     names: Partial<Record<JobControlAction, string>>;
     /** A control sent or queued that has not taken effect yet; it shows as on and the others wait. */
     pending?: JobControlAction | null;

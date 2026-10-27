@@ -167,6 +167,8 @@ describe('ReviewStage', () => {
     ['an image', () => makeJob(), () => makeJob({ previewUrl: '/jobs/job-review/preview?v=9', review: { iteration: 4 } })],
     ['an image without a preview', () => makeJob({ previewUrl: null }), () => makeJob({ previewUrl: null, review: { iteration: 4 } })],
     ['a video', () => videoJob(), () => videoJob({ review: { iteration: 3 } })],
+    ['an image repeated after a discard', () => makeJob(), () => makeJob({ review: { iteration: 3, attempt: 2 } })],
+    ['a video repeated after a discard', () => videoJob(), () => videoJob({ review: { iteration: 2, attempt: 2 } })],
   ])('allows a decision for the next review of the same job, for %s', (_name, first, next) => {
     const props = reactiveProps({ job: first(), onapprove, ondiscard });
     component = mountComponent(ReviewStage, props);
@@ -191,7 +193,7 @@ describe('ReviewStage', () => {
 
     it('loads the render from the review route, paused on its first frame', () => {
       render(videoJob());
-      expect(video()?.getAttribute('src')).toBe('/jobs/job-review/review?v=2');
+      expect(video()?.getAttribute('src')).toBe('/jobs/job-review/review?v=2-1');
       expect(video()?.autoplay).toBe(false);
       expect(video()?.paused).toBe(true);
       expect(image()).toBeNull();
@@ -243,7 +245,7 @@ describe('ReviewStage', () => {
       size(video()!, 704, 448);
       props.job = videoJob({ review: { iteration: 3 } });
       flushSync();
-      expect(video()?.getAttribute('src')).toBe('/jobs/job-review/review?v=3');
+      expect(video()?.getAttribute('src')).toBe('/jobs/job-review/review?v=3-1');
       expect(target.querySelector('.review-line')?.textContent).not.toContain('704×448');
     });
 
@@ -260,7 +262,7 @@ describe('ReviewStage', () => {
       const load = vi.spyOn(HTMLMediaElement.prototype, 'load');
       render(videoJob());
       const player = video()!;
-      expect(player.getAttribute('src')).toBe('/jobs/job-review/review?v=2');
+      expect(player.getAttribute('src')).toBe('/jobs/job-review/review?v=2-1');
       flushSync(() => void component!.unmount());
       expect(pause).toHaveBeenCalled();
       expect(player.hasAttribute('src')).toBe(false);

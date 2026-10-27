@@ -469,37 +469,3 @@ class TestSkipSignalReviewEdges:
         paused.join(timeout=1.0)
         assert not paused.is_alive()
         assert signal._review_decision is None
-
-
-class TestQuitOnlySignal:
-    """A signal for video: outside a review only q queues an action."""
-
-    @pytest.mark.parametrize("key", ["n", "p", "r", "x"])
-    def test_other_command_keys_queue_nothing_and_print_nothing(self, key, capsys):
-        from zvisiongenerator.utils.interactive import SkipSignal
-
-        signal = SkipSignal(quit_only=True)
-        signal._on_key(key)
-
-        assert signal.pending() is None
-        assert capsys.readouterr().err == ""
-
-    def test_q_still_queues_quit(self):
-        from zvisiongenerator.utils.interactive import SkipSignal
-
-        signal = SkipSignal(quit_only=True)
-        signal._on_key("q")
-
-        assert signal.pending() == "quit"
-
-    @pytest.mark.parametrize(("key", "decision"), [("y", "approve"), ("n", "discard")])
-    def test_a_review_still_takes_its_keys(self, key, decision):
-        from zvisiongenerator.utils.interactive import SkipSignal
-
-        signal = SkipSignal(quit_only=True)
-        thread, result = TestSkipSignalReview._wait_in_thread(signal)
-        signal._on_key(key)
-        thread.join(timeout=1.0)
-
-        assert result == [decision]
-        assert signal.pending() is None

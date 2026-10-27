@@ -14,7 +14,7 @@ from zvisiongenerator.utils.interactive import SkipSignal
 
 
 def _build(skip, outcome, *, progress_callback=None):
-    return make_image_review(skip, outcome, progress_callback=progress_callback, ran_iterations=3, completed_iterations=lambda: 2, total_iterations=8)
+    return make_image_review(skip, outcome, progress_callback=progress_callback, ran_iterations=3, attempt=2, completed_iterations=lambda: 2, total_iterations=8)
 
 
 class TestTerminalReview:
@@ -82,7 +82,7 @@ class TestWebReview:
 
         assert approved is True
         assert [event["type"] for event in events] == ["job_paused", "job_resumed"]
-        assert events[0]["review"] == {"iteration": 3}
+        assert events[0]["review"] == {"iteration": 3, "attempt": 2}
         assert events[0]["preview"] is image
         assert events[0]["completed_iterations"] == 2
         assert events[0]["total_iterations"] == 8
