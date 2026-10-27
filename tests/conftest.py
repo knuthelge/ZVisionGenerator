@@ -18,6 +18,9 @@ from zvisiongenerator.preflight import plan_iterations
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.video_probe import VideoProbe
 
+# One BLAS/OpenMP thread per process: under ``-n auto`` every worker otherwise starts one thread per core and they starve each
+# other (the torch-heavy files run several times slower). Set before anything imports torch or numpy.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 # Starlette's TestClient sends ``Host: testserver``; allow it through the Web UI request guard.
 os.environ.setdefault("ZIV_UI_ALLOWED_HOSTS", "testserver")
 # Entry points start the error log; keep tests from writing ~/.ziv/logs or replacing exception hooks.
@@ -53,10 +56,25 @@ def _no_hugging_face_token(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+def _lazy_tmp_dir(factory: pytest.TempPathFactory, name: str):
+    """Return a getter that makes a fresh temp dir on first call, so autouse fixtures cost nothing for tests that never touch it.
+
+    pytest rescans its temp root on every ``mktemp``, so an eager dir per test slows every later test down.
+    """
+    made: list[Path] = []
+
+    def _get() -> Path:
+        if not made:
+            made.append(factory.mktemp(name))
+        return made[0]
+
+    return _get
+
+
 @pytest.fixture(autouse=True)
-def _presets_in_tmp(tmp_path, monkeypatch):
+def _presets_in_tmp(tmp_path_factory, monkeypatch):
     """Keep every test's presets in a temporary data directory, never the real ``~/.ziv/presets``."""
-    monkeypatch.setattr("zvisiongenerator.web.presets.get_ziv_data_dir", lambda: tmp_path / "ziv-data")
+    monkeypatch.setattr("zvisiongenerator.web.presets.get_ziv_data_dir", _lazy_tmp_dir(tmp_path_factory, "ziv-data"))
 
 
 _HUB_DOWNLOADS = ("hf_hub_download", "snapshot_download")
@@ -275,7 +293,10 @@ def _seedvr2_off_in_web_config(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolated_app_db(monkeypatch, tmp_path_factory):
-    """Point the app database at a throwaway data dir so no test reads or writes the real ``ziv.sqlite3``."""
-    data_dir = tmp_path_factory.mktemp("ziv-app-db")
-    monkeypatch.setattr("zvisiongenerator.utils.app_db.get_ziv_data_dir", lambda: data_dir)
+    """Point the app database at a throwaway data dir so no test reads or writes the real ``ziv.sqlite3``.
+
+    Returns the dir getter; the dir is made on first use.
+    """
+    data_dir = _lazy_tmp_dir(tmp_path_factory, "ziv-app-db")
+    monkeypatch.setattr("zvisiongenerator.utils.app_db.get_ziv_data_dir", data_dir)
     return data_dir

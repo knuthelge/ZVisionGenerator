@@ -26,6 +26,9 @@ from zvisiongenerator.utils.paths import get_ziv_data_dir, parse_huggingface_rep
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
 from zvisiongenerator.utils.upscale import max_megapixels
 
+_YAML_LOADER: Final = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+"""libyaml's safe loader when PyYAML was built with it (about 8x faster on the packaged config), else the pure-Python one."""
+
 EULER_ANCESTRAL: Final = "euler_ancestral"
 LTX_SAMPLERS: Final = frozenset({EULER_ANCESTRAL})
 """The LTX denoising samplers a model version may select; the single definition of the names."""
@@ -44,7 +47,7 @@ def load_config() -> dict[str, Any]:
     with importlib.resources.as_file(ref) as path:
         with open(path, encoding="utf-8") as f:
             try:
-                config = yaml.safe_load(f)
+                config = yaml.load(f, Loader=_YAML_LOADER)
             except yaml.YAMLError as e:
                 raise ValueError(f"Failed to parse config file: {e}") from e
 
@@ -53,7 +56,7 @@ def load_config() -> dict[str, Any]:
     if user_config.exists():
         with open(user_config, encoding="utf-8") as f:
             try:
-                user = yaml.safe_load(f)
+                user = yaml.load(f, Loader=_YAML_LOADER)
             except yaml.YAMLError as e:
                 raise ValueError(f"Failed to parse config file: {e}") from e
         if user and isinstance(user, dict):

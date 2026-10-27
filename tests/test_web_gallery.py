@@ -937,8 +937,8 @@ def reads(monkeypatch) -> list[str]:
 
 
 def test_app_db_path_is_isolated_per_test(_isolated_app_db):
-    assert app_db.app_db_path().parent == _isolated_app_db
-    assert _isolated_app_db != Path.home() / ".ziv"
+    assert app_db.app_db_path().parent == _isolated_app_db()
+    assert _isolated_app_db() != Path.home() / ".ziv"
 
 
 def test_an_unchanged_file_is_not_read_again_after_a_restart(tmp_path, monkeypatch, reads):
