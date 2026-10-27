@@ -6,7 +6,8 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import { hasJobSettings } from '$lib/state/jobSettings';
   import type { JobLogEntry } from '$lib/types';
-  import { hasErrorDetail, jobLogDuration, jobLogTime, jobLogTone, jobLogToneLabel, promptFirstLine, timeAgo, type JobLogTone } from './jobLogView';
+  import { promptFirstLine, timeAgo } from '$lib/format';
+  import { hasErrorDetail, jobLogDuration, jobLogTime, jobLogTone, jobLogToneLabel, type JobLogTone } from './jobLogView';
 
   interface Props {
     entry: JobLogEntry;
