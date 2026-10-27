@@ -51,7 +51,7 @@ def _krea2_guidance_scale(guidance: float) -> float:
     return max(guidance - 1.0, 0.0)
 
 
-# Krea2Pipeline's fixed timestep shift for Krea 2 Turbo. Copied from diffusers 0.41's Krea2Pipeline.__call__,
+# Krea2Pipeline's fixed timestep shift for Krea 2 Turbo. Copied from diffusers 0.42's Krea2Pipeline.__call__,
 # which does not expose it: recheck it when upgrading diffusers.
 _KREA2_TURBO_MU = 1.15
 

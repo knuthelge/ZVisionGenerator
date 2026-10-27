@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Upgrading from 0.13
+- **Windows: install again with the new command in [Install](https://knuthelge.github.io/ZVisionGenerator/install/)** to move to PyTorch's CUDA 13.2 build. An upgrade keeps the CUDA 13.0 index, which gets no PyTorch updates after 2.14
+- **Stored q4 and q8 image copies are made again once**, on the first job with each model, after the library updates
+- **Windows/Linux: the first `ltx-4` or `ltx-8` job needs a connection once**, to link the files already on disk to the pinned LTX-2.3 revision. Nothing downloads again
+- **macOS: the same seed can give a slightly different image**, and a LoRA in diffusers format can apply at a different strength, because mflux now reads its alpha
+
 ### Added
 
 #### Web UI
@@ -16,6 +22,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 #### Web UI
 - **The prompt box bars are reorganised.** The tabs only say which text you see. A status line under the box says what Generate sends, with **Re-enhance** and **Use mine** beside **Out of date**. **Use mine** replaces **Clear**
+
+#### Platforms and libraries
+- **Pillow 13**, which fixes heap overflows in its JPEG and FlashPix decoders that a crafted image could trigger
+- **Windows/Linux: diffusers 0.42**
+- **macOS: mflux 0.24 and MLX 0.32.4.** MLX 0.32.4 fixes an attention crash on M1 and M2
+- **macOS: LTX is updated to ltx-2-mlx 0.18.** On Macs that stream the model (24 GB or less), a LoRA's weights outside the transformer blocks now apply, and image to video needs about 1.4 GB less memory
+- **macOS needs macOS 14 Sonoma or newer**, as MLX and PyTorch do
+
+### Fixed
+- **Windows/Linux: the LTX-2.3 downloads are pinned to a fixed revision**, so a file Lightricks renames or deletes upstream no longer breaks `ltx-4` and `ltx-8`
 
 ## [0.14.0b1] - 2026-10-26
 

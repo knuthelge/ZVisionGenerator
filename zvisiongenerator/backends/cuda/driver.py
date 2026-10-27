@@ -8,7 +8,7 @@ from typing import Any
 _CUDA13_MIN_DRIVER = 580
 
 # How to get a CUDA build of PyTorch where PyPI's wheel has none (Windows).
-CUDA_INSTALL_COMMAND = "uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match"
+CUDA_INSTALL_COMMAND = "uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu132 --index-strategy unsafe-best-match"
 
 
 def cuda_driver_hint(available: bool, cuda_version: str | None) -> str | None:

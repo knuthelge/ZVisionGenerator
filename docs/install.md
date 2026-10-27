@@ -4,7 +4,7 @@
 
 === "macOS"
 
-    - A Mac with Apple Silicon (M1 or newer).
+    - A Mac with Apple Silicon (M1 or newer) and macOS 14 Sonoma or newer.
     - 16 GB of memory runs Z-Image Turbo and FLUX.2 Klein quantized (`q8` or `q4`). 32 GB or more runs FLUX.2 Klein 9B and video at `ltx-8`. See [Memory](concepts/memory.md).
     - [ffmpeg](https://ffmpeg.org/) for video. `ziv-video` offers to install it with Homebrew or MacPorts if it's missing.
 
@@ -36,7 +36,7 @@ This puts the commands on your path: `ziv`, `ziv-ui`, `ziv-image`, `ziv-video` a
     PyPI's PyTorch for Windows has no CUDA, so an install from PyPI alone ends with "CUDA is not available" even on an NVIDIA GPU. Point uv at PyTorch's CUDA index as well:
 
     ```bash
-    uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match
+    uv tool install z-vision-generator --index https://download.pytorch.org/whl/cu132 --index-strategy unsafe-best-match
     ```
 
     The index strategy lets uv take PyTorch from that index and everything else from PyPI at its newest version.
