@@ -76,17 +76,23 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 - **Decision:** the rule was to keep 32 only if the peak dropped by at least 4 GB (or swap was avoided) and no scenario regressed by more than 10%. Neither held, so the threshold is 24 GiB (`zvisiongenerator/backends/mac/video.py`, `_LOW_RAM_THRESHOLD_BYTES`).
 - **Not measured:** 24 GB and 16 GB Macs. The 24 GiB threshold keeps streaming where the transformer plus the other components may not fit resident.
 
-### 4a. LoRA under streaming is about 2x slower
+### 4a. LTX LoRAs unfused (shipped)
 
-- **Change:** Remove the roughly 2x step-time penalty that LTX LoRAs pay while the transformer streams. This still affects Macs with 24 GB or less.
-- **Evidence:** the LoRA scenario ran at 17.5 s per step with streaming against 8.8 s resident (+98%), while the other scenarios moved by −4% to +6.7% (see item 4).
-- **Likely cause (unconfirmed):** LoRA weights are fused into each block on every forward while streaming, instead of once. Confirm in the vendored pipeline before choosing an option.
-- **Options to evaluate:**
-  - Fuse the LoRAs once before streaming, if upstream allows it.
-  - Skip streaming when LoRAs are set and the machine has enough memory.
-  - Warn when streaming and LoRAs are combined.
-- **Effort / risk:** not assessed.
-- **Next:** measurement 7 (the vendored LTX at v0.18 re-quantizes LoRAs per streamed block, the likely cause).
+- **Change:** `load_model` in `zvisiongenerator/backends/mac/video.py` builds the pipeline with `LTX2_LORA_MODE=unfused` unless the user already set the variable. LoRAs are attached as run-time adapters next to the q4/q8 weights, on the resident transformer or on each streamed block, instead of fused into them.
+- **Evidence:** fusing dequantizes, adds and re-quantizes each targeted weight, and the re-quantization error is of the order of a small LoRA's update (`packages/ltx_core_mlx/loader/lora_adapters.py`). Item 4's 2x step time while streaming was measured on the older pin; at v0.18 a fused LoRA ran 11.6 s per step streamed.
+- **Measured on the M5 (32 GB), `ltx-4`, 448x768, 49 frames, same seed, a rank-32 style LoRA trained on LTX-2.3 dev:**
+
+  | Run | Seconds per step | PSNR against the fused run |
+  |---|---|---|
+  | Fused, resident | 10.5 | — |
+  | Fused, streamed (low memory forced) | 11.6 | inf (identical) |
+  | Unfused, resident | 11.0 | 17 dB |
+  | Unfused, streamed (low memory forced) | 8.4 | 17 dB, identical to unfused resident |
+
+  The fused LoRA moved the clip 23 dB from the run without it, and the unfused one 17 dB; by eye, only the unfused run shows the LoRA's style without trigger words. A run without a LoRA is identical before and after. Upscale with a LoRA works (stage 2 at 11.2 s per step).
+- **Output:** changes for every LTX job with a LoRA: the LoRA applies at its full strength.
+- **Decision (2026-10-27):** on by default with no option. `LTX2_LORA_MODE=fused` restores the old path.
+- **Not measured:** a 24 GB or 16 GB Mac, where low memory streams by itself, and LTX-2.5 LoRAs.
 
 ### 5. Klein text encoding: fewer layers and a prompt cache
 
@@ -165,9 +171,9 @@ Added from the dependency and model review of 2026-10-27, which landed mflux 0.2
    - *Measure, upcast against no upcast:* peak memory (`mx.get_peak_memory`), decode time, and the image at the same seed (PSNR, plus colour gradients and banding by eye). Use `zit`, `klein9b` and `krea2` at `m`, and a 2x upscale.
    - *Decide:* drop the upcast if the images can't be told apart; otherwise keep it, and record the memory cost in the estimates. Answers item 9's VAE part.
 7. **Vendored LTX MLX at v0.18 (`dgrauet/ltx-2-mlx` `895201d`).** Check:
-   - *LoRA under `--low-memory` on a Mac with 24 GB or less* (or with low memory forced on the 32 GB Mac). LoRA weights outside the blocks were silently dropped while streaming. Pass: a user LoRA visibly applies, as it does resident.
+   - *LoRA under `--low-memory`.* Done (2026-10-27, low memory forced on the 32 GB Mac): a streamed LoRA gives the same clip as a resident one. Not covered: a LoRA with weights outside the blocks.
    - *Image-to-video peak memory* against the old pin, at the same settings. Upstream reports about 1.4 GB lower.
-   - *`LTX2_LORA_MODE=unfused` speed.* Compare seconds per step with a LoRA, streamed and resident, against item 4a's 17.5 and 8.8 s, and record the peak. If unfused removes most of the 2x penalty, it settles item 4a.
+   - *`LTX2_LORA_MODE=unfused` speed.* Done; shipped as item 4a.
    - *Upstream:* dgrauet/ltx-2-mlx #235 (LoRA weights outside the blocks under streaming), #216 (image encode evaluated before its encoder is freed), #213, #220 and #238 (unfused LoRA, IC-LoRA stage 2).
 
 ## Windows/Linux (secondary)

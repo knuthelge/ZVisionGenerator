@@ -1,6 +1,6 @@
 """Pin the vendored LTX MLX internals that ``backends/mac/video.py`` relies on.
 
-Introspection, plus a few tiny-array shape checks: no pipeline is constructed and no weights are loaded. A failure here after
+Introspection, plus a few tiny-array shape checks: no weights are loaded, and a pipeline is only constructed from an empty folder. A failure here after
 ``make update-ltx`` means upstream changed a name or signature the macOS video backend calls.
 """
 
@@ -349,3 +349,30 @@ class TestPinnedPackFilesContract:
 
         assert ltx_mlx_text_encoder_repo_id(load_config()) == default
         assert inspect.signature(DistilledPipeline.__init__).parameters["gemma_model_id"].default == default
+
+
+class TestEnvironmentSettings:
+    """The variables ``backends/mac/video.py`` defaults are read where it sets them: the LoRA mode at construction, the compute dtype at load."""
+
+    @pytest.mark.parametrize("pipeline_class", [BasePipeline, DistilledPipeline])
+    @pytest.mark.parametrize(("value", "mode"), [("unfused", "unfused"), ("fused", "fused"), (None, "fused")])
+    def test_the_pipeline_reads_the_lora_mode_when_constructed(self, monkeypatch, tmp_path, pipeline_class, value, mode):
+        if value is None:
+            monkeypatch.delenv("LTX2_LORA_MODE", raising=False)
+        else:
+            monkeypatch.setenv("LTX2_LORA_MODE", value)
+
+        pipeline = pipeline_class(model_dir=str(tmp_path), low_memory=True, low_ram_streaming=False)
+
+        assert pipeline.lora_mode == mode
+
+    def test_the_compute_dtype_is_applied_to_a_loaded_transformer(self, monkeypatch):
+        import mlx.core as mx
+
+        from ltx_pipelines_mlx._base import apply_compute_dtype_from_env
+
+        monkeypatch.setenv("LTX2_COMPUTE_DTYPE", "float16")
+        dit = SimpleNamespace(set_compute_dtype=lambda dtype: setattr(dit, "dtype", dtype))
+
+        assert apply_compute_dtype_from_env(dit) is dit
+        assert dit.dtype == mx.float16
