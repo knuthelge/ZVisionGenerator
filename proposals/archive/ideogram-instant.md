@@ -35,7 +35,7 @@ Every step of the macOS test plan (step 5) passed. Peaks are the process's physi
 | q4 from `ideo@q4` | 15.5 s | 2:22 | 19 GB (15 GB while denoising, the rest in the VAE decode) | 10.6 GB, fits |
 
 - **Build.** The components took about 2.5 minutes and the 18.6 GB transformer about 4.5 minutes to download; the FP8 conversion took a few seconds, with the process footprint near 3.5 GB. The build passes every check of test step 1.
-- **Speed.** At 1024² the three levels run at the same speed, so q4/q8 save memory and disk, not time. At `-s xs` (400×608, the size of the base model's ~10 s per step in [macos-speed.md](../macos-speed.md)) Instant takes 3.6 s per step unquantized and 2.3 s at q4, so an image is about 6–8× faster than on the base model.
+- **Speed.** At 1024² the three levels run at the same speed, so q4/q8 save memory and disk, not time. At `-s xs` (400×608, the size of the base model's ~10 s per step in [macos-speed.md](macos-speed.md)) Instant takes 3.6 s per step unquantized and 2.3 s at q4, so an image is about 6–8× faster than on the base model.
 - **Stored quants.** The second q8 and q4 runs give the same pixels as the first.
 - **Memory estimates.** MLX's own peak (`mx.get_peak_memory`, which also catches the short VAE decode the footprint samples missed) is 32.8 GiB unquantized, 33.1 GiB at q8 and 25.3 GiB at q4: 15.6–16.2 GiB above the weights, which the estimates count correctly. Denoising alone needs 4–5 GiB of that. The estimates allowed 1.5 GiB, so `estimate_image_memory` now adds 16 GiB for Ideogram 4 (33.1, 33.6 and 25.1 GiB: **Tight** unquantized and at q8, **Fits** at q4 on a 32 GB Mac). Other families also spike at the decode (Z-Image q8 +13 GiB, Krea 2 q8 +9.6 GiB at 1024²) and keep the 1.5 GiB margin for now.
 - **LoRAs.** A LyCORIS LoKr and `ostris/ideogram_4_turbotime_lora`, both made for the base model, load unquantized and at q4 and visibly change the image. At q4 mflux re-quantizes the 204 LoRA-touched layers at q8. A LoRA adds about 2.5 s per step at 1024².
@@ -47,7 +47,7 @@ Still open from step 4: the blocked-frame rate on a fixed prompt set, and an int
 
 ## Problem
 
-`ideo` is the base Ideogram 4 model. It is the slowest image model we ship by a wide margin: 20 steps, and two 9.3B transformers per step (a conditional one and an unconditional one for its asymmetric guidance). On a 32 GB Apple Silicon Mac it takes about 10 s per step against 1–2.4 s for the other families ([macos-speed.md](../macos-speed.md)), and it holds 27.5 GB of weights on a 32 GB Mac. On Windows and Linux both NF4 transformers stream from system memory on every step.
+`ideo` is the base Ideogram 4 model. It is the slowest image model we ship by a wide margin: 20 steps, and two 9.3B transformers per step (a conditional one and an unconditional one for its asymmetric guidance). On a 32 GB Apple Silicon Mac it takes about 10 s per step against 1–2.4 s for the other families ([macos-speed.md](macos-speed.md)), and it holds 27.5 GB of weights on a 32 GB Mac. On Windows and Linux both NF4 transformers stream from system memory on every step.
 
 fal has released a distilled Ideogram 4, **Instant**: 8 steps, guidance folded into the conditional transformer, no unconditional pass. That is about 2.5× fewer steps and half the transformer work per step, so roughly 5× fewer transformer forwards per image, and a whole 9.3B transformer less in memory. This proposal replaces the base model with Instant on both platforms, with stored q4/q8 quants.
 
@@ -116,7 +116,7 @@ A new converter model type, `ideogram4-instant`, builds a local model folder nam
 
 - `model_presets.ideogram4`: `default_steps: 8`, `default_guidance: 1.0`, `supports_quantize: true`. Guidance stays locked at 1.0: with a zero unconditional branch any other value only scales the velocity. The Web UI and CLI treat it like a model without guidance (a warning on `--guidance`), and the steps setting stays free.
 - `core/ideogram4.py`: the default sampler becomes 8 steps with constant guidance 1.0 and the same `mu`/`std`. The 7.0/3.0 polish schedule and the base-model wording go.
-- **Stored quants.** `ideo@q4` and `ideo@q8` come from the existing stored-quant flow. There is no per-model default level: on CUDA the docs recommend q4 or q8, since unquantized BF16 streams 18.6 GB per step, as unquantized Krea 2 did. On macOS the default stays unquantized (the FP8 copy), and q4/q8 are offered. This absorbs item 1 of [macos-speed.md](../macos-speed.md).
+- **Stored quants.** `ideo@q4` and `ideo@q8` come from the existing stored-quant flow. There is no per-model default level: on CUDA the docs recommend q4 or q8, since unquantized BF16 streams 18.6 GB per step, as unquantized Krea 2 did. On macOS the default stays unquantized (the FP8 copy), and q4/q8 are offered. This absorbs item 1 of [macos-speed.md](macos-speed.md).
 - **First-step sigma.** `IDEOGRAM4_INITIAL_SIGMA = 1.004` was tuned on the base model to dodge false safety-filter frames. Keep the setting, re-test it on Instant (step 4 below), and set the default to `None` if it makes no difference.
 
 ### 4. Measure before shipping

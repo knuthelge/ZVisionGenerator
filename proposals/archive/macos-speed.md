@@ -1,6 +1,18 @@
 # Faster generation on macOS
 
-**Status:** Proposed (2026-10-27)
+**Status:** Rejected (2026-10-27). Items 3 (LTX float16, `bf1b3a8`), 4 (streaming threshold) and 4a (unfused LTX LoRAs, `25cc429`) shipped; the rest was dropped.
+
+## Outcome
+
+A review of the remaining items against mflux 0.24 and the vendored LTX MLX v0.18 left two with a realistic chance of a gain: unbaked Krea 2 LoRAs and two stage-2 steps in LTX upscale. Both were measured on the M5 (32 GB) and neither was worth shipping (details under item 8 and the Krea 2 entry in item 11). The other items were dropped:
+
+- **#5 layer truncation** saves no compute: MLX evaluates lazily, and Klein's embeddings only read layers 9, 18 and 27, so layers 28–36 never run. It would only save 0.5–2 GB of memory.
+- **#2 model reuse** saves about 3–6 s per Web UI job (the compile retrace stays, since mflux rebuilds it per image), which is not worth eviction rules on 32 GB.
+- **#5 prompt cache, #6, #7, #9, #10 and #11's `--no-audio` and enhancer items** each save 0–3% of a job, below the ±25% noise of these timings.
+- **The LTX batch restructure** (encode all prompts, keep the DiT across clips, decode at the end; about 5–12 s per extra clip) only helps multi-clip batches and was not pursued.
+- **Ideogram presets** no longer apply: Ideogram 4 Instant runs 8 steps with one pass per step.
+
+The pending Mac checks from the ecosystem review were not run. The H3 text-encoder check stays in [prequantized-model-copies.md](../prequantized-model-copies.md).
 
 ## Problem
 
@@ -10,7 +22,7 @@ Nothing here has been implemented. Apart from the streaming measurement in item 
 
 ### Measured context
 
-[deps-macos.md](archive/deps-macos.md) proposed an opt-in float16 compute mode (`compute_precision`) for Z-Image and FLUX.2 Klein, based on mflux's release notes (8–35% faster, measured on an M1 Max). It was tried on an M5 with 32 GB and gave 0–4%, which is noise. mflux documents the mode as aimed at the M1 family, and the M5 Max shows no change either. It was dropped from deps-macos, so float16 image compute is not an opportunity on current Macs.
+[deps-macos.md](deps-macos.md) proposed an opt-in float16 compute mode (`compute_precision`) for Z-Image and FLUX.2 Klein, based on mflux's release notes (8–35% faster, measured on an M1 Max). It was tried on an M5 with 32 GB and gave 0–4%, which is noise. mflux documents the mode as aimed at the M1 family, and the M5 Max shows no change either. It was dropped from deps-macos, so float16 image compute is not an opportunity on current Macs.
 
 The lifetime peak of an LTX run is set before denoising (the text-encoder load and the pre-denoise phase), so streaming only lowers the steady-state footprint, not the peak. Item 4 has the numbers.
 
@@ -31,7 +43,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 
 ### 1. Ideogram 4 stored q4/q8 quants
 
-*Moved to [ideogram-instant.md](archive/ideogram-instant.md) (2026-10-18), which replaces the model with its distilled version and adds q4/q8 there.*
+*Moved to [ideogram-instant.md](ideogram-instant.md) (2026-10-18), which replaces the model with its distilled version and adds q4/q8 there.*
 
 - **Change:** Pass `quantize` to `Ideogram4(...)` and set `supports_quantize` to true for `ideo`, so the stored-quant flow creates `ideo@q4` and `ideo@q8` like the other families.
 - **Evidence:**
@@ -47,7 +59,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 
 - **Change:** Cache the loaded backend, keyed by model, quant, LoRAs and weights. Free it on a model change, a video or upscale job, before prompt enhancement, or after an idle timeout.
 - **Evidence:** every job loads the model (`zvisiongenerator/web/web_runner.py:664` and `:690`, through the loader at `:880-907`) and frees it at the end (`:606-607`).
-- **Estimated gain:** 3–10 s per job, plus the compile retrace (item 6). Basis: the model-load timings in [image-model-memory.md](archive/image-model-memory.md).
+- **Estimated gain:** 3–10 s per job, plus the compile retrace (item 6). Basis: the model-load timings in [image-model-memory.md](image-model-memory.md).
 - **Output:** identical.
 - **Effort / risk:** medium / medium. On 32 GB an image model and the enhancer cannot both stay resident, so the eviction rules decide whether this helps or causes swap.
 
@@ -100,7 +112,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
   - Truncate the Qwen3 text encoder to the 27 layers Klein reads, after the stored-quant save (`zvisiongenerator/image_model_loader.py:243`).
   - Cache `_encode_prompt_pair` per prompt for Klein and Z-Image.
 - **Evidence:** Klein takes hidden layers 9, 18 and 27 (`mflux.models.flux2.variants.txt2img.flux2_klein`, around lines 151-176), but the encoder runs all 36 (`mflux.models.flux2.model.flux2_text_encoder.qwen3_text_encoder`, around lines 95-121). Klein and Z-Image have no prompt cache (the memory-saver callback in `mflux.callbacks.instances.memory_saver` is the only caching there).
-- **Estimated gain:** 25% less text-encoder compute (27 of 36 layers), 1–2 GB less memory, and no re-encode when a batch repeats a prompt. The encoder was recorded at 7–8 s per Klein image in [image-model-memory.md](archive/image-model-memory.md), which may include step 1, so the absolute saving is uncertain.
+- **Estimated gain:** 25% less text-encoder compute (27 of 36 layers), 1–2 GB less memory, and no re-encode when a batch repeats a prompt. The encoder was recorded at 7–8 s per Klein image in [image-model-memory.md](image-model-memory.md), which may include step 1, so the absolute saving is uncertain.
 - **Output:** identical.
 - **Effort / risk:** small to medium / medium. Layer truncation reaches into mflux's module structure.
 
@@ -127,6 +139,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 - **Estimated gain:** about one third of the full-resolution stage. Basis: 2 of 3 steps.
 - **Output:** changes.
 - **Effort / risk:** small / not assessed. Needs a visual comparison before it is a default.
+- **Measured (2026-10-27), rejected:** `ltx-4 --upscale 2 -s s` (768x448, 121 frames), same seed, alternating runs. Three steps took 135.8 and 147.1 s (stage 2 63 and 68 s), two steps 121.5 and 127.2 s (stage 2 44 and 47 s): about 17 s or 12% faster, at the same 17.7 GB peak. The clip changed more than expected (luma PSNR 19.3 dB): the same composition, but the background lost most of its snow and the fur was softer. Judged not better, so not worth the change.
 
 ### 9. Image VAE and temp PNG
 
@@ -149,7 +162,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 
 - **`--no-audio` on LTX:** set `pipe.generate_audio=False` instead of decoding audio and stripping it with ffmpeg (`zvisiongenerator/workflows/__init__.py:83-84`; vendored `_base.py` around lines 494-506). Identical for the video.
 - **Fewer steps (output changes):** Ideogram's `V4_TURBO_12` preset has 40% fewer steps than the hard-coded `V4_DEFAULT_20` (`zvisiongenerator/backends/mac/image.py:524`). `zit` could run 9 steps instead of 10 (`zvisiongenerator/config.yaml:116`).
-- **Krea 2 with a LoRA:** mflux re-quantizes LoRA-touched q4 layers to q8 (`mflux.models.common.lora.mapping.lora_saver`, around lines 307-317). Compare speed without the LoRA and with `bake_lora=False` before deciding whether the 7.0 s per step is the LoRA's doing.
+- **Krea 2 with a LoRA:** mflux re-quantizes LoRA-touched q4 layers to q8 (`mflux.models.common.lora.mapping.lora_saver`, around lines 307-317). Compare speed without the LoRA and with `bake_lora=False` before deciding whether the 7.0 s per step is the LoRA's doing. *Measured (2026-10-27) on mflux 0.24, `krea2` q4 at `xs`, same seed, a 74 MB public style LoRA, two runs each: no LoRA 3.14 and 3.43 s per step, baked 3.29 and 3.46, `bake_lora=False` 3.56 and 3.52. No layers were re-quantized, the 7.0 s did not reproduce, and baked and unbaked images were nearly identical (31 dB) with the style fully applied. Rejected: nothing to gain.*
 - **Enhancer:** mlx-lm's `batch_generate` (`mlx_lm.generate`, around line 1910) could shorten the 20–35 s preflight, but the rewrites would change.
 
 ## Measurement plan
@@ -165,7 +178,7 @@ Run in this order. Each is a measurement only, with no product change, on the M5
 
 Added from the dependency and model review of 2026-10-27, which landed mflux 0.24 and the LTX MLX update. Same machine and repeats as above.
 
-5. **H3's text encoder from `mlx-community/Qwen3-VL-32B-Instruct-4bit`.** The spike is written up in [prequantized-model-copies.md](prequantized-model-copies.md).
+5. **H3's text encoder from `mlx-community/Qwen3-VL-32B-Instruct-4bit`.** The spike is written up in [prequantized-model-copies.md](../prequantized-model-copies.md).
 6. **mflux 0.24's bf16 strip VAE decode against our float32 VAE upcast.**
    - *Background:* mflux 0.24 decodes the VAE in bf16 row strips by default (about 1.6 GB at 1 MP instead of 7–14 GB). Our float32 VAE upcast (item 9) works against that.
    - *Measure, upcast against no upcast:* peak memory (`mx.get_peak_memory`), decode time, and the image at the same seed (PSNR, plus colour gradients and banding by eye). Use `zit`, `klein9b` and `krea2` at `m`, and a 2x upscale.
@@ -186,9 +199,9 @@ Not researched in depth. One candidate: the video backend enables VAE slicing an
 - **LTX sparse attention (`LTX2_SOL_TAU`).** Applies to the distilled stage 2 only and above 4096 tokens. Size `m` is about 2.2k tokens.
 - **LTX TeaCache.** Upstream refuses it on distilled models (`docs/PIPELINES.md`, around line 266).
 - **PiD decode.** It is a 4x image decode, slower, and changes the picture.
-- **Live previews as a cost.** They are a linear projection on every step but the last, about 0.6 ms each when measured on CUDA (see [denser-live-previews.md](denser-live-previews.md)), which is negligible.
+- **Live previews as a cost.** They are a linear projection on every step but the last, about 0.6 ms each when measured on CUDA (see [denser-live-previews.md](../denser-live-previews.md)), which is negligible.
 - **Removing `mx.eval` in `_ProgressChecker`** (`zvisiongenerator/backends/mac/image.py:223`). mflux evaluates the same latents right afterwards (`z_image.py:133`), so there is nothing to save.
-- **A smaller MLX cache cap or clearing the cache per image.** Already measured with no slowdown in [image-model-memory.md](archive/image-model-memory.md); not worth more work.
+- **A smaller MLX cache cap or clearing the cache per image.** Already measured with no slowdown in [image-model-memory.md](image-model-memory.md); not worth more work.
 - **VAE tiling.** Already off (`flux2_initializer.py:48`).
 - **Shorter text padding.** Changes the conditioning.
 - **Fully loaded LTX (`--low-memory` off).** About 27 GB, too tight for 32 GB.
