@@ -63,6 +63,7 @@ def test_cuda_dispatch_ignores_text_encoder_bundled_and_the_mlx_arguments(monkey
 def test_macos_dispatches_to_the_mac_planner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backends.sys, "platform", "darwin")
     monkeypatch.setattr(mac_plan, "_mflux_patterns", lambda family: ["a/*"])
+    monkeypatch.setattr(mac_plan, "_mflux_revision", lambda repo_id: None)
 
     assert backends.image_download_plan("owner/repo", family="zimage") == (DownloadTarget("owner/repo", None, ("a/*",)),)
     assert backends.video_download_plan("owner/ltx", family="ltx", repo_ignore=("x/*",), mlx_text_encoder="owner/gemma") == (
@@ -75,6 +76,7 @@ def test_macos_dispatches_to_the_mac_planner(monkeypatch: pytest.MonkeyPatch) ->
 def test_macos_image_dispatch_ignores_the_index_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backends.sys, "platform", "darwin")
     monkeypatch.setattr(mac_plan, "_mflux_patterns", lambda family: ["a/*"])
+    monkeypatch.setattr(mac_plan, "_mflux_revision", lambda repo_id: None)
 
     def reader(repo_id: str, revision: str | None) -> dict[str, Any]:
         raise AssertionError("macOS does not read model_index.json")

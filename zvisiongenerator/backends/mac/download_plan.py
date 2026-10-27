@@ -34,6 +34,16 @@ MLX_LM_ALLOW_PATTERNS: tuple[str, ...] = (
 )
 
 
+def _mflux_revision(repo_id: str) -> str | None:
+    """Return the commit mflux loads *repo_id* from, or ``None`` for a repo it does not pin.
+
+    mflux loads its built-in repos only from that commit, so a download at another revision would not count.
+    """
+    from mflux.models.common.resolution.model_revisions import ModelRevisions
+
+    return ModelRevisions.get(repo_id)
+
+
 def _mflux_patterns(family: str) -> list[str] | None:
     """Return the download patterns mflux's own initializer uses for *family*, or ``None`` for a family it does not run."""
     if family == "flux2_klein":
@@ -71,7 +81,7 @@ def image_download_plan(model_ref: str, *, family: str) -> tuple[DownloadTarget,
     patterns = _mflux_patterns(family)
     if patterns is None:
         return ()
-    return (DownloadTarget(reference.repo_id, None, tuple(patterns)),)
+    return (DownloadTarget(reference.repo_id, _mflux_revision(reference.repo_id), tuple(patterns)),)
 
 
 def video_download_plan(

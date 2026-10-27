@@ -152,8 +152,17 @@ def test_image_plan_unknown_family_is_empty() -> None:
 @pytest.mark.parametrize("family", ["flux2_klein", "zimage", "krea2", "ideogram4"])
 def test_image_plan_is_one_cache_target_with_the_family_patterns(monkeypatch: pytest.MonkeyPatch, family: str) -> None:
     monkeypatch.setattr(mac_plan, "_mflux_patterns", lambda name: [f"{name}/*.safetensors", "x.json"])
+    monkeypatch.setattr(mac_plan, "_mflux_revision", lambda repo_id: None)
 
     assert image_download_plan("owner/repo", family=family) == (DownloadTarget("owner/repo", None, (f"{family}/*.safetensors", "x.json")),)
+
+
+def test_image_plan_fetches_the_commit_mflux_loads(monkeypatch) -> None:
+    monkeypatch.setattr(mac_plan, "_mflux_patterns", lambda name: ["x.json"])
+    monkeypatch.setattr(mac_plan, "_mflux_revision", lambda repo_id: "d4" * 20 if repo_id == "owner/pinned" else None)
+
+    assert image_download_plan("owner/pinned", family="zimage") == (DownloadTarget("owner/pinned", "d4" * 20, ("x.json",)),)
+    assert image_download_plan("owner/other", family="zimage") == (DownloadTarget("owner/other", None, ("x.json",)),)
 
 
 # --- mac-only pins against the installed libraries ---
