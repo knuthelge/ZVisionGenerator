@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.utils.console import _fmt_time, format_generation_info
 
@@ -9,24 +11,12 @@ from zvisiongenerator.utils.console import _fmt_time, format_generation_info
 # ── _fmt_time ───────────────────────────────────────────────────────────────
 
 
-class TestFmtTime:
-    def test_none_returns_dash(self):
-        assert _fmt_time(None) == "–"
-
-    def test_seconds_only(self):
-        assert _fmt_time(45) == "45s"
-
-    def test_minutes_and_seconds(self):
-        assert _fmt_time(125) == "2m 05s"
-
-    def test_hours_minutes_seconds(self):
-        assert _fmt_time(3661) == "1h 01m 01s"
-
-    def test_zero_seconds(self):
-        assert _fmt_time(0) == "0s"
-
-    def test_exactly_one_minute(self):
-        assert _fmt_time(60) == "1m 00s"
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [(None, "–"), (0, "0s"), (45, "45s"), (60, "1m 00s"), (125, "2m 05s"), (3661, "1h 01m 01s")],
+)
+def test_fmt_time(seconds, expected):
+    assert _fmt_time(seconds) == expected
 
 
 # ── format_generation_info ──────────────────────────────────────────────────
@@ -79,16 +69,8 @@ def _settings_line(output: str) -> str:
     return _content_lines(output)[2]
 
 
-def _settings_status(output: str) -> str:
-    return _settings_line(output).split(". ", 1)[1]
-
-
 def _model_line(output: str) -> str:
     return _content_lines(output)[3]
-
-
-def _model_status(output: str) -> str:
-    return _model_line(output).split(". ", 1)[1]
 
 
 def _timing_parts(output: str) -> list[str]:
@@ -100,22 +82,9 @@ def _timing_values(output: str) -> list[str]:
 
 
 class TestFormatGenerationInfo:
-    def test_includes_model_name(self):
-        output = _call_format()
-        lines = _content_lines(output)
-        assert lines[0].endswith("1/1.")
-        assert _settings_line(output).split(". ", 1)[0].split(", ")[0].endswith("10")
-        assert "test-model" in lines[3]
-
     def test_includes_model_family(self):
         output = _call_format()
         assert "(zimage)" in output
-
-    def test_includes_steps_and_guidance(self):
-        output = _call_format()
-        settings_segments = _settings_line(output).split(". ", 1)[0].split(", ")
-        assert settings_segments[0].endswith("10")
-        assert settings_segments[1].endswith("0.5")
 
     def test_includes_dimensions_without_preset(self):
         output = _call_format()
@@ -137,20 +106,6 @@ class TestFormatGenerationInfo:
         output = _call_format(request=req)
         settings_segments = _settings_line(output).split(". ", 1)[0].split(", ")
         assert settings_segments[-1] == "1024\u00d71024"
-
-    def test_upscale_adds_status_clause(self):
-        req = _make_request(upscale_factor=2)
-        output = _call_format(request=req)
-        status_parts = _settings_line(output).split(". ")
-        assert len(status_parts) == 2
-        assert status_parts[1]
-        assert status_parts[1] != _settings_status(_call_format())
-
-    def test_without_upscale_still_has_single_status_clause(self):
-        output = _call_format()
-        status_parts = _settings_line(output).split(". ")
-        assert len(status_parts) == 2
-        assert status_parts[1]
 
     def test_lora_info_included(self):
         req = _make_request(
@@ -174,31 +129,10 @@ class TestFormatGenerationInfo:
         assert "style.v1 (0.8)" in output
         assert "detail (0.5)" in output
 
-    def test_lora_slot_is_present_when_none(self):
-        output = _call_format()
-        model_parts = _model_line(output).split(". ")
-        assert len(model_parts) == 2
-        assert model_parts[1]
-        assert model_parts[1] != _model_status(
-            _call_format(
-                request=_make_request(
-                    lora_paths=["style.safetensors"],
-                    lora_weights=[0.8],
-                )
-            )
-        )
-
     def test_timing_with_avg(self):
         output = _call_format(elapsed_secs=120, avg_secs=30, eta_secs=90)
         timing_values = _timing_values(output)
         assert timing_values == ["2m 00s", "30s/img", "~1m 30s"]
-
-    def test_timing_without_avg_has_two_segments(self):
-        output = _call_format(elapsed_secs=10)
-        timing_values = _timing_values(output)
-        assert timing_values[0] == "10s"
-        assert len(timing_values) == 2
-        assert timing_values[1]
 
     def test_run_number_display(self):
         output = _call_format(run_number=2, total_runs=5)

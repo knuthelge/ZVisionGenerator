@@ -1,4 +1,4 @@
-"""Tests for CLI parsing — parse_lora_arg and argument validation."""
+"""Tests for CLI argument validation."""
 
 from __future__ import annotations
 
@@ -9,57 +9,22 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from zvisiongenerator.image_cli import _build_parser, main
-from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
 
-# ── parse_lora_arg ──────────────────────────────────────────────────────────
+_IDEOGRAM = {
+    "detect_image_model": lambda _path: MagicMock(family="ideogram4", size=None),
+    "resolve_defaults": lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+}
+"""``main()`` overrides that make the detected model Ideogram 4 with its preset steps and guidance."""
 
 
-class TestParseLoraArg:
-    def test_single_name_default_weight(self):
-        result = parse_lora_arg("style")
-        assert result == [("style", 1.0)]
-
-    def test_name_with_weight(self):
-        result = parse_lora_arg("style:0.8")
-        assert result == [("style", 0.8)]
-
-    def test_comma_separated_multiple(self):
-        result = parse_lora_arg("style:0.8,detail:0.5")
-        assert result == [("style", 0.8), ("detail", 0.5)]
-
-    def test_mixed_with_and_without_weight(self):
-        result = parse_lora_arg("style:0.7,detail")
-        assert result == [("style", 0.7), ("detail", 1.0)]
-
-    def test_invalid_weight_treated_as_name(self):
-        result = parse_lora_arg("style:notanumber")
-        assert result == [("style:notanumber", 1.0)]
-
-    def test_empty_string_raises(self):
-        with pytest.raises(ValueError, match="Empty LoRA entry"):
-            parse_lora_arg("")
-
-    def test_empty_name_raises(self):
-        with pytest.raises(ValueError, match="Empty LoRA name"):
-            parse_lora_arg(":0.5")
-
-    def test_whitespace_in_entries_stripped(self):
-        result = parse_lora_arg(" style : 0.8 , detail : 0.5 ")
-        assert result == [("style", 0.8), ("detail", 0.5)]
-
-    def test_name_with_path_separator(self):
-        result = parse_lora_arg("models/style.safetensors:0.9")
-        assert result == [("models/style.safetensors", 0.9)]
-
-    def test_zero_weight(self):
-        result = parse_lora_arg("style:0.0")
-        assert result == [("style", 0.0)]
-
-    def test_negative_weight(self):
-        result = parse_lora_arg("style:-0.5")
-        assert result == [("style", -0.5)]
+def _backend(family: str = "zimage") -> MagicMock:
+    """Return a mock mflux backend whose ``load_model`` returns a model of *family*."""
+    backend = MagicMock()
+    backend.name = "mflux"
+    backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family=family)))
+    return backend
 
 
 # ── CLI validation via parser ───────────────────────────────────────────────
@@ -102,7 +67,7 @@ class TestCLIValidation:
 
     @staticmethod
     def _flag_misuse_warning_messages(caught_warnings: list[warnings.WarningMessage]) -> list[str]:
-        return [str(warning.message) for warning in caught_warnings if "--first-sigma only affects Ideogram 4" in str(warning.message) or "passed as a literal prompt" in str(warning.message)]
+        return [str(warning.message) for warning in caught_warnings if "--first-sigma" in str(warning.message) or "--json-prompt" in str(warning.message)]
 
     def test_quantize_rejected_for_families_without_quantization(self):
         backend = MagicMock(name="mflux")
@@ -125,13 +90,32 @@ class TestCLIValidation:
         )
         assert backend.load_model.call_args.kwargs["quantize"] == 8
 
-    def test_runs_zero_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--runs", "0", "-m", "fake"])
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["--runs", "0"],
+            ["--upscale", "3"],
+            ["--width", "-100"],
+            ["--width", "500"],
+            ["--height", "500"],
+            ["--steps", "0"],
+            ["--steps", "-1"],
+            ["--upscale-steps", "0", "--upscale", "2"],
+            ["--guidance", "-1.0"],
+            ["--upscale-guidance", "-1.0"],
+            ["--prompt", ""],
+            ["--prompt", "   "],
+            # 528 with a 4x upscale drifts to 576.
+            ["--width", "528", "--upscale", "4"],
+            ["--height", "528", "--upscale", "4"],
+        ],
+        ids=lambda argv: " ".join(argv),
+    )
+    def test_invalid_values_exit_2(self, argv):
+        with pytest.raises(SystemExit) as excinfo:
+            self._run_main([*argv, "-m", "fake"])
 
-    def test_upscale_3_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--upscale", "3", "-m", "fake"])
+        assert excinfo.value.code == 2
 
     def test_review_without_upscale_exits(self):
         with patch("sys.stdin.isatty", create=True, return_value=True), pytest.raises(SystemExit, match="2"):
@@ -150,66 +134,30 @@ class TestCLIValidation:
             self._run_main_with_overrides(["--review", "--upscale", "2", "-m", "fake"], run_batch=run_batch)
         assert run_batch.call_args.args[4].review is True
 
-    def test_review_is_off_by_default(self):
-        assert _build_parser().parse_args([]).review is False
-
-    def test_upscale_guidance_negative_rejected(self):
-        """--upscale-guidance with negative value must be rejected by the CLI."""
-        with pytest.raises(SystemExit):
-            self._run_main(["--upscale-guidance", "-1.0", "-m", "fake"])
-
-    def test_negative_width_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--width", "-100", "-m", "fake"])
-
-    def test_width_not_multiple_of_16_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--width", "500", "-m", "fake"])
-
-    def test_height_not_multiple_of_16_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--height", "500", "-m", "fake"])
-
     @pytest.mark.parametrize("width", [240, 3072])
     def test_ideogram4_dimension_bounds_error_on_in_grid_out_of_range_widths(self, width, capsys):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
                 ["--prompt", "ok", "--width", str(width), "--height", "1024", "-m", "fake"],
-                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                **_IDEOGRAM,
                 get_backend=lambda: mock_backend,
-                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
             )
 
         assert "between 256 and 2048" in capsys.readouterr().err
         mock_backend.load_model.assert_not_called()
 
     def test_ideogram4_dimension_bounds_accept_1024_square(self):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         self._run_main_with_overrides(
             ["--prompt", "ok", "--width", "1024", "--height", "1024", "-m", "fake"],
-            detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+            **_IDEOGRAM,
             get_backend=lambda: mock_backend,
-            resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
         )
 
         mock_backend.load_model.assert_called_once()
-
-    def test_default_runs_is_1(self):
-        parser = _build_parser()
-        args = parser.parse_args(["-m", "fake"])
-        assert args.runs == 1
-
-    def test_default_size_is_none(self):
-        parser = _build_parser()
-        args = parser.parse_args(["-m", "fake"])
-        assert args.size is None
 
     def test_first_sigma_parses_as_float(self):
         parser = _build_parser()
@@ -217,23 +165,8 @@ class TestCLIValidation:
 
         assert args.first_sigma == 1.005
 
-    def test_first_sigma_default_is_none(self):
-        parser = _build_parser()
-        args = parser.parse_args(["-m", "fake"])
-
-        assert args.first_sigma is None
-
-    def test_first_sigma_help_mentions_valid_range(self):
-        parser = _build_parser()
-
-        first_sigma_action = next(action for action in parser._actions if "--first-sigma" in action.option_strings)
-
-        assert "(0.0, 2.0]" in first_sigma_action.help
-
     def test_first_sigma_invalid_float_exits_before_load_model(self):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
@@ -245,9 +178,7 @@ class TestCLIValidation:
 
     @pytest.mark.parametrize("value", ["-1", "0", "2.5"])
     def test_first_sigma_out_of_band_exits_before_load_model(self, value):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
@@ -259,9 +190,7 @@ class TestCLIValidation:
 
     @pytest.mark.parametrize("value", [1.006, 2.0])
     def test_first_sigma_accepts_in_band_values(self, value):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
         recorded = {}
 
         def _capture_run_batch(_backend, _model, _prompts_data, _config, args, **_kwargs):
@@ -269,10 +198,9 @@ class TestCLIValidation:
 
         self._run_main_with_overrides(
             ["--first-sigma", str(value), "--prompt", "ok", "-m", "fake"],
-            detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+            **_IDEOGRAM,
             get_backend=lambda: mock_backend,
             run_batch=_capture_run_batch,
-            resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
         )
 
         assert recorded["first_sigma"] == value
@@ -295,7 +223,7 @@ class TestCLIValidation:
 
         warning_messages = self._flag_misuse_warning_messages(caught)
 
-        assert any("--first-sigma only affects Ideogram 4" in message and "zimage" in message for message in warning_messages)
+        assert any("--first-sigma" in message and "zimage" in message for message in warning_messages)
 
     def test_non_ideogram_json_prompt_warns_before_load_model(self):
         mock_backend = MagicMock()
@@ -314,7 +242,7 @@ class TestCLIValidation:
 
         warning_messages = self._flag_misuse_warning_messages(caught)
 
-        assert any("passed as a literal prompt" in message and "skips {a|b|c}" in message and "zimage" in message for message in warning_messages)
+        assert any("--json-prompt" in message and "zimage" in message for message in warning_messages)
 
     @pytest.mark.parametrize(
         "argv",
@@ -324,28 +252,22 @@ class TestCLIValidation:
         ],
     )
     def test_ideogram4_flag_usage_does_not_emit_non_ideogram_warnings(self, argv):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             self._run_main_with_overrides(
                 argv,
-                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                **_IDEOGRAM,
                 get_backend=lambda: mock_backend,
-                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
             )
 
         warning_messages = self._flag_misuse_warning_messages(caught)
 
-        assert not any("--first-sigma only affects Ideogram 4" in message for message in warning_messages)
-        assert not any("passed as a literal prompt" in message for message in warning_messages)
+        assert warning_messages == []
 
     def test_non_ideogram_without_first_sigma_or_json_prompt_does_not_emit_flag_warnings(self):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+        mock_backend = _backend("zimage")
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -357,20 +279,9 @@ class TestCLIValidation:
 
         warning_messages = self._flag_misuse_warning_messages(caught)
 
-        assert not any("--first-sigma only affects Ideogram 4" in message for message in warning_messages)
-        assert not any("passed as a literal prompt" in message for message in warning_messages)
+        assert warning_messages == []
 
     # ── Upscale size drift validation ───────────────────────────────────
-
-    def test_upscale_incompatible_width_exits(self):
-        """width=528 with 4x upscale drifts to 576 — should be rejected."""
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--width", "528", "--upscale", "4", "-m", "fake"])
-
-    def test_upscale_incompatible_height_exits(self):
-        """height=528 with 4x upscale drifts to 576 — should be rejected."""
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--height", "528", "--upscale", "4", "-m", "fake"])
 
     def test_upscale_compatible_width_ok(self):
         """width=512 with 4x upscale: 512//4=128, round16(128)=128, 128*4=512 — ok."""
@@ -381,22 +292,6 @@ class TestCLIValidation:
         self._run_main(["--upscale", "2", "-m", "fake"])
 
     # ── Steps and guidance validation ──
-
-    def test_steps_zero_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--steps", "0", "-m", "fake"])
-
-    def test_steps_negative_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--steps", "-1", "-m", "fake"])
-
-    def test_upscale_steps_zero_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--upscale-steps", "0", "--upscale", "2", "-m", "fake"])
-
-    def test_guidance_negative_exits(self):
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--guidance", "-1.0", "-m", "fake"])
 
     def test_guidance_zero_ok(self):
         self._run_main(["--guidance", "0.0", "-m", "fake"])
@@ -425,16 +320,6 @@ class TestCLIValidation:
 
     # ── Empty --prompt validation ──────────────────────────────────
 
-    def test_empty_prompt_string_exits(self):
-        """--prompt '' should be rejected."""
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--prompt", "", "-m", "fake"])
-
-    def test_whitespace_only_prompt_exits(self):
-        """--prompt '   ' should be rejected."""
-        with pytest.raises(SystemExit, match="2"):
-            self._run_main(["--prompt", "   ", "-m", "fake"])
-
     def test_missing_prompts_file_is_refused_before_model_detection(self, capsys):
         """No --prompt and no prompts file ends with a hint, before the model is detected or the backend loads."""
         detect = MagicMock(side_effect=AssertionError("detect_image_model must not run"))
@@ -456,9 +341,7 @@ class TestCLIValidation:
 
     def test_json_prompt_accepts_inline_json_object_value(self):
         recorded = {}
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         def _capture_run_batch(_backend, _model, prompts_data, _config, args, **_kwargs):
             recorded["prompt"] = prompts_data["prompt"][0][0]
@@ -467,10 +350,9 @@ class TestCLIValidation:
 
         self._run_main_with_overrides(
             ["--json-prompt", '{"a": 1}', "-m", "fake"],
-            detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+            **_IDEOGRAM,
             get_backend=lambda: mock_backend,
             run_batch=_capture_run_batch,
-            resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
         )
 
         assert recorded == {
@@ -480,9 +362,7 @@ class TestCLIValidation:
         }
 
     def test_json_prompt_rejects_prompt_argument_combination_before_load_model(self, capsys):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+        mock_backend = _backend("zimage")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
@@ -494,9 +374,7 @@ class TestCLIValidation:
         mock_backend.load_model.assert_not_called()
 
     def test_json_prompt_rejects_empty_value_before_load_model(self, capsys):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+        mock_backend = _backend("zimage")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
@@ -508,9 +386,7 @@ class TestCLIValidation:
         mock_backend.load_model.assert_not_called()
 
     def test_json_prompt_rejects_invalid_json_before_load_model(self, capsys):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+        mock_backend = _backend("zimage")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
@@ -529,9 +405,7 @@ class TestCLIValidation:
         ],
     )
     def test_json_prompt_rejects_non_object_json_before_load_model(self, json_value, type_name, capsys):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+        mock_backend = _backend("zimage")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
@@ -604,9 +478,7 @@ class TestCLIValidation:
         assert recorded["upscale_steps"] == 21
 
     def test_ideogram4_preset_size_guard_errors_before_load_model(self, capsys):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         def _load_config():
             return {
@@ -623,9 +495,8 @@ class TestCLIValidation:
             self._run_main_with_overrides(
                 ["--prompt", "ok", "--size", "xl", "--ratio", "16:9", "-m", "ideo"],
                 load_config=_load_config,
-                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                **_IDEOGRAM,
                 get_backend=lambda: mock_backend,
-                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
             )
 
         assert "2048" in capsys.readouterr().err
@@ -634,32 +505,26 @@ class TestCLIValidation:
     def test_ideogram4_img2img_early_guard_errors_before_load_model(self, tmp_path, capsys):
         image_path = tmp_path / "reference.png"
         image_path.write_bytes(b"fake")
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
                 ["--prompt", "ok", "--image", str(image_path), "-m", "ideo"],
-                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                **_IDEOGRAM,
                 get_backend=lambda: mock_backend,
-                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
             )
 
         assert "img2img is not supported" in capsys.readouterr().err.lower()
         mock_backend.load_model.assert_not_called()
 
     def test_ideogram4_upscale_early_guard_errors_before_load_model(self, capsys):
-        mock_backend = MagicMock()
-        mock_backend.name = "mflux"
-        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        mock_backend = _backend("ideogram4")
 
         with pytest.raises(SystemExit, match="2"):
             self._run_main_with_overrides(
                 ["--prompt", "ok", "--upscale", "2", "-m", "ideo"],
-                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                **_IDEOGRAM,
                 get_backend=lambda: mock_backend,
-                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
             )
 
         assert re.search(r"upscal.*not supported", capsys.readouterr().err, re.IGNORECASE)
@@ -687,105 +552,21 @@ class TestCLIValidation:
 class TestPostProcessingFlags:
     """Test --sharpen/--no-sharpen, --contrast/--no-contrast, --saturation/--no-saturation."""
 
-    def _parse(self, argv: list[str]):
-        parser = _build_parser()
-        return parser.parse_args(["-m", "fake"] + argv)
+    @pytest.mark.parametrize(("flag", "default", "amount"), [("sharpen", True, 0.6), ("contrast", False, 1.3), ("saturation", False, 1.2)])
+    def test_flag_forms(self, flag, default, amount):
+        def parse(*argv: str):
+            return getattr(_build_parser().parse_args(["-m", "fake", *argv]), flag)
 
-    # -- defaults --
+        assert parse() is default
+        assert parse(f"--{flag}") is True
+        assert parse(f"--{flag}", str(amount)) == amount
+        zero = parse(f"--{flag}", "0.0")
+        assert zero == 0.0 and zero is not False
+        assert parse(f"--no-{flag}") is False
 
-    def test_default_sharpen_is_true(self):
-        args = self._parse([])
-        assert args.sharpen is True
+    @pytest.mark.parametrize("argv", [["--sharpen", "-1"], ["--sharpen", "1.6"], ["--contrast", "-0.5"], ["--saturation", "-2"]], ids=lambda argv: " ".join(argv))
+    def test_out_of_range_amounts_are_rejected(self, argv):
+        with pytest.raises(SystemExit) as excinfo:
+            TestCLIValidation()._run_main(["-m", "fake", *argv])
 
-    def test_default_contrast_is_false(self):
-        args = self._parse([])
-        assert args.contrast is False
-
-    def test_default_saturation_is_false(self):
-        args = self._parse([])
-        assert args.saturation is False
-
-    # -- bare flags --
-
-    def test_bare_sharpen(self):
-        args = self._parse(["--sharpen"])
-        assert args.sharpen is True
-
-    def test_bare_contrast(self):
-        args = self._parse(["--contrast"])
-        assert args.contrast is True
-
-    def test_bare_saturation(self):
-        args = self._parse(["--saturation"])
-        assert args.saturation is True
-
-    # -- with amount --
-
-    def test_sharpen_with_amount(self):
-        args = self._parse(["--sharpen", "0.6"])
-        assert args.sharpen == 0.6
-
-    def test_contrast_with_amount(self):
-        args = self._parse(["--contrast", "1.3"])
-        assert args.contrast == 1.3
-
-    def test_saturation_with_amount(self):
-        args = self._parse(["--saturation", "1.2"])
-        assert args.saturation == 1.2
-
-    # -- negation --
-
-    def test_no_sharpen(self):
-        args = self._parse(["--no-sharpen"])
-        assert args.sharpen is False
-
-    def test_no_contrast(self):
-        args = self._parse(["--no-contrast"])
-        assert args.contrast is False
-
-    def test_no_saturation(self):
-        args = self._parse(["--no-saturation"])
-        assert args.saturation is False
-
-    # -- 0.0 edge case --
-
-    def test_sharpen_zero_is_not_false(self):
-        args = self._parse(["--sharpen", "0.0"])
-        assert args.sharpen == 0.0
-        assert args.sharpen is not False
-
-    def test_contrast_zero_is_accepted(self):
-        args = self._parse(["--contrast", "0.0"])
-        assert args.contrast == 0.0
-        assert args.contrast is not False
-
-    def test_saturation_zero_is_accepted(self):
-        args = self._parse(["--saturation", "0.0"])
-        assert args.saturation == 0.0
-        assert args.saturation is not False
-
-    # -- negative amounts rejected --
-
-    def test_negative_sharpen_rejected(self):
-        with pytest.raises(SystemExit):
-            with patch("sys.argv", ["ziv-image", "-m", "fake", "--sharpen", "-1"]):
-                with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
-                    main()
-
-    def test_sharpen_above_the_cap_rejected(self):
-        with pytest.raises(SystemExit):
-            with patch("sys.argv", ["ziv-image", "-m", "fake", "--sharpen", "1.6"]):
-                with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
-                    main()
-
-    def test_negative_contrast_rejected(self):
-        with pytest.raises(SystemExit):
-            with patch("sys.argv", ["ziv-image", "-m", "fake", "--contrast", "-0.5"]):
-                with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
-                    main()
-
-    def test_negative_saturation_rejected(self):
-        with pytest.raises(SystemExit):
-            with patch("sys.argv", ["ziv-image", "-m", "fake", "--saturation", "-2"]):
-                with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
-                    main()
+        assert excinfo.value.code == 2

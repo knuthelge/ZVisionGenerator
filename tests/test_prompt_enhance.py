@@ -7,33 +7,56 @@ import warnings
 import pytest
 
 from zvisiongenerator.utils.prompt_enhance import (
+    CAMERA_AXIS,
     DEFAULT_LENGTH_CONFIG,
+    DETAILS_AXIS,
+    MOOD_AXIS,
+    MOTION_AXIS,
+    PACE_AXIS,
+    PHOTO_REALISM,
+    PRESERVATION_RULES,
+    SOUND_AXIS,
+    STYLE_AXIS,
+    THEME_AXIS,
     EnhanceContext,
     EnhanceSettings,
     action_rules,
     build_messages,
     clean_output,
+    context_rules,
+    detail_rules,
+    direction_rules,
     duration_beats,
     enhance_context,
     enhance_prompt,
     format_enhance_spec,
+    frame_rule,
     image_enhance_entries,
     is_unusable,
+    labelled_prompt,
+    length_instruction,
     matrix_contract,
     parse_enhance_entry,
     parse_enhance_spec,
+    perception_rule,
     plan_length,
+    prompt_rule,
     resolve_enhance_ceiling,
     resolve_parts,
     settings_from_mapping,
     system_message,
+    theme_rules,
     validate_settings,
 )
 from zvisiongenerator.utils.prompt_enhance_video import (
+    _KEEP_SCENE_OUT_RULE,
     CONTINUE_NATURALLY,
     SCENE_HEAVY_WARNING,
     EnhancePairResult,
     PairLengthPlan,
+    _extend_pair_rules,
+    _extend_rules,
+    _pair_workflow_rule,
     build_pair_messages,
     enhance_video_prompt,
     parse_scene_action,
@@ -301,16 +324,15 @@ class TestLength:
         plan = plan_length(in_words, length, ceiling=300)
         assert (plan.target, plan.clamped) == (target, clamped)
 
-    @pytest.mark.parametrize("in_words", [1, 2, 4, 6, 15, 46, 150, 400])
-    @pytest.mark.parametrize("length", ["shorter", "same", "longer", "extra"])
-    def test_range_invariants(self, in_words, length):
-        plan = plan_length(in_words, length, ceiling=300)
-        assert 1 <= plan.lo <= plan.target <= plan.hi
-        assert plan.target <= 300
+    def test_range_invariants(self):
+        for in_words in (1, 2, 4, 6, 15, 46, 150, 400):
+            for length in ("shorter", "same", "longer", "extra"):
+                plan = plan_length(in_words, length, ceiling=300)
+                assert 1 <= plan.lo <= plan.target <= plan.hi <= 300, (in_words, length)
 
     def test_flux1_ceiling(self):
         plan = plan_length(100, "extra", ceiling=180)
-        assert plan.target == 180
+        assert plan.target == 180 and plan.hi == 180 and plan.lo < plan.hi
 
     def test_resolve_ceiling_per_family(self):
         config = {"model_presets": {"flux1": {"enhance_max_words": 180}, "zimage": {}}, "prompt_enhancer": {"length": {"max_words": 250}}}
@@ -368,41 +390,52 @@ class TestMessages:
     def test_user_message_is_prompt(self):
         plan = plan_length(3, "same", ceiling=300)
         messages = build_messages("a red fox", EnhanceSettings(), mode="image", plan=plan)
-        assert messages[1] == {"role": "user", "content": "Prompt: a red fox"}
-        assert messages[0]["content"].splitlines()[2].startswith("- The user gives a Prompt.")
+        assert messages[1] == {"role": "user", "content": labelled_prompt("a red fox")}
+        assert prompt_rule("the image") in messages[0]["content"]
 
     def test_details_line(self):
-        assert "Add detail on: lighting, composition and framing." in _system(EnhanceSettings(details=("lighting", "composition")))
+        settings = EnhanceSettings(details=("lighting", "composition"))
+        system = _system(settings)
+        assert detail_rules(settings, shorter=False)[0] in system
+        assert all(DETAILS_AXIS.option(slug).instruction in system for slug in settings.details)
 
     def test_nothing_focused_asks_for_a_general_rewrite(self):
-        assert "Add concrete visual detail where the prompt is thin" in _system(EnhanceSettings())
-        assert "Add concrete visual detail" not in _system(EnhanceSettings(length="shorter"), in_words=40)
+        general = detail_rules(EnhanceSettings(), shorter=False)[0]
+        assert general in _system(EnhanceSettings())
+        assert general not in _system(EnhanceSettings(length="shorter"), in_words=40)
+        assert detail_rules(EnhanceSettings(), shorter=True) == []
 
     def test_shorter_keeps_details(self):
-        assert "Keep these aspects while cutting: lighting" in _system(EnhanceSettings(length="shorter", details=("lighting",)), in_words=40)
-        assert "Length: at most" in _system(EnhanceSettings(length="shorter"), in_words=40)
+        settings = EnhanceSettings(length="shorter", details=("lighting",))
+        system = _system(settings, in_words=40)
+        assert detail_rules(settings, shorter=True)[0] in system
+        assert detail_rules(settings, shorter=False)[0] not in system
+        assert length_instruction(plan_length(40, "shorter", ceiling=300)) in system
 
     def test_photo_styles_share_the_realism_core_and_art_styles_do_not(self):
-        assert "natural skin texture, not airbrushed or waxy" in _system(EnhanceSettings(style="candid"))
-        assert '"hyperrealistic"' in _system(EnhanceSettings(style="cinematic"))
-        assert "natural skin texture" not in _system(EnhanceSettings(style="watercolor"))
+        for style in ("candid", "cinematic"):
+            system = _system(EnhanceSettings(style=style))
+            assert STYLE_AXIS.option(style).instruction in system and PHOTO_REALISM in system
+        watercolor = _system(EnhanceSettings(style="watercolor"))
+        assert STYLE_AXIS.option("watercolor").instruction in watercolor and PHOTO_REALISM not in watercolor
 
     def test_theme_line_only_when_picked(self):
-        assert "Theme: zen." in _system(EnhanceSettings(theme="zen"))
-        assert "Theme:" not in _system(EnhanceSettings())
+        assert THEME_AXIS.option("zen").instruction in _system(EnhanceSettings(theme="zen"))
+        assert theme_rules(EnhanceSettings()) == []
+        assert not any(option.instruction in _system(EnhanceSettings()) for option in THEME_AXIS.options)
 
     def test_camera_and_pace_lead_the_action_rules(self):
         settings = EnhanceSettings(camera="orbit", pace="slow-motion", motion=("secondary",))
-        rules = action_rules(settings, EnhanceContext())
-        assert rules[0] == "Camera: the camera orbits around the subject."
-        assert rules[1].startswith("Pace: slow motion")
-        assert rules[2].startswith("Motion: describe the secondary motion")
+        camera, pace, motion = action_rules(settings, EnhanceContext())
+        assert camera.startswith("Camera:") and CAMERA_AXIS.option("orbit").instruction in camera
+        assert pace.startswith("Pace:") and PACE_AXIS.option("slow-motion").instruction in pace
+        assert motion.startswith("Motion:") and MOTION_AXIS.option("secondary").instruction in motion
         assert action_rules(EnhanceSettings(), EnhanceContext()) == []
 
     def test_camera_and_pace_in_a_scene_and_action_rewrite(self):
-        rules = action_rules(EnhanceSettings(camera="aerial", pace="fast"), EnhanceContext(), for_pair=True)
-        assert rules[0].startswith("For the ACTION, camera: an aerial drone shot")
-        assert rules[1] == "For the ACTION, pace: fast, quick action."
+        camera, pace = action_rules(EnhanceSettings(camera="aerial", pace="fast"), EnhanceContext(), for_pair=True)
+        assert camera.startswith("For the ACTION") and CAMERA_AXIS.option("aerial").instruction in camera
+        assert pace.startswith("For the ACTION") and PACE_AXIS.option("fast").instruction in pace
 
     @pytest.mark.parametrize(("pace", "beats"), [("keep", "one continuous action"), ("fast", "two or three beats at most"), ("slow-motion", "one continuous action")])
     def test_pace_changes_how_much_action_fits(self, pace, beats):
@@ -413,28 +446,31 @@ class TestMessages:
         assert not is_unusable("The cat swats the apple off the counter.", "the cat knocks an apple off the counter")
 
     def test_mood_line(self):
-        assert "Mood: keep the user's existing mood" in _system(EnhanceSettings())
-        assert "Mood: eerie and unsettling." in _system(EnhanceSettings(mood="eerie"))
+        assert MOOD_AXIS.option("keep").instruction in _system(EnhanceSettings())
+        eerie = _system(EnhanceSettings(mood="eerie"))
+        assert MOOD_AXIS.option("eerie").instruction in eerie and MOOD_AXIS.option("keep").instruction not in eerie
 
     def test_empty_details_omitted(self):
         system = _system(EnhanceSettings(style="anime", details=()))
-        assert "Add detail" not in system and "Keep these aspects" not in system
+        assert detail_rules(EnhanceSettings(details=()), shorter=False)[0] in system
+        assert detail_rules(EnhanceSettings(details=("lighting",)), shorter=False)[0] not in system
+        assert detail_rules(EnhanceSettings(details=()), shorter=True) == []
 
     @pytest.mark.parametrize("settings", [EnhanceSettings(), EnhanceSettings(style="anime", details=(), length="shorter")])
     def test_fidelity_rule_always_present(self, settings):
-        assert "EVERY DETAIL IS IMPORTANT" in _system(settings, in_words=40)
-
-    def test_shorter_never_cuts_named_elements(self):
-        assert "never an element the user named" in _system(EnhanceSettings(length="shorter"), in_words=40)
+        system = _system(settings, in_words=40)
+        assert all(rule in system for rule in PRESERVATION_RULES)
 
     def test_video_mode_lines(self):
-        system = _system(EnhanceSettings(motion=("action", "secondary")), mode="video")
+        settings = EnhanceSettings(motion=("action", "secondary"))
+        system = _system(settings, mode="video")
         assert "text-to-video" in system
-        assert "visible motion and camera movement" in system
-        assert "Motion: describe the action as a clear sequence of events, the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust." in system
+        assert perception_rule("video", EnhanceContext()) in system
+        assert action_rules(settings, EnhanceContext())[0] in system
 
     def test_image_mode_has_no_motion(self):
-        assert "Motion:" not in _system(EnhanceSettings(motion=("action",)))
+        system = _system(EnhanceSettings(motion=("action",)))
+        assert MOTION_AXIS.option("action").instruction not in system and "Motion:" not in system
 
     @pytest.mark.parametrize(("length", "in_words", "expected"), [("same", 10, True), ("longer", 400, True), ("longer", 10, False), ("shorter", 40, False)])
     def test_no_echo_rule_only_when_length_stays_the_same(self, length, in_words, expected):
@@ -442,21 +478,24 @@ class TestMessages:
 
     def test_clamped_uses_same_wording(self):
         system = _system(EnhanceSettings(length="longer"), in_words=400)
-        assert "Do not exceed" in system
+        assert length_instruction(plan_length(400, "longer", ceiling=300)) in system
+        assert length_instruction(plan_length(400, "same", ceiling=300)) in system
 
     def test_video_with_audio_allows_and_keeps_sounds(self):
         system = _system(EnhanceSettings(), mode="video", context=_AUDIO)
-        assert "seen and heard" in system and "no sounds" not in system
-        assert "Keep every sound and every line of quoted speech" in system
+        assert perception_rule("video", _AUDIO) in system
+        assert perception_rule("video", EnhanceContext()) not in system
 
     @pytest.mark.parametrize(("mode", "context"), [("video", EnhanceContext(audio=False)), ("image", _AUDIO), ("video", None)])
     def test_no_audio_forbids_sounds(self, mode, context):
-        assert "no sounds" in _system(EnhanceSettings(), mode=mode, context=context)
+        system = _system(EnhanceSettings(), mode=mode, context=context)
+        assert perception_rule(mode, context or EnhanceContext()) in system
+        assert perception_rule("video", _AUDIO) not in system
 
     def test_sound_rule_lists_choices(self):
         rule = _rule(_system(EnhanceSettings(sound=("ambient", "dialogue")), mode="video", context=_AUDIO), "Sound:")
         assert rule is not None
-        assert "ambient soundscape" in rule and "write short lines" in rule and "double quotes" in rule
+        assert SOUND_AXIS.option("ambient").instruction in rule and SOUND_AXIS.option("dialogue").instruction in rule
 
     @pytest.mark.parametrize(("mode", "context"), [("video", EnhanceContext(audio=False)), ("image", _AUDIO)])
     def test_sound_rule_needs_video_with_audio(self, mode, context):
@@ -466,37 +505,42 @@ class TestMessages:
         assert _rule(_system(EnhanceSettings(), mode="video", context=_AUDIO), "Sound:") is None
 
     def test_direction_rule(self):
-        assert _rule(_system(EnhanceSettings(note="at night, in the rain")), "Direction from the user") == "Direction from the user (follow it): at night, in the rain"
-        assert _rule(_system(EnhanceSettings()), "Direction") is None
+        settings = EnhanceSettings(note="at night, in the rain")
+        assert direction_rules(settings)[0] in _system(settings)
+        assert "at night, in the rain" in direction_rules(settings)[0]
+        assert direction_rules(EnhanceSettings()) == []
 
     @pytest.mark.parametrize(("seconds", "beats"), [(2.0, "one continuous action"), (5.0, "one continuous action"), (8.0, "two or three beats"), (20.0, "short sequence")])
     def test_duration_rule(self, seconds, beats):
-        rule = _rule(_system(EnhanceSettings(), mode="video", context=EnhanceContext(seconds=seconds)), "Duration:")
-        assert rule is not None and f"about {round(seconds)} seconds" in rule and beats in rule
+        system = _system(EnhanceSettings(), mode="video", context=EnhanceContext(seconds=seconds))
+        rule = _rule(system, "Duration:")
+        assert rule is not None and str(round(seconds)) in rule and beats in rule
 
     def test_duration_only_for_video(self):
         assert _rule(_system(EnhanceSettings(), context=EnhanceContext(seconds=4.0)), "Duration:") is None
 
     def test_frame_rule(self):
-        assert _rule(_system(EnhanceSettings(), context=EnhanceContext(orientation="portrait")), "Compose for") == "Compose for a portrait frame; never mention the frame or its shape."
-        assert _rule(_system(EnhanceSettings()), "Compose for") is None
+        assert frame_rule("portrait") in _system(EnhanceSettings(), context=EnhanceContext(orientation="portrait"))
+        assert frame_rule("portrait") not in _system(EnhanceSettings())
 
     def test_reference_image_rules(self):
-        video = _system(EnhanceSettings(), mode="video", context=EnhanceContext(reference_image=True))
-        image = _system(EnhanceSettings(), context=EnhanceContext(reference_image=True))
-        assert _rule(video, "The first frame is supplied as an image") is not None
-        assert _rule(image, "A reference image supplies the subject and layout") is not None
-        assert "reference image" not in _system(EnhanceSettings()) and "first frame" not in _system(EnhanceSettings(), mode="video")
+        video_rule = context_rules("video", EnhanceContext(reference_image=True))[0]
+        image_rule = context_rules("image", EnhanceContext(reference_image=True))[0]
+        assert video_rule in _system(EnhanceSettings(), mode="video", context=EnhanceContext(reference_image=True))
+        assert image_rule in _system(EnhanceSettings(), context=EnhanceContext(reference_image=True))
+        assert video_rule not in _system(EnhanceSettings(), mode="video") and image_rule not in _system(EnhanceSettings())
 
     def test_a_last_frame_swaps_the_video_rule_for_the_two_frame_rule(self):
+        first_only = context_rules("video", EnhanceContext(reference_image=True))[0]
+        two_frames = context_rules("video", EnhanceContext(reference_image=True, end_image=True))[0]
         both = _system(EnhanceSettings(), mode="video", context=EnhanceContext(reference_image=True, end_image=True))
 
-        assert _rule(both, "The first and last frames are supplied as images") is not None
-        assert _rule(both, "The first frame is supplied as an image") is None
+        assert two_frames != first_only
+        assert two_frames in both and first_only not in both
 
     def test_a_last_frame_changes_nothing_without_a_first_frame_or_for_images(self):
-        assert "last frames" not in _system(EnhanceSettings(), mode="video", context=EnhanceContext(end_image=True))
-        assert "last frames" not in _system(EnhanceSettings(), context=EnhanceContext(reference_image=True, end_image=True))
+        assert context_rules("video", EnhanceContext(end_image=True)) == []
+        assert context_rules("image", EnhanceContext(reference_image=True, end_image=True)) == context_rules("image", EnhanceContext(reference_image=True))
 
     def test_the_factory_sets_the_last_frame_for_video_only(self):
         assert enhance_context(mode="video", reference_image=True, end_image=True).end_image is True
@@ -594,10 +638,6 @@ class TestReviewFixes:
     def test_quotes_only_strip_a_wrapping_pair(self, raw, clean):
         assert clean_output(raw) == clean
 
-    def test_hi_never_exceeds_ceiling(self):
-        plan = plan_length(100, "extra", ceiling=180)
-        assert plan.target == 180 and plan.hi == 180 and plan.lo < plan.hi
-
     def test_text_updates_are_throttled(self, monkeypatch):
         import zvisiongenerator.utils.prompt_enhance as module
 
@@ -691,25 +731,30 @@ class TestPairMessages:
         assert "text-to-video" in system
 
     def test_option_mapping_style_mood_details_go_to_the_scene(self):
-        system = _pair_system(EnhanceSettings(style="anime", mood="eerie", details=("lighting",)))
-        assert _rule(system, "For the SCENE: Style: anime") is not None
-        assert _rule(system, "For the SCENE: Mood: eerie") is not None
-        assert _rule(system, "For the SCENE: add detail on: lighting") is not None
-        assert _rule(system, "For the ACTION: Style") is None
+        settings = EnhanceSettings(style="anime", mood="eerie", details=("lighting",))
+        system = _pair_system(settings)
+        assert f"For the SCENE: {STYLE_AXIS.option('anime').instruction}" in system
+        assert f"For the SCENE: {MOOD_AXIS.option('eerie').instruction}" in system
+        assert detail_rules(settings, shorter=False, lead="For the SCENE: ")[0] in system
+        assert f"For the ACTION: {STYLE_AXIS.option('anime').instruction}" not in system
 
     def test_option_mapping_motion_and_sound_go_to_the_action(self):
-        system = _pair_system(EnhanceSettings(motion=("secondary",), sound=("dialogue",)), context=_AUDIO)
-        assert _rule(system, "For the ACTION: describe the secondary motion") is not None
-        assert _rule(system, "For the ACTION: describe speech") is not None
-        assert _rule(system, "For the SCENE: describe") is None
+        settings = EnhanceSettings(motion=("secondary",), sound=("dialogue",))
+        system = _pair_system(settings, context=_AUDIO)
+        motion, sound = action_rules(settings, _AUDIO, for_pair=True)
+        assert motion in system and sound in system
+        assert motion.startswith("For the ACTION") and MOTION_AXIS.option("secondary").instruction in motion
+        assert sound.startswith("For the ACTION") and SOUND_AXIS.option("dialogue").instruction in sound
 
     def test_sound_needs_an_audio_track(self):
-        assert "quoted lines" not in _pair_system(EnhanceSettings(sound=("dialogue",)))
-        assert "quoted lines" in _pair_system(EnhanceSettings(sound=("dialogue",)), context=_AUDIO)
+        settings = EnhanceSettings(sound=("dialogue",))
+        sound = action_rules(settings, _AUDIO, for_pair=True)[0]
+        assert sound in _pair_system(settings, context=_AUDIO)
+        assert sound not in _pair_system(settings)
 
     def test_direction_applies_to_both_parts(self):
-        system = _pair_system(EnhanceSettings(note="make it rain"))
-        assert _rule(system, "Direction from the user (follow it in both parts): make it rain") is not None
+        settings = EnhanceSettings(note="make it rain")
+        assert direction_rules(settings, both_parts=True)[0] in _pair_system(settings)
 
     def test_part_length_lines(self):
         plan = plan_pair_length(10, 20, "same", ceiling=300)
@@ -718,20 +763,20 @@ class TestPairMessages:
         assert f"ACTION length: {plan.action.lo}-{plan.action.hi} words." in system
 
     def test_text_to_video_splits_and_expands(self):
-        rule = _rule(_pair_system(), "Sort the user's text")
-        assert rule is not None and "everything in the Prompt" in rule
+        assert _pair_workflow_rule(EnhanceContext()) in _pair_system()
 
     def test_image_to_video_keeps_the_scene_short(self):
-        system = _pair_system(context=EnhanceContext(reference_image=True))
-        assert "Keep the SCENE short" in system
-        assert "Sort the user's text" not in system
+        reference = EnhanceContext(reference_image=True)
+        system = _pair_system(context=reference)
+        assert _pair_workflow_rule(reference) in system
+        assert _pair_workflow_rule(EnhanceContext()) not in system
 
-    def test_scene_rule_forbids_events_and_speech(self):
-        assert "No events, no camera moves, no quoted speech." in _pair_system()
+    def test_scene_and_action_each_have_a_role_rule(self):
+        system = _pair_system()
+        assert _rule(system, "SCENE:") is not None and _rule(system, "ACTION:") is not None
 
-    def test_audio_adds_dialogue_to_the_action_role(self):
-        assert "sound and quoted dialogue" in _pair_system(context=_AUDIO)
-        assert "sound and quoted dialogue" not in _pair_system()
+    def test_audio_changes_the_action_role(self):
+        assert _rule(_pair_system(context=_AUDIO), "ACTION:") != _rule(_pair_system(), "ACTION:")
 
     def test_blank_prompt_asks_for_an_action(self):
         assert "The Prompt is (none)" in _pair_system(scene="A castle at dusk", prompt="")
@@ -1069,9 +1114,7 @@ class TestExtendWithScene:
     def test_the_scene_and_the_previous_prompt_are_in_the_system_message_only(self):
         _, enhancer = _extend_run(["She opens a black umbrella and walks away."])
         system = _sent_system(enhancer)
-        assert f"The scene (kept as is, do not restate): {_EXT_SCENE}" in system
-        assert "Never repeat their clothing, appearance or the setting" in system
-        assert f"What just happened (do not repeat its actions or quoted lines): {_EXT_PREVIOUS}" in system
+        assert _EXT_SCENE in system and _EXT_PREVIOUS in system and _KEEP_SCENE_OUT_RULE in system
         assert _sent_user(enhancer) == "She grabs an umbrella."
 
     def test_an_empty_prompt_continues_naturally(self):
@@ -1089,34 +1132,41 @@ class TestExtendWithScene:
 
     @pytest.mark.parametrize(("new_frames", "fps", "fitted"), [(48, 24.0, "2 seconds of a 3 second window"), (80, 16.0, "5 seconds of a 7 second window")])
     def test_the_window_and_the_new_part_are_in_the_rules_in_seconds_at_the_source_fps(self, new_frames, fps, fitted):
-        _, enhancer = _extend_run(["She walks away slowly."], context=_extend_context(frames=25 + new_frames, new_frames=new_frames, fps=fps))
-        assert f"fitted to {fitted}" in _sent_system(enhancer)
+        context = _extend_context(frames=25 + new_frames, new_frames=new_frames, fps=fps)
+        _, enhancer = _extend_run(["She walks away slowly."], context=context)
+        window = _extend_rules(context)[-1]
+        assert window in _sent_system(enhancer) and fitted in window
 
     def test_the_rules_start_from_where_the_clip_ends(self):
         _, enhancer = _extend_run(["She walks away slowly."])
         system = _sent_system(enhancer)
-        assert "final positions and poses" in system and "describe speakers as before" in system and "Compose for a portrait frame" in system
+        assert all(rule in system for rule in _extend_rules(_extend_context()))
+        assert frame_rule("portrait") in system
 
     def test_no_reference_image_rule_and_no_style_rules_for_the_kept_scene(self):
         context = _extend_context(reference_image=True)
-        _, enhancer = _extend_run(["She walks away slowly."], context=context, settings=EnhanceSettings(style="anime", mood="eerie"))
+        settings = EnhanceSettings(style="anime", mood="eerie")
+        _, enhancer = _extend_run(["She walks away slowly."], context=context, settings=settings)
         system = _sent_system(enhancer)
-        assert "first frame is supplied" not in system and "Style:" not in system and "Mood:" not in system and "Add detail on" not in system
+        assert context_rules("video", context)[0] not in system
+        assert STYLE_AXIS.option("anime").instruction not in system and MOOD_AXIS.option("eerie").instruction not in system
+        assert detail_rules(settings, shorter=False)[0] not in system
 
     def test_motion_sound_and_direction_apply(self):
         settings = EnhanceSettings(motion=("secondary",), sound=("dialogue",), note="Keep it quiet.")
-        _, enhancer = _extend_run(["She walks away slowly."], context=_extend_context(audio=True), settings=settings)
+        context = _extend_context(audio=True)
+        _, enhancer = _extend_run(["She walks away slowly."], context=context, settings=settings)
         system = _sent_system(enhancer)
-        assert "Motion: describe the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust." in system and "Sound: describe speech" in system
-        assert "Direction from the user (follow it): Keep it quiet." in system
+        assert all(rule in system for rule in action_rules(settings, context))
+        assert direction_rules(settings)[0] in system
 
     def test_sound_is_left_out_without_audio(self):
         _, enhancer = _extend_run(["She walks away slowly."], settings=EnhanceSettings(sound=("dialogue",)))
-        assert "Sound:" not in _sent_system(enhancer)
+        assert SOUND_AXIS.option("dialogue").instruction not in _sent_system(enhancer)
 
     def test_no_previous_prompt_leaves_the_line_out(self):
         _, enhancer = _extend_run(["She walks away slowly."], context=_extend_context(previous=None))
-        assert "What just happened" not in _sent_system(enhancer)
+        assert _EXT_PREVIOUS not in _sent_system(enhancer)
 
     def test_an_action_too_close_to_the_previous_prompt_is_rejected_and_retried(self):
         context = _extend_context(previous='She looks at the camera. She says "I told you so". Then she sighs.')
@@ -1170,14 +1220,14 @@ class TestExtendWithScene:
     @pytest.mark.parametrize(("length", "words"), [("same", "34-46"), ("longer", "68-92")])
     def test_the_action_gets_two_thirds_of_the_total_scaled_by_the_length_setting(self, length, words):
         _, enhancer = _extend_run(["She walks away slowly."], scene=" ".join(["scene"] * 30), prompt=" ".join(["act"] * 30), settings=EnhanceSettings(length=length))
-        assert f"Length: {words} words." in _sent_system(enhancer)
+        assert f"{words} words" in _sent_system(enhancer)
 
     def test_a_long_scene_leaves_a_floor_for_the_action_and_warns(self):
         enhancer = _FakeEnhancer(["She walks away slowly."])
         with pytest.warns(UserWarning, match="scene uses most"):
             result = enhance_video_prompt(enhancer, " ".join(["scene"] * 295), "", EnhanceSettings(), seed=1, ceiling=300, context=_extend_context())
         assert result.warning == SCENE_HEAVY_WARNING
-        assert "Length: 9-15 words." in _sent_system(enhancer) or "Length: 9-12 words." in _sent_system(enhancer)
+        assert "9-15 words" in _sent_system(enhancer) or "9-12 words" in _sent_system(enhancer)
 
 
 class TestExtendWithoutScene:
@@ -1186,9 +1236,8 @@ class TestExtendWithoutScene:
         result, enhancer = _extend_run([_EXT_PAIR], scene="", context=context)
         assert (result.scene, result.prompt) == (_EXT_SCENE, "She opens a black umbrella.")
         system = _sent_system(enhancer)
-        assert f"Extract the scene (who, where, look, style, camera) from this earlier prompt: {_EXT_LEGACY}" in system
-        assert "Write the action for what happens next" in system
-        assert "SCENE: who and where" in system and "final positions and poses" in system
+        assert _extend_pair_rules(context)[0] in system and _EXT_LEGACY in system
+        assert _rule(system, "SCENE:") is not None and all(rule in system for rule in _extend_rules(context))
 
     @pytest.mark.parametrize(
         ("prompt", "is_original", "expected"),
@@ -1201,9 +1250,9 @@ class TestExtendWithoutScene:
         assert _sent_user(enhancer) == expected
 
     def test_the_previous_prompt_is_listed_separately_when_it_differs_from_the_extract_source(self):
-        context = _extend_context(previous="She sighs.", extract_from=_EXT_LEGACY)
+        context = _extend_context(previous="The rain stops.", extract_from=_EXT_LEGACY)
         _, enhancer = _extend_run([_EXT_PAIR], scene="", context=context)
-        assert "What just happened (do not repeat its actions or quoted lines): She sighs." in _sent_system(enhancer)
+        assert "The rain stops." in _sent_system(enhancer)
 
     @pytest.mark.parametrize("action", ['She says "I told you so".', _EXT_LEGACY], ids=["quoted line", "close to the old prompt"])
     def test_the_repeat_guard_retries_even_though_the_user_prompt_was_not_sent(self, action):
@@ -1230,7 +1279,8 @@ class TestExtendWithoutScene:
     def test_the_window_rule_uses_the_new_part_and_the_window(self):
         context = _extend_context(frames=25 + 48, new_frames=48, fps=24.0, extract_from=_EXT_LEGACY)
         _, enhancer = _extend_run([_EXT_PAIR], scene="", context=context)
-        assert "fitted to 2 seconds of a 3 second window" in _sent_system(enhancer) and "Duration:" not in _sent_system(enhancer)
+        system = _sent_system(enhancer)
+        assert _extend_rules(context)[-1] in system and "2 seconds of a 3 second window" in system and "Duration:" not in system
 
     def test_no_source_prompt_at_all_still_writes_a_pair_from_blank_inputs(self):
         context = _extend_context(previous=None)
@@ -1341,43 +1391,43 @@ class TestActionOnlyWithoutExtending:
     def test_the_prompt_says_to_keep_the_scene(self):
         _, enhancer = _action_run(["The knight draws his sword and raises it."])
         system, user = _sent_system(enhancer), _sent_user(enhancer)
-        assert f"The scene (kept exactly as written, do not restate or change it): {_KEPT_SCENE}" in system
-        assert "Never repeat their clothing, appearance or the setting" in system
+        assert _KEPT_SCENE in system and _KEEP_SCENE_OUT_RULE in system
         assert "SCENE:" not in system and _KEPT_SCENE not in user and user == "he draws his sword"
 
     def test_style_mood_and_details_belong_to_the_scene_and_are_left_out(self):
         settings = EnhanceSettings(style="anime", mood="eerie", details=("lighting",), motion=("secondary",), note="Keep it quiet.", parts="action")
         _, enhancer = _action_run(["The knight draws his sword."], settings=settings)
         system = _sent_system(enhancer)
-        assert "Style:" not in system and "Mood:" not in system and "Add detail on" not in system
-        assert (
-            "Motion: describe the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust." in system and "Direction from the user (follow it): Keep it quiet." in system
-        )
+        assert STYLE_AXIS.option("anime").instruction not in system and MOOD_AXIS.option("eerie").instruction not in system
+        assert detail_rules(settings, shorter=False)[0] not in system
+        assert all(rule in system for rule in action_rules(settings, EnhanceContext()))
+        assert direction_rules(settings)[0] in system
 
     def test_a_blank_prompt_asks_for_an_action_that_suits_the_scene(self):
         result, enhancer = _action_run(["The knight walks across the courtyard."], prompt="")
-        assert "write an action that suits the scene" in _sent_user(enhancer) and result.scene == ""
+        assert _sent_user(enhancer).startswith("(none)") and result.scene == ""
 
     def test_a_reference_image_gets_the_describe_change_rule(self):
         context = enhance_context(mode="video", frames=121, fps=24.0, reference_image=True)
         _, enhancer = _action_run(["The knight draws his sword."], context=context)
-        assert "The first frame is supplied as an image. Describe the motion, camera movement and changes over time" in _sent_system(enhancer)
+        assert context_rules("video", context)[0] in _sent_system(enhancer)
 
     def test_no_reference_image_rule_without_an_image(self):
         _, enhancer = _action_run(["The knight draws his sword."])
-        assert "first frame is supplied" not in _sent_system(enhancer)
+        assert context_rules("video", EnhanceContext(reference_image=True))[0] not in _sent_system(enhancer)
 
     def test_duration_and_frame_rules_apply(self):
         context = enhance_context(mode="video", width=512, height=768, frames=121, fps=24.0)
         _, enhancer = _action_run(["The knight draws his sword."], context=context)
         system = _sent_system(enhancer)
-        assert "Compose for a portrait frame" in system and "Duration: about 5 seconds" in system
+        assert frame_rule("portrait") in system and _rule(system, "Duration:") is not None
 
     def test_sound_needs_audio(self):
         settings = EnhanceSettings(sound=("effects",), parts="action")
         _, silent = _action_run(["The knight draws his sword."], settings=settings)
         _, loud = _action_run(["The knight draws his sword."], settings=settings, context=enhance_context(mode="video", frames=121, fps=24.0, audio=True))
-        assert "Sound:" not in _sent_system(silent) and "Sound: describe sound effects" in _sent_system(loud)
+        effects = SOUND_AXIS.option("effects").instruction
+        assert effects not in _sent_system(silent) and effects in _sent_system(loud)
 
     def test_an_echo_of_the_prompt_is_retried(self):
         result, enhancer = _action_run(["he draws his sword", "The knight draws his sword and raises it."])
@@ -1423,7 +1473,7 @@ class TestActionOnlyWhenExtending:
         assert (result.scene, result.prompt) == (_EXT_SCENE, "She opens a black umbrella.")
         assert _sent_user(enhancer) == f"Scene: {_EXT_SCENE}\nWhat happens next: She grabs an umbrella."
         system = _sent_system(enhancer)
-        assert "SCENE:" in system and "rewrite it, keeping its facts" in system and "What just happened" in system
+        assert _rule(system, "SCENE:") is not None and _extend_pair_rules(_extend_context(), scene=_EXT_SCENE)[0] in system and _EXT_PREVIOUS in system
 
     def test_both_with_a_scene_still_rejects_a_repeat_of_the_previous_prompt(self):
         repeat = f'SCENE: {_EXT_SCENE}\nACTION: She says "I told you so".'

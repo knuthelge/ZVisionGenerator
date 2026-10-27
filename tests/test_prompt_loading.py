@@ -39,63 +39,21 @@ def test_load_prompts_extracts_negative(tmp_path):
     assert result["set1"][1] == ("a dog", None)
 
 
-def test_snippets_list_raises(tmp_path):
-    """A snippets block that is a list instead of a dict raises ValueError."""
-    yaml_content = textwrap.dedent("""\
-        snippets:
-          - item1
-          - item2
-        my_set:
-          - prompt: "hello"
-    """)
+@pytest.mark.parametrize(
+    ("yaml_content", "match"),
+    [
+        ("snippets:\n  - item1\n  - item2\nmy_set:\n  - prompt: hello\n", "snippets.*must be a mapping"),
+        ('snippets: "not a dict"\nmy_set:\n  - prompt: hello\n', "snippets.*must be a mapping"),
+        ("my_set:\n  - prompt: null\n", "empty prompt"),
+        ('my_set:\n  - prompt: ""\n', "empty prompt"),
+    ],
+    ids=["snippets-list", "snippets-scalar", "null-prompt", "empty-prompt"],
+)
+def test_an_invalid_prompts_file_is_refused(tmp_path, yaml_content, match):
     f = tmp_path / "prompts.yaml"
     f.write_text(yaml_content)
-    import pytest
 
-    with pytest.raises(ValueError, match="snippets.*must be a mapping"):
-        load_prompts_file(str(f))
-
-
-def test_snippets_scalar_raises(tmp_path):
-    """A snippets block that is a scalar raises ValueError."""
-    yaml_content = textwrap.dedent("""\
-        snippets: "not a dict"
-        my_set:
-          - prompt: "hello"
-    """)
-    f = tmp_path / "prompts.yaml"
-    f.write_text(yaml_content)
-    import pytest
-
-    with pytest.raises(ValueError, match="snippets.*must be a mapping"):
-        load_prompts_file(str(f))
-
-
-def test_null_prompt_raises(tmp_path):
-    """prompt: null should be rejected after snippet resolution."""
-    yaml_content = textwrap.dedent("""\
-        my_set:
-          - prompt: null
-    """)
-    f = tmp_path / "prompts.yaml"
-    f.write_text(yaml_content)
-    import pytest
-
-    with pytest.raises(ValueError, match="empty prompt"):
-        load_prompts_file(str(f))
-
-
-def test_empty_string_prompt_raises(tmp_path):
-    """prompt: '' should be rejected after snippet resolution."""
-    yaml_content = textwrap.dedent("""\
-        my_set:
-          - prompt: ""
-    """)
-    f = tmp_path / "prompts.yaml"
-    f.write_text(yaml_content)
-    import pytest
-
-    with pytest.raises(ValueError, match="empty prompt"):
+    with pytest.raises(ValueError, match=match):
         load_prompts_file(str(f))
 
 
@@ -103,8 +61,6 @@ def test_malformed_yaml_prompts_raises_valueerror(tmp_path):
     """Malformed YAML in a prompts file must raise ValueError."""
     bad = tmp_path / "bad_prompts.yaml"
     bad.write_text("prompts:\n  - prompt: hello\n  bad_indent", encoding="utf-8")
-
-    import pytest
 
     with pytest.raises(ValueError, match="Failed to parse prompts file"):
         load_prompts_file(str(bad))

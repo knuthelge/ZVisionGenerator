@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from zvisiongenerator.utils.prompt_enhance import DETAILS_AXIS, STYLE_AXIS, EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance import DETAILS_AXIS, STYLE_AXIS, THEME_AXIS, EnhanceSettings
 from zvisiongenerator.utils.prompt_enhance_caption import CAPTION_NO_USABLE_MESSAGE, enhance_caption
 
 _PHOTO_KEYS = ["aesthetics", "lighting", "photo", "medium", "color_palette"]
@@ -52,15 +52,15 @@ def _texts(caption: dict) -> list[str]:
 
 
 class TestCaptionShape:
-    @pytest.mark.parametrize("style", STYLE_AXIS.slugs())
-    def test_every_style_follows_the_caption_key_order(self, style: str) -> None:
-        caption = _caption("a red fox in snow", _REPLY, settings=EnhanceSettings(style=style))
-        assert list(caption) == ["high_level_description", "style_description", "compositional_deconstruction"]
-        expected = [key for key in (_PHOTO_KEYS if "photo" in caption["style_description"] else _ART_KEYS) if key in caption["style_description"]]
-        assert list(caption["style_description"]) == expected
-        assert all(_HEX.match(color) for color in caption["style_description"].get("color_palette", []))
-        for element in caption["compositional_deconstruction"]["elements"]:
-            assert list(element) == (["type", "text", "desc"] if element["type"] == "text" else ["type", "desc"])
+    def test_every_style_follows_the_caption_key_order(self) -> None:
+        for style in STYLE_AXIS.slugs():
+            caption = _caption("a red fox in snow", _REPLY, settings=EnhanceSettings(style=style))
+            assert list(caption) == ["high_level_description", "style_description", "compositional_deconstruction"], style
+            expected = [key for key in (_PHOTO_KEYS if "photo" in caption["style_description"] else _ART_KEYS) if key in caption["style_description"]]
+            assert list(caption["style_description"]) == expected, style
+            assert all(_HEX.match(color) for color in caption["style_description"].get("color_palette", [])), style
+            for element in caption["compositional_deconstruction"]["elements"]:
+                assert list(element) == (["type", "text", "desc"] if element["type"] == "text" else ["type", "desc"]), style
 
     def test_art_style_picks_the_art_branch(self) -> None:
         style = _caption("a red fox", _REPLY, settings=EnhanceSettings(style="anime"))["style_description"]
@@ -115,7 +115,7 @@ class TestOptionsInCaptions:
     def test_theme_is_asked_for_in_the_caption(self) -> None:
         enhancer = _FakeEnhancer(_REPLY)
         enhance_caption(enhancer, "a fox in snow", EnhanceSettings(theme="noir"), seed=1, ceiling=300)
-        assert "Theme: noir." in enhancer.messages[0][0]["content"]
+        assert THEME_AXIS.option("noir").instruction in enhancer.messages[0][0]["content"]
 
 
 class TestDesignDetection:

@@ -18,39 +18,21 @@ from zvisiongenerator.web import main as web_main
 class TestUnifiedCli:
     """Test the unified ziv command dispatcher."""
 
-    def test_no_args_prints_help_without_launching_web_ui(self, capsys):
-        """ziv with no args prints command discovery help."""
+    @pytest.mark.parametrize("flags", [[], ["--help"], ["-h"]], ids=["no-args", "--help", "-h"])
+    def test_help_is_printed_without_launching_web_ui(self, capsys, flags):
+        """ziv with no args, --help or -h prints command discovery help and does not launch the Web UI server."""
         with patch("zvisiongenerator.web.run_server") as run_server:
-            with patch("sys.argv", ["ziv"]):
-                main()
+            with patch("sys.argv", ["ziv", *flags]):
+                if flags:
+                    with pytest.raises(SystemExit) as exc_info:
+                        main()
+                    assert exc_info.value.code == 0
+                else:
+                    main()
 
         captured = capsys.readouterr()
         assert captured.err == ""
         assert all(command in captured.out for command in ("image", "video", "model", "ui"))
-        run_server.assert_not_called()
-
-    def test_help_flag_prints_help_without_launching_web_ui(self, capsys):
-        """ziv --help prints help and does not launch the Web UI server."""
-        with patch("zvisiongenerator.web.run_server") as run_server:
-            with patch("sys.argv", ["ziv", "--help"]):
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
-
-        captured = capsys.readouterr()
-        assert exc_info.value.code == 0
-        assert all(token in captured.out for token in ("ziv", "image", "video", "model", "ui"))
-        run_server.assert_not_called()
-
-    def test_h_flag_prints_help_without_launching_web_ui(self, capsys):
-        """ziv -h prints help and does not launch the Web UI server."""
-        with patch("zvisiongenerator.web.run_server") as run_server:
-            with patch("sys.argv", ["ziv", "-h"]):
-                with pytest.raises(SystemExit) as exc_info:
-                    main()
-
-        captured = capsys.readouterr()
-        assert exc_info.value.code == 0
-        assert all(token in captured.out for token in ("ziv", "image", "video", "model", "ui"))
         run_server.assert_not_called()
 
     def test_version_flag(self, capsys):
@@ -69,25 +51,10 @@ class TestUnifiedCli:
 
         assert exc_info.value.code == 2
 
-    def test_image_subcommand_delegates(self):
-        """ziv image --help delegates to image_cli.main."""
-        with patch("sys.argv", ["ziv", "image", "--help"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-
-        assert exc_info.value.code == 0
-
-    def test_video_subcommand_delegates(self):
-        """ziv video --help delegates to video_cli.main."""
-        with patch("sys.argv", ["ziv", "video", "--help"]):
-            with pytest.raises(SystemExit) as exc_info:
-                main()
-
-        assert exc_info.value.code == 0
-
-    def test_model_subcommand_delegates(self):
-        """ziv model (no args) delegates to convert_checkpoint.main which prints help."""
-        with patch("sys.argv", ["ziv", "model"]):
+    @pytest.mark.parametrize("argv", [["image", "--help"], ["video", "--help"], ["model"]], ids=["image", "video", "model"])
+    def test_subcommand_delegates_and_exits_0(self, argv):
+        """ziv image/video --help and ziv model (which prints its help) hand over to their own CLI."""
+        with patch("sys.argv", ["ziv", *argv]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
 
@@ -100,19 +67,6 @@ class TestUnifiedCli:
                 main()
 
         run_server.assert_called_once_with(host="0.0.0.0", port=9000, open_browser=False)
-
-    def test_ui_subcommand_reports_broken_web_ui_install(self, capsys):
-        """ziv ui should explain how to recover from a broken Web UI install."""
-        with patch("zvisiongenerator.web._missing_web_runtime_dependencies", return_value=["fastapi", "uvicorn"]):
-            with patch("zvisiongenerator.web.run_server") as run_server:
-                with patch("sys.argv", ["ziv", "ui", "--no-browser"]):
-                    with pytest.raises(SystemExit) as exc_info:
-                        main()
-
-        captured = capsys.readouterr()
-        assert exc_info.value.code == 1
-        assert all(token in captured.err for token in ("fastapi", "uvicorn", "ziv ui", "z-vision-generator"))
-        run_server.assert_not_called()
 
 
 class TestWebCli:

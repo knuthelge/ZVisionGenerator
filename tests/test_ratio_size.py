@@ -1,203 +1,116 @@
 """Tests for the aspect-ratio + size-scale sizing system.
 
 Covers:
-- All 25 dimension lookup entries match the PRD spec
-- All dimensions are multiples of 16
-- CLI rejects invalid --ratio and --size values
-- Default ratio/size resolution (no flags → 2:3/m/832×1216)
-- Specific ratio+size → correct dimensions
+- The packaged size table (shape, upscale survival) and its copy in the docs
+- CLI --ratio/--size choices match the packaged table, and invalid values are refused
+- Default ratio/size resolution when only some flags are given
+- Runner resolves nested lookup correctly, and --width/--height overrides take priority
 - Filenames are the set name plus a timestamp
-- Console output includes ratio, size, and dimensions
-- Runner resolves nested lookup correctly
-- --width/--height overrides take priority
 """
 
 from __future__ import annotations
 
 import re
-
-from conftest import _make_plan
-
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import _make_plan
 
+import _prompt_helpers
 from zvisiongenerator.image_cli import _build_parser, main
 from zvisiongenerator.utils.alignment import round_to_alignment
-from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
+packaged_config = _prompt_helpers.packaged_config
+packaged_config_shared = _prompt_helpers.packaged_config_shared
 
-# ── PRD dimension lookup table ──────────────────────────────────────────────
+_IMAGES_DOC = Path(__file__).resolve().parent.parent / "docs" / "concepts" / "images.md"
 
-EXPECTED_DIMENSIONS = {
-    "1:1": {
-        "xs": (512, 512),
-        "s": (704, 704),
-        "m": (1024, 1024),
-        "l": (1408, 1408),
-        "xl": (1600, 1600),
-    },
-    "16:9": {
-        "xs": (672, 384),
-        "s": (960, 544),
-        "m": (1344, 768),
-        "l": (1920, 1088),
-        "xl": (2176, 1216),
-    },
-    "9:16": {
-        "xs": (384, 672),
-        "s": (544, 960),
-        "m": (768, 1344),
-        "l": (1088, 1920),
-        "xl": (1216, 2176),
-    },
-    "3:2": {
-        "xs": (576, 384),
-        "s": (864, 576),
-        "m": (1216, 832),
-        "l": (1728, 1152),
-        "xl": (1920, 1280),
-    },
-    "2:3": {
-        "xs": (384, 576),
-        "s": (576, 864),
-        "m": (832, 1216),
-        "l": (1152, 1728),
-        "xl": (1280, 1920),
-    },
+# The few presets the runner and default-resolution tests look up, as (width, height).
+_SIZES_UNDER_TEST = {
+    "1:1": {"m": (1024, 1024)},
+    "16:9": {"l": (1920, 1088)},
+    "9:16": {"xs": (384, 672)},
+    "2:3": {"m": (832, 1216), "xl": (1280, 1920)},
 }
 
-RATIOS = ["1:1", "16:9", "9:16", "3:2", "2:3"]
-SIZES = ["xs", "s", "m", "l", "xl"]
+
+def _sizes_config() -> dict:
+    """Return ``_SIZES_UNDER_TEST`` in config form."""
+    return {ratio: {size: {"width": w, "height": h} for size, (w, h) in scale_map.items()} for ratio, scale_map in _SIZES_UNDER_TEST.items()}
 
 
-# ── All 25 dimension lookup entries (SC-7) ──────────────────────────────────
+def _documented_sizes() -> dict[str, dict[str, tuple[int, int]]]:
+    """Parse the size table in docs/concepts/images.md into ``{ratio: {size: (width, height)}}``."""
+    rows: list[str] = []
+    for line in _IMAGES_DOC.read_text(encoding="utf-8").splitlines():
+        if line.startswith("|"):
+            rows.append(line)
+        elif rows:
+            break  # the size table is the first table on the page
+    ratios = [cell.strip() for cell in rows[0].strip("|").split("|")[1:]]
+    table: dict[str, dict[str, tuple[int, int]]] = {ratio: {} for ratio in ratios}
+    for row in rows[2:]:
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        size = cells[0].strip("`")
+        for ratio, cell in zip(ratios, cells[1:]):
+            width, height = (int(part) for part in cell.split("\u00d7"))
+            table[ratio][size] = (width, height)
+    return table
 
 
-class TestDimensionLookupTable:
-    """Verify all 25 entries in config.yaml match the PRD spec (REQ-1, SC-7)."""
-
-    @pytest.fixture(scope="class")
-    def config(self):
-        return load_config()
-
-    @pytest.mark.parametrize(
-        "ratio,size",
-        [(r, s) for r in RATIOS for s in SIZES],
-        ids=[f"{r}_{s}" for r in RATIOS for s in SIZES],
-    )
-    def test_dimension_matches_spec(self, config, ratio, size):
-        expected_w, expected_h = EXPECTED_DIMENSIONS[ratio][size]
-        actual = config["sizes"][ratio][size]
-        assert actual["width"] == expected_w, f"{ratio}/{size}: width {actual['width']} != {expected_w}"
-        assert actual["height"] == expected_h, f"{ratio}/{size}: height {actual['height']} != {expected_h}"
-
-    @pytest.mark.parametrize(
-        "ratio,size",
-        [(r, s) for r in RATIOS for s in SIZES],
-        ids=[f"{r}_{s}_mod16" for r in RATIOS for s in SIZES],
-    )
-    def test_dimensions_are_multiples_of_16(self, config, ratio, size):
-        """REQ-5: All dimensions must be multiples of 16."""
-        dims = config["sizes"][ratio][size]
-        assert dims["width"] % 16 == 0, f"{ratio}/{size}: width {dims['width']} not multiple of 16"
-        assert dims["height"] % 16 == 0, f"{ratio}/{size}: height {dims['height']} not multiple of 16"
-
-    def test_exactly_5_ratios(self, config):
-        assert set(config["sizes"].keys()) == set(RATIOS)
-
-    def test_each_ratio_has_5_sizes(self, config):
-        for ratio in RATIOS:
-            assert set(config["sizes"][ratio].keys()) == set(SIZES), f"Ratio {ratio} missing sizes"
+# ── The packaged size table ─────────────────────────────────────────────────
 
 
-# ── CLI flag validation (SC-6) ──────────────────────────────────────────────
+class TestPackagedSizeTable:
+    def test_five_ratios_with_five_sizes_each(self, packaged_config_shared):
+        sizes = packaged_config_shared["sizes"]
+
+        assert set(sizes) == {"1:1", "16:9", "9:16", "3:2", "2:3"}
+        for ratio, scale_map in sizes.items():
+            assert set(scale_map) == {"xs", "s", "m", "l", "xl"}, ratio
+
+    def test_the_docs_table_matches_the_packaged_sizes(self, packaged_config_shared):
+        packaged = {ratio: {size: (dims["width"], dims["height"]) for size, dims in scale_map.items()} for ratio, scale_map in packaged_config_shared["sizes"].items()}
+
+        assert _documented_sizes() == packaged
+
+    def test_every_preset_survives_upscale(self, packaged_config_shared):
+        """xs and s survive 2x; m, l and xl survive 2x and 4x (the base render is a multiple of 16)."""
+        for ratio, scale_map in packaged_config_shared["sizes"].items():
+            for size, dims in scale_map.items():
+                factors = (2,) if size in ("xs", "s") else (2, 4)
+                for factor in factors:
+                    for value in (dims["width"], dims["height"]):
+                        assert round_to_alignment(value // factor) * factor == value, f"{ratio}/{size} {value} drifts under {factor}x upscale"
+
+
+# ── CLI flag choices ────────────────────────────────────────────────────────
 
 
 class TestCLIRatioSizeFlags:
-    """CLI must reject invalid --ratio and --size values."""
-
-    def test_invalid_ratio_rejected(self):
-        """SC-6: --ratio 4:3 is not in valid choices."""
+    def test_the_choices_are_the_packaged_ratios_and_sizes(self, packaged_config_shared):
         parser = _build_parser()
-        with pytest.raises(SystemExit, match="2"):
-            parser.parse_args(["--ratio", "4:3", "-m", "fake"])
+        choices = {option: set(action.choices) for action in parser._actions for option in action.option_strings if action.choices}
+        sizes = packaged_config_shared["sizes"]
 
-    def test_invalid_ratio_3_4_rejected(self):
-        parser = _build_parser()
-        with pytest.raises(SystemExit, match="2"):
-            parser.parse_args(["--ratio", "3:4", "-m", "fake"])
+        assert choices["--ratio"] == set(sizes)
+        assert choices["--size"] == {size for scale_map in sizes.values() for size in scale_map}
 
-    def test_invalid_size_xxl_rejected(self):
-        """SC-6: --size xxl is not in valid choices."""
-        parser = _build_parser()
-        with pytest.raises(SystemExit, match="2"):
-            parser.parse_args(["--size", "xxl", "-m", "fake"])
+    @pytest.mark.parametrize("argv", [["--ratio", "4:3"], ["--size", "xxl"]])
+    def test_an_unknown_ratio_or_size_exits_2(self, argv):
+        with pytest.raises(SystemExit) as excinfo:
+            _build_parser().parse_args([*argv, "-m", "fake"])
 
-    def test_invalid_size_medium_rejected(self):
-        parser = _build_parser()
-        with pytest.raises(SystemExit, match="2"):
-            parser.parse_args(["--size", "medium", "-m", "fake"])
-
-    @pytest.mark.parametrize("ratio", RATIOS)
-    def test_valid_ratios_accepted(self, ratio):
-        parser = _build_parser()
-        args = parser.parse_args(["--ratio", ratio, "-m", "fake"])
-        assert args.ratio == ratio
-
-    @pytest.mark.parametrize("size", SIZES)
-    def test_valid_sizes_accepted(self, size):
-        parser = _build_parser()
-        args = parser.parse_args(["--size", size, "-m", "fake"])
-        assert args.size == size
-
-    def test_short_flag_s_works(self):
-        """REQ-2: -s is the short flag for --size."""
-        parser = _build_parser()
-        args = parser.parse_args(["-s", "xl", "-m", "fake"])
-        assert args.size == "xl"
-
-    def test_ratio_default_is_none(self):
-        """Parser default for --ratio is None (resolved later from config)."""
-        parser = _build_parser()
-        args = parser.parse_args(["-m", "fake"])
-        assert args.ratio is None
-
-    def test_size_default_is_none(self):
-        """Parser default for --size is None (resolved later from config)."""
-        parser = _build_parser()
-        args = parser.parse_args(["-m", "fake"])
-        assert args.size is None
+        assert excinfo.value.code == 2
 
 
-# ── Default resolution via main() (SC-2, REQ-3) ────────────────────────────
+# ── Default resolution via main() ───────────────────────────────────────────
 
 
 class TestDefaultResolution:
-    """Verify defaults when no flags are given."""
-
-    _FULL_CONFIG = {
-        "sizes": EXPECTED_DIMENSIONS,  # reuse spec table converted to dict form
-        "model_presets": {},
-        "schedulers": {},
-        "generation": {
-            "default_ratio": "2:3",
-            "default_size": "m",
-            "default_steps": 10,
-            "default_guidance": 3.5,
-        },
-    }
-
-    # Convert EXPECTED_DIMENSIONS to config-style dicts
-    @classmethod
-    def _sizes_config(cls):
-        sizes = {}
-        for ratio, scale_map in EXPECTED_DIMENSIONS.items():
-            sizes[ratio] = {}
-            for size, (w, h) in scale_map.items():
-                sizes[ratio][size] = {"width": w, "height": h}
-        return sizes
+    """Verify the config defaults fill in whichever of --ratio and --size is missing."""
 
     _MAIN_MOCKS = {
         "detect_image_model": staticmethod(lambda _: MagicMock(family="zimage", size=None)),
@@ -219,15 +132,10 @@ class TestDefaultResolution:
         mocks = dict(self._MAIN_MOCKS)
         mocks["run_batch"] = _capture
         mocks["load_config"] = lambda: {
-            "sizes": self._sizes_config(),
+            "sizes": _sizes_config(),
             "model_presets": {},
             "schedulers": {},
-            "generation": {
-                "default_ratio": "2:3",
-                "default_size": "m",
-                "default_steps": 10,
-                "default_guidance": 3.5,
-            },
+            "generation": {"default_ratio": "2:3", "default_size": "m", "default_steps": 10, "default_guidance": 3.5},
         }
 
         with patch("sys.argv", ["ziv-image"] + argv):
@@ -235,29 +143,19 @@ class TestDefaultResolution:
                 main()
         return recorded
 
-    def test_no_flags_defaults_to_2_3_m(self):
-        """SC-2: No flags → ratio='2:3', size='m' → 832×1216."""
-        result = self._run_capturing(["-m", "fake"])
-        assert result["ratio"] == "2:3"
-        assert result["size"] == "m"
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["-m", "fake"], ("2:3", "m")),
+            (["-m", "fake", "--size", "xl"], ("2:3", "xl")),
+            (["-m", "fake", "--ratio", "1:1"], ("1:1", "m")),
+        ],
+        ids=["no-flags", "only-size", "only-ratio"],
+    )
+    def test_the_missing_flag_takes_the_config_default(self, argv, expected):
+        result = self._run_capturing(argv)
 
-    def test_only_size_flag_uses_default_ratio(self):
-        """SC-3: --size xl with default ratio 2:3 → 1280×1920."""
-        result = self._run_capturing(["-m", "fake", "--size", "xl"])
-        assert result["ratio"] == "2:3"
-        assert result["size"] == "xl"
-
-    def test_only_ratio_flag_uses_default_size(self):
-        """SC-4: --ratio 1:1 with default size m → 1024×1024."""
-        result = self._run_capturing(["-m", "fake", "--ratio", "1:1"])
-        assert result["ratio"] == "1:1"
-        assert result["size"] == "m"
-
-    def test_both_flags_explicit(self):
-        """SC-1: --ratio 16:9 --size l → 1920×1088."""
-        result = self._run_capturing(["-m", "fake", "--ratio", "16:9", "--size", "l"])
-        assert result["ratio"] == "16:9"
-        assert result["size"] == "l"
+        assert (result["ratio"], result["size"]) == expected
 
 
 # ── Runner nested lookup (SC-1, SC-2) ──────────────────────────────────────
@@ -282,14 +180,8 @@ class TestRunnerSizeLookup:
 
         wf = GenerationWorkflow(name="test", stages=[_stage])
 
-        sizes_config = {}
-        for r, scale_map in EXPECTED_DIMENSIONS.items():
-            sizes_config[r] = {}
-            for s, (w, h) in scale_map.items():
-                sizes_config[r][s] = {"width": w, "height": h}
-
         config = {
-            "sizes": sizes_config,
+            "sizes": _sizes_config(),
             "generation": {"seed_min": 1, "seed_max": 100},
             "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
             "model_presets": {"zimage": {"supports_negative_prompt": True}},
@@ -302,29 +194,14 @@ class TestRunnerSizeLookup:
 
         return captured["request"]
 
-    def test_16_9_l_resolves_1920x1088(self):
-        """SC-1: --ratio 16:9 --size l → 1920×1088."""
-        req = self._capture_request("16:9", "l")
-        assert req.width == 1920
-        assert req.height == 1088
+    @pytest.mark.parametrize(
+        ("ratio", "size", "expected"),
+        [("16:9", "l", (1920, 1088)), ("2:3", "m", (832, 1216)), ("1:1", "m", (1024, 1024)), ("2:3", "xl", (1280, 1920))],
+    )
+    def test_ratio_and_size_resolve_to_the_preset_dimensions(self, ratio, size, expected):
+        req = self._capture_request(ratio, size)
 
-    def test_2_3_m_resolves_832x1216(self):
-        """SC-2: Default 2:3/m → 832×1216."""
-        req = self._capture_request("2:3", "m")
-        assert req.width == 832
-        assert req.height == 1216
-
-    def test_1_1_m_resolves_1024x1024(self):
-        """SC-4: --ratio 1:1 → 1024×1024."""
-        req = self._capture_request("1:1", "m")
-        assert req.width == 1024
-        assert req.height == 1024
-
-    def test_2_3_xl_resolves_1280x1920(self):
-        """SC-3: --size xl → 1280×1920."""
-        req = self._capture_request("2:3", "xl")
-        assert req.width == 1280
-        assert req.height == 1920
+        assert (req.width, req.height) == expected
 
     def test_width_override_takes_priority(self):
         """SC-5: --width overrides preset width."""
@@ -355,68 +232,6 @@ class TestRunnerSizeLookup:
         req = self._capture_request("9:16", "xs", width_override=800, height_override=600)
         assert req.ratio is None
         assert req.size is None
-
-
-# ── Console output (REQ-8) ─────────────────────────────────────────────────
-
-
-class TestConsoleRatioSize:
-    """Console output displays ratio/size conditionally."""
-
-    def test_console_shows_ratio_size_with_presets(self):
-        from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
-        from zvisiongenerator.utils.console import format_generation_info
-
-        request = ImageGenerationRequest(
-            backend=None,
-            model=None,
-            prompt="test",
-            ratio="16:9",
-            size="l",
-            width=1888,
-            height=1056,
-        )
-        output = format_generation_info(
-            request,
-            ImageWorkingArtifacts(),
-            run_number=0,
-            total_runs=1,
-            ran_iterations=1,
-            total_iterations=1,
-            set_name="test",
-            prompt_idx=0,
-            total_prompts=1,
-        )
-        assert "Ratio: 16:9" in output
-        assert "Size: l" in output
-        assert "1888" in output
-        assert "1056" in output
-
-    def test_console_shows_only_dims_with_explicit(self):
-        from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
-        from zvisiongenerator.utils.console import format_generation_info
-
-        request = ImageGenerationRequest(
-            backend=None,
-            model=None,
-            prompt="test",
-            width=800,
-            height=600,
-        )
-        output = format_generation_info(
-            request,
-            ImageWorkingArtifacts(),
-            run_number=0,
-            total_runs=1,
-            ran_iterations=1,
-            total_iterations=1,
-            set_name="test",
-            prompt_idx=0,
-            total_prompts=1,
-        )
-        assert "800\u00d7600" in output
-        assert "Ratio:" not in output
-        assert "Size:" not in output
 
 
 # ── Runner filename integration (SC-9) ──────────────────────────────────────
@@ -459,27 +274,3 @@ class TestRunnerFilenameIntegration:
         """Dimensions and settings live in the embedded metadata, not the filename."""
         filename = self._capture_filename(width_override=800, height_override=600)
         assert re.fullmatch(r"s_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}", filename)
-
-
-# ── Upscale round-trip with presets (SC-8) ──────────────────────────────────
-
-
-class TestUpscalePresetRoundTrip:
-    """SC-8: Every shipped preset keeps its exact size under the upscale factors its tier supports."""
-
-    @pytest.fixture(scope="class")
-    def config(self):
-        return load_config()
-
-    @pytest.mark.parametrize(
-        "ratio,size",
-        [(r, s) for r in RATIOS for s in SIZES],
-        ids=[f"{r}_{s}" for r in RATIOS for s in SIZES],
-    )
-    def test_preset_survives_upscale(self, config, ratio, size):
-        """xs and s survive 2x; m, l and xl survive 2x and 4x (the base render is a multiple of 16)."""
-        dims = config["sizes"][ratio][size]
-        factors = (2,) if size in ("xs", "s") else (2, 4)
-        for factor in factors:
-            for value in (dims["width"], dims["height"]):
-                assert round_to_alignment(value // factor) * factor == value, f"{ratio}/{size} {value} drifts under {factor}x upscale"

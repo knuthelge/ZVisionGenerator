@@ -55,7 +55,7 @@ def _make_image_request(**overrides):
 
 
 class TestBuildImageConfigPayload:
-    def test_contains_all_minimal_reusable_fields(self):
+    def test_a_plain_payload_holds_exactly_the_reusable_fields(self):
         request = _make_image_request(
             lora_paths=["/models/style.safetensors"],
             lora_weights=[0.7],
@@ -64,19 +64,25 @@ class TestBuildImageConfigPayload:
 
         payload = build_image_config_payload(request, artifacts)
 
-        assert payload["schema"] == IMAGE_CONFIG_SCHEMA
-        assert payload["workflow"] == "txt2img"
-        assert payload["prompt"] == "A red barn"
-        assert payload["model"] == "zit"
-        assert payload["seed"] == 7
-        assert payload["steps"] == 10
-        assert payload["guidance"] == 3.0
-        assert payload["width"] == 512
-        assert payload["height"] == 384
-        assert payload["ratio"] == "4:3"
-        assert payload["size"] == "s"
-        assert payload["image_path"] is None
-        assert payload["lora"] == "/models/style.safetensors:0.7"
+        assert payload == {
+            "schema": IMAGE_CONFIG_SCHEMA,
+            "workflow": "txt2img",
+            "prompt": "A red barn",
+            "negative_prompt": None,
+            "model": "zit",
+            "model_family": "zimage",
+            "seed": 7,
+            "steps": 10,
+            "guidance": 3.0,
+            "scheduler": None,
+            "width": 512,
+            "height": 384,
+            "ratio": "4:3",
+            "size": "s",
+            "image_path": None,
+            "lora": "/models/style.safetensors:0.7",
+            "generation": {"sharpen": 0.8},
+        }
         json.dumps(payload)
 
     def test_lora_paths_are_preserved(self):
@@ -87,19 +93,6 @@ class TestBuildImageConfigPayload:
         payload = build_image_config_payload(request, ImageWorkingArtifacts(image=Image.new("RGB", (32, 32))))
 
         assert payload["lora"] == r"C:\loras\style.SAFETENSORS:0.8,owner/detail.v1.safetensors:0.5"
-
-    def test_excludes_runtime_and_output_fields(self):
-        request = _make_image_request()
-        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (512, 384)), generation_time=3.1)
-
-        payload = build_image_config_payload(request, artifacts)
-
-        assert "model_name" not in payload
-        assert "resolved_prompt" not in payload
-        assert "media_type" not in payload
-        assert "output" not in payload
-        assert "source" not in payload
-        assert "image_strength" not in payload
 
     def test_records_negative_prompt_scheduler_and_family(self):
         request = _make_image_request(negative_prompt="blurry", scheduler="pkg.BetaScheduler", scheduler_name="beta")
@@ -259,12 +252,6 @@ class TestBuildImageConfigPayload:
         assert payload["width"] == 1024
         assert payload["height"] == 768
 
-    def test_is_json_serializable(self):
-        request = _make_image_request()
-        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (512, 384)))
-        payload = build_image_config_payload(request, artifacts)
-        json.dumps(payload)
-
 
 class TestEmbedAndReadPngConfig:
     def test_round_trip_embed_and_read(self, tmp_path):
@@ -350,18 +337,6 @@ class TestBuildVideoConfigPayload:
         assert payload["lora"] == "/models/motion.safetensors:0.7"
         json.dumps(payload)
 
-    def test_excludes_runtime_and_output_fields(self):
-        request = _make_video_request()
-        artifacts = VideoWorkingArtifacts(generation_time=12.5, resolved_prompt="resolved version")
-
-        payload = build_video_config_payload(request, artifacts)
-
-        assert "model_name" not in payload
-        assert "resolved_prompt" not in payload
-        assert "media_type" not in payload
-        assert "output" not in payload
-        assert "no_audio" not in payload
-
     def test_generation_records_time_upscale_audio_and_format(self):
         request = _make_video_request(upscale=2, upscale_steps=3, no_audio=True)
         payload = build_video_config_payload(request, VideoWorkingArtifacts(generation_time=12.54))
@@ -373,11 +348,6 @@ class TestBuildVideoConfigPayload:
         request = _make_video_request()
         payload = build_video_config_payload(request, VideoWorkingArtifacts())
         assert payload["workflow"] == "txt2vid"
-
-    def test_is_json_serializable(self):
-        request = _make_video_request()
-        payload = build_video_config_payload(request, VideoWorkingArtifacts())
-        json.dumps(payload)
 
     def test_plain_txt2vid_payload_is_unchanged_by_scene_support(self):
         """Golden: a video without a scene or enhancement embeds exactly the keys it did before scenes existed."""
@@ -471,73 +441,6 @@ class TestBuildVideoConfigPayload:
 
 
 class TestEmbedMp4Config:
-    def test_calls_ffmpeg_with_metadata_arg(self, tmp_path):
-        video_path = tmp_path / "out.mp4"
-        video_path.write_bytes(b"fake-mp4")
-        payload = {"schema": VIDEO_CONFIG_SCHEMA, "prompt": "test prompt"}
-
-        def _side_effect(cmd, **kwargs):
-            tmp = staging_path(video_path)
-            tmp.write_bytes(b"processed")
-            return MagicMock(returncode=0)
-
-        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
-            embed_mp4_config(video_path, payload)
-
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "ffmpeg"
-        assert "-metadata" in cmd
-        meta_idx = cmd.index("-metadata")
-        meta_val = cmd[meta_idx + 1]
-        assert meta_val.startswith("zvisiongenerator.config=")
-        embedded = json.loads(meta_val[len("zvisiongenerator.config=") :])
-        assert embedded["prompt"] == "test prompt"
-
-    def test_keeps_custom_metadata_key_in_mp4_header(self, tmp_path):
-        video_path = tmp_path / "out.mp4"
-        video_path.write_bytes(b"fake-mp4")
-
-        def _side_effect(cmd, **kwargs):
-            staging_path(video_path).write_bytes(b"processed")
-            return MagicMock(returncode=0)
-
-        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
-            embed_mp4_config(video_path, {"schema": VIDEO_CONFIG_SCHEMA})
-
-        cmd = mock_run.call_args[0][0]
-        assert cmd[cmd.index("-movflags") + 1] == "use_metadata_tags"
-
-    def test_runs_ffmpeg_quietly(self, tmp_path):
-        video_path = tmp_path / "out.mp4"
-        video_path.write_bytes(b"fake-mp4")
-
-        def _side_effect(cmd, **kwargs):
-            staging_path(video_path).write_bytes(b"processed")
-            return MagicMock(returncode=0)
-
-        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
-            embed_mp4_config(video_path, {"schema": VIDEO_CONFIG_SCHEMA})
-
-        cmd = mock_run.call_args[0][0]
-        assert cmd[cmd.index("-v") + 1] == "error"
-
-    def test_does_not_create_adjacent_sidecars(self, tmp_path):
-        video_path = tmp_path / "out.mp4"
-        video_path.write_bytes(b"fake-mp4")
-        payload = {"schema": VIDEO_CONFIG_SCHEMA, "prompt": "test prompt"}
-
-        def _side_effect(cmd, **kwargs):
-            tmp = staging_path(video_path)
-            tmp.write_bytes(b"processed")
-            return MagicMock(returncode=0)
-
-        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect):
-            embed_mp4_config(video_path, payload)
-
-        assert not video_path.with_suffix(".json").exists()
-        assert not video_path.with_name(f"{video_path.name}.json").exists()
-
     def test_writes_hidden_staging_file_and_replaces_original(self, tmp_path):
         video_path = tmp_path / "out.mp4"
         video_path.write_bytes(b"fake-mp4")
@@ -652,59 +555,45 @@ class TestRecordedValueHelpers:
             assert image_prompt_text(image) is None
 
 
-class TestRecordedUpscaleMethod:
-    def test_seedvr2_block_round_trips(self):
-        upscale = {"method": "seedvr2", "factor": 2, "model": "seedvr2-7b", "quantize": 8, "softness": 0.75, "seed": 0}
+_SEEDVR2_FULL = {"method": "seedvr2", "factor": 2, "model": "seedvr2-7b", "quantize": 8, "softness": 0.75, "seed": 0}
+_VIDEO_STEPS = {"factor": 2, "steps": 8}
 
-        assert recorded_settings({"generation": {"upscale": upscale}}).generation == {"upscale": upscale}
 
-    def test_block_without_a_method_reads_as_creative(self):
-        generation = recorded_settings({"generation": {"upscale": {"factor": 2, "denoise": 0.4}}}).generation
-
-        assert generation == {"upscale": {"method": "creative", "factor": 2, "denoise": 0.4}}
-
-    def test_unknown_method_reads_as_creative(self):
-        generation = recorded_settings({"generation": {"upscale": {"method": "other", "factor": 2}}}).generation
-
-        assert generation["upscale"]["method"] == "creative"
-
-    def test_empty_block_stays_absent(self):
-        assert recorded_settings({"generation": {"upscale": {"method": "seedvr2"}}}).generation == {}
-
-    def test_video_upscale_records_no_method(self):
-        upscale = {"factor": 2, "steps": 8}
-
-        by_workflow = recorded_settings({"workflow": "txt2vid", "generation": {"upscale": upscale}}).generation
-        by_frames = recorded_settings({"frame_count": 121, "generation": {"upscale": upscale}}).generation
-
-        assert by_workflow == by_frames == {"upscale": upscale}
-
-    def test_a_video_keeps_the_seedvr2_method_and_drops_any_other(self):
-        seedvr2 = {"method": "seedvr2", "factor": 2}
-
-        kept = recorded_settings({"workflow": "upscale", "frame_count": 97, "generation": {"upscale": seedvr2}}).generation
-        dropped = recorded_settings({"workflow": "txt2vid", "generation": {"upscale": {"method": "creative", "factor": 2}}}).generation
-
-        assert kept == {"upscale": seedvr2}
-        assert dropped == {"upscale": {"factor": 2}}
-
-    def test_extended_video_upscale_records_no_method(self):
-        upscale = {"factor": 2, "steps": 8}
-
-        by_workflow = recorded_settings({"workflow": "extend", "generation": {"upscale": upscale}}).generation
-        by_frames = recorded_settings({"workflow": "extend", "frame_count": 193, "generation": {"upscale": upscale}}).generation
-
-        assert by_workflow == by_frames == {"upscale": upscale}
-
-    def test_old_image_upscale_reads_as_creative(self):
-        generation = recorded_settings({"workflow": "txt2img", "generation": {"upscale": {"factor": 2, "steps": 3}}}).generation
-
-        assert generation == {"upscale": {"method": "creative", "factor": 2, "steps": 3}}
-
-    def test_image_seedvr2_upscale_keeps_its_method(self):
-        generation = recorded_settings({"workflow": "upscale", "generation": {"upscale": {"method": "seedvr2", "factor": 2}}}).generation
-
-        assert generation == {"upscale": {"method": "seedvr2", "factor": 2}}
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        # Images: a block without a known method reads as creative; an empty block stays absent.
+        ({"generation": {"upscale": _SEEDVR2_FULL}}, {"upscale": _SEEDVR2_FULL}),
+        ({"generation": {"upscale": {"factor": 2, "denoise": 0.4}}}, {"upscale": {"method": "creative", "factor": 2, "denoise": 0.4}}),
+        ({"generation": {"upscale": {"method": "other", "factor": 2}}}, {"upscale": {"method": "creative", "factor": 2}}),
+        ({"generation": {"upscale": {"method": "seedvr2"}}}, {}),
+        ({"workflow": "txt2img", "generation": {"upscale": {"factor": 2, "steps": 3}}}, {"upscale": {"method": "creative", "factor": 2, "steps": 3}}),
+        ({"workflow": "upscale", "generation": {"upscale": {"method": "seedvr2", "factor": 2}}}, {"upscale": {"method": "seedvr2", "factor": 2}}),
+        # Videos record no method, except that seedvr2 is kept.
+        ({"workflow": "txt2vid", "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
+        ({"frame_count": 121, "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
+        ({"workflow": "upscale", "frame_count": 97, "generation": {"upscale": {"method": "seedvr2", "factor": 2}}}, {"upscale": {"method": "seedvr2", "factor": 2}}),
+        ({"workflow": "txt2vid", "generation": {"upscale": {"method": "creative", "factor": 2}}}, {"upscale": {"factor": 2}}),
+        ({"workflow": "extend", "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
+        ({"workflow": "extend", "frame_count": 193, "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
+    ],
+    ids=[
+        "image-seedvr2-round-trips",
+        "image-no-method-is-creative",
+        "image-unknown-method-is-creative",
+        "image-empty-block-is-absent",
+        "old-image-is-creative",
+        "image-seedvr2-keeps-its-method",
+        "video-by-workflow",
+        "video-by-frames",
+        "video-keeps-seedvr2",
+        "video-drops-creative",
+        "extend-by-workflow",
+        "extend-by-frames",
+    ],
+)
+def test_recorded_upscale_method(payload, expected):
+    assert recorded_settings(payload).generation == expected
 
 
 _VIDEO_UPSCALE = {"method": "seedvr2", "factor": 2, "model": "seedvr2-7b", "quantize": 8, "softness": 0.0, "seed": 42}

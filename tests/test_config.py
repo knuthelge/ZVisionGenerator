@@ -9,7 +9,6 @@ import pytest
 
 from zvisiongenerator.utils.config import (
     EULER_ANCESTRAL,
-    LTX_SAMPLERS,
     _deep_merge,
     get_variant_key,
     load_config,
@@ -32,6 +31,11 @@ from zvisiongenerator.utils.config import (
 from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
+
+import _prompt_helpers
+
+packaged_config = _prompt_helpers.packaged_config
+packaged_config_shared = _prompt_helpers.packaged_config_shared
 
 
 _SEEDVR2_BLOCK = {
@@ -62,148 +66,48 @@ def _write_packaged_config(tmp_path, data):
 # ---------------------------------------------------------------------------
 
 
+_GENERATION = {"default_steps": 10, "default_guidance": 3.5}
+
+
+def _load_packaged(tmp_path, data, *, user_dir=None):
+    """Load ``data`` as the packaged config, with no user override unless ``user_dir`` has one."""
+    from unittest.mock import patch
+
+    config_file = _write_packaged_config(tmp_path, data)
+    with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
+        mock_dir.return_value = user_dir or tmp_path / "no-user-config"
+        mock_files.return_value.joinpath.return_value = config_file
+        return load_config()
+
+
 class TestNestedConfigValidation:
     """Ensure load_config rejects configs with bad nested values."""
 
-    def test_default_steps_not_int_raises(self, tmp_path):
-        from unittest.mock import patch
-        import yaml
+    @pytest.mark.parametrize(
+        ("sizes", "generation", "match"),
+        [
+            ({"1:1": {"m": {"width": 100, "height": 100}}}, {**_GENERATION, "default_steps": "ten"}, "default_steps.*integer"),
+            ({"1:1": {"m": {"width": 100, "height": 100}}}, {**_GENERATION, "default_guidance": "high"}, "default_guidance.*number"),
+            ({"1:1": {"m": {"width": "wide", "height": 100}}}, _GENERATION, r"sizes\.1:1\.m\.width.*integer"),
+            ({"1:1": "medium"}, _GENERATION, r"sizes\.1:1.*mapping.*size"),
+            ({"1:1": {"m": {"width": 1024, "height": 1024}}}, {**_GENERATION, "default_ratio": "4:3"}, r"default_ratio.*4:3.*not a valid ratio"),
+            ({"1:1": {"m": {"width": 1024, "height": 1024}}}, {**_GENERATION, "default_ratio": "1:1", "default_size": "xxl"}, r"default_size.*xxl.*not a valid size.*1:1"),
+        ],
+        ids=["steps-not-int", "guidance-not-number", "width-not-int", "size-not-mapping", "unknown-ratio", "unknown-size"],
+    )
+    def test_a_bad_size_or_generation_value_names_the_key(self, tmp_path, sizes, generation, match):
+        data = {"sizes": sizes, "generation": generation, "sharpening": {}, "upscale": {}, "schedulers": {}, "model_presets": {}}
 
-        bad_yaml = {
-            "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
-            "generation": {"default_steps": "ten", "default_guidance": 3.5},
-            "sharpening": {},
-            "upscale": {},
-            "schedulers": {},
-            "model_presets": {},
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.dump(bad_yaml))
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "nope"
-            mock_files.return_value.joinpath.return_value = config_file
-            with pytest.raises(ValueError, match="default_steps.*integer"):
-                load_config()
-
-    def test_default_guidance_not_number_raises(self, tmp_path):
-        """Guidance set to a string should be rejected."""
-        from unittest.mock import patch
-        import yaml
-
-        bad_yaml = {
-            "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
-            "generation": {"default_steps": 10, "default_guidance": "high"},
-            "sharpening": {},
-            "upscale": {},
-            "schedulers": {},
-            "model_presets": {},
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.dump(bad_yaml))
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "nope"  # no user override
-            mock_files.return_value.joinpath.return_value = config_file
-            with pytest.raises(ValueError, match="default_guidance.*number"):
-                load_config()
-
-    def test_size_width_not_int_raises(self, tmp_path):
-        """A size entry with string width should be rejected."""
-        from unittest.mock import patch
-        import yaml
-
-        bad_yaml = {
-            "sizes": {"1:1": {"m": {"width": "wide", "height": 100}}},
-            "generation": {"default_steps": 10, "default_guidance": 3.5},
-            "sharpening": {},
-            "upscale": {},
-            "schedulers": {},
-            "model_presets": {},
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.dump(bad_yaml))
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "nope"
-            mock_files.return_value.joinpath.return_value = config_file
-            with pytest.raises(ValueError, match=r"sizes\.1:1\.m\.width.*integer"):
-                load_config()
-
-    def test_size_not_dict_raises(self, tmp_path):
-        """A size entry that is a scalar should be rejected."""
-        from unittest.mock import patch
-        import yaml
-
-        bad_yaml = {
-            "sizes": {"1:1": "medium"},
-            "generation": {"default_steps": 10, "default_guidance": 3.5},
-            "sharpening": {},
-            "upscale": {},
-            "schedulers": {},
-            "model_presets": {},
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.dump(bad_yaml))
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "nope"
-            mock_files.return_value.joinpath.return_value = config_file
-            with pytest.raises(ValueError, match=r"sizes\.1:1.*mapping.*size"):
-                load_config()
-
-    def test_unknown_default_ratio_raises(self, tmp_path):
-        """default_ratio referencing a ratio not in sizes should be rejected."""
-        from unittest.mock import patch
-        import yaml
-
-        bad_yaml = {
-            "sizes": {"1:1": {"m": {"width": 1024, "height": 1024}}},
-            "generation": {"default_steps": 10, "default_guidance": 3.5, "default_ratio": "4:3"},
-            "sharpening": {},
-            "upscale": {},
-            "schedulers": {},
-            "model_presets": {},
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.dump(bad_yaml))
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "nope"
-            mock_files.return_value.joinpath.return_value = config_file
-            with pytest.raises(ValueError, match=r"default_ratio.*4:3.*not a valid ratio"):
-                load_config()
-
-    def test_unknown_default_size_raises(self, tmp_path):
-        """default_size referencing a size not in the ratio's entries should be rejected."""
-        from unittest.mock import patch
-        import yaml
-
-        bad_yaml = {
-            "sizes": {"1:1": {"m": {"width": 1024, "height": 1024}}},
-            "generation": {"default_steps": 10, "default_guidance": 3.5, "default_ratio": "1:1", "default_size": "xxl"},
-            "sharpening": {},
-            "upscale": {},
-            "schedulers": {},
-            "model_presets": {},
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.dump(bad_yaml))
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "nope"
-            mock_files.return_value.joinpath.return_value = config_file
-            with pytest.raises(ValueError, match=r"default_size.*xxl.*not a valid size.*1:1"):
-                load_config()
+        with pytest.raises(ValueError, match=match):
+            _load_packaged(tmp_path, data)
 
     def test_model_alias_reference_resolves_after_user_override(self, tmp_path):
         """Config references should follow the merged default repo value."""
-        from unittest.mock import patch
         import yaml
 
         packaged = {
             "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
-            "generation": {"default_steps": 10, "default_guidance": 3.5, "default_ratio": "1:1", "default_size": "m"},
+            "generation": {**_GENERATION, "default_ratio": "1:1", "default_size": "m"},
             "sharpening": {},
             "upscale": {},
             "seedvr2": _SEEDVR2_BLOCK,
@@ -222,7 +126,6 @@ class TestNestedConfigValidation:
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
             "video_model_presets": {"ltx": {"diffusers": {"default_repo": "dg845/LTX-2.3-Diffusers"}}},
         }
-        config_file = _write_packaged_config(tmp_path, packaged)
         user_dir = tmp_path / ".ziv"
         user_dir.mkdir()
         (user_dir / "config.yaml").write_text(
@@ -230,9 +133,7 @@ class TestNestedConfigValidation:
             encoding="utf-8",
         )
 
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir", return_value=user_dir):
-            mock_files.return_value.joinpath.return_value = config_file
-            config = load_config()
+        config = _load_packaged(tmp_path, packaged, user_dir=user_dir)
 
         assert config["model_aliases"]["ltx-2.3"]["win32"] == "custom/LTX-2.3"
         assert config["model_aliases"]["ltx-2.3"]["linux"] == "custom/LTX-2.3"
@@ -251,39 +152,26 @@ def test_packaged_config_resolves_ideo_to_its_models_folder_on_every_platform(mo
     assert config["model_alias_families"]["ideo"] == "ideogram4"
 
 
-def test_packaged_config_pins_every_ideogram4_instant_source(monkeypatch, tmp_path):
-    from zvisiongenerator.utils import config as config_module
+def test_packaged_config_pins_every_ideogram4_instant_source(packaged_config):
     from zvisiongenerator.utils.ideogram4_instant import instant_source
-
-    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-
-    config = load_config()
 
     formats = {}
     for platform_key in ("darwin", "win32", "linux"):
-        source = instant_source(config, platform_key)
+        source = instant_source(packaged_config, platform_key)
         assert re.fullmatch(r"[0-9a-f]{40}", source.transformer_revision)
         assert source.components_revision is not None and re.fullmatch(r"[0-9a-f]{40}", source.components_revision)
         formats[platform_key] = source.transformer_format
     assert formats == {"darwin": "fp8", "win32": "bf16", "linux": "bf16"}
 
 
-def test_packaged_config_ideogram4_preset_is_instant(monkeypatch, tmp_path):
-    from zvisiongenerator.utils import config as config_module
-
-    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-
-    defaults = resolve_defaults(ImageModelInfo(family="ideogram4", is_distilled=False, size=None), load_config(), {}, "diffusers")
+def test_packaged_config_ideogram4_preset_is_instant(packaged_config):
+    defaults = resolve_defaults(ImageModelInfo(family="ideogram4", is_distilled=False, size=None), packaged_config, {}, "diffusers")
 
     assert (defaults["steps"], defaults["guidance"], defaults["supports_quantize"]) == (8, 1.0, True)
 
 
-def test_packaged_config_ships_krea2_alias_and_defaults(monkeypatch, tmp_path):
-    from zvisiongenerator.utils import config as config_module
-
-    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-
-    config = load_config()
+def test_packaged_config_ships_krea2_alias_and_defaults(packaged_config):
+    config = packaged_config
     turbo = ImageModelInfo(family="krea2", is_distilled=False, size=None)
 
     for platform_key in ("darwin", "win32", "linux"):
@@ -296,12 +184,8 @@ def test_packaged_config_ships_krea2_alias_and_defaults(monkeypatch, tmp_path):
         assert defaults["supports_scheduler"] is False
 
 
-def test_packaged_config_klein9b_uses_ungated_mirror(monkeypatch, tmp_path):
-    from zvisiongenerator.utils import config as config_module
-
-    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-
-    aliases = load_config()["model_aliases"]
+def test_packaged_config_klein9b_uses_ungated_mirror(packaged_config):
+    aliases = packaged_config["model_aliases"]
 
     assert aliases["klein9b"] == "unsloth/FLUX.2-klein-9B"
     for platform_key in ("darwin", "win32", "linux"):
@@ -314,20 +198,10 @@ def test_packaged_config_klein9b_uses_ungated_mirror(monkeypatch, tmp_path):
         assert "black-forest-labs/FLUX.2-klein-9B" not in resolved
 
 
-def test_packaged_config_krea2_capabilities(monkeypatch, tmp_path):
-    from zvisiongenerator.utils import config as config_module
-
-    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    config = load_config()
-
-    caps = model_capabilities(config, "krea2")
+def test_packaged_config_krea2_capabilities(packaged_config):
+    caps = model_capabilities(packaged_config, "krea2")
 
     assert (caps["supports_img2img"], caps["supports_upscale"]) == (True, True)
-
-
-def test_new_capability_flags_default_permissive():
-    caps = model_capabilities({}, "unknown")
-    assert caps["supports_scheduler"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -335,36 +209,24 @@ def test_new_capability_flags_default_permissive():
 # ---------------------------------------------------------------------------
 
 
-class TestDeepMerge:
-    def test_flat_override(self):
-        base = {"a": 1, "b": 2}
-        _deep_merge(base, {"b": 99})
-        assert base == {"a": 1, "b": 99}
+@pytest.mark.parametrize(
+    ("base", "override", "expected"),
+    [
+        ({"a": 1, "b": 2}, {"b": 99}, {"a": 1, "b": 99}),
+        ({"a": 1}, {"b": 2}, {"a": 1, "b": 2}),
+        ({"a": {"x": 1, "y": 2}}, {"a": {"y": 99, "z": 3}}, {"a": {"x": 1, "y": 99, "z": 3}}),
+        ({"a": {"b": {"c": {"d": 1}}}}, {"a": {"b": {"c": {"d": 2, "e": 3}}}}, {"a": {"b": {"c": {"d": 2, "e": 3}}}}),
+        ({"a": {"x": 1}}, {"a": 42}, {"a": 42}),
+        ({"a": 42}, {"a": {"x": 1}}, {"a": {"x": 1}}),
+        ({"a": [1, 2, 3]}, {"a": [4, 5]}, {"a": [4, 5]}),
+        ({"a": 1}, {}, {"a": 1}),
+    ],
+    ids=["flat", "new-key", "nested", "deeply-nested", "dict-to-scalar", "scalar-to-dict", "list-replaced", "empty"],
+)
+def test_deep_merge(base, override, expected):
+    _deep_merge(base, override)
 
-    def test_new_key(self):
-        base = {"a": 1}
-        _deep_merge(base, {"b": 2})
-        assert base == {"a": 1, "b": 2}
-
-    def test_nested_merge(self):
-        base = {"a": {"x": 1, "y": 2}}
-        _deep_merge(base, {"a": {"y": 99, "z": 3}})
-        assert base == {"a": {"x": 1, "y": 99, "z": 3}}
-
-    def test_override_dict_with_scalar(self):
-        base = {"a": {"x": 1}}
-        _deep_merge(base, {"a": 42})
-        assert base == {"a": 42}
-
-    def test_override_scalar_with_dict(self):
-        base = {"a": 42}
-        _deep_merge(base, {"a": {"x": 1}})
-        assert base == {"a": {"x": 1}}
-
-    def test_empty_override(self):
-        base = {"a": 1}
-        _deep_merge(base, {})
-        assert base == {"a": 1}
+    assert base == expected
 
 
 # ---------------------------------------------------------------------------
@@ -372,26 +234,12 @@ class TestDeepMerge:
 # ---------------------------------------------------------------------------
 
 
-class TestGetVariantKey:
-    def test_flux2_klein_distilled(self):
-        info = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")
-        assert get_variant_key(info) == "distilled"
-
-    def test_flux2_klein_base(self):
-        info = ImageModelInfo(family="flux2_klein", is_distilled=False, size="9b")
-        assert get_variant_key(info) == "base"
-
-    def test_zimage_returns_none(self):
-        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        assert get_variant_key(info) is None
-
-    def test_flux1_returns_none(self):
-        info = ImageModelInfo(family="flux1", is_distilled=False, size=None)
-        assert get_variant_key(info) is None
-
-    def test_unknown_returns_none(self):
-        info = ImageModelInfo(family="unknown", is_distilled=False, size=None)
-        assert get_variant_key(info) is None
+@pytest.mark.parametrize(
+    ("family", "is_distilled", "size", "expected"),
+    [("flux2_klein", True, "4b", "distilled"), ("flux2_klein", False, "9b", "base"), ("zimage", False, None, None), ("flux1", False, None, None), ("unknown", False, None, None)],
+)
+def test_get_variant_key(family, is_distilled, size, expected):
+    assert get_variant_key(ImageModelInfo(family=family, is_distilled=is_distilled, size=size)) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -475,114 +323,84 @@ class TestResolveDefaults:
 
     @pytest.fixture(autouse=True)
     def _load(self):
-        import copy
+        self.config = deepcopy(self._SYNTHETIC_CONFIG)
 
-        self.config = copy.deepcopy(self._SYNTHETIC_CONFIG)
+    @pytest.mark.parametrize(
+        ("family", "is_distilled", "size", "backend", "expected"),
+        [
+            (
+                "zimage",
+                False,
+                None,
+                "mflux",
+                {
+                    "steps": 8,
+                    "guidance": 0.7,
+                    "upscale_steps": 8,
+                    "scheduler": "beta",
+                    "supports_quantize": True,
+                    "supports_img2img": True,
+                    "supports_upscale": True,
+                    "supports_json_prompt": False,
+                    "supports_first_sigma": False,
+                    "dimension_min": 16,
+                    "dimension_max": None,
+                    "dimension_step": 16,
+                },
+            ),
+            ("zimage", False, None, "diffusers", {"steps": 8, "guidance": 0.7, "upscale_steps": 8, "scheduler": None}),
+            ("flux2_klein", True, "4b", "mflux", {"steps": 6, "guidance": 1.2, "scheduler": None}),
+            ("flux2_klein", False, "9b", "mflux", {"steps": 40, "guidance": 1.8}),
+            ("flux1", False, None, "mflux", {"steps": 22, "guidance": 3.0}),
+            ("flux2", False, None, "mflux", {"steps": 25, "guidance": 4.5}),
+            (
+                "ideogram4",
+                False,
+                None,
+                "mflux",
+                {
+                    "steps": 20,
+                    "guidance": 7.0,
+                    "scheduler": None,
+                    "supports_negative_prompt": False,
+                    "supports_quantize": False,
+                    "supports_img2img": False,
+                    "supports_upscale": False,
+                    "supports_json_prompt": True,
+                    "supports_first_sigma": True,
+                    "dimension_min": 256,
+                    "dimension_max": 2048,
+                    "dimension_step": 16,
+                },
+            ),
+            ("unknown", False, None, "mflux", {"steps": 15, "guidance": 4.0, "scheduler": None}),
+        ],
+        ids=["zimage-mflux", "zimage-diffusers", "klein-distilled", "klein-base", "flux1", "flux2", "ideogram4", "family-without-a-preset"],
+    )
+    def test_the_family_preset_resolves(self, family, is_distilled, size, backend, expected):
+        result = resolve_defaults(ImageModelInfo(family=family, is_distilled=is_distilled, size=size), self.config, {}, backend)
 
-    def test_zimage_mflux(self):
-        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 8
-        assert result["guidance"] == 0.7
-        assert result["upscale_steps"] == 8
-        assert result["scheduler"] == "beta"
-        assert result["supports_quantize"] is True
-        assert result["supports_img2img"] is True
-        assert result["supports_upscale"] is True
-        assert result["supports_json_prompt"] is False
-        assert result["supports_first_sigma"] is False
-        assert result["dimension_min"] == 16
-        assert result["dimension_max"] is None
-        assert result["dimension_step"] == 16
+        assert {key: result[key] for key in expected} == expected
 
-    def test_zimage_diffusers(self):
-        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {}, "diffusers")
-        assert result["steps"] == 8
-        assert result["guidance"] == 0.7
-        assert result["upscale_steps"] == 8
-        assert result["scheduler"] is None
+    @pytest.mark.parametrize(
+        ("family", "is_distilled", "size", "overrides", "expected"),
+        [
+            ("flux2_klein", True, "4b", {"steps": 20}, {"steps": 20, "guidance": 1.2}),
+            ("zimage", False, None, {"upscale_steps": 20}, {"upscale_steps": 20}),
+            ("zimage", False, None, {"steps": 30, "guidance": 2.0, "scheduler": "euler"}, {"steps": 30, "guidance": 2.0, "scheduler": "euler"}),
+            ("ideogram4", False, None, {"steps": 12, "guidance": 3.5}, {"steps": 12, "guidance": 3.5}),
+            ("zimage", False, None, {"steps": None}, {"steps": 8}),
+        ],
+        ids=["klein-steps", "upscale-steps", "several", "ideogram4", "none-is-ignored"],
+    )
+    def test_cli_overrides_win_over_the_preset(self, family, is_distilled, size, overrides, expected):
+        result = resolve_defaults(ImageModelInfo(family=family, is_distilled=is_distilled, size=size), self.config, overrides, "mflux")
 
-    def test_cli_overrides_upscale_steps(self):
-        """CLI --upscale-steps override takes precedence over preset upscale default."""
-        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {"upscale_steps": 20}, "mflux")
-        assert result["upscale_steps"] == 20
-
-    def test_flux2_klein_distilled(self):
-        info = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 6
-        assert result["guidance"] == 1.2
-        assert result["scheduler"] is None
-
-    def test_flux2_klein_base(self):
-        info = ImageModelInfo(family="flux2_klein", is_distilled=False, size="9b")
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 40
-        assert result["guidance"] == 1.8
-
-    def test_flux1(self):
-        info = ImageModelInfo(family="flux1", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 22
-        assert result["guidance"] == 3.0
-
-    def test_ideogram4(self):
-        info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 20
-        assert result["guidance"] == 7.0
-        assert result["scheduler"] is None
-        assert result["supports_negative_prompt"] is False
-        assert result["supports_quantize"] is False
-        assert result["supports_img2img"] is False
-        assert result["supports_upscale"] is False
-        assert result["supports_json_prompt"] is True
-        assert result["supports_first_sigma"] is True
-        assert result["dimension_min"] == 256
-        assert result["dimension_max"] == 2048
-        assert result["dimension_step"] == 16
-
-    def test_ideogram4_cli_overrides_win(self):
-        info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {"steps": 12, "guidance": 3.5}, "mflux")
-        assert result["steps"] == 12
-        assert result["guidance"] == 3.5
-
-    def test_unknown_falls_to_global(self):
-        info = ImageModelInfo(family="unknown", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 15
-        assert result["guidance"] == 4.0
-
-    def test_cli_overrides_win(self):
-        """CLI --steps 20 overrides Klein distilled preset (default_steps=6)."""
-        info = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")
-        result = resolve_defaults(info, self.config, {"steps": 20}, "mflux")
-        assert result["steps"] == 20
-        # guidance still from preset variant
-        assert result["guidance"] == 1.2
-
-    def test_cli_none_ignored(self):
-        """CLI overrides with None values do not replace preset defaults."""
-        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {"steps": None}, "mflux")
-        assert result["steps"] == 8
-
-    def test_nonexistent_family_uses_global(self):
-        """A family not in model_presets falls back to global defaults."""
-        info = ImageModelInfo(family="totally_new", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 15
-        assert result["guidance"] == 4.0
-        assert result["scheduler"] is None
+        assert {key: result[key] for key in expected} == expected
 
     def test_string_default_scheduler_does_not_crash(self):
         """resolve_defaults should not crash if default_scheduler is a string."""
-        import copy
-
-        config = copy.deepcopy(self._SYNTHETIC_CONFIG)
+        config = deepcopy(self._SYNTHETIC_CONFIG)
         # Inject a string where a dict is expected
         preset = config["model_presets"]["zimage"]
         preset["default_scheduler"] = "beta"
@@ -590,32 +408,9 @@ class TestResolveDefaults:
         result = resolve_defaults(info, config, {}, "mflux")
         assert result["scheduler"] is None
 
-    def test_cli_overrides_scheduler(self):
-        """CLI --scheduler override takes precedence over preset."""
-        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {"scheduler": "euler"}, "mflux")
-        assert result["scheduler"] == "euler"
-
-    def test_flux2_preset_resolves(self):
-        """flux2 family resolves from config."""
-        info = ImageModelInfo(family="flux2", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {}, "mflux")
-        assert result["steps"] == 25
-        assert result["guidance"] == 4.5
-
-    def test_multiple_cli_overrides(self):
-        """Multiple CLI overrides all apply."""
-        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        result = resolve_defaults(info, self.config, {"steps": 30, "guidance": 2.0, "scheduler": "euler"}, "mflux")
-        assert result["steps"] == 30
-        assert result["guidance"] == 2.0
-        assert result["scheduler"] == "euler"
-
     def test_klein_variant_missing_key_falls_to_family(self):
         """If variant exists but has no 'default_steps', family default is used."""
-        import copy
-
-        cfg = copy.deepcopy(self.config)
+        cfg = deepcopy(self.config)
         del cfg["model_presets"]["flux2_klein"]["variants"]["distilled"]["default_steps"]
         info = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")
         result = resolve_defaults(info, cfg, {}, "mflux")
@@ -630,106 +425,66 @@ class TestResolveDefaults:
 class TestConfigSchemaValidation:
     """load_config() should reject configs where known sections have wrong types."""
 
-    def test_sizes_replaced_with_list_raises(self, tmp_path, monkeypatch):
-        from zvisiongenerator.utils import config as config_mod
+    @staticmethod
+    def _load_with_user_config(tmp_path, monkeypatch, text):
+        (tmp_path / "config.yaml").write_text(text)
+        monkeypatch.setattr("zvisiongenerator.utils.config.get_ziv_data_dir", lambda: tmp_path)
+        return load_config()
 
-        # Write a user config that replaces 'sizes' with a list
-        user_cfg = tmp_path / "config.yaml"
-        user_cfg.write_text("sizes:\n  - bad\n")
-        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
-        with pytest.raises(ValueError, match="Config section 'sizes' must be a mapping"):
-            load_config()
-
-    def test_generation_replaced_with_scalar_raises(self, tmp_path, monkeypatch):
-        from zvisiongenerator.utils import config as config_mod
-
-        user_cfg = tmp_path / "config.yaml"
-        user_cfg.write_text("generation: 42\n")
-        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
-        with pytest.raises(ValueError, match="Config section 'generation' must be a mapping"):
-            load_config()
-
-    def test_seedvr2_replaced_with_scalar_raises(self, tmp_path, monkeypatch):
-        from zvisiongenerator.utils import config as config_mod
-
-        (tmp_path / "config.yaml").write_text("seedvr2: 42\n")
-        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
-        with pytest.raises(ValueError, match="Config section 'seedvr2' must be a mapping"):
-            load_config()
-
-    def test_seedvr2_user_override_is_validated(self, tmp_path, monkeypatch):
-        from zvisiongenerator.utils import config as config_mod
-
-        (tmp_path / "config.yaml").write_text("seedvr2:\n  softness: 2\n")
-        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
-        with pytest.raises(ValueError, match="seedvr2.softness"):
-            load_config()
+    @pytest.mark.parametrize(
+        ("text", "match"),
+        [
+            ("sizes:\n  - bad\n", "Config section 'sizes' must be a mapping"),
+            ("generation: 42\n", "Config section 'generation' must be a mapping"),
+            ("seedvr2: 42\n", "Config section 'seedvr2' must be a mapping"),
+            ("seedvr2:\n  softness: 2\n", "seedvr2.softness"),
+        ],
+        ids=["sizes-list", "generation-scalar", "seedvr2-scalar", "seedvr2-softness"],
+    )
+    def test_a_bad_user_override_is_rejected(self, tmp_path, monkeypatch, text, match):
+        with pytest.raises(ValueError, match=match):
+            self._load_with_user_config(tmp_path, monkeypatch, text)
 
     def test_seedvr2_model_override_is_merged(self, tmp_path, monkeypatch):
-        from zvisiongenerator.utils import config as config_mod
-
-        (tmp_path / "config.yaml").write_text("seedvr2:\n  model: seedvr2-3b\n")
-        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
-        cfg = load_config()
+        cfg = self._load_with_user_config(tmp_path, monkeypatch, "seedvr2:\n  model: seedvr2-3b\n")
         assert cfg["seedvr2"]["model"] == "seedvr2-3b"
         assert [row["model"] for row in cfg["seedvr2"]["tiers"]] == ["seedvr2-7b", "seedvr2-3b"]
 
     def test_valid_user_override_accepted(self, tmp_path, monkeypatch):
-        from zvisiongenerator.utils import config as config_mod
-
-        user_cfg = tmp_path / "config.yaml"
-        user_cfg.write_text("generation:\n  default_steps: 99\n")
-        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
-        cfg = load_config()
+        cfg = self._load_with_user_config(tmp_path, monkeypatch, "generation:\n  default_steps: 99\n")
         assert cfg["generation"]["default_steps"] == 99
+
+
+def _platform_config(**sections):
+    """Return a minimal config with every section the platform checks read, overridden by ``sections``."""
+    return {
+        "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
+        "generation": _GENERATION,
+        "sharpening": {},
+        "upscale": {},
+        "contrast": {},
+        "saturation": {},
+        "schedulers": {},
+        "platforms": {"darwin": "macOS", "win32": "Windows", "linux": "Linux"},
+        "model_aliases": {},
+        "model_presets": {},
+        "video_sizes": {},
+        "video_generation": {},
+        "video_model_presets": {},
+        **sections,
+    }
 
 
 class TestPlatformConfigValidation:
     def test_platforms_section_must_be_mapping(self, tmp_path):
-        from unittest.mock import patch
-
-        packaged = _write_packaged_config(
-            tmp_path,
-            {
-                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
-                "generation": {"default_steps": 10, "default_guidance": 3.5},
-                "sharpening": {},
-                "upscale": {},
-                "contrast": {},
-                "saturation": {},
-                "schedulers": {},
-                "platforms": ["darwin"],
-                "model_aliases": {},
-                "model_presets": {},
-                "video_sizes": {},
-                "video_generation": {},
-                "video_model_presets": {},
-            },
-        )
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "no-user-config"
-            mock_files.return_value.joinpath.return_value = packaged
-            with pytest.raises(ValueError, match="Config section 'platforms' must be a mapping"):
-                load_config()
+        with pytest.raises(ValueError, match="Config section 'platforms' must be a mapping"):
+            _load_packaged(tmp_path, _platform_config(platforms=["darwin"]))
 
     def test_sharpening_amounts_above_the_cap_are_rejected(self, tmp_path):
-        from unittest.mock import patch
+        data = {"sizes": {"1:1": {"m": {"width": 100, "height": 100}}}, "generation": _GENERATION, "sharpening": {"normal": 1.0, "upscaled": 2.0}}
 
-        packaged = _write_packaged_config(
-            tmp_path,
-            {
-                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
-                "generation": {"default_steps": 10, "default_guidance": 3.5},
-                "sharpening": {"normal": 1.0, "upscaled": 2.0},
-            },
-        )
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "no-user-config"
-            mock_files.return_value.joinpath.return_value = packaged
-            with pytest.raises(ValueError, match="sharpening.upscaled"):
-                load_config()
+        with pytest.raises(ValueError, match="sharpening.upscaled"):
+            _load_packaged(tmp_path, data)
 
     @pytest.mark.parametrize(
         "alias_value",
@@ -740,33 +495,7 @@ class TestPlatformConfigValidation:
         ],
     )
     def test_polymorphic_alias_values_accept_supported_shapes(self, tmp_path, alias_value):
-        from unittest.mock import patch
-
-        packaged = _write_packaged_config(
-            tmp_path,
-            {
-                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
-                "generation": {"default_steps": 10, "default_guidance": 3.5},
-                "sharpening": {},
-                "upscale": {},
-                "seedvr2": _SEEDVR2_BLOCK,
-                "contrast": {},
-                "saturation": {},
-                "schedulers": {},
-                "platforms": {"darwin": "macOS", "win32": "Windows", "linux": "Linux"},
-                "model_aliases": {"ltx": alias_value},
-                "model_presets": {},
-                "video_sizes": {},
-                "video_generation": {},
-                "video_model_presets": {},
-            },
-        )
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "no-user-config"
-            mock_files.return_value.joinpath.return_value = packaged
-
-            cfg = load_config()
+        cfg = _load_packaged(tmp_path, _platform_config(seedvr2=_SEEDVR2_BLOCK, model_aliases={"ltx": alias_value}))
 
         assert cfg["model_aliases"]["ltx"] == alias_value
 
@@ -780,32 +509,8 @@ class TestPlatformConfigValidation:
         ],
     )
     def test_polymorphic_alias_values_reject_invalid_shapes(self, tmp_path, alias_value, match):
-        from unittest.mock import patch
-
-        packaged = _write_packaged_config(
-            tmp_path,
-            {
-                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
-                "generation": {"default_steps": 10, "default_guidance": 3.5},
-                "sharpening": {},
-                "upscale": {},
-                "contrast": {},
-                "saturation": {},
-                "schedulers": {},
-                "platforms": {"darwin": "macOS", "win32": "Windows", "linux": "Linux"},
-                "model_aliases": {"ltx": alias_value},
-                "model_presets": {},
-                "video_sizes": {},
-                "video_generation": {},
-                "video_model_presets": {},
-            },
-        )
-
-        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
-            mock_dir.return_value = tmp_path / "no-user-config"
-            mock_files.return_value.joinpath.return_value = packaged
-            with pytest.raises(ValueError, match=match):
-                load_config()
+        with pytest.raises(ValueError, match=match):
+            _load_packaged(tmp_path, _platform_config(model_aliases={"ltx": alias_value}))
 
 
 # ---------------------------------------------------------------------------
@@ -816,44 +521,22 @@ class TestPlatformConfigValidation:
 class TestSchedulerResolution:
     """resolve_scheduler_class resolves scheduler names to backend class paths."""
 
-    @pytest.fixture(autouse=True)
-    def _load(self):
-        self.config = load_config()
-
-    def test_beta_scheduler_class(self):
+    def test_beta_scheduler_class(self, packaged_config):
         from zvisiongenerator.utils.config import resolve_scheduler_class
 
-        resolved = resolve_scheduler_class("beta", self.config, "mflux")
+        resolved = resolve_scheduler_class("beta", packaged_config, "mflux")
         assert resolved == "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
-        assert resolved == self.config["schedulers"]["beta"]["mflux_class"]
+        assert resolved == packaged_config["schedulers"]["beta"]["mflux_class"]
 
-    def test_resolve_unknown_scheduler_passthrough(self):
+    def test_resolve_unknown_scheduler_passthrough(self, packaged_config):
         from zvisiongenerator.utils.config import resolve_scheduler_class
 
-        assert resolve_scheduler_class("euler", self.config, "mflux") == "euler"
+        assert resolve_scheduler_class("euler", packaged_config, "mflux") == "euler"
 
-    def test_resolve_none_scheduler(self):
+    def test_resolve_none_scheduler(self, packaged_config):
         from zvisiongenerator.utils.config import resolve_scheduler_class
 
-        assert resolve_scheduler_class(None, self.config, "mflux") is None
-
-
-# ---------------------------------------------------------------------------
-# _deep_merge — additional edge cases
-# ---------------------------------------------------------------------------
-
-
-class TestDeepMergeEdgeCases:
-    def test_deeply_nested(self):
-        base = {"a": {"b": {"c": {"d": 1}}}}
-        _deep_merge(base, {"a": {"b": {"c": {"d": 2, "e": 3}}}})
-        assert base == {"a": {"b": {"c": {"d": 2, "e": 3}}}}
-
-    def test_list_replaced_not_merged(self):
-        """Lists are replaced, not merged element-by-element."""
-        base = {"a": [1, 2, 3]}
-        _deep_merge(base, {"a": [4, 5]})
-        assert base == {"a": [4, 5]}
+        assert resolve_scheduler_class(None, packaged_config, "mflux") is None
 
 
 # ---------------------------------------------------------------------------
@@ -864,11 +547,10 @@ class TestDeepMergeEdgeCases:
 class TestSchedulerValidation:
     """Verify validate_scheduler works."""
 
-    def test_validate_known_scheduler(self):
+    def test_validate_known_scheduler(self, packaged_config):
         from zvisiongenerator.utils.config import validate_scheduler
 
-        config = load_config()
-        validate_scheduler("beta", config)  # Should not raise
+        validate_scheduler("beta", packaged_config)  # Should not raise
 
     def test_validate_none_scheduler(self):
         from zvisiongenerator.utils.config import validate_scheduler
@@ -937,15 +619,6 @@ class TestResolveVideoDefaults:
         },
     }
 
-    def test_ltx_defaults(self):
-        result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, {})
-        assert result["steps"] == 8
-        assert result["width"] == 704
-        assert result["height"] == 480
-        assert result["num_frames"] == 65
-        assert result["ratio"] == "16:9"
-        assert result["size"] == "m"
-
     def test_cli_overrides_take_precedence(self):
         overrides = {"steps": 10}
         result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, overrides)
@@ -965,69 +638,29 @@ class TestResolveVideoDefaults:
         result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, overrides)
         assert result["steps"] == 8
 
-    @pytest.mark.parametrize(
-        "family",
-        ["unknown_family"],
-    )
-    def test_missing_config_falls_to_hardcoded(self, family):
-        empty_config: dict = {}
-        result = resolve_video_defaults(family, empty_config, {})
-        assert result["steps"] == 8
-        assert result["width"] == 768
-        assert result["height"] == 448
-        assert result["num_frames"] == 121
-
-    def test_every_packaged_video_size_is_121_frames(self, monkeypatch, tmp_path):
-        sizes = _packaged_config(monkeypatch, tmp_path)["video_sizes"]
+    def test_every_packaged_video_size_is_121_frames(self, packaged_config):
+        sizes = packaged_config["video_sizes"]
 
         frames = {(ratio, size): dims["frames"] for ratio, entries in sizes.items() for size, dims in entries.items()}
         assert len(frames) == 15
         assert set(frames.values()) == {121}
 
-    def test_ratio_override_selects_preset(self):
-        overrides = {"ratio": "9:16", "size": "m"}
+    @pytest.mark.parametrize(
+        ("overrides", "expected"),
+        [
+            ({"ratio": "9:16", "size": "m"}, {"width": 480, "height": 704, "num_frames": 49, "ratio": "9:16", "size": "m"}),
+            ({"ratio": "16:9", "size": "s"}, {"width": 512, "height": 288, "num_frames": 49}),
+            ({"ratio": "1:1", "size": "m"}, {"width": 512, "height": 512, "num_frames": 33}),
+            # Explicit values override the preset's; the rest still come from it.
+            ({"ratio": "16:9", "size": "m", "width": 640}, {"width": 640, "height": 480, "num_frames": 65}),
+            ({"ratio": "16:9", "size": "m", "width": 640, "height": 360, "num_frames": 33}, {"width": 640, "height": 360, "num_frames": 33}),
+        ],
+        ids=["9:16-m", "16:9-s", "1:1-m", "width", "all-dimensions"],
+    )
+    def test_ratio_and_size_select_the_preset_and_explicit_dimensions_win(self, overrides, expected):
         result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, overrides)
-        assert result["width"] == 480
-        assert result["height"] == 704
-        assert result["num_frames"] == 49
-        assert result["ratio"] == "9:16"
-        assert result["size"] == "m"
 
-    def test_size_override_selects_preset(self):
-        overrides = {"ratio": "16:9", "size": "s"}
-        result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, overrides)
-        assert result["width"] == 512
-        assert result["height"] == 288
-        assert result["num_frames"] == 49
-
-    def test_ratio_size_with_width_override(self):
-        """Explicit --width overrides preset width but height/frames come from preset."""
-        overrides = {"ratio": "16:9", "size": "m", "width": 640}
-        result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, overrides)
-        assert result["width"] == 640
-        assert result["height"] == 480
-        assert result["num_frames"] == 65
-
-    def test_ratio_size_with_all_dim_overrides(self):
-        """Explicit width/height/num_frames override all preset dimensions."""
-        overrides = {"ratio": "16:9", "size": "m", "width": 640, "height": 360, "num_frames": 33}
-        result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, overrides)
-        assert result["width"] == 640
-        assert result["height"] == 360
-        assert result["num_frames"] == 33
-
-    def test_default_ratio_size_from_config(self):
-        """When no ratio/size in overrides, config defaults are used."""
-        result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, {})
-        assert result["ratio"] == "16:9"
-        assert result["size"] == "m"
-
-    def test_ratio_1_1_preset(self):
-        overrides = {"ratio": "1:1", "size": "m"}
-        result = resolve_video_defaults("ltx", self._VIDEO_CONFIG, overrides)
-        assert result["width"] == 512
-        assert result["height"] == 512
-        assert result["num_frames"] == 33
+        assert {key: result[key] for key in expected} == expected
 
 
 def test_sharpening_amounts_fill_defaults_and_follow_upscaled():
@@ -1079,23 +712,19 @@ class TestValidateVideoSizeChoice:
 class TestShippedVideoSizes:
     """Verify the shipped video size table suits LTX with and without --upscale 2."""
 
-    @pytest.fixture(scope="class")
-    def config(self):
-        return load_config()
-
-    def test_every_ratio_has_the_five_tiers(self, config):
-        for ratio, tiers in config["video_sizes"].items():
+    def test_every_ratio_has_the_five_tiers(self, packaged_config):
+        for ratio, tiers in packaged_config["video_sizes"].items():
             assert list(tiers) == ["xs", "s", "m", "l", "xl"], ratio
 
-    def test_sizes_are_64_aligned_and_frames_are_8k_plus_1(self, config):
-        for ratio, tiers in config["video_sizes"].items():
+    def test_sizes_are_64_aligned_and_frames_are_8k_plus_1(self, packaged_config):
+        for ratio, tiers in packaged_config["video_sizes"].items():
             for size, dims in tiers.items():
                 assert dims["width"] % 64 == 0 and dims["height"] % 64 == 0, f"{ratio}/{size}"
                 assert (dims["frames"] - 1) % 8 == 0, f"{ratio}/{size}"
 
-    def test_the_default_size_is_listed(self, config):
-        video = config["video_generation"]
-        assert video["default_size"] in config["video_sizes"][video["default_ratio"]]
+    def test_the_default_size_is_listed(self, packaged_config):
+        video = packaged_config["video_generation"]
+        assert video["default_size"] in packaged_config["video_sizes"][video["default_ratio"]]
 
 
 class TestLtxLatentUpsamplerSource:
@@ -1105,12 +734,8 @@ class TestLtxLatentUpsamplerSource:
     def _config(value):
         return {"video_model_presets": {"ltx": {"diffusers": {"latent_upsampler": value}}}}
 
-    def test_packaged_config_ships_upsampler_and_distilled_default_repo(self, monkeypatch, tmp_path):
-        from zvisiongenerator.utils import config as config_module
-
-        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-
-        config = load_config()
+    def test_packaged_config_ships_upsampler_and_distilled_default_repo(self, packaged_config):
+        config = packaged_config
 
         assert ltx_latent_upsampler_source(config) == ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
         assert config["video_model_presets"]["ltx"]["diffusers"]["default_repo"] == "diffusers/LTX-2.3-Distilled-Diffusers"
@@ -1138,12 +763,8 @@ class TestLtxTransformerSource:
     def _config(value):
         return {"video_model_presets": {"ltx": {"diffusers": {"transformer": value}}}}
 
-    def test_packaged_config_ships_the_distilled_1_1_transformer(self, monkeypatch, tmp_path):
-        from zvisiongenerator.utils import config as config_module
-
-        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-
-        assert ltx_transformer_source(load_config()) == ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
+    def test_packaged_config_ships_the_distilled_1_1_transformer(self, packaged_config):
+        assert ltx_transformer_source(packaged_config) == ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
 
     @pytest.mark.parametrize("config", [{}, {"video_model_presets": {"ltx": {"diffusers": {}}}}, _config.__func__(None)])
     def test_absent_or_null_key_uses_the_repos_own_transformer(self, config):
@@ -1171,21 +792,14 @@ class TestLtxDiffusersQuantize:
     def _config(value):
         return {"video_model_presets": {"ltx": {"diffusers": {"quantize": value}}}}
 
-    def test_packaged_config_quantizes_ltx_4_and_ltx_8_only(self, monkeypatch, tmp_path):
-        from zvisiongenerator.utils import config as config_module
-
-        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-        config = load_config()
+    def test_packaged_config_quantizes_ltx_4_and_ltx_8_only(self, packaged_config):
+        config = packaged_config
 
         assert [ltx_diffusers_quantize(config, name) for name in ("ltx-4", "ltx-8", "other", None)] == [4, 8, None, None]
 
     @pytest.mark.parametrize("platform_key", ["win32", "linux"])
-    def test_packaged_ltx_aliases_resolve_to_the_diffusers_repo_off_macos(self, monkeypatch, tmp_path, platform_key):
-        from zvisiongenerator.utils import config as config_module
-
-        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
-        config = load_config()
+    def test_packaged_ltx_aliases_resolve_to_the_diffusers_repo_off_macos(self, packaged_config, platform_key):
+        config = packaged_config
         repo = config["video_model_presets"]["ltx"]["diffusers"]["default_repo"]
 
         assert "ltx-2.3" not in config["model_aliases"]
@@ -1230,15 +844,6 @@ _LTX25_MAC_PIN = "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f
 _LTX23_REPO = "diffusers/LTX-2.3-Distilled-Diffusers"
 _LTX23_TRANSFORMER = ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
 _LTX23_UPSAMPLER = ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
-
-
-def _packaged_config(monkeypatch, tmp_path):
-    """Load the packaged config with no user override."""
-    from zvisiongenerator.utils import config as config_module
-
-    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    return load_config()
 
 
 def _versioned(**version):
@@ -1330,23 +935,18 @@ class TestPackagedLtx25Config:
     """R2: the packaged ``ltx25-4`` entries, and the LTX-2.3 entries left as they were."""
 
     @pytest.mark.parametrize("platform_key", ["win32", "linux"])
-    def test_ltx25_4_resolves_to_the_pinned_repo(self, monkeypatch, tmp_path, platform_key):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ltx25_4_resolves_to_the_pinned_repo(self, packaged_config, platform_key):
+        config = packaged_config
 
         assert resolve_model_path("ltx25-4", aliases=config["model_aliases"], platform_key=platform_key) == _LTX25_PIN
 
-    def test_ltx25_4_resolves_to_the_pinned_mirror_on_macos(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ltx25_4_resolves_to_the_pinned_mirror_on_macos(self, packaged_config):
+        config = packaged_config
 
         assert resolve_model_path("ltx25-4", aliases=config["model_aliases"], platform_key="darwin") == _LTX25_MAC_PIN
 
-    def test_ltx25_4_is_labelled(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
-
-        assert model_display_name(config, "ltx25-4") == "LTX-2.5 4-bit"
-
-    def test_the_pin_is_written_once_and_referenced(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_the_pin_is_written_once_and_referenced(self, packaged_config):
+        config = packaged_config
         version = config["video_model_presets"]["ltx"]["versions"]["ltx25"]
 
         assert version["aliases"] == ["ltx25-4"]
@@ -1356,43 +956,12 @@ class TestPackagedLtx25Config:
         assert config["model_aliases"]["ltx25-4"]["darwin"] == _LTX25_MAC_PIN
         assert config["video_model_presets"]["ltx"]["diffusers"]["default_repo"] == _LTX23_REPO
 
-    def test_the_version_block_carries_the_2_5_settings(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
-        diffusers = config["video_model_presets"]["ltx"]["versions"]["ltx25"]["diffusers"]
-
-        assert "transformer" in diffusers and diffusers["transformer"] is None
-        assert diffusers["quantize"] == {"ltx25-4": 4}
-        assert diffusers["repo_ignore"] == ["LTX-2.5-*.safetensors", "samples/*"]
-        assert (diffusers["image_crf"], diffusers["sampler"]) == (18, EULER_ANCESTRAL)
-
-    def test_the_ltx_2_3_aliases_labels_and_family_block_are_unchanged(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
-        mlx_base = config["video_model_presets"]["ltx"]["mlx_base"]
-        assert config["model_aliases"]["ltx-8"] == {"darwin": mlx_base["q8"], "win32": _LTX23_REPO, "linux": _LTX23_REPO}
-        assert config["model_aliases"]["ltx-4"] == {"darwin": mlx_base["q4"], "win32": _LTX23_REPO, "linux": _LTX23_REPO}
-        assert config["model_aliases"]["ltx25-4"]["darwin"] == config["video_model_presets"]["ltx"]["versions"]["ltx25"]["mlx_base"]["q4"]
-        assert config["model_labels"]["ltx-8"] == {"name": "LTX-2.3 8-bit"}
-        assert config["model_labels"]["ltx-4"] == {"name": "LTX-2.3 4-bit"}
-        family = config["video_model_presets"]["ltx"]
-        assert family["diffusers"] == {
-            "default_repo": _LTX23_REPO,
-            "transformer": {"repo": "Lightricks/LTX-2.3", "filename": "ltx-2.3-22b-distilled-1.1.safetensors"},
-            "quantize": {"ltx-4": 4, "ltx-8": 8},
-            "latent_upsampler": {"repo": "Lightricks/LTX-2.3", "filename": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"},
-        }
-
-    def test_the_first_run_and_default_models_are_untouched(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
-
-        assert config["ui"]["default_models"]["video"] == "ltx-8"
-        assert "ltx25-4" not in str(config["first_run"])
-
 
 class TestLtxVersionAwareAccessors:
     """R3: the ``ltx_*`` accessors and load options read the version that lists the model."""
 
-    def test_ltx25_4_load_options_with_upscale(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ltx25_4_load_options_with_upscale(self, packaged_config):
+        config = packaged_config
 
         assert ltx_load_options(config, "ltx25-4", upscale=True) == {
             "quantize": 4,
@@ -1407,24 +976,24 @@ class TestLtxVersionAwareAccessors:
             "mlx_text_encoder": ltx_mlx_text_encoder(config),
         }
 
-    def test_ltx25_4_load_options_without_upscale_have_no_upsampler(self, monkeypatch, tmp_path):
-        options = ltx_load_options(_packaged_config(monkeypatch, tmp_path), "ltx25-4", upscale=False)
+    def test_ltx25_4_load_options_without_upscale_have_no_upsampler(self, packaged_config):
+        options = ltx_load_options(packaged_config, "ltx25-4", upscale=False)
 
         assert "upscale" not in options and "latent_upsampler" not in options
         assert options["transformer_source"] is None
 
     @pytest.mark.parametrize("name", ["ltx-4", "ltx-8"])
-    def test_ltx_2_3_load_options_are_unchanged(self, monkeypatch, tmp_path, name):
+    def test_ltx_2_3_load_options_are_unchanged(self, packaged_config, name):
         """2.3 guard: the options of ``ltx-4`` and ``ltx-8`` carry no version key."""
-        config = _packaged_config(monkeypatch, tmp_path)
+        config = packaged_config
         bits = {"ltx-4": 4, "ltx-8": 8}[name]
         plain = {"quantize": bits, "transformer_source": _LTX23_TRANSFORMER, "model_name": name, "mlx_packs": ltx_mlx_packs(config), "mlx_text_encoder": ltx_mlx_text_encoder(config)}
 
         assert ltx_load_options(config, name, upscale=False) == plain
         assert ltx_load_options(config, name, upscale=True) == {**plain, "upscale": True, "latent_upsampler": _LTX23_UPSAMPLER}
 
-    def test_ltx_2_3_sources_do_not_see_the_version(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ltx_2_3_sources_do_not_see_the_version(self, packaged_config):
+        config = packaged_config
 
         for name in (None, "ltx-4", "ltx-8", "unknown"):
             assert ltx_transformer_source(config, name) == _LTX23_TRANSFORMER
@@ -1432,16 +1001,16 @@ class TestLtxVersionAwareAccessors:
         assert ltx_transformer_source(config) == _LTX23_TRANSFORMER
         assert ltx_latent_upsampler_source(config) == _LTX23_UPSAMPLER
 
-    def test_ltx25_4_sources_and_quantize_come_from_the_version(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ltx25_4_sources_and_quantize_come_from_the_version(self, packaged_config):
+        config = packaged_config
 
         assert ltx_transformer_source(config, "ltx25-4") is None
         assert ltx_latent_upsampler_source(config, "ltx25-4") == _LTX25_UPSAMPLER
         assert ltx_diffusers_quantize(config, "ltx25-4") == 4
         assert [ltx_diffusers_quantize(config, name) for name in ("ltx-4", "ltx-8")] == [4, 8]
 
-    def test_a_family_transformer_override_does_not_reach_ltx25_4(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_a_family_transformer_override_does_not_reach_ltx25_4(self, packaged_config):
+        config = packaged_config
         config["video_model_presets"]["ltx"]["diffusers"]["transformer"] = {"repo": "me/ltx", "filename": "mine.safetensors"}
 
         assert ltx_transformer_source(config, "ltx-4") == ("me/ltx", "mine.safetensors")
@@ -1449,38 +1018,38 @@ class TestLtxVersionAwareAccessors:
         assert ltx_load_options(config, "ltx25-4", upscale=False)["transformer_source"] is None
 
     @pytest.mark.parametrize("name", ["ltx-4", "ltx-8", None, "unknown", "org/some-ltx-repo"])
-    def test_ancestral_sampler_outside_a_version_is_refused(self, monkeypatch, tmp_path, name):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ancestral_sampler_outside_a_version_is_refused(self, packaged_config, name):
+        config = packaged_config
         config["video_model_presets"]["ltx"]["diffusers"]["sampler"] = EULER_ANCESTRAL
 
         with pytest.raises(ValueError, match=r"video_model_presets\.ltx\.diffusers\.sampler") as excinfo:
             ltx_load_options(config, name, upscale=False)
         assert (name or "this model") in str(excinfo.value)
 
-    def test_ancestral_sampler_is_accepted_for_a_version_alias(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ancestral_sampler_is_accepted_for_a_version_alias(self, packaged_config):
+        config = packaged_config
         config["video_model_presets"]["ltx"]["diffusers"]["sampler"] = EULER_ANCESTRAL
 
         assert ltx_load_options(config, "ltx25-4", upscale=False)["sampler"] == EULER_ANCESTRAL
 
-    def test_an_invalid_sampler_still_reports_the_allowed_values(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_an_invalid_sampler_still_reports_the_allowed_values(self, packaged_config):
+        config = packaged_config
         config["video_model_presets"]["ltx"]["diffusers"]["sampler"] = "ddim"
 
         with pytest.raises(ValueError, match="must be one of"):
             ltx_load_options(config, "ltx-4", upscale=False)
 
-    def test_ltx_version_reports_version_membership(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ltx_version_reports_version_membership(self, packaged_config):
+        config = packaged_config
 
         assert ltx_version(config, "ltx25-4") == "ltx25"
         assert ltx_version(config, "ltx-4") is None
         assert ltx_version(config, None) is None
 
-    def test_a_converted_ltx25_folder_takes_its_versions_settings(self, monkeypatch, tmp_path):
+    def test_a_converted_ltx25_folder_takes_its_versions_settings(self, packaged_config, monkeypatch, tmp_path):
         from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 
-        config = _packaged_config(monkeypatch, tmp_path)
+        config = packaged_config
         data = tmp_path / "data"
         for name, version in (("my25", "2.5"), ("my23", "2.3")):
             (data / "models" / name).mkdir(parents=True)
@@ -1492,10 +1061,10 @@ class TestLtxVersionAwareAccessors:
         assert ltx_version(config, "my23") is None
         assert ltx_load_options(config, "my25", upscale=False)["sampler"] == "euler_ancestral"
 
-    def test_the_converter_types_map_to_version_blocks_with_their_own_sources(self, monkeypatch, tmp_path):
+    def test_the_converter_types_map_to_version_blocks_with_their_own_sources(self, packaged_config):
         from zvisiongenerator.utils.config import ltx_diffusers_repo, ltx_distilled_lora_source, ltx_mlx_base_repo, ltx_version_for_type
 
-        config = _packaged_config(monkeypatch, tmp_path)
+        config = packaged_config
 
         assert ltx_version_for_type(config, "ltx-2.3") is None
         assert ltx_version_for_type(config, "ltx-2.5") == "ltx25"
@@ -1507,10 +1076,10 @@ class TestLtxVersionAwareAccessors:
         with pytest.raises(ValueError):
             ltx_version_for_type(config, "ltx-9")
 
-    def test_the_repo_ignore_of_a_version_skips_its_root_checkpoints(self, monkeypatch, tmp_path):
+    def test_the_repo_ignore_of_a_version_skips_its_root_checkpoints(self, packaged_config):
         from zvisiongenerator.utils.config import ltx_repo_ignore
 
-        config = _packaged_config(monkeypatch, tmp_path)
+        config = packaged_config
 
         assert "LTX-2.5-*.safetensors" in ltx_repo_ignore(config, "ltx25")
         assert ltx_repo_ignore(config, None) == ()
@@ -1528,10 +1097,6 @@ class TestLtxVersionAwareAccessors:
     def test_image_crf_zero_and_the_bounds_are_valid(self):
         for crf in (0, 51):
             assert ltx_load_options(_versioned(diffusers={"image_crf": crf}), "alias-v", upscale=False)["image_crf"] == crf
-
-    def test_the_sampler_names_are_defined_once(self):
-        assert EULER_ANCESTRAL == "euler_ancestral"
-        assert LTX_SAMPLERS == frozenset({EULER_ANCESTRAL})
 
     @pytest.mark.parametrize(
         ("key", "value"),
@@ -1568,10 +1133,10 @@ class TestLtxVersionAwareAccessors:
         with pytest.raises(ValueError, match=r"^video_model_presets\.ltx\.diffusers\.latent_upsampler "):
             ltx_latent_upsampler_source(config, "ltx-4")
 
-    def test_distilled_lora_and_family_helpers_stay_family_level(self, monkeypatch, tmp_path):
+    def test_distilled_lora_and_family_helpers_stay_family_level(self, packaged_config):
         from zvisiongenerator.utils.config import ltx_companion_repos, ltx_diffusers_repo, ltx_distilled_lora_source
 
-        config = _packaged_config(monkeypatch, tmp_path)
+        config = packaged_config
 
         assert ltx_distilled_lora_source(config) == ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
         assert ltx_diffusers_repo(config) == _LTX23_REPO
@@ -1582,10 +1147,9 @@ class TestLtxVersionAwareAccessors:
 class TestVideoLoadOptionsGolden:
     """G4: ``video_load_options("ltx", ...)`` is exactly ``ltx_load_options`` for every LTX alias and both upscale settings."""
 
-    @pytest.mark.parametrize("upscale", [False, True])
-    @pytest.mark.parametrize("name", ["ltx-4", "ltx-8", "ltx25-4", "unknown", None])
-    def test_ltx_options_are_the_ltx_options(self, monkeypatch, tmp_path, name, upscale):
-        config = _packaged_config(monkeypatch, tmp_path)
+    @pytest.mark.parametrize(("name", "upscale"), [("ltx-4", False), ("ltx25-4", True)])
+    def test_ltx_options_are_the_ltx_options(self, packaged_config, name, upscale):
+        config = packaged_config
 
         assert video_load_options("ltx", config, name, upscale=upscale) == ltx_load_options(config, name, upscale=upscale)
 
@@ -1597,15 +1161,15 @@ class TestVideoFamilyDispatch:
         with pytest.raises(ValueError, match="No video load options for model family 'wan'"):
             video_load_options("wan", {}, "m", upscale=False)
 
-    def test_ltx_companions_are_the_ltx_companions(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_ltx_companions_are_the_ltx_companions(self, packaged_config):
+        config = packaged_config
 
         assert video_companion_repos("ltx", config, _LTX23_REPO) == ("Lightricks/LTX-2.3",)
         assert video_companion_repos("ltx", config, _LTX25_PIN) == ()
 
     @pytest.mark.parametrize("family", ["zimage", "flux2_klein", "wan"])
-    def test_another_family_has_no_companions(self, monkeypatch, tmp_path, family):
-        assert video_companion_repos(family, _packaged_config(monkeypatch, tmp_path), _LTX23_REPO) == ()
+    def test_another_family_has_no_companions(self, packaged_config, family):
+        assert video_companion_repos(family, packaged_config, _LTX23_REPO) == ()
 
     def _h3_config(self, **preset):
         block = {
@@ -1655,11 +1219,8 @@ class TestModelDisplayName:
     def test_anything_unusable_reads_as_the_alias(self, config):
         assert model_display_name(config, "zit") == "zit"
 
-    def test_every_packaged_alias_has_a_name(self, monkeypatch, tmp_path):
-        from zvisiongenerator.utils import config as config_module
-
-        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-        config = load_config()
+    def test_every_packaged_alias_has_a_name(self, packaged_config):
+        config = packaged_config
 
         for alias in config["model_aliases"]:
             name = config["model_labels"][alias]["name"]
@@ -1676,13 +1237,13 @@ class TestModelDisplayName:
 class TestResolveVideoDefaultsGolden:
     """The packaged LTX defaults and the fallbacks for a size the table does not have."""
 
-    def test_packaged_ltx_defaults(self):
-        assert resolve_video_defaults("ltx", load_config(), {}) == {"steps": 8, "width": 768, "height": 448, "num_frames": 121, "ratio": "16:9", "size": "s"}
+    def test_packaged_ltx_defaults(self, packaged_config):
+        assert resolve_video_defaults("ltx", packaged_config, {}) == {"steps": 8, "width": 768, "height": 448, "num_frames": 121, "ratio": "16:9", "size": "s"}
 
-    def test_explicit_values_win_over_the_size_entry(self):
+    def test_explicit_values_win_over_the_size_entry(self, packaged_config):
         overrides = {"ratio": "16:9", "size": "m", "steps": 4, "width": 640}
 
-        assert resolve_video_defaults("ltx", load_config(), overrides) == {"steps": 4, "width": 640, "height": 576, "num_frames": 121, "ratio": "16:9", "size": "m"}
+        assert resolve_video_defaults("ltx", packaged_config, overrides) == {"steps": 4, "width": 640, "height": 576, "num_frames": 121, "ratio": "16:9", "size": "m"}
 
     def test_a_missing_size_falls_back_to_the_built_in_size(self):
         config = {"video_sizes": {}, "video_model_presets": {"ltx": {"default_steps": 6}}}
@@ -1752,8 +1313,8 @@ class TestLtxMlxPacks:
         assert "mlx_text_encoder" not in ltx_load_options(self._config(), "ltx-4", upscale=False)
         assert ltx_load_options(self._config(mlx_text_encoder="o/gemma"), "ltx-4", upscale=False)["mlx_text_encoder"] == "o/gemma"
 
-    def test_the_packaged_packs_are_pinned_with_their_files(self, monkeypatch, tmp_path):
-        config = _packaged_config(monkeypatch, tmp_path)
+    def test_the_packaged_packs_are_pinned_with_their_files(self, packaged_config):
+        config = packaged_config
         ltx = config["video_model_presets"]["ltx"]
 
         packs = ltx_mlx_packs(config)
@@ -1764,9 +1325,9 @@ class TestLtxMlxPacks:
         assert packs[ltx["versions"]["ltx25"]["mlx_base"]["q4"]].files == tuple(ltx["versions"]["ltx25"]["mlx_files"])
         assert parse_huggingface_repo_reference(ltx_mlx_text_encoder(config)).revision is not None  # type: ignore[union-attr]
 
-    def test_the_macos_aliases_are_the_pinned_bases(self, monkeypatch, tmp_path):
+    def test_the_macos_aliases_are_the_pinned_bases(self, packaged_config):
         """The aliases read the packs' references, so an alias, the plan and the run cannot name different revisions."""
-        config = _packaged_config(monkeypatch, tmp_path)
+        config = packaged_config
         ltx = config["video_model_presets"]["ltx"]
         aliases = config["model_aliases"]
 

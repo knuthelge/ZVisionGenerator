@@ -38,155 +38,46 @@ def _success_workflow():
     return GenerationWorkflow(name="test", stages=[stage])
 
 
-class TestNegativePromptSupported:
-    """Model supports negative prompts (e.g., zimage family)."""
+def _run(family, supports_negative, prompts, size=None):
+    """Run a batch whose single stage records its requests; return those requests and the negative-prompt warnings."""
+    from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_no_crash_with_negative_prompt(self, mock_get_wf):
-        """Regression: effective_negative must be assigned before _display_request."""
-        wf = _success_workflow()
-        mock_get_wf.return_value = wf
+    wf = _success_workflow()
+    config = _config_with_preset(family, supports_negative)
+    info = ImageModelInfo(family=family, is_distilled=False, size=size)
 
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        prompts = {"set1": [("a cat", "ugly, blurry")]}
-        config = _config_with_preset("zimage", supports_negative=True)
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        # Should NOT raise UnboundLocalError
-        run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
-        wf.stages[0].assert_called_once()
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_negative_prompt_preserved(self, mock_get_wf):
-        """When supports_negative_prompt=True, negative prompt flows through."""
-        wf = _success_workflow()
-        mock_get_wf.return_value = wf
-
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
-        prompts = {"set1": [("a cat", "ugly, blurry")]}
-        config = _config_with_preset("zimage", supports_negative=True)
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
-
-        # The workflow stage receives a GenerationRequest — check the negative_prompt
-        stage_call = wf.stages[0].call_args
-        request = stage_call[0][0]  # first positional arg
-        assert isinstance(request, ImageGenerationRequest)
-        assert request.negative_prompt == "ugly, blurry"
-
-
-class TestNegativePromptUnsupported:
-    """Model does NOT support negative prompts (e.g., flux2 family)."""
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_negative_prompt_suppressed_with_warning(self, mock_get_wf):
-        """When supports_negative_prompt=False, negative prompt is suppressed."""
-        wf = _success_workflow()
-        mock_get_wf.return_value = wf
-
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        model_info = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")
-        prompts = {"set1": [("a cat", "ugly, blurry")]}
-        config = _config_with_preset("flux2_klein", supports_negative=False)
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
-            neg_warnings = [x for x in w if "negative prompt" in str(x.message).lower()]
-            assert len(neg_warnings) >= 1
-
-        # The workflow stage should receive None for negative_prompt
-        stage_call = wf.stages[0].call_args
-        request = stage_call[0][0]
-        assert isinstance(request, ImageGenerationRequest)
-        assert request.negative_prompt is None
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_ideogram4_negative_prompt_suppressed_with_single_warning(self, mock_get_wf):
-        wf = _success_workflow()
-        mock_get_wf.return_value = wf
-
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        model_info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
-        prompts = {"set1": [("a city skyline", "blurry, dull")]}
-        config = _config_with_preset("ideogram4", supports_negative=False)
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
+    with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
+            run_batch(MagicMock(), MagicMock(spec=[]), prompts, config, _make_args(), model_info=info, plan=_make_plan(prompts, _make_args(), config=config))
 
-        negative_warnings = [warning for warning in caught if "negative prompt" in str(warning.message).lower()]
-        assert len(negative_warnings) == 1
+    requests = [call.args[0] for call in wf.stages[0].call_args_list]
+    assert all(isinstance(request, ImageGenerationRequest) for request in requests)
+    return requests, [warning for warning in caught if "negative prompt" in str(warning.message).lower()]
 
-        stage_call = wf.stages[0].call_args
-        request = stage_call[0][0]
-        assert isinstance(request, ImageGenerationRequest)
-        assert request.negative_prompt is None
 
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_ideogram4_multiple_negative_prompts_emit_single_warning(self, mock_get_wf):
-        wf = _success_workflow()
-        mock_get_wf.return_value = wf
+def test_a_negative_prompt_reaches_a_model_that_supports_it():
+    requests, negative_warnings = _run("zimage", True, {"set1": [("a cat", "ugly, blurry")]})
 
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+    assert [request.negative_prompt for request in requests] == ["ugly, blurry"]
+    assert negative_warnings == []
 
-        model_info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
-        prompts = {
-            "set1": [("a city skyline", "blurry, dull"), ("a forest path", "washed out")],
-            "set2": [("a harbor at dawn", "low contrast")],
-        }
-        config = _config_with_preset("ideogram4", supports_negative=False)
 
-        backend = MagicMock()
-        model = MagicMock(spec=[])
+def test_unsupported_negative_prompts_are_dropped_with_a_single_warning():
+    prompts = {
+        "set1": [("a city skyline", "blurry, dull"), ("a forest path", "washed out")],
+        "set2": [("a harbor at dawn", "low contrast")],
+    }
 
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
+    requests, negative_warnings = _run("ideogram4", False, prompts)
 
-        negative_warnings = [warning for warning in caught if "negative prompt" in str(warning.message).lower()]
-        assert len(negative_warnings) == 1
-        assert wf.stages[0].call_count == 3
+    assert len(negative_warnings) == 1
+    assert [request.negative_prompt for request in requests] == [None, None, None]
 
-        for stage_call in wf.stages[0].call_args_list:
-            request = stage_call[0][0]
-            assert isinstance(request, ImageGenerationRequest)
-            assert request.negative_prompt is None
 
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_no_warning_when_no_negatives(self, mock_get_wf):
-        """No warning if no negative prompts are provided for unsupported models."""
-        wf = _success_workflow()
-        mock_get_wf.return_value = wf
+def test_no_warning_when_no_negatives():
+    """No warning if no negative prompts are provided for unsupported models."""
+    requests, negative_warnings = _run("flux2_klein", False, {"set1": [("a cat", None)]}, size="4b")
 
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        model_info = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")
-        prompts = {"set1": [("a cat", None)]}
-        config = _config_with_preset("flux2_klein", supports_negative=False)
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
-            neg_warnings = [x for x in w if "negative prompt" in str(x.message).lower()]
-            assert len(neg_warnings) == 0
+    assert len(requests) == 1
+    assert negative_warnings == []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.resources
 import re
 from pathlib import Path
@@ -80,10 +81,17 @@ def _setting_keys(mapping: dict, prefix: str = "") -> list[str]:
     return names
 
 
+@functools.cache
 def _packaged_config() -> dict:
-    """Load the packaged config.yaml without any user override."""
+    """Load the packaged config.yaml without any user override (parsed once; treat as read-only)."""
     ref = importlib.resources.files("zvisiongenerator").joinpath("config.yaml")
     return yaml.safe_load(ref.read_text(encoding="utf-8"))
+
+
+@functools.cache
+def _read(path: Path) -> str:
+    """Return the text of a docs page (read once)."""
+    return path.read_text(encoding="utf-8")
 
 
 def _cli_cases() -> list[tuple[str, argparse.ArgumentParser]]:
@@ -99,19 +107,19 @@ def _cli_cases() -> list[tuple[str, argparse.ArgumentParser]]:
 
 @pytest.mark.parametrize(("heading", "parser"), _cli_cases(), ids=[heading for heading, _ in _cli_cases()])
 def test_cli_reference_lists_every_option(heading: str, parser: argparse.ArgumentParser) -> None:
-    section = _section(_CLI_REFERENCE.read_text(encoding="utf-8"), heading)
+    section = _section(_read(_CLI_REFERENCE), heading)
     missing = sorted(opt for opt in _long_options(parser) if not _documented(section, opt))
     assert not missing, f"Add these options under `{heading}` in {_CLI_REFERENCE.relative_to(_DOCS.parent)}: {missing}"
 
 
 def test_config_reference_lists_every_section() -> None:
-    text = _CONFIG_REFERENCE.read_text(encoding="utf-8")
+    text = _read(_CONFIG_REFERENCE)
     missing = sorted(section for section in _packaged_config() if not _documented(text, section))
     assert not missing, f"Add these sections to {_CONFIG_REFERENCE.relative_to(_DOCS.parent)}: {missing}"
 
 
 @pytest.mark.parametrize("section", _KEYED_SECTIONS)
 def test_config_reference_lists_every_key(section: str) -> None:
-    body = _section(_CONFIG_REFERENCE.read_text(encoding="utf-8"), section)
+    body = _section(_read(_CONFIG_REFERENCE), section)
     missing = sorted(key for key in _setting_keys(_packaged_config()[section]) if not (_documented(body, key) or _documented(body, f"{section}.{key}")))
     assert not missing, f"Add these `{section}` keys under its heading in {_CONFIG_REFERENCE.relative_to(_DOCS.parent)}: {missing}"

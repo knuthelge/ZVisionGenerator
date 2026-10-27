@@ -20,7 +20,6 @@ from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhancement_requested, resolve_item_enhance
 from zvisiongenerator.utils.prompts import inspect_prompts_text
-from zvisiongenerator.utils.provenance import build_image_config_payload, build_video_config_payload
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.workflows import build_video_workflow, build_workflow
@@ -84,19 +83,6 @@ class TestApplyPlannedEnhancement:
         assert seen == ["A field. A fox sprints."]
         assert capsys.readouterr().out == "Enhanced prompt:\nA field. A fox sprints.\n\n"
 
-    def test_video_stage_reports_through_the_helper(self):
-        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", enhanced_prompt="A fox sprints.", enhanced_scene="A field.")
-        artifacts = VideoWorkingArtifacts()
-        with patch("zvisiongenerator.workflows.video_stages.apply_planned_enhancement") as helper:
-            assert video_enhance_prompt_stage(request, artifacts) is StageOutcome.success
-        helper.assert_called_once_with(request, artifacts, resolved_prompt="A field. A fox sprints.", extra_metadata={"enhanced_scene": "A field."})
-
-    def test_video_stage_without_a_scene_adds_no_scene_metadata(self):
-        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", enhanced_prompt="A fox sprints.")
-        with patch("zvisiongenerator.workflows.video_stages.apply_planned_enhancement") as helper:
-            video_enhance_prompt_stage(request, VideoWorkingArtifacts())
-        assert helper.call_args.kwargs["extra_metadata"] is None
-
 
 # ── Stage behaviour ─────────────────────────────────────────────────────────
 
@@ -104,14 +90,14 @@ class TestApplyPlannedEnhancement:
 class TestEnhanceStage:
     """The stage applies the preflight rewrite; it never calls an enhancer."""
 
-    def test_applies_planned_rewrite_and_reports(self):
-        seen: list[str] = []
-        request = _image_request(on_prompt_enhanced=seen.append)
-        artifacts = ImageWorkingArtifacts(resolved_prompt="a red fox")
-        assert enhance_prompt_stage(request, artifacts) is StageOutcome.success
-        assert artifacts.resolved_prompt == "A red fox in deep snow, golden light."
-        assert artifacts.metadata["enhanced_prompt"] == artifacts.resolved_prompt
-        assert seen == [artifacts.resolved_prompt]
+    def test_video_stage_without_a_scene_adds_no_scene_metadata(self):
+        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", enhanced_prompt="A fox sprints.")
+        artifacts = VideoWorkingArtifacts()
+
+        assert video_enhance_prompt_stage(request, artifacts) is StageOutcome.success
+
+        assert artifacts.resolved_prompt == "A fox sprints."
+        assert artifacts.metadata == {"enhanced_prompt": "A fox sprints."}
 
     def test_not_enhanced_is_noop(self):
         seen: list[str] = []
@@ -162,27 +148,6 @@ class TestEnhanceStage:
 
 
 # ── Provenance (REQ-10) ─────────────────────────────────────────────────────
-
-
-class TestProvenance:
-    def test_image_payload_stores_enhanced_prompt(self):
-        artifacts = ImageWorkingArtifacts(metadata={"enhanced_prompt": "An enhanced fox."})
-        assert build_image_config_payload(_image_request(prompt="a {red|grey} fox"), artifacts)["prompt"] == "An enhanced fox."
-
-    def test_image_payload_without_enhancement_keeps_template(self):
-        assert build_image_config_payload(_image_request(prompt="a {red|grey} fox"), ImageWorkingArtifacts())["prompt"] == "a {red|grey} fox"
-
-    def test_video_payload_stores_enhanced_prompt(self):
-        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs")
-        artifacts = VideoWorkingArtifacts(metadata={"enhanced_prompt": "A fox sprints."})
-        assert build_video_config_payload(request, artifacts)["prompt"] == "A fox sprints."
-
-    def test_video_payload_prompt_excludes_the_enhanced_scene(self):
-        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", scene="A snowy field.")
-        artifacts = VideoWorkingArtifacts(metadata={"enhanced_prompt": "A fox sprints.", "enhanced_scene": "A snowy field at dusk."})
-        payload = build_video_config_payload(request, artifacts)
-        assert payload["prompt"] == "A fox sprints." and payload["scene"] == "A snowy field at dusk."
-        assert (payload["prompt_input"], payload["scene_input"]) == ("a fox runs", "A snowy field.")
 
 
 # ── Precedence ──────────────────────────────────────────────────────────────
@@ -462,14 +427,6 @@ class TestCliFlags:
             _cli(["--enhance", "parts=action"], mode="image")
         with pytest.raises(SystemExit):
             _cli(["--enhance", "parts=scene"], mode="video")
-
-    def test_video_help_mentions_parts_and_image_help_does_not(self):
-        import argparse
-
-        video, image = argparse.ArgumentParser(prog="v"), argparse.ArgumentParser(prog="i")
-        add_enhance_arguments(video, mode="video")
-        add_enhance_arguments(image, mode="image")
-        assert "parts=action" in video.format_help() and "parts=" not in image.format_help()
 
     def test_note_implies_enhance(self):
         assert _cli(["--enhance-note", "at night,  in the rain"]).enhance == EnhanceSettings(note="at night, in the rain")

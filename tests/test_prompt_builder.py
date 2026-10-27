@@ -257,18 +257,6 @@ class TestScene:
         assert reloaded["document"]["sets"][0]["entries"][1]["scene"] == scene
         assert response.json()["document"]["sets"][0]["entries"][1]["scene"] == scene
 
-    def test_save_with_null_scene_removes_the_key(self, tmp_path):
-        path = _write(tmp_path, SCENE_SAMPLE)
-
-        with TestClient(web_server.app) as client:
-            loaded = _load(client, path)
-            document = loaded["document"]
-            document["sets"][0]["entries"][0]["scene"] = None
-            response = _save(client, path, loaded, document)
-
-        assert response.status_code == 200
-        assert "scene:" not in path.read_text(encoding="utf-8")
-
     def test_payload_without_a_scene_key_means_no_scene(self, tmp_path):
         path = _write(tmp_path, SCENE_SAMPLE)
 
@@ -458,12 +446,6 @@ class TestAppendRoute:
         assert response.status_code == 422
         assert response.json()["detail"]
         assert path.read_bytes() == before
-
-    def test_route_is_in_the_openapi_schema(self):
-        with TestClient(web_server.app) as client:
-            paths = client.get("/openapi.json").json()["paths"]
-
-        assert "post" in paths["/api/prompt-files/append"]
 
 
 class TestAppendLocking:

@@ -19,113 +19,66 @@ from zvisiongenerator.utils.prompt_compose import (
 # ── flatten_value ───────────────────────────────────────────────────────────
 
 
-class TestFlattenValue:
-    def test_string_passthrough(self):
-        assert flatten_value("hello world") == "hello world"
-
-    def test_string_strips_whitespace(self):
-        assert flatten_value("  padded  ") == "padded"
-
-    def test_none_returns_empty(self):
-        assert flatten_value(None) == ""
-
-    def test_bool_true(self):
-        assert flatten_value(True) == "true"
-
-    def test_bool_false(self):
-        assert flatten_value(False) == "false"
-
-    def test_int(self):
-        assert flatten_value(42) == "42"
-
-    def test_float(self):
-        assert flatten_value(3.14) == "3.14"
-
-    def test_dict_key_value_pairs(self):
-        result = flatten_value({"style": "anime", "quality": "high"})
-        assert "style: anime" in result
-        assert "quality: high" in result
-
-    def test_dict_with_empty_value(self):
-        result = flatten_value({"mood": None})
-        # When value flattens to "", should just show key
-        assert "mood" in result
-
-    def test_list_joins_items(self):
-        result = flatten_value(["red", "blue", "green"])
-        assert "red" in result
-        assert "blue" in result
-        assert "green" in result
-
-    def test_list_filters_empty(self):
-        result = flatten_value(["hello", None, "world"])
-        # None flattens to "" and is filtered
-        assert result == "hello. world"
-
-    def test_unknown_type_uses_str(self):
-        assert flatten_value(object) != ""
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("hello world", "hello world"),
+        ("  padded  ", "padded"),
+        (None, ""),
+        (True, "true"),
+        (False, "false"),
+        (42, "42"),
+        (3.14, "3.14"),
+        ({"style": "anime", "quality": "high"}, "style: anime. quality: high"),
+        ({"mood": None}, "mood"),  # a value that flattens to nothing shows just the key
+        (["red", "blue", "green"], "red. blue. green"),
+        (["hello", None, "world"], "hello. world"),
+        (object, str(object)),
+    ],
+    ids=["str", "str-stripped", "none", "true", "false", "int", "float", "dict", "dict-empty-value", "list", "list-drops-empty", "other-type-uses-str"],
+)
+def test_flatten_value(value, expected):
+    assert flatten_value(value) == expected
 
 
 # ── resolve_snippets ────────────────────────────────────────────────────────
 
 
-class TestResolveSnippets:
-    def test_standalone_reference(self):
-        snippets = {"color": "vivid red"}
-        result = resolve_snippets("$color", snippets)
-        assert result == "vivid red"
+@pytest.mark.parametrize(
+    ("value", "snippets", "expected"),
+    [
+        ("$color", {"color": "vivid red"}, "vivid red"),
+        ("a $style painting", {"style": "watercolor"}, "a watercolor painting"),
+        ("a $adj $noun", {"adj": "dark", "noun": "forest"}, "a dark forest"),
+        ("$outer", {"inner": "deep blue", "outer": "$inner sky"}, "deep blue sky"),
+        ("$nums", {"nums": [1, 2, 3]}, [1, 2, 3]),  # a standalone reference keeps the snippet's type
+        ({"fg": "$color"}, {"color": "red"}, {"fg": "red"}),
+        (["$x", "world"], {"x": "hello"}, ["hello", "world"]),
+        (None, {}, None),
+        (42, {}, 42),
+        (True, {}, True),
+    ],
+    ids=["standalone", "inline", "several-inline", "nested", "standalone-non-string", "dict-values", "list-values", "none", "int", "bool"],
+)
+def test_resolve_snippets(value, snippets, expected):
+    result = resolve_snippets(value, snippets)
 
-    def test_inline_reference(self):
-        snippets = {"style": "watercolor"}
-        result = resolve_snippets("a $style painting", snippets)
-        assert result == "a watercolor painting"
+    assert result == expected
+    assert type(result) is type(expected)
 
-    def test_multiple_inline_references(self):
-        snippets = {"adj": "dark", "noun": "forest"}
-        result = resolve_snippets("a $adj $noun", snippets)
-        assert result == "a dark forest"
 
-    def test_undefined_snippet_raises(self):
-        with pytest.raises(ValueError, match="Undefined snippet"):
-            resolve_snippets("$missing", {})
-
-    def test_undefined_inline_snippet_raises(self):
-        with pytest.raises(ValueError, match="Undefined snippet"):
-            resolve_snippets("a $missing photo", {})
-
-    def test_circular_reference_raises(self):
-        snippets = {"a": "$b", "b": "$a"}
-        with pytest.raises(ValueError, match="Circular snippet reference"):
-            resolve_snippets("$a", snippets)
-
-    def test_nested_snippets(self):
-        snippets = {"inner": "deep blue", "outer": "$inner sky"}
-        result = resolve_snippets("$outer", snippets)
-        assert result == "deep blue sky"
-
-    def test_standalone_returns_non_string_type(self):
-        snippets = {"nums": [1, 2, 3]}
-        result = resolve_snippets("$nums", snippets)
-        assert result == [1, 2, 3]
-
-    def test_dict_values_resolved(self):
-        snippets = {"color": "red"}
-        result = resolve_snippets({"fg": "$color"}, snippets)
-        assert result == {"fg": "red"}
-
-    def test_list_values_resolved(self):
-        snippets = {"x": "hello"}
-        result = resolve_snippets(["$x", "world"], snippets)
-        assert result == ["hello", "world"]
-
-    def test_none_passthrough(self):
-        assert resolve_snippets(None, {}) is None
-
-    def test_int_passthrough(self):
-        assert resolve_snippets(42, {}) == 42
-
-    def test_bool_passthrough(self):
-        assert resolve_snippets(True, {}) is True
+@pytest.mark.parametrize(
+    ("value", "snippets", "match"),
+    [
+        ("$missing", {}, "Undefined snippet"),
+        ("a $missing photo", {}, "Undefined snippet"),
+        ("$a", {"a": "$b", "b": "$a"}, "Circular snippet reference"),
+    ],
+    ids=["undefined", "undefined-inline", "circular"],
+)
+def test_resolve_snippets_refuses_bad_references(value, snippets, match):
+    with pytest.raises(ValueError, match=match):
+        resolve_snippets(value, snippets)
 
 
 # ── compose_video_prompt ────────────────────────────────────────────────────
@@ -136,9 +89,6 @@ class TestComposeVideoPrompt:
     def test_blank_scene_returns_the_prompt_byte_identical(self, scene):
         prompt = "  A dog runs.\n  "
         assert compose_video_prompt(scene, prompt) is prompt
-
-    def test_none_scene_golden(self):
-        assert compose_video_prompt(None, "A dog runs.") == "A dog runs."
 
     def test_blank_scene_keeps_whitespace_of_a_blank_prompt(self):
         assert compose_video_prompt("", " x ") == " x "
@@ -182,34 +132,17 @@ class TestStripQuotedLines:
     def test_goldens(self, text, expected):
         assert strip_quoted_lines(text) == expected
 
-    def test_a_quote_at_the_end_is_dropped(self):
-        assert strip_quoted_lines('She waves. She says "Bye"') == "She waves."
-
-    def test_nested_punctuation_inside_a_quote_does_not_end_the_sentence(self):
-        assert strip_quoted_lines('She asks "Wait... what? Why!" quietly. Then she leaves.') == "Then she leaves."
-
-    def test_a_lowercase_continuation_after_a_closed_quote_stays_in_the_sentence(self):
-        assert strip_quoted_lines('"Wait!" he says. The door shuts.') == "The door shuts."
-
-    def test_curly_and_straight_quotes_are_both_recognised(self):
-        assert strip_quoted_lines('A "x" b. C \u201cy\u201d d. E.') == "E."
-
-    def test_text_without_quotes_is_returned_untouched(self):
-        text = "  One.\n\nTwo   words.  "
-        assert strip_quoted_lines(text) == text
-
-    def test_a_question_mark_and_exclamation_end_sentences(self):
-        assert strip_quoted_lines('Who is there? She says "Me". Nobody moves!') == "Who is there? Nobody moves!"
-
-    def test_an_unclosed_quote_drops_the_rest(self):
-        assert strip_quoted_lines('She waves. She says "Bye. Then she leaves.') == "She waves."
-
-    def test_apostrophes_are_ignored(self):
-        assert strip_quoted_lines("Moe's dog runs. It's fast.") == "Moe's dog runs. It's fast."
-
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
+            ('She waves. She says "Bye"', "She waves."),  # a quote at the end is dropped
+            ('She asks "Wait... what? Why!" quietly. Then she leaves.', "Then she leaves."),  # punctuation inside a quote does not end the sentence
+            ('"Wait!" he says. The door shuts.', "The door shuts."),  # a lowercase continuation after a closed quote stays in the sentence
+            ('A "x" b. C \u201cy\u201d d. E.', "E."),  # curly and straight quotes are both recognised
+            ("  One.\n\nTwo   words.  ", "  One.\n\nTwo   words.  "),  # text without quotes is returned untouched
+            ('Who is there? She says "Me". Nobody moves!', "Who is there? Nobody moves!"),
+            ('She waves. She says "Bye. Then she leaves.', "She waves."),  # an unclosed quote drops the rest
+            ("Moe's dog runs. It's fast.", "Moe's dog runs. It's fast."),  # apostrophes are ignored
             ('She says "Hello." and leaves. He nods.', "He nods."),
             ('She says "Hello" to him. He nods.', "He nods."),
             ('She says "Hi. Bye" and waves. He nods.', "He nods."),

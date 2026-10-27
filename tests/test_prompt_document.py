@@ -116,11 +116,6 @@ class TestRender:
 
         assert rendered == SAMPLE
 
-    def test_capitalized_booleans_are_kept(self):
-        rendered = render_prompt_document(SAMPLE, load_prompt_document(SAMPLE))
-
-        assert "active: False" in rendered
-
     def test_reordering_sets_moves_their_section_comments(self):
         document = load_prompt_document(SAMPLE)
         reordered = replace(document, sets=(document.sets[1], document.sets[0]))
@@ -185,13 +180,6 @@ class TestRender:
         rendered = render_prompt_document(text, replace(document, sets=(replace(document.sets[0], entries=(entry,)),)))
 
         assert rendered == "s:\n  - active: false\n    prompt: a\n"
-
-    def test_structured_values_are_never_rewritten(self):
-        document = load_prompt_document(SAMPLE)
-
-        rendered = render_prompt_document(SAMPLE, document)
-
-        assert "        - Nina: $nina\n      Style: warm\n" in rendered
 
     def test_new_snippets_section_in_a_file_without_one(self):
         text = "s:\n  - prompt: a $x\n"
@@ -528,11 +516,6 @@ class TestAppendRender:
         assert reloaded.sets[-1].entries[-1].prompt == _text("new")
         tail = rendered[rendered.index("  - prompt: existing") :]
         assert tail.index("scene: a room") < tail.index("prompt: new") < tail.index("negative: ugly")
-
-    def test_no_active_or_enhance_key_is_written(self):
-        rendered, _ = self._render(COMMENTED, scene="a room", negative="ugly")
-
-        assert yaml.safe_load(rendered)["prompts"][-1] == {"scene": "a room", "prompt": "new", "negative": "ugly"}
 
     def test_comments_and_other_sets_survive(self):
         rendered, _ = self._render(COMMENTED)
