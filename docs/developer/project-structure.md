@@ -219,7 +219,7 @@ zvisiongenerator/
 | Path | Holds |
 |---|---|
 | `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed |
-| `tests/` | The pytest suite |
+| `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`) and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
 | `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX and MOSS-Image code |
 | `docs/` | These docs, built with Zensical from `zensical.toml` |

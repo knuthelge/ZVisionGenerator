@@ -90,6 +90,8 @@ dev = [
 [tool.pytest.ini_options]
 # The repository root, so tests can import the developer benches in bench/.
 pythonpath = ["."]
+# A bare `pytest` collects only the suite, not bench/, packages/ or docs/.
+testpaths = ["tests"]
 
 [project.urls]
 Homepage = "https://github.com/knuthelge/ZVisionGenerator"

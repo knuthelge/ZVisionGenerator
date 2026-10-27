@@ -51,7 +51,7 @@ mflux-community/mflux#914 (MOSS-Image-SFT support, with an MLX port of the Qwen3
 
 ### 1. Upgrade mflux to the first release with MOSS
 
-Wait for the first mflux release that contains #914; 0.23 alone brings nothing our families use, so there is no separate 0.23 step. Upgrade to that release as its own commit before any MOSS work: re-run the mflux contract tests, including `tests/test_mflux_seedvr2_contract.py`, check the Z-Image, Klein, Krea 2 and Ideogram 4 paths for regressions in output and memory, and rebuild the stored quants if the format changes. Note that mflux 0.23 started loading built-in models from pinned Hugging Face commits, so a cached model may need one online run after the upgrade.
+Wait for the first mflux release that contains #914; 0.23 alone brings nothing our families use, so there is no separate 0.23 step. Upgrade to that release as its own commit before any MOSS work: re-run the mflux contract tests, including `tests/contracts/test_mflux_seedvr2_contract.py`, check the Z-Image, Klein, Krea 2 and Ideogram 4 paths for regressions in output and memory, and rebuild the stored quants if the format changes. Note that mflux 0.23 started loading built-in models from pinned Hugging Face commits, so a cached model may need one online run after the upgrade.
 
 ### 2. Long prompts: mflux#920
 

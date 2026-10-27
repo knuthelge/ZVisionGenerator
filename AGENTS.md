@@ -40,7 +40,7 @@ Package manager is `uv`; run Python tools with `uv run`. Install everything with
 While iterating, run targeted checks instead of the full gate:
 
 ```bash
-uv run pytest tests/test_<module>.py -k <name>   # single test file or test
+uv run pytest tests/<area>/test_<module>.py -k <name>   # single test file or test
 make lint-fix && make format                     # auto-fix lint and formatting
 make frontend-test                               # svelte-check + Vitest
 ```
@@ -49,6 +49,7 @@ Run `make check` before finishing. It is the full CI gate: ruff lint and format 
 
 ## Testing
 
-- Tests live in `tests/` as `test_<module>.py`; frontend tests sit next to their source as `*.test.ts`.
+- Tests live in `tests/<area>/test_<module>.py`, where the area is one of `web`, `video`, `image`, `prompts`, `downloads`, `converters`, `contracts`, `backends` (with `cuda` and `mac`) or `common`; frontend tests sit next to their source as `*.test.ts`. A feature that spans areas is selected with `-k`, for example `-k h3`.
+- Never import from `conftest` or from another test module. Import shared helpers as `tests.<module>`: `tests/_factories.py` and the other `tests/_*.py` modules for helpers used in more than one area, `tests/<area>/_helpers.py` for one area. Resolve repo paths through `tests/_paths.py`, never from `__file__`.
 - Never load real backends or models. Use `MagicMock` with controlled return values and `tests/_factories.py::_make_args(**overrides)` for CLI args.
 - Test behavior and machine-readable contracts (routes, config keys, event names, enum values, statuses), not prose, help text, CSS classes, or source text.

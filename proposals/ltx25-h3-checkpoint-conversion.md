@@ -364,7 +364,7 @@ Decision: build once G1–G5 pass, and add INT8 once G8 passes.
    `distillation` and `connectors_status` read the file of the checkpoint's version. A design detail for 2.5: they must not assume 2.3's counts.
 4. **Version-aware config accessors.** `ltx_diffusers_repo`, `ltx_distilled_lora_source` and `ltx_mlx_base_repo` (`config.py:692-718`) take the version. The 2.5 distilled LoRA goes into `versions.ltx25.distilled_lora`: `lxxxy6/LTX-2.5` at `3506f52c`, with a link to the official file.
 5. **Manifest kind `ltx-2.5`.** The video runner reads the version from a converted folder's manifest and passes it to `ltx_load_options`. A converted 2.5 model then runs with 2.5's ancestral sampler, CRF 18, components and upsampler. Without this it would silently run with 2.3's settings, because today the version comes only from the alias name.
-6. **Mapping fixes** from the spike, if any, go into `transformer_name_map`, covered by `test_diffusers_ltx2_contract.py`.
+6. **Mapping fixes** from the spike, if any, go into `transformer_name_map`, covered by `tests/contracts/test_diffusers_ltx2_contract.py`.
 
 #### Verified sources
 

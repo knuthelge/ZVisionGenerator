@@ -41,8 +41,11 @@ Raise `ValueError`, `FileNotFoundError` or `RuntimeError` with a descriptive mes
 
 ## Tests
 
-- Tests live in `tests/` as `test_<module>.py`, with functions named `test_<behavior>`. Group related tests in `Test`-prefixed classes. Frontend tests sit next to their source as `*.test.ts`.
-- **Never load real backends or models.** Use `unittest.mock.MagicMock` with controlled return values, for example a backend whose `.text_to_image.return_value` is `Image.new("RGB", (64, 64))` (see `_make_mock_backend()` in `tests/test_workflow.py`).
+- Tests live in `tests/<area>/test_<module>.py`, with functions named `test_<behavior>`. Group related tests in `Test`-prefixed classes. Frontend tests sit next to their source as `*.test.ts`.
+- **Test areas are layers, not features.** The folders are `web`, `video`, `image`, `prompts`, `downloads`, `converters`, `contracts` (the pins on vendored and upstream code), `backends` (with `cuda` and `mac`, mirroring the package), and `common` for cross-cutting modules. Run a layer with `pytest tests/web`, the macOS gate with `pytest tests/backends/mac`. A feature such as H3 or MOSS spans several layers, so select it with `-k` (`pytest tests -k h3`). Put a new file in the folder of the layer its subject module lives in; a folder needs at least four files, so anything smaller goes to `common`.
+- **Imports.** `tests` and every area folder are packages. Import shared code as `tests.<module>`; never `from conftest import ...` and never import one test module from another. `conftest.py` holds only autouse guards and fixtures. Plain builders used in more than one area live in `tests/_factories.py`, other cross-area helpers in `tests/_*.py` modules at the root, and a helper used by one area in `tests/<area>/_helpers.py`. Paths to the repo and to `tests/fixtures/` come from `tests/_paths.py`.
+- **Fixtures for the packaged config.** `packaged_config` is a private copy a test may change, and `packaged_config_shared` is a read-only session copy; outside a fixture, `tests._factories.load_packaged_config()` returns the same copy.
+- **Never load real backends or models.** Use `unittest.mock.MagicMock` with controlled return values, for example a backend whose `.text_to_image.return_value` is `Image.new("RGB", (64, 64))` (see `_make_mock_backend()` in `tests/image/test_workflow.py`).
 - Build CLI arguments with `tests/_factories.py::_make_args(**overrides)`.
 - Use the `tmp_path` fixture for files, and `@pytest.mark.parametrize` for many input/output pairs.
 - Skip heavy dependencies with `pytest.importorskip("torch")`, and platform-specific tests with `@pytest.mark.skipif(sys.platform == ...)`.
@@ -64,7 +67,7 @@ Raise `ValueError`, `FileNotFoundError` or `RuntimeError` with a descriptive mes
 
 ### Tests that need tools
 
-Tests that run the real `ffmpeg` and `ffprobe` (`tests/test_video_probe.py`, `tests/test_video_splice.py`, `tests/test_video_tail.py`) skip when the tools are missing. Run them locally with ffmpeg installed before changing how extensions are joined.
+Tests that run the real `ffmpeg` and `ffprobe` (`tests/video/test_video_probe.py`, `tests/video/test_video_splice.py`, `tests/video/test_video_tail.py`) skip when the tools are missing. Run them locally with ffmpeg installed before changing how extensions are joined.
 
 ## Web UI
 

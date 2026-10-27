@@ -91,10 +91,10 @@ Result: the ship rule is met by a wide margin, and every step is the change to m
 
 These tests assert the 25/50/75% steps, or keep the latents only before a milestone, and are rewritten for every step:
 
-- `tests/test_progress_events.py`
-- `tests/test_mac_image_preview.py`, including the order of the step and preview reports
-- `tests/test_cuda_image_preview.py`
-- `tests/test_cuda_image.py`
+- `tests/image/test_progress_events.py`
+- `tests/backends/mac/test_mac_image_preview.py`, including the order of the step and preview reports
+- `tests/backends/cuda/test_cuda_image_preview.py`
+- `tests/backends/cuda/test_cuda_image.py`
 - `JobPreview.test.ts`
 
 New cases:

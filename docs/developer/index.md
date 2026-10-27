@@ -43,7 +43,7 @@ make docs-serve        # these docs, with live reload
 4. Iterate with targeted checks:
 
     ```bash
-    uv run pytest tests/test_<module>.py -k <name>
+    uv run pytest tests/<area>/test_<module>.py -k <name>
     make lint-fix && make format
     make frontend-test
     ```

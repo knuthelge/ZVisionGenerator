@@ -17,4 +17,4 @@ make enhance-bench ARGS="rescore main-fast try"                  # recompute che
 - **Rescore** recomputes the checks of stored runs from their outputs, after a check or a case's expectations change. A video's format result is kept, since the stored text can't show whether the pair needed the fallback.
 - **Compare** reports each check overall and per tag, speed, and the ten cases that changed most, side by side with a diff of their system prompts.
 
-The bench loads one enhancer model and nothing else. `tests/test_enhance_bench.py` covers its checks and plumbing with a fake model.
+The bench loads one enhancer model and nothing else. `tests/prompts/test_enhance_bench.py` covers its checks and plumbing with a fake model.

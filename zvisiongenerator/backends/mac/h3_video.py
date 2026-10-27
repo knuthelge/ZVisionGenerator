@@ -72,7 +72,7 @@ _VISION_PREFIX = "model.visual."
 _VISION_SHARD = "model-visual.safetensors"
 _INDEX_NAME = "model.safetensors.index.json"
 
-# The tensors the fork's ``TurboLoRAProvider`` accepts (tests/test_h3_mlx_contract.py pins them): one adapter of PEFT
+# The tensors the fork's ``TurboLoRAProvider`` accepts (tests/contracts/test_h3_mlx_contract.py pins them): one adapter of PEFT
 # diffusers keys, for the transformer blocks and the token refiner, six projections each.
 _FAMILIES = ("transformer_blocks", "token_refiner.refiner_blocks")
 _TARGETS = ("attn.to_q", "attn.to_k", "attn.to_v", "attn.to_out.0", "ff.net.0.proj", "ff.net.2")
