@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -47,6 +50,27 @@ class TestLtxSystemEstimate:
         expected = estimate_ltx_cuda_system_memory(block_matrices=10 * _GIB, transformer_rest=_GIB // 2, connectors=3 * _GIB, text_encoder=12 * _GIB, quantize=quantize)
         assert estimate == expected
         assert header_counts == [Path("/ckpt")]
+
+
+def _write_header(path: Path, shapes: dict[str, list[int]]) -> None:
+    """Write a header-only safetensors file holding *shapes*."""
+    header = json.dumps({name: {"dtype": "BF16", "shape": shape, "data_offsets": [0, 0]} for name, shape in shapes.items()}).encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(len(header).to_bytes(8, "little") + header)
+
+
+def test_estimating_a_single_file_checkpoint_loads_neither_torch_nor_diffusers(tmp_path):
+    checkpoint = tmp_path / "ltx.safetensors"
+    _write_header(checkpoint, {"model.diffusion_model.transformer_blocks.0.attn1.to_q.weight": [4, 4], "model.diffusion_model.patchify_proj.weight": [4, 2], "vae.decoder.weight": [3]})
+    _write_header(tmp_path / "repo" / "connectors" / "diffusion_pytorch_model.safetensors", {"w": [5]})
+    _write_header(tmp_path / "repo" / "text_encoder" / "model.safetensors", {"model.layers.0.mlp.up_proj.weight": [2, 2]})
+    code = (
+        "import sys; from pathlib import Path; from zvisiongenerator.backends.cuda.video import memory_estimate; "
+        "memory_estimate.ltx_system_estimate(Path(sys.argv[1]), Path(sys.argv[2]), 4); "
+        "bad = [m for m in ('torch', 'diffusers') if m in sys.modules]; assert not bad, bad"
+    )
+
+    subprocess.run([sys.executable, "-I", "-c", code, str(tmp_path / "repo"), str(checkpoint)], check=True, capture_output=True, text=True)
 
 
 class TestCachedLtxSystemEstimate:

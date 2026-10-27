@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.quant import cast_to_fp8, empty_diffusers_model, fill_weights, kept_in_compute_dtype, nf4_linear_names, nf4_storage_format, pack_nf4, place_nf4, swap_in_linear4bit
+from zvisiongenerator.converters.ltx_checkpoint import CHECKPOINT_PREFIX, CONNECTOR_PREFIXES
 from zvisiongenerator.utils.model_files import ltx2_text_encoder_class
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, read_header, shard_files
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME, ensure_stored_copy, file_identities
@@ -56,7 +57,6 @@ _SHARD_PREFIX = "model"
 _CONFIG_NAME = "config.json"
 _DIFFUSERS_INDEX_NAME = "diffusion_pytorch_model.safetensors.index.json"
 _TRANSFORMERS_INDEX_NAME = "model.safetensors.index.json"
-_CHECKPOINT_PREFIX = "model.diffusion_model."
 _BLOCKS_PREFIX = "transformer_blocks."
 # LTX-2.3's prompt modulation layers, which diffusers 0.42's single-file conversion leaves under their checkpoint names.
 _LTX23_RENAMES = (("prompt_adaln_single.", "prompt_adaln."), ("audio_prompt_adaln_single.", "audio_prompt_adaln."))
@@ -86,7 +86,7 @@ def transformer_name_map(names: Iterable[str]) -> dict[str, str]:
     from diffusers.loaders.single_file_utils import convert_ltx2_transformer_to_diffusers
 
     # The conversion renames keys and drops the connectors; each value carries its original name through.
-    originals = {name: name for name in names if name.startswith(_CHECKPOINT_PREFIX)}
+    originals = {name: name for name in names if name.startswith(CHECKPOINT_PREFIX)}
     return {original: _rename_ltx23(converted) for converted, original in convert_ltx2_transformer_to_diffusers(originals).items()}
 
 
@@ -114,7 +114,11 @@ def transformer_elements(source: Path) -> tuple[int, int]:
 
 
 def count_transformer_elements(shapes: Iterable[tuple[str, list[int]]]) -> tuple[int, int]:
-    """Count the elements of the transformer tensors ``(diffusers name, shape)`` in *shapes*: ``(2-D weights in its blocks, the rest)``."""
+    """Count the elements of the transformer tensors ``(name, shape)`` in *shapes*: ``(2-D weights in its blocks, the rest)``.
+
+    A name is relative to the transformer: a diffusers name, or a checkpoint name without its prefix. Only the
+    ``transformer_blocks.`` prefix matters, which both namings share.
+    """
     blocks = rest = 0
     for name, shape in shapes:
         count = math.prod(shape)
@@ -140,11 +144,15 @@ def text_encoder_bytes(component_dir: Path) -> int:
 
 
 def _transformer_shapes(source: Path) -> Iterator[tuple[str, list[int]]]:
-    """Yield ``(diffusers name, shape)`` for each transformer tensor at *source*, read from the headers only."""
+    """Yield ``(name, shape)`` for each transformer tensor at *source*, read from the headers only.
+
+    A single-file checkpoint keeps its own names without the prefix, so counting it does not import diffusers for
+    the renames; they never move a tensor into or out of the blocks.
+    """
     if source.is_file():
-        header = read_header(source)[1]
-        for original, name in transformer_name_map(header).items():
-            yield name, header[original]["shape"]
+        for name, info in read_header(source)[1].items():
+            if name.startswith(CHECKPOINT_PREFIX) and not name.startswith(CONNECTOR_PREFIXES):
+                yield name.removeprefix(CHECKPOINT_PREFIX), info["shape"]
         return
     for path in transformer_sources(source):
         for name, info in read_header(path)[1].items():

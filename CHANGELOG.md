@@ -41,6 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **The remaining-time estimate stays sensible.** An image skipped with Next no longer pulls the estimate down, and after Repeats it can no longer go negative; the final count includes the repeats
 - **A repeated image can always be reviewed.** When you discard an image and Repeat it, Approve and Discard no longer stay disabled for the new render if the Web UI lost its connection meanwhile
 - **Windows/Linux: the LTX-2.3 downloads are pinned to a fixed revision**, so a file Lightricks renames or deletes upstream no longer breaks `ltx-4` and `ltx-8`
+- **Windows/Linux: the first Web UI page load is fast.** It no longer waits about 5 seconds when an LTX model is downloaded
 
 ## [0.14.0b1] - 2026-10-26
 
