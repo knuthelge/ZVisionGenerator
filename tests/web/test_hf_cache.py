@@ -217,7 +217,8 @@ def test_other_downloads_are_the_repos_nothing_uses(web_config, hub):
     assert [repo.repo_id for repo in find_other_downloads(web_config, cache_dir=hub)] == ["org/old"]
 
 
-def test_the_repos_a_built_model_links_files_from_are_not_other_downloads(web_config, hub):
+def test_the_repos_a_built_model_links_files_from_are_not_other_downloads(web_config, hub, monkeypatch):
+    monkeypatch.setattr("sys.platform", "linux")
     for repo_id in ("Org/Moss-SFT", "org/moss-turbo", "org/ideo-nf4", "org/instant-transformer"):
         _repo(hub, repo_id, local=25_000)
     web_config.app_config = {**web_config.app_config, **_BUILT_ON_FIRST_USE_CONFIG}
