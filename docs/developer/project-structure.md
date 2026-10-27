@@ -199,6 +199,7 @@ zvisiongenerator/
 │   ├── presets.py                 Settings presets for the Web UI: file format, slugs, validation, and the store (list, write, rename, delete under one lock)
 │   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked), create prompt files, and append a Workspace prompt
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
+│   ├── recent_prompts.py          Recent prompts component of the app database: the entry builder and the `recent_prompts_entries` store
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
 │   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits
 │   ├── video_clip.py              Resolve the model, steps, size and length a video job runs at, shared by the job and its memory estimate

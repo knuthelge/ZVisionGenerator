@@ -10,6 +10,8 @@
 
 The job log is the first component whose rows cannot be rebuilt: `Component("jobs", 1, …)` with the table `jobs_entries_v1` (see [Job log](web-server.md#job-log)). Its migration raises `JobLogError` (a `RuntimeError`) for a stored version above its own, so an older ziv leaves a newer log alone and its job log routes answer 500. Its migration creates only its own table and drops nothing, so a future version must copy the rows it keeps into the new table before it drops the old one. A gallery rebuild never touches it, and a quarantine keeps its rows in the `.corrupt-*` file.
 
+The recent prompts are the second: `Component("recent_prompts", 1, …)` with the table `recent_prompts_entries_v1` (see [Recent prompts](web-server.md#recent-prompts)). Its migration raises `RecentPromptsError` for a stored version above its own and creates only its own table. It and the job log share the connect, recover, close and error-wrapping step as `app_db.run`, and never read each other's rows.
+
 ## Gallery index
 
 `web/gallery_index.py` is the gallery component of the app database. `list_gallery_assets` calls it on every listing, so `/api/gallery` and `/api/workspace?include_history=true` read a file's embedded metadata once per file version instead of once per request, including the first request after a restart.

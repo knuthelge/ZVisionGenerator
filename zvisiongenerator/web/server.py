@@ -13,6 +13,7 @@ import stat
 import subprocess
 import threading
 import sys
+import time
 import uuid
 import warnings
 from collections.abc import Iterator
@@ -113,6 +114,7 @@ from zvisiongenerator.web.gallery import (
 )
 from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, JobLogError
 from zvisiongenerator.web.json_fields import json_field
+from zvisiongenerator.web.recent_prompts import RecentPrompts, RecentPromptsError, recent_prompt_entry
 from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
 from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
@@ -150,6 +152,7 @@ _PROMPT_FILE_EXTENSIONS = tuple(PROMPT_FILE_CONTRACT["accepted_extensions"])
 
 download_flights = DownloadFlights()
 job_log = JobLog(app_db.app_db_path)
+recent_prompts = RecentPrompts(app_db.app_db_path)
 web_runner = WebRunner(download_flights=download_flights, job_log=job_log)
 download_lane = DownloadLane(flights=download_flights)
 logger = logging.getLogger(__name__)
@@ -685,7 +688,26 @@ def _generate_from_form(form: Any) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    _remember_prompt(form, mode)
     return _job_response(str(job_context["job_id"]), job_context["context"], job_context.get("supported_controls", ()))
+
+
+def _remember_prompt(form: Any, mode: str) -> None:
+    """Store the inline prompt of an accepted submit in the recent prompts; a failure only warns."""
+    try:
+        entry = recent_prompt_entry(
+            prompt_source=_optional_text(form, "prompt_source"),
+            prompt=_optional_text(form, "prompt"),
+            json_prompt=_optional_text(form, "json_prompt"),
+            scene=_optional_text(form, "scene"),
+            negative_prompt=_optional_text(form, "negative_prompt"),
+            mode=mode,
+            used_at=time.time(),
+        )
+        if entry is not None:
+            recent_prompts.record(entry)
+    except Exception as exc:  # noqa: BLE001 - remembering a prompt must never fail the submit
+        warnings.warn(f"Could not remember the prompt: {exc}", stacklevel=2)
 
 
 def _job_response(job_id: str, context: dict[str, Any], supported_controls: tuple[str, ...]) -> JSONResponse:
@@ -2291,6 +2313,11 @@ def _job_log_unavailable(exc: JobLogError) -> HTTPException:
     return HTTPException(status_code=500, detail=f"Could not read or write the job log: {exc}")
 
 
+def _recent_prompts_unavailable(exc: RecentPromptsError) -> HTTPException:
+    """Return the 500 for recent prompts that could not be read or written."""
+    return HTTPException(status_code=500, detail=f"Could not read or write the recent prompts: {exc}")
+
+
 # Declared before the parameterised /api/jobs/{job_id} routes.
 @app.get("/api/jobs")
 def api_list_jobs() -> dict[str, Any]:
@@ -2326,6 +2353,24 @@ def api_clear_job_log() -> dict[str, int]:
         return {"deleted_count": job_log.clear()}
     except JobLogError as exc:
         raise _job_log_unavailable(exc) from exc
+
+
+@app.get("/api/recent-prompts")
+def api_recent_prompts(mode: Literal["image", "video"], q: str = "") -> dict[str, Any]:
+    """Return the newest recent prompts of *mode* whose prompt or scene contains *q*, newest first."""
+    try:
+        return {"entries": recent_prompts.search(q, mode)}
+    except RecentPromptsError as exc:
+        raise _recent_prompts_unavailable(exc) from exc
+
+
+@app.delete("/api/recent-prompts")
+def api_clear_recent_prompts(mode: Literal["image", "video"]) -> dict[str, int]:
+    """Remove every recent prompt of *mode* and return how many there were."""
+    try:
+        return {"deleted_count": recent_prompts.clear(mode)}
+    except RecentPromptsError as exc:
+        raise _recent_prompts_unavailable(exc) from exc
 
 
 @app.delete("/api/jobs/queue")
