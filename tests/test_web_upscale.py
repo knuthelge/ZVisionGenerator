@@ -143,37 +143,29 @@ def test_plan_picks_denoise_by_output_size_not_the_in_run_default(monkeypatch, t
     assert large_2x.request.upscale_denoise == 0.15
 
 
-def test_plan_skips_pre_sharpen_and_sharpens_at_the_upscaled_amount(monkeypatch, tmp_path):
-    _patch_model_resolution(monkeypatch)
-
-    plan = upscale_api.plan_upscale(_source(), 2, _web_config(tmp_path), backend_name="mflux")
-
-    assert plan.request.upscale_sharpen is False
-    assert plan.request.sharpen is True
-    assert plan.request.sharpen_amount_override is None
-    assert plan.request.sharpen_amount_upscaled == 1.2
-
-
-def test_plan_uses_the_viewer_sharpen_keys(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("viewer_keys", "source", "expected"),
+    [
+        pytest.param(
+            {}, {}, {"upscale_sharpen": False, "sharpen": True, "sharpen_amount_override": None, "sharpen_amount_upscaled": 1.2}, id="skips the pre-sharpen and sharpens at the upscaled amount"
+        ),
+        pytest.param(
+            {"existing_upscaled": 1.3, "existing_pre_upscale": 0.6}, {}, {"upscale_sharpen": True, "sharpen_amount_pre_upscale": 0.6, "sharpen_amount_upscaled": 1.3}, id="uses the viewer sharpen keys"
+        ),
+        pytest.param({}, {"generation": {"time": 10.0, "sharpen": 0.5}}, {"sharpen_amount_override": None, "sharpen_amount_upscaled": 1.2}, id="ignores the source sharpen amount"),
+        pytest.param({}, {"generation": {"time": 10.0}}, {"sharpen": False}, id="does not sharpen a source recorded without sharpening"),
+        pytest.param({}, {"generation": {}}, {"sharpen": True}, id="sharpens files without a record"),
+    ],
+)
+def test_plan_sharpening(monkeypatch, tmp_path, viewer_keys, source, expected):
+    """The final pass always uses the configured viewer amount, so editing the config never reinterprets old files."""
     _patch_model_resolution(monkeypatch)
     web_config = _web_config(tmp_path)
-    web_config.app_config["sharpening"].update(existing_upscaled=1.3, existing_pre_upscale=0.6)
+    web_config.app_config["sharpening"].update(viewer_keys)
 
-    plan = upscale_api.plan_upscale(_source(), 2, web_config, backend_name="mflux")
+    request = upscale_api.plan_upscale(_source(**source), 2, web_config, backend_name="mflux").request
 
-    assert plan.request.upscale_sharpen is True
-    assert plan.request.sharpen_amount_pre_upscale == 0.6
-    assert plan.request.sharpen_amount_upscaled == 1.3
-
-
-def test_plan_ignores_the_source_sharpen_amount(monkeypatch, tmp_path):
-    # The final pass always uses the configured viewer amount, so editing the config never reinterprets old files.
-    _patch_model_resolution(monkeypatch)
-
-    plan = upscale_api.plan_upscale(_source(generation={"time": 10.0, "sharpen": 0.5}), 2, _web_config(tmp_path), backend_name="mflux")
-
-    assert plan.request.sharpen_amount_override is None
-    assert plan.request.sharpen_amount_upscaled == 1.2
+    assert {name: getattr(request, name) for name in expected} == expected
 
 
 def test_plan_keeps_how_an_enhanced_source_was_enhanced(monkeypatch, tmp_path):
@@ -183,22 +175,6 @@ def test_plan_keeps_how_an_enhanced_source_was_enhanced(monkeypatch, tmp_path):
     request = upscale_api.plan_upscale(_source(prompt_input="a barn", enhance=record), 2, _web_config(tmp_path), backend_name="mflux").request
 
     assert (request.prompt_input, request.enhance_record) == ("a barn", record)
-
-
-def test_plan_does_not_sharpen_a_source_recorded_without_sharpening(monkeypatch, tmp_path):
-    _patch_model_resolution(monkeypatch)
-
-    plan = upscale_api.plan_upscale(_source(generation={"time": 10.0}), 2, _web_config(tmp_path), backend_name="mflux")
-
-    assert plan.request.sharpen is False
-
-
-def test_plan_sharpens_older_files_without_a_record(monkeypatch, tmp_path):
-    _patch_model_resolution(monkeypatch)
-
-    plan = upscale_api.plan_upscale(_source(generation={}), 2, _web_config(tmp_path), backend_name="mflux")
-
-    assert plan.request.sharpen is True
 
 
 def test_plan_falls_back_to_default_model_with_its_defaults(monkeypatch, tmp_path):
@@ -435,55 +411,42 @@ def test_upscale_route_queues_job(upscale_client):
     assert payload["queue_position"] is None
 
 
-def test_upscale_route_unknown_asset_is_404(upscale_client):
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "missing.png", "factor": 2})
-
-    assert response.status_code == 404
-
-
-def test_upscale_route_rejects_path_outside_output_dir(upscale_client):
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "../outside.png", "factor": 2})
-
-    assert response.status_code == 422
-
-
-def test_upscale_route_rejects_bad_factor(upscale_client):
-    _write_png(upscale_client.root / "a.png")
-
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 3})
-
-    assert response.status_code == 422
-
-
-def test_upscale_route_rejects_unsupported_model(upscale_client):
-    _patch_model_resolution(upscale_client.monkeypatch, defaults={**_DEFAULTS, "supports_img2img": False})
-    _write_png(upscale_client.root / "a.png")
-
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2})
-
-    assert response.status_code == 422
-
-
-def test_upscale_route_rejects_output_over_cap(upscale_client):
-    _write_png(upscale_client.root / "a.png")
-
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 4})
-
-    assert response.status_code == 422
-    assert "megapixel" in response.json()["detail"]
-
-
-def test_upscale_route_conflict_while_busy(upscale_client):
-    _write_png(upscale_client.root / "a.png")
-
+def _busy_runner(client):
     def _busy(**_kwargs):
         raise JobConflictError("busy")
 
-    upscale_client.monkeypatch.setattr(web_server.web_runner, "submit_upscale_job", _busy)
+    client.monkeypatch.setattr(web_server.web_runner, "submit_upscale_job", _busy)
 
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2})
 
-    assert response.status_code == 409
+@pytest.mark.parametrize(
+    ("body", "seedvr2", "defaults", "busy", "status", "detail"),
+    [
+        pytest.param({"asset_id": "missing.png", "factor": 2}, False, None, False, 404, None, id="unknown asset"),
+        pytest.param({"asset_id": "../outside.png", "factor": 2}, False, None, False, 422, None, id="path outside the output folder"),
+        pytest.param({"asset_id": "a.png", "factor": 3}, False, None, False, 422, None, id="bad factor"),
+        pytest.param({"asset_id": "a.png", "factor": 2}, False, {**_DEFAULTS, "supports_img2img": False}, False, 422, None, id="model without img2img"),
+        pytest.param({"asset_id": "a.png", "factor": 4}, False, None, False, 422, "megapixel", id="output over the cap"),
+        pytest.param({"asset_id": "a.png", "factor": 2}, False, None, True, 409, None, id="busy"),
+        pytest.param({"asset_id": "a.png", "factor": 2, "method": "bogus"}, False, None, False, 422, None, id="unknown method"),
+        pytest.param({"asset_id": "a.png", "factor": 2, "method": "seedvr2"}, False, None, False, 422, None, id="seedvr2 where it is unsupported"),
+        pytest.param({"asset_id": "missing.png", "factor": 2, "method": "seedvr2"}, True, None, False, 404, None, id="seedvr2 unknown asset"),
+        pytest.param({"asset_id": "a.png", "factor": 2, "method": "seedvr2"}, True, None, True, 409, None, id="seedvr2 busy"),
+    ],
+)
+def test_upscale_route_refusals(upscale_client, body, seedvr2, defaults, busy, status, detail):
+    if seedvr2:
+        upscale_client.web_config.seedvr2 = _seedvr2_setup()
+    if defaults:
+        _patch_model_resolution(upscale_client.monkeypatch, defaults=defaults)
+    if busy:
+        _busy_runner(upscale_client)
+    _write_png(upscale_client.root / "a.png")
+
+    response = upscale_client.client.post("/api/upscale", json=body)
+
+    assert response.status_code == status
+    assert detail is None or detail in response.json()["detail"]
+    assert upscale_client.submitted == []
 
 
 def test_upscale_route_defaults_to_the_creative_plan_even_with_seedvr2_on(upscale_client):
@@ -497,24 +460,6 @@ def test_upscale_route_defaults_to_the_creative_plan_even_with_seedvr2_on(upscal
     assert submitted["request"].upscale_method == "creative"
     assert submitted["model_ref"] == "/models/zit"
     assert submitted["context"]["model"] == "zit"
-
-
-def test_upscale_route_rejects_an_unknown_method(upscale_client):
-    _write_png(upscale_client.root / "a.png")
-
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2, "method": "bogus"})
-
-    assert response.status_code == 422
-    assert upscale_client.submitted == []
-
-
-def test_upscale_route_rejects_seedvr2_where_it_is_unsupported(upscale_client):
-    _write_png(upscale_client.root / "a.png")
-
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2, "method": "seedvr2"})
-
-    assert response.status_code == 422
-    assert upscale_client.submitted == []
 
 
 def test_upscale_route_queues_a_seedvr2_job(upscale_client):
@@ -560,21 +505,6 @@ def test_upscale_route_queues_a_warned_seedvr2_size_that_creative_refuses(upscal
     assert queued.status_code == 200
     assert upscale_client.submitted[0]["request"].upscale_factor == 4
     assert queued.json()["meta"] == "4× → 3328×4864"
-
-
-def test_upscale_route_seedvr2_maps_unknown_asset_and_busy(upscale_client):
-    upscale_client.web_config.seedvr2 = _seedvr2_setup()
-    _write_png(upscale_client.root / "a.png")
-
-    missing = upscale_client.client.post("/api/upscale", json={"asset_id": "missing.png", "factor": 2, "method": "seedvr2"})
-
-    def _busy(**_kwargs):
-        raise JobConflictError("busy")
-
-    upscale_client.monkeypatch.setattr(web_server.web_runner, "submit_upscale_job", _busy)
-    busy = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2, "method": "seedvr2"})
-
-    assert (missing.status_code, busy.status_code) == (404, 409)
 
 
 # ── Gallery asset fields ────────────────────────────────────────────────────
@@ -876,34 +806,60 @@ def test_video_upscale_route_queues_the_job(video_upscale_client):
     assert video_upscale_client.image_submitted == []
 
 
-@pytest.mark.parametrize("extra", [{"method": "creative"}, {"method": None}, {"factor": 4}])
-def test_video_upscale_route_takes_seedvr2_2x_only(video_upscale_client, extra):
-    body = {"asset_id": "clip.mp4", "factor": 2, "method": "seedvr2", **extra}
-    body = {key: value for key, value in body.items() if value is not None}
+def _video_unsupported(client):
+    client.monkeypatch.setattr(web_server, "supports_video_file_upscale", lambda: False)
+
+
+def _video_without_setup(client):
+    client.web_config.seedvr2 = None
+
+
+def _video_without_ffmpeg(client):
+    def _missing():
+        raise RuntimeError("ffmpeg is not installed.")
+
+    client.monkeypatch.setattr(web_server, "require_ffmpeg", _missing)
+
+
+def _video_unreadable(client):
+    problem = ExtendProblem("unreadable", "ffprobe could not read the file")
+    client.monkeypatch.setattr(web_server, "read_video_upscale_source", lambda path: (_ for _ in ()).throw(ValueError("clip.mp4 can't be upscaled: " + problem.message)))
+
+
+def _video_with_the_real_reader(client):
+    client.monkeypatch.setattr(web_server, "read_video_upscale_source", video_file_upscale_runner.read_video_upscale_source)
+
+
+def _video_busy(client):
+    def _busy(**_kwargs):
+        raise JobConflictError("busy")
+
+    client.monkeypatch.setattr(web_server.web_runner, "submit_video_file_upscale_job", _busy)
+
+
+@pytest.mark.parametrize(
+    ("body", "setup", "status"),
+    [
+        pytest.param({"method": "creative"}, None, 422, id="creative method"),
+        pytest.param({"method": None}, None, 422, id="no method"),
+        pytest.param({"factor": 4}, None, 422, id="4x"),
+        pytest.param({}, _video_unsupported, 422, id="unsupported platform"),
+        pytest.param({}, _video_without_setup, 422, id="no seedvr2 setup"),
+        pytest.param({}, _video_without_ffmpeg, 422, id="no ffmpeg"),
+        pytest.param({}, _video_unreadable, 422, id="unreadable file"),
+        pytest.param({"asset_id": "gone.mp4"}, _video_with_the_real_reader, 404, id="missing file"),
+        pytest.param({"asset_id": "../clip.mp4"}, _video_with_the_real_reader, 422, id="outside the output folder"),
+        pytest.param({}, _video_busy, 409, id="busy"),
+    ],
+)
+def test_video_upscale_route_refusals(video_upscale_client, body, setup, status):
+    if setup:
+        setup(video_upscale_client)
+    body = {key: value for key, value in {"asset_id": "clip.mp4", "factor": 2, "method": "seedvr2", **body}.items() if value is not None}
 
     response = video_upscale_client.client.post("/api/upscale", json=body)
 
-    assert response.status_code == 422
-    assert response.json()["detail"]
-    assert video_upscale_client.submitted == []
-
-
-@pytest.mark.parametrize("case", ["unsupported", "no_setup", "no_ffmpeg"])
-def test_video_upscale_route_refuses_where_it_cannot_run(video_upscale_client, case):
-    if case == "unsupported":
-        video_upscale_client.monkeypatch.setattr(web_server, "supports_video_file_upscale", lambda: False)
-    elif case == "no_setup":
-        video_upscale_client.web_config.seedvr2 = None
-    else:
-
-        def _missing():
-            raise RuntimeError("ffmpeg is not installed.")
-
-        video_upscale_client.monkeypatch.setattr(web_server, "require_ffmpeg", _missing)
-
-    response = _post_video(video_upscale_client)
-
-    assert response.status_code == 422
+    assert response.status_code == status
     assert video_upscale_client.submitted == []
 
 
@@ -922,34 +878,6 @@ def test_video_upscale_route_refuses_a_clip_the_upscale_would_get_wrong(video_up
 
     assert response.status_code == 422
     assert video_upscale_client.submitted == []
-
-
-def test_video_upscale_route_unreadable_file_is_422(video_upscale_client):
-    problem = ExtendProblem("unreadable", "ffprobe could not read the file")
-    video_upscale_client.monkeypatch.setattr(web_server, "read_video_upscale_source", lambda path: (_ for _ in ()).throw(ValueError("clip.mp4 can't be upscaled: " + problem.message)))
-
-    response = _post_video(video_upscale_client)
-
-    assert response.status_code == 422
-
-
-def test_video_upscale_route_missing_file_is_404_and_outside_the_root_is_422(video_upscale_client):
-    video_upscale_client.monkeypatch.setattr(web_server, "read_video_upscale_source", video_file_upscale_runner.read_video_upscale_source)
-    missing = video_upscale_client.client.post("/api/upscale", json={"asset_id": "gone.mp4", "factor": 2, "method": "seedvr2"})
-    outside = video_upscale_client.client.post("/api/upscale", json={"asset_id": "../clip.mp4", "factor": 2, "method": "seedvr2"})
-
-    assert missing.status_code == 404
-    assert outside.status_code == 422
-    assert video_upscale_client.submitted == []
-
-
-def test_video_upscale_route_conflict_while_busy(video_upscale_client):
-    def _busy(**_kwargs):
-        raise JobConflictError("busy")
-
-    video_upscale_client.monkeypatch.setattr(web_server.web_runner, "submit_video_file_upscale_job", _busy)
-
-    assert _post_video(video_upscale_client).status_code == 409
 
 
 def test_video_upscale_plan_carries_the_clips_settings_and_softness():

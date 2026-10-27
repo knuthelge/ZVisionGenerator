@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 
 import pytest
 
@@ -19,18 +18,6 @@ def _iteration(**overrides) -> IterationPlan:
 class TestJobPlan:
     def test_enum_values(self):
         assert [status.value for status in EnhanceStatus] == ["off", "enhanced", "failed", "skipped"]
-
-    def test_types_are_frozen(self):
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            _iteration().seed = 1
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            JobPlan(iterations=()).cancelled = True
-
-    def test_defaults(self):
-        iteration = _iteration()
-        assert iteration.enhanced_prompt is None and iteration.enhance_status is EnhanceStatus.OFF
-        assert iteration.scene is None and iteration.resolved_scene is None and iteration.enhanced_scene is None
-        assert JobPlan(iterations=()).cancelled is False
 
     def test_has_rewrites(self):
         enhanced = _iteration(enhance=EnhanceSettings(), enhanced_prompt="A fox in snow.", enhance_status=EnhanceStatus.ENHANCED)

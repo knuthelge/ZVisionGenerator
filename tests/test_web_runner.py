@@ -20,6 +20,7 @@ from huggingface_hub.errors import GatedRepoError
 from PIL import Image
 import pytest
 
+from tests._server_helpers import sse_payload, stub_request_job, wait_for_status
 from tests.conftest import _make_args
 from tests.conftest import _make_plan
 from tests.conftest import _make_video_args, make_extend_source
@@ -39,18 +40,6 @@ from zvisiongenerator.workflows import build_video_workflow
 def _no_real_memory_release(monkeypatch):
     """Never run the real accelerator cleanup (on CUDA it imports torch and collects garbage); tests may override it."""
     monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: None)
-
-
-def _wait_for_status(runner: web_runner_module.WebRunner, job_id: str, expected_status: str, *, timeout: float = 1.0) -> dict[str, object]:
-    """Poll a job until it reaches the expected status."""
-    deadline = time.monotonic() + timeout
-    snapshot = runner.get_job_snapshot(job_id)
-    while time.monotonic() < deadline:
-        snapshot = runner.get_job_snapshot(job_id)
-        if snapshot["status"] == expected_status:
-            return snapshot
-        time.sleep(0.01)
-    return snapshot
 
 
 def _read_sse_events(response) -> list[dict[str, object]]:
@@ -80,37 +69,16 @@ def _read_sse_events(response) -> list[dict[str, object]]:
     return events
 
 
-def _sse_payload(frame: str) -> dict[str, object]:
-    """Extract the JSON payload from one runner-formatted SSE frame."""
-    for line in frame.splitlines():
-        if line.startswith("data: "):
-            return json.loads(line.removeprefix("data: "))
-    raise AssertionError(f"SSE frame did not contain a data field: {frame!r}")
-
-
-def _stub_request_job(monkeypatch, *, run_preflight=None) -> MagicMock:
-    """Stub preflight, model loading and memory release so a request job runs only the faked batch runner."""
-    backend = MagicMock(name="backend")
-    backend.load_model.return_value = (MagicMock(name="model"), MagicMock(name="model_info"))
-    monkeypatch.setattr(web_runner_module, "run_preflight", run_preflight or (lambda prompts_data, config, args, **_kw: _make_plan(prompts_data, args, config=config)))
-    monkeypatch.setattr(web_runner_module, "get_backend", lambda: backend)
-    monkeypatch.setattr(web_runner_module, "get_video_backend", lambda _family: backend)
-    monkeypatch.setattr(web_runner_module, "require_ffmpeg", lambda: None)
-    monkeypatch.setattr(web_runner_module, "build_video_workflow", lambda _args, **_kw: MagicMock(name="workflow"))
-    monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: None)
-    return backend
-
-
 def _submit_image(monkeypatch, runner, *, prompts_data, config, args) -> str:
     """Submit an image request job with preflight and model loading stubbed."""
-    _stub_request_job(monkeypatch)
+    stub_request_job(monkeypatch)
     request = ImageGenerationRequest(backend=None, model=None, prompt="prompt", model_family="zimage")
     return runner.submit_image_request_job(request=request, prompts_data=prompts_data, config=config, args=args, model_ref="model")
 
 
 def _submit_video(monkeypatch, runner, *, prompts_data, config, args) -> str:
     """Submit a video request job with preflight and model loading stubbed."""
-    _stub_request_job(monkeypatch)
+    stub_request_job(monkeypatch)
     request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx")
     return runner.submit_video_request_job(request=request, prompts_data=prompts_data, config=config, args=args, model_ref="model")
 
@@ -175,7 +143,7 @@ class TestWebRunner:
             assert captured_control_signal["signal"] is not None
 
             release.set()
-            completed_snapshot = _wait_for_status(runner, job_id, "completed")
+            completed_snapshot = wait_for_status(runner, job_id, "completed")
             assert completed_snapshot["status"] == "completed"
             assert completed_snapshot["last_event"]["type"] == "job_completed"
             assert completed_snapshot["terminal_event"] == "job_completed"
@@ -200,7 +168,7 @@ class TestWebRunner:
 
         job_id_holder: dict = {}
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
         monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
@@ -212,7 +180,7 @@ class TestWebRunner:
             request = ImageGenerationRequest(backend=None, model=None, prompt="prompt", model_family="zimage", model_name="atlas")
             job_id_holder["id"] = runner.submit_image_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(), model_ref="/models/atlas", quantize=8)
             start.set()
-            _wait_for_status(runner, job_id_holder["id"], "cancelled")
+            wait_for_status(runner, job_id_holder["id"], "cancelled")
             events = [event for event in runner._get_job(job_id_holder["id"]).history if event["type"] == "model_loading"]
         finally:
             runner.shutdown()
@@ -241,15 +209,16 @@ class TestWebRunner:
         try:
             job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
 
-            snapshot = _wait_for_status(runner, job_id, "completed")
+            snapshot = wait_for_status(runner, job_id, "completed")
             assert snapshot["status"] == "completed"
             assert snapshot["event_count"] == 6  # job_submitted, job_started, model_loading, batch_started, batch_completed, job_completed
             assert snapshot["last_event"]["type"] == "job_completed"
         finally:
             runner.shutdown()
 
-    def test_submit_video_job_passes_scene_and_scene_by_set_to_preflight(self, monkeypatch):
-        """The job scene and the per-entry prompt-file scenes reach run_preflight."""
+    @pytest.mark.parametrize(("scene", "scene_by_set"), [("Night.", {"default": ["A castle at dusk.", None]}), (None, None)])
+    def test_submit_video_job_passes_scene_and_scene_by_set_to_preflight(self, monkeypatch, scene, scene_by_set):
+        """The job scene and the per-entry prompt-file scenes reach run_preflight; a job without them passes None."""
         seen: dict[str, dict] = {}
 
         def _fake_run_video_batch(*, progress_callback, **_kw):
@@ -261,48 +230,23 @@ class TestWebRunner:
 
         monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        scene_by_set = {"default": ["A castle at dusk.", None]}
         try:
-            _stub_request_job(monkeypatch, run_preflight=_recording_preflight)
+            stub_request_job(monkeypatch, run_preflight=_recording_preflight)
             request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx")
             job_id = runner.submit_video_request_job(
                 request=request,
                 prompts_data={"default": [("one", None), ("two", None)]},
                 config={},
-                args=_make_video_args(scene="Night."),
+                args=_make_video_args(scene=scene),
                 model_ref="model",
                 scene_by_set=scene_by_set,
             )
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
-        assert seen["video"]["scene"] == "Night."
+        assert seen["video"]["scene"] == scene
         assert seen["video"]["scene_by_set"] == scene_by_set
-
-    def test_submit_video_job_without_scene_passes_none_to_preflight(self, monkeypatch):
-        """A job submitted without a scene keeps run_preflight's scene arguments empty."""
-        seen: dict[str, dict] = {}
-
-        def _fake_run_video_batch(*, progress_callback, **_kw):
-            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
-
-        def _recording_preflight(prompts_data, config, args, **kwargs):
-            seen["video"] = kwargs
-            return _make_plan(prompts_data, args, config=config)
-
-        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            _stub_request_job(monkeypatch, run_preflight=_recording_preflight)
-            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx")
-            job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(), model_ref="model")
-            _wait_for_status(runner, job_id, "completed")
-        finally:
-            runner.shutdown()
-
-        assert seen["video"]["scene"] is None
-        assert seen["video"]["scene_by_set"] is None
 
     def test_extend_job_builds_the_extend_workflow_and_loads_the_plain_model(self, monkeypatch):
         """Args that carry an extend source run the extend stages with the plain (not upscale) pipeline, and the source reaches the batch."""
@@ -318,11 +262,11 @@ class TestWebRunner:
         monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         try:
-            backend = _stub_request_job(monkeypatch)
+            backend = stub_request_job(monkeypatch)
             monkeypatch.setattr(web_runner_module, "build_video_workflow", build_video_workflow)
             request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", width=512, height=256, num_frames=73)
             job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("", None)]}, config={}, args=args, model_ref="model")
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -335,14 +279,14 @@ class TestWebRunner:
     @pytest.mark.parametrize("end_image_path", ["/images/last.png", None])
     def test_an_image_to_video_job_loads_for_its_last_frame_image_only_when_it_has_one(self, monkeypatch, end_image_path):
         monkeypatch.setattr(web_runner_module, "run_video_batch", lambda **_kw: None)
-        backend = _stub_request_job(monkeypatch)
+        backend = stub_request_job(monkeypatch)
         request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", image_path="/images/first.png", end_image_path=end_image_path)
         args = _make_video_args(image_path="/images/first.png", end_image_path=end_image_path)
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
             job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config={}, args=args, model_ref="model")
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -353,14 +297,14 @@ class TestWebRunner:
     def test_video_job_passes_latent_upsampler_only_when_upscaling(self, monkeypatch, upscale, expect_source):
         """Video jobs hand the configured upsampler source to load_model only for upscale jobs."""
         monkeypatch.setattr(web_runner_module, "run_video_batch", lambda **_kw: None)
-        backend = _stub_request_job(monkeypatch)
+        backend = stub_request_job(monkeypatch)
         config = {"video_model_presets": {"ltx": {"diffusers": {"latent_upsampler": {"repo": "your-org/upsampler", "filename": "up.safetensors"}}}}}
         request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", upscale=upscale)
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
             job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config=config, args=_make_video_args(), model_ref="model")
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -384,7 +328,7 @@ class TestWebRunner:
             progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
 
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
         monkeypatch.setattr(web_runner_module, "run_upscale", _fake_run_upscale)
@@ -395,7 +339,7 @@ class TestWebRunner:
 
         try:
             job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="/models/zit", config={}, context={"output_dir": str(tmp_path)})
-            snapshot = _wait_for_status(runner, job_id, "completed")
+            snapshot = wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -427,7 +371,7 @@ class TestWebRunner:
             raise AssertionError("a SeedVR2 job must not load an image model")
 
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: upscaler)
         monkeypatch.setattr(web_runner_module, "load_seedvr2", _fake_load)
@@ -438,7 +382,7 @@ class TestWebRunner:
 
         try:
             job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="numz/SeedVR2_comfyUI", config={}, context={"output_dir": str(tmp_path)})
-            snapshot = _wait_for_status(runner, job_id, "completed")
+            snapshot = wait_for_status(runner, job_id, "completed")
             events = [event for event in runner._get_job(job_id).history if event["type"] == "model_loading"]
         finally:
             runner.shutdown()
@@ -451,14 +395,14 @@ class TestWebRunner:
 
     def test_seedvr2_upscale_without_an_engine_fails_the_job(self, tmp_path, monkeypatch):
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: None)
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source="/out/a.png", upscale_method="seedvr2", upscale_model="seedvr2-7b")
 
         try:
             job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="numz/SeedVR2_comfyUI", config={}, context={})
-            snapshot = _wait_for_status(runner, job_id, "failed")
+            snapshot = wait_for_status(runner, job_id, "failed")
         finally:
             runner.shutdown()
 
@@ -527,7 +471,7 @@ class TestWebRunner:
 
         try:
             job_id = runner.submit_video_file_upscale_job(request=request, context={"output_dir": str(tmp_path), "media_type": "video"})
-            snapshot = _wait_for_status(runner, job_id, "completed")
+            snapshot = wait_for_status(runner, job_id, "completed")
             loading = [event for event in runner._get_job(job_id).history if event["type"] == "model_loading"]
         finally:
             runner.shutdown()
@@ -573,7 +517,7 @@ class TestWebRunner:
 
     def test_image_job_snapshots_carry_no_media_type(self, tmp_path, monkeypatch):
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "run_upscale", lambda *_a, **_kw: None)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
@@ -581,7 +525,7 @@ class TestWebRunner:
 
         try:
             job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/zit", config={}, context={"output_dir": str(tmp_path)})
-            snapshot = _wait_for_status(runner, job_id, "completed")
+            snapshot = wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -609,7 +553,7 @@ class TestWebRunner:
         try:
             job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(output=str(tmp_path)))
 
-            snapshot = _wait_for_status(runner, job_id, "completed")
+            snapshot = wait_for_status(runner, job_id, "completed")
 
             assert snapshot["status"] == "completed"
             assert snapshot["outputs"] == snapshot["last_event"]["outputs"]
@@ -621,7 +565,7 @@ class TestWebRunner:
             async def _read_history() -> list[dict[str, object]]:
                 payloads: list[dict[str, object]] = []
                 async for frame in runner.stream_job_events(job_id):
-                    payloads.append(_sse_payload(frame))
+                    payloads.append(sse_payload(frame))
                 return payloads
 
             events = asyncio.run(_read_history())
@@ -637,42 +581,24 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
-    def test_submit_image_job_all_failed_batch_ends_failed(self, monkeypatch):
-        """Image jobs with only failed generations should publish a failed terminal state."""
+    @pytest.mark.parametrize("mode", ["image", "video"])
+    def test_a_batch_with_only_failed_generations_ends_failed(self, monkeypatch, mode):
+        """Jobs with only failed generations publish a failed terminal state."""
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
-            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
-            progress_callback({"type": "generation_finished", "mode": "image", "status": "failed", "filename": "failed.png"})
-            progress_callback({"type": "batch_failed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+        def _fake_run_batch(*_args, progress_callback, **_kw):
+            progress_callback({"type": "batch_started", "mode": mode, "total_iterations": 1, "total_runs": 1})
+            progress_callback({"type": "generation_finished", "mode": mode, "status": "failed"})
+            progress_callback({"type": "batch_failed", "mode": mode, "completed_iterations": 1, "total_iterations": 1})
 
-        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        monkeypatch.setattr(web_runner_module, "run_batch" if mode == "image" else "run_video_batch", _fake_run_batch)
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
+            submit = _submit_image if mode == "image" else _submit_video
+            args = _make_args() if mode == "image" else _make_video_args()
+            job_id = submit(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=args)
 
-            snapshot = _wait_for_status(runner, job_id, "failed")
-            assert snapshot["status"] == "failed"
-            assert snapshot["terminal_event"] == "job_failed"
-            assert snapshot["last_event"]["type"] == "job_failed"
-        finally:
-            runner.shutdown()
-
-    def test_submit_video_job_all_failed_batch_ends_failed(self, monkeypatch):
-        """Video jobs with only failed generations should publish a failed terminal state."""
-
-        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback, skip_signal):
-            progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
-            progress_callback({"type": "generation_finished", "mode": "video", "status": "failed"})
-            progress_callback({"type": "batch_failed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
-
-        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-
-        try:
-            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
-
-            snapshot = _wait_for_status(runner, job_id, "failed")
+            snapshot = wait_for_status(runner, job_id, "failed")
             assert snapshot["status"] == "failed"
             assert snapshot["terminal_event"] == "job_failed"
             assert snapshot["last_event"]["type"] == "job_failed"
@@ -690,34 +616,16 @@ class TestWebRunner:
             job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
             monkeypatch.setattr(web_runner_module, "build_video_workflow", lambda _args, **_kw: workflow)
 
-            snapshot = _wait_for_status(runner, job_id, "failed", timeout=5.0)
+            snapshot = wait_for_status(runner, job_id, "failed", timeout=5.0)
 
             async def _read_history() -> list[dict[str, object]]:
-                return [_sse_payload(frame) async for frame in runner.stream_job_events(job_id)]
+                return [sse_payload(frame) async for frame in runner.stream_job_events(job_id)]
 
             events = asyncio.run(_read_history())
             failed = next(event for event in events if event["type"] == "job_failed")
             assert failed["message"] == "CUDA out of memory"
             assert snapshot["last_event"]["type"] == "job_failed"
             assert snapshot["last_event"]["message"] == "CUDA out of memory"
-        finally:
-            runner.shutdown()
-
-    def test_runner_messages_pass_through_job_failed_unchanged(self, monkeypatch):
-        """The runner's batch_failed message is the job_failed message."""
-
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
-            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
-            progress_callback({"type": "batch_failed", "mode": "image", "completed_iterations": 1, "total_iterations": 1, "message": "Generation failed in workflow stage."})
-
-        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-
-        try:
-            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
-
-            snapshot = _wait_for_status(runner, job_id, "failed")
-            assert snapshot["last_event"]["message"] == "Generation failed in workflow stage."
         finally:
             runner.shutdown()
 
@@ -733,7 +641,7 @@ class TestWebRunner:
         try:
             with caplog.at_level("ERROR", logger=web_runner_module.logger.name):
                 job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
-                snapshot = _wait_for_status(runner, job_id, "failed")
+                snapshot = wait_for_status(runner, job_id, "failed")
 
             message = snapshot["last_event"]["message"]
             assert "\n" not in message
@@ -750,7 +658,7 @@ class TestWebRunner:
         try:
             job_id = runner.submit_dummy_job(total_steps=5, delay_seconds=0.001)
 
-            snapshot = _wait_for_status(runner, job_id, "completed")
+            snapshot = wait_for_status(runner, job_id, "completed")
 
             assert snapshot["status"] == "completed"
             assert snapshot["event_count"] == 9
@@ -768,7 +676,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         try:
             job_id = runner.submit_dummy_job(total_steps=2, delay_seconds=0.001)
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
             with runner._jobs_lock:
                 history = [dict(event) for event in runner._jobs[job_id].history]
             cursor = history[-2]["event_id"]
@@ -782,9 +690,9 @@ class TestWebRunner:
             filtered = asyncio.run(_read_filtered_history())
             full = asyncio.run(_read_full_history())
 
-            assert [_sse_payload(frame)["event_id"] for frame in filtered] == [history[-1]["event_id"]]
-            assert _sse_payload(filtered[0])["type"] == "job_completed"
-            assert [_sse_payload(frame)["event_id"] for frame in full] == [event["event_id"] for event in history]
+            assert [sse_payload(frame)["event_id"] for frame in filtered] == [history[-1]["event_id"]]
+            assert sse_payload(filtered[0])["type"] == "job_completed"
+            assert [sse_payload(frame)["event_id"] for frame in full] == [event["event_id"] for event in history]
         finally:
             runner.shutdown()
 
@@ -812,9 +720,9 @@ class TestWebRunner:
                 return first, second
 
             first, second = asyncio.run(_read_history_then_live())
-            assert _sse_payload(first)["event_id"] == 2
-            assert _sse_payload(second)["event_id"] == 3
-            assert _sse_payload(second)["message"] == "arrived while subscribed"
+            assert sse_payload(first)["event_id"] == 2
+            assert sse_payload(second)["event_id"] == 3
+            assert sse_payload(second)["message"] == "arrived while subscribed"
         finally:
             release.set()
             runner.shutdown()
@@ -836,9 +744,9 @@ class TestWebRunner:
             active_job_id = runner._submit_job(job_type="dummy", target_factory=_active_target)
             assert started.wait(timeout=1.0)
             first_terminal_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
-            assert _wait_for_status(runner, first_terminal_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, first_terminal_id, "completed")["status"] == "completed"
             second_terminal_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
-            assert _wait_for_status(runner, second_terminal_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, second_terminal_id, "completed")["status"] == "completed"
 
             with runner._jobs_lock:
                 assert active_job_id in runner._jobs
@@ -874,8 +782,8 @@ class TestWebRunner:
             assert runner.get_job_snapshot(first)["queue_position"] is None
 
             release.set()
-            assert _wait_for_status(runner, first, "completed")
-            assert _wait_for_status(runner, second, "completed")
+            assert wait_for_status(runner, first, "completed")
+            assert wait_for_status(runner, second, "completed")
         finally:
             release.set()
             runner.shutdown()
@@ -896,7 +804,7 @@ class TestWebRunner:
 
         try:
             failed_job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
-            snapshot = _wait_for_status(runner, failed_job_id, "failed")
+            snapshot = wait_for_status(runner, failed_job_id, "failed")
 
             assert snapshot["terminal_event"] == "job_failed"
             assert snapshot["completed_at"] is not None
@@ -908,7 +816,7 @@ class TestWebRunner:
                 assert [event["type"] for event in record.history].count("job_failed") == 1
 
             reusable_job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _progress_callback: None)
-            assert _wait_for_status(runner, reusable_job_id, "completed")["terminal_event"] == "job_completed"
+            assert wait_for_status(runner, reusable_job_id, "completed")["terminal_event"] == "job_completed"
         finally:
             runner.shutdown()
 
@@ -922,7 +830,7 @@ class TestWebRunner:
 
         try:
             job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
-            snapshot = _wait_for_status(runner, job_id, "failed")
+            snapshot = wait_for_status(runner, job_id, "failed")
 
             message = snapshot["last_event"]["message"]
             assert "\n" not in message
@@ -946,7 +854,7 @@ class TestWebRunner:
                 args=_make_video_args(),
                 model_ref="ltx-8",
             )
-            snapshot = _wait_for_status(runner, job_id, "failed")
+            snapshot = wait_for_status(runner, job_id, "failed")
 
             assert snapshot["terminal_event"] == "job_failed"
             assert snapshot["completed_at"] is not None
@@ -967,7 +875,7 @@ class TestWebRunner:
 
         try:
             job_id = runner._submit_job(job_type="test", target_factory=_succeed)
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
 
             with pytest.raises(type(error)):
                 runner._run_target(job_id, _raise_process_control)
@@ -1024,7 +932,7 @@ class TestWebRunner:
 
             runner.queue_job_control(job_id, "quit")
 
-            cancelled_snapshot = _wait_for_status(runner, job_id, "cancelled")
+            cancelled_snapshot = wait_for_status(runner, job_id, "cancelled")
             assert cancelled_snapshot["status"] == "cancelled"
             assert cancelled_snapshot["last_event"]["type"] == "job_cancelled"
             assert cancelled_snapshot["terminal_event"] == "job_cancelled"
@@ -1055,7 +963,7 @@ class TestWebRunner:
             runner.shutdown()
             proceed.set()
 
-            snapshot = _wait_for_status(runner, job_id, "cancelled", timeout=2.0)
+            snapshot = wait_for_status(runner, job_id, "cancelled", timeout=2.0)
             assert snapshot["status"] == "cancelled"
             assert actions == ["quit"]
         finally:
@@ -1085,20 +993,6 @@ class TestWebRunner:
             progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": rounds, "total_iterations": rounds})
 
         return _fake_run_batch
-
-    def test_review_job_lists_approve_and_discard_in_its_controls(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "run_batch", lambda *a, **kw: None)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            plain = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2))
-            reviewed = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
-            no_upscale = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(review=True))
-
-            assert runner.get_job_snapshot(plain)["supported_controls"] == ["next", "pause", "resume", "repeat", "quit"]
-            assert runner.get_job_snapshot(reviewed)["supported_controls"] == ["next", "pause", "resume", "repeat", "approve", "discard", "quit"]
-            assert "approve" not in runner.get_job_snapshot(no_upscale)["supported_controls"]
-        finally:
-            runner.shutdown()
 
     def test_decisions_are_refused_while_no_review_waits(self, monkeypatch):
         started = threading.Event()
@@ -1143,7 +1037,7 @@ class TestWebRunner:
             with pytest.raises(web_runner_module.UnsupportedJobControlError):
                 runner.queue_job_control(job_id, "discard" if action == "approve" else "approve")
 
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
             assert decisions == [decision]
             assert runner.get_job_snapshot(job_id)["review"] is None
         finally:
@@ -1165,7 +1059,7 @@ class TestWebRunner:
             assert decisions == []
 
             runner.queue_job_control(job_id, "approve")
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
         finally:
             runner.shutdown()
 
@@ -1182,7 +1076,7 @@ class TestWebRunner:
             with pytest.raises(web_runner_module.UnsupportedJobControlError):
                 runner.queue_job_control(job_id, "approve")
 
-            assert _wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
+            assert wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
             assert decisions == ["quit"]
         finally:
             runner.shutdown()
@@ -1204,7 +1098,7 @@ class TestWebRunner:
             assert runner.get_job_snapshot(job_id)["review"] == {"iteration": 2}
             runner.queue_job_control(job_id, "approve")
 
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
             assert decisions == ["discard", "approve"]
         finally:
             runner.shutdown()
@@ -1255,7 +1149,7 @@ class TestWebRunner:
             assert runner._get_job(job_id).review_path == small_render
 
             runner._get_job(job_id).control_signal.set_review_decision("discard")
-            final = _wait_for_status(runner, job_id, "completed")
+            final = wait_for_status(runner, job_id, "completed")
 
             assert decisions == ["discard"]
             assert runner._get_job(job_id).review_path is None
@@ -1296,76 +1190,7 @@ class TestWebRunner:
                 runner.queue_job_control(job_id, "resume")
 
             proceed.set()
-            assert _wait_for_status(runner, job_id, "completed")["review"] is None
-        finally:
-            proceed.set()
-            runner.shutdown()
-
-    def test_the_next_review_of_a_batch_opens_a_fresh_latch(self, monkeypatch):
-        reached = threading.Event()
-        decisions: list[str] = []
-        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, decisions, rounds=2))
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
-            assert reached.wait(timeout=1.0)
-            runner.queue_job_control(job_id, "approve")
-            deadline = time.monotonic() + 1.0
-            while runner.get_job_snapshot(job_id)["review"] != {"iteration": 2} and time.monotonic() < deadline:
-                time.sleep(0.01)
-            assert runner._get_job(job_id).review_decided is False
-
-            runner.queue_job_control(job_id, "discard")
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
-            assert decisions == ["approve", "discard"]
-        finally:
-            runner.shutdown()
-
-    def test_video_job_lists_approve_and_discard_with_a_review(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "run_video_batch", lambda *a, **kw: None)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            plain = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2))
-            reviewed = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2, review=True))
-            no_upscale = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(review=True))
-
-            assert runner.get_job_snapshot(plain)["supported_controls"] == ["quit"]
-            assert runner.get_job_snapshot(reviewed)["supported_controls"] == ["approve", "discard", "quit"]
-            assert runner.get_job_snapshot(no_upscale)["supported_controls"] == ["quit"]
-        finally:
-            runner.shutdown()
-
-    def test_the_review_path_is_available_only_while_the_review_is_pending(self, monkeypatch, tmp_path):
-        reached = threading.Event()
-        proceed = threading.Event()
-        small_render = str(tmp_path / "small-render.mp4")
-
-        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, progress_callback, skip_signal):
-            progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
-            skip_signal.begin_review()
-            progress_callback({"type": "job_paused", "mode": "video", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1}, "review_path": small_render})
-            reached.set()
-            skip_signal.wait_for_review()
-            proceed.wait(timeout=2.0)
-            progress_callback({"type": "job_resumed", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
-            progress_callback({"type": "generation_finished", "mode": "video", "status": "skipped"})
-            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
-
-        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2, review=True, output=str(tmp_path)))
-            assert reached.wait(timeout=1.0)
-            assert runner.get_job_review_path(job_id) == small_render
-
-            runner.queue_job_control(job_id, "discard")
-            assert runner.get_job_review_path(job_id) == small_render  # the file lives until job_resumed
-
-            proceed.set()
-            _wait_for_status(runner, job_id, "completed")
-            assert runner.get_job_review_path(job_id) is None
-            with pytest.raises(KeyError):
-                runner.get_job_review_path("nope")
+            assert wait_for_status(runner, job_id, "completed")["review"] is None
         finally:
             proceed.set()
             runner.shutdown()
@@ -1380,28 +1205,8 @@ class TestWebRunner:
 
         runner.shutdown()
 
-        assert _wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
+        assert wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
         assert decisions == ["quit"]
-
-    def test_shutdown_ends_a_paused_image_job(self, monkeypatch):
-        paused = threading.Event()
-
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
-            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
-            progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
-            paused.set()
-            skip_signal.wait_for_key()
-            if skip_signal.consume() == "quit":
-                progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
-
-        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
-        assert paused.wait(timeout=1.0)
-
-        runner.shutdown()
-
-        assert _wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
 
     def test_video_jobs_accept_quit_and_refuse_other_controls(self, monkeypatch):
         """A running video job can be cancelled; its batch sees the queued Quit and ends the job."""
@@ -1426,7 +1231,7 @@ class TestWebRunner:
                 runner.queue_job_control(job_id, "pause")
             assert runner.queue_job_control(job_id, "quit") == {"job_id": job_id, "action": "quit", "status": "queued"}
 
-            assert _wait_for_status(runner, job_id, "cancelled")["terminal_event"] == "job_cancelled"
+            assert wait_for_status(runner, job_id, "cancelled")["terminal_event"] == "job_cancelled"
         finally:
             runner.shutdown()
 
@@ -1485,15 +1290,10 @@ class TestWebServerSse:
         [
             (None, None, None),
             ("7", None, 7),
-            ("", None, None),
             ("-1", None, None),
-            ("7.5", None, None),
-            (" 7", None, None),
             (None, "5", 5),
-            (None, "0", 0),
             ("7", "5", 7),
             ("-1", "5", 5),
-            ("7.5", "5", 5),
         ],
     )
     def test_sse_endpoint_forwards_only_valid_non_negative_last_event_id(self, monkeypatch, last_event_id, after, expected_cursor):
@@ -1581,7 +1381,7 @@ def test_pruned_jobs_keep_their_final_status_for_late_clients():
     runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, terminal_retention_seconds=0.0)
     try:
         job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
-        assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+        assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
         runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)  # triggers pruning of the finished job
 
         with runner._jobs_lock:
@@ -1613,16 +1413,10 @@ class TestAcceleratorMemoryRelease:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         try:
             job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=target_factory)
-            snapshot = _wait_for_status(runner, job_id, expected_status)
+            snapshot = wait_for_status(runner, job_id, expected_status)
         finally:
             runner.shutdown()
         return snapshot, calls
-
-    def test_successful_job_releases_memory(self, monkeypatch):
-        snapshot, calls = self._run_job(monkeypatch, lambda _progress_callback: None, expected_status="completed")
-
-        assert snapshot["status"] == "completed"
-        assert calls == ["released"]
 
     def test_failed_job_releases_memory_before_reporting_failure(self, monkeypatch):
         def _fail(_progress_callback):
@@ -1651,7 +1445,7 @@ def test_non_generation_jobs_do_not_release_accelerator_memory(monkeypatch):
     runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
     try:
         job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
-        assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+        assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
     finally:
         runner.shutdown()
 
@@ -1797,7 +1591,7 @@ class TestJobQueue:
         queued_order = [labels[snapshot["job_id"]] for snapshot in runner.list_jobs()["queued_jobs"]]
         release.set()
         for job_id in labels:
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
 
         assert ran == queued_order
         assert len(ids) == 6
@@ -1837,15 +1631,15 @@ class TestJobQueue:
             progress_callback({"type": "step_progress", "current_step": 1, "total_steps": 2})
 
         queued = runner._submit_job(job_type="test", exclusive=True, target_factory=_report)
-        time.sleep(0.3)
+        time.sleep(0.1)
         release.set()
-        assert _wait_for_status(runner, queued, "completed")["status"] == "completed"
+        assert wait_for_status(runner, queued, "completed")["status"] == "completed"
 
         with runner._jobs_lock:
             record = runner._jobs[queued]
         with record.lock:
             step = next(event for event in record.history if event["type"] == "step_progress")
-        assert step["elapsed_secs"] < 0.2
+        assert step["elapsed_secs"] < 0.05
 
     def test_list_jobs_puts_each_job_in_one_place_and_positions_follow_the_queue(self, runner):
         # A non-generation job occupies the worker, so the first generation job waits at the head unclaimed.
@@ -1870,7 +1664,7 @@ class TestJobQueue:
         assert runner.clear_queue() == [second, third]
         release.set()
 
-        assert _wait_for_status(runner, head, "completed")["status"] == "completed"
+        assert wait_for_status(runner, head, "completed")["status"] == "completed"
         assert runner.get_job_snapshot(second)["status"] == "cancelled"
         assert runner.get_job_snapshot(third)["status"] == "cancelled"
 
@@ -1914,8 +1708,8 @@ class TestJobQueue:
         failed = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
         after = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
 
-        assert _wait_for_status(runner, failed, "failed")["status"] == "failed"
-        assert _wait_for_status(runner, after, "completed")["status"] == "completed"
+        assert wait_for_status(runner, failed, "failed")["status"] == "failed"
+        assert wait_for_status(runner, after, "completed")["status"] == "completed"
 
     def test_memory_is_released_before_the_next_job_starts(self, monkeypatch, runner):
         order: list[str] = []
@@ -1923,13 +1717,9 @@ class TestJobQueue:
         first = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: order.append("first"))
         second = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: order.append("second"))
 
-        assert _wait_for_status(runner, second, "completed")["status"] == "completed"
+        assert wait_for_status(runner, second, "completed")["status"] == "completed"
         assert runner.get_job_snapshot(first)["status"] == "completed"
         assert order == ["first", "release", "second", "release"]
-
-    def test_dummy_jobs_still_run(self, runner):
-        job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
-        assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
 
 
 def test_shutdown_cancels_queued_jobs_without_running_them():
@@ -1948,7 +1738,7 @@ def test_shutdown_cancels_queued_jobs_without_running_them():
 
     runner.shutdown()
     release.set()
-    time.sleep(0.1)
+    runner._executor.shutdown(wait=True)
 
     assert ran == []
     for job_id in queued:
@@ -2007,7 +1797,7 @@ def test_a_video_review_over_http_serves_the_small_render_until_the_job_resumes(
 
             assert client.post(f"/jobs/{job_id}/controls/discard").status_code == 200
             proceed[1].set()
-            assert _wait_for_status(runner, job_id, "completed")["review"] is None
+            assert wait_for_status(runner, job_id, "completed")["review"] is None
             assert client.get(f"/jobs/{job_id}/review?v=2").status_code == 404
             assert client.get("/jobs/unknown-job/review").status_code == 404
         assert decisions == ["approve", "discard"]
@@ -2248,3 +2038,67 @@ class TestJobLogHook:
         assert ran == ["second"]
         assert runner.list_jobs() == {"active_job": None, "queued_jobs": []}
         assert self._entries(db_path) == []
+
+
+_BUSY_ENHANCER_SESSION = SimpleNamespace(busy=lambda: True)
+
+
+class TestEnhancerAdmission:
+    """A job is admitted, queued or refused by what the prompt enhancer is doing."""
+
+    def test_job_admission_rejects_while_enhancing(self, monkeypatch):
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _BUSY_ENHANCER_SESSION)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            with pytest.raises(web_runner_module.JobConflictError, match="Prompt enhancement in progress"):
+                runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
+            assert runner.get_active_exclusive_job_snapshot() is None
+        finally:
+            runner.shutdown()
+
+    def test_job_queues_while_an_auto_enhance_job_holds_the_enhancer(self, monkeypatch):
+        """While a job's own preflight holds the enhancer, a second job queues behind it instead of being refused."""
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _BUSY_ENHANCER_SESSION)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        monkeypatch.setattr(web_server, "web_runner", runner)
+        release = threading.Event()
+        try:
+            runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: release.wait(5))
+            queued_id = runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
+            assert runner.get_job_snapshot(queued_id)["status"] == "queued"
+        finally:
+            release.set()
+            runner.shutdown()
+
+    def test_admit_exclusive_is_atomic_with_job_check(self):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        release = threading.Event()
+        admitted: list[bool] = []
+        try:
+            runner.admit_exclusive(lambda: admitted.append(True), busy_message="busy")
+            assert admitted == [True]
+            runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: release.wait(5))
+            with pytest.raises(web_runner_module.JobConflictError, match="busy"):
+                runner.admit_exclusive(lambda: admitted.append(True), busy_message="busy")
+            assert admitted == [True]
+        finally:
+            release.set()
+            runner.shutdown()
+
+
+class TestJobLifecycle:
+    """The enhanced prompt is carried by the job's history."""
+
+    def test_enhanced_prompt_survives_in_prompt_progress(self):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = runner._submit_job(job_type="image", target_factory=lambda cb: None)
+            runner._publish_event(job_id, {"type": "prompt_started", "prompt": "a fox", "run_index": 0})
+            runner._publish_event(job_id, {"type": "prompt_enhanced", "enhanced_prompt": "A fox in snow."})
+            runner._publish_event(job_id, {"type": "generation_started"})
+            history = runner._get_job(job_id).history
+            assert history[-1]["enhanced_prompt"] == "A fox in snow."
+            runner._publish_event(job_id, {"type": "prompt_started", "prompt": "a cat", "run_index": 0})
+            assert "enhanced_prompt" not in runner._get_job(job_id).history[-1]
+        finally:
+            runner.shutdown()

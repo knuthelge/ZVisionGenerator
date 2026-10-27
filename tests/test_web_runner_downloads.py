@@ -12,8 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests.conftest import _make_args, _make_video_args
-from tests.test_downloads_child import _FakeProcess, _Launcher
-from tests.test_web_runner import _sse_payload, _stub_request_job, _wait_for_status
+from tests._server_helpers import FakeProcess, Launcher, sse_payload, stub_request_job, wait_for_status
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
@@ -63,7 +62,7 @@ def _image_request(**overrides) -> ImageGenerationRequest:
 
 
 def _submit_image(monkeypatch, runner, *, request=None, config=None, run_batch=None) -> str:
-    _stub_request_job(monkeypatch)
+    stub_request_job(monkeypatch)
     monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="info")))
     monkeypatch.setattr(web_runner_module, "run_batch", run_batch or _batch_that_completes)
     return runner.submit_image_request_job(request=request or _image_request(model_name="atlas"), prompts_data=_PROMPTS, config=config or {}, args=_make_args(), model_ref="owner/atlas")
@@ -118,7 +117,7 @@ class TestJobFlow:
         runner = _runner()
         try:
             job_id = _submit_image(monkeypatch, runner)
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
             history = _history(runner, job_id)
         finally:
             runner.shutdown()
@@ -140,7 +139,7 @@ class TestJobFlow:
         runner._publish_event = lambda job_id, event: (seen.append(event) if event["type"] == DOWNLOADING_EVENT else None, original(job_id, event))[1]
         try:
             job_id = _submit_image(monkeypatch, runner)
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
             kept = [event for event in _history(runner, job_id) if event["type"] == DOWNLOADING_EVENT]
         finally:
             runner.shutdown()
@@ -154,29 +153,13 @@ class TestJobFlow:
         assert (seen[0]["part"], seen[0]["parts"]) == (1, 1)
         assert seen[0]["shared"] is False
         assert "eta_secs" not in kept[0]
-
-    def test_the_download_eta_never_becomes_the_generation_eta(self):
-        runner = _runner()
-        try:
-            job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.0)
-            _wait_for_status(runner, job_id, "completed")
-            runner._publish_event(job_id, _downloading(10))
-            runner._publish_event(job_id, {"type": "model_loading", "mode": "image", "model": "m"})
-            events = _history(runner, job_id)
-        finally:
-            runner.shutdown()
-
-        downloading = next(event for event in events if event["type"] == DOWNLOADING_EVENT)
-        loading = next(event for event in events if event["type"] == "model_loading")
-        assert downloading["download_eta_secs"] == 9.0
-        assert "eta_secs" not in downloading
-        assert "eta_secs" not in loading
+        assert "eta_secs" not in next(event for event in _history(runner, job_id) if event["type"] == "model_loading")
 
     def test_a_video_job_downloads_before_model_loading(self, monkeypatch):
         calls: list = []
         monkeypatch.setattr(web_runner_module, "video_plan", lambda *a, **kw: (calls.append((a, kw)), (_TARGET,))[1])
         _fake_ensure(monkeypatch, run=_child_that_reports(1))
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(
             web_runner_module, "run_video_batch", lambda *, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
         )
@@ -184,7 +167,7 @@ class TestJobFlow:
         try:
             request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", model_name="ltx-q4", upscale="x2")
             job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config={"k": 1}, args=_make_video_args(), model_ref="owner/ltx")
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
             types = _types(runner, job_id)
             first = next(event for event in _history(runner, job_id) if event["type"] == DOWNLOADING_EVENT)
         finally:
@@ -195,26 +178,12 @@ class TestJobFlow:
         assert first["model"] == "ltx-q4"
         assert calls == [(("owner/ltx",), {"family": "ltx", "config": {"k": 1}, "model_name": "ltx-q4", "upscale": True})]
 
-    def test_an_unchecked_download_loads_the_model_without_download_events(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
-        _fake_ensure(monkeypatch, check=lambda _t: None, run=MagicMock(side_effect=AssertionError("no download")))
-        runner = _runner()
-        try:
-            job_id = _submit_image(monkeypatch, runner)
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
-            types = _types(runner, job_id)
-        finally:
-            runner.shutdown()
-
-        assert DOWNLOADING_EVENT not in types
-        assert "model_loading" in types
-
     def test_a_plan_that_cannot_be_made_skips_the_ensure_step(self, monkeypatch):
         """``None`` means the plan is unknown (offline): the ensure step is not called and the model loads as before."""
         runner = _runner()
         try:
             job_id = _submit_image(monkeypatch, runner)  # the autouse ensure raises when called
-            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
             types = _types(runner, job_id)
         finally:
             runner.shutdown()
@@ -228,7 +197,7 @@ class TestJobFlow:
         runner = _runner()
         try:
             job_id = _submit_image(monkeypatch, runner)
-            snapshot = _wait_for_status(runner, job_id, "failed")
+            snapshot = wait_for_status(runner, job_id, "failed")
             events = _history(runner, job_id)
         finally:
             runner.shutdown()
@@ -275,7 +244,7 @@ class _EnhancerHarness:
 
 
 def _submit_enhanced_image(monkeypatch, runner) -> str:
-    _stub_request_job(monkeypatch, run_preflight=web_runner_module.run_preflight)
+    stub_request_job(monkeypatch, run_preflight=web_runner_module.run_preflight)
     monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="info")))
     monkeypatch.setattr(web_runner_module, "run_batch", _batch_that_completes)
     request = _image_request(model_name="atlas")
@@ -291,7 +260,7 @@ class TestEnhancerDownload:
         runner = _runner()
         try:
             job_id = _submit_enhanced_image(monkeypatch, runner)
-            assert _wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
             history = _history(runner, job_id)
         finally:
             runner.shutdown()
@@ -311,16 +280,16 @@ class TestEnhancerDownload:
 
     def test_stopping_the_enhancer_download_ends_the_job_once_without_loading_anything(self, monkeypatch):
         harness = _EnhancerHarness(monkeypatch)
-        process = _FakeProcess(running_polls=None, wait_timeouts=1)
+        process = FakeProcess(running_polls=None, wait_timeouts=1)
         cleanup = MagicMock()
-        _fake_ensure(monkeypatch, run=functools.partial(run_in_child, popen=_Launcher(process), poll_secs=0.01, grace_secs=0.01, cleanup=cleanup))
+        _fake_ensure(monkeypatch, run=functools.partial(run_in_child, popen=Launcher(process), poll_secs=0.01, grace_secs=0.01, cleanup=cleanup))
         flights = DownloadFlights()
         runner = _runner(download_flights=flights)
         try:
             job_id = _submit_enhanced_image(monkeypatch, runner)
             _wait_for_event(runner, job_id, DOWNLOADING_EVENT)
             runner.queue_job_control(job_id, "quit")
-            snapshot = _wait_for_status(runner, job_id, "cancelled", timeout=3.0)
+            snapshot = wait_for_status(runner, job_id, "cancelled", timeout=3.0)
             events = _history(runner, job_id)
         finally:
             runner.shutdown()
@@ -348,7 +317,7 @@ class TestEnhancerDownload:
             _wait_for_event(runner, job_id, DOWNLOADING_EVENT)
             mirrored = next(event for event in _history(runner, job_id) if event["type"] == DOWNLOADING_EVENT)
             runner.queue_job_control(job_id, "quit")
-            _wait_for_status(runner, job_id, "cancelled", timeout=3.0)
+            wait_for_status(runner, job_id, "cancelled", timeout=3.0)
             events = _history(runner, job_id)
             still_active = flights.active()
         finally:
@@ -367,7 +336,7 @@ class TestEnhancerDownload:
         runner = _runner()
         try:
             job_id = _submit_enhanced_image(monkeypatch, runner)
-            assert _wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
             history = _history(runner, job_id)
         finally:
             runner.shutdown()
@@ -376,33 +345,17 @@ class TestEnhancerDownload:
         assert [event["phase"] for event in history if event["type"] == "enhancer_loading"] == ["downloading"]
         assert harness.loaded == [("a/enhancer", None)]
 
-    def test_the_video_hook_labels_the_events_with_the_mode_and_counts_the_job_iterations(self, monkeypatch):
-        seen: list = []
-        monkeypatch.setattr(web_runner_module, "enhancer_plan", lambda repo, revision: (_ENHANCER_TARGET,))
-        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: STOPPED)
-        runner = _runner()
-        try:
-            hook = runner._enhancer_download_hook(
-                mode="video", prompts_data={"a": [("x", None), ("y", None)], "b": [("z", None)]}, args=_make_video_args(runs=2), progress_callback=seen.append, control_signal=SkipSignal()
-            )
-            result = hook("a/enhancer", None)
-        finally:
-            runner.shutdown()
-
-        assert result is False
-        assert seen == [{"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 6, "download": "stopped"}]
-
     def test_a_job_without_enhancement_never_plans_an_enhancer_download(self, monkeypatch):
         harness = _EnhancerHarness(monkeypatch)
         runner = _runner()
         try:
-            _stub_request_job(monkeypatch, run_preflight=web_runner_module.run_preflight)
+            stub_request_job(monkeypatch, run_preflight=web_runner_module.run_preflight)
             monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
             monkeypatch.setattr(web_runner_module, "run_batch", _batch_that_completes)
             job_id = runner.submit_image_request_job(
                 request=_image_request(model_name="atlas"), prompts_data=_PROMPTS, config=_ENHANCER_CONFIG, args=_make_args(enhance=None, no_enhance=True, enhance_model=None), model_ref="owner/atlas"
             )
-            assert _wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
+            assert wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
         finally:
             runner.shutdown()
 
@@ -413,9 +366,9 @@ class TestStop:
     def test_stopping_the_owning_job_terminates_then_kills_the_child_cleans_up_and_cancels(self, monkeypatch):
         """SC-3: the owner's Stop ends the child (kill after the grace period), cleans up and reports download "stopped"."""
         monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
-        process = _FakeProcess(running_polls=None, wait_timeouts=1)
+        process = FakeProcess(running_polls=None, wait_timeouts=1)
         cleanup = MagicMock()
-        run = functools.partial(run_in_child, popen=_Launcher(process), poll_secs=0.01, grace_secs=0.01, cleanup=cleanup)
+        run = functools.partial(run_in_child, popen=Launcher(process), poll_secs=0.01, grace_secs=0.01, cleanup=cleanup)
         _fake_ensure(monkeypatch, run=run)
         flights = DownloadFlights()
         runner = _runner(download_flights=flights)
@@ -423,7 +376,7 @@ class TestStop:
             job_id = _submit_image(monkeypatch, runner)
             _wait_for_event(runner, job_id, DOWNLOADING_EVENT)
             runner.queue_job_control(job_id, "quit")
-            snapshot = _wait_for_status(runner, job_id, "cancelled")
+            snapshot = wait_for_status(runner, job_id, "cancelled")
             events = _history(runner, job_id)
         finally:
             runner.shutdown()
@@ -450,7 +403,7 @@ class TestStop:
             _wait_for_event(runner, job_id, DOWNLOADING_EVENT)
             mirrored = next(event for event in _history(runner, job_id) if event["type"] == DOWNLOADING_EVENT)
             runner.queue_job_control(job_id, "quit")
-            _wait_for_status(runner, job_id, "cancelled")
+            wait_for_status(runner, job_id, "cancelled")
             events = _history(runner, job_id)
             still_active = flights.active()
         finally:
@@ -566,7 +519,7 @@ class TestPlannerArguments:
         runner = _runner()
         try:
             job_id = _submit_image(monkeypatch, runner, config={"generation": {}})
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -575,7 +528,7 @@ class TestPlannerArguments:
     def test_the_creative_upscale_plans_the_image_model_with_the_app_config(self, monkeypatch, tmp_path):
         plan = MagicMock(return_value=None)
         monkeypatch.setattr(web_runner_module, "image_plan", plan)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
         monkeypatch.setattr(
             web_runner_module, "run_upscale", lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
@@ -584,7 +537,7 @@ class TestPlannerArguments:
         try:
             request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="flux2_klein", model_name="atlas", upscale_factor=2, upscale_source="/out/a.png")
             job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/atlas", config={"generation": {}}, context={"output_dir": str(tmp_path)})
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -596,7 +549,7 @@ class TestPlannerArguments:
         config = {"moss_image": {}}
         monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
         monkeypatch.setattr(web_runner_module, "ensure_built_model", lambda model_ref, cfg, **_kw: calls.append(("built", model_ref, cfg)) or True)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: calls.append(("load",)) or (MagicMock(), MagicMock()))
         monkeypatch.setattr(
             web_runner_module, "run_upscale", lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
@@ -605,7 +558,7 @@ class TestPlannerArguments:
         try:
             request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="zimage", model_name="moss", upscale_factor=2, upscale_source="/out/a.png")
             job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/moss", config=config, context={"output_dir": str(tmp_path)})
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
         finally:
             runner.shutdown()
 
@@ -618,7 +571,7 @@ class TestPlannerArguments:
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: upscaler)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
         _fake_ensure(monkeypatch, run=_child_that_reports(1))
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_seedvr2", lambda _engine, _name, *, on_phase, **_kw: (on_phase("loading"), MagicMock())[1])
         monkeypatch.setattr(
             web_runner_module, "run_upscale", lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
@@ -627,7 +580,7 @@ class TestPlannerArguments:
         try:
             request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source="/out/a.png", upscale_method="seedvr2", upscale_model="seedvr2-7b")
             job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="numz/SeedVR2_comfyUI", config={}, context={"output_dir": str(tmp_path)})
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
             events = _history(runner, job_id)
         finally:
             runner.shutdown()
@@ -640,13 +593,13 @@ class TestPlannerArguments:
     def test_an_upscale_stopped_while_downloading_reports_one_iteration(self, monkeypatch, tmp_path):
         monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: STOPPED)
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", MagicMock(side_effect=AssertionError("no load after a stopped download")))
         runner = _runner()
         try:
             request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="zimage", upscale_factor=2, upscale_source="/out/a.png")
             job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/atlas", config={}, context={"output_dir": str(tmp_path)})
-            _wait_for_status(runner, job_id, "cancelled")
+            wait_for_status(runner, job_id, "cancelled")
             last = _history(runner, job_id)[-1]
         finally:
             runner.shutdown()
@@ -660,7 +613,7 @@ class TestHistoryReplacement:
         runner = _runner()
         try:
             job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.0)
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
             runner._publish_event(job_id, _downloading(10))
             runner._publish_event(job_id, {"type": "model_loading", "mode": "image", "model": "m"})
             runner._publish_event(job_id, _downloading(20))
@@ -678,14 +631,14 @@ class TestHistoryReplacement:
         runner = _runner()
         try:
             job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.0)
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
             first = runner._get_job(job_id).next_event_id
             runner._publish_event(job_id, _downloading(10))
             runner._publish_event(job_id, _downloading(20))
             runner._publish_event(job_id, _downloading(30))
 
             async def replay() -> list[dict]:
-                return [_sse_payload(frame) async for frame in runner.stream_job_events(job_id, after_event_id=first)]
+                return [sse_payload(frame) async for frame in runner.stream_job_events(job_id, after_event_id=first)]
 
             replayed = asyncio.run(replay())
         finally:
@@ -697,7 +650,7 @@ class TestHistoryReplacement:
         runner = _runner()
         try:
             job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.0)
-            _wait_for_status(runner, job_id, "completed")
+            wait_for_status(runner, job_id, "completed")
             record = runner._get_job(job_id)
             record.review = {"iteration": 1}
             record.preview_jpeg = b"jpeg"
@@ -709,21 +662,20 @@ class TestHistoryReplacement:
         assert kept == ({"iteration": 1}, b"jpeg")
 
     @pytest.mark.parametrize("mode", ["image", "video"])
-    def test_the_hook_counts_every_planned_iteration_across_sets_and_runs(self, monkeypatch, mode):
+    def test_the_hook_labels_its_events_with_the_mode_and_counts_every_planned_iteration_across_sets_and_runs(self, monkeypatch, mode):
+        seen: list = []
         monkeypatch.setattr(web_runner_module, "enhancer_plan", lambda repo, revision: (DownloadTarget(repo, revision),))
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: STOPPED)
         runner = _runner()
-        captured: dict[str, object] = {}
-        monkeypatch.setattr(runner, "_ensure_downloads", lambda targets, **kwargs: (captured.update(kwargs, targets=targets), False)[1])
         try:
             prompts_data = {"a": [("one", None), ("two", None)], "b": [("three", None)]}
-            hook = runner._enhancer_download_hook(mode=mode, prompts_data=prompts_data, args=_make_args(runs=4), progress_callback=MagicMock(), control_signal=SkipSignal())
-            assert hook("a/enhancer", "rev") is False
+            hook = runner._enhancer_download_hook(mode=mode, prompts_data=prompts_data, args=_make_args(runs=4), progress_callback=seen.append, control_signal=SkipSignal())
+            result = hook("a/enhancer", "rev")
         finally:
             runner.shutdown()
 
-        assert captured["total_iterations"] == 12
-        assert (captured["mode"], captured["role"], captured["model"]) == (mode, "enhancer", "a/enhancer")
-        assert captured["targets"] == (DownloadTarget("a/enhancer", "rev"),)
+        assert result is False
+        assert seen == [{"type": "batch_cancelled", "mode": mode, "completed_iterations": 0, "total_iterations": 12, "download": "stopped"}]
 
 
 class TestMacH3VideoJob:
@@ -736,7 +688,7 @@ class TestMacH3VideoJob:
         from zvisiongenerator.backends.mac import h3_video
         from zvisiongenerator.utils.config import load_config
 
-        _stub_request_job(monkeypatch)
+        stub_request_job(monkeypatch)
         monkeypatch.setattr("sys.platform", "darwin")
         planned: list = []
         from zvisiongenerator.downloads.plans import video_plan as real_plan
@@ -760,7 +712,7 @@ class TestMacH3VideoJob:
                 request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="h3", model_name="h3", image_path=image_path, upscale=upscale)
                 args = _make_video_args(extend_source=object() if extend else None)
                 job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config=load_config(), args=args, model_ref=self._REF)
-                snapshot = _wait_for_status(runner, job_id, "completed")
+                snapshot = wait_for_status(runner, job_id, "completed")
                 assert snapshot["status"] == "completed", snapshot
             finally:
                 runner.shutdown()

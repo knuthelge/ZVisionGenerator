@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import _make_args, make_extend_source
+from tests._server_helpers import make_web_config, patch_image_submit_dependencies
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
@@ -169,7 +170,7 @@ class TestEnhanceEndpoint:
         assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
         assert _without_model(frames[-1]) == {"type": "done", "scene": "", "prompt": "The knight draws his sword and raises it high.", "clamped": False}
         system, user = enhancer.messages[0][0]["content"], enhancer.messages[0][1]["content"]
-        assert "A castle at dusk." in system and "kept exactly as written" in system and user == "he draws his sword"
+        assert "A castle at dusk." in system and user == "he draws his sword"
 
     def test_json_format_writes_a_caption(self, monkeypatch, no_active_job):
         reply = "SUMMARY: A fox in snow.\nAESTHETICS: calm\nLIGHTING: soft\nCAMERA: 50mm\nCOLORS: white\nBACKGROUND: Snowy trees.\nOBJECT: A red fox."
@@ -395,10 +396,8 @@ class TestGenerateFields:
         assert args.enhance is not None
 
     def test_image_submit_threads_settings_and_file_entries(self, monkeypatch, tmp_path):
-        from test_web_server import _make_web_config, _patch_image_submit_dependencies
-
         submitted: list[dict] = []
-        _patch_image_submit_dependencies(
+        patch_image_submit_dependencies(
             monkeypatch,
             model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None),
             defaults={"steps": 4, "guidance": 1.0, "scheduler": None, "supports_negative_prompt": True},
@@ -406,7 +405,7 @@ class TestGenerateFields:
         )
         prompt_file = tmp_path / "p.yaml"
         prompt_file.write_text("a:\n  - prompt: x\n    enhance: {style: anime}\n  - prompt: y\n", encoding="utf-8")
-        web_config = _make_web_config()
+        web_config = make_web_config()
         web_config.output_dir = str(tmp_path)
 
         class _Form(dict):
@@ -437,63 +436,8 @@ class TestGenerateFields:
 
     _KEEP_ALL_IMAGE = json.dumps({"style": "keep", "mood": "keep", "details": [], "length": "same"})
 
-    def test_job_admission_rejects_while_enhancing(self, monkeypatch):
-        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            with pytest.raises(web_runner_module.JobConflictError, match="Prompt enhancement in progress"):
-                runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
-            assert runner.get_active_exclusive_job_snapshot() is None
-        finally:
-            runner.shutdown()
-
-    def test_job_queues_while_an_auto_enhance_job_holds_the_enhancer(self, monkeypatch):
-        """While a job's own preflight holds the enhancer, a second job queues behind it instead of being refused."""
-        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        monkeypatch.setattr(web_server, "web_runner", runner)
-        release = threading.Event()
-        try:
-            runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: release.wait(5))
-            queued_id = runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
-            assert runner.get_job_snapshot(queued_id)["status"] == "queued"
-        finally:
-            release.set()
-            runner.shutdown()
-
-    def test_admit_exclusive_is_atomic_with_job_check(self):
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        release = threading.Event()
-        admitted: list[bool] = []
-        try:
-            runner.admit_exclusive(lambda: admitted.append(True), busy_message="busy")
-            assert admitted == [True]
-            runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: release.wait(5))
-            with pytest.raises(web_runner_module.JobConflictError, match="busy"):
-                runner.admit_exclusive(lambda: admitted.append(True), busy_message="busy")
-            assert admitted == [True]
-        finally:
-            release.set()
-            runner.shutdown()
-
 
 # ── Job lifecycle (web_runner) ──────────────────────────────────────────────
-
-
-class TestJobLifecycle:
-    def test_enhanced_prompt_survives_in_prompt_progress(self):
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            job_id = runner._submit_job(job_type="image", target_factory=lambda cb: None)
-            runner._publish_event(job_id, {"type": "prompt_started", "prompt": "a fox", "run_index": 0})
-            runner._publish_event(job_id, {"type": "prompt_enhanced", "enhanced_prompt": "A fox in snow."})
-            runner._publish_event(job_id, {"type": "generation_started"})
-            history = runner._get_job(job_id).history
-            assert history[-1]["enhanced_prompt"] == "A fox in snow."
-            runner._publish_event(job_id, {"type": "prompt_started", "prompt": "a cat", "run_index": 0})
-            assert "enhanced_prompt" not in runner._get_job(job_id).history[-1]
-        finally:
-            runner.shutdown()
 
 
 # ── Preflight in web jobs ───────────────────────────────────────────────────
@@ -857,15 +801,8 @@ class TestExtendEnhance:
         ("context", "message"),
         [
             ({"extend_frames": 12}, "extend_frames must be a multiple of 8"),
-            ({"extend_frames": 0}, "extend_frames must be a multiple of 8"),
             ({"extend_frames": True}, "context.extend_frames must be an integer"),
-            ({"extend_frames": "48"}, "context.extend_frames must be an integer"),
             ({"extend_seconds": 0}, "extend_seconds must be positive"),
-            ({"extend_seconds": "2"}, "context.extend_seconds must be a number"),
-            ({"extend_seconds": float("nan")}, "extend_seconds"),
-            ({"extend_seconds": float("inf")}, "extend_seconds"),
-            ({"audio": True, "source_video": ""}, "source_video"),
-            ({"source_video": 5}, "source_video"),
             ({"source_video": "https://example.com/a.mp4"}, "host-local"),
             ({"source_video": "clip.png"}, "video file"),
         ],

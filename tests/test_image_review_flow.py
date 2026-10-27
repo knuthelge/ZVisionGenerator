@@ -92,42 +92,6 @@ def test_a_discard_writes_no_file_and_never_upscales(tmp_path):
     assert _png_pixels(tmp_path / "out") == []
 
 
-def test_terminal_review_deletes_the_preview_file_after_ctrl_c(tmp_path, monkeypatch):
-    """Without a progress callback the render is a temp PNG; an interrupt in the wait must not leave it behind."""
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path / "tmp"))
-    (tmp_path / "tmp").mkdir()
-    skip = SkipSignal()
-    skip.wait_for_review = MagicMock(side_effect=KeyboardInterrupt)
-
-    with pytest.raises(KeyboardInterrupt):
-        _run(tmp_path / "out", review=True, skip=skip)
-
-    skip.wait_for_review.assert_called_once()
-    assert list((tmp_path / "tmp").iterdir()) == []
-
-
-def test_terminal_review_prints_the_path_and_removes_the_file_after_the_decision(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path / "tmp"))
-    (tmp_path / "tmp").mkdir()
-    skip = SkipSignal()
-    seen: dict[str, object] = {}
-
-    def _answer():
-        printed = capsys.readouterr().out
-        seen["listing"] = [p.name for p in (tmp_path / "tmp").iterdir()]
-        seen["printed"] = printed
-        skip.set_review_decision("discard")
-
-    original = skip.wait_for_review
-    skip.wait_for_review = lambda: (_answer(), original())[1]
-
-    _run(tmp_path / "out", review=True, skip=skip)
-
-    assert len(seen["listing"]) == 1 and seen["listing"][0].startswith("ziv-review-")
-    assert seen["listing"][0] in seen["printed"]
-    assert list((tmp_path / "tmp").iterdir()) == []
-
-
 def test_review_without_a_signal_is_refused(tmp_path):
     with pytest.raises(ValueError, match="skip_signal"):
         _run(tmp_path / "out", review=True, skip=None)

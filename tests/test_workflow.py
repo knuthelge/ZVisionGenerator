@@ -59,75 +59,22 @@ def _default_args(**overrides):
 class TestBuildWorkflow:
     """Verify build_workflow() assembles the correct stage list."""
 
-    def test_default_args_include_sharpen(self):
-        """Default: sharpen on, contrast/saturation off, no upscale."""
-        wf = build_workflow(_default_args())
-        assert wf.stages == [
-            resolve_prompt_stage,
-            suppress_negative_stage,
-            load_reference_stage,
-            text_to_image_stage,
-            sharpen_stage,
-            save_image_stage,
-        ]
+    _HEAD = [resolve_prompt_stage, suppress_negative_stage, load_reference_stage, text_to_image_stage]
 
-    def test_all_disabled_generates_only(self):
-        """Equivalent to old 'generate_only': no post-processing."""
-        wf = build_workflow(_default_args(sharpen=False, contrast=False, saturation=False, upscale=None))
-        assert wf.stages == [
-            resolve_prompt_stage,
-            suppress_negative_stage,
-            load_reference_stage,
-            text_to_image_stage,
-            save_image_stage,
-        ]
-
-    def test_all_enabled_with_upscale(self):
-        """All stages on: upscale -> contrast -> saturation -> sharpen -> save."""
-        wf = build_workflow(_default_args(sharpen=True, contrast=True, saturation=True, upscale=2))
-        assert wf.stages == [
-            resolve_prompt_stage,
-            suppress_negative_stage,
-            load_reference_stage,
-            text_to_image_stage,
-            upscale_stage,
-            contrast_stage,
-            saturation_stage,
-            sharpen_stage,
-            save_image_stage,
-        ]
-
-    def test_zero_amount_is_not_false(self):
-        """0.0 is not False -- stages should still be included."""
-        wf = build_workflow(_default_args(sharpen=0.0, contrast=0.0, saturation=0.0, upscale=None))
-        assert contrast_stage in wf.stages
-        assert sharpen_stage in wf.stages
-        assert saturation_stage in wf.stages
-
-    def test_stage_ordering_contrast_before_saturation_before_sharpen(self):
-        """Fixed order: contrast -> saturation -> sharpen."""
-        wf = build_workflow(_default_args(sharpen=True, contrast=True, saturation=True))
-        stage_names = wf.stages
-        c_idx = stage_names.index(contrast_stage)
-        s_idx = stage_names.index(saturation_stage)
-        sh_idx = stage_names.index(sharpen_stage)
-        assert c_idx < s_idx < sh_idx
-
-    def test_workflow_name_is_dynamic(self):
-        wf = build_workflow(_default_args())
-        assert wf.name == "dynamic"
-
-    def test_upscale_without_post_processing(self):
-        """Upscale on, all post-processing off."""
-        wf = build_workflow(_default_args(sharpen=False, contrast=False, saturation=False, upscale=4))
-        assert wf.stages == [
-            resolve_prompt_stage,
-            suppress_negative_stage,
-            load_reference_stage,
-            text_to_image_stage,
-            upscale_stage,
-            save_image_stage,
-        ]
+    @pytest.mark.parametrize(
+        ("args", "post_stages"),
+        [
+            pytest.param({}, [sharpen_stage], id="default: sharpen only"),
+            pytest.param({"sharpen": False}, [], id="all off generates only"),
+            pytest.param(
+                {"sharpen": True, "contrast": True, "saturation": True, "upscale": 2}, [upscale_stage, contrast_stage, saturation_stage, sharpen_stage], id="all on with upscale, in fixed order"
+            ),
+            pytest.param({"sharpen": False, "upscale": 4}, [upscale_stage], id="upscale without post-processing"),
+            pytest.param({"sharpen": 0.0, "contrast": 0.0, "saturation": 0.0}, [contrast_stage, saturation_stage, sharpen_stage], id="0.0 is not False"),
+        ],
+    )
+    def test_stage_list(self, args, post_stages):
+        assert build_workflow(_default_args(**args)).stages == [*self._HEAD, *post_stages, save_image_stage]
 
 
 # ---------------------------------------------------------------------------
@@ -189,30 +136,6 @@ class TestE2EWorkflow:
         assert outcome is StageOutcome.success
         assert mock_backend.text_to_image.call_args.kwargs["first_sigma"] == 1.005
 
-    def test_default_workflow_saves_image(self, tmp_path):
-        mock_backend = _make_mock_backend()
-        workflow = build_workflow(_default_args())
-
-        request = ImageGenerationRequest(
-            backend=mock_backend,
-            model="fake",
-            model_family="zimage",
-            supports_negative_prompt=True,
-            prompt="a cat",
-            seed=42,
-            width=64,
-            height=64,
-            steps=10,
-            guidance=3.5,
-            output_dir=str(tmp_path),
-            filename_base="test",
-        )
-        artifacts = ImageWorkingArtifacts(filename="test")
-        workflow.run(request, artifacts)
-
-        assert artifacts.filepath is not None
-        assert os.path.isfile(artifacts.filepath)
-
     def test_default_workflow_embeds_config_in_png_and_writes_no_sidecar(self, tmp_path):
         mock_backend = _make_mock_backend()
         workflow = build_workflow(_default_args())
@@ -238,6 +161,7 @@ class TestE2EWorkflow:
         workflow.run(request, artifacts)
 
         assert artifacts.filepath is not None
+        assert os.path.isfile(artifacts.filepath)
 
         # No sidecar written (neither asset.ext.json nor asset.json)
         from pathlib import Path as _Path
@@ -343,62 +267,6 @@ class TestE2EWorkflow:
         call_kwargs = mock_backend.text_to_image.call_args.kwargs
         assert call_kwargs["negative_prompt"] is None
 
-    def test_all_disabled_does_not_sharpen(self, tmp_path):
-        """All post-processing off: no upscale, no sharpening."""
-        mock_backend = _make_mock_backend()
-        workflow = build_workflow(_default_args(sharpen=False))
-
-        request = ImageGenerationRequest(
-            backend=mock_backend,
-            model="fake",
-            model_family="zimage",
-            supports_negative_prompt=True,
-            prompt="test",
-            seed=1,
-            width=64,
-            height=64,
-            steps=10,
-            guidance=3.5,
-            sharpen=False,
-            output_dir=str(tmp_path),
-            filename_base="test",
-        )
-        artifacts = ImageWorkingArtifacts(filename="test")
-        outcome = workflow.run(request, artifacts)
-
-        assert outcome is StageOutcome.success
-        # No upscale stage → image_to_image never called
-        mock_backend.image_to_image.assert_not_called()
-        # Sharpen stage not in workflow
-        assert sharpen_stage not in workflow.stages
-
-    def test_all_disabled_still_generates_and_saves(self, tmp_path):
-        mock_backend = _make_mock_backend()
-        workflow = build_workflow(_default_args(sharpen=False))
-
-        request = ImageGenerationRequest(
-            backend=mock_backend,
-            model="fake",
-            model_family="zimage",
-            supports_negative_prompt=True,
-            prompt="a cat",
-            seed=42,
-            width=64,
-            height=64,
-            steps=10,
-            guidance=3.5,
-            sharpen=False,
-            output_dir=str(tmp_path),
-            filename_base="test",
-        )
-        artifacts = ImageWorkingArtifacts(filename="test")
-        outcome = workflow.run(request, artifacts)
-
-        assert outcome is StageOutcome.success
-        mock_backend.text_to_image.assert_called_once()
-        assert artifacts.filepath is not None
-        assert os.path.isfile(artifacts.filepath)
-
 
 # ---------------------------------------------------------------------------
 # Stage-layer tests: contrast_stage, saturation_stage, sharpen_stage
@@ -493,31 +361,6 @@ class TestReviewStage:
         from zvisiongenerator.workflows.image_stages import review_stage
 
         assert review_stage not in build_workflow(_default_args(**args)).stages
-
-    def test_approve_continues_to_the_upscale(self, tmp_path):
-        backend = _make_mock_backend()
-        review = MagicMock(return_value=True)
-        request = ImageGenerationRequest(
-            backend=backend,
-            model="fake",
-            prompt="a cat",
-            width=64,
-            height=64,
-            upscale_factor=2,
-            upscale_denoise=0.3,
-            output_dir=str(tmp_path),
-            filename_base="test",
-            review=review,
-        )
-        artifacts = ImageWorkingArtifacts(filename="test")
-
-        outcome = build_workflow(_default_args(upscale=2, review=True)).run(request, artifacts)
-
-        assert outcome is StageOutcome.success
-        review.assert_called_once()
-        assert review.call_args.args[0].size == (64, 64)
-        backend.image_to_image.assert_called_once()
-        assert artifacts.was_upscaled is True
 
     def test_discard_skips_without_upscaling_or_saving(self, tmp_path):
         backend = _make_mock_backend()

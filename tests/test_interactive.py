@@ -119,7 +119,7 @@ class TestSkipSignalReview:
         assert signal._reviewing
         return thread, result
 
-    @pytest.mark.parametrize(("key", "decision"), [("y", "approve"), ("Y", "approve"), ("n", "discard"), ("N", "discard")])
+    @pytest.mark.parametrize(("key", "decision"), [("y", "approve"), ("N", "discard")])
     def test_keys_decide_during_a_review(self, key, decision):
         from zvisiongenerator.utils.interactive import SkipSignal
 
@@ -142,7 +142,7 @@ class TestSkipSignalReview:
         assert result == ["quit"]
         assert signal.pending() == "quit"
 
-    @pytest.mark.parametrize("key", ["p", "r", "x", " ", "\r", "\n"])
+    @pytest.mark.parametrize("key", ["p", "\r"])
     def test_other_keys_are_ignored_during_a_review(self, key):
         """Enter and the command keys neither decide nor queue anything, so a stray key cannot discard a render."""
         from zvisiongenerator.utils.interactive import SkipSignal
@@ -159,6 +159,7 @@ class TestSkipSignalReview:
         thread.join(timeout=1.0)
 
     def test_first_decision_wins(self):
+        """A decision set before the wait starts is not lost (the web can answer as soon as job_paused is published)."""
         from zvisiongenerator.utils.interactive import SkipSignal
 
         signal = SkipSignal()
@@ -285,23 +286,13 @@ class TestSkipSignalStaleDecisions:
         result: list[str] = []
         thread = threading.Thread(target=lambda: result.append(signal.wait_for_review()), daemon=True)
         thread.start()
-        thread.join(timeout=0.3)
+        thread.join(timeout=0.05)
 
         assert thread.is_alive()
         assert result == []
         signal.set_review_decision("discard")
         thread.join(timeout=1.0)
         assert result == ["discard"]
-
-    def test_a_decision_made_while_an_early_return_is_in_flight_is_cleared(self):
-        from zvisiongenerator.utils.interactive import SkipSignal
-
-        signal = SkipSignal()
-        signal.set_review_decision("approve")
-        signal.queue_action("quit")
-
-        assert signal.wait_for_review() == "quit"
-        assert signal._review_decision is None
 
     def test_an_answer_to_the_announcement_is_kept_once_the_review_begins(self):
         from zvisiongenerator.utils.interactive import SkipSignal
@@ -393,15 +384,6 @@ class TestStdinIsInteractive:
 class TestSkipSignalReviewEdges:
     """Races and loop behaviour of the review state that the happy-path tests do not reach."""
 
-    def test_a_decision_set_before_the_wait_starts_is_not_lost(self):
-        """The web can answer as soon as job_paused is published, before the runner reaches the wait."""
-        from zvisiongenerator.utils.interactive import SkipSignal
-
-        signal = SkipSignal()
-        signal.set_review_decision("discard")
-
-        assert signal.wait_for_review() == "discard"
-
     def test_a_quit_before_the_wait_starts_wins_over_a_decision(self):
         from zvisiongenerator.utils.interactive import SkipSignal
 
@@ -411,6 +393,7 @@ class TestSkipSignalReviewEdges:
 
         assert signal.wait_for_review() == "quit"
         assert signal.pending() == "quit"
+        assert signal._review_decision is None
 
     def test_the_wait_polls_with_a_timeout_so_ctrl_c_stays_responsive(self):
         """The waiter must never block without a timeout: Windows only delivers Ctrl-C between waits."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 
 from PIL import Image
@@ -96,13 +97,11 @@ class TestFailureWithDetail:
     def test_an_empty_detail_gives_just_the_prefix(self):
         assert failure_with_detail("Failed", " \n ") == "Failed"
 
-    @pytest.mark.parametrize("limit", [1, 2, 5, 11, 12, 21, 60, 500])
-    @pytest.mark.parametrize("prefix_length", [0, 1, 6, 20, 600])
-    @pytest.mark.parametrize("detail_length", [0, 1, 13, 14, 1000])
-    def test_never_exceeds_the_limit_and_stays_on_one_line(self, limit, prefix_length, detail_length):
-        message = failure_with_detail("p" * prefix_length, "d" * detail_length, limit=limit)
-        assert len(message) <= limit
-        assert "\n" not in message
+    def test_never_exceeds_the_limit_and_stays_on_one_line(self):
+        for limit, prefix_length, detail_length in itertools.product([1, 2, 5, 11, 12, 21, 60, 500], [0, 1, 6, 20, 600], [0, 1, 13, 14, 1000]):
+            message = failure_with_detail("p" * prefix_length, "d" * detail_length, limit=limit)
+            assert len(message) <= limit, (limit, prefix_length, detail_length)
+            assert "\n" not in message
 
     def test_a_prefix_longer_than_the_limit_is_cut_and_the_detail_is_left_out(self):
         message = failure_with_detail("p" * 600, "detail")

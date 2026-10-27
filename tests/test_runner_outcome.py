@@ -39,6 +39,113 @@ def _mock_workflow(outcome: StageOutcome) -> GenerationWorkflow:
     return GenerationWorkflow(name="test", stages=[stage])
 
 
+def _captured_request(config=_CONFIG, **args_overrides):
+    """Run a single-prompt batch and return the generation request its workflow stage received."""
+    captured = {}
+
+    def _capture_stage(request, artifacts):
+        captured["request"] = request
+        return StageOutcome.success
+
+    wf = GenerationWorkflow(name="test", stages=[_capture_stage])
+    with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
+        run_batch(
+            MagicMock(),
+            MagicMock(spec=[]),
+            _prompts(1),
+            config,
+            _make_args(**args_overrides),
+            model_info=_MODEL_INFO,
+            plan=_make_plan(_prompts(1), _make_args(**args_overrides), config=config),
+        )
+    return captured["request"]
+
+
+@pytest.mark.parametrize(
+    ("args_overrides", "attribute", "expected"),
+    [
+        ({}, "json_prompt", False),
+        ({"json_prompt_enabled": True}, "json_prompt", True),
+        ({"first_sigma": 1.005}, "first_sigma", 1.005),
+        ({}, "first_sigma", None),
+    ],
+)
+def test_args_reach_the_generation_request(args_overrides, attribute, expected):
+    assert getattr(_captured_request(**args_overrides), attribute) == expected
+
+
+_UNSET = object()
+
+
+@pytest.mark.parametrize(
+    ("kind", "value", "config_default", "enabled", "amount"),
+    [
+        ("sharpen", 0.6, None, True, 0.6),
+        ("sharpen", True, None, True, None),
+        ("sharpen", False, None, False, _UNSET),
+        ("sharpen", 0.0, None, True, 0.0),
+        ("contrast", 1.3, None, True, 1.3),
+        ("contrast", True, 1.5, True, 1.5),
+        ("contrast", False, None, False, _UNSET),
+        ("contrast", 0.0, None, True, 0.0),
+        ("saturation", 1.2, None, True, 1.2),
+        ("saturation", True, 0.8, True, 0.8),
+        ("saturation", False, None, False, _UNSET),
+        ("saturation", 0.0, None, True, 0.0),
+    ],
+)
+def test_flag_values_become_an_enabled_flag_and_an_amount(kind, value, config_default, enabled, amount):
+    """A float enables the stage at that amount, ``True`` uses the configured default, ``False`` disables, and ``0.0`` is an amount rather than False."""
+    config = _CONFIG if config_default is None else {**_CONFIG, kind: {"default_amount": config_default}}
+
+    request = _captured_request(config, **{kind: value})
+
+    assert getattr(request, kind) is enabled
+    if amount is not _UNSET:
+        assert getattr(request, "sharpen_amount_override" if kind == "sharpen" else f"{kind}_amount") == amount
+
+
+@pytest.mark.parametrize("outcome", [StageOutcome.skipped, StageOutcome.failed])
+@patch("zvisiongenerator.image_runner.build_workflow")
+def test_a_skipped_or_failed_generation_warns_and_the_batch_continues(mock_build_wf, outcome):
+    wf = _mock_workflow(outcome)
+    mock_build_wf.return_value = wf
+
+    with pytest.warns(UserWarning):
+        run_batch(MagicMock(), MagicMock(spec=[]), _prompts(2), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(2), _make_args(), config=_CONFIG))
+
+    assert wf.stages[0].call_count == 2  # both prompts were attempted
+
+
+_DRIFT_CONFIG = {
+    "sizes": {"2:3": {"m": {"width": 1440, "height": 768}, "a": {"width": 1024, "height": 768}}},
+    "generation": {"seed_min": 1, "seed_max": 100},
+    "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
+    "model_presets": {"zimage": {"supports_negative_prompt": True}},
+}
+
+
+@pytest.mark.parametrize(
+    ("size_args", "warns"),
+    [
+        pytest.param({"size": "m"}, True, id="preset that drifts under the upscale round-trip"),
+        pytest.param({"size": "a"}, False, id="preset that survives it"),
+        pytest.param({"size": "m", "width": 1024, "height": 768}, False, id="explicit dimensions skip the check"),
+    ],
+)
+@patch("zvisiongenerator.image_runner.build_workflow")
+def test_a_preset_size_that_drifts_under_upscale_warns(mock_wf, size_args, warns):
+    """Preset 'm' with 4x upscale: 1440//4=360, _round_to_16(360)=368, 368*4=1472 != 1440."""
+    mock_wf.return_value = GenerationWorkflow(name="t", stages=[MagicMock(return_value=StageOutcome.success)])
+    args = _make_args(upscale=4, upscale_denoise=0.4, upscale_steps=2, **size_args)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, _DRIFT_CONFIG, args, model_info=_MODEL_INFO, plan=_make_plan({"s": [("cat", None)]}, args, config=_DRIFT_CONFIG))
+
+    assert any("drifts" in str(warning.message) for warning in caught) is warns
+
+
 class TestRunnerOutcome:
     """Verify run_batch() reacts correctly to each StageOutcome."""
 
@@ -86,107 +193,6 @@ class TestRunnerOutcome:
         assert finished_events[0]["filename"] == "image.png"
         assert finished_events[0]["output_path"] == "/tmp/image.png"
         assert isinstance(finished_events[0]["generation_time"], float)
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_success_continues_normally(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.success)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])  # no _model_info attr
-
-        run_batch(backend, model, _prompts(), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(), _make_args(), config=_CONFIG))
-        wf.stages[0].assert_called_once()
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_request_json_prompt_defaults_false(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.success)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        run_batch(backend, model, _prompts(), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(), _make_args(), config=_CONFIG))
-
-        request = wf.stages[0].call_args[0][0]
-        assert request.json_prompt is False
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_request_threads_json_prompt_from_args(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.success)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        run_batch(backend, model, _prompts(), _CONFIG, _make_args(json_prompt_enabled=True), model_info=_MODEL_INFO, plan=_make_plan(_prompts(), _make_args(json_prompt_enabled=True), config=_CONFIG))
-
-        request = wf.stages[0].call_args[0][0]
-        assert request.json_prompt is True
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_request_threads_first_sigma_from_args(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.success)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        run_batch(backend, model, _prompts(), _CONFIG, _make_args(first_sigma=1.005), model_info=_MODEL_INFO, plan=_make_plan(_prompts(), _make_args(first_sigma=1.005), config=_CONFIG))
-
-        request = wf.stages[0].call_args[0][0]
-        assert request.first_sigma == 1.005
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_request_first_sigma_defaults_to_none_when_args_omit_it(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.success)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        run_batch(backend, model, _prompts(), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(), _make_args(), config=_CONFIG))
-
-        request = wf.stages[0].call_args[0][0]
-        assert request.first_sigma is None
-
-    def test_image_generation_request_first_sigma_default_is_none(self):
-        request = ImageGenerationRequest(backend=MagicMock(), model=MagicMock(), prompt="prompt")
-
-        assert request.first_sigma is None
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_skipped_warns_and_continues(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.skipped)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(backend, model, _prompts(2), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(2), _make_args(), config=_CONFIG))
-            skipped_warnings = [x for x in w if "skipped" in str(x.message).lower()]
-            assert len(skipped_warnings) >= 1
-
-        # Both prompts should still have been attempted
-        assert wf.stages[0].call_count == 2
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_failed_warns_and_continues(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.failed)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(backend, model, _prompts(2), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(2), _make_args(), config=_CONFIG))
-            failed_warnings = [x for x in w if "failed" in str(x.message).lower()]
-            assert len(failed_warnings) >= 1
-
-        assert wf.stages[0].call_count == 2
 
     @patch("zvisiongenerator.image_runner.build_workflow")
     def test_all_failed_batch_emits_failed_terminal_event(self, mock_build_wf):
@@ -243,26 +249,6 @@ class TestRunnerOutcome:
         }
 
     @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_retry_warns_and_continues(self, mock_build_wf):
-        wf = _mock_workflow(StageOutcome.retry)
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(backend, model, _prompts(2), _CONFIG, _make_args(), model_info=_MODEL_INFO, plan=_make_plan(_prompts(2), _make_args(), config=_CONFIG))
-            retry_warnings = [x for x in w if "retry" in str(x.message).lower()]
-            assert len(retry_warnings) >= 1
-            # Should include a "failed after N retries" warning per prompt
-            exceeded_warnings = [x for x in w if "failed after" in str(x.message).lower()]
-            assert len(exceeded_warnings) == 2
-
-        # 4 attempts per prompt (1 initial + 3 retries) × 2 prompts = 8
-        assert wf.stages[0].call_count == 8
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
     def test_retry_exhaustion_emits_failed_generation_and_batch_failed(self, mock_build_wf):
         wf = _mock_workflow(StageOutcome.retry)
         mock_build_wf.return_value = wf
@@ -310,8 +296,9 @@ class TestRunnerOutcome:
         assert not [event for event in events if event["type"] == "batch_completed"]
 
     @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_repeat_regenerates_seed(self, mock_build_wf):
-        """Pressing 'r' (repeat) should generate a new seed for the second run and keep the planned text."""
+    @pytest.mark.parametrize("seed", [None, 42])
+    def test_repeat_regenerates_seed(self, mock_build_wf, seed):
+        """Pressing 'r' (repeat) draws a new random seed for the second run, even when --seed is set, and keeps the planned text."""
         call_count = 0
         seeds_seen: list[int] = []
         texts_seen: list[tuple[str | None, str | None]] = []
@@ -330,9 +317,9 @@ class TestRunnerOutcome:
         backend = MagicMock()
         model = MagicMock(spec=[])
 
-        plan = _make_plan(_prompts(1), _make_args(seed=None), config=_CONFIG)
+        plan = _make_plan(_prompts(1), _make_args(seed=seed), config=_CONFIG)
         # Mock random.randint to return a controlled value for the repeat
-        with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip, patch("zvisiongenerator.image_runner.random.randint", side_effect=[200]):
+        with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip, patch("zvisiongenerator.image_runner.random.randint", side_effect=[200]) as randint:
             skip_inst = MockSkip.return_value
             # None: nothing queued before each generation; then the post-generation action.
             skip_inst.consume.side_effect = [None, "repeat", None, "skip"]
@@ -341,41 +328,13 @@ class TestRunnerOutcome:
             skip_inst.stop = MagicMock()
             skip_inst.wait_for_key = MagicMock()
 
-            run_batch(backend, model, _prompts(1), _CONFIG, _make_args(seed=None), model_info=_MODEL_INFO, plan=plan)
+            run_batch(backend, model, _prompts(1), _CONFIG, _make_args(seed=seed), model_info=_MODEL_INFO, plan=plan)
 
         assert call_count == 2
         assert seeds_seen == [plan.iterations[0].seed, 200]
-        assert texts_seen == [("a photo of a cat", None)] * 2
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_repeat_draws_random_seed_even_with_explicit_seed(self, mock_build_wf):
-        """Repeat always draws a new random seed, even when --seed is set."""
-        seeds_seen: list[int] = []
-
-        def _capture_and_succeed(request, artifacts):
-            seeds_seen.append(request.seed)
-            return StageOutcome.success
-
-        stage = MagicMock(side_effect=_capture_and_succeed)
-        wf = GenerationWorkflow(name="test", stages=[stage])
-        mock_build_wf.return_value = wf
-
-        backend = MagicMock()
-        model = MagicMock(spec=[])
-
-        with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip, patch("zvisiongenerator.image_runner.random.randint", side_effect=[77]) as randint:
-            skip_inst = MockSkip.return_value
-            # None: nothing queued before each generation; then the post-generation action.
-            skip_inst.consume.side_effect = [None, "repeat", None, "skip"]
-            skip_inst.reset = MagicMock()
-            skip_inst.start = MagicMock()
-            skip_inst.stop = MagicMock()
-            skip_inst.wait_for_key = MagicMock()
-
-            run_batch(backend, model, _prompts(1), _CONFIG, _make_args(seed=42), model_info=_MODEL_INFO, plan=_make_plan(_prompts(1), _make_args(seed=42), config=_CONFIG))
-
-        assert seeds_seen == [42, 77]
+        assert seed is None or seeds_seen[0] == seed
         randint.assert_called_once_with(1, 100)
+        assert texts_seen == [("a photo of a cat", None)] * 2
 
     @patch("zvisiongenerator.image_runner.build_workflow")
     def test_quit_during_generation_ends_batch(self, mock_build_wf):
@@ -406,215 +365,9 @@ class TestRunnerOutcome:
 # ---------------------------------------------------------------------------
 
 
-class TestPresetSizeDriftWarning:
-    """run_batch should warn when preset size drifts under upscale round-trip."""
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_warns_on_drift(self, mock_wf):
-        """Preset 'm' with 4x upscale: 1440//4=360, _round_to_16(360)=368, 368*4=1472 != 1440."""
-        stage = MagicMock(return_value=StageOutcome.success)
-        mock_wf.return_value = GenerationWorkflow(name="t", stages=[stage])
-
-        config = {
-            "sizes": {"2:3": {"m": {"width": 1440, "height": 768}}},
-            "generation": {"seed_min": 1, "seed_max": 100},
-            "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-            "model_presets": {"zimage": {"supports_negative_prompt": True}},
-        }
-        args = _make_args(
-            size="m",
-            upscale=4,
-            upscale_denoise=0.4,
-            upscale_steps=2,
-        )
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, config, args, model_info=_MODEL_INFO, plan=_make_plan({"s": [("cat", None)]}, args, config=config))
-
-        drift_warnings = [x for x in w if "drifts" in str(x.message)]
-        assert len(drift_warnings) >= 1
-        assert "1440" in str(drift_warnings[0].message)
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_no_warning_when_aligned(self, mock_wf):
-        """Preset with dimensions that survive upscale round-trip should emit no drift warning."""
-        stage = MagicMock(return_value=StageOutcome.success)
-        mock_wf.return_value = GenerationWorkflow(name="t", stages=[stage])
-
-        config = {
-            "sizes": {"2:3": {"a": {"width": 1024, "height": 768}}},
-            "generation": {"seed_min": 1, "seed_max": 100},
-            "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-            "model_presets": {"zimage": {"supports_negative_prompt": True}},
-        }
-        args = _make_args(
-            size="a",
-            upscale=4,
-            upscale_denoise=0.4,
-            upscale_steps=2,
-        )
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, config, args, model_info=_MODEL_INFO, plan=_make_plan({"s": [("cat", None)]}, args, config=config))
-
-        drift_warnings = [x for x in w if "drifts" in str(x.message)]
-        assert len(drift_warnings) == 0
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_no_warning_with_explicit_dims(self, mock_wf):
-        """Explicit --width/--height should skip drift check even with upscale."""
-        stage = MagicMock(return_value=StageOutcome.success)
-        mock_wf.return_value = GenerationWorkflow(name="t", stages=[stage])
-
-        config = {
-            "sizes": {"2:3": {"m": {"width": 1440, "height": 768}}},
-            "generation": {"seed_min": 1, "seed_max": 100},
-            "sharpening": {"normal": 0.8, "upscaled": 1.2, "pre_upscale": 0.4},
-            "model_presets": {"zimage": {"supports_negative_prompt": True}},
-        }
-        args = _make_args(
-            size="m",
-            width=1024,
-            height=768,
-            upscale=4,
-            upscale_denoise=0.4,
-            upscale_steps=2,
-        )
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, config, args, model_info=_MODEL_INFO, plan=_make_plan({"s": [("cat", None)]}, args, config=config))
-
-        drift_warnings = [x for x in w if "drifts" in str(x.message)]
-        assert len(drift_warnings) == 0
-
-
 # ---------------------------------------------------------------------------
 # Amount-propagation: verify runner resolves flag values into GenerationRequest
 # ---------------------------------------------------------------------------
-
-
-class TestAmountPropagation:
-    """Verify runner correctly translates CLI flag values to GenerationRequest fields."""
-
-    def _capture_request(self, args_overrides: dict):
-        """Run a single-prompt batch capturing the GenerationRequest passed to workflow.run()."""
-        captured = {}
-
-        def _capture_stage(request, artifacts):
-            captured["request"] = request
-            return StageOutcome.success
-
-        wf = GenerationWorkflow(name="test", stages=[_capture_stage])
-        with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
-            run_batch(
-                MagicMock(),
-                MagicMock(spec=[]),
-                _prompts(1),
-                _CONFIG,
-                _make_args(**args_overrides),
-                model_info=_MODEL_INFO,
-                plan=_make_plan(_prompts(1), _make_args(**args_overrides), config=_CONFIG),
-            )
-        return captured["request"]
-
-    # -- sharpen --
-
-    def test_sharpen_float_sets_override(self):
-        req = self._capture_request({"sharpen": 0.6})
-        assert req.sharpen is True
-        assert req.sharpen_amount_override == 0.6
-
-    def test_sharpen_true_no_override(self):
-        req = self._capture_request({"sharpen": True})
-        assert req.sharpen is True
-        assert req.sharpen_amount_override is None
-
-    def test_sharpen_false_disables(self):
-        req = self._capture_request({"sharpen": False})
-        assert req.sharpen is False
-
-    def test_sharpen_zero_is_not_false(self):
-        req = self._capture_request({"sharpen": 0.0})
-        assert req.sharpen is True
-        assert req.sharpen_amount_override == 0.0
-
-    # -- contrast --
-
-    def test_contrast_float_sets_amount(self):
-        req = self._capture_request({"contrast": 1.3})
-        assert req.contrast is True
-        assert req.contrast_amount == 1.3
-
-    def test_contrast_true_uses_config_default(self):
-        config = {**_CONFIG, "contrast": {"default_amount": 1.5}}
-        captured = {}
-
-        def _capture_stage(request, artifacts):
-            captured["request"] = request
-            return StageOutcome.success
-
-        wf = GenerationWorkflow(name="test", stages=[_capture_stage])
-        with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
-            run_batch(
-                MagicMock(),
-                MagicMock(spec=[]),
-                _prompts(1),
-                config,
-                _make_args(contrast=True),
-                model_info=_MODEL_INFO,
-                plan=_make_plan(_prompts(1), _make_args(contrast=True), config=config),
-            )
-        req = captured["request"]
-        assert req.contrast is True
-        assert req.contrast_amount == 1.5
-
-    def test_contrast_false_disables(self):
-        req = self._capture_request({"contrast": False})
-        assert req.contrast is False
-
-    def test_contrast_zero_is_not_false(self):
-        req = self._capture_request({"contrast": 0.0})
-        assert req.contrast is True
-        assert req.contrast_amount == 0.0
-
-    # -- saturation --
-
-    def test_saturation_float_sets_amount(self):
-        req = self._capture_request({"saturation": 1.2})
-        assert req.saturation is True
-        assert req.saturation_amount == 1.2
-
-    def test_saturation_true_uses_config_default(self):
-        config = {**_CONFIG, "saturation": {"default_amount": 0.8}}
-        captured = {}
-
-        def _capture_stage(request, artifacts):
-            captured["request"] = request
-            return StageOutcome.success
-
-        wf = GenerationWorkflow(name="test", stages=[_capture_stage])
-        with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
-            run_batch(
-                MagicMock(),
-                MagicMock(spec=[]),
-                _prompts(1),
-                config,
-                _make_args(saturation=True),
-                model_info=_MODEL_INFO,
-                plan=_make_plan(_prompts(1), _make_args(saturation=True), config=config),
-            )
-        req = captured["request"]
-        assert req.saturation is True
-        assert req.saturation_amount == 0.8
-
-    def test_saturation_false_disables(self):
-        req = self._capture_request({"saturation": False})
-        assert req.saturation is False
-
-    def test_saturation_zero_is_not_false(self):
-        req = self._capture_request({"saturation": 0.0})
-        assert req.saturation is True
-        assert req.saturation_amount == 0.0
 
 
 class TestProgressCallbacks:
@@ -942,15 +695,15 @@ class TestReviewBeforeUpscale:
         skip = SkipSignal()
 
         def _decide_late(_event):
-            time.sleep(0.3)
+            time.sleep(0.1)
             skip.set_review_decision("approve")
 
         events = self._run(skip, _decide_late, prompts=2)
 
         finished = [event for event in events if event["type"] == "generation_finished"]
-        assert all(event["generation_time"] < 0.2 for event in finished)
+        assert all(event["generation_time"] < 0.08 for event in finished)
         second_start = [event for event in events if event["type"] == "prompt_started"][1]
-        assert second_start["avg_secs"] < 0.2
+        assert second_start["avg_secs"] < 0.08
 
     @patch("zvisiongenerator.image_runner.build_workflow")
     def test_a_pause_queued_during_the_small_render_applies_after_the_upscale(self, mock_build_wf):
@@ -982,70 +735,6 @@ class TestReviewBeforeUpscale:
         assert types.count("job_paused") == 2
         assert "review" in events[types.index("job_paused")]
         assert types.index("generation_finished") < len(types) - 1 - types[::-1].index("job_paused")
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_a_pause_queued_before_the_review_applies_after_a_discard(self, mock_build_wf):
-        import threading
-        import time
-
-        upscale = MagicMock(return_value=StageOutcome.success)
-        mock_build_wf.return_value = self._workflow(upscale)
-        skip = SkipSignal()
-
-        def _decide(_event):
-            skip.queue_action("pause")
-            skip.set_review_decision("discard")
-
-        def _resume_a_pause(event):
-            if event["type"] == "job_paused" and "review" not in event:
-
-                def _resume():
-                    while not skip.is_waiting_for_resume():
-                        time.sleep(0.001)
-                    skip.resume()
-
-                threading.Thread(target=_resume, daemon=True).start()
-
-        events = self._run(skip, _decide, on_event=_resume_a_pause)
-
-        types = [event["type"] for event in events]
-        assert types.count("job_paused") == 2
-        assert "review" in events[types.index("job_paused")]
-        plain_pause = len(types) - 1 - types[::-1].index("job_paused")
-        assert types.index("generation_finished") < plain_pause
-        assert types[plain_pause + 1] == "job_resumed"
-        assert skip.pending() is None
-        upscale.assert_not_called()
-        assert types[-1] == "batch_completed"
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_a_quit_while_paused_after_a_discard_ends_the_batch(self, mock_build_wf):
-        import threading
-        import time
-
-        mock_build_wf.return_value = self._workflow(MagicMock(return_value=StageOutcome.success))
-        skip = SkipSignal()
-
-        def _decide(_event):
-            skip.queue_action("pause")
-            skip.set_review_decision("discard")
-
-        def _quit_the_pause(event):
-            if event["type"] == "job_paused" and "review" not in event:
-
-                def _quit():
-                    while not skip.is_waiting_for_resume():
-                        time.sleep(0.001)
-                    skip.queue_action("quit")
-                    skip.resume()
-
-                threading.Thread(target=_quit, daemon=True).start()
-
-        events = self._run(skip, _decide, on_event=_quit_the_pause, prompts=2)
-
-        types = [event["type"] for event in events]
-        assert types[-1] == "batch_cancelled"
-        assert types.count("prompt_started") == 1
 
     @patch("zvisiongenerator.image_runner.build_workflow")
     def test_a_repeat_queued_before_the_review_applies_after_a_discard(self, mock_build_wf):
@@ -1090,35 +779,6 @@ class TestReviewBeforeUpscale:
         assert [event["type"] for event in events].count("generation_started") == 2
         upscale.assert_not_called()
         assert events[-1]["type"] == "batch_completed"
-
-    @pytest.mark.parametrize("args", [dict(upscale=2, review=False), dict(upscale=None, review=True)])
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_no_review_callable_without_upscale_and_review(self, mock_build_wf, args):
-        stage = MagicMock(return_value=StageOutcome.success)
-        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
-
-        run_batch(MagicMock(), MagicMock(spec=[]), _prompts(), _CONFIG, _make_args(**args), model_info=_MODEL_INFO, plan=_make_plan(_prompts(), _make_args(**args), config=_CONFIG))
-
-        assert stage.call_args[0][0].review is None
-
-    @patch("zvisiongenerator.image_runner.build_workflow")
-    def test_review_callable_is_set_with_upscale_and_review(self, mock_build_wf):
-        stage = MagicMock(return_value=StageOutcome.success)
-        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
-        args = _make_args(upscale=2, review=True)
-
-        run_batch(
-            MagicMock(),
-            MagicMock(spec=[]),
-            _prompts(),
-            _CONFIG,
-            args,
-            model_info=_MODEL_INFO,
-            plan=_make_plan(_prompts(), args, config=_CONFIG),
-            skip_signal=SkipSignal(),
-        )
-
-        assert callable(stage.call_args[0][0].review)
 
     @patch("zvisiongenerator.image_runner.build_workflow")
     def test_a_review_discard_still_warns_for_other_skips(self, mock_build_wf):

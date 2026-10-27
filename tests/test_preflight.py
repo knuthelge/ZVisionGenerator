@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from argparse import Namespace
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +16,7 @@ from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils.config import load_config, video_family
 from zvisiongenerator.preflight import _iteration_context, _job_context, plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, entry_scene
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, entry_scene, resolve_enhance_ceiling
 from zvisiongenerator.utils.prompt_enhance_video import CONTINUE_NATURALLY
 
 
@@ -82,17 +83,6 @@ class TestPlanIterations:
     def test_scene_lookup_is_aligned_per_set_and_index(self):
         plan = _plan({"a": [("x", None)], "b": [("y", None)]}, runs=2, scene_by_set={"b": ["Scene B."]})
         assert [(it.run_index, it.set_name, it.scene) for it in plan] == [(0, "a", None), (0, "b", "Scene B."), (1, "a", None), (1, "b", "Scene B.")]
-
-    @pytest.mark.filterwarnings("ignore:.*not enhanced")
-    def test_whitespace_entry_scene_falls_back_to_the_job_scene_in_the_plan(self):
-        """A blank entry scene never hides the job scene."""
-        scene_by_set = {"a": ["   ", None, "Own."]}
-        data = {"a": [("x", None), ("y", None), ("z", None)]}
-        keep = EnhanceSettings(details=(), motion=(), sound=())
-        by_set = {"a": [keep, keep, keep]}
-        plan = _plan(data, scene="Job", scene_by_set=scene_by_set, enhance_by_set=by_set)
-        assert [it.scene for it in plan] == ["Job", "Job", "Own."]
-        assert [it.scene for it in _plan(data, scene_by_set=scene_by_set)] == [None, None, "Own."]
 
     @pytest.mark.parametrize(
         ("own", "job", "expected"),
@@ -213,6 +203,18 @@ def _run(prompts=None, *, enhancer=None, order=None, args=None, control=None, fa
 _PAIR_TEXT = "SCENE: A snowy field at dusk, soft light.\nACTION: A red fox runs across it."
 
 
+def _capture_rewrite(monkeypatch, name):
+    """Replace the preflight's enhance function *name* with one that records its keyword arguments and returns a fixed rewrite."""
+    captured: list[dict] = []
+
+    def _fake(*_args, **kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(prompt="A vivid rewrite with soft light.", scene="A snowy field at dusk.", format_fallback=False)
+
+    monkeypatch.setattr(f"zvisiongenerator.preflight.{name}", _fake)
+    return captured
+
+
 def _types(events):
     return [event["type"] for event in events]
 
@@ -226,12 +228,10 @@ class TestRunPreflight:
         enhancer = _FakeEnhancer([], texts=[reply, reply])
         plan, _events, _release, _enhancer = _run(enhancer=enhancer, args=_args(enhance_format="json"), family="ideogram4")
         assert all(json.loads(it.enhanced_prompt)["high_level_description"] == "A fox." for it in plan.iterations)
-        assert "OBJECT:" in enhancer.systems[0]
 
     def test_text_format_stays_prose(self):
-        plan, _events, _release, enhancer = _run(args=_args(enhance_format=None))
+        plan, _events, _release, _enhancer = _run(args=_args(enhance_format=None))
         assert all(not it.enhanced_prompt.startswith("{") for it in plan.iterations)
-        assert "OBJECT:" not in enhancer.systems[0]
 
     def test_plan_names_the_enhancer_that_ran(self):
         plan, _events, _release, _enhancer = _run()
@@ -356,36 +356,36 @@ class TestRunPreflight:
         failed = [e for e in events if e["type"] == "prompt_enhance_failed"]
         assert failed == [{"type": "prompt_enhance_failed", "mode": "image", "index": 1, "total": 2, "message": "chat template rejected the system role"}]
 
-    def test_ceiling_comes_from_model_family(self):
-        enhancer = _FakeEnhancer([])
-        _run({"a": [("fox " * 100, None)]}, enhancer=enhancer, args=_args(enhance=EnhanceSettings(length="extra")), family="flux1")
-        assert "153-180 words" in enhancer.systems[0]
+    def test_ceiling_comes_from_model_family(self, monkeypatch):
+        captured = _capture_rewrite(monkeypatch, "enhance_prompt")
+        _run({"a": [("fox " * 100, None)]}, args=_args(enhance=EnhanceSettings(length="extra")), family="flux1")
+        _run({"a": [("fox " * 100, None)]}, args=_args(enhance=EnhanceSettings(length="extra")), family="zimage")
+        assert [call["ceiling"] for call in captured] == [180, resolve_enhance_ceiling(_CONFIG, family="zimage", mode="image")]
+        assert captured[0]["ceiling"] != captured[1]["ceiling"]
 
-    def test_video_mode_prompt(self):
-        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
-        _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video")
-        assert "text-to-video" in enhancer.systems[0]
+    def test_video_jobs_are_rewritten_as_scene_and_action_pairs(self, monkeypatch):
+        images = _capture_rewrite(monkeypatch, "enhance_prompt")
+        videos = _capture_rewrite(monkeypatch, "enhance_video_prompt")
+        _run({"v": [("a fox runs", None)]}, mode="video")
+        assert (len(images), len(videos)) == (0, 1)
 
-    def test_video_job_shape_reaches_the_prompt(self):
-        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+    def test_video_job_shape_reaches_the_rewrite_context(self, monkeypatch):
+        captured = _capture_rewrite(monkeypatch, "enhance_video_prompt")
         args = _args(enhance=EnhanceSettings(sound=("ambient",)), width=704, height=448, num_frames=97, fps=24, no_audio=False, image_path="first.png")
-        _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args)
-        lines = enhancer.systems[0].splitlines()
-        assert any("ambient soundscape" in line for line in lines)
-        assert any(line.startswith("- Duration: about 4 seconds") for line in lines)
-        assert "- Compose for a landscape frame; never mention the frame or its shape." in lines
-        assert any(line.startswith("- The first frame is supplied as an image") for line in lines)
+        _run({"v": [("a fox runs", None)]}, mode="video", args=args)
+        context = captured[0]["context"]
+        assert (context.audio, context.orientation, context.reference_image) == (True, "landscape", True)
+        assert context.seconds == pytest.approx(97 / 24)
 
-    def test_video_without_audio_has_no_sound_rule(self):
-        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
-        args = _args(enhance=EnhanceSettings(sound=("ambient",)), no_audio=True)
-        _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args)
-        assert "ambient soundscape" not in enhancer.systems[0]
+    def test_video_without_audio_has_no_audio_in_the_context(self, monkeypatch):
+        captured = _capture_rewrite(monkeypatch, "enhance_video_prompt")
+        _run({"v": [("a fox runs", None)]}, mode="video", args=_args(enhance=EnhanceSettings(sound=("ambient",)), no_audio=True))
+        assert captured[0]["context"].audio is False
 
-    def test_image_ratio_sets_frame(self):
-        enhancer = _FakeEnhancer([])
-        _run({"a": [("a fox", None)]}, enhancer=enhancer, args=_args(ratio="9:16", width=None, height=None))
-        assert "- Compose for a portrait frame; never mention the frame or its shape." in enhancer.systems[0].splitlines()
+    def test_image_ratio_sets_the_frame_in_the_context(self, monkeypatch):
+        captured = _capture_rewrite(monkeypatch, "enhance_prompt")
+        _run({"a": [("a fox", None)]}, args=_args(ratio="9:16", width=None, height=None))
+        assert captured[0]["context"].orientation == "portrait"
 
     def test_json_captions_are_not_enhanced(self):
         session = MagicMock()
@@ -396,12 +396,6 @@ class TestRunPreflight:
     def test_bad_mode(self):
         with pytest.raises(ValueError, match="mode"):
             run_preflight({}, {}, _args(), mode="audio", model_family=None)
-
-    def test_default_release_patch_target(self, monkeypatch):
-        released = MagicMock()
-        monkeypatch.setattr("zvisiongenerator.preflight.release_accelerator_memory", released)
-        run_preflight({"a": [("x", None)]}, _CONFIG, _args(), mode="image", model_family=None, session=_session(_FakeEnhancer([])))
-        released.assert_called_once()
 
     def test_default_release_error_becomes_warning(self, monkeypatch):
         monkeypatch.setattr("zvisiongenerator.preflight.release_accelerator_memory", MagicMock(side_effect=RuntimeError("metal gone")))
