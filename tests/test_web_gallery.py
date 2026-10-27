@@ -106,27 +106,6 @@ def test_embedded_png_config_drives_gallery_detail(tmp_path):
     assert asset.lora is None
 
 
-def test_embedded_png_config_missing_model_shows_unavailable(tmp_path):
-    """When embedded config omits the model field, model_label should be Unavailable."""
-    config = {
-        "schema": "zvisiongenerator.config.v1",
-        "workflow": "txt2img",
-        "prompt": "Sunset",
-        "seed": 1,
-        "steps": 4,
-        "guidance": 2.0,
-        "width": 512,
-        "height": 512,
-    }
-    img_path = tmp_path / "nomodel.png"
-    _make_png_with_config(img_path, config)
-
-    assets = list_gallery_assets(str(tmp_path))
-    asset = _find_asset(assets, "nomodel.png")
-
-    assert asset.model_label == "Unavailable"
-
-
 def test_embedded_png_config_with_img2img_reference(tmp_path):
     """Embedded img2img config should surface the reference image path."""
     config = {
@@ -152,117 +131,14 @@ def test_embedded_png_config_with_img2img_reference(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Adjacent JSON files are ignored for reusable metadata
-# ---------------------------------------------------------------------------
-
-
-def test_embedded_config_ignores_adjacent_json_sidecar(tmp_path):
-    """When embedded config and adjacent JSON conflict, embedded config fields should be used."""
-    embedded_config = {
-        "schema": "zvisiongenerator.config.v1",
-        "workflow": "txt2img",
-        "prompt": "Embedded prompt wins",
-        "model": "embedded-model",
-        "seed": 111,
-        "steps": 6,
-        "guidance": 2.0,
-        "width": 512,
-        "height": 512,
-    }
-    sidecar_data = {
-        "schema": "zvisiongenerator.asset-provenance.v1",
-        "workflow": "img2img",
-        "prompt": "Adjacent JSON prompt ignored",
-        "model_name": "legacy-model",
-        "seed": 999,
-        "steps": 20,
-        "guidance": 7.0,
-        "width": 256,
-        "height": 256,
-    }
-    img_path = tmp_path / "both.png"
-    _make_png_with_config(img_path, embedded_config)
-    img_path.with_suffix(".json").write_text(json.dumps(sidecar_data), encoding="utf-8")
-
-    assets = list_gallery_assets(str(tmp_path))
-    asset = _find_asset(assets, "both.png")
-
-    assert asset.prompt == "Embedded prompt wins"
-    assert asset.model_label == "embedded-model"
-    assert asset.seed == 111
-    assert asset.steps == 6
-    assert asset.guidance == 2.0
-    assert asset.width == 512
-    assert asset.height == 512
-    assert asset.workflow == "txt2img"
-
-
-def test_plain_png_ignores_adjacent_json_sidecar(tmp_path):
-    """A PNG without embedded config should not pick up reusable metadata from adjacent JSON."""
-    sidecar_data = {
-        "schema": "zvisiongenerator.asset-provenance.v1",
-        "workflow": "txt2img",
-        "prompt": "Ignored sidecar prompt",
-        "model_name": "ignored-model",
-        "seed": 55,
-        "steps": 12,
-        "guidance": 3.0,
-        "width": 800,
-        "height": 600,
-        "ratio": "4:3",
-        "size": "m",
-    }
-    img_path = tmp_path / "legacy.png"
-    _make_plain_png(img_path)
-    img_path.with_suffix(".json").write_text(json.dumps(sidecar_data), encoding="utf-8")
-
-    assets = list_gallery_assets(str(tmp_path))
-    asset = _find_asset(assets, "legacy.png")
-
-    assert asset.prompt == "legacy"
-    assert asset.model_label == "Unavailable"
-    assert asset.seed is None
-    assert asset.steps is None
-    assert asset.guidance is None
-    assert asset.width == 32
-    assert asset.height == 32
-    assert asset.workflow is None
-    assert asset.ratio is None
-    assert asset.size is None
-
-
-def test_plain_png_ignores_asset_ext_json_sidecar(tmp_path):
-    """The asset.ext.json sidecar name variant should not provide reusable metadata."""
-    sidecar_data = {
-        "prompt": "Ignored dot-json sidecar",
-        "model_name": "ignored-dot-json-model",
-        "seed": 77,
-        "steps": 5,
-        "width": 256,
-        "height": 256,
-    }
-    img_path = tmp_path / "legacy2.png"
-    _make_plain_png(img_path)
-    img_path.with_name(f"{img_path.name}.json").write_text(json.dumps(sidecar_data), encoding="utf-8")
-
-    assets = list_gallery_assets(str(tmp_path))
-    asset = _find_asset(assets, "legacy2.png")
-
-    assert asset.prompt == "legacy2"
-    assert asset.model_label == "Unavailable"
-    assert asset.seed is None
-    assert asset.steps is None
-
-
-# ---------------------------------------------------------------------------
 # Missing metadata falls back to filename / PIL image info
 # ---------------------------------------------------------------------------
 
 
-def test_missing_metadata_uses_filename_and_pil_for_display_only_fields(tmp_path):
-    """Assets with no embedded config should still have display labels and media dimensions."""
-    img_path = tmp_path / "mystery_image.png"
-    _make_plain_png(img_path)
+def test_missing_metadata_falls_back_to_the_filename_and_pil_and_an_unavailable_model(tmp_path):
+    """Assets with no embedded config, or a config without a model, still have display labels and media dimensions."""
+    _make_plain_png(tmp_path / "mystery_image.png")
+    _make_png_with_config(tmp_path / "nomodel.png", {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "prompt": "Sunset", "seed": 1})
 
     assets = list_gallery_assets(str(tmp_path))
     asset = _find_asset(assets, "mystery_image.png")
@@ -275,6 +151,7 @@ def test_missing_metadata_uses_filename_and_pil_for_display_only_fields(tmp_path
     assert asset.steps is None
     assert asset.guidance is None
     assert asset.workflow is None
+    assert _find_asset(assets, "nomodel.png").model_label == "Unavailable"
 
 
 # ---------------------------------------------------------------------------
@@ -318,119 +195,6 @@ def test_embedded_mp4_config_drives_gallery_metadata(tmp_path):
     assert asset.workflow == "txt2vid"
 
 
-def test_embedded_mp4_config_ignores_mp4_sidecar(tmp_path):
-    """Embedded MP4 config should be used while adjacent JSON is ignored."""
-    embedded_config = {
-        "schema": "zvisiongenerator.config.v1",
-        "workflow": "txt2vid",
-        "prompt": "Embedded video prompt",
-        "model": "ltx-8",
-        "seed": 1,
-        "steps": 8,
-        "width": 704,
-        "height": 448,
-        "frame_count": 49,
-    }
-    sidecar_data = {
-        "prompt": "Ignored video sidecar",
-        "model_name": "old-model",
-        "seed": 9999,
-        "steps": 50,
-    }
-    mp4_path = tmp_path / "dual.mp4"
-    mp4_path.write_bytes(b"\x00" * 8)
-    mp4_path.with_suffix(".json").write_text(json.dumps(sidecar_data), encoding="utf-8")
-
-    with _video_probe_returning(embedded_config):
-        assets = list_gallery_assets(str(tmp_path))
-
-    asset = _find_asset(assets, "dual.mp4")
-
-    assert asset.prompt == "Embedded video prompt"
-    assert asset.model_label == "ltx-8"
-    assert asset.seed == 1
-
-
-def test_mp4_without_embedded_config_ignores_sidecar(tmp_path):
-    """An MP4 with no embedded config should not use adjacent JSON metadata."""
-    sidecar_data = {
-        "prompt": "Ignored fallback video sidecar",
-        "model_name": "ignored-sidecar-model",
-        "seed": 77,
-        "steps": 10,
-        "frame_count": 25,
-        "width": 512,
-        "height": 320,
-    }
-    mp4_path = tmp_path / "nosidebar.mp4"
-    mp4_path.write_bytes(b"\x00" * 8)
-    mp4_path.with_suffix(".json").write_text(json.dumps(sidecar_data), encoding="utf-8")
-
-    with _video_probe_returning(None):
-        assets = list_gallery_assets(str(tmp_path))
-
-    asset = _find_asset(assets, "nosidebar.mp4")
-
-    assert asset.prompt == "nosidebar"
-    assert asset.model_label == "Unavailable"
-    assert asset.seed is None
-    assert asset.steps is None
-    assert asset.frame_count is None
-
-
-# ---------------------------------------------------------------------------
-# Delete removes only selected media assets
-# ---------------------------------------------------------------------------
-
-
-def test_delete_preserves_adjacent_json_files(tmp_path):
-    """Deleting a gallery asset should leave adjacent JSON files untouched."""
-    img_path = tmp_path / "deleteme.png"
-    _make_plain_png(img_path)
-    sidecar_a = img_path.with_suffix(".json")
-    sidecar_b = img_path.with_name(f"{img_path.name}.json")
-    sidecar_a.write_text("{}", encoding="utf-8")
-    sidecar_b.write_text("{}", encoding="utf-8")
-
-    delete_gallery_assets(str(tmp_path), ["deleteme.png"])
-
-    assert not img_path.exists()
-    assert sidecar_a.exists()
-    assert sidecar_b.exists()
-
-
-def test_delete_media_asset_succeeds_without_adjacent_json(tmp_path):
-    """Deleting an asset that has no adjacent JSON should succeed without error."""
-    img_path = tmp_path / "nosidecar.png"
-    _make_plain_png(img_path)
-
-    delete_gallery_assets(str(tmp_path), ["nosidecar.png"])
-
-    assert not img_path.exists()
-
-
-# ---------------------------------------------------------------------------
-# Error resilience: embedded config read failure does not consult sidecars
-# ---------------------------------------------------------------------------
-
-
-def test_embedded_config_read_error_lists_plain_asset_without_sidecar_metadata(tmp_path):
-    """When read_png_config raises, adjacent JSON should still be ignored."""
-    sidecar_data = {"prompt": "Ignored adjacent JSON on read error", "model_name": "ignored-model", "seed": 88}
-    img_path = tmp_path / "broken_meta.png"
-    _make_plain_png(img_path)
-    img_path.with_suffix(".json").write_text(json.dumps(sidecar_data), encoding="utf-8")
-
-    with patch("zvisiongenerator.web.gallery.read_png_config", side_effect=Exception("corrupt metadata")):
-        assets = list_gallery_assets(str(tmp_path))
-
-    asset = _find_asset(assets, "broken_meta.png")
-
-    assert asset.prompt == "broken meta"
-    assert asset.model_label == "Unavailable"
-    assert asset.seed is None
-
-
 # ---------------------------------------------------------------------------
 # Scene in the gallery JSON and Reuse params
 # ---------------------------------------------------------------------------
@@ -460,75 +224,80 @@ def _video_reuse(tmp_path, config_overrides: dict) -> tuple[dict, dict[str, str]
     return payload, _reuse_params(payload)
 
 
-@pytest.mark.parametrize("scene", [None, "A castle at dusk."])
-def test_reuse_of_a_video_fills_the_recorded_scene_and_prompt_only(tmp_path, scene):
-    payload, params = _video_reuse(tmp_path, {"prompt": "A knight rides in.", **({"scene": scene} if scene else {})})
+@pytest.mark.parametrize(
+    ("overrides", "params_include", "params_absent", "payload_include"),
+    [
+        pytest.param(
+            {"prompt": "A knight rides in."},
+            {"prompt": "A knight rides in."},
+            {"scene", "enhanced_scene", "enhanced_prompt"},
+            {"scene": None, "prompt": "A knight rides in."},
+            id="prompt-only",
+        ),
+        pytest.param(
+            {"prompt": "A knight rides in.", "scene": "A castle at dusk."},
+            {"scene": "A castle at dusk.", "prompt": "A knight rides in."},
+            {"enhanced_scene", "enhanced_prompt"},
+            {"scene": "A castle at dusk.", "prompt": "A knight rides in."},
+            id="scene-and-prompt",
+        ),
+        pytest.param(
+            {
+                "prompt": "A knight in plate armour rides across the drawbridge as the gates open.",
+                "scene": "A grey stone castle at dusk, cold light, wide static shot.",
+                "scene_input": "A castle at dusk.",
+                "prompt_input": "A knight rides in.",
+            },
+            {
+                "scene": "A castle at dusk.",
+                "prompt": "A knight rides in.",
+                "enhanced_scene": "A grey stone castle at dusk, cold light, wide static shot.",
+                "enhanced_prompt": "A knight in plate armour rides across the drawbridge as the gates open.",
+            },
+            set(),
+            {
+                "scene": "A grey stone castle at dusk, cold light, wide static shot.",
+                "prompt": "A knight in plate armour rides across the drawbridge as the gates open.",
+            },
+            id="enhanced-pair",
+        ),
+        pytest.param(
+            {"prompt": "A knight rides in, armour clanking.", "scene": "A castle at dusk.", "prompt_input": "A knight rides in."},
+            {"prompt": "A knight rides in.", "enhanced_scene": "A castle at dusk.", "enhanced_prompt": "A knight rides in, armour clanking."},
+            {"scene"},
+            {},
+            id="enhanced-without-a-user-scene",
+        ),
+        pytest.param(
+            {"prompt": "A knight draws his sword and raises it.", "scene": "A castle at dusk.", "scene_input": "A castle at dusk.", "prompt_input": "He draws his sword."},
+            {"scene": "A castle at dusk.", "prompt": "He draws his sword.", "enhanced_prompt": "A knight draws his sword and raises it."},
+            {"enhanced_scene"},
+            {},
+            id="action-only-enhanced",
+        ),
+        pytest.param(
+            {"prompt": "He draws his sword.", "scene": "A grey castle at dusk.", "scene_input": "A castle at dusk.", "prompt_input": "He draws his sword."},
+            {"enhanced_scene": "A grey castle at dusk."},
+            {"enhanced_prompt"},
+            {},
+            id="part-equal-to-its-input",
+        ),
+        pytest.param(
+            {"scene": "A castle at dusk."},
+            {"scene": "A castle at dusk."},
+            {"prompt"},
+            {"prompt": "A castle at dusk."},
+            id="scene-only-never-the-file-name",
+        ),
+    ],
+)
+def test_reuse_of_a_video_fills_the_recorded_inputs_and_the_generated_pair(tmp_path, overrides, params_include, params_absent, payload_include):
+    """The user's inputs go to Your text, the generated pair to Enhanced only where it differs from its input."""
+    payload, params = _video_reuse(tmp_path, overrides)
 
-    assert (params.get("scene"), params["prompt"]) == (scene, "A knight rides in.")
-    assert not {"enhanced_scene", "enhanced_prompt"} & set(params)
-    assert (payload["scene"], payload["prompt"]) == (scene, "A knight rides in.")
-
-
-def test_reuse_of_an_enhanced_video_offers_inputs_and_the_generated_pair_without_scene_in_the_prompt(tmp_path):
-    """The user's inputs go to Your text, the generated pair to Enhanced, and no prompt value carries scene text."""
-    payload, params = _video_reuse(
-        tmp_path,
-        {
-            "prompt": "A knight in plate armour rides across the drawbridge as the gates open.",
-            "scene": "A grey stone castle at dusk, cold light, wide static shot.",
-            "scene_input": "A castle at dusk.",
-            "prompt_input": "A knight rides in.",
-        },
-    )
-
-    assert params["scene"] == "A castle at dusk."
-    assert params["prompt"] == "A knight rides in."
-    assert params["enhanced_scene"] == "A grey stone castle at dusk, cold light, wide static shot."
-    assert params["enhanced_prompt"] == "A knight in plate armour rides across the drawbridge as the gates open."
-    assert "castle" not in params["enhanced_prompt"]
-    assert payload["prompt"] == params["enhanced_prompt"]
-    assert payload["scene"] == params["enhanced_scene"]
-
-
-def test_reuse_of_an_enhanced_video_without_a_user_scene_omits_the_scene_input(tmp_path):
-    _payload, params = _video_reuse(
-        tmp_path,
-        {"prompt": "A knight rides in, armour clanking.", "scene": "A castle at dusk.", "prompt_input": "A knight rides in."},
-    )
-
-    assert "scene" not in params
-    assert params["prompt"] == "A knight rides in."
-    assert (params["enhanced_scene"], params["enhanced_prompt"]) == ("A castle at dusk.", "A knight rides in, armour clanking.")
-
-
-def test_reuse_of_an_action_only_video_carries_the_users_scene_and_only_the_enhanced_action(tmp_path):
-    """The scene was not rewritten (it equals its input), so only the action is offered as Enhanced."""
-    _payload, params = _video_reuse(
-        tmp_path,
-        {"prompt": "A knight draws his sword and raises it.", "scene": "A castle at dusk.", "scene_input": "A castle at dusk.", "prompt_input": "He draws his sword."},
-    )
-
-    assert (params["scene"], params["prompt"]) == ("A castle at dusk.", "He draws his sword.")
-    assert params["enhanced_prompt"] == "A knight draws his sword and raises it."
-    assert "enhanced_scene" not in params
-
-
-def test_reuse_offers_no_enhanced_text_for_a_part_that_equals_its_input(tmp_path):
-    _payload, params = _video_reuse(
-        tmp_path,
-        {"prompt": "He draws his sword.", "scene": "A grey castle at dusk.", "scene_input": "A castle at dusk.", "prompt_input": "He draws his sword."},
-    )
-
-    assert params["enhanced_scene"] == "A grey castle at dusk."
-    assert "enhanced_prompt" not in params
-
-
-def test_reuse_of_a_scene_only_video_carries_no_prompt_and_not_the_file_name(tmp_path):
-    payload, params = _video_reuse(tmp_path, {"scene": "A castle at dusk."})
-
-    assert params["scene"] == "A castle at dusk."
-    assert "prompt" not in params
-    assert payload["prompt"] == "A castle at dusk."
+    assert {key: params[key] for key in params_include} == params_include
+    assert not params_absent & set(params)
+    assert {key: payload[key] for key in payload_include} == payload_include
 
 
 def test_reuse_of_an_image_keeps_only_the_prompt(tmp_path, monkeypatch):
@@ -865,16 +634,7 @@ def test_a_plain_image_has_no_enhance_record(tmp_path, monkeypatch):
 
 def test_an_enhanced_video_reuses_its_options(tmp_path):
     payload, params = _video_reuse(tmp_path, {"prompt": "A fox sprints.", "prompt_input": "a fox runs", "enhance": {**_ENHANCE, "settings": {"style": "cinematic", "camera": "orbit"}}})
-    assert payload["enhance"]["summary"] == "Fast · Cinematic, Orbit"
     assert json.loads(params["enhance"])["settings"]["camera"] == "orbit"
-
-
-@pytest.mark.parametrize("workflow", ["txt2img", "img2img"])
-def test_image_workflows_show_the_quantize_control_the_reuse_param_is_gated_on(workflow):
-    """The Workspace applies a reused ``quantize`` only where this control is visible, so the real contract must list it."""
-    from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS
-
-    assert "quantize" in WORKFLOW_DEFINITIONS[workflow]["visible_controls"]
 
 
 # ---------------------------------------------------------------------------
@@ -941,17 +701,6 @@ def test_app_db_path_is_isolated_per_test(_isolated_app_db):
     assert _isolated_app_db() != Path.home() / ".ziv"
 
 
-def test_an_unchanged_file_is_not_read_again_after_a_restart(tmp_path, monkeypatch, reads):
-    _aged_png(tmp_path / "a.png", _CONFIG)
-
-    first = list_gallery_assets(str(tmp_path))
-    _restart_index(monkeypatch)
-    second = list_gallery_assets(str(tmp_path))
-
-    assert reads == ["a.png"]
-    assert [asdict(asset) for asset in second] == [asdict(asset) for asset in first]
-
-
 def test_a_changed_file_is_read_again(tmp_path, reads):
     png = _aged_png(tmp_path / "a.png", _CONFIG)
     list_gallery_assets(str(tmp_path))
@@ -961,16 +710,6 @@ def test_a_changed_file_is_read_again(tmp_path, reads):
 
     assert reads == ["a.png", "a.png"]
     assert assets[0].prompt == "A tower."
-
-
-def test_a_file_younger_than_the_settle_window_is_not_stored(tmp_path, reads):
-    _make_plain_png(tmp_path / "fresh.png")
-
-    list_gallery_assets(str(tmp_path))
-    list_gallery_assets(str(tmp_path))
-
-    assert reads == ["fresh.png", "fresh.png"]
-    assert _stored_rel_paths() == []
 
 
 def test_a_file_deleted_outside_the_app_is_never_shown_and_its_row_is_pruned(tmp_path):

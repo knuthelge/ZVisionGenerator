@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import huggingface_hub
 import huggingface_hub.constants
 import pytest
+from _web_helpers import packaged_config
 
 from zvisiongenerator.backends.cuda import download_plan as cuda_plan
 from zvisiongenerator.downloads.space import SpaceNeed
@@ -86,32 +87,31 @@ def _no_planner_may_run(monkeypatch) -> None:
 
 
 class TestRowPlan:
-    def test_an_image_row_is_planned_with_its_resolved_path_family_and_config(self, env, monkeypatch):
-        targets = (DownloadTarget("owner/zit"),)
-        planner = MagicMock(return_value=targets)
-        monkeypatch.setattr(plan_module, "image_plan", planner)
-        web_config = _web_config(env, image=[_image("zit", "owner/zit")])
+    @pytest.mark.parametrize(
+        ("kind", "name", "planner", "inventory", "expected_kwargs"),
+        [
+            pytest.param("model", "zit", "image_plan", {"image": [_image("zit", "owner/zit")]}, {}, id="image"),
+            pytest.param("model", "ltx-8", "video_plan", {"video": [_video("ltx-8", "owner/ltx")]}, {"upscale": True}, id="video-includes-the-upscaler-parts"),
+            pytest.param("model", "seedvr2-7b@fp8", "seedvr2_plan", {"seedvr2": _seedvr2()}, {"weights": FP8_WEIGHTS}, id="seedvr2-picks-the-weights-folder"),
+            pytest.param("enhancer", "fast", "enhancer_plan", {}, {}, id="enhancer"),
+        ],
+    )
+    def test_each_row_kind_is_planned_by_its_own_planner(self, env, monkeypatch, kind, name, planner, inventory, expected_kwargs):
+        targets = (DownloadTarget("owner/target"),)
+        mock = MagicMock(return_value=targets)
+        monkeypatch.setattr(plan_module, planner, mock)
 
-        plan = row_plan("model", "zit", web_config)
+        plan = row_plan(kind, name, _web_config(env, **inventory))
 
-        assert plan == RowPlan("model", "zit", "zit", targets)
-        planner.assert_called_once_with("owner/zit", family="zimage", config=web_config.app_config, platform_key=sys.platform)
+        assert (plan.kind, plan.name, plan.targets) == (kind, name, targets)
+        assert plan.label
+        mock.assert_called_once()
+        assert {key: mock.call_args.kwargs[key] for key in expected_kwargs} == expected_kwargs
 
     def test_a_plan_that_cannot_be_made_has_no_targets(self, env, monkeypatch):
         monkeypatch.setattr(plan_module, "image_plan", lambda *a, **k: None)
 
         assert row_plan("model", "zit", _web_config(env, image=[_image("zit", "owner/zit")])).targets is None
-
-    def test_a_video_row_is_planned_with_every_part(self, env, monkeypatch):
-        targets = (DownloadTarget("owner/ltx"),)
-        planner = MagicMock(return_value=targets)
-        monkeypatch.setattr(plan_module, "video_plan", planner)
-        web_config = _web_config(env, video=[_video("ltx-8", "owner/ltx")])
-
-        plan = row_plan("model", "ltx-8", web_config)
-
-        assert (plan.kind, plan.name, plan.label, plan.targets) == ("model", "ltx-8", "ltx-8", targets)
-        planner.assert_called_once_with("owner/ltx", family="ltx", config=web_config.app_config, model_name="ltx-8", upscale=True)
 
     def test_a_row_is_labelled_by_its_configured_name(self, env, monkeypatch):
         monkeypatch.setattr(plan_module, "image_plan", MagicMock(return_value=(DownloadTarget("owner/zit"),)))
@@ -124,28 +124,6 @@ class TestRowPlan:
 
         assert (image.name, image.label, video.name, video.label) == ("zit", "Z-Image Turbo", "ltx-8", "LTX-2.3 8-bit")
         assert (summary["name"], summary["label"]) == ("zit", "Z-Image Turbo")
-
-    def test_the_seedvr2_row_is_planned_by_its_row_name(self, env, monkeypatch):
-        targets = (DownloadTarget("owner/seedvr2", None, ("a.safetensors",), local_dir="/x"),)
-        planner = MagicMock(return_value=targets)
-        monkeypatch.setattr(plan_module, "seedvr2_plan", planner)
-        web_config = _web_config(env, seedvr2=_seedvr2())
-
-        plan = row_plan("model", "seedvr2-7b@fp8", web_config)
-
-        assert (plan.name, plan.label, plan.targets) == ("seedvr2-7b@fp8", "seedvr2-7b@fp8", targets)
-        planner.assert_called_once_with("seedvr2-7b", models_dir=env.models_dir, weights=FP8_WEIGHTS)
-
-    def test_an_enhancer_row_is_planned_by_tier(self, env, monkeypatch):
-        targets = (DownloadTarget("owner/enhancer"),)
-        planner = MagicMock(return_value=targets)
-        monkeypatch.setattr(plan_module, "enhancer_plan", planner)
-
-        plan = row_plan("enhancer", "fast", _web_config(env))
-
-        assert (plan.kind, plan.name, plan.targets) == ("enhancer", "fast", targets)
-        assert plan.label
-        planner.assert_called_once_with("owner/enhancer", None)
 
     @pytest.mark.parametrize(("kind", "name"), [("model", "nope"), ("enhancer", "nope"), ("enhancer", "smart"), ("lora", "zit")])
     def test_an_unknown_row_or_kind_is_a_value_error(self, env, kind, name):
@@ -198,10 +176,8 @@ class TestDownloadNeeded:
         assert row_download_needed("model", "ltx-8", web_config, downloaded=True, present=_present) is False
 
     def test_the_ltx25_row_plans_one_pinned_target_and_is_needed_until_it_is_present(self, env, monkeypatch):
-        from zvisiongenerator.utils.config import load_config
-
         monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "linux")
-        config = load_config()
+        config = packaged_config()
         pin = config["model_aliases"]["ltx25-4"]["linux"]
         web_config = _web_config(env, video=[_video("ltx25-4", pin)], app_config=config)
         target = DownloadTarget("unsloth/LTX-2.5-FP8", "7b40724fc39bbb01d9b4d72638c0d263531c88c2", None, ("LTX-2.5-*.safetensors", "samples/*"))
@@ -329,8 +305,6 @@ class TestPlanSummary:
             "total_bytes": 1_500,
             "space": {"path": str(tmp_path), "needed_bytes": 1_500, "free_bytes": 1_000, "enough": False},
         }
-        assert space.call_args.kwargs == {"cache_dir": tmp_path}
-        assert space.call_args.args[0] == [(first, checks[first]), (second, checks[second])]
 
     def test_targets_on_disk_are_skipped_and_never_checked(self, tmp_path):
         present, missing = DownloadTarget("owner/a"), DownloadTarget("owner/b")

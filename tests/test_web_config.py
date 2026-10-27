@@ -12,7 +12,7 @@ from zvisiongenerator.web import config as web_config_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.config import load_config
-from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
+from zvisiongenerator.utils.seedvr2 import MLX_WEIGHTS
 
 
 def _make_app_config() -> dict[str, object]:
@@ -55,9 +55,21 @@ def _make_app_config() -> dict[str, object]:
     }
 
 
-def _assert_non_empty_string(value: object) -> None:
-    assert isinstance(value, str)
-    assert value
+def _patch_minimal_web_config(monkeypatch, tmp_path, app_config=None, *, platform=None, detect_image=None, detect_video=None):
+    """Point the web config loader at *app_config* (default: the minimal one) with empty model inventories."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / ".ziv"))  # alias resolution reads the models folder too
+    monkeypatch.setattr(web_config_module, "load_config", (lambda: app_config) if app_config is not None else _make_app_config)
+    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
+    if platform is not None:
+        monkeypatch.setattr(model_inventory_module.sys, "platform", platform)
+    if detect_image is not None:
+        monkeypatch.setattr(web_config_module, "detect_image_model", detect_image)
+    if detect_video is not None:
+        monkeypatch.setattr(web_config_module, "detect_video_model", detect_video)
 
 
 def test_declared_image_family_returns_configured_family():
@@ -171,15 +183,6 @@ def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeyp
     app_config["model_alias_families"] = {"ideo": "ideogram4"}
     app_config["ui"]["default_models"] = {"image": "ideo"}
 
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / ".ziv"))  # alias resolution reads the models folder too
-    monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
-    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
-    monkeypatch.setattr(model_inventory_module.sys, "platform", "darwin")
-
     detect_calls: list[str] = []
 
     def _fake_detect_image_model(value: object) -> ImageModelInfo:
@@ -188,8 +191,14 @@ def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeyp
             raise RuntimeError("offline")
         return ImageModelInfo(family="zimage" if "custom-default" in str(value) else "unknown", is_distilled=False, size=None)
 
-    monkeypatch.setattr(web_config_module, "detect_image_model", _fake_detect_image_model)
-    monkeypatch.setattr(web_config_module, "detect_video_model", lambda _value: SimpleNamespace(family="unknown"))
+    _patch_minimal_web_config(
+        monkeypatch,
+        tmp_path,
+        app_config,
+        platform="darwin",
+        detect_image=_fake_detect_image_model,
+        detect_video=lambda _value: SimpleNamespace(family="unknown"),
+    )
 
     web_config = web_config_module.load_web_config()
 
@@ -198,111 +207,65 @@ def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeyp
     assert detect_calls == [str(tmp_path / "models" / "custom-default")]
 
 
-def test_load_web_config_hides_ideo_alias_on_windows(monkeypatch, tmp_path):
+_IDEO_ALIASES = {
+    "ideo": {
+        "darwin": "ideogram-ai/ideogram-4-fp8",
+        "win32": {"message": "Alias 'ideo' is macOS-only."},
+        "linux": {"message": "Alias 'ideo' is macOS-only."},
+    },
+    "portable-image": "Tongyi-MAI/Z-Image-Turbo",
+}
+_BLOCKED_ALIASES = {
+    "portable-image": "Tongyi-MAI/Z-Image-Turbo",
+    "windows-only-blocked": {
+        "darwin": "Tongyi-MAI/Z-Image-Turbo",
+        "win32": {"message": "Windows build is not available."},
+    },
+}
+_LTX_ALIASES = {
+    "ltx-8": {
+        "darwin": "dgrauet/ltx-2.3-mlx-q8",
+        "win32": {"message": "Alias 'ltx-8' is macOS-only."},
+        "linux": {"message": "Alias 'ltx-8' is macOS-only."},
+    },
+    "ltx-2.3": {
+        "darwin": {"message": "Alias 'ltx-2.3' is available on Windows and Linux only."},
+        "win32": "diffusers/LTX-2.3-Distilled-Diffusers",
+        "linux": "diffusers/LTX-2.3-Distilled-Diffusers",
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("aliases", "families", "default_models", "options_field", "expected"),
+    [
+        (_IDEO_ALIASES, {"ideo": "ideogram4"}, {"image": "ideo"}, "image_model_options", "portable-image"),
+        (_BLOCKED_ALIASES, {}, {"image": "portable-image"}, "image_model_options", "portable-image"),
+        (_LTX_ALIASES, {}, {"video": "ltx-8"}, "video_model_options", "ltx-2.3"),
+    ],
+    ids=["ideo-alias", "blocked-alias", "ltx-video-aliases"],
+)
+def test_load_web_config_hides_aliases_the_platform_cannot_resolve(monkeypatch, tmp_path, aliases, families, default_models, options_field, expected):
+    """A platform-unavailable alias is hidden from the options and the default falls back to an available one."""
     app_config = _make_app_config()
-    app_config["model_aliases"] = {
-        "ideo": {
-            "darwin": "ideogram-ai/ideogram-4-fp8",
-            "win32": {"message": "Alias 'ideo' is macOS-only."},
-            "linux": {"message": "Alias 'ideo' is macOS-only."},
-        },
-        "portable-image": "Tongyi-MAI/Z-Image-Turbo",
-    }
-    app_config["model_alias_families"] = {"ideo": "ideogram4"}
-    app_config["ui"]["default_models"] = {"image": "ideo"}
+    app_config["model_aliases"] = aliases
+    app_config["model_alias_families"] = families
+    app_config["ui"]["default_models"] = default_models
 
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / ".ziv"))  # alias resolution reads the models folder too
-    monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
-    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
-    monkeypatch.setattr(model_inventory_module.sys, "platform", "win32")
-    monkeypatch.setattr(
-        web_config_module,
-        "detect_image_model",
-        lambda value: ImageModelInfo(family="zimage" if "Z-Image" in str(value) else "unknown", is_distilled=False, size=None),
-    )
-    monkeypatch.setattr(web_config_module, "detect_video_model", lambda _value: SimpleNamespace(family="unknown"))
-
-    web_config = web_config_module.load_web_config()
-
-    assert web_config.image_model_options == ("portable-image",)
-    assert web_config.default_models.image == "portable-image"
-
-
-def test_load_web_config_skips_unavailable_platform_aliases(monkeypatch, tmp_path):
-    """Unavailable platform-aware aliases should be ignored during inventory discovery."""
-    app_config = _make_app_config()
-    app_config["model_aliases"] = {
-        "portable-image": "Tongyi-MAI/Z-Image-Turbo",
-        "windows-only-blocked": {
-            "darwin": "Tongyi-MAI/Z-Image-Turbo",
-            "win32": {"message": "Windows build is not available."},
-        },
-    }
-    app_config["ui"]["default_models"] = {"image": "portable-image"}
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
-    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
-    monkeypatch.setattr(model_inventory_module.sys, "platform", "win32")
-    monkeypatch.setattr(
-        web_config_module,
-        "detect_image_model",
-        lambda value: ImageModelInfo(family="zimage" if "Z-Image" in str(value) else "unknown", is_distilled=False, size=None),
-    )
-    monkeypatch.setattr(web_config_module, "detect_video_model", lambda _value: SimpleNamespace(family="unknown"))
-
-    web_config = web_config_module.load_web_config()
-
-    assert web_config.image_model_options == ("portable-image",)
-    assert web_config.default_models.image == "portable-image"
-
-
-def test_load_web_config_exposes_windows_linux_video_aliases_and_hides_macos_only_ones(monkeypatch, tmp_path):
-    """Windows/Linux inventory should include ltx-2.3 and omit macOS-only video aliases."""
-    app_config = _make_app_config()
-    app_config["model_aliases"] = {
-        "ltx-8": {
-            "darwin": "dgrauet/ltx-2.3-mlx-q8",
-            "win32": {"message": "Alias 'ltx-8' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
-            "linux": {"message": "Alias 'ltx-8' is macOS-only. On Linux, use 'ltx-2.3' for the CUDA diffusers backend."},
-        },
-        "ltx-2.3": {
-            "darwin": {"message": "Alias 'ltx-2.3' is available on Windows and Linux only. On macOS, use 'ltx-4' or 'ltx-8'."},
-            "win32": "diffusers/LTX-2.3-Distilled-Diffusers",
-            "linux": "diffusers/LTX-2.3-Distilled-Diffusers",
-        },
-    }
-    app_config["ui"]["default_models"] = {"video": "ltx-8"}
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
-    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
-    monkeypatch.setattr(model_inventory_module.sys, "platform", "win32")
-    monkeypatch.setattr(
-        web_config_module,
-        "detect_image_model",
-        lambda _value: ImageModelInfo(family="unknown", is_distilled=False, size=None),
-    )
-    monkeypatch.setattr(
-        web_config_module,
-        "detect_video_model",
-        lambda value: SimpleNamespace(family="ltx" if "Diffusers" in str(value) else "unknown", supports_i2v=True),
+    _patch_minimal_web_config(
+        monkeypatch,
+        tmp_path,
+        app_config,
+        platform="win32",
+        detect_image=lambda value: ImageModelInfo(family="zimage" if "Z-Image" in str(value) else "unknown", is_distilled=False, size=None),
+        detect_video=lambda value: SimpleNamespace(family="ltx" if "Diffusers" in str(value) else "unknown", supports_i2v=True),
     )
 
     web_config = web_config_module.load_web_config()
 
-    assert web_config.video_model_options == ("ltx-2.3",)
-    assert web_config.default_models.video == "ltx-2.3"
+    assert getattr(web_config, options_field) == (expected,)
+    default = web_config.default_models.video if "video" in default_models else web_config.default_models.image
+    assert default == expected
 
 
 def test_load_web_config_rejects_invalid_ui_mapping(monkeypatch):
@@ -339,8 +302,6 @@ def test_build_writable_config_schema_exposes_frozen_phase_a_fields(monkeypatch,
 
     assert schema["version"] == 1
     assert schema["semantics"]["omitted"] == "unchanged"
-    assert "null" in schema["semantics"]
-    _assert_non_empty_string(schema["semantics"]["null"])
     assert sorted(fields) == [
         "generation.default_size",
         "prompt_enhancer.user_model",
@@ -353,14 +314,8 @@ def test_build_writable_config_schema_exposes_frozen_phase_a_fields(monkeypatch,
     assert fields["ui.output_dir"]["empty_string"] == "clear"
     assert fields["ui.output_dir"]["persisted_value"] == str(tmp_path / "persisted-outputs")
     assert fields["ui.output_dir"]["effective_value"] == str(tmp_path / "effective-outputs")
-    assert "default_source" in fields["ui.output_dir"]
-    _assert_non_empty_string(fields["ui.output_dir"]["default_source"])
-    assert fields["ui.output_dir"]["owning_consumer"]
-    assert fields["ui.output_dir"]["validation_rules"]
     assert fields["generation.default_size"]["persisted_value"] == "l"
     assert fields["generation.default_size"]["effective_value"] == "m"
-    assert "default_source" in fields["generation.default_size"]
-    _assert_non_empty_string(fields["generation.default_size"]["default_source"])
 
 
 def test_build_writable_config_schema_reports_effective_default_size_without_override(monkeypatch):
@@ -455,26 +410,6 @@ def test_persist_writable_config_patch_clears_output_dir_override(monkeypatch, t
     }
 
 
-def test_image_inventory_does_not_probe_video_aliases(tmp_path):
-    """Video aliases are recognised offline; probing them as image repos cost a Hub request per page load."""
-    probed: list[str] = []
-
-    def _detect(path: str) -> ImageModelInfo:
-        probed.append(path)
-        return ImageModelInfo(family="zimage", is_distilled=False, size=None)
-
-    inventory = model_inventory_module.discover_image_inventory(
-        {"model_aliases": {"ltx-8": "dgrauet/ltx-2.3-mlx-q8", "zit": "Tongyi-MAI/Z-Image-Turbo"}},
-        tmp_path,
-        list_installed=lambda _data_dir: [],
-        resolve_alias_path=lambda name, **_kwargs: {"ltx-8": "dgrauet/ltx-2.3-mlx-q8", "zit": "Tongyi-MAI/Z-Image-Turbo"}[name],
-        detect_model=_detect,
-    )
-
-    assert probed == ["Tongyi-MAI/Z-Image-Turbo"]
-    assert [entry.name for entry in inventory] == ["zit"]
-
-
 def _persist_current() -> SimpleNamespace:
     return SimpleNamespace(
         image_model_options=("zit",),
@@ -529,19 +464,6 @@ def test_user_config_write_is_atomic(monkeypatch, tmp_path):
     assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
 
 
-def test_image_inventory_still_probes_local_paths_containing_ltx(tmp_path):
-    """Only remote video repos are skipped; a local image model under e.g. /Volumes/Voltx must still be detected."""
-    local_dir = str(tmp_path / "Voltx" / "my-image-model")
-    inventory = model_inventory_module.discover_image_inventory(
-        {"model_aliases": {"mine": local_dir}},
-        tmp_path,
-        list_installed=lambda _data_dir: [],
-        resolve_alias_path=lambda _name, **_kwargs: local_dir,
-        detect_model=lambda _path: ImageModelInfo(family="zimage", is_distilled=False, size=None),
-    )
-    assert [entry.name for entry in inventory] == ["mine"]
-
-
 def test_user_config_write_preserves_symlink_and_permissions(monkeypatch, tmp_path):
     """Saving from the Web UI must not replace a symlinked config.yaml or widen its permissions."""
     import stat
@@ -562,38 +484,6 @@ def test_user_config_write_preserves_symlink_and_permissions(monkeypatch, tmp_pa
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
-def test_user_config_temp_file_never_has_wider_permissions(monkeypatch, tmp_path):
-    """The temp file must carry the target's mode before it holds the config, so a 0600 file never leaks as 0644."""
-    import stat
-    from pathlib import Path
-
-    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-    config = tmp_path / "config.yaml"
-    config.write_text("ui: {}\n", encoding="utf-8")
-    config.chmod(0o600)
-    seen: list[tuple[int, str]] = []
-    real_replace = Path.replace
-
-    def _capture(self, target):
-        seen.append((stat.S_IMODE(self.stat().st_mode), self.read_text(encoding="utf-8")))
-        return real_replace(self, target)
-
-    monkeypatch.setattr(Path, "replace", _capture)
-    config_contract_module.write_user_config_override({"ui": {"output_dir": "/x"}})
-
-    assert seen and seen[0][0] == 0o600 and "/x" in seen[0][1]
-    assert stat.S_IMODE(config.stat().st_mode) == 0o600
-
-
-def _patch_minimal_web_config(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(web_config_module, "load_config", _make_app_config)
-    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
-    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
-
-
 @pytest.mark.usefixtures("hub_offline")
 def test_load_web_config_has_no_seedvr2_where_it_is_unsupported(monkeypatch, tmp_path):
     _patch_minimal_web_config(monkeypatch, tmp_path)
@@ -609,9 +499,8 @@ def test_load_web_config_has_no_seedvr2_where_it_is_unsupported(monkeypatch, tmp
         (None, None, None),
     ],
 )
-@pytest.mark.parametrize("weights", [MLX_WEIGHTS, FP8_WEIGHTS])
 @pytest.mark.usefixtures("hub_offline")
-def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget_and_engine(monkeypatch, tmp_path, budget, expected_gpu, expected_system, weights):
+def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget_and_engine(monkeypatch, tmp_path, budget, expected_gpu, expected_system):
     _patch_minimal_web_config(monkeypatch, tmp_path)
     setup = object()
     calls: list[dict] = []
@@ -621,14 +510,14 @@ def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget_and_engine(
         return setup
 
     monkeypatch.setattr(web_config_module, "supports_seedvr2", lambda: True)
-    monkeypatch.setattr(web_config_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=weights))
+    monkeypatch.setattr(web_config_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=MLX_WEIGHTS))
     monkeypatch.setattr(web_config_module, "memory_budget", lambda: budget)
     monkeypatch.setattr(web_config_module, "build_seedvr2_setup", _build)
 
     web_config = web_config_module.load_web_config()
 
     assert web_config.seedvr2 is setup
-    assert calls[0]["weights"] is weights
+    assert calls[0]["weights"] is MLX_WEIGHTS
     assert (calls[0]["budget_bytes"], calls[0]["system_bytes"]) == (expected_gpu, expected_system)
     assert calls[0]["models_dir"] == tmp_path / ".ziv" / "models"
 

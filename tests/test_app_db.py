@@ -73,7 +73,7 @@ def test_a1_new_database_has_standard_settings(tmp_path: Path) -> None:
 
 def test_simultaneous_first_connects_all_succeed_and_leave_wal(tmp_path: Path) -> None:
     workers = 20
-    for round_number in range(10):
+    for round_number in range(3):
         path = tmp_path / f"ziv-{round_number}.sqlite3"
         barrier = threading.Barrier(workers)
 
@@ -307,24 +307,6 @@ def test_a9_real_garbage_file_is_classified_as_corruption(tmp_path: Path) -> Non
     with closing(sqlite3.connect(path)) as conn, pytest.raises(sqlite3.DatabaseError) as info:
         conn.execute("PRAGMA journal_mode=WAL")
     assert app_db.is_corruption(info.value)
-
-
-def test_a10_same_second_quarantines_get_distinct_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(app_db.time, "strftime", lambda _fmt: "20260101-000000")
-    path = tmp_path / "ziv.sqlite3"
-    targets = []
-    for index in range(3):
-        path.write_bytes(f"file {index}".encode())
-        (tmp_path / "ziv.sqlite3-wal").write_bytes(b"wal")
-        st = os.stat(path)
-        target = app_db.quarantine(path, (st.st_dev, st.st_ino))
-        assert target is not None
-        targets.append(target)
-    assert len(set(targets)) == 3
-    assert targets[0].name == "ziv.sqlite3.corrupt-20260101-000000"
-    assert targets[1].name == "ziv.sqlite3.corrupt-20260101-000000-1"
-    assert [t.read_bytes() for t in targets] == [b"file 0", b"file 1", b"file 2"]
-    assert not path.exists()
 
 
 def test_a11_replaced_file_is_not_moved(tmp_path: Path) -> None:

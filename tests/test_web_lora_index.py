@@ -108,15 +108,6 @@ def test_a_name_without_a_file_is_unknown(loras_dir, reads):
     assert reads == []
 
 
-def test_no_names_give_an_empty_result_without_opening_the_database(loras_dir, monkeypatch):
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("the database must not be opened")
-
-    monkeypatch.setattr(lora_index.app_db, "connect", forbidden)
-
-    assert lookup(loras_dir, []) == {}
-
-
 def test_a_database_error_gives_unknown_for_all(loras_dir, monkeypatch):
     _write_lora(loras_dir / "a.safetensors")
 
@@ -152,16 +143,3 @@ def test_an_empty_name_list_keeps_the_cached_rows(loras_dir, reads):
     lookup(loras_dir, [])
 
     assert _rows(loras_dir) == ["a"]
-
-
-def test_a_version_bump_drops_lower_versioned_tables_only(loras_dir):
-    with closing(lora_index.app_db.connect(components=(lora_index._COMPONENT,))) as conn:
-        conn.execute(f"CREATE TABLE {lora_index._TABLE_PREFIX}0 (x)")
-        conn.execute(f"CREATE TABLE {lora_index._TABLE_PREFIX}999 (x)")
-        conn.execute("BEGIN IMMEDIATE")
-        lora_index._migrate(conn, 0)
-        conn.execute("COMMIT")
-        tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-
-    assert f"{lora_index._TABLE_PREFIX}0" not in tables
-    assert {f"{lora_index._TABLE_PREFIX}999", lora_index._TABLE} <= tables

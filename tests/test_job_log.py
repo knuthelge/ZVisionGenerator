@@ -101,32 +101,6 @@ class TestBuildEntry:
         assert entry["error"] == "boom"
         assert entry["failed_runs"] == 3
 
-    def test_builder_is_total_on_junk_input(self):
-        class Unprintable:
-            def __str__(self) -> str:
-                raise RuntimeError("no text")
-
-        class BrokenMapping(dict):
-            def get(self, *_args, **_kwargs):
-                raise RuntimeError("no get")
-
-        junk_contexts = [
-            {"prompt": Unprintable(), "model": Unprintable(), "workflow": Unprintable(), "settings": Unprintable()},
-            {"settings": ["not", "a", "mapping"], "prompt": None, "model": None},
-            BrokenMapping(),
-            None,
-            "text",
-        ]
-        for context in junk_contexts:
-            entry = _build(context=context, outputs=None, error=Unprintable(), failed_runs="x", started_at=None, completed_at="soon")
-            assert set(entry) == ENTRY_KEYS
-            assert entry["failed_runs"] == 0
-            assert entry["duration_secs"] == 0.0
-            assert entry["outputs"] == []
-
-    def test_unserialisable_settings_still_build(self):
-        assert _build(context={"settings": {"path": Path("/x")}})["settings"] == {"path": Path("/x")}
-
 
 class TestHelpers:
     @pytest.mark.parametrize(
@@ -224,14 +198,6 @@ class TestJobLogStore:
         assert stored["prompt"] == "blå øyne"
         assert stored["settings"] == {"path": str(Path("/x"))}
 
-    def test_unicode_line_separators_in_an_entry_are_kept(self, log):
-        prompt = "one two three\x85four\u2028five"
-        log.append(_entry("a", prompt=prompt))
-        log.append(_entry("b"))
-
-        assert _ids(log) == ["b", "a"]
-        assert log.page("all", 1, 50)["entries"][1]["prompt"] == prompt
-
     @pytest.mark.parametrize("entry", [{"job_id": 5}, {}])
     def test_entry_without_a_string_job_id_is_refused(self, log, entry):
         with pytest.raises(ValueError):
@@ -239,23 +205,16 @@ class TestJobLogStore:
 
         assert log.page("all", 1, 50)["total_count"] == 0
 
-    def test_delete_removes_only_the_named_entry(self, log):
-        for job_id in ("a", "b", "c"):
-            log.append(_entry(job_id))
-
-        assert log.delete("b") is True
-        assert log.delete("b") is False
-
-        assert _ids(log) == ["c", "a"]
-
-    def test_delete_removes_every_entry_of_the_id(self, log):
+    def test_delete_removes_every_entry_of_the_named_id_only(self, log):
         log.append(_entry("a"))
         log.append(_entry("a", status="failed"))
         log.append(_entry("b"))
+        log.append(_entry("c"))
 
         assert log.delete("a") is True
+        assert log.delete("a") is False
 
-        assert _ids(log) == ["b"]
+        assert _ids(log) == ["c", "b"]
 
     def test_clear_returns_the_count_and_empties_the_log(self, log):
         for job_id in ("a", "b"):

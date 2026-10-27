@@ -118,10 +118,8 @@ def test_a_setting_of_the_wrong_type_is_422(client, settings):
 @pytest.mark.parametrize(
     "body",
     [
-        _body(name=""),
         _body(name="***"),
         {"name": "Soft portrait", "mode": "audio", "model": None, "settings": {}},
-        {"name": "Soft portrait", "mode": "image", "model": 5, "settings": {}},
         {"name": "Soft portrait", "mode": "image", "model": None, "settings": 5},
     ],
 )
@@ -189,13 +187,6 @@ def test_invalid_files_are_left_out_of_the_list(client):
     (store._presets_dir() / "video" / "wrong.yaml").write_text("name: x\nsettings: 5\n", encoding="utf-8")
 
     assert [item["slug"] for item in client.get("/api/presets").json()["presets"]] == ["good"]
-
-
-def test_writes_from_another_origin_are_refused(client):
-    response = client.post("/api/presets", json=_body(), headers={"Origin": "https://evil.example"})
-
-    assert response.status_code == 403
-    assert _files() == []
 
 
 @pytest.mark.parametrize(

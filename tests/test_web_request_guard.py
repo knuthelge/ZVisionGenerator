@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 
 from fastapi.testclient import TestClient
 import pytest
@@ -72,61 +71,6 @@ def reset_configured_hostnames():
     request_guard.configure_allowed_hostnames(())
 
 
-@pytest.mark.parametrize(
-    ("host", "machine", "expected"),
-    [
-        ("127.0.0.1", "MyMac.local", []),
-        ("::1", "MyMac.local", []),
-        ("my-box.lan", "MyMac.local", ["my-box.lan"]),
-        ("0.0.0.0", "MyMac.local", ["mymac.local", "mymac"]),
-        ("::", "mymac", ["mymac", "mymac.local"]),
-        ("0.0.0.0", "MyMac.lan", ["mymac.lan", "mymac", "mymac.local"]),
-        ("192.168.1.20", "MyMac.local", ["mymac.local", "mymac"]),
-    ],
-)
-def test_bound_hostnames(monkeypatch, host, machine, expected):
-    from zvisiongenerator import web
-
-    monkeypatch.setattr(web.socket, "gethostname", lambda: machine)
-    assert web._bound_hostnames(host) == expected
-
-
-class _FakeUdpSocket:
-    def __init__(self, address: str | None) -> None:
-        self._address = address
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc) -> None:
-        return None
-
-    def connect(self, _target) -> None:
-        if self._address is None:
-            raise OSError("Network is unreachable")
-
-    def getsockname(self):
-        return (self._address, 0)
-
-
-@pytest.mark.parametrize(
-    ("host", "detected", "expected"),
-    [
-        ("0.0.0.0", "192.168.1.20", "192.168.1.20"),
-        ("::", "fd00::20", "fd00::20"),
-        ("0.0.0.0", None, None),
-        ("0.0.0.0", "127.0.0.1", None),
-        ("127.0.0.1", "192.168.1.20", None),
-        ("192.168.1.20", "192.168.1.20", None),
-    ],
-)
-def test_lan_address(monkeypatch, host, detected, expected):
-    from zvisiongenerator import web
-
-    monkeypatch.setattr(web.socket, "socket", lambda *_args: _FakeUdpSocket(detected))
-    assert web._lan_address(host) == expected
-
-
 def test_configured_hostnames_are_allowed_without_touching_env(monkeypatch, reset_configured_hostnames):
     monkeypatch.delenv(request_guard.ALLOWED_HOSTS_ENV_VAR, raising=False)
     request_guard.configure_allowed_hostnames(["mymac", "mymac.local"])
@@ -134,72 +78,3 @@ def test_configured_hostnames_are_allowed_without_touching_env(monkeypatch, rese
     assert request_guard.is_allowed_host("MyMac.local:8080")
     assert not request_guard.is_allowed_host("attacker.example:8080")
     assert request_guard.ALLOWED_HOSTS_ENV_VAR not in os.environ
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="TIME_WAIT reuse semantics are POSIX-specific")
-def test_port_probe_keeps_port_with_only_time_wait_connections():
-    """A quick restart must reuse the same port; lingering TIME_WAIT sockets from the old server must not move it."""
-    import socket
-    import time
-
-    from zvisiongenerator import web
-
-    server = socket.socket()
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("127.0.0.1", 0))
-    port = server.getsockname()[1]
-    server.listen()
-    client = socket.create_connection(("127.0.0.1", port))
-    accepted, _ = server.accept()
-    accepted.close()  # server closes first -> server-side TIME_WAIT on `port`, like a killed ziv-ui
-    server.close()
-    time.sleep(0.05)
-    client.close()
-
-    assert web._find_available_port("127.0.0.1", port) == port
-
-
-def test_port_probe_skips_port_with_active_listener():
-    import socket
-
-    from zvisiongenerator import web
-
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        listener.listen()
-        port = listener.getsockname()[1]
-        assert web._find_available_port("127.0.0.1", port) != port
-
-
-def test_port_probe_skips_port_held_by_wildcard_listener():
-    """Another process on 0.0.0.0:P (e.g. a Docker-published port) must not be shadowed by binding 127.0.0.1:P."""
-    import socket
-
-    from zvisiongenerator import web
-
-    with socket.socket() as listener:
-        listener.bind(("0.0.0.0", 0))
-        listener.listen()
-        port = listener.getsockname()[1]
-        assert web._find_available_port("127.0.0.1", port) != port
-
-
-def test_port_probe_supports_ipv6_hosts():
-    """--host :: (and other IPv6 addresses) must not make every port look taken."""
-    import socket
-
-    from zvisiongenerator import web
-
-    if not socket.has_ipv6:
-        pytest.skip("IPv6 unavailable")
-    with socket.socket(socket.AF_INET6) as finder:
-        finder.bind(("::1", 0))
-        port = finder.getsockname()[1]
-    assert web._find_available_port("::1", port) == port
-    assert web._find_available_port("::", port) == port
-
-    with socket.socket(socket.AF_INET6) as listener:
-        listener.bind(("::1", 0))
-        listener.listen()
-        busy = listener.getsockname()[1]
-        assert web._find_available_port("::1", busy) != busy

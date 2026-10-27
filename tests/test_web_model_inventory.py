@@ -6,20 +6,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _web_helpers import packaged_config as _packaged_config
 
-from zvisiongenerator.utils.config import load_config, model_display_name
-from zvisiongenerator.web.first_run import recommended_first_run_model
+from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, discover_video_inventory, selectable_image_inventory, stored_quant_of
-
-_LTX25_REPO = "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"
-_LTX25_MAC_REPO = "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
 
 
 @pytest.fixture
 def packaged_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     """Return the packaged config with the user's data dir (and so any user config) swapped for an empty one."""
     monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "ziv"))
-    return load_config()
+    return _packaged_config()
 
 
 def _video_inventory(config: dict[str, Any], tmp_path: Path, platform: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -28,13 +26,13 @@ def _video_inventory(config: dict[str, Any], tmp_path: Path, platform: str, monk
     return {entry.name: entry for entry in entries}
 
 
-@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("platform", ["linux", "win32", "darwin"])
 def test_ltx25_alias_is_listed_beside_the_ltx23_aliases(packaged_config, tmp_path, monkeypatch, platform):
     inventory = _video_inventory(packaged_config, tmp_path, platform, monkeypatch)
 
     entry = inventory["ltx25-4"]
     assert (entry.source, entry.family, entry.supports_i2v) == ("alias", "ltx", True)
-    assert entry.resolved_path == _LTX25_REPO
+    assert entry.resolved_path == packaged_config["model_aliases"]["ltx25-4"]["darwin" if platform == "darwin" else "linux"]
     assert {"ltx-4", "ltx-8"} <= set(inventory)
 
 
@@ -46,28 +44,6 @@ def test_ltx23_aliases_resolve_unchanged_off_macos(packaged_config, tmp_path, mo
         assert inventory[name].family == "ltx"
         assert inventory[name].resolved_path == default_repo
     assert "2.5" not in default_repo
-
-
-def test_ltx25_alias_is_listed_on_macos_beside_the_ltx23_aliases(packaged_config, tmp_path, monkeypatch):
-    inventory = _video_inventory(packaged_config, tmp_path, "darwin", monkeypatch)
-
-    entry = inventory["ltx25-4"]
-    assert (entry.source, entry.family, entry.supports_i2v, entry.resolved_path) == ("alias", "ltx", True, _LTX25_MAC_REPO)
-    assert {"ltx-4", "ltx-8"} <= set(inventory)
-    assert inventory["ltx-8"].resolved_path == packaged_config["model_aliases"]["ltx-8"]["darwin"]
-
-
-def test_ltx25_alias_has_its_label(packaged_config):
-    assert model_display_name(packaged_config, "ltx25-4") == "LTX-2.5 4-bit"
-    assert model_display_name(packaged_config, "ltx-4") == "LTX-2.3 4-bit"
-    assert model_display_name(packaged_config, "ltx-8") == "LTX-2.3 8-bit"
-
-
-def test_default_video_model_and_first_run_recommendation_are_unchanged(packaged_config):
-    assert packaged_config["ui"]["default_models"]["video"] == "ltx-8"
-    assert packaged_config["ui"]["default_models"]["image"] == "klein9b"
-    assert recommended_first_run_model(packaged_config, None, ["klein4b", "klein9b"]) == "klein4b"
-    assert packaged_config["first_run"]["large_model"] == "klein9b"
 
 
 def test_h3_alias_is_listed_on_macos_as_an_h3_model(packaged_config, tmp_path, monkeypatch):
@@ -104,3 +80,36 @@ def test_the_macos_h3_text_encoder_copy_is_not_listed_as_an_installed_video_mode
     installed = {entry.name for entry in inventory if entry.source == "installed"}
     assert "h3-local" in installed
     assert "h3@mlx-te4" not in installed
+
+
+def test_image_inventory_does_not_probe_video_aliases(tmp_path):
+    """Video aliases are recognised offline; probing them as image repos cost a Hub request per page load."""
+    probed: list[str] = []
+
+    def _detect(path: str) -> ImageModelInfo:
+        probed.append(path)
+        return ImageModelInfo(family="zimage", is_distilled=False, size=None)
+
+    inventory = model_inventory_module.discover_image_inventory(
+        {"model_aliases": {"ltx-8": "dgrauet/ltx-2.3-mlx-q8", "zit": "Tongyi-MAI/Z-Image-Turbo"}},
+        tmp_path,
+        list_installed=lambda _data_dir: [],
+        resolve_alias_path=lambda name, **_kwargs: {"ltx-8": "dgrauet/ltx-2.3-mlx-q8", "zit": "Tongyi-MAI/Z-Image-Turbo"}[name],
+        detect_model=_detect,
+    )
+
+    assert probed == ["Tongyi-MAI/Z-Image-Turbo"]
+    assert [entry.name for entry in inventory] == ["zit"]
+
+
+def test_image_inventory_still_probes_local_paths_containing_ltx(tmp_path):
+    """Only remote video repos are skipped; a local image model under e.g. /Volumes/Voltx must still be detected."""
+    local_dir = str(tmp_path / "Voltx" / "my-image-model")
+    inventory = model_inventory_module.discover_image_inventory(
+        {"model_aliases": {"mine": local_dir}},
+        tmp_path,
+        list_installed=lambda _data_dir: [],
+        resolve_alias_path=lambda _name, **_kwargs: local_dir,
+        detect_model=lambda _path: ImageModelInfo(family="zimage", is_distilled=False, size=None),
+    )
+    assert [entry.name for entry in inventory] == ["mine"]

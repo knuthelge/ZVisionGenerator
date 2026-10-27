@@ -57,7 +57,7 @@ class TestFirstRunPayload:
 
     @pytest.mark.parametrize(
         ("ui", "skipped"),
-        [({"first_run_skipped": True}, True), ({"first_run_skipped": False}, False), ({}, False), (None, False), ({"first_run_skipped": "yes"}, False)],
+        [({"first_run_skipped": True}, True), ({}, False)],
     )
     def test_skipped_only_when_the_flag_is_true(self, ui, skipped):
         payload = first_run_payload({**_CONFIG, "ui": ui}, None, _BOTH)

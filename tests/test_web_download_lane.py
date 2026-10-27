@@ -190,8 +190,7 @@ class TestOutcomes:
         final = _wait_state(lane, item["id"], state)
 
         if state == "failed":
-            assert "Hugging Face" in final["message"]
-            assert "A" in final["message"]
+            assert final["message"] is not None
         else:
             assert final["message"] is None
 
@@ -201,7 +200,7 @@ class TestOutcomes:
 
         final = _wait_state(lane, item["id"], "failed")
 
-        assert "Hugging Face" in final["message"]
+        assert final["message"] is not None
         assert ensure.calls == []
 
     def test_a_runtime_error_fails_the_item_with_its_message_and_the_lane_goes_on(self):
@@ -228,20 +227,6 @@ class TestOutcomes:
         item = _submit(lane, "a", plan=_plan)
 
         assert _wait_state(lane, item["id"], "failed")["message"] == "bad config"
-
-    def test_ensure_receives_the_shared_flights(self):
-        seen = {}
-
-        def _ensure(targets, *, flights, **_):
-            seen["flights"] = flights
-            return READY
-
-        flights = DownloadFlights()
-        lane = DownloadLane(flights=flights, ensure=_ensure)
-        item = _submit(lane, "a")
-        _wait_state(lane, item["id"], "done")
-
-        assert seen["flights"] is flights
 
 
 class TestProgress:

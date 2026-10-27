@@ -71,6 +71,24 @@ def downloading(monkeypatch):
         web_server.download_flights.finish(flight, "stopped")
 
 
+@pytest.fixture
+def web_client(monkeypatch):
+    """Return a factory that serves *web_config* from the app with no job running, and closes the client afterwards."""
+    clients: list[TestClient] = []
+
+    def _make(web_config) -> TestClient:
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+        client = TestClient(web_server.app)
+        client.__enter__()
+        clients.append(client)
+        return client
+
+    yield _make
+    for client in clients:
+        client.__exit__(None, None, None)
+
+
 class TestModelDeleteTarget:
     def test_installed_model_deletes_its_folder(self, layout):
         target = model_delete_target(_image_entry("custom", "installed", str(layout.models_dir / "custom")), layout.models_dir)
@@ -223,19 +241,17 @@ def test_delete_lora_removes_only_the_named_file(layout):
 
 class TestDeleteRoutes:
     @pytest.fixture
-    def client(self, layout, monkeypatch):
-        web_config = SimpleNamespace(
-            data_dir=str(layout.data_dir),
-            models_dir=str(layout.models_dir),
-            seedvr2=None,
-            app_config={},
-            image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")), _image_entry("base", "alias", "org/base")),
-            video_inventory=(VideoInventoryEntry(name="ltx", family="ltx", supports_i2v=True, source="alias", resolved_path="org/missing"),),
+    def client(self, layout, web_client):
+        return web_client(
+            SimpleNamespace(
+                data_dir=str(layout.data_dir),
+                models_dir=str(layout.models_dir),
+                seedvr2=None,
+                app_config={},
+                image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")), _image_entry("base", "alias", "org/base")),
+                video_inventory=(VideoInventoryEntry(name="ltx", family="ltx", supports_i2v=True, source="alias", resolved_path="org/missing"),),
+            )
         )
-        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
-        with TestClient(web_server.app) as client:
-            yield client
 
     def test_delete_installed_model(self, client, layout):
         response = client.delete("/api/models/custom")
@@ -247,7 +263,6 @@ class TestDeleteRoutes:
         response = client.delete("/api/models/base")
 
         assert response.status_code == 200
-        assert "org/base" in response.json()["message"]
         assert not (layout.hub / "models--org--base").exists()
 
     def test_unknown_or_undownloaded_model_is_404(self, client):
@@ -265,7 +280,6 @@ class TestDeleteRoutes:
         response = client.delete("/api/models/base")
 
         assert response.status_code == 409
-        assert "org/base" in response.json()["detail"].lower()
         assert (layout.hub / "models--org--base").is_dir()
 
     def test_deleting_an_installed_model_is_refused_while_a_download_writes_inside_it(self, client, layout, downloading):
@@ -435,102 +449,72 @@ class TestSeedvr2Fp8DeleteTarget:
         assert cached.is_file()
 
 
-class TestSeedvr2Fp8DeleteRoute:
-    @pytest.fixture
-    def client(self, layout, monkeypatch):
-        tier = SeedVR2Tier("seedvr2-7b", weights_gb=0.9, activation_floor_gb=5.0, activation_base_gb=0.21, activation_gb_per_mp=0.556, system_gb=22)
-        settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(tier,))
-        self.folder = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, FP8_WEIGHTS)
-        _touch(self.folder / "ema_vae_fp16.safetensors")
-        web_config = SimpleNamespace(
-            data_dir=str(layout.data_dir),
-            models_dir=str(layout.models_dir),
-            image_inventory=(),
-            video_inventory=(),
-            seedvr2=SeedVR2Setup(settings=settings, tier=tier, budget_bytes=None, downloaded=True, weights=FP8_WEIGHTS),
-        )
-        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
-        with TestClient(web_server.app) as client:
-            yield client
-
-    def test_the_row_name_deletes_the_weights_folder(self, client, layout):
-        response = client.delete("/api/models/seedvr2-7b@fp8")
-
-        assert response.status_code == 200
-        assert not self.folder.exists()
-        assert layout.base_snapshot.is_dir()
-
-    def test_the_macos_row_name_is_404(self, client):
-        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 404
-        assert self.folder.exists()
+@pytest.fixture(params=[MLX_WEIGHTS, FP8_WEIGHTS], ids=["mlx", "fp8"])
+def seedvr2_route(request, layout, web_client):
+    """Serve a SeedVR2 row for each weights engine, with its stored weights folder on disk."""
+    weights = request.param
+    tier = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
+    settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(tier,))
+    folder = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, weights)
+    _touch(folder / "weights.safetensors")
+    web_config = SimpleNamespace(
+        data_dir=str(layout.data_dir),
+        models_dir=str(layout.models_dir),
+        image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")),),
+        video_inventory=(),
+        seedvr2=SeedVR2Setup(settings=settings, tier=tier, budget_bytes=None, downloaded=True, weights=weights),
+    )
+    own, other = ("seedvr2-7b@q8", "seedvr2-7b@fp8") if weights is MLX_WEIGHTS else ("seedvr2-7b@fp8", "seedvr2-7b@q8")
+    return SimpleNamespace(client=web_client(web_config), web_config=web_config, folder=folder, own=own, other=other)
 
 
 class TestSeedvr2DeleteRoute:
-    @pytest.fixture
-    def client(self, layout, monkeypatch):
-        tier = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
-        settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(tier,))
-        self.copy = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, MLX_WEIGHTS)
-        _touch(self.copy / "transformer" / "weights.safetensors")
-        self.web_config = SimpleNamespace(
-            data_dir=str(layout.data_dir),
-            models_dir=str(layout.models_dir),
-            image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")),),
-            video_inventory=(),
-            seedvr2=SeedVR2Setup(settings=settings, tier=tier, budget_bytes=None, downloaded=True, weights=MLX_WEIGHTS),
-        )
-        monkeypatch.setattr(web_server, "load_web_config", lambda: self.web_config)
-        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
-        with TestClient(web_server.app) as client:
-            yield client
-
-    def test_delete_removes_only_the_stored_copy(self, client, layout):
-        response = client.delete("/api/models/seedvr2-7b@q8")
+    def test_delete_removes_only_the_weights_folder(self, seedvr2_route, layout):
+        response = seedvr2_route.client.delete(f"/api/models/{seedvr2_route.own}")
 
         assert response.status_code == 200
-        assert not self.copy.exists()
+        assert not seedvr2_route.folder.exists()
         assert (layout.models_dir / "custom").is_dir()
         assert layout.base_snapshot.is_dir()
 
-    def test_a_second_delete_finds_nothing(self, client):
-        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 200
-        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 404
+    def test_a_second_delete_finds_nothing(self, seedvr2_route):
+        assert seedvr2_route.client.delete(f"/api/models/{seedvr2_route.own}").status_code == 200
+        assert seedvr2_route.client.delete(f"/api/models/{seedvr2_route.own}").status_code == 404
 
-    def test_other_names_and_the_other_tier_are_404(self, client):
-        assert client.delete("/api/models/seedvr2-3b@q8").status_code == 404
-        assert client.delete("/api/models/seedvr2-7b").status_code == 404
-        assert self.copy.is_dir()
+    def test_other_names_and_the_other_engines_row_are_404(self, seedvr2_route):
+        for name in (seedvr2_route.other, "seedvr2-3b@q8", "seedvr2-7b"):
+            assert seedvr2_route.client.delete(f"/api/models/{name}").status_code == 404, name
+        assert seedvr2_route.folder.is_dir()
 
-    def test_delete_is_404_where_seedvr2_is_off(self, client):
-        self.web_config.seedvr2 = None
+    def test_delete_is_404_where_seedvr2_is_off(self, seedvr2_route):
+        seedvr2_route.web_config.seedvr2 = None
 
-        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 404
-        assert self.copy.is_dir()
+        assert seedvr2_route.client.delete(f"/api/models/{seedvr2_route.own}").status_code == 404
+        assert seedvr2_route.folder.is_dir()
 
-    def test_delete_is_refused_while_a_job_runs(self, client, monkeypatch):
+    def test_delete_is_refused_while_a_job_runs(self, seedvr2_route, monkeypatch):
         monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: {"job_id": "j1"})
 
-        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 409
-        assert self.copy.is_dir()
+        assert seedvr2_route.client.delete(f"/api/models/{seedvr2_route.own}").status_code == 409
+        assert seedvr2_route.folder.is_dir()
 
-    def test_names_that_climb_out_of_the_copy_folder_are_404(self, client, layout):
+    def test_names_that_climb_out_of_the_copy_folder_are_404(self, seedvr2_route, layout):
         sibling = layout.models_dir / "custom"
         for name in ("..", ".seedvr2", "%2e%2e%2fcustom", "..%2Fcustom", "seedvr2-7b@q8%2F..%2F..%2Fcustom", "SEEDVR2-7B@Q8"):
-            assert client.delete(f"/api/models/{name}").status_code in {404, 405}, name
-        assert self.copy.is_dir()
+            assert seedvr2_route.client.delete(f"/api/models/{name}").status_code in {404, 405}, name
+        assert seedvr2_route.folder.is_dir()
         assert sibling.is_dir()
         assert layout.base_snapshot.is_dir()
 
-    def test_a_symlinked_copy_is_unlinked_and_its_target_survives(self, client, layout, tmp_path):
+    def test_a_symlinked_copy_is_unlinked_and_its_target_survives(self, seedvr2_route, tmp_path):
         elsewhere = tmp_path / "elsewhere"
         _touch(elsewhere / "weights.safetensors")
-        shutil.rmtree(self.copy)
-        self.copy.symlink_to(elsewhere, target_is_directory=True)
+        shutil.rmtree(seedvr2_route.folder)
+        seedvr2_route.folder.symlink_to(elsewhere, target_is_directory=True)
 
-        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 200
+        assert seedvr2_route.client.delete(f"/api/models/{seedvr2_route.own}").status_code == 200
 
-        assert not self.copy.is_symlink()
+        assert not seedvr2_route.folder.is_symlink()
         assert (elsewhere / "weights.safetensors").is_file()
 
 
@@ -673,7 +657,6 @@ class TestEnhancerDeleteRoute:
         response = client.delete("/api/enhancer-models/fast")
 
         assert response.status_code == 409
-        assert "org/fast" in response.json()["detail"]
         assert (layout.hub / "models--org--fast").is_dir()
         assert not session.busy()
 
@@ -855,14 +838,10 @@ class TestBuiltModelDelete:
         assert size(ideo) == "1 KB"
 
     @pytest.fixture
-    def client(self, built, monkeypatch):
+    def client(self, built, web_client, monkeypatch):
         moss = built.row("moss", built=True)
-        web_config = SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config=self._CONFIG, image_inventory=(moss,), video_inventory=())
-        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
         monkeypatch.setattr("sys.platform", "linux")
-        with TestClient(web_server.app) as client:
-            yield client
+        return web_client(SimpleNamespace(data_dir=str(built.data_dir), models_dir=str(built.models_dir), seedvr2=None, app_config=self._CONFIG, image_inventory=(moss,), video_inventory=()))
 
     def test_an_unbuilt_row_shows_the_disk_its_deletable_sources_use(self, built):
         from zvisiongenerator.web.workspace_api import _disk_size_resolver

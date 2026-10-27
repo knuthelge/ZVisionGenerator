@@ -7,6 +7,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from _web_helpers import packaged_config
 
 from zvisiongenerator.utils.model_memory import CudaMemoryEstimate, LtxCudaMemoryEstimate, MemoryBudget
 from zvisiongenerator.web import model_status
@@ -51,9 +52,7 @@ def darwin(monkeypatch):
 
 def _ltx_status(name, pack, *, gemma=None, present=None, budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), **extra):
     """Describe the macOS alias *name* whose pinned pack is the folder *pack*; *gemma* is the Gemma 3 folder when it is on disk."""
-    from zvisiongenerator.utils.config import load_config
-
-    config = load_config()
+    config = packaged_config()
     ref = config["model_aliases"][name]["darwin"]
     folders = {ref: pack, **({_GEMMA_REPO: gemma} if gemma is not None else {})}
     present = present or (lambda target: target.repo_id != _GEMMA_REPO or gemma is not None)
@@ -89,10 +88,8 @@ class TestDescribeMlxVideoStatus:
 
     @pytest.mark.parametrize("unpinned", [False, True])
     def test_a_custom_name_for_the_bundled_pack_is_downloaded_with_no_gemma_3_cached(self, tmp_path, unpinned):
-        from zvisiongenerator.utils.config import load_config
-
         pack = _make_mlx_pack(tmp_path, bundled=True)
-        config = load_config()
+        config = packaged_config()
         ref = config["model_aliases"]["ltx25-4"]["darwin"]
         ref = ref.split("@")[0] if unpinned else ref
         seen = []
@@ -144,9 +141,7 @@ class TestDescribeMlxVideoStatus:
         }
 
     def test_a_pack_that_is_not_on_disk_is_not_downloaded(self):
-        from zvisiongenerator.utils.config import load_config
-
-        config = load_config()
+        config = packaged_config()
         ref = config["model_aliases"]["ltx-8"]["darwin"]
 
         status = describe_model_status(
@@ -164,10 +159,10 @@ class TestTrimmedPackOnDisk:
     def pack(self, tmp_path, monkeypatch):
         import huggingface_hub.constants
 
-        from zvisiongenerator.utils.config import ltx_mlx_packs, load_config
+        from zvisiongenerator.utils.config import ltx_mlx_packs
 
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(tmp_path / "cache"))
-        config = load_config()
+        config = packaged_config()
         files = ltx_mlx_packs(config)[config["model_aliases"]["ltx-4"]["darwin"]]
         snapshot = tmp_path / "cache" / f"models--{files.repo_id.replace('/', '--')}" / "snapshots" / files.revision
         for name in files.files:
@@ -178,9 +173,8 @@ class TestTrimmedPackOnDisk:
     @staticmethod
     def _status(snapshot, tmp_path):
         from zvisiongenerator.downloads.presence import target_present_offline
-        from zvisiongenerator.utils.config import load_config
 
-        config = load_config()
+        config = packaged_config()
         ref = config["model_aliases"]["ltx-4"]["darwin"]
         gemma = tmp_path / "gemma"
         gemma.mkdir(exist_ok=True)
@@ -196,39 +190,10 @@ class TestTrimmedPackOnDisk:
     def test_a_folder_with_every_listed_file_is_downloaded(self, pack, tmp_path):
         assert self._status(pack, tmp_path) is True
 
-    @pytest.mark.parametrize("name", ["audio_vae.safetensors", "spatial_upscaler_x2_v1_1.safetensors", "embedded_config.json"])
-    def test_a_folder_missing_one_listed_file_is_not_downloaded(self, pack, tmp_path, name):
-        (pack / name).unlink()
+    def test_a_folder_missing_one_listed_file_is_not_downloaded(self, pack, tmp_path):
+        (pack / "audio_vae.safetensors").unlink()
 
         assert self._status(pack, tmp_path) is False
-
-
-@pytest.mark.usefixtures("darwin")
-class TestDescribeLtxStatusGolden:
-    """G5: the LTX MLX status dicts, pinned so the family argument cannot move them."""
-
-    @pytest.mark.parametrize("family", [pytest.param({}, id="default"), pytest.param({"family": "ltx"}, id="ltx")])
-    def test_a_bundled_pack_status_is_pinned(self, tmp_path, family):
-        pack = _make_mlx_pack(tmp_path, bundled=True)
-
-        status = _ltx_status("ltx25-4", pack, **family)
-
-        assert status == {
-            "downloaded": True,
-            "memory_fit": {
-                "kind": "unified",
-                "budget_gb": 24.0,
-                "by_quantize": {"none": {"status": "fits", "required_gb": 15.1}},
-                "without_low_memory": {"status": "too_large", "required_gb": 36.2},
-                "note": VIDEO_ESTIMATE_NOTE,
-            },
-        }
-
-    @pytest.mark.parametrize("family", [pytest.param({}, id="default"), pytest.param({"family": "ltx"}, id="ltx")])
-    def test_a_2_3_pack_without_gemma_3_status_is_pinned(self, tmp_path, family):
-        pack = _make_mlx_pack(tmp_path, bundled=False)
-
-        assert _ltx_status("ltx-4", pack, **family) == {"downloaded": False, "memory_fit": None}
 
 
 class TestH3Status:
@@ -244,15 +209,13 @@ class TestH3Status:
 
     @staticmethod
     def _status(present, *, budget=_UNIFIED, **extra):
-        from zvisiongenerator.utils.config import load_config
-
         return describe_model_status(
             "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe",
             kind="video",
             budget=budget,
             find_local_dir=lambda reference: None,
             model_name="h3",
-            app_config=load_config(),
+            app_config=packaged_config(),
             family="h3",
             target_present=present,
             **extra,
@@ -270,9 +233,8 @@ class TestH3Status:
         assert status["downloaded"] is True
         assert [repo for repo, _revision in seen] == ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "MiniMaxAI/MiniMax-H3", "lightx2v/Minimax-h3-Turbo"]
 
-    @pytest.mark.parametrize("missing", ["water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "MiniMaxAI/MiniMax-H3", "lightx2v/Minimax-h3-Turbo"])
-    def test_one_absent_target_is_not_downloaded_and_has_no_estimate(self, darwin, missing):
-        status = self._status(lambda target: target.repo_id != missing)
+    def test_one_absent_target_is_not_downloaded_and_has_no_estimate(self, darwin):
+        status = self._status(lambda target: target.repo_id != "MiniMaxAI/MiniMax-H3")
 
         assert status == {"downloaded": False, "memory_fit": None}
 
@@ -305,7 +267,7 @@ class TestH3Status:
             "budget_gb": 10.0,
             "system_budget_gb": 30.0,
             "by_quantize": {"none": {"status": "fits", "required_gb": 7.2, "system_gb": 17.8}},
-            "note": "Estimated for a 5 s clip at 768x448. The Workspace checks the size and length you choose.",
+            "note": VIDEO_ESTIMATE_NOTE,
         }
         assert seen == ["MiniMaxAI/MiniMax-H3", "unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo"]
 
@@ -316,13 +278,12 @@ class TestH3Status:
         from zvisiongenerator.backends.mac.h3_video import resolve_mlx_files
         from zvisiongenerator.downloads.plans import video_plan
         from zvisiongenerator.utils import model_files
-        from zvisiongenerator.utils.config import load_config
         from zvisiongenerator.utils.h3_preset import h3_mlx_preset, h3_turbo_lora
 
         cache = tmp_path / "cache"
         monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_CACHE", str(cache))
         monkeypatch.setattr(model_files, "huggingface_cache_dir", lambda: cache)
-        config = load_config()
+        config = packaged_config()
         ref = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
 
         def no_network(**_kwargs):

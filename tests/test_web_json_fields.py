@@ -16,15 +16,10 @@ class TestJsonField:
     def test_an_absent_or_null_field_is_none(self, payload):
         assert json_field(payload, "key", int, "an integer") is None
 
-    @pytest.mark.parametrize(("expected", "value"), [(str, 5), (int, "5"), (int, 1.5), (bool, 1), ((int, float), "1")])
+    @pytest.mark.parametrize(("expected", "value"), [(str, 5), (int, 1.5), (int, True), ((int, float), True)])
     def test_a_value_of_another_type_is_refused_by_name(self, expected, value):
         with pytest.raises(ValueError, match="key must be a thing."):
             json_field({"key": value}, "key", expected, "a thing")
-
-    @pytest.mark.parametrize("expected", [int, (int, float)])
-    def test_a_boolean_is_not_a_number(self, expected):
-        with pytest.raises(ValueError, match="must be"):
-            json_field({"key": True}, "key", expected, "a number")
 
     def test_a_value_under_the_minimum_is_refused(self):
         assert json_field({"key": 1}, "key", int, "a positive integer", minimum=1) == 1

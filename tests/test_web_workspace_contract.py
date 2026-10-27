@@ -6,22 +6,21 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from _web_helpers import packaged_config
 
 from zvisiongenerator import backends
 from zvisiongenerator.core.video_family import VideoCapabilities
-from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.workspace_api import _build_video_bootstrap_defaults
 from zvisiongenerator.web.workspace_contract import CANONICAL_WORKFLOW_VALUES, END_FRAME_CONTROLS, WORKFLOW_DEFINITIONS, hidden_video_controls
 
-_FULL = {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True}
 _UPSCALE_CONTROLS = ["video_upscale_enabled", "video_upscale_factor", "video_upscale_review"]
 _END_CONTROLS = ["end_image", "end_image_clear", "end_image_path"]
 
 
 def _web_config(config: dict | None = None) -> SimpleNamespace:
-    config = config if config is not None else load_config()
+    config = config if config is not None else packaged_config()
     return SimpleNamespace(app_config=config, video_ratios=tuple(config["video_sizes"]), video_size_options={ratio: tuple(sizes) for ratio, sizes in config["video_sizes"].items()})
 
 
@@ -97,25 +96,8 @@ def test_an_ltx_payload_keeps_its_values_and_adds_the_family_keys(model):
 
 
 # ---------------------------------------------------------------------------
-# An H3 payload (the family block is patched into the packaged config)
+# An H3 payload (from the packaged config's family block)
 # ---------------------------------------------------------------------------
-
-
-def _h3_config() -> dict:
-    config = load_config()
-    config["video_model_presets"]["h3"] = {
-        "label": "MiniMax H3",
-        "default_steps": 8,
-        "max_steps": 8,
-        "step_options": [4, 8],
-        "default_frames": 124,
-        "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
-        "extend_frame_step": 17,
-        "carry_frames": 22,
-        "capabilities": {**_FULL, "low_memory": False},
-        "platform_capabilities": {"darwin": {"upscale": False, "upscale_review": False}},
-    }
-    return config
 
 
 def _patch_h3(monkeypatch, platform: str) -> None:
@@ -129,7 +111,7 @@ def _patch_h3(monkeypatch, platform: str) -> None:
 def test_an_h3_payload_carries_the_rule_the_options_and_the_hidden_controls(monkeypatch):
     _patch_h3(monkeypatch, "linux")
 
-    payload = _build_video_bootstrap_defaults("h3", _web_config(_h3_config()))
+    payload = _build_video_bootstrap_defaults("h3", _web_config())
 
     assert payload["frame_rule"] == {"alignment": 17, "offset": 5, "round": "up"}
     assert payload["hidden_controls"] == ["low_memory"]
@@ -142,7 +124,7 @@ def test_an_h3_payload_carries_the_rule_the_options_and_the_hidden_controls(monk
 def test_an_h3_payload_on_macos_also_hides_the_upscale_controls(monkeypatch):
     _patch_h3(monkeypatch, "darwin")
 
-    payload = _build_video_bootstrap_defaults("h3", _web_config(_h3_config()))
+    payload = _build_video_bootstrap_defaults("h3", _web_config())
 
     assert payload["hidden_controls"] == ["low_memory", *_UPSCALE_CONTROLS]
     assert payload["supports_extend"] is True
@@ -150,7 +132,7 @@ def test_an_h3_payload_on_macos_also_hides_the_upscale_controls(monkeypatch):
 
 def test_a_default_frame_count_off_the_rule_is_aligned(monkeypatch):
     _patch_h3(monkeypatch, "linux")
-    config = _h3_config()
+    config = packaged_config()
     del config["video_model_presets"]["h3"]["default_frames"]
 
     # The size table's 121 frames is not a count of 17k + 5; the next one is.
@@ -185,3 +167,9 @@ def test_leaving_image_to_video_clears_the_last_frame():
     clearing = {name for name in CANONICAL_WORKFLOW_VALUES if "end_image_path" in WORKFLOW_DEFINITIONS[name]["clear_fields"]}
 
     assert clearing == {"txt2img", "img2img", "txt2vid", "extend"}
+
+
+@pytest.mark.parametrize("workflow", ["txt2img", "img2img"])
+def test_image_workflows_show_the_quantize_control_the_reuse_param_is_gated_on(workflow):
+    """The Workspace applies a reused ``quantize`` only where this control is visible, so the real contract must list it."""
+    assert "quantize" in WORKFLOW_DEFINITIONS[workflow]["visible_controls"]

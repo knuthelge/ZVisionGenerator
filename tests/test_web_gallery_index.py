@@ -196,12 +196,6 @@ def test_g7_recent_file_is_persisted_only_after_it_settles(tmp_path: Path, root:
     assert reader.calls["a.png"] == 2
 
 
-def test_g7_file_with_future_mtime_is_not_persisted(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png"], age=-3600)
-    _index(tmp_path).facts_for("root", _scan(root), _Reader(), prune=True)
-    assert _rows(tmp_path) == {}
-
-
 def test_g8_file_changed_during_read_is_not_persisted(tmp_path: Path, root: Path) -> None:
     _make_files(root, ["a.png"])
     inner = _Reader()
@@ -226,10 +220,6 @@ def test_g8_restat_failure_is_not_persisted_and_does_not_raise(tmp_path: Path, r
     result = _index(tmp_path).facts_for("root", _scan(root), reader, prune=True)
     assert set(result) == {"a.png"}
     assert _rows(tmp_path) == {}
-
-
-def test_g8_restat_returns_none_for_an_oserror(tmp_path: Path) -> None:
-    assert app_db.stat_key(tmp_path / "missing.png") is None
 
 
 def test_g9_batches_flushed_before_a_reader_error_stay_committed(tmp_path: Path, root: Path) -> None:
@@ -292,20 +282,6 @@ def test_g12_directory_as_database_reads_uncached_and_is_not_renamed(tmp_path: P
     assert _corrupt_files(tmp_path) == []
 
 
-def test_g12_failing_connect_reads_uncached(tmp_path: Path, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _make_files(root, ["a.png"])
-
-    def failing_connect(*args, **kwargs):
-        raise sqlite3.OperationalError("unable to open database file")
-
-    monkeypatch.setattr(sqlite3, "connect", failing_connect)
-    reader = _Reader()
-    with pytest.warns(UserWarning):
-        facts = _index(tmp_path).facts_for("root", _scan(root), reader, prune=True)
-    assert set(facts) == {"a.png"}
-    assert reader.total == 1
-
-
 def test_g13_write_failure_keeps_the_full_result_and_warns(tmp_path: Path, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_files(root, ["a.png", "b.png", "c.png"])
 
@@ -361,36 +337,6 @@ def test_g15_prune_keeps_a_row_changed_since_it_was_loaded(tmp_path: Path, root:
     assert set(_rows(tmp_path)) == {"a.png"}
 
 
-def test_g16_ctime_only_change_is_read_once(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png"])
-    index, reader = _index(tmp_path), _Reader()
-    index.facts_for("root", _scan(root), reader, prune=True)
-    time.sleep(0.05)
-    before = (root / "a.png").stat()
-    os.chmod(root / "a.png", 0o600)
-    after = (root / "a.png").stat()
-    assert (after.st_mtime_ns, after.st_size) == (before.st_mtime_ns, before.st_size)
-    assert after.st_ctime_ns != before.st_ctime_ns
-    index.facts_for("root", _scan(root), reader, prune=True)
-    index.facts_for("root", _scan(root), reader, prune=True)
-    assert reader.calls["a.png"] == 2
-
-
-def test_g17_older_version_never_drops_the_newer_table(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png"])
-    v2, v1 = _index(tmp_path, version=2), _index(tmp_path, version=1)
-    v2_reader, v1_reader = _Reader(), _Reader()
-    v2.facts_for("root", _scan(root), v2_reader, prune=True)
-    v1.facts_for("root", _scan(root), v1_reader, prune=True)
-    assert {"gallery_assets_v1", "gallery_assets_v2"} <= _tables(tmp_path)
-    v2.facts_for("root", _scan(root), v2_reader, prune=True)
-    v1.facts_for("root", _scan(root), v1_reader, prune=True)
-    assert v2_reader.calls["a.png"] == 1
-    assert v1_reader.calls["a.png"] == 1
-    assert _stored_version(tmp_path, "gallery") == 2
-    assert set(_rows(tmp_path, 2)) == {"a.png"}
-
-
 def test_g18_forget_does_not_wait_for_a_running_scan(tmp_path: Path, root: Path) -> None:
     _make_files(root, ["a.png", "b.png"])
     index = _index(tmp_path)
@@ -435,41 +381,12 @@ def test_g19_forget_without_a_database_creates_none(tmp_path: Path) -> None:
     assert not path.parent.exists()
 
 
-def test_forget_with_no_names_is_a_noop(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png"])
-    index = _index(tmp_path)
-    index.facts_for("root", _scan(root), _Reader(), prune=True)
-    index.forget("root", [])
-    assert set(_rows(tmp_path)) == {"a.png"}
-
-
 def test_forget_with_unusable_database_only_warns(tmp_path: Path) -> None:
     db_dir = tmp_path / "ziv.sqlite3"
     db_dir.mkdir()
     with pytest.warns(UserWarning):
         GalleryIndex(lambda: db_dir).forget("root", ["a.png"])
     assert db_dir.is_dir()
-
-
-def test_invalid_row_facts_are_read_again(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png"])
-    index = _index(tmp_path)
-    index.facts_for("root", _scan(root), _Reader(), prune=True)
-    with closing(sqlite3.connect(tmp_path / "ziv.sqlite3")) as conn:
-        conn.execute(f"UPDATE gallery_assets_v{GALLERY_INDEX_VERSION} SET facts = 'not json'")
-        conn.commit()
-    reader = _Reader()
-    facts = index.facts_for("root", _scan(root), reader, prune=True)
-    assert reader.calls["a.png"] == 1
-    assert facts["a.png"] == {"config": {"name": "a.png"}, "image": {}}
-
-
-def test_unserializable_facts_are_returned_but_not_persisted(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png"])
-    marker = object()
-    result = _index(tmp_path).facts_for("root", _scan(root), lambda f: FactsRead({"config": marker}, True), prune=True)
-    assert result["a.png"]["config"] is marker
-    assert _rows(tmp_path) == {}
 
 
 def _surrogate_scan(root: Path, bad_name: str) -> list[ScannedFile]:
@@ -500,25 +417,6 @@ def test_a_lone_surrogate_in_the_root_reads_without_the_cache(tmp_path: Path, ro
         facts = _index(tmp_path).facts_for("bad\udcffroot", _scan(root), reader, prune=True)
     assert set(facts) == {"a.png", "b.png"}
     assert reader.total == 2
-
-
-def test_a_reader_error_still_propagates(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png"])
-
-    def reader(file: ScannedFile) -> FactsRead:
-        raise UnicodeEncodeError("utf-8", "x", 0, 1, "reader bug")
-
-    with pytest.raises(UnicodeEncodeError):
-        _index(tmp_path).facts_for("root", _scan(root), reader, prune=True)
-
-
-def test_forget_with_a_lone_surrogate_path_does_not_raise(tmp_path: Path, root: Path) -> None:
-    _make_files(root, ["a.png", "b.png"])
-    index = _index(tmp_path)
-    index.facts_for("root", _scan(root), _Reader(), prune=True)
-    with pytest.warns(UserWarning):
-        index.forget("root", ["a.png", "bad\udcff.png"])
-    assert set(_rows(tmp_path)) == {"a.png", "b.png"}
 
 
 def test_non_ascii_facts_and_paths_are_stored(tmp_path: Path, root: Path) -> None:

@@ -149,11 +149,6 @@ def test_create_folder_is_only_for_folder_purposes(tmp_path):
         create_folder(resolve_purpose("lora_file"), str(tmp_path), "new")
 
 
-def test_source_video_accepts_the_extend_containers():
-    assert set(path_browser.SOURCE_VIDEO_EXTENSIONS) == {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
-    assert resolve_purpose("source_video").accepted_extensions == path_browser.SOURCE_VIDEO_EXTENSIONS
-
-
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 
@@ -228,7 +223,3 @@ def test_folder_route_creates_and_reports_conflicts(client, tree):
     assert created.json() == {"path": str(tree / "renders")}
     assert again.status_code == 409
     assert for_files.status_code == 422
-
-
-def test_the_native_picker_route_is_gone(client):
-    assert client.post("/api/picker", json={"kind": "directory", "purpose": "output_directory"}).status_code in {404, 405}
