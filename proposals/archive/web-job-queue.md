@@ -51,7 +51,7 @@ A static wireframe of the layout and states was made during design (not committe
 
 **B6. Elapsed time.** `elapsed_secs` in events is measured from `started_at` (from `created_at` until the job starts), so time spent waiting in the queue is not counted.
 
-**B7. Remove a queued job.** New `WebRunner.cancel_queued(job_id) -> bool`: under `_jobs_lock`, if the id is in the deque (including the active job while it still waits at the head), remove it; then publish `job_cancelled` (with `reason: "removed"`) outside the lock and return `True`. The record is not marked cancelled before the event: the event sets the status, so every reader sees the status and the terminal event together. `Future.cancel()` is called as a best effort only; the claim step (B5) is what guarantees the job never runs. `POST /api/jobs/{job_id}/cancel` tries `cancel_queued` first, before the supported-controls check, so queued video jobs can be removed too. For a running job it falls back to today's `quit` control; a running video job still cannot be stopped (see [Controls for Web UI video jobs](../video-job-controls.md)).
+**B7. Remove a queued job.** New `WebRunner.cancel_queued(job_id) -> bool`: under `_jobs_lock`, if the id is in the deque (including the active job while it still waits at the head), remove it; then publish `job_cancelled` (with `reason: "removed"`) outside the lock and return `True`. The record is not marked cancelled before the event: the event sets the status, so every reader sees the status and the terminal event together. `Future.cancel()` is called as a best effort only; the claim step (B5) is what guarantees the job never runs. `POST /api/jobs/{job_id}/cancel` tries `cancel_queued` first, before the supported-controls check, so queued video jobs can be removed too. For a running job it falls back to today's `quit` control; a running video job still cannot be stopped (see [Controls for Web UI video jobs](video-job-controls.md)).
 
 **B8. Clear the queue.** New `DELETE /api/jobs/queue` removes every queued job the same way as B7, never the active job (when no job is claimed, the head of the deque is the active job and is kept), and returns `{"cancelled": [<job ids>]}`. It is declared before any parameterised `/api/jobs/{job_id}` route.
 
@@ -175,7 +175,7 @@ A new shared `ConfirmDialog` molecule becomes the convention for asking the user
 - Reordering, pausing the queue, and editing a queued job.
 - Keeping a model loaded between queued jobs that use the same model.
 - Persisting the queue across server restarts.
-- Stopping a running video job ([Controls for Web UI video jobs](../video-job-controls.md)).
+- Stopping a running video job ([Controls for Web UI video jobs](video-job-controls.md)).
 
 ## Implementation notes
 
