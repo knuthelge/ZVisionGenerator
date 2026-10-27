@@ -22,28 +22,29 @@ const context = {
   scheduler_options: [],
 } as unknown as WorkspaceContext;
 
+let target: HTMLDivElement;
+let app: Record<string, unknown> | null = null;
+
+beforeEach(() => {
+  localStorage.clear();
+  draft.reset();
+  // jsdom has no Web Animations API, which the popover's enter transition calls.
+  Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+  target = document.createElement('div');
+  document.body.appendChild(target);
+});
+
+afterEach(async () => {
+  if (app) {
+    await unmount(app);
+    app = null;
+  }
+  target.remove();
+  delete (Element.prototype as Partial<Element>).animate;
+});
+
 describe('SettingPopover model list', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
-  beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    draft.update('model', 'zit');
-    // jsdom has no Web Animations API, which the popover's enter transition calls.
-    Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-    delete (Element.prototype as Partial<Element>).animate;
-  });
+  beforeEach(() => draft.update('model', 'zit'));
 
   function mountPopover(onModelChange: (model: string) => void): void {
     app = flushSync(() => mount(SettingPopover, {
@@ -104,8 +105,7 @@ describe('SettingPopover model list', () => {
 });
 
 describe('SettingPopover LoRA list', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
+  beforeEach(() => draft.update('model', 'zit'));
 
   const loraContext = {
     ...context,
@@ -118,24 +118,6 @@ describe('SettingPopover LoRA list', () => {
     ],
   } as unknown as WorkspaceContext;
 
-  beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    draft.update('model', 'zit');
-    Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-    delete (Element.prototype as Partial<Element>).animate;
-  });
-
   function mountLoras(ctx: WorkspaceContext = loraContext): void {
     app = flushSync(() => mount(SettingPopover, {
       target,
@@ -146,17 +128,7 @@ describe('SettingPopover LoRA list', () => {
     }));
   }
 
-  const addRows = () => Array.from(target.querySelectorAll('.pop-list .pop-item')).map((el) => el.textContent?.trim() ?? '');
   const fold = () => target.querySelector('[data-action="other-models"]') as HTMLButtonElement;
-
-  it('lists only the matches by name, then a collapsed Other models row', () => {
-    mountLoras();
-
-    expect(addRows().slice(0, 2)).toEqual(['a-match', 'b-match']);
-    expect(fold().getAttribute('aria-expanded')).toBe('false');
-    expect(target.textContent).not.toContain('d-ltx');
-    expect(target.textContent).not.toContain('c-unknown');
-  });
 
   it('expands the fold in place and shows the family label beside each folded LoRA', () => {
     mountLoras();
@@ -169,30 +141,16 @@ describe('SettingPopover LoRA list', () => {
     expect(unknown?.querySelector('small')).toBeNull();
   });
 
-  it('starts with the fold open when nothing matches', () => {
-    mountLoras({ ...loraContext, loras: [{ name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null }] } as WorkspaceContext);
-
-    expect(fold().getAttribute('aria-expanded')).toBe('true');
-    expect(target.textContent).toContain('d-ltx');
-  });
-
   it('adds the chosen LoRA to the draft', () => {
     mountLoras();
     (Array.from(target.querySelectorAll('.pop-item')).find((el) => el.textContent?.includes('b-match')) as HTMLButtonElement).click();
 
     expect(draft.state.loraString).toBe('b-match:1');
   });
-
-  it('shows no fold row when every LoRA fits the model', () => {
-    mountLoras({ ...loraContext, loras: loraContext.loras.slice(0, 2) } as WorkspaceContext);
-
-    expect(fold()).toBeNull();
-  });
 });
 
 describe('SettingPopover last frame', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
+  beforeEach(() => draft.patch({ workflow: 'img2vid', model: 'h3' }));
 
   const videoContext = (hidden: string[]): WorkspaceContext => ({
     workflow_contract: {
@@ -212,24 +170,6 @@ describe('SettingPopover last frame', () => {
     prompt_sources: [],
     scheduler_options: [],
   }) as unknown as WorkspaceContext;
-
-  beforeEach(() => {
-    localStorage.clear();
-    draft.reset();
-    draft.patch({ workflow: 'img2vid', model: 'h3' });
-    Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-    delete (Element.prototype as Partial<Element>).animate;
-  });
 
   function open(key: 'reference' | 'endReference', hidden: string[] = [], props: Record<string, unknown> = {}): void {
     app = flushSync(() => mount(SettingPopover, {

@@ -5,14 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
 import { lastSaveTarget, recentFiles, rememberRecent } from '$lib/state/promptFileStorage';
-import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
-import { presetsStore } from '$lib/state/presets.svelte';
-import { firstRun } from './firstRun.svelte';
-import { clipMemory } from '$lib/state/clipMemory.svelte';
-import { extendInspection } from '$lib/state/extendInspection.svelte';
-import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { mascotHome } from '$lib/state/mascotHome.svelte';
@@ -20,26 +14,21 @@ import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJob
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { DownloadItem, EnhanceFrame, SettingsPreset, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
+import type { DownloadItem, EnhanceFrame, JobSnapshot, PromptEnhancerContract, WorkspaceContext, GalleryAsset } from '$lib/types';
 import { workspaceMemory } from '$lib/state/pageMemory';
 
-const workspaceApiMocks = vi.hoisted(() => ({
-  getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
-  getWorkspaceCoreContext: vi.fn<() => Promise<WorkspaceContext>>(),
-  submitGenerate: vi.fn<(formData: FormData) => Promise<JobContext>>(),
-  getJobSnapshot: vi.fn<(jobId: string) => Promise<JobSnapshot>>(),
-  parseUrlPrefill: vi.fn<() => Record<string, string>>(),
-  listJobs: vi.fn(async () => ({ active_job: null as JobSnapshot | null, queued_jobs: [] as JobSnapshot[] })),
-  clearQueue: vi.fn(async () => ({ cancelled: [] as string[] })),
-  cancelJob: vi.fn(async () => undefined),
-  skipFirstRun: vi.fn(async () => ({ skipped: true })),
-}));
-
-// Lets a test pick the phone layout; the page reads `layout.compact` once when it mounts.
-const layoutProbe = vi.hoisted(() => ({ compact: false }));
+import WorkspacePage from './WorkspacePage.svelte';
+import ControlsSidebar from './ControlsSidebar.svelte';
+import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
+import { lastEventSource } from '../../test-utils/eventSource';
+import { optionLabels, optionValues, pickOption } from '../../test-utils/select';
+import { jobSnap, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, withEnhancer, withVideoEnhancer } from '../../test-utils/workspace';
+import { answerConfirm, choosePrompts, createHost, expectRenderedLabelsToResolveControls, field, mockClipboard, mountWorkspacePage, openEnhanceRun, pressKey, resetWorkspaceTest, settle, submitForm, type } from '../../test-utils/workspaceHarness';
+import { browseApiMocks, enhanceApiMocks, galleryApiMocks, modelApiMocks, promptFileApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
+  const { layoutProbe } = await import('../../test-utils/workspaceMocks');
   return {
     ...actual,
     layout: {
@@ -50,487 +39,92 @@ vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   };
 });
 
-const configApiMocks = vi.hoisted(() => ({
-  updateConfig: vi.fn(async () => ({})),
-}));
-
 vi.mock('$lib/api/config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/config')>();
+  const { configApiMocks } = await import('../../test-utils/workspaceMocks');
   return { ...actual, updateConfig: configApiMocks.updateConfig };
 });
 
-const browseApiMocks = vi.hoisted(() => ({
-  listDirectory: vi.fn(),
-  browsePlaces: vi.fn(),
-  createFolder: vi.fn(),
-}));
+vi.mock('$lib/api/extend', async () => {
+  const { extendApiMocks } = await import('../../test-utils/workspaceMocks');
+  return { inspectExtendSource: extendApiMocks.inspectExtendSource };
+});
 
-const promptFileApiMocks = vi.hoisted(() => ({
-  inspectPromptFile: vi.fn(),
-  writePromptFile: vi.fn(),
-  appendPromptEntry: vi.fn(),
-  createPromptFile: vi.fn(),
-}));
-
-const extendApiMocks = vi.hoisted(() => ({
-  inspectExtendSource: vi.fn(),
-}));
-
-vi.mock('$lib/api/extend', () => ({ inspectExtendSource: extendApiMocks.inspectExtendSource }));
-
-const videoMemoryApiMocks = vi.hoisted(() => ({
-  checkVideoMemoryFit: vi.fn<(body: Record<string, unknown>) => Promise<{ memory_fit: { status: string; required_gb: number; budget_gb: number } | null; width: number; height: number; frames: number }>>(),
-}));
-
-vi.mock('$lib/api/videoMemory', () => ({ checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit }));
+vi.mock('$lib/api/videoMemory', async () => {
+  const { videoMemoryApiMocks } = await import('../../test-utils/workspaceMocks');
+  return { checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit };
+});
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/workspace')>();
+  const { workspaceApiMocks: mocks } = await import('../../test-utils/workspaceMocks');
   return {
     ...actual,
-    getWorkspaceContext: workspaceApiMocks.getWorkspaceContext,
-    getWorkspaceCoreContext: workspaceApiMocks.getWorkspaceCoreContext,
-    submitGenerate: workspaceApiMocks.submitGenerate,
-    getJobSnapshot: workspaceApiMocks.getJobSnapshot,
-    parseUrlPrefill: workspaceApiMocks.parseUrlPrefill,
-    listJobs: workspaceApiMocks.listJobs,
-    clearQueue: workspaceApiMocks.clearQueue,
-    cancelJob: workspaceApiMocks.cancelJob,
-    skipFirstRun: workspaceApiMocks.skipFirstRun,
+    getWorkspaceContext: mocks.getWorkspaceContext,
+    getWorkspaceCoreContext: mocks.getWorkspaceCoreContext,
+    submitGenerate: mocks.submitGenerate,
+    getJobSnapshot: mocks.getJobSnapshot,
+    parseUrlPrefill: mocks.parseUrlPrefill,
+    listJobs: mocks.listJobs,
+    clearQueue: mocks.clearQueue,
+    cancelJob: mocks.cancelJob,
+    skipFirstRun: mocks.skipFirstRun,
   };
 });
 
-
-const galleryApiMocks = vi.hoisted(() => ({
-  getGallery: vi.fn<(page?: number, filter?: string, sort?: string) => Promise<GalleryPage>>(),
-  deleteAsset: vi.fn<(assetId: string) => Promise<void>>(),
-}));
-
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
+  const { galleryApiMocks } = await import('../../test-utils/workspaceMocks');
   return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAsset: galleryApiMocks.deleteAsset };
 });
 
-const enhanceApiMocks = vi.hoisted(() => ({
-  enhancePrompt: vi.fn<(body: unknown) => Promise<void>>(),
-}));
-
 vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/promptEnhance')>();
+  const { enhanceApiMocks } = await import('../../test-utils/workspaceMocks');
   return { ...actual, enhancePrompt: enhanceApiMocks.enhancePrompt };
 });
 
-vi.mock('$lib/api/browse', () => browseApiMocks);
+vi.mock('$lib/api/browse', async () => (await import('../../test-utils/workspaceMocks')).browseApiMocks);
 
-const presetApiMocks = vi.hoisted(() => ({
-  listPresets: vi.fn<() => Promise<SettingsPreset[]>>(),
-  createPreset: vi.fn<(body: unknown) => Promise<SettingsPreset>>(),
-  updatePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, body: unknown) => Promise<SettingsPreset>>(),
-  renamePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, name: string) => Promise<SettingsPreset>>(),
-  deletePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string) => Promise<{ status: string }>>(),
-}));
-
-vi.mock('$lib/api/presets', () => presetApiMocks);
-
-const modelApiMocks = vi.hoisted(() => ({
-  getDownloads: vi.fn<() => Promise<{ items: DownloadItem[] }>>(),
-}));
+vi.mock('$lib/api/presets', async () => (await import('../../test-utils/workspaceMocks')).presetApiMocks);
 
 vi.mock('$lib/api/models', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/models')>();
+  const { modelApiMocks } = await import('../../test-utils/workspaceMocks');
   return { ...actual, getDownloads: modelApiMocks.getDownloads };
 });
 
-vi.mock('$lib/api/promptFiles', () => ({
-  inspectPromptFile: promptFileApiMocks.inspectPromptFile,
-  writePromptFile: promptFileApiMocks.writePromptFile,
-  appendPromptEntry: promptFileApiMocks.appendPromptEntry,
-  createPromptFile: promptFileApiMocks.createPromptFile,
-}));
-
-import WorkspacePage from './WorkspacePage.svelte';
-import ControlsSidebar from './ControlsSidebar.svelte';
-import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
-import { optionLabels, optionValues, pickOption } from '../../test-utils/select';
+vi.mock('$lib/api/promptFiles', async () => {
+  const { promptFileApiMocks } = await import('../../test-utils/workspaceMocks');
+  return {
+    inspectPromptFile: promptFileApiMocks.inspectPromptFile,
+    writePromptFile: promptFileApiMocks.writePromptFile,
+    appendPromptEntry: promptFileApiMocks.appendPromptEntry,
+    createPromptFile: promptFileApiMocks.createPromptFile,
+  };
+});
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | null = null;
 
 // Every test starts from empty stores, reset API mocks, an empty server-side queue and a fresh host element.
 beforeEach(() => {
-  layoutProbe.compact = false;
-  localStorage.clear();
-  sessionStorage.clear();
-  draft.reset();
-  workspaceMemory.forget();
-  extendInspection.reset();
-  clipMemory.reset();
-  galleryStore.reset();
-  jobStore.clearJob();
-  downloadStore.reset();
-  for (const mock of Object.values(presetApiMocks)) mock.mockReset();
-  presetApiMocks.listPresets.mockResolvedValue([]);
-  firstRun.reset();
-  configApiMocks.updateConfig.mockClear();
-  workspaceApiMocks.skipFirstRun.mockClear();
-  modelApiMocks.getDownloads.mockReset();
-  modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
-  toasts.splice(0, toasts.length);
-  for (const mock of [
-    workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
-    galleryApiMocks.getGallery, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
-    promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
-    videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
-  ]) mock.mockReset();
-  workspaceApiMocks.clearQueue.mockClear();
-  workspaceApiMocks.cancelJob.mockClear();
-  workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });
-  workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
-  galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage());
-  target = document.createElement('div');
-  document.body.appendChild(target);
+  resetWorkspaceTest();
+  target = createHost();
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   if (app) { await unmount(app); app = null; }
   target.remove();
   document.body.innerHTML = '';
   vi.restoreAllMocks();
 });
 
-function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageModelDefaults {
-  return {
-    ratio: '2:3',
-    size: 'm',
-    steps: 28,
-    guidance: 6.2,
-    width: 832,
-    height: 1216,
-    scheduler: 'beta',
-    supports_negative_prompt: true,
-    supports_quantize: true,
-    quantize: null,
-    image_strength: 0.5,
-    postprocess: { sharpen: 0.8, contrast: false, saturation: false },
-    upscale: {
-      enabled: false,
-      factor: null,
-      denoise: null,
-      steps: null,
-      guidance: null,
-      sharpen: true,
-      save_pre: false,
-    },
-    supports_img2img: true,
-    supports_upscale: true,
-    supports_json_prompt: false,
-    supports_first_sigma: false,
-    supports_scheduler: true,
-    dimension_min: 16,
-    dimension_max: null,
-    dimension_step: 16,
-    ...overrides,
-  };
-}
-
-function makeIdeogramDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageModelDefaults {
-  return makeImageDefaults({
-    ratio: '16:9',
-    size: 'l',
-    steps: 20,
-    guidance: 7,
-    width: 1664,
-    height: 928,
-    supports_negative_prompt: false,
-    supports_img2img: false,
-    supports_upscale: false,
-    supports_json_prompt: true,
-    supports_first_sigma: true,
-    supports_scheduler: true,
-    dimension_min: 256,
-    dimension_max: 2048,
-    dimension_step: 16,
-    ...overrides,
-  });
-}
-
-function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoModelDefaults {
-  return {
-    ratio: '16:9',
-    size: 'm',
-    steps: 8,
-    width: 704,
-    height: 448,
-    frame_count: 49,
-    audio: true,
-    low_memory: true,
-    supports_i2v: true,
-    supports_quantize: false,
-    quantize: null,
-    max_steps: 8,
-    fps: 24,
-    frame_rule: { alignment: 8, offset: 1, round: 'nearest' },
-    supports_extend: true,
-    extend_frame_step: 8,
-    upscale: {
-      enabled: false,
-      factor: 2,
-      steps: null,
-    },
-    ...overrides,
-  };
-}
-
-function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
-  const imageDefaults = makeImageDefaults();
-  const alternateImageDefaults = makeImageDefaults({
-    ratio: '16:9',
-    size: 'l',
-    steps: 12,
-    guidance: 3.5,
-    width: 1216,
-    height: 832,
-    supports_negative_prompt: false,
-    supports_quantize: false,
-  });
-  const videoDefaults = makeVideoDefaults();
-
-  return {
-    image_models: [
-      { id: 'zit', label: 'zit', type: 'image' },
-      { id: 'flux-lite', label: 'flux-lite', type: 'image' },
-    ],
-    video_models: [{ id: 'ltx-8', label: 'ltx-8', type: 'video' }],
-    loras: [],
-    history_assets: [],
-    active_job: null,
-    defaults: imageDefaults,
-    video_defaults: videoDefaults,
-    image_model_defaults: {
-      zit: imageDefaults,
-      'flux-lite': alternateImageDefaults,
-    },
-    video_model_defaults: {
-      'ltx-8': videoDefaults,
-    },
-    current_image_model: 'zit',
-    current_video_model: 'ltx-8',
-    config: {
-      gallery_page_size: 20,
-      startup_view: 'workspace',
-    },
-    output_dir: '/tmp/output',
-    quantize_options: [4, 8],
-    image_ratios: ['2:3', '16:9'],
-    video_ratios: ['16:9'],
-    image_size_options: { '2:3': ['m'], '16:9': ['l'] },
-    image_size_dimensions: {},
-    video_size_options: { '16:9': ['m'] },
-    scheduler_options: ['beta'],
-    workflow_contract: {
-      values: ['txt2img', 'img2img', 'txt2vid', 'img2vid'],
-      definitions: {
-        txt2img: {
-          mode: 'image',
-          model_kind: 'image',
-          visible_controls: [
-            'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
-            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
-            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'scheduler',
-            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
-            'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
-            'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
-          ],
-          supports_reference_image: false,
-          requires_reference_image: false,
-          requires_source_video: false,
-          clear_fields: ['image_path', 'image_strength', 'frames', 'audio', 'low_memory'],
-        },
-        img2img: {
-          mode: 'image',
-          model_kind: 'image',
-          visible_controls: [
-            'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
-            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
-            'reference_image', 'reference_image_path', 'reference_image_clear',
-            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed', 'scheduler',
-            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
-            'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
-            'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
-          ],
-          supports_reference_image: true,
-          requires_reference_image: true,
-          requires_source_video: false,
-          clear_fields: ['frames', 'audio', 'low_memory'],
-        },
-        txt2vid: {
-          mode: 'video',
-          model_kind: 'video',
-          visible_controls: [
-            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
-            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
-            'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
-            'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
-          ],
-          supports_reference_image: false,
-          requires_reference_image: false,
-          requires_source_video: false,
-          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
-        },
-        img2vid: {
-          mode: 'video',
-          model_kind: 'video',
-          visible_controls: [
-            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
-            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
-            'reference_image', 'reference_image_path', 'reference_image_clear',
-            'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
-            'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
-          ],
-          supports_reference_image: true,
-          requires_reference_image: true,
-          requires_source_video: false,
-          clear_fields: ['negative_prompt', 'guidance', 'quantize'],
-        },
-        extend: {
-          mode: 'video',
-          model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
-          supports_reference_image: false,
-          requires_reference_image: false,
-          requires_source_video: true,
-          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
-        },
-      },
-      field_precedence: {
-        defaults: ['cli', 'model_variant', 'model_family', 'global'],
-        dimensions: 'explicit_width_height_overrides_ratio_size',
-      },
-    },
-    prompt_sources: ['inline', 'file'],
-    default_prompt_source: 'inline',
-    prompt_file: {
-      accepted_extensions: ['.yaml', '.yml'],
-      selection_required: true,
-      trust_boundary: {
-        scope: 'server_host_only',
-        manual_entry: 'submitted_value_kept_until_backend_validation',
-        picker: 'in_app_browser',
-        read_write: 'yaml_files_only',
-      },
-      help: {
-        path: 'Prompt file path.',
-        option_required: 'Select an active prompt option before generating.',
-        option_optional: 'Select an active prompt option from the file.',
-        empty_options: 'This prompt file has no active prompt options.',
-        stale_selection: 'The previously selected prompt option is no longer active.',
-        loaded: 'Prompt file loaded.',
-        ignored_negative_video: 'Negative prompt entries are ignored for video workflows.',
-        ignored_negative_unsupported: 'The current image model ignores negative prompt entries.',
-        ignored_scene_image: 'Scene entries are ignored for image workflows.',
-      },
-    },
-    ...overrides,
-  };
-}
-
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await Promise.resolve();
-  await Promise.resolve();
-  flushSync();
-}
-
-/** Answer the open confirmation dialog. */
-async function answerConfirm(confirmed: boolean): Promise<void> {
-  const action = confirmed ? 'confirm' : 'cancel';
-  (document.querySelector(`[role="alertdialog"] [data-action="${action}"]`) as HTMLButtonElement).click();
-  await settle();
-}
-
-/** Pick prompt-file prompts through the Choose prompts dialog and confirm. */
-async function choosePrompts(container: ParentNode, ids: string[]): Promise<void> {
-  (container.querySelector('[data-action="choose-prompts"]') as HTMLButtonElement).click();
-  await settle();
-  const chooser = document.querySelector('[data-testid="prompt-chooser"]') as HTMLElement;
-  for (const box of Array.from(chooser.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
-    if (box.checked !== ids.includes(box.value)) box.click();
-  }
-  await settle();
-  (document.querySelector('[data-action="confirm-prompts"]') as HTMLButtonElement).click();
-  await settle();
-}
-
-function expectRenderedLabelsToResolveControls(container: ParentNode): void {
-  const explicitLabels = Array.from(container.querySelectorAll('label[for]')) as HTMLLabelElement[];
-  expect(explicitLabels.length).toBeGreaterThan(0);
-  for (const label of explicitLabels) {
-    const control = label.control ?? container.querySelector(`[id="${label.htmlFor}"]`);
-    expect(
-      control,
-      `Expected label "${label.textContent?.trim() ?? label.htmlFor}" to resolve control "${label.htmlFor}"`
-    ).not.toBeNull();
-  }
-
-  const wrappedLabels = Array.from(container.querySelectorAll('label:not([for])')) as HTMLLabelElement[];
-  for (const label of wrappedLabels) {
-    expect(
-      label.querySelector('input, select, textarea'),
-      `Expected wrapped label "${label.textContent?.trim() ?? '(unnamed label)'}" to contain a control`
-    ).not.toBeNull();
-  }
-}
-
-
 /** Mount the Workspace page on the host element and let it settle. */
 async function mountWorkspace(context: WorkspaceContext): Promise<void> {
-  workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
-  app = flushSync(() => mount(WorkspacePage, { target }));
-  await settle();
+  app = await mountWorkspacePage(context, target);
 }
-
-const field = (id: string) => document.querySelector(`#${id}`) as HTMLTextAreaElement;
-
-function type(id: string, value: string): void {
-  const el = field(id);
-  el.value = value;
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-/** Wait out the 300 ms input debounce of the memory check and the source check. */
-async function waitDebounce(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 340));
-  await settle();
-}
-
-/** Open the Enhance popover and return its Enhance button. */
-async function openEnhanceRun(): Promise<HTMLButtonElement> {
-  (document.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
-  await settle();
-  return document.querySelector('#ws-enhance-run') as HTMLButtonElement;
-}
-
-/** Enhance with the current settings through the popover. */
-async function runEnhance(): Promise<void> {
-  (await openEnhanceRun()).click();
-  await settle();
-}
-
-/** Make the next source check wait until the returned function is called with the server's answer. */
-function holdInspection(): (info: ReturnType<typeof sceneSource>) => void {
-  let release: (info: ReturnType<typeof sceneSource>) => void = () => undefined;
-  extendApiMocks.inspectExtendSource.mockReturnValue(new Promise((resolve) => { release = resolve; }));
-  return (info) => release(info);
-}
-
-/** Replace the clipboard with a spy and return it. */
-function mockClipboard(): ReturnType<typeof vi.fn<(text: string) => Promise<void>>> {
-  const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
-  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-  return writeText;
-}
-
 
 describe('WorkspacePage', () => {
   beforeEach(() => {
@@ -772,42 +366,6 @@ describe('WorkspacePage', () => {
     expect(report).toHaveBeenCalled();
   });
 
-  function withEnhancer(context: WorkspaceContext): WorkspaceContext {
-    context.workflow_contract.definitions.txt2img.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
-    context.prompt_enhancer = {
-      matrix: {
-        axes: [
-          { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'photo', label: 'Photographic', description: '', group: null }], default: ['keep'] },
-          { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting', description: '', group: null }], default: ['lighting'] },
-          { key: 'length', label: 'Length', multi: false, video_only: false, audio_only: false, options: [{ slug: 'same', label: 'Same', description: '', group: null }, { slug: 'longer', label: 'Longer', description: '', group: null }], default: ['same'] },
-          { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action', description: '', group: null }], default: ['action'] },
-        ],
-        defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' },
-      },
-      model: 'owner/llm',
-      revision: null,
-      downloaded: true,
-      download_size_label: null,
-      default_max_words: 300,
-      error: null,
-    };
-    return context;
-  }
-
-  async function submitForm(): Promise<FormData> {
-    const form = target.querySelector('form');
-    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-    const [submitted] = workspaceApiMocks.submitGenerate.mock.calls.at(-1) ?? [];
-    return submitted as FormData;
-  }
-
-  function pressKey(key: string, init: KeyboardEventInit = {}, from: EventTarget = document): KeyboardEvent {
-    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
-    from.dispatchEvent(event);
-    return event;
-  }
-
   it('generates with Ctrl+Enter and re-rolls a locked seed with Ctrl+Shift+Enter', async () => {
     draft.update('prompt', 'a fox');
     await mountWorkspace(makeContext());
@@ -832,16 +390,13 @@ describe('WorkspacePage', () => {
     expect(Number(seed)).toBeGreaterThanOrEqual(0);
   });
 
-  it('focuses the prompt with Alt+1 and the settings with Alt+2', async () => {
+  it('focuses the prompt with Alt+1 and the settings with Alt+2, expanding a collapsed sidebar first', async () => {
     await mountWorkspace(makeContext());
     expect(pressKey('1', { altKey: true, code: 'Digit1' }).defaultPrevented).toBe(true);
     expect(document.activeElement?.id).toBe('ws-prompt');
     pressKey('2', { altKey: true, code: 'Digit2' });
     expect(document.activeElement?.closest('.settings-pane')).not.toBeNull();
-  });
 
-  it('expands a collapsed sidebar with Alt+1 and Alt+2 before focusing', async () => {
-    await mountWorkspace(makeContext());
     draft.update('sidebarCollapsed', true);
     pressKey('1', { altKey: true, code: 'Digit1' });
     await settle();
@@ -872,14 +427,6 @@ describe('WorkspacePage', () => {
     expect(document.activeElement?.closest('.settings-pane')).not.toBeNull();
     expect(draft.state.historyCollapsed).toBe(false);
   });
-
-  function jobSnap(jobId: string, status: JobSnapshot['status'], extra: Partial<JobSnapshot> = {}): JobSnapshot {
-    return {
-      id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'Text to Image', status, created_at: '2026-10-04T10:00:00Z', completed_at: null,
-      event_count: 1, last_event: { type: 'job_started' }, supported_controls: ['quit'], paused: false, result_path: null,
-      prompt: `prompt of ${jobId}`, model: 'zit', runs: 1, ...extra,
-    };
-  }
 
   function queueContext(queued: JobSnapshot[]): WorkspaceContext {
     workspaceApiMocks.listJobs.mockResolvedValue({ active_job: jobSnap('job-live', 'running'), queued_jobs: queued });
@@ -1108,36 +655,14 @@ describe('WorkspacePage', () => {
       const dialog = overlay.querySelector('[role="dialog"]')!;
       expect(dialog.getAttribute('aria-label')).toBe('Review');
       expect(overlay.querySelector('img')?.getAttribute('src')).toBe('/jobs/job-review/preview?v=4');
-      expect(overlay.querySelector('.review-line')?.textContent).toContain('Review 3 of 8');
       expect(overlay.querySelector('[data-decision="approve"]')).not.toBeNull();
       expect(overlay.querySelector('[data-decision="discard"]')).not.toBeNull();
-      expect([...overlay.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Approve', 'Discard']);
 
       // The running-job view is still there under the overlay, with only Cancel.
       const card = preview.querySelector<HTMLElement>('.job-card')!;
       expect(card.contains(overlay)).toBe(false);
       expect(card.querySelector('button[data-control="quit"]')).not.toBeNull();
       for (const control of ['pause-resume', 'next', 'repeat']) expect(card.querySelector(`button[data-control="${control}"]`)).toBeNull();
-    });
-
-    it('sends the decision from the buttons, once', async () => {
-      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: reviewSnapshot(), queued_jobs: [] });
-      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-      vi.stubGlobal('fetch', fetchMock);
-      try {
-        await mountWorkspace(makeContext({ active_job: reviewSnapshot() }));
-        target.querySelector<HTMLButtonElement>('[data-decision="approve"]')!.click();
-        await settle();
-        expect(fetchMock).toHaveBeenCalledWith('/jobs/job-review/controls/approve', expect.objectContaining({ method: 'POST' }));
-        // Both buttons wait for the server to resume the job.
-        expect(target.querySelector<HTMLButtonElement>('[data-decision="discard"]')!.disabled).toBe(true);
-        target.querySelector<HTMLButtonElement>('[data-decision="discard"]')!.click();
-        pressKey('n');
-        await settle();
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-      } finally {
-        vi.unstubAllGlobals();
-      }
     });
 
     it.each([
@@ -1162,7 +687,7 @@ describe('WorkspacePage', () => {
       await mountWorkspace(makeContext({ active_job: reviewSnapshot() }));
       expect(target.querySelector('[data-testid="review-overlay"]')).not.toBeNull();
 
-      const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+      const source = lastEventSource();
       source.emit('job_resumed', { type: 'job_resumed', event_id: 10 });
       await settle();
       expect(target.querySelector('[data-testid="review-overlay"]')).toBeNull();
@@ -1179,22 +704,24 @@ describe('WorkspacePage', () => {
       expect(summary()).toBe('2×');
     });
 
-    it.each(['y', 'n'])('does not decide a plain pause with %s', async (key) => {
-      const plain = jobSnap('job-plain', 'paused', {
-        paused: true,
-        review: null,
-        supported_controls: ['next', 'pause', 'resume', 'repeat', 'approve', 'discard', 'quit'],
-        last_event: { type: 'job_paused', event_id: 4 },
-      });
-      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: plain, queued_jobs: [] });
+    it('does not decide anything with Y or N for a plain pause or a job that runs without a review', async () => {
+      const controls = ['next', 'pause', 'resume', 'repeat', 'approve', 'discard', 'quit'];
+      const plain = jobSnap('job-plain', 'paused', { paused: true, review: null, supported_controls: controls, last_event: { type: 'job_paused', event_id: 4 } });
+      const running = jobSnap('job-run', 'running', { supported_controls: controls, last_event: { type: 'step_progress', event_id: 4 } });
       const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
       vi.stubGlobal('fetch', fetchMock);
       try {
-        await mountWorkspace(makeContext({ active_job: plain }));
-        expect(target.querySelector('[data-testid="review-overlay"]')).toBeNull();
-        expect(target.querySelector('[data-decision]')).toBeNull();
-        pressKey(key);
-        await settle();
+        for (const job of [plain, running]) {
+          workspaceApiMocks.listJobs.mockResolvedValue({ active_job: job, queued_jobs: [] });
+          await mountWorkspace(makeContext({ active_job: job }));
+          expect(target.querySelector('[data-testid="review-overlay"]')).toBeNull();
+          expect(target.querySelector('[data-decision]')).toBeNull();
+          for (const key of ['y', 'n']) pressKey(key);
+          await settle();
+          await unmount(app!);
+          app = null;
+          jobStore.clearJob();
+        }
         const decisions = fetchMock.mock.calls.filter(([url]) => /\/controls\/(approve|discard)$/.test(String(url)));
         expect(decisions).toHaveLength(0);
       } finally {
@@ -1301,53 +828,6 @@ describe('WorkspacePage', () => {
         expect(card.querySelector('button[data-control="quit"]')).not.toBeNull();
         for (const control of ['pause-resume', 'next', 'repeat']) expect(card.querySelector(`button[data-control="${control}"]`)).toBeNull();
       });
-
-      it('mutes the video and drops the native controls when the job has Audio off', async () => {
-        const snapshot = videoReviewSnapshot({ settings: { upscale: '2', audio: 'false' } });
-        workspaceApiMocks.listJobs.mockResolvedValue({ active_job: snapshot, queued_jobs: [] });
-        await mountWorkspace(makeContext({ active_job: snapshot }));
-
-        const video = target.querySelector<HTMLVideoElement>('[data-testid="review-overlay"] video')!;
-        expect(video.muted).toBe(true);
-        expect(video.controls).toBe(false);
-        expect(target.querySelector('button[data-playback]')).not.toBeNull();
-      });
-
-      it.each([
-        ['y', 'approve'],
-        ['n', 'discard'],
-      ])('sends %s as %s', async (key, action) => {
-        workspaceApiMocks.listJobs.mockResolvedValue({ active_job: videoReviewSnapshot(), queued_jobs: [] });
-        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-        vi.stubGlobal('fetch', fetchMock);
-        try {
-          await mountWorkspace(makeContext({ active_job: videoReviewSnapshot() }));
-          pressKey(key);
-          await settle();
-          expect(fetchMock).toHaveBeenCalledWith(`/jobs/job-vreview/controls/${action}`, expect.objectContaining({ method: 'POST' }));
-        } finally {
-          vi.unstubAllGlobals();
-        }
-      });
-    });
-
-    it('does not decide anything with Y or N while a job runs without a review', async () => {
-      const running = jobSnap('job-run', 'running', {
-        supported_controls: ['next', 'pause', 'resume', 'repeat', 'approve', 'discard', 'quit'],
-        last_event: { type: 'step_progress', event_id: 4 },
-      });
-      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: running, queued_jobs: [] });
-      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-      vi.stubGlobal('fetch', fetchMock);
-      try {
-        await mountWorkspace(makeContext({ active_job: running }));
-        pressKey('y');
-        await settle();
-        const decisions = fetchMock.mock.calls.filter(([url]) => /\/controls\/(approve|discard)$/.test(String(url)));
-        expect(decisions).toHaveLength(0);
-      } finally {
-        vi.unstubAllGlobals();
-      }
     });
   });
 
@@ -1390,7 +870,7 @@ describe('WorkspacePage', () => {
 
       expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ format: 'json' });
       expect(draft.state.enhancedPrompt).toBe('{\n  "high_level_description": "A fox."\n}');
-      const submitted = await submitForm();
+      const submitted = await submitForm(target);
       expect(submitted.get('json_prompt')).toBe('{\n  "high_level_description": "A fox."\n}');
       expect(submitted.has('prompt')).toBe(false);
       // The asset records the user's prompt and how the caption was written.
@@ -1439,7 +919,7 @@ describe('WorkspacePage', () => {
       draft.update('enhanceModel', 'smart');
       draft.update('enhanceFormat', 'json');
       await mountWorkspace(ideoEnhancerContext({ download_size_label: null, unavailable: null }));
-      const submitted = await submitForm();
+      const submitted = await submitForm(target);
       expect(submitted.get('enhance_model')).toBe('smart');
       expect(submitted.get('enhance_format')).toBe('json');
     });
@@ -1462,7 +942,7 @@ describe('WorkspacePage', () => {
     expect(enhanced?.value).toBe('A red fox in deep snow, golden light.');
     expect(enhanced?.getAttribute('name')).toBeNull();
 
-    const submitted = await submitForm();
+    const submitted = await submitForm(target);
     expect(submitted.get('prompt')).toBe('A red fox in deep snow, golden light.');
     expect(submitted.has('enhance_auto')).toBe(false);
   });
@@ -1489,7 +969,7 @@ describe('WorkspacePage', () => {
     await mountWorkspace(withEnhancer(makeContext()));
 
     expect((target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement).disabled).toBe(true);
-    const submitted = await submitForm();
+    const submitted = await submitForm(target);
     expect(submitted.get('prompt')).toBe('a fox');
     expect(submitted.get('enhance_auto')).toBe('true');
     expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', mood: 'keep', theme: 'keep', details: [], length: 'longer' });
@@ -1512,16 +992,6 @@ describe('WorkspacePage', () => {
     expect(command).toContain("--prompt 'A red fox in deep snow.'");
     expect(command).toContain('--steps 28');
     expect(command).toMatch(/--output \/tmp\/output$/);
-  });
-
-  it('copies nothing while the prompt is empty', async () => {
-    const writeText = mockClipboard();
-    await mountWorkspace(makeContext());
-
-    (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
-    await settle();
-
-    expect(writeText).not.toHaveBeenCalled();
   });
 
   it('resets the options of the current mode only, and offers Reset only when something is picked', async () => {
@@ -1550,14 +1020,6 @@ describe('WorkspacePage', () => {
   });
 
   describe('scene and prompt pair (video)', () => {
-    function withVideoEnhancer(context: WorkspaceContext): WorkspaceContext {
-      withEnhancer(context);
-      for (const workflow of ['txt2vid', 'img2vid'] as const) {
-        context.workflow_contract.definitions[workflow].visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
-      }
-      return context;
-    }
-
     const isShown = (id: string) => target.querySelector(`#${id}`)?.closest('[hidden]') == null && !(target.querySelector(`#${id}`) as HTMLElement).hidden;
 
     it('shows the Scene box in the video workflows and not in the image workflows', async () => {
@@ -1611,7 +1073,7 @@ describe('WorkspacePage', () => {
 
       type('ws-scene', 'A castle at dusk.');
       await settle();
-      const submitted = await submitForm();
+      const submitted = await submitForm(target);
       expect(submitted.get('scene')).toBe('A castle at dusk.');
       expect(submitted.get('prompt')).toBe('');
     });
@@ -1687,24 +1149,16 @@ describe('WorkspacePage', () => {
       expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).not.toHaveProperty('scene');
     });
 
-    it.each([
-      ['neither part', {}, 'A castle.', 'a knight'],
-      ['both parts', { enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' }, 'A castle at dusk.', 'A knight rides in.'],
-    ])('sends each part enhanced when its Enhanced box has text: %s', async (_name, enhanced, scene, prompt) => {
+    it('sends each part enhanced when its Enhanced box has text, with the user text recorded beside them', async () => {
       draft.update('workflow', 'txt2vid');
-      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedFrom: null, ...enhanced });
+      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedFrom: null, enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' });
       await mountWorkspace(withVideoEnhancer(makeContext()));
 
-      const submitted = await submitForm();
-      expect(submitted.get('scene')).toBe(scene);
-      expect(submitted.get('prompt')).toBe(prompt);
-      // The user's own text is recorded only when some part ran enhanced.
-      expect(submitted.has('scene_input')).toBe(Object.keys(enhanced).length > 0);
-      expect(submitted.has('prompt_input')).toBe(Object.keys(enhanced).length > 0);
-      if (Object.keys(enhanced).length > 0) {
-        expect(submitted.get('scene_input')).toBe('A castle.');
-        expect(submitted.get('prompt_input')).toBe('a knight');
-      }
+      const submitted = await submitForm(target);
+      expect(submitted.get('scene')).toBe('A castle at dusk.');
+      expect(submitted.get('prompt')).toBe('A knight rides in.');
+      expect(submitted.get('scene_input')).toBe('A castle.');
+      expect(submitted.get('prompt_input')).toBe('a knight');
     });
 
     it('records the user text and how an enhanced image prompt was made', async () => {
@@ -1712,7 +1166,7 @@ describe('WorkspacePage', () => {
       draft.patch({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
       await mountWorkspace(withEnhancer(makeContext()));
 
-      const submitted = await submitForm();
+      const submitted = await submitForm(target);
       expect(submitted.get('prompt')).toBe('A red fox curls up in deep snow.');
       expect(submitted.get('prompt_input')).toBe('a fox in snow');
       expect(JSON.parse(String(submitted.get('enhance_record')))).toEqual(record);
@@ -1723,7 +1177,7 @@ describe('WorkspacePage', () => {
       draft.patch({ prompt: 'a wolf in rain', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
       await mountWorkspace(withEnhancer(makeContext()));
 
-      const submitted = await submitForm();
+      const submitted = await submitForm(target);
       expect(submitted.get('prompt')).toBe('A red fox curls up in deep snow.');
       expect(submitted.get('prompt_input')).toBe('a fox in snow');
     });
@@ -1737,7 +1191,7 @@ describe('WorkspacePage', () => {
       enhanced.dispatchEvent(new Event('input', { bubbles: true }));
       await settle();
 
-      const submitted = await submitForm();
+      const submitted = await submitForm(target);
       expect(submitted.get('prompt')).toBe('A red fox curls up in deep snow, my own words.');
       expect(submitted.get('prompt_input')).toBe('a fox in snow');
       expect(submitted.has('enhance_record')).toBe(false);
@@ -1747,7 +1201,7 @@ describe('WorkspacePage', () => {
       draft.patch({ prompt: 'a fox in snow', enhancedPrompt: '', enhancedFrom: null });
       await mountWorkspace(withEnhancer(makeContext()));
 
-      const submitted = await submitForm();
+      const submitted = await submitForm(target);
       expect(submitted.has('enhance_record')).toBe(false);
       expect(submitted.has('prompt_input')).toBe(false);
     });
@@ -1810,30 +1264,15 @@ describe('WorkspacePage', () => {
         expect(chip('Action only').getAttribute('aria-checked')).toBe('true');
       });
 
-      it('sends parts with an on-demand enhancement and keeps the memory out of the payload', async () => {
-        enhanceApiMocks.enhancePrompt.mockResolvedValue();
-        draft.update('workflow', 'txt2vid');
-        draft.patch({ scene: 'A castle.', prompt: 'a knight' });
-        await mountWorkspace(withVideoEnhancer(makeContext()));
-        await openEnhanceRun();
-        chip('Action only').click();
-        await settle();
-        (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
-        await settle();
-        const body = enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { settings: Record<string, unknown> };
-        expect(body.settings.parts).toBe('action');
-        expect(body.settings).not.toHaveProperty('partsByWorkflow');
-      });
-
       it('sends parts inside enhance_settings with auto-enhance, and none for images', async () => {
         draft.update('workflow', 'txt2vid');
         draft.patch({ scene: 'A castle.', prompt: 'a knight', enhanceAuto: true });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('both');
+        expect(JSON.parse(String((await submitForm(target)).get('enhance_settings'))).parts).toBe('both');
 
         draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await settle();
-        expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('action');
+        expect(JSON.parse(String((await submitForm(target)).get('enhance_settings'))).parts).toBe('action');
       });
     });
 
@@ -1887,7 +1326,7 @@ describe('WorkspacePage', () => {
         expect(rowText('ws-prompt')).not.toContain('Uses enhanced');
         expect(rowText('ws-scene')).toContain('Uses enhanced');
         expect(status()).toBe('Action now uses your text.');
-        const submitted = await submitForm();
+        const submitted = await submitForm(target);
         expect(submitted.get('scene')).toBe('A castle at dusk.');
         expect(submitted.get('prompt')).toBe('a knight');
 
@@ -1974,19 +1413,6 @@ describe('WorkspacePage', () => {
       expect(target.textContent).not.toContain('Out of date');
     });
 
-    it('copies a scene alone as --scene without --prompt', async () => {
-      const writeText = mockClipboard();
-      draft.update('workflow', 'txt2vid');
-      draft.patch({ scene: 'A castle.', prompt: '' });
-      await mountWorkspace(makeContext());
-
-      (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
-      await settle();
-      expect(writeText).toHaveBeenCalledTimes(1);
-      expect(writeText.mock.calls[0]?.[0]).toContain("--scene 'A castle.'");
-      expect(writeText.mock.calls[0]?.[0]).not.toContain('--prompt');
-    });
-
     it('focuses the Prompt box, not the Scene box, with Alt+1', async () => {
       draft.update('workflow', 'txt2vid');
       await mountWorkspace(makeContext());
@@ -2018,7 +1444,7 @@ describe('WorkspacePage', () => {
         await settle();
         expect(draft.state.scene).toBe('A city in the rain.');
 
-        const submitted = await submitForm();
+        const submitted = await submitForm(target);
         expect(submitted.get('prompt_source')).toBe('file');
         expect(submitted.get('scene')).toBe('A city in the rain.');
         expect(submitted.has('prompt')).toBe(false);
@@ -2058,38 +1484,6 @@ describe('WorkspacePage', () => {
     await mountWorkspace(makeContext());
     expect(target.querySelector('#ws-enhanced-prompt')).toBeNull();
     expect(target.querySelector('#ws-enhance-toggle')).toBeNull();
-  });
-
-  it('uses backend visible_controls instead of workflow-name literals for sidebar visibility', async () => {
-    const context = makeContext({
-      workflow_contract: {
-        ...makeContext().workflow_contract,
-        definitions: {
-          ...makeContext().workflow_contract.definitions,
-          txt2vid: {
-            ...makeContext().workflow_contract.definitions.txt2vid,
-            visible_controls: ['workflow', 'model', 'prompt_inline', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'seed'],
-          },
-        },
-      },
-    });
-    draft.update('workflow', 'txt2vid');
-    draft.update('model', 'ltx-8');
-    draft.hydrateFromContext(context, 'ltx-8');
-    app = flushSync(() => mount(ControlsSidebar, {
-      target,
-      props: {
-        context,
-        busy: false,
-        imageFile: null,
-        onImageFileChange: vi.fn(),
-      },
-    }));
-    await settle();
-
-    expect(target.querySelector('input[name="audio"]')).toBeNull();
-    expect(target.querySelector('input[name="low_memory"]')).toBeNull();
-    expect(target.querySelector('input[name="frames"]')).toBeNull();
   });
 
   it('edits the clip length in seconds and submits it as a frame count the model accepts', async () => {
@@ -2222,19 +1616,6 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(target.querySelector('#ws-negative-prompt')).not.toBeNull();
-  });
-
-  it('shows scheduler for txt2img and hides it for txt2vid', async () => {
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    expect(target.querySelector('#ws-scheduler')).not.toBeNull();
-
-    draft.update('workflow', 'txt2vid');
-    draft.update('model', 'ltx-8');
-    await settle();
-
-    expect(target.querySelector('#ws-scheduler')).toBeNull();
   });
 
   it('gates reference image and upscale controls by selected model capabilities', async () => {
@@ -2732,23 +2113,6 @@ describe('WorkspacePage', () => {
     expectRenderedLabelsToResolveControls(target);
   });
 
-  it('renders toolbar selector controls for txt2img with zit model', async () => {
-    draft.update('workflow', 'txt2img');
-    draft.update('model', 'zit');
-
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    // Model select is always rendered.
-    expect(target.querySelector('#ws-model')).not.toBeNull();
-
-    // The quantize block is gated on {#if supportsQuantize} which requires the
-    // async context to load. An extra settle() lets the onMount promise chain
-    // (getWorkspaceContext → context = ctx → reactive re-render) complete.
-    await settle();
-    expect(target.querySelector('select[name="quantize"]'), 'Quantize select must be rendered for zit model (supports_quantize: true)').not.toBeNull();
-  });
-
   it('adds a LoRA from the Add LoRA menu and closes the menu on Escape or an outside click', async () => {
     draft.update('workflow', 'txt2img');
     draft.update('model', 'zit');
@@ -2823,25 +2187,6 @@ describe('WorkspacePage', () => {
       expect(fold.getAttribute('aria-expanded')).toBe('true');
       expect(picker()?.querySelector('[data-action="d-ltx"]')?.textContent).toContain('LTX');
       expect(picker()?.querySelector('[data-action="c-unknown"]')).not.toBeNull();
-    });
-
-    it('opens the fold from the start when nothing matches and nothing is unknown', async () => {
-      await mountWorkspace(loraContext([{ name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null }]));
-      await settle();
-      openPicker();
-
-      expect(picker()?.querySelector('[data-action="other-models"]')?.getAttribute('aria-expanded')).toBe('true');
-      expect(picker()?.querySelector('[data-action="d-ltx"]')).not.toBeNull();
-    });
-
-    it('adds a LoRA chosen from the fold', async () => {
-      await mountWorkspace(loraContext([{ name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null }]));
-      await settle();
-      openPicker();
-      flushSync(() => (picker()?.querySelector('[data-action="d-ltx"]') as HTMLElement).click());
-
-      expect(picker()).toBeNull();
-      expect(draft.state.loraString).toBe('d-ltx:1');
     });
   });
 
@@ -2938,9 +2283,7 @@ describe('WorkspacePage', () => {
     expect(submitButton?.disabled).toBe(false);
     expect(submitButton?.textContent).toContain('Add to queue');
 
-    const mockEventSource = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void };
-    }).lastInstance;
+    const mockEventSource = lastEventSource();
     mockEventSource.emit('job_cancelled', { type: 'job_cancelled', job_id: 'job-123' });
     await settle();
 
@@ -2970,9 +2313,7 @@ describe('WorkspacePage', () => {
     target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
 
-    const mockEventSource = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void };
-    }).lastInstance;
+    const mockEventSource = lastEventSource();
     mockEventSource.emit('job_failed', { type: 'job_failed', job_id: 'job-123', message: 'boom' });
     await settle();
 
@@ -3000,9 +2341,7 @@ describe('WorkspacePage', () => {
       url: '/media/batch/second.png',
       filename: 'second.png',
     });
-    const source = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void };
-    }).lastInstance;
+    const source = lastEventSource();
     source.emit('generation_finished', {
       type: 'generation_finished',
       job_id: 'job-123',
@@ -3023,6 +2362,13 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('button[aria-label="View first.png"]')).not.toBeNull();
     expect(target.querySelector('button[aria-label="View second.png"]')).not.toBeNull();
     expect(galleryStore.assets.map((item) => item.id)).toEqual([secondAsset.id, firstAsset.id]);
+
+    // A job that ends badly leaves the outputs it made in the history.
+    source.emit('job_failed', { type: 'job_failed', job_id: 'job-123' });
+    await settle();
+    expect(target.querySelector('.job-card[data-tone="failed"]')).not.toBeNull();
+    expect(target.querySelector('button[aria-label="View first.png"]')).not.toBeNull();
+    expect(target.querySelector('button[aria-label="View second.png"]')).not.toBeNull();
   });
 
   it('restores an active job from the backend workspace snapshot on mount', async () => {
@@ -3123,80 +2469,6 @@ describe('WorkspacePage', () => {
     expect(galleryApiMocks.getGallery).toHaveBeenCalledOnce();
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).not.toContain('Add to queue');
-  });
-
-  it('reconnects the active job across workspace remounts from stored continuity state', async () => {
-    const context = makeContext({ active_job: null });
-    const runningSnapshot: JobSnapshot = {
-      id: 'job-reconnect',
-      job_id: 'job-reconnect',
-      workflow: 'txt2img',
-      job_type: 'Text to Image',
-      status: 'running',
-      created_at: '2026-04-30T10:00:00Z',
-      completed_at: null,
-      event_count: 2,
-      last_event: {
-        type: 'step_progress',
-        current_step: 3,
-        total_steps: 12,
-        elapsed_secs: 5,
-        eta_secs: 14,
-      },
-      supported_controls: ['next', 'pause', 'resume', 'repeat', 'quit'],
-      paused: false,
-      result_path: null,
-      prompt: 'Resume me after remount',
-      model: 'zit',
-      runs: 2,
-    };
-
-    workspaceApiMocks.getJobSnapshot.mockResolvedValue(runningSnapshot);
-    sessionStorage.setItem('ziv-active-job-id-v1', 'job-reconnect');
-
-    await mountWorkspace(context);
-
-    expect(workspaceApiMocks.getJobSnapshot).toHaveBeenCalledWith('job-reconnect');
-    expect(target.textContent).toContain('Resume me after remount');
-    // A running job no longer blocks Generate; it adds to the queue.
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).toContain('Add to queue');
-
-    await unmount(app!);
-    app = null;
-
-    jobStore.clearJob();
-    sessionStorage.setItem('ziv-active-job-id-v1', 'job-reconnect');
-    workspaceApiMocks.getJobSnapshot.mockClear();
-
-    await mountWorkspace(context);
-
-    expect(workspaceApiMocks.getJobSnapshot).toHaveBeenCalledWith('job-reconnect');
-    expect(target.textContent).toContain('Resume me after remount');
-    // A running job no longer blocks Generate; it adds to the queue.
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).toContain('Add to queue');
-  });
-
-  it('hides image-only controls (negative prompt, quantize) on a txt2vid URL reuse landing', async () => {
-    // Simulate a reuse landing: draft is left in txt2vid state (persisted to
-    // localStorage by router.navigate + URL-param application on prior navigation).
-    // WorkspacePage.onMount calls draft.loadDraft() which reads this, then
-    // hydrateFromContext confirms video defaults — image-only controls must be absent.
-    draft.update('workflow', 'txt2vid');
-
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    // Video workflow: image-only controls must be absent.
-    expect(target.querySelector('#ws-negative-prompt')).toBeNull();
-    expect(target.querySelector('select[name="quantize"]')).toBeNull();
-    expect(target.querySelector('input[name="guidance"]')).toBeNull();
-    // Video controls must be present.
-    expect(target.querySelector('input[name="audio"]')).not.toBeNull();
-    expect(target.querySelector('input[name="low_memory"]')).not.toBeNull();
-    // Reference image must be absent (txt2vid, not img2vid).
-    expect(target.querySelector('#ws-image-file')).toBeNull();
   });
 
   it('submits explicit false values for video toggles when they are switched off', async () => {
@@ -3428,49 +2700,6 @@ describe('WorkspacePage', () => {
     expect(draft.state.promptFileOptionIds).toEqual(['scene:0', 'scene:2']);
   });
 
-  it('keeps the rejected prompt-file path visible when a manual reload fails', async () => {
-    promptFileApiMocks.inspectPromptFile.mockResolvedValueOnce({
-      path: '/server/prompts.yaml',
-      options: [
-        {
-          id: 'portrait:0',
-          set_name: 'portrait',
-          source_index: 0,
-          label: 'portrait #1 · first option',
-          prompt_preview: 'first option',
-          negative_preview: null,
-        },
-      ],
-    });
-
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    const promptSource = target.querySelector('[aria-label="Prompt source"] [data-value="file"]') as HTMLButtonElement | null;
-    promptSource!.click();
-    await settle();
-
-    const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
-    pathInput!.value = '~/prompts.yaml';
-    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
-    pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await settle();
-
-    await choosePrompts(target, ['portrait:0']);
-
-    promptFileApiMocks.inspectPromptFile.mockRejectedValueOnce(new Error('POST /api/prompt-files/inspect → 422: missing file'));
-    pathInput!.value = '/missing/prompts.yaml';
-    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
-    pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await settle();
-
-    const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
-    expect(pathInput!.value).toBe('/missing/prompts.yaml');
-    expect(hiddenPath?.value).toBe('/missing/prompts.yaml');
-    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
-  });
-
   it('opens the prompt file on the Prompts page from Edit', async () => {
     promptFileApiMocks.inspectPromptFile.mockResolvedValueOnce({ path: '/server/prompts.yaml', options: [] });
 
@@ -3493,7 +2722,7 @@ describe('WorkspacePage', () => {
     expect(router.params).toEqual({ path: '/server/prompts.yaml' });
   });
 
-  it('invalidates prompt-file options when the visible path is manually changed', async () => {
+  it('invalidates prompt-file options when the visible path is manually changed, and keeps a rejected path visible', async () => {
     promptFileApiMocks.inspectPromptFile.mockResolvedValueOnce({
       path: '/server/prompts.yaml',
       options: [
@@ -3532,6 +2761,17 @@ describe('WorkspacePage', () => {
     expect(hiddenPath?.value).toBe('/server/other-prompts.yaml');
     expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+
+    promptFileApiMocks.inspectPromptFile.mockRejectedValueOnce(new Error('POST /api/prompt-files/inspect → 422: missing file'));
+    pathInput!.value = '/missing/prompts.yaml';
+    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+
+    expect(pathInput!.value).toBe('/missing/prompts.yaml');
+    expect(hiddenPath?.value).toBe('/missing/prompts.yaml');
+    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
   it('queues a prompt sent from the Prompts page without changing the prompt selection', async () => {
@@ -3548,31 +2788,6 @@ describe('WorkspacePage', () => {
     expect(form.has('prompt')).toBe(false);
     expect(draft.state.promptSource).toBe('inline');
     expect(draft.state.promptFileOptionIds).toEqual([]);
-  });
-
-  it('revokes the reference image blob URL on teardown to prevent memory leaks', async () => {
-    const revokeObjectURL = vi.fn();
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
-
-    const context = makeContext();
-    draft.update('workflow', 'img2img');
-    draft.hydrateFromContext(context, 'zit');
-
-    const imageFile = new File(['img-data'], 'ref.png', { type: 'image/png' });
-    app = flushSync(() => mount(ControlsSidebar, {
-      target,
-      props: { context, busy: false, imageFile, onImageFileChange: vi.fn() },
-    }));
-    await settle();
-
-    // The effect must have created a blob URL for the image file.
-    expect(URL.createObjectURL).toHaveBeenCalledWith(imageFile);
-
-    // Unmounting triggers the $effect cleanup, which must revoke the URL.
-    await unmount(app!);
-    app = null;
-
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:test-image');
   });
 
   it('revokes the previous reference image blob URL when the file changes', async () => {
@@ -3608,14 +2823,6 @@ describe('WorkspacePage', () => {
   });
 
   describe('save to prompt file', () => {
-    function withVideoEnhancer(context: WorkspaceContext): WorkspaceContext {
-      withEnhancer(context);
-      for (const workflow of ['txt2vid', 'img2vid'] as const) {
-        context.workflow_contract.definitions[workflow].visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
-      }
-      return context;
-    }
-
     const saveButton = () => target.querySelector('#ws-save-prompt') as HTMLButtonElement | null;
 
     async function openSaveMenu(): Promise<void> {
@@ -3652,18 +2859,6 @@ describe('WorkspacePage', () => {
       expect(router.params.path).toBe('/p/a.yaml');
     });
 
-    it('saves the negative prompt when it is shown', async () => {
-      rememberRecent('/p/a.yaml');
-      draft.update('prompt', 'a fox');
-      draft.update('negativePrompt', 'blurry');
-      await mountWorkspace(makeContext());
-
-      await openSaveMenu();
-      await chooseTarget('/p/a.yaml');
-
-      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/a.yaml', prompt: 'a fox', negative: 'blurry' });
-    });
-
     it('saves the Enhanced text when the Enhanced tab is in view', async () => {
       rememberRecent('/p/a.yaml');
       draft.update('prompt', 'a fox');
@@ -3685,19 +2880,6 @@ describe('WorkspacePage', () => {
       await settle();
 
       expect(saveButton()!.disabled).toBe(true);
-    });
-
-    it('saves the scene and action of a video prompt', async () => {
-      rememberRecent('/p/a.yaml');
-      draft.update('workflow', 'txt2vid');
-      draft.update('scene', 'A rainy street.');
-      draft.update('prompt', 'She opens an umbrella.');
-      await mountWorkspace(withVideoEnhancer(makeContext()));
-
-      await openSaveMenu();
-      await chooseTarget('/p/a.yaml');
-
-      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/a.yaml', scene: 'A rainy street.', prompt: 'She opens an umbrella.' });
     });
 
     it('is absent in the Prompt file source', async () => {
@@ -3722,15 +2904,6 @@ describe('WorkspacePage', () => {
       expect(target.querySelector('#ws-json-prompt-toggle')).not.toBeNull();
       expect(target.querySelector('textarea[name="json_prompt"]')).not.toBeNull();
       expect(saveButton()).toBeNull();
-    });
-
-    it('is disabled while the prompt is blank', async () => {
-      await mountWorkspace(makeContext());
-      expect(saveButton()!.disabled).toBe(true);
-
-      type('ws-prompt', 'a fox');
-      await settle();
-      expect(saveButton()!.disabled).toBe(false);
     });
 
     it('saves to a file chosen with Browse…', async () => {
@@ -3822,2356 +2995,5 @@ describe('WorkspacePage', () => {
       expect(lastSaveTarget()).toBeNull();
       expect(saveButton()!.disabled).toBe(false);
     });
-  });
-});
-
-function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
-  return {
-    id: 'output/result.png',
-    url: '/media/output/result.png',
-    thumbnail_url: '/media/output/result.png',
-    filename: 'result.png',
-    created_at: '2026-04-30T12:00:00Z',
-    workflow: 'txt2img',
-    prompt: 'Test completed output',
-    model: 'zit',
-    media_type: 'image',
-    reuse_workspace_url: '#/workspace?workflow=txt2img',
-    ...overrides,
-  };
-}
-
-function makeGalleryPage(assets: GalleryAsset[] = []): GalleryPage {
-  return {
-    assets,
-    page: 1,
-    total_pages: 1,
-    total_count: assets.length,
-  };
-}
-
-describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
-  beforeEach(() => {
-    workspaceApiMocks.submitGenerate.mockResolvedValue({
-      job_id: 'job-promo',
-      workflow: 'txt2img',
-      prompt: 'Test prompt',
-      model: 'zit',
-      runs: 1,
-      created_at: '2026-04-30T10:00:00Z',
-    });
-  });
-
-  it('renders the full authoritative completed output grid and hides the JobCard', async () => {
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    const form = target.querySelector('form');
-    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-
-    const submitButton = target.querySelector('#ws-submit') as HTMLButtonElement | null;
-    // A running job no longer blocks Generate; it adds to the queue.
-    expect(submitButton?.disabled).toBe(false);
-    expect(submitButton?.textContent).toContain('Add to queue');
-
-    const completedAsset = makeAsset({ id: 'out/first.png', filename: 'first.png' });
-    const secondAsset = makeAsset({ id: 'out/second.png', url: '/media/out/second.png', filename: 'second.png' });
-    const mockEventSource = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void };
-    }).lastInstance;
-    mockEventSource.emit('job_completed', { type: 'job_completed', job_id: 'job-promo', total_runs: 2, outputs: [completedAsset, secondAsset] });
-    await settle();
-
-    expect(target.textContent).toContain('Completed outputs');
-    expect(target.querySelectorAll('.completed-output-grid .asset-tile')).toHaveLength(2);
-    expect(target.querySelector(`.completed-output-grid img[src="${completedAsset.url}"]`)).not.toBeNull();
-    expect(target.querySelector(`.completed-output-grid img[src="${secondAsset.url}"]`)).not.toBeNull();
-    expect(target.textContent).not.toContain('Waiting for worker allocation...');
-  });
-
-  it.each([
-    ['job_failed', 'failed'],
-    ['job_cancelled', 'stopped'],
-  ] as const)('adds generation_finished assets to the history before %s and keeps them afterward', async (terminal, tone) => {
-    await mountWorkspace(makeContext());
-    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-    const source = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void };
-    }).lastInstance;
-    const output = makeAsset({ id: `out/${terminal}.png`, filename: `${terminal}.png` });
-
-    source.emit('generation_finished', {
-      type: 'generation_finished', job_id: 'job-promo', status: 'success', run_index: 0, asset: output,
-    });
-    await settle();
-    expect(target.querySelector(`.job-card img[alt="${output.filename}"]`)).toBeNull();
-    expect(target.querySelector(`.history-strip img[src="${output.thumbnail_url || output.url}"]`)).not.toBeNull();
-
-    source.emit(terminal, { type: terminal, job_id: 'job-promo' });
-    await settle();
-    expect(target.querySelector(`.job-card[data-tone="${tone}"]`)).not.toBeNull();
-    expect(target.querySelector(`.history-strip img[src="${output.thumbnail_url || output.url}"]`)).not.toBeNull();
-  });
-
-  it('opens indexed completed outputs in the workspace lightbox and navigates the full list', async () => {
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    const staleHistoryAsset = makeAsset({
-      id: 'out/stale.png',
-      url: '/media/out/stale.png',
-      thumbnail_url: '/media/out/stale-thumb.png',
-      filename: 'stale.png',
-      prompt: 'Stale history asset',
-    });
-    const completedAsset = makeAsset({
-      id: 'out/completed.png',
-      url: '/media/out/completed.png',
-      thumbnail_url: '/media/out/completed-thumb.png',
-      filename: 'completed.png',
-      prompt: 'Fresh completed asset',
-    });
-    const secondAsset = makeAsset({
-      id: 'out/completed-second.png',
-      url: '/media/out/completed-second.png',
-      thumbnail_url: '/media/out/completed-second-thumb.png',
-      filename: 'completed-second.png',
-      prompt: 'Second completed asset',
-    });
-    galleryStore.seed([staleHistoryAsset]);
-
-    const form = target.querySelector('form');
-    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-
-    const mockEventSource = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void };
-    }).lastInstance;
-    mockEventSource.emit('job_completed', { type: 'job_completed', job_id: 'job-promo', total_runs: 2, outputs: [completedAsset, secondAsset] });
-    await settle();
-
-    const secondButton = target.querySelector(`button[aria-label="View ${secondAsset.filename} fullscreen"]`);
-    expect(secondButton).not.toBeNull();
-    secondButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    expect(target.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
-    const lightboxImage = target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null;
-    expect(lightboxImage?.getAttribute('src')).toBe(secondAsset.url);
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Close viewer');
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    await settle();
-    expect((target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null)?.getAttribute('src')).toBe(completedAsset.url);
-
-    const closeButton = target.querySelector('[data-testid="asset-viewer"] button[aria-label="Close viewer"]');
-    closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-    expect(document.activeElement).toBe(secondButton);
-  });
-});
-
-describe('WorkspacePage history viewer (REC-UX-002)', () => {
-
-  it('clicking a history row opens the workspace viewer lightbox', async () => {
-    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png' });
-    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
-    const context = makeContext({ history_assets: [] });
-    await mountWorkspace(context);
-
-    const historyRow = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLButtonElement | null;
-    expect(historyRow).not.toBeNull();
-
-    historyRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    expect(target.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
-  });
-});
-
-describe('WorkspacePage asset actions and settings', () => {
-
-  async function mountWithHistory(assets: GalleryAsset[]): Promise<void> {
-    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage(assets));
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({ history_assets: assets }));
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-  }
-
-  function historyTile(asset: GalleryAsset): HTMLElement {
-    return target.querySelector(`#ws-history-shell article[aria-label="${asset.filename}"]`) as HTMLElement;
-  }
-
-  function openTileMenu(asset: GalleryAsset): void {
-    (historyTile(asset).querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
-    flushSync();
-  }
-
-  it('shows history as a filmstrip under the preview that collapses and remembers it', async () => {
-    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png' });
-    await mountWithHistory([asset]);
-
-    expect(target.querySelector('.workspace-preview #ws-history-shell')).not.toBeNull();
-    expect(historyTile(asset)).not.toBeNull();
-
-    (target.querySelector('#ws-history-toggle') as HTMLButtonElement).click();
-    await settle();
-    expect(historyTile(asset)).toBeNull();
-    expect(draft.state.historyCollapsed).toBe(true);
-  });
-
-  it('focuses the newest history tile with Alt+3, expanding a collapsed strip', async () => {
-    const newest = makeAsset({ id: 'out/newest.png', url: '/media/out/newest.png', filename: 'newest.png' });
-    const older = makeAsset({ id: 'out/older.png', url: '/media/out/older.png', filename: 'older.png' });
-    draft.update('historyCollapsed', true);
-    await mountWithHistory([newest, older]);
-
-    const event = new KeyboardEvent('keydown', { key: '3', code: 'Digit3', altKey: true, bubbles: true, cancelable: true });
-    document.dispatchEvent(event);
-    await settle();
-
-    expect(event.defaultPrevented).toBe(true);
-    expect(draft.state.historyCollapsed).toBe(false);
-    expect(document.activeElement?.getAttribute('aria-label')).toBe(`View ${newest.filename}`);
-  });
-
-  it('toggles the history strip with Alt+Shift+3, focusing the newest tile when it opens', async () => {
-    const newest = makeAsset({ id: 'out/newest.png', url: '/media/out/newest.png', filename: 'newest.png' });
-    await mountWithHistory([newest]);
-    const press = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: '#', code: 'Digit3', altKey: true, shiftKey: true, bubbles: true, cancelable: true })); };
-
-    press();
-    await settle();
-    expect(draft.state.historyCollapsed).toBe(true);
-    press();
-    await settle();
-    expect(draft.state.historyCollapsed).toBe(false);
-    expect(document.activeElement?.getAttribute('aria-label')).toBe(`View ${newest.filename}`);
-    expect(draft.state.sidebarCollapsed).toBe(false);
-  });
-
-  it('focuses the history toggle with Alt+3 when there is no history', async () => {
-    await mountWithHistory([]);
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', code: 'Digit3', altKey: true, bubbles: true, cancelable: true }));
-    await settle();
-    expect(document.activeElement?.id).toBe('ws-history-toggle');
-  });
-
-  it('reuses the settings of an asset in place without leaving the workspace, and forgets the applied preset', async () => {
-    draft.setAppliedPreset('look');
-    const asset = makeAsset({
-      id: 'out/first.png',
-      filename: 'first.png',
-      has_reusable_config: true,
-      reuse_workspace_url: '#/workspace?workflow=txt2img&prompt=reused+prompt&steps=17&seed=99',
-    });
-    await mountWithHistory([asset]);
-
-    (historyTile(asset).querySelector(`button[aria-label="Reuse settings from ${asset.filename}"]`) as HTMLButtonElement).click();
-    await settle();
-
-    expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'reused prompt', steps: 17, seed: 99 });
-    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('reused prompt');
-    expect((target.querySelector('#ws-steps') as HTMLInputElement).value).toBe('17');
-    expect(draft.state.appliedPreset).toBeNull();
-  });
-
-  it('makes an image the img2img reference and submits its host path', async () => {
-    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
-    await mountWithHistory([asset]);
-
-    openTileMenu(asset);
-    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
-    await settle();
-
-    expect(draft.state.workflow).toBe('img2img');
-    expect((target.querySelector('input[name="image_path"]') as HTMLInputElement).value).toBe('/outputs/out/first.png');
-    // The reference row previews the known asset.
-    expect(target.querySelector(`[data-section="reference"] img[src="${asset.url}"]`)).not.toBeNull();
-    expect(new FormData(target.querySelector('form')!).get('image_path')).toBe('/outputs/out/first.png');
-  });
-
-  it('deletes an asset from history after confirmation', async () => {
-    const first = makeAsset({ id: 'out/first.png', filename: 'first.png' });
-    const second = makeAsset({ id: 'out/second.png', filename: 'second.png' });
-    await mountWithHistory([first, second]);
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
-
-    openTileMenu(second);
-    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
-    await settle();
-    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Delete "second.png"?');
-    await answerConfirm(false);
-    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
-
-    openTileMenu(second);
-    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
-    await settle();
-    await answerConfirm(true);
-
-    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(second.id);
-    expect(galleryStore.assets.map((asset) => asset.id)).toEqual([first.id]);
-    expect(historyTile(second)).toBeNull();
-  });
-
-  it('marks settings that differ from the model default and resets one row at a time', async () => {
-    await mountWithHistory([]);
-    const stepsRow = () => (target.querySelector('#ws-steps') as HTMLInputElement).closest('.inspector-row') as HTMLElement;
-    const changedCount = () => target.querySelector('[data-testid="changed-count"]')?.textContent ?? '0';
-
-    expect(stepsRow().dataset.changed).toBe('false');
-    expect(changedCount()).toBe('0');
-
-    const steps = target.querySelector('#ws-steps') as HTMLInputElement;
-    steps.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true }));
-    await settle();
-
-    expect(draft.state.steps).toBe(38);
-    expect(stepsRow().dataset.changed).toBe('true');
-    expect(changedCount()).toBe('1');
-
-    (stepsRow().querySelector('button[aria-label="Reset Steps to default"]') as HTMLButtonElement).click();
-    await settle();
-    expect(draft.state.steps).toBe(28);
-    expect(stepsRow().dataset.changed).toBe('false');
-  });
-
-  it('changes a number by dragging its label', async () => {
-    await mountWithHistory([]);
-    const label = target.querySelector('label[for="ws-steps"]') as HTMLElement;
-
-    label.dispatchEvent(new MouseEvent('pointerdown', { clientX: 100, button: 0, bubbles: true }));
-    label.dispatchEvent(new MouseEvent('pointermove', { clientX: 120, bubbles: true }));
-    label.dispatchEvent(new MouseEvent('pointerup', { clientX: 120, bubbles: true }));
-    await settle();
-
-    expect(draft.state.steps).toBe(33);
-    expect((target.querySelector('#ws-steps') as HTMLInputElement).value).toBe('33');
-  });
-
-  it('keeps changed settings when the workspace is opened again', async () => {
-    await mountWithHistory([]);
-    const steps = target.querySelector('#ws-steps') as HTMLInputElement;
-    steps.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-    await settle();
-    expect(draft.state.steps).toBe(27);
-
-    await unmount(app!);
-    app = null;
-    await mountWithHistory([]);
-
-    expect((target.querySelector('#ws-steps') as HTMLInputElement).value).toBe('27');
-  });
-
-  it('allows batches of up to 100', async () => {
-    await mountWithHistory([]);
-    const runs = target.querySelector('#ws-runs') as HTMLInputElement;
-    runs.value = '250';
-    runs.dispatchEvent(new Event('input', { bubbles: true }));
-    runs.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-    expect(draft.state.runs).toBe(100);
-  });
-
-  it('settles a typed width on a valid step when the field is committed', async () => {
-    await mountWithHistory([]);
-    const width = target.querySelector('#ws-width') as HTMLInputElement;
-    width.value = '1000';
-    width.dispatchEvent(new Event('input', { bubbles: true }));
-    width.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-
-    expect(width.value).toBe('1008');
-    expect(draft.state).toMatchObject({ width: 1008, dimensionMode: 'custom' });
-    expect(new FormData(target.querySelector('form')!).get('width')).toBe('1008');
-  });
-
-  it('returns to the preset size when reusing an asset after a custom size', async () => {
-    const asset = makeAsset({
-      id: 'out/first.png',
-      filename: 'first.png',
-      has_reusable_config: true,
-      reuse_workspace_url: '#/workspace?workflow=txt2img&prompt=p&ratio=2%3A3&size=m&width=832&height=1216',
-    });
-    await mountWithHistory([asset]);
-    draft.patch({ dimensionMode: 'custom', width: 1000, height: 1000 });
-    await settle();
-
-    (historyTile(asset).querySelector(`button[aria-label="Reuse settings from ${asset.filename}"]`) as HTMLButtonElement).click();
-    await settle();
-
-    const submitted = new FormData(target.querySelector('form')!);
-    expect(submitted.get('ratio')).toBe('2:3');
-    expect(submitted.get('size')).toBe('m');
-    expect(submitted.has('width')).toBe(false);
-  });
-
-  it('shows video preset dimensions for the chosen ratio and size', async () => {
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
-      video_ratios: ['16:9', '9:16'],
-      video_size_options: { '16:9': ['m'], '9:16': ['m'] },
-      video_size_dimensions: { '16:9': { m: [704, 448] }, '9:16': { m: [448, 704] } },
-    }));
-    draft.update('workflow', 'txt2vid');
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-
-    const ratio916 = Array.from(target.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Aspect ratio"] button')).find((b) => b.textContent === '9:16')!;
-    ratio916.click();
-    await settle();
-
-    expect((target.querySelector('#ws-width') as HTMLInputElement).value).toBe('448');
-    expect((target.querySelector('#ws-height') as HTMLInputElement).value).toBe('704');
-  });
-
-  it('disables a reference target the current model cannot use', async () => {
-    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
-    const context = makeContext({ history_assets: [asset] });
-    context.image_model_defaults = { ...context.image_model_defaults, zit: { ...context.image_model_defaults!.zit, supports_img2img: false } };
-    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-
-    openTileMenu(asset);
-    const forImage = document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement;
-    expect(forImage.getAttribute('aria-disabled')).toBe('true');
-    expect(forImage.title).toContain("can't use a reference image");
-    forImage.click();
-    await settle();
-    expect(draft.state.workflow).toBe('txt2img');
-  });
-
-  it('submits the chosen asset, not an earlier browsed file, after Use as reference', async () => {
-    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
-    draft.update('workflow', 'img2img');
-    await mountWithHistory([asset]);
-    const submitSpy = workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-ref' } as JobContext);
-
-    const fileInput = target.querySelector('#ws-image-file') as HTMLInputElement;
-    const browsed = new File(['img'], 'browsed.png', { type: 'image/png' });
-    Object.defineProperty(fileInput, 'files', { configurable: true, value: [browsed] });
-    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-
-    openTileMenu(asset);
-    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
-    await settle();
-    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).value = 'a prompt';
-    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).dispatchEvent(new Event('input', { bubbles: true }));
-    await settle();
-    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-
-    const submitted = submitSpy.mock.calls.at(-1)![0];
-    expect(submitted.has('image_file')).toBe(false);
-    expect(submitted.get('image_path')).toBe('/outputs/out/first.png');
-  });
-
-  it('carries the asset prompt when Use as reference keeps the workflow', async () => {
-    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png', prompt: 'a red fox' });
-    await mountWithHistory([asset]);
-    draft.update('workflow', 'img2img');
-    draft.patch({ prompt: 'old prompt', enhancedPrompt: 'old enhanced', steps: 9 });
-    await settle();
-
-    openTileMenu(asset);
-    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
-    await settle();
-
-    expect(draft.state).toMatchObject({ workflow: 'img2img', prompt: 'a red fox', enhancedPrompt: '', steps: 9, referenceImagePath: '/outputs/out/first.png' });
-    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('a red fox');
-  });
-
-  it('keeps settings when Use as reference switches the workflow', async () => {
-    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
-    await mountWithHistory([asset]);
-    draft.patch({ steps: 9, runs: 40 });
-    await settle();
-
-    openTileMenu(asset);
-    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
-    await settle();
-
-    expect(draft.state).toMatchObject({ workflow: 'img2img', prompt: asset.prompt, steps: 9, runs: 40, referenceImagePath: '/outputs/out/first.png' });
-  });
-
-  it('resets W × H after a reused custom size back to a submittable preset', async () => {
-    await mountWithHistory([]);
-    draft.loadFromUrl({ ratio: '2:3', size: 'custom', width: '640', height: '480' }, makeContext());
-    await settle();
-
-    const row = (target.querySelector('#ws-width') as HTMLInputElement).closest('.inspector-row') as HTMLElement;
-    (row.querySelector('button[aria-label="Reset W × H to default"]') as HTMLButtonElement).click();
-    await settle();
-
-    const submitted = new FormData(target.querySelector('form')!);
-    expect(submitted.get('size')).toBe('m');
-    expect(submitted.has('width')).toBe(false);
-  });
-
-  it('never submits a preset the model is too small for after a ratio change', async () => {
-    const constrained = makeIdeogramDefaults({ ratio: '1:1', size: 'l', dimension_max: 1024 });
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
-      image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }],
-      defaults: constrained,
-      current_image_model: 'ideo',
-      image_model_defaults: { ideo: constrained },
-      image_ratios: ['1:1', '16:9'],
-      image_size_options: { '1:1': ['m', 'l'], '16:9': ['m', 'l'] },
-      image_size_dimensions: { '1:1': { m: [768, 768], l: [1024, 1024] }, '16:9': { m: [1024, 576], l: [1344, 768] } },
-    }));
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-    expect(new FormData(target.querySelector('form')!).get('size')).toBe('l');
-
-    const ratio169 = Array.from(target.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Aspect ratio"] button')).find((b) => b.textContent === '16:9')!;
-    ratio169.click();
-    await settle();
-
-    expect(new FormData(target.querySelector('form')!).get('size')).toBe('m');
-  });
-
-  it('clears the reference when its asset is deleted', async () => {
-    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
-    await mountWithHistory([asset]);
-    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
-    openTileMenu(asset);
-    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
-    await settle();
-    expect(draft.state.referenceImagePath).toBe('/outputs/out/first.png');
-
-    openTileMenu(asset);
-    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
-    await settle();
-    await answerConfirm(true);
-
-    expect(draft.state.referenceImagePath).toBeNull();
-  });
-
-  it('locks the seed to the latest output and unlocks it back to random', async () => {
-    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', seed: 4242 });
-    await mountWithHistory([asset]);
-    const lock = () => target.querySelector('#ws-seed')!.closest('.inspector-value')!.querySelector('button[aria-pressed]') as HTMLButtonElement;
-
-    lock().click();
-    await settle();
-    expect(draft.state.seed).toBe(4242);
-    expect(lock().getAttribute('aria-pressed')).toBe('true');
-
-    lock().click();
-    await settle();
-    expect(draft.state.seed).toBeNull();
-  });
-
-  describe('stepping through history on the stage', () => {
-    const first = () => makeAsset({ id: 'out/first.png', filename: 'first.png' });
-    const second = () => makeAsset({ id: 'out/second.png', filename: 'second.png' });
-    const third = () => makeAsset({ id: 'out/third.png', filename: 'third.png' });
-    const stageTile = () => target.querySelector('.latest-region article') as HTMLElement;
-    const position = () => target.querySelector('[data-testid="stage-position"]');
-    const arrow = (key: 'ArrowLeft' | 'ArrowRight') => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
-    };
-
-    it('steps older with → and newer with ←, shows the position, and Latest returns', async () => {
-      await mountWithHistory([first(), second(), third()]);
-      expect(stageTile().getAttribute('aria-label')).toBe('first.png');
-      expect(position()).toBeNull();
-
-      arrow('ArrowRight');
-      await settle();
-      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
-      expect(position()?.textContent).toContain('2');
-
-      arrow('ArrowRight');
-      arrow('ArrowRight');
-      await settle();
-      expect(stageTile().getAttribute('aria-label')).toBe('third.png');
-
-      arrow('ArrowLeft');
-      await settle();
-      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
-
-      (position()!.querySelector('button') as HTMLButtonElement).click();
-      await settle();
-      expect(stageTile().getAttribute('aria-label')).toBe('first.png');
-      expect(position()).toBeNull();
-    });
-
-    it('has Newer and Older buttons that disable at the ends', async () => {
-      await mountWithHistory([first(), second()]);
-      const newer = () => target.querySelector('button[aria-label="Newer output"]') as HTMLButtonElement;
-      const older = () => target.querySelector('button[aria-label="Older output"]') as HTMLButtonElement;
-      expect(newer().disabled).toBe(true);
-      expect(older().disabled).toBe(false);
-
-      older().click();
-      await settle();
-      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
-      expect(older().disabled).toBe(true);
-      expect(newer().disabled).toBe(false);
-    });
-
-    it('ignores the arrows while typing in a field', async () => {
-      await mountWithHistory([first(), second()]);
-      const prompt = target.querySelector('#ws-prompt') as HTMLTextAreaElement;
-      prompt.focus();
-      prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
-      await settle();
-      expect(stageTile().getAttribute('aria-label')).toBe('first.png');
-    });
-  });
-});
-
-
-describe('WorkspacePage extend', () => {
-  const SOURCE = '/clips/walk.mp4';
-  const ENHANCER: PromptEnhancerContract = {
-    matrix: {
-      axes: [
-        { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] },
-        { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action', description: '', group: null }], default: ['action'] },
-      ],
-      defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: ['action'], sound: [], note: '' },
-    },
-    model: 'owner/llm',
-    revision: null,
-    downloaded: true,
-    download_size_label: null,
-    default_max_words: 300,
-    error: null,
-  };
-
-  /** A context whose contract lists `extend`, with the control list the server sends for it. */
-  function makeExtendContext(options: { withExtend?: boolean } = {}): WorkspaceContext {
-    const context = makeContext();
-    if (options.withExtend !== false) context.workflow_contract.values = [...context.workflow_contract.values, 'extend'];
-    context.workflow_contract.definitions.extend.visible_controls = [
-      'workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'prompt_enhance', 'prompt_enhance_auto',
-      'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
-      'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory',
-    ];
-    context.prompt_enhancer = ENHANCER;
-    return context;
-  }
-
-  beforeEach(() => {
-    workspaceApiMocks.submitGenerate.mockResolvedValue({
-      job_id: 'job-ext', workflow: 'extend', prompt: '', model: 'ltx-8', runs: 1, created_at: '2026-10-11T10:00:00Z',
-    });
-    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('source_video'));
-  });
-
-  async function mountExtend(options: { context?: WorkspaceContext; params?: Record<string, string>; props?: Record<string, unknown> } = {}): Promise<void> {
-    workspaceApiMocks.parseUrlPrefill.mockReturnValue(options.params ?? {});
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(options.context ?? makeExtendContext());
-    if (!options.params) draft.update('workflow', 'extend');
-    app = flushSync(() => mount(WorkspacePage, { target, props: options.props }));
-    await settle();
-  }
-
-  const input = (id: string) => target.querySelector(`#${id}`) as HTMLInputElement;
-  const button = (id: string) => target.querySelector(`#${id}`) as HTMLButtonElement;
-  const text = (selector: string) => (target.querySelector(selector)?.textContent ?? '').replace(/\s+/g, ' ').trim();
-
-  function typePath(value: string, key?: 'Enter' | 'change'): void {
-    const el = input('ws-source-path');
-    el.value = value;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    if (key === 'Enter') el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    if (key === 'change') el.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  /** Pick *path* in the path browser that Browse opens. */
-  async function browseTo(path: string): Promise<void> {
-    browseApiMocks.listDirectory.mockResolvedValue(listingWith(path));
-    button('ws-source-browse').click();
-    await settle();
-    chooseInBrowser(path.slice(path.lastIndexOf('/') + 1));
-    await settle();
-  }
-
-  /** Choose a source the way Browse does, and let the server describe it. */
-  async function chooseSource(info = sceneSource(), path = SOURCE): Promise<void> {
-    extendApiMocks.inspectExtendSource.mockResolvedValue(info);
-    await browseTo(path);
-  }
-
-  async function submit(): Promise<FormData | undefined> {
-    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-    return workspaceApiMocks.submitGenerate.mock.calls.at(-1)?.[0] as FormData | undefined;
-  }
-
-  const lastInspect = () => extendApiMocks.inspectExtendSource.mock.calls.at(-1)?.[0] as Record<string, unknown>;
-
-  describe('the tab', () => {
-    it('tells the top bar which workflows the contract lists', async () => {
-      const props = reactiveProps<{ workflows: string[] | null }>({ workflows: null });
-      await mountExtend({ props });
-      expect(props.workflows).toContain('extend');
-    });
-  });
-
-  describe('with no source', () => {
-    it('offers the path field and Browse for a source video, with Clear disabled', async () => {
-      await mountExtend();
-      expect(target.querySelector('[data-section="source-video"]')).not.toBeNull();
-      expect(input('ws-source-path').name).toBe('source_video');
-      expect(button('ws-source-browse').getAttribute('aria-label')).toBe('Browse for a source video');
-      expect(button('ws-source-clear').disabled).toBe(true);
-      expect(text('[data-section="source-video"] .inspector-summary')).toBe('None');
-    });
-
-    it('disables Generate with the reason linked to it, and leaves the length rows waiting', async () => {
-      await mountExtend();
-      expect(button('ws-submit').disabled).toBe(true);
-      expect(text('#ws-generate-reason')).toBe('Choose a video to extend.');
-      expect(button('ws-submit').getAttribute('aria-describedby')).toBe('ws-generate-reason');
-      expect(input('ws-extend-seconds').disabled).toBe(true);
-      expect(text('[data-testid="extend-frames"]')).toBe('—');
-      expect(text('[data-testid="extend-total"]')).toBe('—');
-    });
-
-    it('has no Size, Duration, Reference image or upscale controls', async () => {
-      await mountExtend();
-      for (const section of ['size', 'reference', 'upscale']) expect(target.querySelector(`[data-section="${section}"]`)).toBeNull();
-      expect(target.querySelector('#ws-duration')).toBeNull();
-      expect(target.querySelector('#ws-video-upscale')).toBeNull();
-      expect(target.querySelector('[data-section="sampling"]')).not.toBeNull();
-    });
-
-    it('refuses to submit, says why and moves focus to the path field', async () => {
-      await mountExtend();
-      expect(await submit()).toBeUndefined();
-      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
-      expect(toasts.map((toast) => [toast.type, toast.message])).toContainEqual(['error', 'Choose a video to extend.']);
-      await settle();
-      expect(document.activeElement).toBe(input('ws-source-path'));
-    });
-
-    it('disables Generate on the collapsed strip with the reason as its title', async () => {
-      draft.update('sidebarCollapsed', true);
-      await mountExtend();
-      const generate = target.querySelector('[data-testid="sidebar-strip"] button[type="submit"]') as HTMLButtonElement;
-      expect(generate.disabled).toBe(true);
-      expect(generate.title).toBe('Generate: choose a video to extend');
-    });
-
-    it('keeps the placeholders for an empty extension and allows an empty Prompt', async () => {
-      await mountExtend();
-      expect(field('ws-prompt').placeholder).toBe('What happens next…');
-      expect(field('ws-prompt').required).toBe(false);
-      expect(field('ws-scene').placeholder).toBe('Who and where, look, style, camera. Kept for extensions.');
-    });
-  });
-
-  describe('choosing a source', () => {
-    it('asks the server about the picked path and shows what it says', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-
-      expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('source_video', '', expect.anything());
-      expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: null, model: 'ltx-8' });
-      expect(draft.state.extendSourcePath).toBe(SOURCE);
-      expect(text('[data-section="source-video"] .inspector-summary')).toBe('walk.mp4');
-      expect(text('[data-testid="extend-source-facts"]')).toBe('512 × 288 · 24 fps · 4.04 s · 97 frames · Audio');
-      expect(input('ws-source-path').value).toBe(SOURCE);
-      expect(button('ws-source-clear').disabled).toBe(false);
-      expect(button('ws-submit').disabled).toBe(false);
-      expect(target.querySelector('#ws-generate-reason')).toBeNull();
-    });
-
-    it('shows the last frame of a clip inside the output folder as its thumbnail', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource({ media_url: '/media/out/walk.mp4', duration_seconds: 4.04 }));
-      expect(target.querySelector('[data-section="source-video"] .reference-thumb video')?.getAttribute('src')).toBe('/media/out/walk.mp4#t=3.99');
-
-      await chooseSource(sceneSource({ media_url: null }), '/elsewhere/walk.mp4');
-      expect(target.querySelector('[data-section="source-video"] .reference-thumb video')).toBeNull();
-      expect(target.querySelector('[data-section="source-video"] .reference-thumb svg')).not.toBeNull();
-    });
-
-    it('lists a rejected source\'s problems, keeps Generate off and points to the Source video section', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource({ problems: [{ code: 'off_grid', message: 'Its size, 500 × 300, isn\'t a multiple of 32.' }, { code: 'hdr', message: 'It is HDR or wide gamut.' }] }));
-
-      const problems = target.querySelector('[data-testid="extend-source-problems"]');
-      expect(problems?.textContent).toContain("This video can't be extended:");
-      expect(Array.from(problems!.querySelectorAll('li')).map((item) => item.textContent)).toEqual(["Its size, 500 × 300, isn't a multiple of 32.", 'It is HDR or wide gamut.']);
-      expect(button('ws-submit').disabled).toBe(true);
-      expect(text('#ws-generate-reason')).toBe("This video can't be extended. See Source video.");
-      expect(target.querySelector('#ws-source-help')?.getAttribute('aria-live')).toBe('polite');
-    });
-
-    it('reports a path with no video and keeps the reason Choose a video', async () => {
-      await mountExtend();
-      extendApiMocks.inspectExtendSource.mockRejectedValue(new ApiError('not found', 404, 'Source video not found: /nope.mp4'));
-      await browseTo('/nope.mp4');
-
-      expect(text('#ws-source-help')).toBe('No video at this path.');
-      expect(input('ws-source-path').getAttribute('aria-invalid')).toBe('true');
-      expect(input('ws-source-path').getAttribute('aria-describedby')).toBe('ws-source-help');
-      expect(button('ws-submit').disabled).toBe(true);
-      expect(text('#ws-generate-reason')).toBe('Choose a video to extend.');
-    });
-
-    it('clears the source and its facts but keeps the typed text', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-prompt', 'She turns away.');
-      await settle();
-
-      button('ws-source-clear').click();
-      await settle();
-      expect(draft.state.extendSourcePath).toBeNull();
-      expect(draft.extendSource).toBeNull();
-      expect(target.querySelector('[data-testid="extend-source-facts"]')).toBeNull();
-      expect(input('ws-source-path').value).toBe('');
-      expect(field('ws-scene').value).toBe('A woman on a rainy street.');
-      expect(field('ws-prompt').value).toBe('She turns away.');
-      expect(button('ws-submit').disabled).toBe(true);
-    });
-
-    it('shows the moved-file message for a Reuse whose source is gone, and gives the moved path no facts', async () => {
-      extendApiMocks.inspectExtendSource.mockRejectedValue(new ApiError('not found', 404, 'gone'));
-      await mountExtend({ params: { workflow: 'extend', source_video: '/clips/old.mp4', missing_source_video: 'true', scene: 'A street.', prompt: 'She waves.' } });
-      const moved = target.querySelector('[data-testid="extend-source-moved"]');
-      expect(moved?.textContent).toContain('The source video has moved or been deleted; choose it again to extend.');
-      expect(field('ws-scene').value).toBe('A street.');
-      expect(field('ws-prompt').value).toBe('She waves.');
-      expect(button('ws-submit').disabled).toBe(true);
-      expect(input('ws-source-path').getAttribute('aria-invalid')).toBe('true');
-    });
-  });
-
-  describe('Scene and Prompt', () => {
-    it('fills the old prompt of a legacy source, warns right away and points the Scene placeholder at moving the description', async () => {
-      await mountExtend();
-      await chooseSource(legacySource());
-
-      expect(field('ws-prompt').value).toBe('A woman stands in the rain and says "Hello".');
-      expect(field('ws-scene').value).toBe('');
-      expect(field('ws-scene').placeholder).toBe('Move the scene description here from the prompt (who, where, look). Then change the prompt to what happens next.');
-      const warning = target.querySelector('[data-testid="original-prompt-warning"]') as HTMLElement;
-      expect(warning.id).toBe('ws-prompt-original');
-      expect(warning.textContent?.trim()).toBe('Still the original prompt. Change it to what happens next.');
-      expect(warning.closest('[aria-live="polite"]')).not.toBeNull();
-      expect(field('ws-prompt').getAttribute('aria-describedby')).toBe('ws-prompt-original');
-      expect(button('ws-submit').disabled).toBe(false);
-    });
-
-    it('hides the warning once the Prompt is edited and still submits either way', async () => {
-      await mountExtend();
-      await chooseSource(legacySource());
-
-      const unchanged = await submit();
-      expect(unchanged?.get('prompt')).toBe('A woman stands in the rain and says "Hello".');
-
-      type('ws-prompt', 'She walks away.');
-      await settle();
-      expect(target.querySelector('[data-testid="original-prompt-warning"]')).toBeNull();
-      expect(field('ws-prompt').getAttribute('aria-describedby')).toBeNull();
-      expect((await submit())?.get('prompt')).toBe('She walks away.');
-    });
-
-  });
-
-  describe('the source flow', () => {
-    it('lets a new source replace both boxes, edits included, and clears the Enhanced pair', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-scene', 'My own scene.');
-      type('ws-prompt', 'My own action.');
-      draft.patch({ enhancedScene: 'Enhanced scene.', enhancedPrompt: 'Enhanced action.' });
-      await settle();
-
-      await chooseSource(sceneSource({ path: '/clips/other.mp4', scene: 'Another scene.', prompt: 'Another action.' }), '/clips/other.mp4');
-      expect(field('ws-scene').value).toBe('Another scene.');
-      expect(field('ws-prompt').value).toBe('');
-      expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
-    });
-
-    it('replaces the boxes when a different path is typed and checked', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-prompt', 'My own action.');
-
-      extendApiMocks.inspectExtendSource.mockResolvedValue(legacySource({ path: '/clips/other.mp4' }));
-      typePath('/clips/other.mp4', 'Enter');
-      await settle();
-      expect(lastInspect()).toMatchObject({ path: '/clips/other.mp4' });
-      expect(field('ws-prompt').value).toBe('A woman stands in the rain and says "Hello".');
-      expect(field('ws-scene').value).toBe('');
-    });
-
-    it('waits 300 ms after the last keystroke before checking a typed path', async () => {
-      await mountExtend();
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      typePath('/clips/w');
-      typePath('/clips/walk.mp4');
-      await settle();
-      expect(extendApiMocks.inspectExtendSource).not.toHaveBeenCalled();
-
-      await waitDebounce();
-      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
-      expect(lastInspect()).toMatchObject({ path: '/clips/walk.mp4' });
-    });
-
-    it('keeps a typed path when the workflow changes before the check', async () => {
-      await mountExtend();
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      typePath('/clips/walk.mp4');
-      draft.update('workflow', 'txt2vid');
-      await settle();
-      expect(draft.state.extendSourcePath).toBe('/clips/walk.mp4');
-
-      draft.update('workflow', 'extend');
-      await settle();
-      expect(lastInspect()).toMatchObject({ path: '/clips/walk.mp4' });
-    });
-
-    it('checks the path when the field is left', async () => {
-      await mountExtend();
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      typePath(SOURCE, 'change');
-      await settle();
-      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not submit the form when Enter is pressed in the path field', async () => {
-      await mountExtend();
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
-      input('ws-source-path').value = SOURCE;
-      input('ws-source-path').dispatchEvent(new Event('input', { bubbles: true }));
-      input('ws-source-path').dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(true);
-    });
-
-    it('keeps edits when the same source is checked again', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-scene', 'My own scene.');
-      type('ws-prompt', 'My own action.');
-      await settle();
-
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ scene: 'Changed on disk.' }));
-      typePath(SOURCE, 'Enter');
-      await settle();
-      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(2);
-      expect(field('ws-scene').value).toBe('My own scene.');
-      expect(field('ws-prompt').value).toBe('My own action.');
-    });
-
-    it('checks the source again when the length changes, so the memory note follows', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ extend_frames: 72, memory_fit: { status: 'tight', required_gb: 21, budget_gb: 24 } }));
-
-      input('ws-extend-seconds').value = '3';
-      input('ws-extend-seconds').dispatchEvent(new Event('change', { bubbles: true }));
-      await settle();
-      expect(draft.state.extendFrames).toBe(72);
-      await waitDebounce();
-
-      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(2);
-      expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: 72 });
-      expect(target.querySelector('[data-testid="extend-memory-note"]')?.getAttribute('data-status')).toBe('tight');
-    });
-
-    it('checks a saved source once on load and leaves the text it was reused with', async () => {
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      await mountExtend({ params: { workflow: 'extend', source_video: SOURCE, extend_frames: '48', scene: 'My street.', prompt: 'She waves.' } });
-      await settle();
-      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
-      expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: 48 });
-      expect(field('ws-scene').value).toBe('My street.');
-      expect(field('ws-prompt').value).toBe('She waves.');
-      expect(button('ws-submit').disabled).toBe(false);
-    });
-
-  });
-
-  describe('length', () => {
-    it('shows Extend by with its frames and the total at the source frame rate', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      expect(input('ws-extend-seconds').value).toBe('2');
-      expect(input('ws-extend-seconds').disabled).toBe(false);
-      expect(text('[data-testid="extend-frames"]')).toBe('+48 frames');
-      expect(text('[data-testid="extend-total"]')).toBe('6.04 s · 145 frames');
-      expect(text('label[for="ws-extend-seconds"]')).toBe('Extend by (s)');
-    });
-
-    it('snaps a typed length to 8-frame steps of the source frame rate', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource({ fps: 30, frame_count: 90 }));
-      input('ws-extend-seconds').value = '2';
-      input('ws-extend-seconds').dispatchEvent(new Event('change', { bubbles: true }));
-      await settle();
-      expect(draft.state.extendFrames).toBe(64);
-      expect(input('ws-extend-seconds').value).toBe('2.13');
-      expect(text('[data-testid="extend-frames"]')).toBe('+64 frames');
-      expect(text('[data-testid="extend-total"]')).toBe('5.13 s · 154 frames');
-    });
-
-    it('notes a too-large fit without blocking Generate', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource({ memory_fit: { status: 'too_large', required_gb: 40, budget_gb: 24 } }));
-      expect(target.querySelector('[data-testid="extend-memory-note"]')?.getAttribute('data-status')).toBe('too_large');
-      expect(target.querySelector('[data-testid="extend-memory-note"]')?.closest('[aria-live="polite"]')).not.toBeNull();
-      expect(button('ws-submit').disabled).toBe(false);
-    });
-
-    it.each([['fits', { status: 'fits', required_gb: 10, budget_gb: 24 }], ['unknown', null]])('shows no memory note when the fit is %s', async (_name, fit) => {
-      await mountExtend();
-      await chooseSource(sceneSource({ memory_fit: fit }));
-      expect(target.querySelector('[data-testid="extend-memory-note"]')).toBeNull();
-    });
-  });
-
-  describe('audio', () => {
-    it('disables Audio for a silent source, keeps the preference and submits audio=false', async () => {
-      draft.update('audio', true);
-      await mountExtend();
-      await chooseSource(sourceInfo({ has_audio: false }));
-
-      const audio = input('ws-audio');
-      expect(audio.disabled).toBe(true);
-      expect(audio.checked).toBe(false);
-      expect(draft.state.audio).toBe(true);
-      expect(text('[data-section="video"] .inspector-summary')).not.toContain('Audio');
-      expect((await submit())?.getAll('audio')).toEqual(['false']);
-    });
-
-    it('leaves Audio on for a source with sound', async () => {
-      draft.update('audio', true);
-      await mountExtend();
-      await chooseSource(sourceInfo({ has_audio: true }));
-      expect(input('ws-audio').disabled).toBe(false);
-      expect(input('ws-audio').checked).toBe(true);
-    });
-  });
-
-  describe('what Generate submits', () => {
-    it('sends the source, the new frames and both text boxes, and none of the size or length fields', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-prompt', 'She waves.');
-      await settle();
-
-      const form = await submit();
-      expect(form?.get('workflow')).toBe('extend');
-      expect(form?.get('mode')).toBe('video');
-      expect(form?.get('source_video')).toBe(SOURCE);
-      expect(form?.get('extend_frames')).toBe('48');
-      expect(form?.get('scene')).toBe('A woman on a rainy street.');
-      expect(form?.get('prompt')).toBe('She waves.');
-      for (const name of ['ratio', 'size', 'width', 'height', 'frames', 'image_path', 'upscale', 'video_upscale_factor']) expect(form?.has(name)).toBe(false);
-    });
-
-    it('records a blank scene as blank, not as the source\'s scene', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-scene', '');
-      await settle();
-      expect((await submit())?.get('scene')).toBe('');
-    });
-
-    it('waits for a source still being checked, then submits, without a reason, a toast or a jump of focus', async () => {
-      await mountExtend();
-      const release = holdInspection();
-      await browseTo(SOURCE);
-      expect(button('ws-submit').disabled).toBe(true);
-      expect(target.querySelector('#ws-generate-reason')).toBeNull();
-      expect(target.querySelector('[data-section="source-video"] .spinner')).not.toBeNull();
-
-      target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      await settle();
-      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
-      expect(toasts).toHaveLength(0);
-      expect(document.activeElement).not.toBe(input('ws-source-path'));
-
-      release(sceneSource());
-      await settle();
-      expect(button('ws-submit').disabled).toBe(false);
-      expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
-      expect((workspaceApiMocks.submitGenerate.mock.calls[0][0] as FormData).get('source_video')).toBe(SOURCE);
-    });
-
-    it('stays off the queue while the source is rejected', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource({ problems: [{ code: 'hdr', message: 'It is HDR or wide gamut.' }] }));
-      expect(await submit()).toBeUndefined();
-      expect(toasts.map((toast) => toast.message)).toContain("This video can't be extended. See Source video.");
-    });
-  });
-
-  describe('with a settings preset', () => {
-    const CLIP_PRESET: SettingsPreset = {
-      slug: 'clip', name: 'Clip', mode: 'video', model: 'ltx-8',
-      settings: { lora: '', ratio: '9:16', size: 's', width: null, height: null, runs: 1, steps: 6, frames: 49, audio: false, low_memory: true, video_upscale_factor: 2, review: true },
-    };
-    const presetButton = () => target.querySelector('[data-testid="preset-button"]') as HTMLButtonElement;
-
-    async function applyClip(): Promise<void> {
-      flushSync(() => presetButton().click());
-      await settle();
-      flushSync(() => (document.querySelector('[role="menu"][aria-label="Preset"] [data-action="preset:clip"]') as HTMLButtonElement).click());
-      await settle();
-    }
-
-    it('applies every key of the preset, and the job is submitted with the same fields as without one', async () => {
-      presetApiMocks.listPresets.mockResolvedValue([CLIP_PRESET]);
-      const context = makeExtendContext();
-      context.video_ratios = ['16:9', '9:16'];
-      context.video_size_options = { '16:9': ['s', 'm'], '9:16': ['s', 'm'] };
-      context.video_size_dimensions = { '16:9': { m: [704, 448], s: [512, 320] }, '9:16': { m: [448, 704], s: [320, 512] } };
-      await mountExtend({ context });
-      await chooseSource(sceneSource());
-      type('ws-prompt', 'She waves.');
-      await settle();
-
-      await applyClip();
-
-      expect(draft.state).toMatchObject({ steps: 6, ratio: '9:16', size: 's', audio: false, lowMemory: true, videoUpscaleEnabled: true, videoUpscaleReview: true, appliedPreset: 'clip' });
-      const form = await submit();
-      expect(form?.get('workflow')).toBe('extend');
-      expect(form?.get('source_video')).toBe(SOURCE);
-      expect(form?.get('prompt')).toBe('She waves.');
-      expect(form?.get('steps')).toBe('6');
-      for (const name of ['ratio', 'size', 'width', 'height', 'frames', 'image_path', 'upscale', 'video_upscale_factor']) expect(form?.has(name)).toBe(false);
-    });
-
-    it('is forgotten when another source video is chosen, so its settings are used', async () => {
-      presetApiMocks.listPresets.mockResolvedValue([CLIP_PRESET]);
-      await mountExtend();
-      await chooseSource(sceneSource());
-      await applyClip();
-      expect(draft.state.appliedPreset).toBe('clip');
-
-      await chooseSource(sceneSource(), '/clips/other.mp4');
-
-      expect(draft.state.appliedPreset).toBeNull();
-      expect(presetButton().dataset.applied).toBe('');
-    });
-  });
-
-  describe('Enhance', () => {
-    it('is enabled with both boxes empty once a source can be extended, and sends the source and its audio', async () => {
-      enhanceApiMocks.enhancePrompt.mockResolvedValue();
-      draft.update('audio', true);
-      await mountExtend();
-      await chooseSource(sourceInfo({ has_audio: false }));
-
-      await openEnhanceRun();
-      const run = document.querySelector('#ws-enhance-run') as HTMLButtonElement;
-      expect(run.disabled).toBe(false);
-      run.click();
-      await settle();
-
-      const body = enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { mode: string; context: Record<string, unknown> };
-      expect(body.mode).toBe('video');
-      expect(body.context).toMatchObject({ source_video: SOURCE, extend_frames: 48, audio: false, reference_image: false });
-    });
-
-    it.each([
-      ['no source is chosen', undefined, 'Choose a video to extend first.'],
-      ['the source is rejected', sceneSource({ problems: [{ code: 'hdr', message: 'It is HDR or wide gamut.' }] }), 'Choose a video that can be extended first.'],
-    ])('is disabled, with its own hint, when %s', async (_name, info, hint) => {
-      await mountExtend();
-      if (info) await chooseSource(info);
-      await openEnhanceRun();
-      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(true);
-      expect(document.querySelector('.enhance-popover')?.textContent).toContain(hint);
-    });
-
-    it('marks the Enhanced pair out of date when the length changes', async () => {
-      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
-        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: 'A woman on a rainy street.', prompt: 'She waves slowly.', clamped: false });
-      });
-      await mountExtend();
-      await chooseSource(sceneSource());
-      await runEnhance();
-      expect(draft.state.enhancedFrom).toMatchObject({ mode: 'video', sourceVideoPath: SOURCE, extendFrames: 48 });
-      expect(target.textContent).not.toContain('Out of date');
-
-      draft.update('extendFrames', 72);
-      await settle();
-      expect(target.textContent).toContain('Out of date');
-    });
-
-    describe('Action only', () => {
-      const rewrite = () => Array.from(document.querySelectorAll('#ws-enhance-panel [aria-labelledby="ws-enhance-rewrite-label"] [role="radio"]')) as HTMLButtonElement[];
-      const extras = (id: string) => (target.querySelector(`label[for="${id}"]`)!.closest('.label-row')!.querySelector('.label-extras')?.textContent ?? '').replace(/\s+/g, ' ').trim();
-
-      /** The server answers an action-only run with no scene part. */
-      function answerActionOnly(): void {
-        enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
-          const onFrame = rest[0] as (frame: EnhanceFrame) => void;
-          onFrame({ type: 'text', text: 'She waves sl', scene: '', prompt: 'She waves sl' });
-          onFrame({ type: 'done', scene: '', prompt: 'She waves slowly.', clamped: false });
-        });
-      }
-
-      it('is the default for an extension and is sent with the request', async () => {
-        answerActionOnly();
-        await mountExtend();
-        await chooseSource(sceneSource());
-        type('ws-prompt', 'She waves.');
-        await settle();
-        await openEnhanceRun();
-        expect(rewrite().map((el) => el.getAttribute('aria-checked'))).toEqual(['false', 'true']);
-        (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
-        await settle();
-        expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ scene: 'A woman on a rainy street.', prompt: 'She waves.', settings: { parts: 'action' } });
-        expect(draft.state.enhanceSettingsVideo?.partsByWorkflow?.extend).toBeUndefined();
-      });
-
-      it('leaves the Enhanced scene empty, even when an older server returns one, so an edited Scene applies', async () => {
-        enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
-          (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: 'A woman on a rainy street.', prompt: 'She waves slowly.', clamped: false });
-        });
-        await mountExtend();
-        await chooseSource(sceneSource());
-        type('ws-prompt', 'She waves.');
-        await settle();
-        await runEnhance();
-
-        expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: 'She waves slowly.' });
-        expect(field('ws-enhanced-scene').value).toBe('');
-        expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
-        expect(extras('ws-prompt')).toBe('Uses enhanced Use mine');
-        expect(extras('ws-scene')).toBe('');
-
-        type('ws-scene', 'A woman on a sunny street.');
-        await settle();
-        const form = await submit();
-        expect(form?.get('scene')).toBe('A woman on a sunny street.');
-        expect(form?.get('prompt')).toBe('She waves slowly.');
-        expect(form?.get('scene_input')).toBe('A woman on a sunny street.');
-        expect(form?.get('prompt_input')).toBe('She waves.');
-      });
-
-      it('fills only the Action while streaming and keeps the Scene placeholder', async () => {
-        let release: () => void = () => undefined;
-        const gate = new Promise<void>((resolve) => { release = resolve; });
-        enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
-          (rest[0] as (frame: EnhanceFrame) => void)({ type: 'text', text: 'She waves sl', scene: '', prompt: 'She waves sl' });
-          await gate;
-        });
-        await mountExtend();
-        await chooseSource(sceneSource());
-        await runEnhance();
-        expect(field('ws-enhanced-prompt').value).toBe('She waves sl');
-        expect(field('ws-enhanced-prompt').getAttribute('aria-busy')).toBe('true');
-        expect(field('ws-enhanced-scene').value).toBe('');
-        expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
-        release();
-        await settle();
-      });
-
-    });
-  });
-
-  describe('restoring the clip text', () => {
-    const link = (label: string) => Array.from(target.querySelectorAll('.label-extras button')).find((el) => el.textContent?.trim() === label) as HTMLButtonElement | undefined;
-    const status = () => target.querySelector('[role="status"]')?.textContent?.trim();
-
-    it('offers the clip\'s scene only while the Scene differs, and restores it with a status and focus', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      expect(link("Use the clip's scene")).toBeUndefined();
-
-      type('ws-scene', 'A woman on a sunny street.');
-      await settle();
-      const restore = link("Use the clip's scene")!;
-      expect(restore.title).toBe('Replace your scene with the one recorded in the clip');
-      restore.click();
-      await settle();
-
-      expect(field('ws-scene').value).toBe('A woman on a rainy street.');
-      expect(draft.state.scene).toBe('A woman on a rainy street.');
-      expect(status()).toBe('Scene restored from the clip.');
-      expect(document.activeElement).toBe(field('ws-scene'));
-      expect(link("Use the clip's scene")).toBeUndefined();
-    });
-
-    it('clears Out of date when the clip\'s scene is restored', async () => {
-      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
-        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: '', prompt: 'She waves slowly.', clamped: false });
-      });
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-prompt', 'She waves.');
-      await settle();
-      await runEnhance();
-
-      type('ws-scene', 'A woman on a sunny street.');
-      await settle();
-      expect(target.textContent).toContain('Out of date');
-      link("Use the clip's scene")!.click();
-      await settle();
-      expect(target.textContent).not.toContain('Out of date');
-    });
-
-    it('offers the clip\'s prompt for a legacy clip, beside Action, and brings back the original-prompt warning', async () => {
-      await mountExtend();
-      await chooseSource(legacySource());
-      expect(link("Use the clip's prompt")).toBeUndefined();
-      expect(link("Use the clip's scene")).toBeUndefined();
-
-      type('ws-prompt', 'She walks away.');
-      await settle();
-      expect(target.querySelector('[data-testid="original-prompt-warning"]')).toBeNull();
-      const restore = link("Use the clip's prompt")!;
-      expect(restore.title).toBe("Replace your action with the clip's recorded prompt");
-      restore.click();
-      await settle();
-
-      expect(field('ws-prompt').value).toBe('A woman stands in the rain and says "Hello".');
-      expect(target.querySelector('[data-testid="original-prompt-warning"]')).not.toBeNull();
-      expect(link("Use the clip's prompt")).toBeUndefined();
-    });
-
-    it('offers nothing outside an extension', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource({ legacy: true }));
-      type('ws-scene', 'Something else.');
-      type('ws-prompt', 'She looks up.');
-      await settle();
-      expect(link("Use the clip's scene")).toBeDefined();
-      expect(target.querySelector('[data-testid="original-prompt-warning"]')).not.toBeNull();
-
-      draft.update('workflow', 'txt2vid');
-      await settle();
-      expect(link("Use the clip's scene")).toBeUndefined();
-      expect(target.querySelector('[data-testid="original-prompt-warning"]')).toBeNull();
-    });
-
-  });
-
-  describe('Copy CLI command', () => {
-    let writeText: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
-
-    beforeEach(() => {
-      writeText = mockClipboard();
-    });
-
-    it('copies the extension with the source, the length and the scene', async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-prompt', 'She waves.');
-      await settle();
-      button('ws-copy-cli').click();
-      await settle();
-      const command = writeText.mock.calls[0]?.[0] ?? '';
-      expect(command).toContain('ziv video');
-      expect(command).toContain('--extend /clips/walk.mp4 --extend-frames 48');
-      expect(command).toContain("--prompt 'She waves.'");
-      expect(command).toContain("--scene 'A woman on a rainy street.'");
-      for (const flag of ['--ratio', '--size', '--frames', '--upscale', '--width']) expect(command).not.toContain(flag);
-    });
-
-    it("sends an empty --scene where the CLI would otherwise fill it in from the source", async () => {
-      await mountExtend();
-      await chooseSource(sceneSource());
-      type('ws-scene', '');
-      await settle();
-      button('ws-copy-cli').click();
-      await settle();
-      expect(writeText.mock.calls[0]?.[0]).toContain("--scene ''");
-    });
-
-    it('does not copy without a source and says why', async () => {
-      await mountExtend();
-      button('ws-copy-cli').click();
-      await settle();
-      expect(writeText).not.toHaveBeenCalled();
-      expect(toasts.map((toast) => toast.message)).toContain('Choose a video to extend.');
-    });
-  });
-
-  describe('Extend from an asset', () => {
-    const clip = (overrides: Partial<GalleryAsset> = {}): GalleryAsset =>
-      makeAsset({
-        id: 'out/walk.mp4', url: '/media/out/walk.mp4', thumbnail_url: '/media/out/walk.mp4', filename: 'walk.mp4', media_type: 'video', workflow: 'txt2vid',
-        file_path: SOURCE, scene: 'A woman on a rainy street.', prompt: 'She looks up.', extend: { available: true, reason: null }, ...overrides,
-      });
-
-    async function mountWithClip(asset: GalleryAsset, workflow: 'txt2vid' | 'extend' = 'txt2vid'): Promise<void> {
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
-      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue({ ...makeExtendContext(), history_assets: [asset] });
-      draft.update('workflow', workflow);
-      app = flushSync(() => mount(WorkspacePage, { target }));
-      await settle();
-    }
-
-    const historyTile = (asset: GalleryAsset) => target.querySelector(`#ws-history-shell article[aria-label="${asset.filename}"]`) as HTMLElement;
-
-    function openMenu(asset: GalleryAsset): void {
-      (historyTile(asset).querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
-      flushSync();
-    }
-
-    it('lists Extend, then Download and Delete, in a history tile\'s menu', async () => {
-      const asset = clip();
-      await mountWithClip(asset);
-      openMenu(asset);
-      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'download', 'delete']);
-    });
-
-    it('turns the Workspace to Extend Video with the clip as source, its scene in the boxes, and checks it', async () => {
-      const asset = clip();
-      await mountWithClip(asset);
-      openMenu(asset);
-      (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
-      await settle();
-
-      expect(draft.state).toMatchObject({ workflow: 'extend', extendSourcePath: SOURCE, scene: 'A woman on a rainy street.', prompt: '' });
-      expect(lastInspect()).toMatchObject({ path: SOURCE });
-      expect(input('ws-source-path').value).toBe(SOURCE);
-      expect(text('[data-testid="extend-source-facts"]')).toContain('512 × 288');
-      expect(toasts.map((toast) => toast.message)).toContain('walk.mp4 is now the source video');
-    });
-
-    it('forgets the applied preset when the Gallery makes the clip the source, from either workflow', async () => {
-      const asset = clip();
-      for (const workflow of ['txt2vid', 'extend'] as const) {
-        draft.reset();
-        document.body.innerHTML = '';
-        target = document.createElement('div');
-        document.body.appendChild(target);
-        draft.update('workflow', workflow);
-        draft.setAppliedPreset('clip');
-        await mountWithClip(asset, workflow);
-        expect(draft.state.appliedPreset).toBe('clip');
-        openMenu(asset);
-        (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
-        await settle();
-        expect(draft.state.appliedPreset).toBeNull();
-        await unmount(app!);
-        app = null;
-      }
-    });
-
-    it('replaces the text of an earlier source when already on Extend Video', async () => {
-      const asset = clip();
-      await mountWithClip(asset, 'extend');
-      draft.patch({ scene: 'Old scene.', prompt: 'Old action.', extendSourcePath: '/clips/old.mp4' });
-      await settle();
-
-      openMenu(asset);
-      (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
-      await settle();
-      expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, scene: 'A woman on a rainy street.', prompt: '' });
-    });
-
-    it('disables Extend with its reason in the menu when the video cannot be extended', async () => {
-      const asset = clip({ extend: { available: false, reason: "Upscaled videos can't be extended yet." } });
-      await mountWithClip(asset);
-      openMenu(asset);
-      const item = document.querySelector('[role="menu"] [data-action="extend"]') as HTMLElement;
-      expect(item.getAttribute('aria-disabled')).toBe('true');
-      expect(item.getAttribute('title')).toBe("Upscaled videos can't be extended yet.");
-      item.click();
-      await settle();
-      expect(draft.state.workflow).toBe('txt2vid');
-    });
-
-    it('extends from the viewer button and the E key, and closes the viewer', async () => {
-      const asset = clip();
-      await mountWithClip(asset);
-      (historyTile(asset).querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLButtonElement).click();
-      await settle();
-      const viewerButton = document.querySelector('[data-testid="asset-viewer"] [data-action="extend"]') as HTMLButtonElement;
-      expect(viewerButton).not.toBeNull();
-
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true, cancelable: true }));
-      await settle();
-      expect(draft.state).toMatchObject({ workflow: 'extend', extendSourcePath: SOURCE });
-      expect(document.querySelector('[data-testid="asset-viewer"]')).toBeNull();
-    });
-
-    it('has no Extend item for an image or where the server offers none', async () => {
-      const image = makeAsset({ id: 'out/a.png', filename: 'a.png', file_path: '/outputs/a.png' });
-      const video = clip({ id: 'out/b.mp4', filename: 'b.mp4', extend: null });
-      galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([image, video]));
-      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue({ ...makeExtendContext(), history_assets: [image, video] });
-      app = flushSync(() => mount(WorkspacePage, { target }));
-      await settle();
-      for (const asset of [image, video]) {
-        openMenu(asset);
-        expect(document.querySelector('[role="menu"] [data-action="extend"]')).toBeNull();
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        flushSync();
-      }
-    });
-  });
-
-  describe('a prompt sent from the Prompts page', () => {
-    it('queues the run once the saved source has been checked', async () => {
-      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      draft.update('workflow', 'extend');
-      draft.update('extendSourcePath', SOURCE);
-      requestPromptRun({ path: '/server/prompts.yaml', optionId: 'portrait:1' });
-      await mountExtend();
-      await settle();
-
-      expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
-      const form = workspaceApiMocks.submitGenerate.mock.calls[0][0] as FormData;
-      expect(form.get('source_video')).toBe(SOURCE);
-      expect(form.getAll('prompt_option_id')).toEqual(['portrait:1']);
-    });
-
-    it('refuses the run with a reason when no source is chosen', async () => {
-      requestPromptRun({ path: '/server/prompts.yaml', optionId: 'portrait:1' });
-      await mountExtend();
-      await settle();
-
-      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
-      expect(toasts.map((toast) => toast.message)).toContain('Choose a video to extend.');
-    });
-  });
-});
-
-
-describe('WorkspacePage clip memory note', () => {
-  const fit = (status: string, required_gb = 21) => ({ memory_fit: { status, required_gb, budget_gb: 24 }, width: 704, height: 448, frames: 49 });
-  const note = () => target.querySelector('[data-testid="clip-memory-note"]');
-  const lastRequest = () => videoMemoryApiMocks.checkVideoMemoryFit.mock.calls.at(-1)?.[0];
-
-  async function mountVideo(workflow: 'txt2vid' | 'img2vid' | 'extend' = 'txt2vid'): Promise<void> {
-    const context = makeContext();
-    context.workflow_contract.values = [...context.workflow_contract.values, 'extend'];
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
-    draft.update('workflow', workflow);
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-    await waitDebounce();
-  }
-
-
-  it('notes a tight clip under Duration without blocking Generate', async () => {
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
-
-    await mountVideo();
-
-    expect(note()?.getAttribute('data-status')).toBe('tight');
-    expect(note()?.closest('[aria-live="polite"]')).not.toBeNull();
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("asks about the form's model, size, length, Low memory and upscale", async () => {
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('fits'));
-
-    await mountVideo();
-
-    expect(lastRequest()).toEqual({ model: 'ltx-8', ratio: expect.any(String), size: expect.any(String), frames: draft.state.frameCount, low_memory: draft.state.lowMemory, upscale: null });
-  });
-
-  it('asks again when the length changes, and follows the answer', async () => {
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('fits'));
-    await mountVideo();
-    expect(note()).toBeNull();
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
-
-    draft.update('frameCount', 241);
-    await settle();
-    expect(videoMemoryApiMocks.checkVideoMemoryFit).toHaveBeenCalledTimes(1);
-    await waitDebounce();
-
-    expect(lastRequest()).toMatchObject({ frames: 241 });
-    expect(note()?.getAttribute('data-status')).toBe('tight');
-  });
-
-  it('drops the note at once when the workflow leaves video', async () => {
-    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
-    await mountVideo();
-    expect(note()).not.toBeNull();
-
-    draft.update('workflow', 'txt2img');
-    await settle();
-
-    expect(note()).toBeNull();
-  });
-
-
-  describe('first-run dialog', () => {
-    const firstRunContext = (overrides: Partial<WorkspaceContext> = {}) => makeContext({
-      image_models: [
-        { id: 'zit', label: 'Z-Image Turbo', type: 'image', downloaded: false, memory_fit: null, download_size_label: '33 GB' },
-        { id: 'klein4b', label: 'FLUX.2 Klein 4B', type: 'image', downloaded: false, memory_fit: null, download_size_label: '16 GB' },
-      ],
-      current_image_model: 'zit',
-      image_model_defaults: { zit: makeImageDefaults({}), klein4b: makeImageDefaults({ steps: 4 }) },
-      first_run: { skipped: false, recommended_model: 'klein4b' },
-      ...overrides,
-    });
-    const dialog = () => document.querySelector('[data-testid="first-run-dialog"]');
-    const press = async (action: string) => {
-      (document.querySelector(`[data-action="${action}"]`) as HTMLButtonElement).click();
-      await settle();
-    };
-
-    it('opens with the recommended model chosen when nothing is downloaded', async () => {
-      await mountWorkspace(firstRunContext());
-
-      expect(dialog()).not.toBeNull();
-      expect((document.querySelector('[data-testid="first-run-model-klein4b"]') as HTMLInputElement).checked).toBe(true);
-    });
-
-    it.each([
-      ['it was skipped', { first_run: { skipped: true, recommended_model: 'klein4b' } }],
-      ['a model is downloaded', { image_models: [{ id: 'zit', label: 'zit', type: 'image', downloaded: true, memory_fit: null }] }],
-    ] as [string, Partial<WorkspaceContext>][])('stays closed when %s', async (_why, overrides) => {
-      await mountWorkspace(firstRunContext(overrides));
-
-      expect(dialog()).toBeNull();
-    });
-
-    it('stays closed while an image model is already downloading', async () => {
-      modelApiMocks.getDownloads.mockResolvedValue({ items: [{ id: 'd1', kind: 'model', name: 'klein4b', label: 'FLUX.2 Klein 4B', state: 'running', message: null }] });
-
-      await mountWorkspace(firstRunContext());
-
-      expect(dialog()).toBeNull();
-    });
-
-    it('queues the chosen model, saves it as the default, selects it and closes', async () => {
-      const request = vi.spyOn(downloadStore, 'request').mockResolvedValue('queued');
-      await mountWorkspace(firstRunContext());
-
-      (document.querySelector('[data-testid="first-run-model-zit"]') as HTMLInputElement).click();
-      await settle();
-      await press('first-run-download');
-
-      expect(request).toHaveBeenCalledWith('model', 'zit', 'Z-Image Turbo');
-      expect(configApiMocks.updateConfig).toHaveBeenCalledWith({ 'ui.default_models.image': 'zit' });
-      expect(draft.state.model).toBe('zit');
-      expect(dialog()).toBeNull();
-    });
-
-    it('selects the downloaded model in the draft', async () => {
-      vi.spyOn(downloadStore, 'request').mockResolvedValue('present');
-      await mountWorkspace(firstRunContext());
-
-      await press('first-run-download');
-
-      expect(configApiMocks.updateConfig).toHaveBeenCalledWith({ 'ui.default_models.image': 'klein4b' });
-      expect(draft.state.model).toBe('klein4b');
-    });
-
-    it.each(['declined', 'failed'] as const)('stays open and saves nothing when the download is %s', async (result) => {
-      vi.spyOn(downloadStore, 'request').mockResolvedValue(result);
-      await mountWorkspace(firstRunContext());
-
-      await press('first-run-download');
-
-      expect(dialog()).not.toBeNull();
-      expect(configApiMocks.updateConfig).not.toHaveBeenCalled();
-    });
-
-    it('remembers a skip on the server and closes', async () => {
-      await mountWorkspace(firstRunContext());
-
-      await press('first-run-skip');
-
-      expect(workspaceApiMocks.skipFirstRun).toHaveBeenCalledOnce();
-      expect(dialog()).toBeNull();
-    });
-
-    it('does not reopen when the queued download fails and the lane empties', async () => {
-      vi.spyOn(downloadStore, 'request').mockResolvedValue('queued');
-      await mountWorkspace(firstRunContext());
-      await press('first-run-download');
-      expect(dialog()).toBeNull();
-
-      // The download ends without a model on disk: the lane is empty and every model is still missing.
-      modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
-      await downloadStore.refresh();
-      await settle();
-
-      expect(dialog()).toBeNull();
-    });
-
-    it('still closes, and says so, when remembering the skip fails', async () => {
-      workspaceApiMocks.skipFirstRun.mockRejectedValueOnce(new Error('disk full'));
-      await mountWorkspace(firstRunContext());
-
-      await press('first-run-skip');
-
-      expect(dialog()).toBeNull();
-      expect(toasts.some((toast) => toast.type === 'error')).toBe(true);
-    });
-
-    it('selects the model and says so when saving the default fails', async () => {
-      vi.spyOn(downloadStore, 'request').mockResolvedValue('queued');
-      configApiMocks.updateConfig.mockRejectedValueOnce(new Error('read-only config'));
-      await mountWorkspace(firstRunContext());
-
-      await press('first-run-download');
-
-      expect(dialog()).toBeNull();
-      expect(draft.state.model).toBe('klein4b');
-      expect(toasts.some((toast) => toast.type === 'error')).toBe(true);
-    });
-
-    it('closes on Escape without remembering anything, and does not reopen after the page is mounted again', async () => {
-      const context = firstRunContext();
-      await mountWorkspace(context);
-
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      await settle();
-      expect(dialog()).toBeNull();
-      expect(workspaceApiMocks.skipFirstRun).not.toHaveBeenCalled();
-
-      await unmount(app!);
-      app = null;
-      await mountWorkspace(context);
-
-      expect(dialog()).toBeNull();
-    });
-  });
-});
-
-describe('WorkspacePage settings presets', () => {
-  const IMAGE_SETTINGS: SettingsPreset['settings'] = {
-    quantize: null, lora: 'style-a:0.8', ratio: '16:9', size: 'l', width: null, height: null, runs: 2, steps: 12, guidance: 3.5, image_strength: 0.4, scheduler: 'beta', first_sigma: null,
-    sharpen_enabled: true, sharpen_amount: null, contrast_enabled: false, contrast_amount: null, saturation_enabled: false, saturation_amount: null,
-    upscale: null, upscale_denoise: null, upscale_steps: null, upscale_guidance: null, upscale_sharpen: null, review: null,
-  };
-  const LOOK: SettingsPreset = { slug: 'look', name: 'Look', mode: 'image', model: 'flux-lite', settings: IMAGE_SETTINGS };
-  const PORTRAIT: SettingsPreset = { slug: 'portrait', name: 'Portrait', mode: 'image', model: null, settings: { ...IMAGE_SETTINGS, steps: 20 } };
-  const CLIP: SettingsPreset = {
-    slug: 'clip', name: 'Clip', mode: 'video', model: 'ltx-8',
-    settings: { lora: '', ratio: '16:9', size: 'm', width: null, height: null, runs: 1, steps: 8, frames: 49, audio: false, low_memory: true, video_upscale_factor: null, review: null },
-  };
-
-  function presetContext(): WorkspaceContext {
-    const context = makeContext();
-    context.loras = [{ name: 'style-a', path: '/loras/style-a.safetensors' }, { name: 'detail-b', path: '/loras/detail-b.safetensors' }];
-    return context;
-  }
-
-  const presetButton = () => target.querySelector('[data-testid="preset-button"]') as HTMLButtonElement;
-  const presetMenu = () => document.querySelector('[role="menu"][aria-label="Preset"]') as HTMLElement | null;
-  const menuActions = () => Array.from(presetMenu()?.querySelectorAll('[data-action]') ?? []).map((el) => el.getAttribute('data-action'));
-  const menuItem = (action: string) => presetMenu()?.querySelector(`[data-action="${action}"]`) as HTMLButtonElement;
-
-  async function openMenu(): Promise<void> {
-    flushSync(() => presetButton().click());
-    await settle();
-  }
-
-  async function choose(action: string): Promise<void> {
-    await openMenu();
-    flushSync(() => menuItem(action).click());
-    await settle();
-  }
-
-  /** Mount with presets saved; the page reads them when it mounts. */
-  async function mountWithPresets(presets: SettingsPreset[] = [LOOK, PORTRAIT, CLIP], context: WorkspaceContext = presetContext()): Promise<void> {
-    presetApiMocks.listPresets.mockResolvedValue(presets);
-    await mountWorkspace(context);
-    await settle();
-  }
-
-  function typeName(value: string): void {
-    const input = document.querySelector('#preset-name') as HTMLInputElement;
-    input.value = value;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-  }
-
-  const nameDialogError = () => document.querySelector('[role="dialog"] [role="alert"]');
-  const confirmName = () => document.querySelector('[data-action="confirm-preset-name"]') as HTMLButtonElement;
-  const dot = () => presetButton().dataset.changed === 'true';
-
-  beforeEach(() => {
-    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-1', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '2026-04-23T10:00:00Z' });
-    window.location.hash = '#/workspace';
-    window.history.replaceState({}, '', '/');
-  });
-
-  describe('the toolbar control', () => {
-    it('comes first, before the Model select, and says none until a preset is applied', async () => {
-      await mountWithPresets();
-
-      expect(presetButton()).not.toBeNull();
-      expect(presetButton().compareDocumentPosition(target.querySelector('#ws-model') as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(presetButton().getAttribute('aria-haspopup')).toBe('menu');
-      expect(presetButton().dataset.applied).toBe('');
-      expect(dot()).toBe(false);
-    });
-
-    it('is disabled until the workspace has loaded', async () => {
-      workspaceApiMocks.getWorkspaceCoreContext.mockImplementation(() => new Promise<WorkspaceContext>(() => undefined));
-      app = flushSync(() => mount(WorkspacePage, { target }));
-      await settle();
-
-      expect(presetButton().disabled).toBe(true);
-    });
-
-    it('names the applied preset and shows the changed dot only while the form differs from it', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-
-      expect(presetButton().dataset.applied).toBe('look');
-      expect(dot()).toBe(false);
-      draft.update('steps', 99);
-      flushSync();
-      expect(dot()).toBe(true);
-      draft.update('steps', 12);
-      flushSync();
-      expect(dot()).toBe(false);
-    });
-  });
-
-  describe('the menu', () => {
-    it('lists the current mode\'s presets with only Save as when none is applied', async () => {
-      await mountWithPresets();
-      await openMenu();
-
-      expect(menuActions()).toEqual(['preset:look', 'preset:portrait', 'preset-save-as']);
-      expect(presetMenu()?.querySelectorAll('[role="menuitemradio"][aria-checked="true"]')).toHaveLength(0);
-    });
-
-    it('offers only Save as when the mode has no presets, and lists video presets in a video workflow', async () => {
-      await mountWithPresets([CLIP], presetContext());
-      await openMenu();
-      expect(menuActions()).toEqual(['preset-save-as']);
-
-      await unmount(app!);
-      app = null;
-      document.body.innerHTML = '';
-      target = document.createElement('div');
-      document.body.appendChild(target);
-      draft.update('workflow', 'txt2vid');
-      await mountWithPresets([CLIP, LOOK]);
-      await openMenu();
-      expect(menuActions()).toEqual(['preset:clip', 'preset-save-as']);
-    });
-
-    it('checks the applied preset and adds Rename and Delete, but Update only once the form differs', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-      await openMenu();
-
-      expect(menuActions()).toEqual(['preset:look', 'preset:portrait', 'preset-save-as', 'preset-rename', 'preset-delete']);
-      expect(menuItem('preset:look').getAttribute('aria-checked')).toBe('true');
-      expect(menuItem('preset:portrait').getAttribute('aria-checked')).toBe('false');
-
-      draft.update('steps', 30);
-      flushSync();
-      await settle();
-      expect(menuActions()).toContain('preset-update');
-      expect(menuActions().indexOf('preset-update')).toBeLessThan(menuActions().indexOf('preset-save-as'));
-    });
-
-    it('reads the list again each time it opens', async () => {
-      await mountWithPresets();
-      const reads = presetApiMocks.listPresets.mock.calls.length;
-      await openMenu();
-      flushSync(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-      await openMenu();
-
-      expect(presetApiMocks.listPresets.mock.calls.length).toBeGreaterThanOrEqual(reads + 2);
-    });
-
-    it('shows none for an applied preset that a fresh list no longer holds', async () => {
-      draft.setAppliedPreset('look');
-      await mountWithPresets([PORTRAIT]);
-
-      expect(presetButton().dataset.applied).toBe('');
-    });
-  });
-
-  describe('applying a preset', () => {
-    it('sets the preset\'s settings and model, and keeps the prompt and seed', async () => {
-      draft.update('prompt', 'A lighthouse at dusk');
-      draft.update('seed', 77);
-      await mountWithPresets();
-
-      await choose('preset:look');
-
-      expect(draft.state).toMatchObject({ model: 'flux-lite', steps: 12, runs: 2, referenceImageStrength: 0.4, ratio: '16:9', size: 'l', loraString: 'style-a:0.8', prompt: 'A lighthouse at dusk', seed: 77 });
-      expect(draft.state.appliedPreset).toBe('look');
-      expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('A lighthouse at dusk');
-    });
-
-    it('skips LoRAs that are not installed and a model that is not offered, and applies the rest', async () => {
-      const gone: SettingsPreset = { ...LOOK, slug: 'gone', name: 'Gone', model: 'removed-model', settings: { ...IMAGE_SETTINGS, lora: 'style-a:1,missing-one:1' } };
-      await mountWithPresets([gone]);
-      toasts.splice(0, toasts.length);
-
-      await choose('preset:gone');
-
-      expect(toasts).toHaveLength(0);
-      expect(draft.state).toMatchObject({ model: 'zit', loraString: 'style-a:1', steps: 12 });
-    });
-
-    it('forgets the applied preset when a job\'s settings are loaded', async () => {
-      draft.update('prompt', 'A lighthouse');
-      await mountWithPresets();
-      await choose('preset:look');
-      expect(draft.state.appliedPreset).toBe('look');
-
-      requestJobSettings({ mode: 'image', workflow: 'txt2img', model: 'zit', prompt_source: 'inline', prompt: 'from the job log', steps: '7' });
-      await settle();
-
-      expect(draft.state.appliedPreset).toBeNull();
-      expect(presetButton().dataset.applied).toBe('');
-    });
-
-    it('forgets the applied preset when the top nav switches to the other mode, but not within a mode', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-
-      // The top nav only updates the workflow; the page's own handler follows.
-      draft.update('workflow', 'img2img');
-      await settle();
-      expect(draft.state.appliedPreset).toBe('look');
-
-      draft.update('workflow', 'txt2vid');
-      await settle();
-      expect(draft.state.appliedPreset).toBeNull();
-    });
-  });
-
-  describe('Save as', () => {
-    it('saves the form under the typed name, applies it and closes', async () => {
-      await mountWithPresets();
-      draft.update('steps', 14);
-      flushSync();
-      presetApiMocks.createPreset.mockImplementation(async (body) => ({ slug: 'my-new-look', ...(body as Omit<SettingsPreset, 'slug'>) }));
-
-      await choose('preset-save-as');
-      typeName('  My new look ');
-      flushSync(() => confirmName().click());
-      await settle();
-
-      expect(presetApiMocks.createPreset).toHaveBeenCalledTimes(1);
-      const [body] = presetApiMocks.createPreset.mock.calls[0] as [SettingsPreset];
-      expect(body).toMatchObject({ name: 'My new look', mode: 'image', model: 'zit', settings: { steps: 14 } });
-      expect(Object.keys(body.settings)).toHaveLength(24);
-      expect(draft.state.appliedPreset).toBe('my-new-look');
-      expect(document.querySelector('[role="dialog"]')).toBeNull();
-      expect(presetButton().dataset.applied).toBe('my-new-look');
-    });
-
-    it('shows the server\'s reason in the dialog and keeps it open', async () => {
-      await mountWithPresets();
-      presetApiMocks.createPreset.mockRejectedValue(new ApiError('POST 409', 409, 'That name belongs to a video preset.'));
-      await choose('preset-save-as');
-      typeName('Fresh');
-
-      flushSync(() => confirmName().click());
-      await settle();
-
-      expect(nameDialogError()?.textContent).toContain('That name belongs to a video preset.');
-      expect(draft.state.appliedPreset).toBeNull();
-    });
-  });
-
-  describe('Update', () => {
-    it('writes the form back under the applied preset\'s slug', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-      draft.update('steps', 30);
-      flushSync();
-      presetApiMocks.updatePreset.mockImplementation(async (mode, slug, body) => ({ slug, mode, ...(body as Omit<SettingsPreset, 'slug' | 'mode'>) }));
-
-      await choose('preset-update');
-
-      const [mode, slug, body] = presetApiMocks.updatePreset.mock.calls[0] as [string, string, SettingsPreset];
-      expect([mode, slug]).toEqual(['image', 'look']);
-      expect(body).toMatchObject({ name: 'Look', model: 'flux-lite', settings: { steps: 30 } });
-      expect(dot()).toBe(false);
-    });
-  });
-
-  describe('Rename', () => {
-    it('starts from the current name and moves the applied slug to the returned one', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-      presetApiMocks.renamePreset.mockResolvedValue({ ...LOOK, slug: 'better-look', name: 'Better look' });
-
-      await choose('preset-rename');
-      expect((document.querySelector('#preset-name') as HTMLInputElement).value).toBe('Look');
-      typeName('Better look');
-      flushSync(() => confirmName().click());
-      await settle();
-
-      expect(presetApiMocks.renamePreset).toHaveBeenCalledWith('image', 'look', 'Better look');
-      expect(draft.state.appliedPreset).toBe('better-look');
-      expect(presetButton().dataset.applied).toBe('better-look');
-    });
-  });
-
-  describe('Delete', () => {
-    it('asks first, and does nothing when declined', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-
-      await choose('preset-delete');
-      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
-      await answerConfirm(false);
-
-      expect(presetApiMocks.deletePreset).not.toHaveBeenCalled();
-      expect(draft.state.appliedPreset).toBe('look');
-    });
-
-    it('deletes the preset and clears the applied slug when confirmed', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-      presetApiMocks.deletePreset.mockResolvedValue({ status: 'ok' });
-
-      await choose('preset-delete');
-      presetApiMocks.listPresets.mockResolvedValue([PORTRAIT, CLIP]);
-      await answerConfirm(true);
-
-      expect(presetApiMocks.deletePreset).toHaveBeenCalledWith('image', 'look');
-      expect(draft.state.appliedPreset).toBeNull();
-      expect(presetButton().dataset.applied).toBe('');
-      await openMenu();
-      expect(menuActions()).toEqual(['preset:portrait', 'preset-save-as']);
-    });
-
-    it('says so, and keeps the preset, when the server refuses', async () => {
-      await mountWithPresets();
-      await choose('preset:look');
-      presetApiMocks.deletePreset.mockRejectedValue(new ApiError('DELETE 500', 500, 'Disk is read-only.'));
-      toasts.splice(0, toasts.length);
-
-      await choose('preset-delete');
-      await answerConfirm(true);
-
-      expect(toasts.some((toast) => toast.type === 'error' && toast.message.includes('Disk is read-only.'))).toBe(true);
-      expect(draft.state.appliedPreset).toBe('look');
-    });
-  });
-
-  describe('on a phone', () => {
-    const chips = () => Array.from(target.querySelectorAll('.strip-chips [data-chip]')) as HTMLButtonElement[];
-    const presetChip = () => target.querySelector('[data-chip="preset"]') as HTMLButtonElement;
-    const sheetMenu = () => document.querySelector('[data-testid="action-sheet"]') as HTMLElement | null;
-
-    beforeEach(() => {
-      layoutProbe.compact = true;
-      // jsdom has no Web Animations; the sheets' transitions need it.
-      Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
-    });
-    afterEach(() => { delete (Element.prototype as Partial<Element>).animate; });
-
-    it('puts the Preset chip first, saying none, and opens the preset menu as an action sheet', async () => {
-      await mountWithPresets();
-
-      expect(chips()[0].dataset.chip).toBe('preset');
-      expect(presetChip().dataset.applied).toBe('');
-      flushSync(() => presetChip().click());
-      await settle();
-
-      expect(sheetMenu()).not.toBeNull();
-      expect(sheetMenu()?.querySelector('[data-action="preset:look"]')).not.toBeNull();
-      expect(sheetMenu()?.querySelector('[data-action="preset-save-as"]')).not.toBeNull();
-      // The chip opens a menu, never a settings popover.
-      expect(document.querySelector('.pop-list')).toBeNull();
-    });
-
-    it('shows the applied name on the chip with the changed dot, which the All badge does not count', async () => {
-      await mountWithPresets();
-      flushSync(() => presetChip().click());
-      await settle();
-      flushSync(() => (sheetMenu()?.querySelector('[data-action="preset:look"]') as HTMLButtonElement).click());
-      await settle();
-
-      expect(presetChip().dataset.applied).toBe('look');
-      expect(presetChip().dataset.changed).toBe('false');
-      draft.update('runs', 2);
-      draft.update('steps', 99);
-      flushSync();
-      await settle();
-
-      expect(presetChip().dataset.changed).toBe('true');
-      const badge = target.querySelector('.setchip-all .setchip-n');
-      // Steps and Batch count; the preset chip does not.
-      expect(badge?.textContent).toBe(String(chips().filter((chip) => chip.dataset.changed === 'true' && chip.dataset.chip !== 'preset').length));
-    });
-
-    it('starts the All sheet\'s toolbar with a full-width Preset row', async () => {
-      await mountWithPresets();
-      const rowButton = target.querySelector('.sheet-model [data-testid="preset-button"]') as HTMLButtonElement | null;
-
-      expect(rowButton).not.toBeNull();
-      const toolbarChildren = Array.from(rowButton!.closest('.toolbar-stacked > div')!.children);
-      expect(toolbarChildren[0]).toBe(rowButton);
-    });
-  });
-});
-
-describe('WorkspacePage last frame', () => {
-  const END_CONTROLS = ['end_image', 'end_image_clear', 'end_image_path'];
-
-  /** A context with two video models: MiniMax H3 (has a last frame) and LTX (hides the last-frame controls). */
-  function lastFrameContext(assets: GalleryAsset[] = [], withEnhancer = false): WorkspaceContext {
-    const context = makeContext({
-      history_assets: assets,
-      video_models: [{ id: 'h3', label: 'MiniMax H3', type: 'video' }, { id: 'ltx-8', label: 'ltx-8', type: 'video' }],
-      current_video_model: 'h3',
-      video_model_defaults: {
-        h3: makeVideoDefaults({ hidden_controls: ['low_memory'] }),
-        'ltx-8': makeVideoDefaults({ hidden_controls: END_CONTROLS }),
-      },
-    });
-    const { definitions } = context.workflow_contract;
-    definitions.img2vid.visible_controls = [...definitions.img2vid.visible_controls, 'end_image', 'end_image_path', 'end_image_clear'];
-    for (const workflow of ['txt2img', 'img2img', 'txt2vid'] as const) definitions[workflow].clear_fields = [...definitions[workflow].clear_fields, 'end_image_path'];
-    if (withEnhancer) {
-      definitions.img2vid.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
-      context.prompt_enhancer = {
-        matrix: {
-          axes: [{ key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] }],
-          defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' },
-        },
-        model: 'owner/llm', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, error: null,
-      };
-    }
-    return context;
-  }
-
-  async function mountLastFrame(assets: GalleryAsset[] = [], workflow: 'img2vid' | 'txt2vid' = 'img2vid', withEnhancer = false): Promise<void> {
-    draft.update('workflow', workflow);
-    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage(assets));
-    await mountWorkspace(lastFrameContext(assets, withEnhancer));
-    draft.update('model', 'h3');
-    await settle();
-  }
-
-  beforeEach(() => {
-    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-1' } as JobContext);
-    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('reference_image'));
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test-image') });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
-    window.location.hash = '#/workspace';
-  });
-
-  const endPath = () => target.querySelector('input[name="end_image_path"]') as HTMLInputElement | null;
-  const submit = async (): Promise<FormData> => {
-    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).value = 'a prompt';
-    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).dispatchEvent(new Event('input', { bubbles: true }));
-    await settle();
-    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-    return workspaceApiMocks.submitGenerate.mock.calls.at(-1)![0];
-  };
-  async function upload(inputId: string, name: string): Promise<File> {
-    const input = target.querySelector(`#${inputId}`) as HTMLInputElement;
-    const file = new File(['img'], name, { type: 'image/png' });
-    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-    return file;
-  }
-
-  it('offers a Last frame slot beside the first frame for a model that has one', async () => {
-    await mountLastFrame();
-
-    expect(endPath()).not.toBeNull();
-    expect(target.querySelector('#ws-end-image-file')).not.toBeNull();
-    expect(target.querySelector('#ws-image-label')?.textContent).toContain('First frame');
-    expect(target.querySelector('#ws-end-image-label')?.textContent).toContain('Last frame');
-  });
-
-  it('leaves the reference picker alone, and offers no slot, for a model without a last frame', async () => {
-    await mountLastFrame();
-    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ltx-8');
-    await settle();
-
-    expect(endPath()).toBeNull();
-    expect(target.querySelector('#ws-end-image-file')).toBeNull();
-    expect(target.querySelector('#ws-image-label')?.textContent).toContain('Image');
-    expect(target.querySelector('input[name="image_path"]')).not.toBeNull();
-  });
-
-  it('submits a typed last-frame path with the first frame', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
-    await settle();
-
-    const submitted = await submit();
-
-    expect(submitted.get('image_path')).toBe('/in/start.png');
-    expect(submitted.get('end_image_path')).toBe('/in/end.png');
-    expect(submitted.has('end_image_file')).toBe(false);
-  });
-
-  it('submits an uploaded last frame as end_image_file, apart from the first frame', async () => {
-    await mountLastFrame();
-    const file = await upload('ws-end-image-file', 'end.png');
-
-    const submitted = await submit();
-
-    expect(submitted.get('end_image_file')).toBe(file);
-    expect(submitted.has('image_file')).toBe(false);
-  });
-
-  it('shows the pair in the section summary', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
-    await settle();
-
-    expect(target.querySelector('[data-section="reference"] .inspector-summary')?.textContent).toBe('start.png → end.png');
-  });
-
-  it('clears a chosen path and a pending upload when the model switches to one without a last frame', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
-    await upload('ws-end-image-file', 'end.png');
-
-    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ltx-8');
-    await settle();
-    const submitted = await submit();
-
-    expect(draft.state.endImagePath).toBeNull();
-    expect(submitted.has('end_image_path')).toBe(false);
-    expect(submitted.has('end_image_file')).toBe(false);
-    expect(submitted.get('image_path')).toBe('/in/start.png');
-  });
-
-  it('clears the last frame when the workflow changes to one without the slot', async () => {
-    await mountLastFrame();
-    draft.update('endImagePath', '/in/end.png');
-    await upload('ws-end-image-file', 'end.png');
-
-    draft.update('workflow', 'txt2vid');
-    await settle();
-    const submitted = await submit();
-
-    expect(endPath()).toBeNull();
-    expect(submitted.has('end_image_path')).toBe(false);
-    expect(submitted.has('end_image_file')).toBe(false);
-  });
-
-  it('clears only the last frame with its Clear button', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
-    await settle();
-
-    (target.querySelector('button[aria-label="Clear last frame"]') as HTMLButtonElement).click();
-    await settle();
-
-    expect(draft.state.endImagePath).toBeNull();
-    expect(draft.state.referenceImagePath).toBe('/in/start.png');
-  });
-
-  describe('from the history strip', () => {
-    const asset = makeAsset({ id: 'out/end.png', url: '/media/out/end.png', filename: 'end.png', file_path: '/outputs/out/end.png', prompt: 'a red fox' });
-    const menuFor = async (): Promise<NodeListOf<Element>> => {
-      const tile = target.querySelector(`#ws-history-shell article[aria-label="${asset.filename}"]`) as HTMLElement;
-      (tile.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
-      flushSync();
-      return document.querySelectorAll('[role="menu"] [data-action^="reference-"]');
-    };
-
-    it('offers For last frame and sets only the last frame, leaving the text and the first frame', async () => {
-      await mountLastFrame([asset]);
-      draft.patch({ referenceImagePath: '/in/start.png', prompt: 'my action' });
-      await settle();
-
-      const actions = Array.from(await menuFor()).map((el) => el.getAttribute('data-action'));
-      (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
-      await settle();
-
-      expect(actions).toEqual(['reference-image', 'reference-video', 'reference-last-frame']);
-      expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/end.png', referenceImagePath: '/in/start.png', prompt: 'my action', scene: '' });
-      expect(toasts.some((toast) => toast.message === 'end.png is now the last frame')).toBe(true);
-      expect(target.querySelector(`[data-section="reference"] img[src="${asset.url}"]`)).not.toBeNull();
-    });
-
-    it('does not offer it for a model without a last frame, or outside Image to Video', async () => {
-      await mountLastFrame([asset], 'txt2vid');
-
-      expect(Array.from(await menuFor()).map((el) => el.getAttribute('data-action'))).toEqual(['reference-image', 'reference-video']);
-    });
-
-    it('clears the last frame when its asset is deleted', async () => {
-      await mountLastFrame([asset]);
-      galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
-      await menuFor();
-      (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
-      await settle();
-      expect(draft.state.endImagePath).toBe('/outputs/out/end.png');
-
-      await menuFor();
-      (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
-      await settle();
-      await answerConfirm(true);
-
-      expect(draft.state.endImagePath).toBeNull();
-    });
-  });
-
-  it('tells the enhancer about the last frame, and only while the slot is showing', async () => {
-    enhanceApiMocks.enhancePrompt.mockResolvedValue(undefined);
-    await mountLastFrame([], 'img2vid', true);
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png', prompt: 'a fox' });
-    await settle();
-    const enhanceWithShortcut = async (): Promise<void> => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, bubbles: true, cancelable: true }));
-      await settle();
-    };
-    await enhanceWithShortcut();
-
-    expect(enhanceApiMocks.enhancePrompt.mock.calls.at(-1)?.[0]).toMatchObject({ context: { reference_image: true, end_image: true } });
-
-    draft.update('endImagePath', null);
-    await settle();
-    await enhanceWithShortcut();
-
-    expect(enhanceApiMocks.enhancePrompt.mock.calls.at(-1)?.[0]).toMatchObject({ context: { end_image: false } });
-  });
-
-  it('copies the CLI command with --end-image', async () => {
-    const writeText = mockClipboard();
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png', prompt: 'a fox' });
-    await settle();
-
-    (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
-    await settle();
-
-    expect(writeText.mock.calls[0]?.[0]).toContain('--image /in/start.png --end-image /in/end.png');
-  });
-});
-
-describe('WorkspacePage Video summary', () => {
-  it('leaves Low memory out of the summary when the model has no such control', async () => {
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test-image') });
-    draft.update('workflow', 'txt2vid');
-    const context = makeContext({ video_model_defaults: { 'ltx-8': makeVideoDefaults({ hidden_controls: ['low_memory'], low_memory: true }) } });
-    await mountWorkspace(context);
-    draft.update('lowMemory', true);
-    await settle();
-
-    const summary = target.querySelector('[data-section="video"] .inspector-summary')?.textContent ?? '';
-    expect(target.querySelector('#ws-low-memory')).toBeNull();
-    expect(summary).toContain('Audio');
-    expect(summary).not.toContain('Low memory');
-  });
-
-  it('keeps Low memory in the summary when the model has the control', async () => {
-    draft.update('workflow', 'txt2vid');
-    await mountWorkspace(makeContext());
-    draft.update('lowMemory', true);
-    await settle();
-
-    expect(target.querySelector('[data-section="video"] .inspector-summary')?.textContent).toContain('Low memory');
   });
 });

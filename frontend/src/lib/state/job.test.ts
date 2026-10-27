@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readActiveJobId } from './activeJobStorage';
 import { jobStore } from './job.svelte';
 import { reviewVideoUrl } from './jobView';
+import { lastEventSource } from '../../test-utils/eventSource';
 
 describe('jobStore reconnect contract', () => {
   beforeEach(() => {
@@ -16,7 +17,7 @@ describe('jobStore reconnect contract', () => {
 
   it('keeps deleted outputs out when the job later reports its outputs', () => {
     jobStore.startJob({ job_id: 'job-removed', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 2, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     const keep = { id: 'out/keep.png', url: '/media/out/keep.png', thumbnail_url: '', filename: 'keep.png', created_at: '', workflow: 'txt2img', prompt: 'P', model: 'zit', media_type: 'image', reuse_workspace_url: '' };
     const gone = { ...keep, id: 'out/gone.png', url: '/media/out/gone.png', filename: 'gone.png' };
 
@@ -37,9 +38,7 @@ describe('jobStore reconnect contract', () => {
       supported_controls: ['pause', 'resume'],
     });
 
-    const mockEventSource = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void; close: () => void };
-    }).lastInstance;
+    const mockEventSource = lastEventSource();
 
     mockEventSource.emit('job_paused', { type: 'job_paused', job_id: 'job-1' });
     expect(jobStore.current?.paused).toBe(true);
@@ -52,7 +51,7 @@ describe('jobStore reconnect contract', () => {
 
   it('tracks prompts across YAML groups and repeat runs, retaining context during steps', () => {
     jobStore.startJob({ job_id: 'prompts', workflow: 'txt2img', prompt: 'First', model: 'zit', runs: 2, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     source.emit('prompt_started', { type: 'prompt_started', prompt: 'Third', run_index: 0, total_runs: 2, ran_iterations: 3, total_iterations: 6, prompt_index: 0, total_prompts: 1 });
     expect(jobStore.current).toMatchObject({ prompt: 'Third', promptNumber: 3, promptCount: 3, batchIndex: 0, currentStep: 0, totalSteps: 0 });
     source.emit('step_progress', { type: 'step_progress', current_step: 4, total_steps: 20, elapsed_secs: 1 });
@@ -63,7 +62,7 @@ describe('jobStore reconnect contract', () => {
 
   it('distinguishes saving a stored quant from a plain model load', () => {
     jobStore.startJob({ job_id: 'quant', workflow: 'txt2img', prompt: 'a fox', model: 'atlas', runs: 1, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'atlas' });
     const loadingMessage = jobStore.current?.message;
     source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'atlas', phase: 'saving_quant', quantize: 8 });
@@ -73,7 +72,7 @@ describe('jobStore reconnect contract', () => {
 
   it('describes a SeedVR2 download and a copy that replaces it differently from a plain saved copy', () => {
     jobStore.startJob({ job_id: 'seedvr2', workflow: 'upscale', prompt: '', model: 'SeedVR2 7B q8', runs: 1, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'SeedVR2 7B q8', phase: 'downloading', quantize: 8, replaces_download: true });
     expect(jobStore.current).toMatchObject({ loadPhase: 'downloading' });
     const downloading = jobStore.current?.message;
@@ -82,7 +81,7 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current).toMatchObject({ loadPhase: 'saving_quant', loadQuant: 8, loadReplacesDownload: true });
 
     jobStore.startJob({ job_id: 'plain', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
-    const next = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const next = lastEventSource();
     next.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'zit', phase: 'saving_quant', quantize: 8 });
     const plain = jobStore.current?.message;
 
@@ -93,7 +92,7 @@ describe('jobStore reconnect contract', () => {
 
   it('shows enhancer phases and the per-image enhanced prompt, resetting it for the next prompt', () => {
     jobStore.startJob({ job_id: 'enh', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     source.emit('enhancer_loading', { type: 'enhancer_loading', phase: 'downloading' });
     expect(jobStore.current?.message).toBe('Downloading prompt enhancer (first use only)...');
     source.emit('enhancer_loading', { type: 'enhancer_loading', phase: 'loading' });
@@ -111,7 +110,7 @@ describe('jobStore reconnect contract', () => {
 
   it('shows preflight rewrite progress as a stage bar and resets it before generation', () => {
     jobStore.startJob({ job_id: 'pre', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     source.emit('preflight_started', { type: 'preflight_started', mode: 'image', total_iterations: 3, total_rewrites: 3 });
     expect(jobStore.current).toMatchObject({ currentStep: 0, totalSteps: 0, stageName: '' });
     source.emit('prompts_enhancing', { type: 'prompts_enhancing', mode: 'image', index: 2, total: 3 });
@@ -125,7 +124,7 @@ describe('jobStore reconnect contract', () => {
 
   it('takes the per-generation enhance status from prompt_started and clears it when absent', () => {
     jobStore.startJob({ job_id: 'status', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     source.emit('prompt_started', { type: 'prompt_started', prompt: 'a fox', enhance_status: 'failed' });
     expect(jobStore.current).toMatchObject({ enhanceStatus: 'failed', enhancedPrompt: undefined });
     source.emit('step_progress', { type: 'step_progress', current_step: 1, total_steps: 4, elapsed_secs: 1, enhance_status: 'failed' });
@@ -145,7 +144,7 @@ describe('jobStore reconnect contract', () => {
       last_event: { type: 'prompts_enhancing', event_id: 4, index: 2, total: 5 },
     } });
     expect(jobStore.current?.message).toBe('Enhancing prompt 2 of 5...');
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     source.emit('prompts_enhancing', { type: 'prompts_enhancing', event_id: 4, index: 2, total: 5 });
     expect(jobStore.current).toMatchObject({ stageName: 'enhancing_prompts', currentStep: 1, totalSteps: 5 });
     jobStore.clearJob();
@@ -160,7 +159,7 @@ describe('jobStore reconnect contract', () => {
 
   describe('model downloads', () => {
     type Source = { emit: (type: string, data: unknown) => void };
-    const source = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+    const source = (): Source => lastEventSource();
     const progress = { bytes_done: 5, bytes_total: 10, bytes_per_sec: 2, download_eta_secs: 3, repo: 'org/repo', part: 1, parts: 2, shared: false };
 
     it('follows a download from the first event to the model loading, and keeps how a stop left it', () => {
@@ -205,7 +204,7 @@ describe('jobStore reconnect contract', () => {
 
   it('tracks the live preview URL from step versions and clears it when the generation ends', () => {
     jobStore.startJob({ job_id: 'job-preview', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     expect(jobStore.current?.previewUrl).toBeNull();
     source.emit('step_progress', { type: 'step_progress', current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 3 });
     expect(jobStore.current?.previewUrl).toBe('/jobs/job-preview/preview?v=3');
@@ -232,7 +231,7 @@ describe('jobStore reconnect contract', () => {
       prompt: 'P', model: 'zit', runs: 1, created_at: '', event_count: 12, paused: false, preview_version: 7,
       last_event: { type: 'step_progress', event_id: 12, current_step: 5, total_steps: 8 },
     } });
-    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const source = lastEventSource();
     const current = '/jobs/replay-preview/preview?v=7';
     expect(jobStore.current?.previewUrl).toBe(current);
     source.emit('step_progress', { type: 'step_progress', event_id: 3, current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 1 });
@@ -358,9 +357,7 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.prompt).toBe('Recovered prompt');
     expect(readActiveJobId()).toBe('job-reconnect');
 
-    const mockEventSource = (globalThis.EventSource as unknown as {
-      lastInstance: { url: string };
-    }).lastInstance;
+    const mockEventSource = lastEventSource();
     expect(mockEventSource.url).toBe('/jobs/job-reconnect/events');
   });
 
@@ -503,9 +500,7 @@ describe('jobStore reconnect contract', () => {
       runs: 1,
       created_at: '2026-04-22T00:00:00Z',
     });
-    const source = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void; closeCalls: number };
-    }).lastInstance;
+    const source = lastEventSource();
 
     source.emit('job_completed', { type: 'job_completed', job_id: 'job-isolation', total_runs: 1, outputs: [] });
     await Promise.resolve();
@@ -552,9 +547,7 @@ describe('jobStore reconnect contract', () => {
       job_id: 'job-progressive', workflow: 'txt2img', prompt: 'Test prompt', model: 'zit', runs: 3,
       created_at: '2026-04-22T00:00:00Z',
     });
-    const source = (globalThis.EventSource as unknown as {
-      lastInstance: { emit: (type: string, data: unknown) => void };
-    }).lastInstance;
+    const source = lastEventSource();
     const first = makeOutput('first');
     const second = makeOutput('second');
     const terminalOnly = makeOutput('terminal');
@@ -594,9 +587,7 @@ describe('jobStore reconnect contract', () => {
       jobStore.clearJob();
       const jobId = `job-preserve-${index}`;
       jobStore.startJob({ job_id: jobId, workflow: 'txt2img', prompt: 'Test prompt', model: 'zit', runs: 1, created_at: '2026-04-22T00:00:00Z' });
-      const source = (globalThis.EventSource as unknown as {
-        lastInstance: { emit: (type: string, data: unknown) => void };
-      }).lastInstance;
+      const source = lastEventSource();
       const output = makeOutput(`preserved-${index}`);
       source.emit('generation_finished', { type: 'generation_finished', job_id: jobId, status: 'success', asset: output });
       source.emit(testCase.terminal, { type: testCase.terminal, job_id: jobId, total_runs: 1, ...(testCase.outputs === undefined ? {} : { outputs: testCase.outputs }) });
@@ -608,7 +599,7 @@ describe('jobStore reconnect contract', () => {
 
   function startAndLoseStream(jobId: string): void {
     jobStore.startJob({ job_id: jobId, workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '' });
-    (globalThis.EventSource as unknown as { lastInstance: { emitFatalError: () => void } }).lastInstance.emitFatalError();
+    lastEventSource().emitFatalError();
   }
 
   function snapshot(jobId: string, status: string, extra: Record<string, unknown> = {}) {
@@ -674,7 +665,7 @@ describe('jobStore reconnect contract', () => {
       try {
         const fetchMock = vi.fn().mockResolvedValue(snapshot('loop-job', 'running'));
         vi.stubGlobal('fetch', fetchMock);
-        const source = () => (globalThis.EventSource as unknown as { lastInstance: { emitFatalError: () => void } }).lastInstance;
+        const source = () => lastEventSource();
 
         startAndLoseStream('loop-job');
         await vi.advanceTimersByTimeAsync(0);
@@ -723,7 +714,7 @@ describe('jobStore reconnect contract', () => {
 
   describe('when the tab becomes visible again', () => {
     type Source = { emit: (type: string, data: unknown) => void; emitError: () => void; emitFatalError: () => void; closeCalls: number; url: string };
-    type MockEventSourceClass = { instances: Source[]; lastInstance: Source };
+    type MockEventSourceClass = { instances: Source[] };
     const sources = (): MockEventSourceClass => globalThis.EventSource as unknown as MockEventSourceClass;
     const stepEvent = (eventId: number) => ({ type: 'step_progress', event_id: eventId, current_step: eventId, total_steps: 20, elapsed_secs: 1, workflow_stage_name: 'denoise', workflow_stage_index: 0 });
     let stopWatching: () => void;
@@ -759,7 +750,7 @@ describe('jobStore reconnect contract', () => {
       const fetchMock = vi.fn();
       vi.stubGlobal('fetch', fetchMock);
       start('resume-job');
-      const old = sources().lastInstance;
+      const old = lastEventSource();
       const asset = makeOutput('shown');
       old.emit('step_progress', stepEvent(3));
       old.emit('generation_finished', { type: 'generation_finished', event_id: 9, status: 'success', run_index: 0, asset });
@@ -770,9 +761,9 @@ describe('jobStore reconnect contract', () => {
       leaveAndReturn();
 
       expect(sources().instances).toHaveLength(count + 1);
-      expect(sources().lastInstance.url).toMatch(/^\/jobs\/resume-job\/events\?after=9$/);
+      expect(lastEventSource().url).toMatch(/^\/jobs\/resume-job\/events\?after=9$/);
       expect(old.closeCalls).toBe(1);
-      expect(sources().lastInstance.closeCalls).toBe(0);
+      expect(lastEventSource().closeCalls).toBe(0);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(jobStore.current).toEqual(before);
       expect(jobStore.current?.outputs.map((output) => output.id)).toEqual([asset.id]);
@@ -785,13 +776,13 @@ describe('jobStore reconnect contract', () => {
     it('replays from the start after a snapshot reattach, which rebuilds state from the full history', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(snapshot('snap-job', 'running')));
       start('snap-job');
-      sources().lastInstance.emit('step_progress', stepEvent(6));
-      sources().lastInstance.emitFatalError();
+      lastEventSource().emit('step_progress', stepEvent(6));
+      lastEventSource().emitFatalError();
       await vi.advanceTimersByTimeAsync(0);
 
       leaveAndReturn();
 
-      expect(sources().lastInstance.url).toBe('/jobs/snap-job/events');
+      expect(lastEventSource().url).toBe('/jobs/snap-job/events');
     });
 
     it('does nothing without a followed job, while the tab is hidden, or once the job has ended', () => {
@@ -801,7 +792,7 @@ describe('jobStore reconnect contract', () => {
       expect(sources().instances).toHaveLength(count);
 
       start('hidden-job');
-      const live = sources().lastInstance;
+      const live = lastEventSource();
       const liveCount = sources().instances.length;
       setHidden(true);
       document.dispatchEvent(new Event('visibilitychange'));
@@ -835,8 +826,8 @@ describe('jobStore reconnect contract', () => {
 
     it('marks a reconnecting paused review job live again once the stream opens, keeping its controls', async () => {
       start('review-job');
-      sources().lastInstance.emit('job_paused', { type: 'job_paused', event_id: 2, review: { iteration: 1 } });
-      sources().lastInstance.emitError();
+      lastEventSource().emit('job_paused', { type: 'job_paused', event_id: 2, review: { iteration: 1 } });
+      lastEventSource().emitError();
       expect(jobStore.current).toMatchObject({ paused: true, review: { iteration: 1 }, connection: 'reconnecting' });
 
       leaveAndReturn();
@@ -856,7 +847,7 @@ describe('jobStore reconnect contract', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       leaveAndReturn();
-      const attached = sources().lastInstance;
+      const attached = lastEventSource();
       const count = sources().instances.length;
       resolveSnapshot(snapshot('race-job', 'completed'));
       await vi.advanceTimersByTimeAsync(0);
@@ -880,7 +871,7 @@ function makeOutput(id: string) {
 
 describe('jobStore queue', () => {
   type Source = { emit: (type: string, data: unknown) => void };
-  const lastSource = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+  const lastSource = (): Source => lastEventSource();
 
   function snap(jobId: string, status: string, extra: Record<string, unknown> = {}) {
     return { id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'Text to Image', status, prompt: jobId, model: 'zit', runs: 1, created_at: '', event_count: 1, paused: false, supported_controls: [], ...extra };
@@ -1022,7 +1013,7 @@ describe('jobStore queue', () => {
 
 describe('jobStore job card bookkeeping', () => {
   type Source = { emit: (type: string, data: unknown) => void; emitError: () => void; readyState: number };
-  const source = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+  const source = (): Source => lastEventSource();
 
   beforeEach(() => {
     sessionStorage.clear();
@@ -1097,7 +1088,7 @@ describe('jobStore job card bookkeeping', () => {
 
 describe('jobStore review before upscaling', () => {
   type Source = { emit: (type: string, data: unknown) => void };
-  const source = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+  const source = (): Source => lastEventSource();
   const reviewPause = { type: 'job_paused', mode: 'image', review: { iteration: 2 }, preview_version: 6 };
 
   beforeEach(() => {

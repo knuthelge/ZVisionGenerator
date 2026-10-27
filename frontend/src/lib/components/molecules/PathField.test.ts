@@ -1,5 +1,5 @@
 // @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
-import { flushSync, mount, unmount } from '../../node_modules/svelte/src/index-client.js';
+import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const browseApiMocks = vi.hoisted(() => ({
@@ -10,8 +10,8 @@ const browseApiMocks = vi.hoisted(() => ({
 
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
-import PathField from '$lib/components/molecules/PathField.svelte';
-import { chooseInBrowser, listingWith, openBrowser, placesFor } from '../test-utils/pathBrowser';
+import PathField from './PathField.svelte';
+import { chooseInBrowser, listingWith, openBrowser, placesFor } from '../../../test-utils/pathBrowser';
 
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
