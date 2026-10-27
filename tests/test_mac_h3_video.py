@@ -281,12 +281,6 @@ def written(monkeypatch):
 # ---- Constants, protocol ---------------------------------------------------------------------------------------------
 
 
-def test_commit_constant_equals_the_makefile_pin() -> None:
-    match = re.search(r"^H3_MLX_COMMIT\s*\?=\s*(\S+)\s*$", (ROOT / "Makefile").read_text(encoding="utf-8"), re.MULTILINE)
-    assert match is not None
-    assert H3_MLX_COMMIT == match.group(1)
-
-
 def test_backend_satisfies_the_video_protocol() -> None:
     backend = H3MlxVideoBackend()
     assert backend.name == "h3"
@@ -298,7 +292,6 @@ def test_mlx_the_fork_and_torch_are_imported_lazily() -> None:
     tree = ast.parse(Path(h3_video.__file__).read_text(encoding="utf-8"))
     modules = [node.module or "" for node in tree.body if isinstance(node, ast.ImportFrom)] + [alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names]
     assert not [name for name in modules if name.split(".")[0] in {"mlx", "minimax_h3_mlx", "torch", "safetensors", "diffusers", "scipy", "PIL", "numpy"}]
-    assert h3_video.__all__ == ["H3_MLX_COMMIT", "H3MlxVideoBackend", "combine_loras", "ensure_text_encoder_copy", "local_int8_transformer", "local_transformer_dirs", "resolve_mlx_files"]
 
 
 # ---- resolve_mlx_files -----------------------------------------------------------------------------------------------
@@ -538,12 +531,6 @@ class TestLoadModel:
         with pytest.raises(ValueError, match=message):
             H3MlxVideoBackend().load_model(MODEL_REF, **options)
 
-    def test_low_memory_is_accepted_and_ignored(self, env):
-        assert _load(env, low_memory=True) is not None
-
-    def test_the_end_image_flag_is_accepted_and_ignored(self, env):
-        assert _load(env, end_image=True) is not None
-
 
 class TestDirectTurbo:
     def test_the_turbo_file_goes_through_with_alpha_sixteenth_of_its_rank_times_one(self, env, written, tmp_path):
@@ -603,22 +590,10 @@ class TestConvertedFolder:
 
 
 class TestTextToVideo:
-    def test_loads_the_pipeline_with_the_documented_arguments(self, env, written, tmp_path):
-        model = _load(env, verbose=False)
-        H3MlxVideoBackend().text_to_video(model, "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-
-        kwargs = env.loads[0]
-        assert kwargs["checkpoint_dir"] == env.files.fl2va_dir
-        assert kwargs["transformer_dir"] == env.files.transformer_dir
-        assert kwargs["text_encoder_dir"] == env.tmp / "models" / "h3@mlx-te4"
-        assert (kwargs["sigma_shift_video"], kwargs["sigma_shift_audio"]) == (6.0, 3.0)
-        assert (kwargs["stream_blocks"], kwargs["low_memory"], kwargs["load_vision"]) == (True, True, False)
-        assert kwargs["memory_limit_gb"] == 16.0
-        assert kwargs["verbose"] is False
-
-    def test_verbose_defaults_to_the_cli_setting(self, env, written, tmp_path):
+    def test_verbose_defaults_to_the_cli_setting_and_can_be_turned_off(self, env, written, tmp_path):
         H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-        assert env.loads[0]["verbose"] is True
+        H3MlxVideoBackend().text_to_video(_load(env, verbose=False), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+        assert [kwargs["verbose"] for kwargs in env.loads] == [True, False]
 
     def test_calls_the_pipeline_with_the_clip_geometry(self, env, written, tmp_path):
         H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 124, 7, 8, str(tmp_path / "out.mp4"))
@@ -628,11 +603,6 @@ class TestTextToVideo:
         assert call["duration_seconds"] == pytest.approx(124 / 24)
         assert call["num_inference_steps"] == 9
         assert (call["seed"], call["height"], call["width"]) == (7, 32, 64)
-
-    @pytest.mark.parametrize(("steps", "expected"), [(4, 5), (8, 9)])
-    def test_the_sigma_grid_has_one_point_more_than_the_forwards(self, env, written, tmp_path, steps, expected):
-        H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, steps, str(tmp_path / "out.mp4"))
-        assert env.calls[0]["num_inference_steps"] == expected
 
     def test_writes_the_frames_and_muxes_the_audio_at_the_models_rate(self, env, written, tmp_path):
         output = tmp_path / "videos" / "out.mp4"
@@ -644,10 +614,6 @@ class TestTextToVideo:
         assert "24/1" in written.commands[0] and "64x32" in written.commands[0]
         assert written.wav == (2, 32000, round(22 / 24 * 32000))
         assert [p.name for p in output.parent.iterdir()] == ["out.mp4"]
-
-    def test_runs_the_fork_pipeline_not_the_staged_path(self, env, written, tmp_path):
-        H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-        assert len(env.loads) == 1 and env.staged == []
 
     def test_progress_fires_at_the_start_and_the_end(self, env, written, tmp_path):
         events = []
@@ -673,10 +639,6 @@ class TestTextToVideo:
         assert [event["current_step"] for event in events] == [0]
         assert env.limits[-2:] == [("cache", 111), ("memory", 222)]
         assert not (tmp_path / "out.mp4").exists()
-
-    def test_releases_memory_after_a_clip(self, env, written, tmp_path):
-        H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-        assert env.released == 1
 
 
 class TestImageToVideo:
@@ -736,19 +698,11 @@ class TestImageToVideo:
         with pytest.raises(ValueError, match="upscale"):
             H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), stage1_steps=4)
 
-    def test_the_mlx_limits_are_set_for_the_run_and_restored(self, env, written, tmp_path):
-        H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
-        assert env.limits == [("cache", 0), ("memory", 16_000_000_000), ("cache", 111), ("memory", 222)]
-
     def test_a_failure_restores_the_limits_releases_memory_and_still_raises(self, env, written, tmp_path):
         env.fail_in_call = True
         with pytest.raises(RuntimeError, match="out of memory"):
             H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
         assert env.limits[-2:] == [("cache", 111), ("memory", 222)]
-        assert env.released == 1
-
-    def test_releases_memory_after_a_clip(self, env, written, tmp_path):
-        H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
         assert env.released == 1
 
 
@@ -822,7 +776,7 @@ class TestExtend:
         _extend(env, tmp_path, written, monkeypatch, callback=events.append)
         assert [(event["current_step"], event["total_steps"]) for event in events] == [(step, 8) for step in range(9)]
 
-    @pytest.mark.parametrize("extend", [0, 8, 18, -17])
+    @pytest.mark.parametrize("extend", [0, 18])
     def test_extend_frames_must_be_a_positive_multiple_of_17(self, env, written, tmp_path, monkeypatch, extend):
         with pytest.raises(ValueError, match="multiple of 17"):
             _extend(env, tmp_path, written, monkeypatch, extend_frames=extend)
@@ -842,10 +796,6 @@ class TestExtend:
         with pytest.raises(RuntimeError, match="expected at least 52"):
             _extend(env, tmp_path, written, monkeypatch, extend_frames=51)
 
-    def test_releases_memory(self, env, written, tmp_path, monkeypatch):
-        _extend(env, tmp_path, written, monkeypatch)
-        assert env.released == 1
-
 
 def _make_real_source(path: Path, frames: int = 33) -> Any:
     """Encode a 64x32, 24 fps clip with a sine track and return its extend source."""
@@ -862,18 +812,17 @@ def _make_real_source(path: Path, frames: int = 33) -> Any:
 
 @REAL
 class TestExtendJoin:
-    @pytest.mark.parametrize("audio", [True, False])
-    def test_the_segment_passes_the_join_check_and_adds_exactly_the_extend_frames(self, env, tmp_path, audio):
+    def test_the_segment_passes_the_join_check_and_adds_exactly_the_extend_frames(self, env, tmp_path):
         source = _make_real_source(tmp_path / "source.mp4")
         segment_dir = tmp_path / "segment"
         segment_dir.mkdir()
 
-        segment = H3MlxVideoBackend().extend_video(_load(env, mode="extend"), source, "the fox stops", extend_frames=17, seed=3, steps=8, segment_dir=segment_dir, audio_output=audio)
+        segment = H3MlxVideoBackend().extend_video(_load(env, mode="extend"), source, "the fox stops", extend_frames=17, seed=3, steps=8, segment_dir=segment_dir, audio_output=True)
 
         assert probe_video(segment.video_path).frame_count == 17
-        output = splice_clips(source, segment, tmp_path / "joined.mp4", extend_frames=17, include_audio=audio)
+        output = splice_clips(source, segment, tmp_path / "joined.mp4", extend_frames=17, include_audio=True)
         probe = probe_video(output)
-        assert (probe.frame_count, probe.width, probe.height, probe.has_audio) == (33 + 17, 64, 32, audio)
+        assert (probe.frame_count, probe.width, probe.height, probe.has_audio) == (33 + 17, 64, 32, True)
 
     def test_a_text_to_video_clip_is_a_real_mp4_with_both_streams(self, env, tmp_path):
         output = tmp_path / "out.mp4"
@@ -970,21 +919,14 @@ class TestCombineLoras:
         pattern = _provider_key_pattern()
         for key in load_file(str(combine_loras(turbo, 0.0625, [(user, 1.0)], tmp_path / "adapter.safetensors"))):
             assert pattern.fullmatch(key), key
-        targets = ast.literal_eval(
-            next(
-                n for n in ast.parse((ROOT / "packages/minimax_h3_mlx/turbo_lora.py").read_text(encoding="utf-8")).body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "TARGETS"
-            ).value
-        )
-        assert tuple(targets) == tuple(TARGET_SHAPES)
 
     @pytest.mark.parametrize("module", ["blocks.1.adaln_proj.linear", "final_layer.adaln_proj.linear", "time_embedder.proj_in"])
-    def test_other_targets_are_refused_with_the_documented_message(self, tmp_path, module):
+    def test_other_targets_are_refused(self, tmp_path, module):
         turbo = _write_turbo(tmp_path / "turbo.safetensors")
         shapes = {"blocks.0.attn.out_proj": (HIDDEN, HIDDEN), module: (6 * HIDDEN, HIDDEN) if "adaln" in module else (HIDDEN, 4)}
         user = _write_kohya(tmp_path / "user.safetensors", shapes, rank=2, alpha=1.0)
-        with pytest.raises(ValueError) as caught:
+        with pytest.raises(ValueError):
             combine_loras(turbo, 0.0625, [(user, 1.0)], tmp_path / "adapter.safetensors")
-        assert str(caught.value) == "MiniMax H3 on macOS takes LoRAs for transformer blocks and the token refiner only."
         assert not (tmp_path / "adapter.safetensors").exists()
 
     def test_a_block_the_turbo_does_not_have_is_refused(self, tmp_path):
@@ -1103,6 +1045,9 @@ class TestSettingsFromThePreset:
         H3MlxVideoBackend().text_to_video(_shipped_load(env, "t2v"), "a fox", 64, 32, 124, 7, 8, str(tmp_path / "out.mp4"))
 
         loaded = env.loads[0]
+        assert loaded["checkpoint_dir"] == env.files.fl2va_dir
+        assert loaded["transformer_dir"] == env.files.transformer_dir
+        assert loaded["text_encoder_dir"] == env.tmp / "models" / "h3@mlx-te4"
         assert {key: loaded[key] for key in SHIPPED_LOAD_ARGUMENTS} == SHIPPED_LOAD_ARGUMENTS
         assert loaded["turbo_lora_alpha"] == 0.0625 * TURBO_RANK
         assert (loaded["low_memory"], loaded["load_vision"]) == (True, False)

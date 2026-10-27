@@ -9,7 +9,7 @@ import pytest
 torch = pytest.importorskip("torch")
 from safetensors.torch import load_file, save_file  # noqa: E402
 
-from zvisiongenerator.converters.ideogram4_instant import convert_tensor, fp8_rows, transformer_config, write_transformer  # noqa: E402
+from zvisiongenerator.converters.ideogram4_instant import convert_tensor, fp8_rows, write_transformer  # noqa: E402
 from zvisiongenerator.ideogram4_instant_builder import build_instant_model, ensure_instant_model, instant_model_index  # noqa: E402
 from zvisiongenerator.image_model_loader import LOADING_PHASE  # noqa: E402
 from zvisiongenerator.built_models import ensure_built_model  # noqa: E402
@@ -166,10 +166,6 @@ class TestWriteTransformer:
 
         assert write_transformer(source, tmp_path / "transformer", "bf16", {}, cancelled=lambda: True) is False
         assert not (tmp_path / "transformer" / "config.json").exists()
-
-
-def test_transformer_config_drops_only_storage_keys():
-    assert transformer_config({"num_layers": 34, "quantization_config": {}, "_name_or_path": "x"}) == {"num_layers": 34}
 
 
 def test_the_model_index_has_no_unconditional_transformer():

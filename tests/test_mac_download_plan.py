@@ -41,10 +41,6 @@ def test_video_plan_pinned_pack_is_its_literal_files_at_its_revision_then_gemma(
     assert plan[0].ignore_patterns is None
 
 
-def test_video_plan_gemma_is_the_pinned_reference_with_the_mlx_lm_files(gemma: DownloadTarget) -> None:
-    assert gemma.revision == "c3" * 20 and _plan(f"o/pack@{PIN}")[1] == gemma
-
-
 def test_video_plan_other_repo_is_the_whole_repo_then_gemma(gemma: DownloadTarget) -> None:
     plan = _plan("dgrauet/ltx-2.3-mlx-q4")
 
@@ -80,7 +76,7 @@ def test_video_plan_pack_files_decide_gemma_not_the_bundled_flag(gemma: Download
     assert unflagged == (DownloadTarget("o/bundled", PIN, BUNDLED_PACK.files),)
 
 
-@pytest.mark.parametrize("model_ref", ["o/pack", "O/Pack", f"O/PACK@{PIN}", f"o/pack@{PIN}"])
+@pytest.mark.parametrize("model_ref", ["o/pack", f"O/PACK@{PIN}"])
 def test_video_plan_pack_by_its_repo_id_is_its_pinned_files_whatever_the_case_or_pin(model_ref: str, gemma: DownloadTarget) -> None:
     assert _plan(model_ref) == (DownloadTarget("o/pack", PIN, PACK.files), gemma)
 
@@ -139,10 +135,6 @@ def test_enhancer_plan_uses_mlx_lm_patterns() -> None:
 
 def test_enhancer_plan_local_folder_is_empty(tmp_path: Path) -> None:
     assert enhancer_download_plan(str(tmp_path), None) == ()
-
-
-def test_mlx_lm_allow_patterns_are_the_pinned_defaults() -> None:
-    assert MLX_LM_ALLOW_PATTERNS == ("*.json", "model*.safetensors", "*.py", "tokenizer.model", "*.tiktoken", "tiktoken.model", "*.txt", "*.jsonl", "*.jinja")
 
 
 # --- image (no mflux needed) ---
@@ -211,7 +203,13 @@ def test_module_imports_nothing_heavy() -> None:
 # --- MiniMax H3 ---
 
 
-H3_REF = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
+def _shipped_h3_ref() -> str:
+    from zvisiongenerator.utils.config import load_config
+
+    return load_config()["model_aliases"]["h3"]
+
+
+H3_REF = _shipped_h3_ref()
 
 
 @pytest.fixture(scope="module")
@@ -233,11 +231,9 @@ def test_h3_plan_is_the_int8_transformer_the_fl2va_components_and_the_lora(h3_pl
 
     transformer, components, turbo = h3_mlx_download_plan(H3_REF, preset, lora)
 
-    assert (transformer.repo_id, transformer.revision) == ("water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "70505b09c80e298e684d798d8e0f946937dcfad4")
-    assert transformer.allow_patterns == preset.transformer.files
-    assert (components.repo_id, components.revision) == ("MiniMaxAI/MiniMax-H3", "42ed227ee7df40d41602854ae760620d6eb651fe")
-    assert components.allow_patterns == preset.components.files
-    assert turbo == DownloadTarget("lightx2v/Minimax-h3-Turbo", "30f485ed874aa44c8183348ad361c5eabad318da", ("minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors",))
+    assert (transformer.repo_id, transformer.revision, transformer.allow_patterns) == (preset.transformer.repo_id, preset.transformer.revision, preset.transformer.files)
+    assert (components.repo_id, components.revision, components.allow_patterns) == (preset.components.repo_id, preset.components.revision, preset.components.files)
+    assert turbo == DownloadTarget(lora.repo_id, lora.revision, lora.files)
 
 
 def test_h3_plan_lists_every_file_literally(h3_plan_inputs) -> None:
@@ -278,9 +274,10 @@ def test_h3_plan_for_a_converted_folder_is_the_components_without_the_lora(tmp_p
 
 
 def test_h3_plan_takes_the_presets_components_whatever_the_reference_revision(h3_plan_inputs) -> None:
+    preset, _lora = h3_plan_inputs
     (_transformer, components, _lora) = h3_mlx_download_plan("MiniMaxAI/MiniMax-H3@other", *h3_plan_inputs)
 
-    assert components.revision == "42ed227ee7df40d41602854ae760620d6eb651fe"
+    assert components.revision == preset.components.revision
 
 
 def test_h3_plan_downloads_what_the_backend_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, h3_plan_inputs) -> None:

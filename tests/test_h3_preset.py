@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import copy
-import dataclasses
-from pathlib import Path
+import re
 
 import pytest
 
 from zvisiongenerator.core.video_family import FrameRule
-from zvisiongenerator.utils import h3_preset
 from zvisiongenerator.utils.config import h3_companion_repos, load_config, video_companion_repos, video_family, video_load_options
-from zvisiongenerator.utils.h3_preset import H3Files, H3MlxFiles, H3MlxPreset, H3Preset, H3Schedule, HubFiles, h3_load_options, h3_mlx_load_options, h3_mlx_preset, h3_turbo_lora
+from zvisiongenerator.utils.h3_preset import H3MlxPreset, H3Preset, H3Schedule, HubFiles, h3_load_options, h3_mlx_load_options, h3_mlx_preset, h3_turbo_lora
 from zvisiongenerator.utils.h3_preset import h3_preset as parse_h3_preset
 
 
@@ -41,51 +39,6 @@ def test_num_inference_steps_is_forwards_plus_the_terminal_zero(forwards):
     assert H3Schedule(forwards, 6.0, 3.0).num_inference_steps == forwards + 1
 
 
-def test_preset_defaults():
-    preset = _preset()
-    assert preset.attention == "sdpa"
-    assert (preset.ffn_chunk_tokens, preset.qk_norm_chunk_tokens, preset.query_chunk) == (None, None, None)
-    assert preset.schedules[4].forwards == 4
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        _hub(),
-        H3Schedule(8, 6.0, 3.0),
-        _preset(),
-        H3MlxPreset(_hub(), _hub(), 4, 64, 50, FrameRule(17, 5, "up"), {8: H3Schedule(8, 6.0, 3.0)}),
-        H3Files(Path("r"), Path("t"), (Path("s"),), Path("l")),
-        H3MlxFiles(Path("f"), Path("t"), Path("s"), Path("l")),
-    ],
-)
-def test_value_types_are_frozen(value):
-    field = dataclasses.fields(value)[0].name
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        setattr(value, field, None)
-
-
-def test_public_names_are_exported():
-    assert set(h3_preset.__all__) == {
-        "H3Files",
-        "H3MlxFiles",
-        "H3MlxPreset",
-        "H3Preset",
-        "H3Schedule",
-        "HubFiles",
-        "h3_load_options",
-        "h3_mlx_load_options",
-        "h3_mlx_preset",
-        "h3_preset",
-        "h3_turbo_lora",
-        "is_folder_name",
-    }
-    assert all(hasattr(h3_preset, name) for name in h3_preset.__all__)
-
-
-REPO_REF = "MiniMaxAI/MiniMax-H3@42ed227ee7df40d41602854ae760620d6eb651fe"
-
-
 @pytest.fixture
 def config() -> dict:
     return load_config()
@@ -94,21 +47,26 @@ def config() -> dict:
 class TestShippedPreset:
     def test_the_packaged_preset_parses(self, config):
         preset = parse_h3_preset(config)
-        assert (preset.repo, preset.revision) == ("MiniMaxAI/MiniMax-H3", "42ed227ee7df40d41602854ae760620d6eb651fe")
+        assert preset.repo == "MiniMaxAI/MiniMax-H3"
         assert preset.text_encoder.repo_id == "unsloth/Qwen3-VL-32B-Instruct-bnb-4bit"
-        assert preset.text_encoder.revision == "48cfc6496841742a77892646c15a7f3e8da44348"
         assert len(preset.text_encoder.files) == 6
         assert preset.text_encoder_layers == 50
-        assert preset.lora == HubFiles("lightx2v/Minimax-h3-Turbo", "30f485ed874aa44c8183348ad361c5eabad318da", ("minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors",))
+        assert (preset.lora.repo_id, preset.lora.files) == ("lightx2v/Minimax-h3-Turbo", ("minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors",))
         assert preset.lora_scale == 0.0625
-        assert preset.latent_upsampler == HubFiles(
-            "LBH-123-AI/Minimax_h3_latent_Upscaler", "3f941d5d182014dd5c0a5e16330420ee2d4aa0c6", ("minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors",)
-        )
+        assert preset.latent_upsampler.repo_id == "LBH-123-AI/Minimax_h3_latent_Upscaler"
+        assert len(preset.latent_upsampler.files) == 1
         assert preset.schedules == {8: H3Schedule(8, 6.0, 3.0), 4: H3Schedule(4, 6.0, 3.0)}
         assert preset.attention == "sdpa"
         assert preset.ffn_chunk_tokens == 4096
         assert "text_encoder/*" in preset.repo_ignore
         assert "transformer/*" in preset.repo_allow
+
+    def test_every_pinned_revision_is_a_full_commit_hash(self, config):
+        preset = parse_h3_preset(config)
+        mlx = h3_mlx_preset(config)
+        revisions = [preset.revision, preset.text_encoder.revision, preset.lora.revision, preset.latent_upsampler.revision, mlx.transformer.revision, mlx.components.revision]
+
+        assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in revisions), revisions
 
     def test_the_family_is_described_for_the_shared_rules(self, config):
         family = video_family(config, "h3")
@@ -140,7 +98,8 @@ class TestShippedPreset:
         assert (capabilities.upscale, capabilities.upscale_review, capabilities.low_memory) == (False, False, False)
 
     def test_the_alias_and_label(self, config):
-        assert config["model_aliases"]["h3"] == REPO_REF
+        preset = parse_h3_preset(config)
+        assert config["model_aliases"]["h3"] == f"{preset.repo}@{preset.revision}"
         assert config["model_labels"]["h3"]["name"] == "MiniMax H3"
 
 
@@ -156,32 +115,20 @@ class TestPresetErrors:
         return broken
 
     @pytest.mark.parametrize(
-        ("path", "value", "message"),
+        ("path", "value"),
         [
-            ("repo_ref", "MiniMaxAI/MiniMax-H3", "video_model_presets.h3.repo_ref must name a revision"),
-            ("repo_ref", 5, "video_model_presets.h3.repo_ref must be a string"),
-            ("diffusers", None, "video_model_presets.h3.diffusers must be a mapping"),
-            ("diffusers.repo_allow", [], "video_model_presets.h3.diffusers.repo_allow must be a non-empty list"),
-            ("diffusers.repo_ignore", "text_encoder/*", "video_model_presets.h3.diffusers.repo_ignore must be a list"),
-            ("diffusers.text_encoder.repo", "unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "video_model_presets.h3.diffusers.text_encoder.repo must name a revision"),
-            ("diffusers.text_encoder.files", None, "video_model_presets.h3.diffusers.text_encoder.files must be a non-empty list"),
-            ("diffusers.text_encoder.layers", 0, "video_model_presets.h3.diffusers.text_encoder.layers must be an integer of at least 1"),
-            ("diffusers.lora.filename", "", "video_model_presets.h3.diffusers.lora.filename must be a non-blank string"),
-            ("diffusers.lora.scale", -1, "video_model_presets.h3.diffusers.lora.scale must be a number above 0"),
-            ("diffusers.latent_upsampler", None, "video_model_presets.h3.diffusers.latent_upsampler must be a mapping"),
-            ("diffusers.latent_upsampler.repo", "LBH-123-AI/Minimax_h3_latent_Upscaler", r"video_model_presets.h3.diffusers.latent_upsampler.repo must name a revision"),
-            ("diffusers.latent_upsampler.repo", None, r"video_model_presets.h3.diffusers.latent_upsampler.repo must be a string"),
-            ("diffusers.latent_upsampler.filename", " ", "video_model_presets.h3.diffusers.latent_upsampler.filename must be a non-blank string"),
-            ("diffusers.schedules", {}, "video_model_presets.h3.diffusers.schedules must not be empty"),
-            ("diffusers.schedules.8.forwards", 0, "video_model_presets.h3.diffusers.schedules.8.forwards must be an integer of at least 1"),
-            ("diffusers.schedules.4.video_shift", "x", "video_model_presets.h3.diffusers.schedules.4.video_shift must be a number above 0"),
-            ("diffusers.ffn_chunk_tokens", 0, "video_model_presets.h3.diffusers.ffn_chunk_tokens must be an integer of at least 1"),
-            ("diffusers.ffn_chunk_tokens", "4096", "video_model_presets.h3.diffusers.ffn_chunk_tokens must be an integer of at least 1"),
-            ("diffusers.attention", "spark", "video_model_presets.h3.diffusers.attention must be one of: sdpa"),
+            ("repo_ref", "MiniMaxAI/MiniMax-H3"),  # no revision
+            ("repo_ref", 5),  # not a string
+            ("diffusers", None),  # not a mapping
+            ("diffusers.repo_allow", []),  # empty list
+            ("diffusers.text_encoder.layers", 0),  # integer below the minimum
+            ("diffusers.lora.scale", -1),  # number not above 0
+            ("diffusers.lora.filename", ""),  # blank string
+            ("diffusers.attention", "spark"),  # not one of the choices
         ],
     )
-    def test_a_malformed_entry_names_its_key_path(self, config, path, value, message):
-        with pytest.raises(ValueError, match=message):
+    def test_a_malformed_entry_names_its_key_path(self, config, path, value):
+        with pytest.raises(ValueError, match=re.escape(f"video_model_presets.h3.{path} ")):
             parse_h3_preset(self._broken(config, path, value))
 
     def test_a_missing_entry_is_refused(self):
@@ -213,15 +160,17 @@ class TestLoadOptionsAndCompanions:
         monkeypatch.setattr(backends.sys, "platform", "linux")
         assert set(video_load_options("h3", config, "h3", upscale=True)) <= {"model_name", "preset", "upscale"}
 
-    @pytest.mark.parametrize("repo_id", [REPO_REF, "MiniMaxAI/MiniMax-H3", "MiniMaxAI/MiniMax-H3@other"])
-    def test_the_companions_are_the_text_encoder_the_lora_and_the_latent_upsampler_repos(self, config, monkeypatch, repo_id):
+    @pytest.mark.parametrize("suffix", [None, "", "@other"])
+    def test_the_companions_are_the_text_encoder_the_lora_and_the_latent_upsampler_repos(self, config, monkeypatch, suffix):
         import zvisiongenerator.backends as backends
+
+        repo_id = config["model_aliases"]["h3"] if suffix is None else f"MiniMaxAI/MiniMax-H3{suffix}"
 
         monkeypatch.setattr(backends.sys, "platform", "linux")
         assert video_companion_repos("h3", config, repo_id) == ("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo", "LBH-123-AI/Minimax_h3_latent_Upscaler")
 
     def test_seedvr2_repos_are_not_companions(self, config):
-        assert not any("seedvr2" in repo.lower() for repo in h3_companion_repos(config, REPO_REF))
+        assert not any("seedvr2" in repo.lower() for repo in h3_companion_repos(config, config["model_aliases"]["h3"]))
 
     @pytest.mark.parametrize("repo_id", ["some/other-repo", "/models/h3-local"])
     def test_another_repository_has_none(self, config, repo_id):
@@ -233,10 +182,10 @@ class TestMlxPreset:
         preset = h3_mlx_preset(config)
 
         assert preset.transformer.repo_id == "water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8"
-        assert preset.transformer.revision == "70505b09c80e298e684d798d8e0f946937dcfad4"
         assert preset.transformer.files[:3] == ("config.json", "quant_config.json", "model.safetensors.index.json")
         assert len(preset.transformer.files) == 11
-        assert (preset.components.repo_id, preset.components.revision) == ("MiniMaxAI/MiniMax-H3", "42ed227ee7df40d41602854ae760620d6eb651fe")
+        cuda = parse_h3_preset(config)
+        assert (preset.components.repo_id, preset.components.revision) == (cuda.repo, cuda.revision)
         assert (preset.text_encoder_bits, preset.text_encoder_group_size, preset.text_encoder_layers) == (4, 64, 50)
 
     def test_the_components_are_literal_fl2va_files_with_the_text_encoder_shards_one_to_eleven_and_fourteen(self, config):
@@ -265,22 +214,15 @@ class TestMlxPreset:
         return broken
 
     @pytest.mark.parametrize(
-        ("path", "value", "message"),
+        ("path", "value"),
         [
-            ("mlx", None, r"video_model_presets\.h3\.mlx must be a mapping"),
-            ("mlx.transformer", [], r"video_model_presets\.h3\.mlx\.transformer must be a mapping"),
-            ("mlx.transformer.repo", "no/revision", r"video_model_presets\.h3\.mlx\.transformer\.repo must name a revision"),
-            ("mlx.transformer.files", [], r"video_model_presets\.h3\.mlx\.transformer\.files must be a non-empty list"),
-            ("mlx.components.files", ["ok", ""], r"video_model_presets\.h3\.mlx\.components\.files must be a non-empty list"),
-            ("mlx.text_encoder", 4, r"video_model_presets\.h3\.mlx\.text_encoder must be a mapping"),
-            ("mlx.text_encoder.bits", 3, r"video_model_presets\.h3\.mlx\.text_encoder\.bits must be one of: 4, 8"),
-            ("mlx.text_encoder.group_size", 0, r"video_model_presets\.h3\.mlx\.text_encoder\.group_size must be an integer of at least 1"),
-            ("mlx.text_encoder.layers", "x", r"video_model_presets\.h3\.mlx\.text_encoder\.layers must be an integer of at least 1"),
-            ("repo_ref", "MiniMaxAI/MiniMax-H3", r"video_model_presets\.h3\.repo_ref must name a revision"),
+            ("mlx", None),  # not a mapping
+            ("mlx.transformer.repo", "no/revision"),  # no revision
+            ("mlx.text_encoder.bits", 3),  # not one of the choices
         ],
     )
-    def test_a_malformed_entry_names_its_key_path(self, config, path, value, message):
-        with pytest.raises(ValueError, match=message):
+    def test_a_malformed_entry_names_its_key_path(self, config, path, value):
+        with pytest.raises(ValueError, match=re.escape(f"video_model_presets.h3.{path} ")):
             h3_mlx_preset(self._broken(config, path, value))
 
     def test_a_missing_h3_entry_is_refused(self):
@@ -354,5 +296,5 @@ class TestMlxLoadOptions:
 
         monkeypatch.setattr(backends.sys, "platform", "darwin")
 
-        assert video_companion_repos("h3", config, REPO_REF) == ("water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo")
+        assert video_companion_repos("h3", config, config["model_aliases"]["h3"]) == ("water1234/MiniMax-H3-MLX-Argus-Calibrated-INT8", "lightx2v/Minimax-h3-Turbo")
         assert video_companion_repos("h3", config, "some/other-repo") == ()

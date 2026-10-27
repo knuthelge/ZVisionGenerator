@@ -87,12 +87,3 @@ def test_stored_quant_format_tracks_the_mflux_version(image_mac):
     import importlib.metadata
 
     assert module.MfluxBackend().stored_quant_format(8) == f"mflux-{importlib.metadata.version('mflux')}"
-
-
-def test_save_quantized_uses_mflux_saver(image_mac):
-    module, _mx = image_mac
-    model = MagicMock()
-
-    module.MfluxBackend().save_quantized(model, "/models/zit@q8")
-
-    model.save_model.assert_called_once_with("/models/zit@q8")

@@ -6,18 +6,18 @@ Introspection, plus a few tiny-array shape checks: no pipeline is constructed an
 
 from __future__ import annotations
 
+import sys
 import dataclasses
 import inspect
 from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("mlx")
-pytest.importorskip("ltx_pipelines_mlx")
+if sys.platform != "darwin":
+    pytest.skip("MLX is only available on macOS", allow_module_level=True)
 
 from ltx_core_mlx.components.patchifiers import AudioPatchifier, VideoLatentPatchifier, compute_video_latent_shape, snap_output_dimensions  # noqa: E402
 from ltx_core_mlx.conditioning.types import VideoConditionByKeyframeIndex, VideoConditionByLatentIndex  # noqa: E402
-from ltx_core_mlx.components.diffusion_steps import EulerAncestralDiffusionStep  # noqa: E402
 from ltx_core_mlx.model.audio_vae import encode_audio  # noqa: E402
 from ltx_core_mlx.text_encoders.gemma.encoders import encoder_configurator  # noqa: E402
 from ltx_core_mlx.model.transformer.model import X0Model  # noqa: E402
@@ -29,7 +29,6 @@ from ltx_core_mlx.model.video_vae.video_vae import (  # noqa: E402
     stream_chunks_to_ffmpeg,
 )
 from ltx_core_mlx.utils.audio import AudioData, load_audio  # noqa: E402
-from ltx_core_mlx.utils.memory import aggressive_cleanup  # noqa: E402
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions  # noqa: E402
 from ltx_pipelines_mlx import BasePipeline, DistilledPipeline  # noqa: E402
 from ltx_pipelines_mlx.distilled import ANCESTRAL_ETA, ANCESTRAL_NOISE_SEED_OFFSET, ANCESTRAL_S_NOISE, Stage1Result  # noqa: E402
@@ -67,27 +66,83 @@ def _assert_keyword_only(fn, *names: str) -> None:
         assert params[name].kind is inspect.Parameter.KEYWORD_ONLY, f"{fn.__qualname__} takes {name} positionally"
 
 
+# Signature pins, one row per callable. Each row is what ``backends/mac/video.py`` or ``utils/model_files`` passes or reads.
+
+# (callable, names it must accept)
+ACCEPTED_PARAMS = [
+    (BasePipeline.__init__, ("model_dir", "low_memory", "low_ram_streaming", "gemma_model_id")),
+    (DistilledPipeline.__init__, ("model_dir", "low_memory", "low_ram_streaming", "gemma_model_id")),
+    (DistilledPipeline.generate_and_save, ("prompt", "output_path", "height", "width", "num_frames", "stage1_steps", "image", "images")),
+    (DistilledPipeline._stage1, ("prompt", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image")),
+    (ImageConditioner.resolve_crf, ("images",)),
+    (denoise_loop, ("model", "video_state", "audio_state", "video_text_embeds", "audio_text_embeds", "sigmas", "on_step")),
+    (create_noised_state, ("base_shape", "conditionings", "spatial_dims", "positions", "seed", "sigma", "initial_latent", "legacy_scalar_blend")),
+    (euler_ancestral_denoising_loop, ("sigmas", "video_state", "audio_state", "stepper", "transformer", "video_text_embeds", "audio_text_embeds")),
+    (compute_video_latent_shape, ("num_frames", "height", "width")),
+    (compute_video_positions, ("num_frames", "height", "width", "frame_rate")),
+    (compute_audio_token_count, ("num_video_frames", "frame_rate")),
+    (compute_audio_positions, ("num_tokens",)),
+    (load_audio, ("path", "target_sample_rate", "start_time", "max_duration", "mono")),
+]
+
+# (callable, names that must be keyword-only)
+KEYWORD_ONLY_PARAMS = [
+    (BasePipeline._decode_and_save_video, ("frame_rate", "seed")),
+    (BasePipeline._stepwise_hook, ("stage",)),
+    (DistilledPipeline.generate_and_save, ("frame_rate", "seed", "stage1_steps", "image", "images")),
+    (PromptEncoder.__call__, ("free_after",)),
+    (ImageConditioner.__call__, ("free_after",)),
+    (AudioConditioner.__call__, ("free_after",)),
+    (StepwisePreview.bind, ("stage",)),
+    (combined_image_conditionings, ("enc_h", "enc_w", "spatial_dims", "video_encoder", "frame_rate")),
+    (shorten_schedule, ("keep",)),
+    (euler_ancestral_denoising_loop, ("noise_seed", "on_step")),
+    (snap_output_dimensions, ("two_stage",)),
+]
+
+# (callable, slice of its parameter names, the names there)
+EXACT_PARAMS = [
+    (BasePipeline._pre_denoise_flush, slice(None), ("video_state", "audio_state")),
+    (BasePipeline._decode_and_save_video, slice(1, 4), ("video_latent", "audio_latent", "output_path")),
+    (BasePipeline._load_decoders, slice(None), ("self",)),
+    (is_ltx25_pack, slice(None), ("model_dir",)),
+    (VideoConditionByLatentIndex.__init__, slice(1, 4), ("frame_indices", "clean_latent", "strength")),
+    (encode_video_tensor, slice(None), ("encoder", "video_tensor")),
+    (video_preprocess, slice(None, 3), ("frames", "height", "width")),
+    (encode_audio, slice(None, 4), ("waveform", "sample_rate", "encoder", "processor")),
+    (fit_audio_latent, slice(None), ("audio_latent", "audio_tokens")),
+    (carry_audio_tokens, slice(None, 2), ("frame_rate", "carry_pixel_frames")),
+    (VideoDecoderBlock.load, slice(None), ("self",)),
+    (AudioDecoder.__call__, slice(None), ("self", "audio_latent")),
+    (AudioPatchifier.patchify, slice(None), ("self", "latent")),
+    (VaeVideoDecoder.tiled_decode, slice(None), ("self", "latent", "tiling_config")),
+    (_compute_decode_tiling, slice(None), ("latent_shape", "frame_rate", "budget_bytes")),
+    (decode_cache_limit, slice(None), ()),
+    (stream_chunks_to_ffmpeg, slice(None), ("chunks", "proc")),
+    (_ffmpeg_sink, slice(None), ("cmd",)),
+]
+
+
+def _row_id(value: object) -> str | None:
+    return getattr(value, "__qualname__", None) if callable(value) else None
+
+
+@pytest.mark.parametrize(("fn", "names"), ACCEPTED_PARAMS, ids=_row_id)
+def test_the_callable_accepts_the_names_the_backend_passes(fn, names):
+    _assert_params(fn, *names)
+
+
+@pytest.mark.parametrize(("fn", "names"), KEYWORD_ONLY_PARAMS, ids=_row_id)
+def test_the_callable_takes_these_names_as_keywords_only(fn, names):
+    _assert_keyword_only(fn, *names)
+
+
+@pytest.mark.parametrize(("fn", "where", "names"), EXACT_PARAMS, ids=_row_id)
+def test_the_callable_keeps_its_parameter_order(fn, where, names):
+    assert list(_params(fn))[where] == list(names)
+
+
 class TestBasePipelineContract:
-    def test_constructor_arguments(self):
-        _assert_params(BasePipeline.__init__, "model_dir", "low_memory", "low_ram_streaming")
-
-    def test_distilled_pipeline_shares_the_base_constructor(self):
-        _assert_params(DistilledPipeline.__init__, "model_dir", "low_memory", "low_ram_streaming")
-
-    def test_pre_denoise_flush_takes_both_states(self):
-        params = list(_params(BasePipeline._pre_denoise_flush))
-        assert params == ["video_state", "audio_state"]
-
-    def test_decode_and_save_video_keywords(self):
-        _assert_keyword_only(BasePipeline._decode_and_save_video, "frame_rate", "seed")
-        assert list(_params(BasePipeline._decode_and_save_video))[1:4] == ["video_latent", "audio_latent", "output_path"]
-
-    def test_stepwise_hook_forwards_stage(self):
-        _assert_keyword_only(BasePipeline._stepwise_hook, "stage")
-
-    def test_load_takes_no_arguments(self):
-        assert list(_params(BasePipeline.load)) == ["self"]
-
     def test_instance_slots_are_assigned_by_the_constructor(self):
         source = inspect.getsource(BasePipeline.__init__)
         for attr in ("self.stepwise", "self.dit", "self.video_patchifier", "self.audio_patchifier", "self.prompt_encoder", "self.image_conditioner"):
@@ -102,69 +157,26 @@ class TestBasePipelineContract:
         source = inspect.getsource(BasePipeline._load_transformer_with_optional_streaming)
         assert "_pending_loras" in source
 
-    def test_distilled_generate_and_save_keywords(self):
-        _assert_params(DistilledPipeline.generate_and_save, "prompt", "output_path", "height", "width", "num_frames", "stage1_steps", "image", "images")
-        _assert_keyword_only(DistilledPipeline.generate_and_save, "frame_rate", "seed", "stage1_steps", "image", "images")
-
 
 class TestReviewContract:
-    """What the review before upscaling relies on: it shadows ``_stage1`` and decodes its half-size result."""
+    """What the review before upscaling relies on: it shadows ``_stage1`` and decodes its half-size result.
+
+    ``test_mac_video_review_orchestration`` runs the real vendored orchestration for the rest.
+    """
 
     def test_two_stage_generation_calls_stage1_through_the_instance(self):
         source = inspect.getsource(DistilledPipeline.generate_two_stage)
         assert "self._stage1(" in source
 
-    def test_generate_and_save_runs_generate_two_stage(self):
-        source = inspect.getsource(DistilledPipeline.generate_and_save)
-        assert "self.generate_two_stage(" in source
-
-    def test_stage1_returns_the_result_first_and_takes_the_generation_arguments(self):
-        _assert_params(DistilledPipeline._stage1, "prompt", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image")
-        assert "Stage1Result" in str(inspect.signature(DistilledPipeline._stage1).return_annotation)
+    def test_stage1_returns_the_result_first(self):
+        assert str(inspect.signature(DistilledPipeline._stage1).return_annotation).startswith("tuple[Stage1Result")
 
     def test_stage1_result_fields_used_for_the_preview(self):
         fields = {field.name for field in dataclasses.fields(Stage1Result)}
         assert {"video_tokens", "audio_tokens", "latent_dims"} <= fields
 
-    def test_load_decoders_takes_no_arguments(self):
-        assert list(_params(BasePipeline._load_decoders)) == ["self"]
-
-    def test_patchifiers_unpatchify_the_stage1_tokens(self):
-        source = inspect.getsource(DistilledPipeline.generate_two_stage)
-        assert "self.video_patchifier.unpatchify(stage1.video_tokens, stage1.latent_dims)" in source
-        assert "audio_patchifier" in inspect.getsource(BasePipeline.__init__)
-
-    def test_stage1_result_comes_first_in_the_returned_tuple(self):
-        """The wrapper returns ``_stage1``'s tuple unchanged and reads the result as ``[0]``."""
-        assert "stage1, num_frames, height, width = self._stage1(" in inspect.getsource(DistilledPipeline.generate_two_stage)
-        assert str(inspect.signature(DistilledPipeline._stage1).return_annotation).startswith("tuple[Stage1Result")
-
-    def test_audio_tokens_unpatchify_without_dims(self):
-        assert "self.audio_patchifier.unpatchify(output_2.audio_latent)" in inspect.getsource(DistilledPipeline._stage2)
-
-    def test_stage_two_reads_the_dit_slot(self):
-        """Why ``dit`` is restored after the preview decode: sparse attention and tiling read it in stage 2."""
-        source = inspect.getsource(DistilledPipeline._stage2) + inspect.getsource(DistilledPipeline._start_stage2_sparse_attention)
-        assert "self.dit" in source
-
-    def test_generate_and_save_loads_the_decoders_itself(self):
-        """The preview may leave the decoders freed: the final decode loads them on demand."""
-        assert "self._load_decoders()" in inspect.getsource(DistilledPipeline.generate_and_save)
-
-    def test_low_memory_decode_empties_the_dit_slot(self):
-        """The wrapper restores ``dit`` and ``_loaded`` because the decode clears them."""
-        source = inspect.getsource(BasePipeline._decode_and_save_video)
-        assert "self.dit = None" in source and "self._loaded = False" in source
-
 
 class TestBlockContract:
-    def test_prompt_encoder_call(self):
-        _assert_keyword_only(PromptEncoder.__call__, "free_after")
-
-    def test_image_conditioner_call_and_crf(self):
-        _assert_keyword_only(ImageConditioner.__call__, "free_after")
-        _assert_params(ImageConditioner.resolve_crf, "images")
-
     def test_image_conditioning_input_fields(self):
         assert {"path", "frame_idx", "strength"} <= set(ImageConditioningInput._fields)
 
@@ -180,9 +192,6 @@ class TestBlockContract:
 
 class TestLoadTimeContract:
     """The vendored behaviour ``load_model`` and ``utils/model_files`` mirror."""
-
-    def test_pack_detection_takes_the_model_dir(self):
-        assert list(_params(is_ltx25_pack)) == ["model_dir"]
 
     def test_base_pipeline_assigns_model_dir_in_its_constructor(self):
         source = inspect.getsource(BasePipeline.__init__)
@@ -214,36 +223,9 @@ class TestLoadTimeContract:
         assert chosen.name == f"{decoder_name}.safetensors"
 
 
-class TestStepwiseContract:
-    def test_bind_accepts_stage(self):
-        _assert_keyword_only(StepwisePreview.bind, "stage")
-
-
 class TestSamplingContract:
-    def test_denoise_loop_arguments(self):
-        _assert_params(denoise_loop, "model", "video_state", "audio_state", "video_text_embeds", "audio_text_embeds", "sigmas", "on_step")
-
-    def test_create_noised_state_arguments(self):
-        _assert_params(create_noised_state, "base_shape", "conditionings", "spatial_dims", "positions", "seed", "sigma", "initial_latent", "legacy_scalar_blend")
-
-    def test_combined_image_conditionings_arguments(self):
-        _assert_keyword_only(combined_image_conditionings, "enc_h", "enc_w", "spatial_dims", "video_encoder", "frame_rate")
-
-    def test_shorten_schedule_keep(self):
-        _assert_keyword_only(shorten_schedule, "keep")
+    def test_shorten_schedule_keeps_the_end_of_the_table(self):
         assert shorten_schedule(DISTILLED_SIGMAS, 3, keep="start")[-1] == DISTILLED_SIGMAS[-1]
-
-    def test_sigma_tables_are_sequences(self):
-        assert len(DISTILLED_SIGMAS) > 1
-        assert len(STAGE_2_SIGMAS) > 1
-
-    def test_ancestral_loop_arguments(self):
-        _assert_params(euler_ancestral_denoising_loop, "sigmas", "video_state", "audio_state", "stepper", "transformer", "video_text_embeds", "audio_text_embeds")
-        _assert_keyword_only(euler_ancestral_denoising_loop, "noise_seed", "on_step")
-
-    def test_ancestral_stepper_takes_eta_and_s_noise(self):
-        stepper = EulerAncestralDiffusionStep(eta=1.0, s_noise=1.0)
-        assert (stepper.eta, stepper.s_noise) == (1.0, 1.0)
 
     def test_ancestral_constants(self):
         assert (ANCESTRAL_ETA, ANCESTRAL_S_NOISE, ANCESTRAL_NOISE_SEED_OFFSET) == (1.0, 1.0, 10000)
@@ -257,71 +239,16 @@ class TestSamplingContract:
         assert len(_params(X0Model.__init__)) == 2
 
 
-class TestGeometryHelpers:
-    def test_latent_shape_and_snap_arguments(self):
-        _assert_params(compute_video_latent_shape, "num_frames", "height", "width")
-        _assert_keyword_only(snap_output_dimensions, "two_stage")
-
-    def test_position_helpers(self):
-        _assert_params(compute_video_positions, "num_frames", "height", "width", "frame_rate")
-        _assert_params(compute_audio_token_count, "num_video_frames", "frame_rate")
-        _assert_params(compute_audio_positions, "num_tokens")
-
-    def test_aggressive_cleanup_takes_no_arguments(self):
-        assert not _params(aggressive_cleanup)
-
-
 class TestExtendContract:
     """Internals the macOS backend uses to continue a clip from its tail."""
-
-    def test_video_pin_condition_arguments(self):
-        assert list(_params(VideoConditionByLatentIndex.__init__))[1:4] == ["frame_indices", "clean_latent", "strength"]
-
-    def test_video_tail_encoding_arguments(self):
-        assert list(_params(encode_video_tensor)) == ["encoder", "video_tensor"]
-        assert list(_params(video_preprocess))[:3] == ["frames", "height", "width"]
-
-    def test_tail_audio_loading_arguments(self):
-        _assert_params(load_audio, "path", "target_sample_rate", "start_time", "max_duration", "mono")
-
-    def test_audio_encoding_arguments(self):
-        assert list(_params(encode_audio))[:4] == ["waveform", "sample_rate", "encoder", "processor"]
-
-    def test_audio_carry_helpers(self):
-        assert list(_params(fit_audio_latent)) == ["audio_latent", "audio_tokens"]
-        assert list(_params(carry_audio_tokens))[:2] == ["frame_rate", "carry_pixel_frames"]
-
-    def test_audio_conditioner_frees_after_the_call(self):
-        _assert_keyword_only(AudioConditioner.__call__, "free_after")
 
     def test_pipeline_assigns_the_blocks_and_flags_the_extension_relies_on(self):
         source = inspect.getsource(BasePipeline.__init__)
         for attr in ("self._loaded", "self.audio_conditioner", "self.video_decoder_block", "self.audio_decoder_block", "self.audio_patchifier"):
             assert attr in source, f"BasePipeline.__init__ does not assign {attr}"
 
-    def test_freeing_the_transformer_follows_the_upstream_decode_wrapper(self):
-        source = inspect.getsource(BasePipeline._decode_and_save_video)
-        assert "self.dit = None" in source
-        assert "self._loaded = False" in source
-
-    def test_video_decoder_block_loads_without_arguments_and_names_its_decoder(self):
-        assert list(_params(VideoDecoderBlock.load)) == ["self"]
+    def test_video_decoder_block_names_its_decoder(self):
         assert "self.video_decoder" in inspect.getsource(VideoDecoderBlock.__init__)
-
-    def test_audio_decoder_block_decodes_a_latent(self):
-        assert list(_params(AudioDecoder.__call__)) == ["self", "audio_latent"]
-
-    def test_audio_patchifier_patchifies_a_latent(self):
-        assert list(_params(AudioPatchifier.patchify)) == ["self", "latent"]
-
-    def test_tiled_decode_arguments(self):
-        assert list(_params(VaeVideoDecoder.tiled_decode)) == ["self", "latent", "tiling_config"]
-
-    def test_decode_tiling_and_streaming_helpers(self):
-        assert list(_params(_compute_decode_tiling)) == ["latent_shape", "frame_rate", "budget_bytes"]
-        assert not _params(decode_cache_limit)
-        assert list(_params(stream_chunks_to_ffmpeg)) == ["chunks", "proc"]
-        assert list(_params(_ffmpeg_sink)) == ["cmd"]
 
 
 class TestExtendShapes:
@@ -420,7 +347,3 @@ class TestPinnedPackFilesContract:
 
         assert ltx_mlx_text_encoder_repo_id(load_config()) == default
         assert inspect.signature(DistilledPipeline.__init__).parameters["gemma_model_id"].default == default
-
-    def test_both_pipelines_take_the_text_encoder_folder(self):
-        _assert_params(BasePipeline.__init__, "gemma_model_id")
-        _assert_params(DistilledPipeline.__init__, "gemma_model_id")

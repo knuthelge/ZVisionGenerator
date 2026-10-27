@@ -46,25 +46,14 @@ def image_mac_module(monkeypatch):
         delattr(image_mac._initial_sigma_override, "value")
 
 
-def test_make_timesteps_is_wrapped_on_image_mac_import(image_mac_module):
-    scheduler_class = image_mac_module.Ideogram4Scheduler
+def test_the_shim_wraps_the_scheduler_symbol_and_the_default_changes_only_the_last_timestep(image_mac_module, monkeypatch):
+    from mflux.models.ideogram4.model.ideogram4_scheduler import scheduler as ideogram4_scheduler_module
 
+    scheduler_class = image_mac_module.Ideogram4Scheduler
+    assert scheduler_class is ideogram4_scheduler_module.Ideogram4Scheduler
     assert getattr(scheduler_class.make_timesteps, "_ziv_initial_sigma_wrapped", False) is True
 
-
-def test_make_timesteps_applies_default_sigma_override_to_last_timestep(image_mac_module):
-    scheduler_class = image_mac_module.Ideogram4Scheduler
-
-    t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
-
-    assert image_mac_module.IDEOGRAM4_INITIAL_SIGMA == _DEFAULT_INITIAL_SIGMA
-    assert t_values[-1] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
-
-
-def test_make_timesteps_only_changes_last_timestep_and_leaves_sigmas_untouched(image_mac_module, monkeypatch):
-    scheduler_class = image_mac_module.Ideogram4Scheduler
     shimmed_t_values, shimmed_s_values = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
-
     monkeypatch.setattr(image_mac_module, "IDEOGRAM4_INITIAL_SIGMA", None)
     natural_t_values, natural_s_values = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
 
@@ -74,16 +63,20 @@ def test_make_timesteps_only_changes_last_timestep_and_leaves_sigmas_untouched(i
     assert natural_t_values[-1] == pytest.approx(_NATURAL_LAST_TIMESTEP)
 
 
-def test_make_timesteps_reads_sigma_dynamically_and_none_disables_override(image_mac_module, monkeypatch):
+def test_none_restores_the_natural_schedule_and_a_changed_default_is_read_at_call_time(image_mac_module, monkeypatch):
     scheduler_class = image_mac_module.Ideogram4Scheduler
 
-    monkeypatch.setattr(image_mac_module, "IDEOGRAM4_INITIAL_SIGMA", None)
-    natural_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
+    with image_mac_module._use_initial_sigma(None):
+        natural_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
+        assert image_mac_module._effective_initial_sigma() is None
+        assert natural_t_values[-1] == pytest.approx(_NATURAL_LAST_TIMESTEP)
+
+    restored_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
+    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
+    assert restored_t_values[-1] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
 
     monkeypatch.setattr(image_mac_module, "IDEOGRAM4_INITIAL_SIGMA", 1.01)
     overridden_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
-
-    assert natural_t_values[-1] == pytest.approx(_NATURAL_LAST_TIMESTEP)
     assert overridden_t_values[-1] == pytest.approx(1.0 - 1.01)
 
 
@@ -111,35 +104,6 @@ def test_use_initial_sigma_sets_and_restores_previous_value(image_mac_module):
 
     assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
     assert default_t_values[-1] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
-
-
-def test_use_initial_sigma_none_disables_override_for_one_run(image_mac_module):
-    scheduler_class = image_mac_module.Ideogram4Scheduler
-
-    with image_mac_module._use_initial_sigma(None):
-        natural_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
-
-        assert image_mac_module._effective_initial_sigma() is None
-        assert natural_t_values[-1] == pytest.approx(_NATURAL_LAST_TIMESTEP)
-
-    restored_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
-
-    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
-    assert restored_t_values[-1] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
-
-
-def test_effective_initial_sigma_distinguishes_default_none_and_override(image_mac_module):
-    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
-
-    with image_mac_module._use_initial_sigma(None):
-        assert image_mac_module._effective_initial_sigma() is None
-
-    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
-
-    with image_mac_module._use_initial_sigma(1.006):
-        assert image_mac_module._effective_initial_sigma() == 1.006
-
-    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
 
 
 def test_use_initial_sigma_is_thread_local_and_isolates_concurrent_generations(image_mac_module):
@@ -175,10 +139,3 @@ def test_install_ideogram4_initial_sigma_is_idempotent(image_mac_module):
     assert scheduler_class.make_timesteps is wrapped_make_timesteps
     assert getattr(scheduler_class.make_timesteps, "_ziv_initial_sigma_wrapped", False) is True
     assert t_values[-1] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
-
-
-def test_shim_target_is_the_ideogram4_scheduler_symbol(image_mac_module):
-    from mflux.models.ideogram4.model.ideogram4_scheduler import scheduler as ideogram4_scheduler_module
-
-    assert image_mac_module.Ideogram4Scheduler is ideogram4_scheduler_module.Ideogram4Scheduler
-    assert getattr(ideogram4_scheduler_module.Ideogram4Scheduler.make_timesteps, "_ziv_initial_sigma_wrapped", False) is True

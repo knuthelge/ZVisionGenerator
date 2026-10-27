@@ -7,14 +7,15 @@ claim of the review: the final output and the pipeline state after the run do no
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("mlx")
-pytest.importorskip("ltx_pipelines_mlx")
+if sys.platform != "darwin":
+    pytest.skip("MLX is only available on macOS", allow_module_level=True)
 
 from ltx_pipelines_mlx import DistilledPipeline  # noqa: E402
 from ltx_pipelines_mlx.utils import _orchestration  # noqa: E402
@@ -144,7 +145,7 @@ def low_memory(request) -> bool:
 
 
 class TestReviewAgainstTheVendoredOrchestration:
-    def test_stage_two_and_the_final_decode_get_the_same_inputs_with_and_without_review(self, monkeypatch, tmp_path, low_memory):
+    def test_stage_two_the_final_decode_and_the_pipeline_state_are_the_same_with_and_without_review(self, monkeypatch, tmp_path, low_memory):
         plain = _Run(monkeypatch, tmp_path / "plain", low_memory=low_memory)
         reviewed = _Run(monkeypatch, tmp_path / "reviewed", low_memory=low_memory)
 
@@ -155,6 +156,8 @@ class TestReviewAgainstTheVendoredOrchestration:
         assert reviewed.stage2_saw == plain.stage2_saw
         assert [(v, a) for v, a, _ in reviewed.decodes[-1:]] == [(v, a) for v, a, _ in plain.decodes]
         assert (len(plain.decodes), len(reviewed.decodes)) == (1, 2)
+        assert reviewed.state() == plain.state()
+        assert "_stage1" not in vars(reviewed.pipe)
 
     def test_the_preview_decodes_the_half_size_latents_and_the_final_decode_the_stage_two_output(self, monkeypatch, tmp_path, low_memory):
         run = _Run(monkeypatch, tmp_path, low_memory=low_memory)
@@ -168,16 +171,6 @@ class TestReviewAgainstTheVendoredOrchestration:
         assert Path(preview_path).parent != Path(final_path).parent
         assert not Path(preview_path).exists()
         assert Path(final_path).exists()
-
-    def test_the_pipeline_ends_in_the_same_state_with_and_without_review(self, monkeypatch, tmp_path, low_memory):
-        plain = _Run(monkeypatch, tmp_path / "plain", low_memory=low_memory)
-        reviewed = _Run(monkeypatch, tmp_path / "reviewed", low_memory=low_memory)
-
-        plain.generate(review=False)
-        reviewed.generate(review=True)
-
-        assert reviewed.state() == plain.state()
-        assert "_stage1" not in vars(reviewed.pipe)
 
     def test_the_dit_slot_is_intact_for_the_review_and_for_stage_two(self, monkeypatch, tmp_path, low_memory):
         run = _Run(monkeypatch, tmp_path, low_memory=low_memory)

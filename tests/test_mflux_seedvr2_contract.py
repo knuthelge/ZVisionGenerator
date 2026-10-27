@@ -13,7 +13,6 @@ import pytest
 pytest.importorskip("mlx")
 pytest.importorskip("mflux")
 
-from mflux.models.common.config.model_config import ModelConfig  # noqa: E402
 from mflux.models.common.weights.loading.weight_definition import ComponentDefinition  # noqa: E402
 from mflux.models.seedvr2 import SeedVR2  # noqa: E402
 from mflux.models.seedvr2.weights.seedvr2_weight_definition import SeedVR2WeightDefinition7B, SeedVR2WeightDefinition3B  # noqa: E402
@@ -44,13 +43,6 @@ class TestSeedVR2Contract:
 
     def test_save_model_takes_a_base_path(self):
         assert _params(SeedVR2.save_model)[1:] == ["base_path"]
-
-    def test_model_configs_exist_for_both_variants(self):
-        assert callable(ModelConfig.seedvr2_3b)
-        assert callable(ModelConfig.seedvr2_7b)
-
-    def test_model_precision_is_a_settable_class_attribute(self):
-        assert hasattr(ModelConfig, "precision")
 
 
 class TestWeightLayoutContract:

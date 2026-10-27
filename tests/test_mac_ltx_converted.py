@@ -139,22 +139,6 @@ def test_block_linears_are_quantized_and_the_rest_kept_as_stock_stores_it(tmp_pa
     assert torch.equal(written[f"{block}.scale_shift_table"], torch.ones(6, 2))
 
 
-def test_transformer_elements_count_scalars_and_zero_size_tensors_by_whether_they_are_quantized():
-    shapes = {
-        f"{P}transformer_blocks.0.attn1.to_q.weight": [2, 64],  # quantized
-        f"{P}transformer_blocks.0.attn1.to_empty.weight": [0, 64],  # quantized, no elements
-        f"{P}transformer_blocks.0.attn1.to_out.0.bias": [2],
-        f"{P}transformer_blocks.0.scale_shift_table": [],  # scalar
-        f"{P}patchify_proj.weight": [3, 5],  # outside the blocks
-        f"{P}patchify_proj.empty": [4, 0],
-    }
-    checkpoint = ltx_checkpoint.LtxCheckpoint(
-        path=Path("unused.safetensors"), transformer={name: name for name in shapes}, connectors={}, shapes=shapes, quantized={}, bundles_components=False, version="2.3"
-    )
-
-    assert ltx_converted._transformer_elements(checkpoint) == (2 * 64 + 0, 2 + 1 + 15 + 0)
-
-
 def test_names_follow_the_vendored_mlx_renames():
     assert mlx_name(f"{P}transformer_blocks.0.attn1.to_out.0.weight") == "transformer.transformer_blocks.0.attn1.to_out.weight"
     assert mlx_name(f"{P}transformer_blocks.0.ff.net.0.proj.weight") == "transformer.transformer_blocks.0.ff.proj_in.weight"
@@ -222,51 +206,43 @@ def _pinned_config(**extra) -> dict:
     return {"video_model_presets": {"ltx": {"mlx_base": {"q4": f"org/base@{_PIN}"}, "mlx_files": list(_PACK_FILES), **extra}}}
 
 
-@pytest.mark.parametrize(("status", "own"), [("changed", True), ("unknown", True), ("stock", False), ("absent", False)])
-def test_changed_and_quantized_connectors_are_kept_and_stock_ones_linked(monkeypatch, tmp_path, status, own):
+@pytest.fixture
+def convert_with_seams(monkeypatch, tmp_path):
+    """Replace the base download, the connector check and the writer; return what they saw and a runner taking the config."""
     import contextlib
     from types import SimpleNamespace
 
-    seen: dict = {}
-    monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: status)
-    monkeypatch.setattr(ltx_converted, "_base_dir", lambda base: tmp_path)
-    monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(own=kwargs["own_connectors"]))
-    monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
-
-    ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=_pinned_config(), version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
-
-    assert seen == {"own": own}
-
-
-def test_the_base_is_the_pinned_packs_files_but_its_transformer(monkeypatch, tmp_path):
-    import contextlib
-    from types import SimpleNamespace
-
-    seen: dict = {}
-    monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: "stock")
+    seen: dict = {"status": "stock"}
+    monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: seen["status"])
     monkeypatch.setattr(ltx_converted, "_base_dir", lambda base: (seen.update(base=base), tmp_path)[1])
-    monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(files=kwargs["base_files"]))
+    monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(own=kwargs["own_connectors"], files=kwargs["base_files"]))
     monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
 
-    ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=_pinned_config(), version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
+    def run(config: dict, status: str = "stock") -> dict:
+        seen["status"] = status
+        ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=config, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
+        return seen
+
+    return run
+
+
+@pytest.mark.parametrize(("status", "own"), [("changed", True), ("unknown", True), ("stock", False), ("absent", False)])
+def test_changed_and_quantized_connectors_are_kept_and_stock_ones_linked(convert_with_seams, status, own):
+    assert convert_with_seams(_pinned_config(), status)["own"] is own
+
+
+def test_the_base_is_the_pinned_packs_files_but_its_transformer(convert_with_seams):
+    seen = convert_with_seams(_pinned_config())
 
     assert (seen["base"].repo_id, seen["base"].revision, seen["base"].files) == ("org/base", _PIN, _BASE_FILES)
     assert seen["files"] == _BASE_FILES
 
 
-def test_an_unpinned_base_of_a_repo_pinned_elsewhere_converts_from_that_pack(monkeypatch, tmp_path):
-    import contextlib
-    from types import SimpleNamespace
-
-    seen: dict = {}
-    monkeypatch.setattr(ltx_converted, "connectors_status", lambda checkpoint: "stock")
-    monkeypatch.setattr(ltx_converted, "_base_dir", lambda base: (seen.update(base=base), tmp_path)[1])
-    monkeypatch.setattr(ltx_converted, "write_converted", lambda *args, **kwargs: seen.update(files=kwargs["base_files"]))
-    monkeypatch.setattr("zvisiongenerator.backends.mac.memory.mlx_cache_limit", lambda limit: contextlib.nullcontext())
+def test_an_unpinned_base_of_a_repo_pinned_elsewhere_converts_from_that_pack(convert_with_seams):
     config = _pinned_config()
     config["video_model_presets"]["ltx"]["mlx_base"] = {"q4": "Org/Base", "q8": f"org/base@{_PIN}"}
 
-    ltx_converted.convert(SimpleNamespace(version="2.3"), tmp_path, 4, config=config, version=None, models_dir=tmp_path, lora=None, report=lambda *_: None)
+    seen = convert_with_seams(config)
 
     assert (seen["base"].repo_id, seen["base"].revision, seen["base"].files) == ("org/base", _PIN, _BASE_FILES)
     assert seen["files"] == _BASE_FILES

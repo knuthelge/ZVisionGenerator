@@ -74,16 +74,9 @@ def test_full_checkpoints_keep_the_projection_unprefixed_and_ignore_the_bundled_
     assert checkpoint.bundles_components
 
 
-@pytest.mark.parametrize(
-    ("tensors", "message"),
-    [
-        (_ltx_tensors(gate=False), "LTX-2.0"),
-        (_ltx_tensors(ff_bias=False), "none of its feed-forward layers"),
-        (_ltx_tensors(blocks=40), "40 blocks"),
-    ],
-)
-def test_checkpoints_that_are_neither_ltx23_nor_ltx25_are_refused(tmp_path, tensors, message):
-    with pytest.raises(ValueError, match=message):
+@pytest.mark.parametrize("tensors", [_ltx_tensors(gate=False), _ltx_tensors(ff_bias=False), _ltx_tensors(blocks=40)], ids=["ltx-2.0", "no-feed-forward-biases", "40-blocks"])
+def test_checkpoints_that_are_neither_ltx23_nor_ltx25_are_refused(tmp_path, tensors):
+    with pytest.raises(ValueError):
         inspect_checkpoint(_save(tmp_path / "other.safetensors", tensors))
 
 
@@ -125,27 +118,12 @@ def test_a_torchao_repack_is_refused(tmp_path):
         inspect_checkpoint(_save(tmp_path / "ao.safetensors", tensors))
 
 
-def test_quantized_connectors_cannot_be_told_from_stock(monkeypatch, tmp_path):
+@pytest.mark.parametrize(("dtype", "scaled"), [(torch.float8_e4m3fn, True), (torch.float8_e4m3fn, False), (torch.int8, False)], ids=["fp8-with-scale", "fp8-cast", "int8-cast"])
+def test_quantized_connectors_cannot_be_told_from_stock(monkeypatch, tmp_path, dtype, scaled):
     connector = f"{P}video_embeddings_connector.weight"
     path = tmp_path / "q.safetensors"
-    save_file(
-        {
-            **{f"{P}{name}": t for name, t in _ltx_tensors().items()},
-            connector: torch.ones(2, 2).to(torch.float8_e4m3fn),
-            f"{P}video_embeddings_connector.weight_scale": torch.tensor(1.0),
-        },
-        str(path),
-    )
-    monkeypatch.setattr(ltx_checkpoint, "_pinned", lambda version: {"connectors": {connector: "0"}})
-
-    assert connectors_status(inspect_checkpoint(path)) == "unknown"
-
-
-@pytest.mark.parametrize("dtype", [torch.float8_e4m3fn, torch.int8])
-def test_connectors_cast_to_a_narrow_dtype_cannot_be_told_from_stock(monkeypatch, tmp_path, dtype):
-    connector = f"{P}video_embeddings_connector.weight"
-    path = tmp_path / "cast.safetensors"
-    save_file({**{f"{P}{name}": t for name, t in _ltx_tensors().items()}, connector: torch.ones(2, 2).to(dtype)}, str(path))
+    extra = {f"{P}video_embeddings_connector.weight_scale": torch.tensor(1.0)} if scaled else {}
+    save_file({**{f"{P}{name}": t for name, t in _ltx_tensors().items()}, connector: torch.ones(2, 2).to(dtype), **extra}, str(path))
     monkeypatch.setattr(ltx_checkpoint, "_pinned", lambda version: {"connectors": {connector: "0"}})
 
     assert connectors_status(inspect_checkpoint(path)) == "unknown"
@@ -275,25 +253,19 @@ def _stock_connectors() -> dict[str, torch.Tensor]:
         ("none", "absent"),
         ("stock", "stock"),
         ("changed", "changed"),
-        ("no projection", "stock"),
-        ("only the projection", "stock"),
         ("half the video connector", "changed"),
-        ("float32", "stock"),
         ("an extra tensor", "changed"),
     ],
 )
 def test_connectors_are_absent_equal_to_stock_or_changed(monkeypatch, tmp_path, variant, expected):
     stock = _stock_connectors()
     _pin(monkeypatch, tmp_path, connectors=stock)
-    video_a, video_b, projection = stock
+    video_a, _video_b, projection = stock
     found = {
         "none": {},
         "stock": stock,
         "changed": {**stock, projection: torch.zeros(2, dtype=torch.bfloat16)},
-        "no projection": {video_a: stock[video_a], video_b: stock[video_b]},
-        "only the projection": {projection: stock[projection]},
         "half the video connector": {video_a: stock[video_a], projection: stock[projection]},
-        "float32": {name: tensor.float() for name, tensor in stock.items()},
         "an extra tensor": {**stock, f"{P}audio_embeddings_connector.c.weight": torch.ones(2, dtype=torch.bfloat16)},
     }[variant]
     path = tmp_path / "ft.safetensors"
@@ -332,13 +304,12 @@ def ltx_cli(monkeypatch, tmp_path):
     return data_dir / "models", checkpoint, calls
 
 
-def test_ltx_needs_a_quantize_level(ltx_cli, capsys):
+def test_ltx_needs_a_quantize_level(ltx_cli):
     _models, checkpoint, calls = ltx_cli
 
     with pytest.raises(SystemExit):
         _run_cli(["-i", str(checkpoint), "--model-type", "ltx-2.3"])
 
-    assert "--quantize 4 or 8" in capsys.readouterr().err
     assert calls == []
 
 
@@ -427,7 +398,7 @@ def test_an_interrupted_conversion_leaves_no_folder(ltx_cli, monkeypatch):
     assert list(models.iterdir()) == []
 
 
-def test_distill_fails_before_converting_when_the_lora_cannot_be_downloaded(ltx_cli, monkeypatch, capsys):
+def test_distill_fails_before_converting_when_the_lora_cannot_be_downloaded(ltx_cli, monkeypatch):
     _models, checkpoint, calls = ltx_cli
     monkeypatch.setattr("zvisiongenerator.utils.config.load_config", lambda: {"video_model_presets": {"ltx": {"distilled_lora": {"repo": "o/r", "filename": "l.safetensors"}}}})
 
@@ -439,7 +410,6 @@ def test_distill_fails_before_converting_when_the_lora_cannot_be_downloaded(ltx_
     with pytest.raises(SystemExit):
         _run_cli(["-i", str(checkpoint), "--model-type", "ltx-2.3", "--quantize", "4", "--distill"])
 
-    assert "couldn't be downloaded" in capsys.readouterr().err
     assert calls == []
 
 

@@ -241,8 +241,6 @@ class TestPhases:
         with pytest.raises(ValueError, match="anchor"):
             _generate(rig, anchors=("first", "last"), images=1)
         assert rig.events == []
-
-    def test_images_are_required(self, rig):
         with pytest.raises(ValueError, match="keyframe"):
             _generate(rig, anchors=(), images=0)
 
@@ -306,12 +304,6 @@ class TestPromptRows:
         assert embeds[0, :, 0].tolist() == [0, 5, 5, 5, 0, 0]
         assert mask[0].tolist() == [False, True, True, True, False, False]
         assert [float(item[0, 0]) for item in deepstack] == [6, 7]
-
-    def test_the_encoder_is_built_for_the_resident_text_only_tower_and_uses_the_pil_processor(self, rig):
-        _generate(rig)
-
-        assert rig.encoder_kwargs == {"load_vision": False, "stream_layers": False, "tokenizer_dir": rig.dirs.fl2va / "tokenizer", "processor_dir": rig.dirs.fl2va / "processor"}
-        assert rig.request == ("a fox", rig.processor)
 
     def test_a_vision_row_count_that_misses_the_image_positions_is_an_error(self, rig, monkeypatch):
         monkeypatch.setattr(h3_staged, "_vision_rows", lambda *args: (np.zeros((2, 4), dtype=np.float32), []))

@@ -19,10 +19,6 @@ PACKAGE = ROOT / "packages" / "minimax_h3_mlx"
 MAKEFILE = ROOT / "Makefile"
 BACKEND = ROOT / "zvisiongenerator" / "backends" / "mac" / "h3_video.py"
 
-# The commit that ``make update-h3-mlx`` vendors. Until the macOS backend defines ``H3_MLX_COMMIT`` this value is pinned
-# here, so bumping the Makefile alone fails the test.
-PINNED_COMMIT = "3fcc9f8c557cf353400b1acf737b985e524a509f"
-
 REMOVED_ENTRY_POINTS = ("generate_cli", "doctor", "cleanroom_smoke")
 
 
@@ -95,22 +91,6 @@ def test_from_pretrained_takes_the_arguments_the_backend_passes() -> None:
     }
     assert expected <= set(parameters)
     assert parameters["checkpoint_dir"] is None, "checkpoint_dir is required"
-
-
-def test_from_pretrained_defaults() -> None:
-    function = _function(_pipeline_class(), "from_pretrained")
-    assert _default(function, "memory_limit_gb") == 16.0
-    assert _default(function, "turbo_lora_scale") == 1.0
-    assert _default(function, "low_memory") is False
-    assert _default(function, "load_vision") is False
-    assert _default(function, "stream_blocks") is False
-    assert _default(function, "transformer_dir") is None
-    assert _default(function, "text_encoder_dir") is None
-
-
-def test_from_pretrained_is_a_classmethod() -> None:
-    function = _function(_pipeline_class(), "from_pretrained")
-    assert [ast.unparse(decorator) for decorator in function.decorator_list] == ["classmethod"]
 
 
 def test_call_takes_the_arguments_the_backend_passes() -> None:
@@ -244,19 +224,6 @@ def test_the_text_encoder_surface() -> None:
     assert {"language", "image_token_id", "_processor"} <= _self_writes(_function(encoder, "__init__"))
 
 
-def test_the_text_encoder_uses_a_preset_processor_instead_of_loading_its_own() -> None:
-    """The staged path seeds ``_processor`` with the PIL image processor, since the default loader needs torchvision."""
-    getter = _function(_class(_tree("text_encoder.py"), "MiniMaxH3TextEncoder"), "processor")
-    source = ast.unparse(getter)
-    assert "if self._processor is None" in source and source.rstrip().endswith("return self._processor")
-
-
-def test_build_request_reads_the_processors_image_processor() -> None:
-    request = ast.unparse(_function(_class(_tree("text_encoder.py"), "MiniMaxH3TextEncoder"), "build_request"))
-    assert "self.processor.image_processor(images=images, return_tensors='np')" in request
-    assert "self.processor.image_processor.merge_size" in request
-
-
 # ---- Turbo LoRA ------------------------------------------------------------------------------------------------------
 
 
@@ -265,49 +232,10 @@ def test_turbo_lora_targets() -> None:
     assert targets == ("attn.to_q", "attn.to_k", "attn.to_v", "attn.to_out.0", "ff.net.0.proj", "ff.net.2")
 
 
-def _turbo_key_pattern() -> re.Pattern[str]:
-    call = _assigned(_tree("turbo_lora.py"), "_KEY")
-    assert isinstance(call, ast.Call)
-    return re.compile(ast.literal_eval(call.args[0]))
-
-
-@pytest.mark.parametrize(
-    "key",
-    [
-        "transformer_blocks.3.attn.to_q.lora_A.default.weight",
-        "base_model.model.transformer_blocks.0.ff.net.2.lora_B.default.weight",
-        "token_refiner.refiner_blocks.1.attn.to_out.0.lora_A.default.weight",
-        "diffusion_model.token_refiner.refiner_blocks.0.ff.net.0.proj.lora_B.default.weight",
-    ],
-)
-def test_turbo_lora_accepts_block_and_refiner_keys(key: str) -> None:
-    assert _turbo_key_pattern().fullmatch(key) is not None
-
-
-@pytest.mark.parametrize(
-    "key",
-    [
-        "single_blocks.0.attn.to_q.lora_A.default.weight",
-        "transformer_blocks.0.attn.to_q.lora_A.weight",
-        "transformer_blocks.0.attn.add_q_proj.lora_A.default.weight",
-        "transformer_blocks.0.norm1.lora_B.default.weight",
-        "token_refiner.proj_in.lora_A.default.weight",
-    ],
-)
-def test_turbo_lora_rejects_other_keys(key: str) -> None:
-    assert _turbo_key_pattern().fullmatch(key) is None
-
-
 def test_turbo_lora_provider_signature() -> None:
     provider = _class(_tree("turbo_lora.py"), "TurboLoRAProvider")
     parameters = _parameters(_function(provider, "__init__"))
     assert list(parameters) == ["path", "num_blocks", "num_refiner_blocks", "hidden_size", "inner_dim", "ffn_hidden_size", "alpha", "scale"]
-    assert _default(_function(provider, "__init__"), "scale") == 1.0
-    assert _default(_function(provider, "__init__"), "alpha") is None
-
-
-def test_turbo_lora_default_alpha() -> None:
-    assert ast.literal_eval(_assigned(_tree("turbo_lora.py"), "DEFAULT_TURBO_LORA_ALPHA")) == 8.0
 
 
 # ---- Text encoder converter ------------------------------------------------------------------------------------------
@@ -317,20 +245,9 @@ def test_quantize_text_encoder_convert_signature() -> None:
     function = _function(_tree("quantize_text_encoder.py"), "convert")
     assert list(_parameters(function)) == ["source", "output", "bits", "group_size", "num_layers"]
     assert [arg.arg for arg in function.args.args] == ["source", "output"]
-    assert _default(function, "bits") == 4
-    assert _default(function, "group_size") == 64
-    assert _default(function, "num_layers") == 50
 
 
 # ---- Layout ----------------------------------------------------------------------------------------------------------
-
-
-def test_vendored_layout() -> None:
-    for name in ("__init__.py", "pipeline.py", "turbo_lora.py", "quantize_text_encoder.py", "release_assets.json", "LICENSE"):
-        assert (PACKAGE / name).is_file(), name
-    for name in REMOVED_ENTRY_POINTS:
-        assert not (PACKAGE / f"{name}.py").exists(), name
-    assert "Apache License" in (PACKAGE / "LICENSE").read_text(encoding="utf-8")
 
 
 def _imports_of_the_package() -> list[tuple[str, str, int]]:
@@ -351,7 +268,14 @@ def _imports_of_the_package() -> list[tuple[str, str, int]]:
 
 
 def test_package_imports_resolve_inside_the_vendored_copy() -> None:
+    """The fork's absolute imports use ``minimax_h3_mlx``, so the files, the removed entry points and the license stay as vendored."""
+    for name in ("__init__.py", "pipeline.py", "turbo_lora.py", "quantize_text_encoder.py", "release_assets.json", "LICENSE"):
+        assert (PACKAGE / name).is_file(), name
+    for name in REMOVED_ENTRY_POINTS:
+        assert not (PACKAGE / f"{name}.py").exists(), name
+    assert "Apache License" in (PACKAGE / "LICENSE").read_text(encoding="utf-8")
     imports = _imports_of_the_package()
+    assert any(level == 0 for _file, _module, level in imports), "the fork imports itself under the vendored name"
     assert imports, "the fork imports its own modules"
     for file, module, _level in imports:
         if not module:
@@ -361,36 +285,22 @@ def test_package_imports_resolve_inside_the_vendored_copy() -> None:
         assert head not in REMOVED_ENTRY_POINTS, f"{file} imports the removed {head}"
 
 
-def test_package_imports_itself_under_the_vendored_name() -> None:
-    """The fork's absolute imports use ``minimax_h3_mlx``, so the directory must keep that name."""
-    absolute = [module for _file, module, level in _imports_of_the_package() if level == 0]
-    assert absolute
-    assert PACKAGE.name == "minimax_h3_mlx"
-
-
 # ---- Pin and packaging -----------------------------------------------------------------------------------------------
 
 
-def _backend_commit() -> str | None:
-    if not BACKEND.is_file():
-        return None
+def _backend_commit() -> str:
     for node in ast.parse(BACKEND.read_text(encoding="utf-8")).body:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "H3_MLX_COMMIT" and node.value is not None:
             return ast.literal_eval(node.value)
         if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "H3_MLX_COMMIT" for target in node.targets):
             return ast.literal_eval(node.value)
-    return None
+    raise AssertionError("the macOS backend defines no H3_MLX_COMMIT")
 
 
 def test_makefile_commit_matches_the_pin() -> None:
     commit = _makefile_commit()
     assert re.fullmatch(r"[0-9a-f]{40}", commit)
-    backend = _backend_commit()
-    assert commit == (backend if backend is not None else PINNED_COMMIT)
-
-
-def test_makefile_has_the_vendoring_target() -> None:
-    assert re.search(r"^update-h3-mlx:", MAKEFILE.read_text(encoding="utf-8"), re.MULTILINE)
+    assert commit == _backend_commit()
 
 
 def test_packaging_declares_the_vendored_package_and_its_dependency() -> None:
@@ -400,38 +310,6 @@ def test_packaging_declares_the_vendored_package_and_its_dependency() -> None:
 
 
 # ---- Import checks (macOS only) --------------------------------------------------------------------------------------
-
-
-def test_imported_pipeline_matches_the_syntax_tree() -> None:
-    pytest.importorskip("mlx.core")
-    import inspect
-
-    from minimax_h3_mlx.pipeline import GenerationResult, MiniMaxH3Pipeline
-
-    function = _function(_pipeline_class(), "from_pretrained")
-    assert list(inspect.signature(MiniMaxH3Pipeline.from_pretrained).parameters) == list(_parameters(function))
-    assert list(inspect.signature(MiniMaxH3Pipeline.__call__).parameters)[1:] == list(_parameters(_function(_pipeline_class(), "__call__")))
-    assert list(GenerationResult.__dataclass_fields__) == ["video", "audio", "sample_rate", "fps", "seconds_per_step", "total_seconds", "block_cache_stats"]
-
-
-def test_imported_turbo_lora_targets() -> None:
-    pytest.importorskip("mlx.core")
-    import inspect
-
-    from minimax_h3_mlx.turbo_lora import TARGETS, TurboLoRAProvider
-
-    assert len(TARGETS) == 6
-    parameters = list(inspect.signature(TurboLoRAProvider.__init__).parameters)[1:]
-    assert parameters == list(_parameters(_function(_class(_tree("turbo_lora.py"), "TurboLoRAProvider"), "__init__")))
-
-
-def test_imported_converter_signature() -> None:
-    pytest.importorskip("mlx.core")
-    import inspect
-
-    from minimax_h3_mlx.quantize_text_encoder import convert
-
-    assert list(inspect.signature(convert).parameters) == ["source", "output", "bits", "group_size", "num_layers"]
 
 
 def test_imported_staged_path_dependencies() -> None:

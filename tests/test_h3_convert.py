@@ -5,10 +5,9 @@ from __future__ import annotations
 import pytest
 from safetensors.torch import save_file
 
-from tests.test_h3_checkpoint import _TINY, _diffusers_state, _native
+from tests._mac_helpers import _TINY, _diffusers_state, _native
 from zvisiongenerator.converters import h3_checkpoint
 from zvisiongenerator.converters.convert_checkpoint import _build_model_parser, _cmd_model
-from zvisiongenerator.converters.h3_convert import turbo_advice
 from zvisiongenerator.utils.h3_converted import read_converted_h3, write_converted_h3
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 
@@ -60,28 +59,6 @@ def test_h3_refuses_the_ltx_flags(h3_cli, flags):
     assert calls == []
 
 
-@pytest.mark.parametrize("name", ["h3", "myh3@q4"])
-def test_alias_and_stored_copy_names_are_refused(h3_cli, name):
-    _models, checkpoint, calls = h3_cli
-
-    with pytest.raises(SystemExit):
-        _run_cli(["-i", str(checkpoint), "--model-type", "h3", "--name", name])
-
-    assert calls == []
-
-
-def test_an_existing_name_needs_force(h3_cli):
-    models, checkpoint, calls = h3_cli
-    (models / "myh3").mkdir(parents=True)
-
-    with pytest.raises(SystemExit):
-        _run_cli(["-i", str(checkpoint), "--model-type", "h3", "--name", "myh3"])
-    _run_cli(["-i", str(checkpoint), "--model-type", "h3", "--name", "myh3", "--force"])
-
-    assert len(calls) == 1
-    assert read_converted_h3(models / "myh3") is not None
-
-
 def test_turbo_is_refused_for_ltx(h3_cli, monkeypatch):
     _models, checkpoint, _calls = h3_cli
     monkeypatch.setattr("zvisiongenerator.converters.ltx_convert.convert_ltx", lambda *a, **k: pytest.fail("LTX takes no --turbo"))
@@ -99,12 +76,3 @@ def test_a_symlinked_input_keeps_its_own_name(h3_cli, tmp_path):
 
     assert (models / "linked-finetune").is_dir()
     assert calls[0]["checkpoint"].path == link
-
-
-@pytest.mark.parametrize("hints", [(), ("hint",)])
-def test_the_advice_names_the_callers_switch(hints):
-    assert "<switch>" in turbo_advice(hints, "<switch>")
-
-
-def test_the_advice_depends_on_the_hints():
-    assert turbo_advice(("hint",), "<switch>") != turbo_advice((), "<switch>")

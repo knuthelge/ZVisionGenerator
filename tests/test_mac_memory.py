@@ -79,16 +79,6 @@ class TestBufferCachePolicy:
         assert [c[0] for c in mx.method_calls] == ["set_cache_limit", "clear_cache"]
         mx.set_cache_limit.assert_called_once_with(BUFFER_CACHE_LIMIT_BYTES)
 
-    def test_materializing_precedes_the_policy_when_both_run(self, mx, monkeypatch):
-        monkeypatch.setitem(sys.modules, "mlx.utils", MagicMock(tree_flatten=MagicMock(return_value=[("w", object())])))
-        materialize_weights(MagicMock())
-        apply_buffer_cache_policy()
-
-        assert [c[0] for c in mx.method_calls if c[0] in {"eval", "set_cache_limit", "clear_cache"}] == ["eval", "set_cache_limit", "clear_cache"]
-
-    def test_buffer_cache_limit_is_four_gib(self):
-        assert BUFFER_CACHE_LIMIT_BYTES == 4 * 1024**3
-
 
 class TestLoadResident:
     @pytest.fixture

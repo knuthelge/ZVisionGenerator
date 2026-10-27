@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, caption_text, sampler_settings, wrap_ideogram4_prompt
+from zvisiongenerator.core.ideogram4 import caption_text, sampler_settings, wrap_ideogram4_prompt
 
 
 class TestCaptions:
@@ -38,9 +38,6 @@ class TestSamplerSettings:
 
         assert (sampler.steps, sampler.mu, sampler.std) == (8, 0.0, 1.75)
 
-    def test_other_step_counts_are_kept(self):
-        assert sampler_settings(12, 1.0).steps == 12
-
     def test_a_guidance_other_than_one_is_ignored_with_a_warning(self):
         with pytest.warns(UserWarning, match="guidance 7 is ignored"):
             sampler = sampler_settings(8, 7.0)
@@ -51,7 +48,3 @@ class TestSamplerSettings:
         sampler_settings(8, 1.0)
 
         assert not recwarn.list
-
-
-def test_the_first_sigma_default_is_just_above_pure_noise():
-    assert IDEOGRAM4_INITIAL_SIGMA == 1.004

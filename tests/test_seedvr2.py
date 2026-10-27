@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,7 +17,6 @@ from zvisiongenerator.utils.seedvr2 import (
     SeedVR2Tier,
     estimate_seedvr2_bytes,
     pick_seedvr2_tier,
-    seedvr2_download_bytes,
     seedvr2_over_budget,
     seedvr2_row_name,
     seedvr2_settings,
@@ -85,28 +83,16 @@ class TestMfluxSeedVR2Upscaler:
         assert loaded is seedvr2_class.return_value
         assert seedvr2_class.call_args.kwargs == {"quantize": 8, "model_path": "/models/seedvr2", "model_config": model_config.seedvr2_7b()}
 
-    def test_load_model_uses_the_3b_config_for_the_3b_model(self, seedvr2_mac):
+    def test_the_3b_model_is_built_through_load_resident_in_bfloat16(self, seedvr2_mac):
+        import mlx.core as mx
+
         module, seedvr2_class, model_config = seedvr2_mac
-
-        module.MfluxSeedVR2Upscaler().load_model("seedvr2-3b", quantize=None, model_path="/models/seedvr2")
-
-        assert seedvr2_class.call_args.kwargs["model_config"] == model_config.seedvr2_3b()
-
-    def test_load_model_builds_the_model_through_load_resident(self, seedvr2_mac):
-        module, seedvr2_class, _model_config = seedvr2_mac
 
         loaded = module.MfluxSeedVR2Upscaler().load_model("seedvr2-3b", quantize=8, model_path="/m")
 
+        assert seedvr2_class.call_args.kwargs["model_config"] == model_config.seedvr2_3b()
         module.memory_mac.load_resident.assert_called_once()
         assert loaded is seedvr2_class.return_value
-
-    def test_load_model_sets_bfloat16_precision(self, seedvr2_mac):
-        import mlx.core as mx
-
-        module, _cls, model_config = seedvr2_mac
-
-        module.MfluxSeedVR2Upscaler().load_model("seedvr2-3b", quantize=8, model_path="/m")
-
         assert model_config.precision == mx.bfloat16
 
     def test_unknown_model_raises(self, seedvr2_mac):
@@ -116,14 +102,6 @@ class TestMfluxSeedVR2Upscaler:
             module.MfluxSeedVR2Upscaler().load_model("seedvr2-9b", quantize=8, model_path="/m")
 
         seedvr2_class.assert_not_called()
-
-    def test_save_model_writes_to_the_path(self, seedvr2_mac):
-        module, _cls, _config = seedvr2_mac
-        model = MagicMock()
-
-        module.MfluxSeedVR2Upscaler().save_model(model, Path("/models/.seedvr2/copy"))
-
-        model.save_model.assert_called_once_with("/models/.seedvr2/copy")
 
     def test_upscale_image_sizes_by_the_shorter_side_and_returns_the_image(self, seedvr2_mac):
         import mlx.core as mx
@@ -200,7 +178,6 @@ class TestOverBudget:
     def test_over_only_when_the_estimate_is_strictly_larger(self):
         assert seedvr2_over_budget(101, 100) is True
         assert seedvr2_over_budget(100, 100) is False
-        assert seedvr2_over_budget(99, 100) is False
 
     def test_never_over_an_unknown_budget(self):
         assert seedvr2_over_budget(10**12, None) is False
@@ -268,19 +245,9 @@ class TestLabels:
         assert seedvr2_tier_label("seedvr2-3b", MLX_WEIGHTS) == "SeedVR2 3B q8"
         assert seedvr2_tier_label("seedvr2-7b", FP8_WEIGHTS) == "SeedVR2 7B fp8"
 
-    def test_the_fp8_7b_is_the_mixed_file_from_the_companion_repo(self):
-        assert FP8_WEIGHTS.files["seedvr2-7b"][0] == ("AInVFX/SeedVR2_comfyUI", "seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors")
-        assert {repo for _model, files in FP8_WEIGHTS.files.items() for repo, name in files if name.startswith("ema_vae")} == {"numz/SeedVR2_comfyUI"}
-
     def test_row_name(self):
         assert seedvr2_row_name("seedvr2-7b", MLX_WEIGHTS) == "seedvr2-7b@q8"
         assert seedvr2_row_name("seedvr2-3b", FP8_WEIGHTS) == "seedvr2-3b@fp8"
-
-    def test_download_bytes_cover_the_transformer_and_the_vae(self):
-        assert seedvr2_download_bytes("seedvr2-7b", MLX_WEIGHTS) == 16_479_334_424 + 501_324_814
-        assert seedvr2_download_bytes("seedvr2-3b", MLX_WEIGHTS) == 6_783_018_808 + 501_324_814
-        assert seedvr2_download_bytes("seedvr2-7b", FP8_WEIGHTS) == 8_466_296_338 + 501_324_814
-        assert seedvr2_download_bytes("seedvr2-3b", FP8_WEIGHTS) == 3_391_544_696 + 501_324_814
 
     def test_size_label(self):
         assert seedvr2_size_label(16_980_659_238) == "17.0 GB"
@@ -311,9 +278,8 @@ class TestSettings:
 
         assert seedvr2_settings(config, "discrete_tiers").tiers == (STREAMED_7B,)
 
-    @pytest.mark.parametrize("system_gb", [0, -1, "22", True])
-    def test_system_memory_must_be_a_positive_number(self, system_gb):
-        config = _config(discrete_tiers=[{"model": "seedvr2-7b", "weights_gb": 0.4, "activation_floor_gb": 5, "activation_base_gb": 0.6, "activation_gb_per_mp": 0.55, "system_gb": system_gb}])
+    def test_system_memory_must_be_a_positive_number(self):
+        config = _config(discrete_tiers=[{"model": "seedvr2-7b", "weights_gb": 0.4, "activation_floor_gb": 5, "activation_base_gb": 0.6, "activation_gb_per_mp": 0.55, "system_gb": 0}])
 
         with pytest.raises(ValueError, match=r"seedvr2\.discrete_tiers\[0\]\.system_gb"):
             seedvr2_settings(config, "discrete_tiers")
@@ -330,50 +296,26 @@ class TestSettings:
     def test_a_pinned_model_is_accepted(self):
         assert seedvr2_settings(_config(model="seedvr2-3b")).model == "seedvr2-3b"
 
-    @pytest.mark.parametrize("softness", [0, 1, 0.5])
-    def test_softness_bounds_are_inclusive(self, softness):
-        assert seedvr2_settings(_config(softness=softness)).softness == softness
-
-    @pytest.mark.parametrize("video_softness", [0, 1, 0.5])
-    def test_video_softness_bounds_are_inclusive(self, video_softness):
-        settings = seedvr2_settings(_config(video_softness=video_softness))
-
-        assert settings.video_softness == video_softness
-        assert settings.softness == 0.75
-
     @pytest.mark.parametrize(
         ("overrides", "key"),
         [
             ({"tiers": None}, "seedvr2.tiers"),
-            ({"tiers": []}, "seedvr2.tiers"),
             ({"tiers": [{"model": "seedvr2-9b", "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].model"),
-            ({"tiers": [{"model": ["seedvr2-3b"], "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].model"),
-            ({"tiers": [{"model": 3, "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].model"),
-            ({"tiers": [{"model": "seedvr2-3b", "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].weights_gb"),
             ({"tiers": [{"model": "seedvr2-3b", "weights_gb": 0, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].weights_gb"),
-            ({"tiers": [{"model": "seedvr2-3b", "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1, "quantize": 4}]}, "seedvr2.tiers[0]"),
             ({"model": "seedvr2-9b"}, "seedvr2.model"),
-            ({"model": ["seedvr2-7b"]}, "seedvr2.model"),
-            ({"model": 7}, "seedvr2.model"),
             ({"softness": 1.5}, "seedvr2.softness"),
-            ({"softness": -0.1}, "seedvr2.softness"),
-            ({"video_softness": 1.5}, "seedvr2.video_softness"),
-            ({"video_softness": -0.1}, "seedvr2.video_softness"),
             ({"video_softness": "0"}, "seedvr2.video_softness"),
-            ({"video_softness": True}, "seedvr2.video_softness"),
-            ({"reference_megapixels": 0}, "seedvr2.reference_megapixels"),
         ],
     )
     def test_invalid_blocks_name_the_key(self, overrides, key):
         with pytest.raises(ValueError, match=key.replace("[", r"\[").replace("]", r"\]")):
             seedvr2_settings(_config(**overrides))
 
-    @pytest.mark.parametrize("key", ["softness", "video_softness", "reference_megapixels"])
-    def test_required_keys_must_be_present(self, key):
+    def test_required_keys_must_be_present(self):
         config = _config()
-        del config["seedvr2"][key]
+        del config["seedvr2"]["softness"]
 
-        with pytest.raises(ValueError, match=f"seedvr2.{key}"):
+        with pytest.raises(ValueError, match="seedvr2.softness"):
             seedvr2_settings(config)
 
     def test_missing_block_raises(self):

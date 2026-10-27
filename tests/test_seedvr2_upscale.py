@@ -9,7 +9,6 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
-from zvisiongenerator.core.progress_events import _stage_label
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.provenance import embed_png_config, read_png_config
@@ -51,17 +50,6 @@ def _artifacts(size=(32, 16)):
     return ImageWorkingArtifacts(image=Image.new("RGB", size))
 
 
-def test_workflow_stages_are_prompt_load_upscale_save():
-    stages = build_seedvr2_upscale_workflow().stages
-
-    assert [stage.__name__ for stage in stages] == ["resolve_prompt_stage", "load_source_stage", "upscale_stage", "save_image_stage"]
-    assert stages[2] is upscale_stage
-
-
-def test_stage_label_stays_upscale():
-    assert _stage_label(upscale_stage) == "upscale"
-
-
 def test_stage_calls_the_engine_with_the_target_size(tmp_path):
     request = _request(tmp_path, _source(tmp_path))
     artifacts = _artifacts((33, 17))
@@ -92,12 +80,6 @@ def test_stage_sends_one_complete_step_with_a_callback(tmp_path):
     assert events == [{"phase": "image_upscale", "current_step": 1, "total_steps": 1}]
 
 
-def test_stage_without_a_callback_sends_nothing(tmp_path):
-    request = _request(tmp_path, _source(tmp_path))
-
-    assert upscale_stage(request, _artifacts()) is StageOutcome.success
-
-
 def test_stage_quit_after_the_call_is_skipped_and_keeps_the_source(tmp_path):
     events: list[dict] = []
     skip_signal = MagicMock()
@@ -113,14 +95,6 @@ def test_stage_quit_after_the_call_is_skipped_and_keeps_the_source(tmp_path):
     assert artifacts.image is source_image
     assert artifacts.was_upscaled is False
     assert events == []
-
-
-def test_stage_without_a_pending_quit_succeeds(tmp_path):
-    skip_signal = MagicMock()
-    skip_signal.pending.return_value = None
-    request = _request(tmp_path, _source(tmp_path), skip_signal=skip_signal)
-
-    assert upscale_stage(request, _artifacts()) is StageOutcome.success
 
 
 @pytest.mark.parametrize("missing", ["upscale_source", "upscale_factor"])

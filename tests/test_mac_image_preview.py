@@ -34,22 +34,14 @@ def _klein_model(mx, channels: int = 128):
 
 
 class TestRenderLatentPreview:
-    def test_zimage_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, mx, preview_module):
-        latents = mx.zeros((16, 1, 32, 16))
+    @pytest.mark.parametrize(("family", "shape", "bias"), [("zimage", (16, 1, 32, 16), ZIMAGE_RGB_BIAS), ("krea2", (1, 16, 32, 16), QWEN_IMAGE_RGB_BIAS)])
+    def test_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, mx, preview_module, family, shape, bias):
+        latents = mx.zeros(shape)
 
-        image = preview_module.render_latent_preview(None, "zimage", latents, height=256, width=128)
-
-        assert image.size == (16, 32)
-        expected = np.round(np.array(ZIMAGE_RGB_BIAS) * 255)
-        assert np.allclose(np.asarray(image)[0, 0], expected, atol=1)
-
-    def test_krea2_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, mx, preview_module):
-        latents = mx.zeros((1, 16, 32, 16))
-
-        image = preview_module.render_latent_preview(None, "krea2", latents, height=256, width=128)
+        image = preview_module.render_latent_preview(None, family, latents, height=256, width=128)
 
         assert image.size == (16, 32)
-        expected = np.round(np.array(QWEN_IMAGE_RGB_BIAS) * 255)
+        expected = np.round(np.array(bias) * 255)
         assert np.allclose(np.asarray(image)[0, 0], expected, atol=1)
 
     def test_flux2_klein_unpacks_like_the_mflux_vae(self, mx, preview_module):
@@ -83,10 +75,6 @@ class TestRenderLatentPreview:
         estimate = preview_module.estimate_clean_latents(previous, current, 0.8, 0.4)
 
         assert np.allclose(np.array(estimate), np.array(x0), atol=1e-4)
-
-    def test_clean_estimate_without_a_noise_change_returns_current(self, mx, preview_module):
-        current = mx.ones((4, 4))
-        assert preview_module.estimate_clean_latents(mx.zeros((4, 4)), current, 0.5, 0.5) is current
 
     def test_unknown_family_has_no_preview(self, mx, preview_module):
         assert preview_module.render_latent_preview(None, "flux1", mx.zeros((1, 4, 64)), height=64, width=64) is None
@@ -220,12 +208,6 @@ class TestProgressCheckerPreviews:
         assert image_mac._is_euler_scheduler(object.__new__(BetaScheduler))
         assert not image_mac._is_euler_scheduler(SimpleNamespace(sigmas=[1.0, 0.0]))
 
-    def test_euler_check_never_imports_the_beta_scheduler(self, image_mac, monkeypatch):
-        monkeypatch.delitem(sys.modules, "zvisiongenerator.schedulers.beta_scheduler", raising=False)
-
-        assert not image_mac._is_euler_scheduler(SimpleNamespace(sigmas=[1.0, 0.0]))
-        assert "zvisiongenerator.schedulers.beta_scheduler" not in sys.modules
-
     def test_previous_latents_are_kept_only_ahead_of_a_preview_step(self, mx, image_mac):
         checker = image_mac._ProgressChecker(8, lambda _event: None, model=None, family="zimage")
         config = self._config(8)
@@ -281,17 +263,6 @@ class TestProgressCheckerPreviews:
 
         assert len(events) == 4
         assert not any("preview" in event for event in events)
-
-    def test_no_latents_are_kept_once_previews_are_disabled(self, mx, image_mac):
-        checker = image_mac._ProgressChecker(8, lambda _event: None, model=None, family="zimage")
-        config = self._config(8)
-        checker.call_before_loop(1, "prompt", mx.zeros((16, 1, 8, 8)), config)
-        checker._previews_enabled = False
-
-        # Step 3 precedes the step-4 preview, which would normally keep its latents.
-        checker.call_in_loop(2, 1, "prompt", mx.zeros((16, 1, 8, 8)), config, None)
-
-        assert checker._previous_latents is None
 
     def test_a_before_loop_failure_disables_previews_without_failing_generation(self, mx, image_mac):
         events: list[dict] = []

@@ -76,8 +76,8 @@ def _first_frame_conditioned():
 
 @pytest.mark.parametrize(
     "timestep",
-    [_first_frame_conditioned(), torch.full((1, _TOKENS), 0.4), (torch.arange(_TOKENS, dtype=torch.float32)[None] // 5) / 4],
-    ids=["first-frame", "uniform", "three-runs"],
+    [_first_frame_conditioned(), (torch.arange(_TOKENS, dtype=torch.float32)[None] // 5) / 4],
+    ids=["first-frame", "three-runs"],
 )
 def test_outputs_match_the_per_token_path(timestep):
     reference = _tiny_transformer()
@@ -92,8 +92,7 @@ def test_outputs_match_the_per_token_path(timestep):
 
     for want, got in zip(expected, actual, strict=True):
         torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-4)
-    if timestep.unique().numel() > 1:
-        assert not torch.allclose(uniform[0], expected[0], atol=1e-3)  # the runs really do differ
+    assert not torch.allclose(uniform[0], expected[0], atol=1e-3)  # the runs really do differ
 
 
 def test_without_per_sample_cross_timesteps_the_pass_is_untouched():

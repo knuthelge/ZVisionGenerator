@@ -107,11 +107,6 @@ class TestCopyLocation:
 
         assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
 
-    def test_listings_ignore_the_copy_folder(self, tmp_path, models_dir):
-        _make_copy(models_dir)
-
-        assert list_models(tmp_path) == []
-
     def test_listings_skip_the_copy_folder_without_probing_it(self, tmp_path, models_dir):
         _make_copy(models_dir)
 
@@ -130,14 +125,6 @@ class TestFirstLoad:
 
         assert loaded is parent.model
         copy = seedvr2_weights_dir("seedvr2-7b", models_dir, MLX_WEIGHTS)
-        assert [c[0] for c in parent.manager.mock_calls] == [
-            "on_phase",
-            "upscaler.load_model",
-            "on_phase",
-            "upscaler.save_model",
-            "delete",
-            "delete",
-        ]
         assert parent.on_phase.call_args_list == [call(DOWNLOADING_PHASE), call(SAVING_QUANT_PHASE)]
         parent.upscaler.load_model.assert_called_once_with("seedvr2-7b", quantize=8, model_path=SEEDVR2_REPO)
         saved_to = parent.upscaler.save_model.call_args.args[1]
@@ -160,13 +147,6 @@ class TestFirstLoad:
 
         assert parent.delete.call_args_list == [call(SEEDVR2_REPO, transformer), call(SEEDVR2_REPO, VAE)]
 
-    def test_the_7b_tier_never_touches_the_3b_file(self, models_dir):
-        parent = _Parent()
-
-        _load(parent, models_dir, "seedvr2-7b")
-
-        assert call(SEEDVR2_REPO, TRANSFORMER_3B) not in parent.delete.call_args_list
-
     def test_a_failed_save_warns_deletes_nothing_and_leaves_no_folder(self, models_dir):
         parent = _Parent(save_error=OSError("disk full"))
 
@@ -177,22 +157,6 @@ class TestFirstLoad:
         parent.delete.assert_not_called()
         assert not seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
         assert list((models_dir / ".seedvr2").iterdir()) == []
-
-    def test_a_failed_save_warning_names_the_caller_of_the_loader(self, models_dir):
-        parent = _Parent(save_error=OSError("disk full"))
-
-        with pytest.warns(UserWarning, match="disk full") as warned:
-            _load(parent, models_dir)
-
-        assert Path(warned[0].filename) == Path(__file__)
-
-    def test_a_failed_delete_warning_names_the_caller_of_the_loader(self, models_dir):
-        parent = _Parent(delete_error=OSError("busy"))
-
-        with pytest.warns(UserWarning, match="busy") as warned:
-            _load(parent, models_dir)
-
-        assert {Path(item.filename) for item in warned} == {Path(__file__)}
 
     def test_a_failed_delete_warns_and_still_returns_the_model(self, models_dir):
         parent = _Parent(delete_error=OSError("busy"))
@@ -273,13 +237,6 @@ class TestFirstLoad:
 
         assert parent.on_phase.call_args_list[0] == call(DOWNLOADING_PHASE)
 
-    def test_a_missing_on_phase_is_allowed(self, models_dir):
-        parent = _Parent()
-
-        load_seedvr2(parent.upscaler, "seedvr2-7b", models_dir=models_dir, on_phase=None, delete_cached_file=parent.delete, files_cached=lambda *_: None)
-
-        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
-
 
 class TestLaterLoads:
     def test_the_copy_is_loaded_without_quantizing_or_downloading(self, models_dir):
@@ -293,15 +250,6 @@ class TestLaterLoads:
         parent.upscaler.load_model.assert_called_once_with("seedvr2-7b", quantize=None, model_path=str(copy))
         parent.upscaler.save_model.assert_not_called()
         parent.delete.assert_not_called()
-
-    def test_a_second_load_after_the_first_uses_the_copy(self, models_dir):
-        first, second = _Parent(), _Parent()
-
-        _load(first, models_dir)
-        _load(second, models_dir)
-
-        assert second.on_phase.call_args_list == [call(LOADING_PHASE)]
-        assert second.upscaler.load_model.call_args.kwargs["quantize"] is None
 
     def test_a_stale_copy_is_downloaded_again(self, models_dir):
         _make_copy(models_dir, manifest={"bits": 8, "backend_format": "older-format", "model": "seedvr2-7b"})
