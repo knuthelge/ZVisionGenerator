@@ -84,7 +84,7 @@ def load_pipeline(
     device = torch.device(_DEVICE)
     tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer")
     scheduler = MOSSImageScheduler.from_pretrained(model_path, subfolder="scheduler")
-    vae = AutoencoderKLFlux2.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32).eval().to(device)
+    vae = AutoencoderKLFlux2.from_pretrained(model_path, subfolder="vae", dtype=torch.float32).eval().to(device)
     # The text encoder is the NF4 copy at every level; it loads onto the GPU, so it leaves before the transformer loads.
     text_encoder = load_nf4_text_encoder(model_path, torch_dtype, prequantized=prequantized)
     text_encoder.to("cpu")
@@ -93,7 +93,7 @@ def load_pipeline(
     elif bits == 8:
         transformer = load_fp8_transformer(model_path, torch_dtype, model_class=MOSSImageTransformer, keep_patterns=fp8_keep_patterns())
     else:
-        transformer = MOSSImageTransformer.from_pretrained(model_path, subfolder="transformer", torch_dtype=torch_dtype)
+        transformer = MOSSImageTransformer.from_pretrained(model_path, subfolder="transformer", dtype=torch_dtype)
     transformer.to("cpu")
     if files := _lora_files(turbo_lora, lora_paths, lora_weights):
         install_loras(transformer, files, device=device)

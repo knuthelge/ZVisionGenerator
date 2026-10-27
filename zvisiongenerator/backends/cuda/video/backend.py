@@ -292,7 +292,7 @@ def _load_generation_pipeline(
         repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _stock_weights(model_path, model_name, transformer_source, quantize, runtime.torch.device("cuda"), repo_ignore)
     connectors = _load_connectors(repo_dir, torch_dtype)
     try:
-        pipeline = pipeline_class.from_pretrained(str(repo_dir), transformer=None, connectors=connectors, text_encoder=None, torch_dtype=torch_dtype, **_absent_optional_components(repo_dir))
+        pipeline = pipeline_class.from_pretrained(str(repo_dir), transformer=None, connectors=connectors, text_encoder=None, dtype=torch_dtype, **_absent_optional_components(repo_dir))
     except Exception as exc:
         raise RuntimeError(f"Failed to load {pipeline_class.__name__} from '{model_path}': {exc}") from exc
     _place_components(pipeline, runtime.torch, low_memory=low_memory)

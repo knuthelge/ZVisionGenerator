@@ -175,7 +175,7 @@ def _load_nf4(model_path: str, torch_dtype: torch.dtype, family: str, *, prequan
     """Load the pipeline with its transformer and text encoder in NF4 on the GPU (q4)."""
     offload = family in _Q4_CPU_OFFLOAD_FAMILIES
     components = load_nf4_components(model_path, torch_dtype, prequantized=prequantized, text_encoder_to_cpu=offload)
-    pipeline = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch_dtype, **components)
+    pipeline = AutoPipelineForText2Image.from_pretrained(model_path, dtype=torch_dtype, **components)
     if offload:
         # Model CPU offload moves the text encoder and transformer onto the GPU in turn.
         pipeline.enable_model_cpu_offload()
@@ -437,7 +437,7 @@ class DiffusersBackend:
             components = {}
             if bits == 8:
                 components = load_fp8_components(model_path, torch_dtype)
-            pipeline = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch_dtype, **components)
+            pipeline = AutoPipelineForText2Image.from_pretrained(model_path, dtype=torch_dtype, **components)
             _stream_to_gpu(pipeline, torch_dtype)
 
         if lora_paths:
@@ -488,7 +488,7 @@ class DiffusersBackend:
         # Built per call from the loaded components (cheap): a scheduler swap stays on this pipeline only, and
         # no reference to the model outlives the job. Without a dtype, from_pipe casts the shared components to
         # float32; the VAE carries the dtype the model loaded in.
-        img2img = AutoPipelineForImage2Image.from_pipe(model, torch_dtype=model.vae.dtype)
+        img2img = AutoPipelineForImage2Image.from_pipe(model, dtype=model.vae.dtype)
         scheduler_kwargs = _apply_beta_scheduler(img2img, self._model_info.family, steps) if scheduler == "beta" else {}
 
         _is_flux = self._model_info.family in ("flux1", "flux2", "flux2_klein")

@@ -30,7 +30,7 @@ def load_audio_vae(audio_vae_dir: Path, device: Any) -> Any:
     import torch
     from diffusers import AutoencoderKLMiniMaxH3Audio
 
-    vae = AutoencoderKLMiniMaxH3Audio.from_pretrained(str(audio_vae_dir), torch_dtype=torch.bfloat16).to(device).eval()
+    vae = AutoencoderKLMiniMaxH3Audio.from_pretrained(str(audio_vae_dir), dtype=torch.bfloat16).to(device).eval()
     vae.requires_grad_(False)
     return vae
 
