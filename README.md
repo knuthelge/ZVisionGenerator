@@ -31,7 +31,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 ## Install
 
-Requires Python 3.14+, [uv](https://docs.astral.sh/uv/), and [ffmpeg](https://ffmpeg.org/) for video. On Windows and Linux: an RTX 20-series or newer NVIDIA GPU with driver 580 or newer.
+Requires Python 3.14+, macOS 14 or newer on a Mac, [uv](https://docs.astral.sh/uv/), and [ffmpeg](https://ffmpeg.org/) for video. On Windows and Linux: an RTX 20-series or newer NVIDIA GPU with driver 580 or newer.
 
 ```bash
 uv tool install z-vision-generator

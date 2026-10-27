@@ -784,6 +784,7 @@ class LTXModel(nn.Module):
         video_attention_mask: mx.array | None = None,
         audio_attention_mask: mx.array | None = None,
         video_cross_attention_mask: mx.array | None = None,
+        audio_cross_attention_mask: mx.array | None = None,
         video_keyframes_mask: mx.array | None = None,
         video_timesteps: mx.array | None = None,
         audio_timesteps: mx.array | None = None,
@@ -810,6 +811,9 @@ class LTXModel(nn.Module):
             video_cross_attention_mask: Optional additive bias for the video→text
                 cross-attention (Prompt Relay temporal prompt gating). Same array
                 is broadcast to every block.
+            audio_cross_attention_mask: Optional additive bias for the audio→text
+                cross-attention (Prompt Relay on ``audio_attn2``). Same array is
+                broadcast to every block; ignored on the video-only path.
             video_timesteps: Optional (B, Nv) per-token timesteps for video.
                 When provided, AdaLN parameters are computed per-token instead
                 of per-batch, enabling preserved tokens (mask=0) to receive
@@ -1029,6 +1033,7 @@ class LTXModel(nn.Module):
                             video_attention_mask=video_attention_mask,
                             audio_attention_mask=audio_attention_mask,
                             video_cross_attention_mask=video_cross_attention_mask,
+                            audio_cross_attention_mask=audio_cross_attention_mask,
                             perturbations=perturbations,
                             block_idx=_bidx,
                             nag=nag,
@@ -1059,6 +1064,7 @@ class LTXModel(nn.Module):
                     video_attention_mask=video_attention_mask,
                     audio_attention_mask=audio_attention_mask,
                     video_cross_attention_mask=video_cross_attention_mask,
+                    audio_cross_attention_mask=audio_cross_attention_mask,
                     perturbations=perturbations,
                     block_idx=block_idx,
                     nag=nag,

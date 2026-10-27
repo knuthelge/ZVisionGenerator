@@ -83,8 +83,8 @@ def load_pipeline(model_path: str, torch_dtype: torch.dtype, bits: int | None, *
     elif bits == 8:
         transformer = load_fp8_transformer(model_path, torch_dtype)
     else:
-        transformer = DiffusersAutoModel.from_pretrained(model_path, subfolder="transformer", torch_dtype=torch_dtype)
-    pipeline = Ideogram4Pipeline.from_pretrained(model_path, text_encoder=text_encoder, transformer=transformer, unconditional_transformer=None, torch_dtype=torch_dtype)
+        transformer = DiffusersAutoModel.from_pretrained(model_path, subfolder="transformer", dtype=torch_dtype)
+    pipeline = Ideogram4Pipeline.from_pretrained(model_path, text_encoder=text_encoder, transformer=transformer, unconditional_transformer=None, dtype=torch_dtype)
     # The model index lists no unconditional transformer, so the stand-in is not recorded there (nor saved with a stored copy).
     pipeline.unconditional_transformer = zero_unconditional_transformer(torch_dtype)
     setattr(pipeline, _SOURCE_ATTRIBUTE, str(Path(model_path).expanduser()))

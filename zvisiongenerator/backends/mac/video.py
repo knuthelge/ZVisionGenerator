@@ -263,7 +263,7 @@ def _conditioning_inputs(image_path: str, end_image_path: str | None) -> list:
     """Return the vendored ``ImageConditioningInput`` of each image the clip is pinned to, at full strength."""
     from ltx_pipelines_mlx.utils.args import ImageConditioningInput
 
-    return [ImageConditioningInput(path=path, frame_idx=frame, strength=1.0) for path, frame in _image_anchors(image_path, end_image_path)]
+    return [ImageConditioningInput.at(path, frame, 1.0) for path, frame in _image_anchors(image_path, end_image_path)]
 
 
 def _conditioning_latent(cond: Any) -> Any:

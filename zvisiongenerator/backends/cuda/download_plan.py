@@ -32,7 +32,7 @@ __all__ = [
 # An LTX diffusers repo is downloaded without its own transformer weights when a single-file transformer replaces them.
 SEPARATE_TRANSFORMER_IGNORE: tuple[str, ...] = ("transformer/*.safetensors", "transformer/*.safetensors.index.json")
 
-# Root files ``DiffusionPipeline.download`` keeps (diffusers 0.41 ``pipeline_utils.py``: the scheduler, config and model
+# Root files ``DiffusionPipeline.download`` keeps (diffusers 0.42 ``pipeline_utils.py``: the scheduler, config and model
 # index names plus ``TRANSFORMERS_COMPONENT_AUX_FILES``).
 DIFFUSERS_ROOT_FILES: tuple[str, ...] = (
     "config.json",

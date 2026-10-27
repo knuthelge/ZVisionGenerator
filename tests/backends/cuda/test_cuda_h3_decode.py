@@ -63,7 +63,7 @@ def tiled_vae():
     return tiny
 
 
-# --- contract against diffusers' decode step (0.41.0) ------------------------------------------------------------
+# --- contract against diffusers' decode step (0.42.0) ------------------------------------------------------------
 
 
 class TestAgainstTheDiffusersDecodeStep:

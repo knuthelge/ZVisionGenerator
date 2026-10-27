@@ -58,7 +58,7 @@ _DIFFUSERS_INDEX_NAME = "diffusion_pytorch_model.safetensors.index.json"
 _TRANSFORMERS_INDEX_NAME = "model.safetensors.index.json"
 _CHECKPOINT_PREFIX = "model.diffusion_model."
 _BLOCKS_PREFIX = "transformer_blocks."
-# LTX-2.3's prompt modulation layers, which diffusers 0.41's single-file conversion leaves under their checkpoint names.
+# LTX-2.3's prompt modulation layers, which diffusers 0.42's single-file conversion leaves under their checkpoint names.
 _LTX23_RENAMES = (("prompt_adaln_single.", "prompt_adaln."), ("audio_prompt_adaln_single.", "audio_prompt_adaln."))
 # The diffusers text-encoder checkpoint uses transformers' older Gemma 3 names.
 _LEGACY_TEXT_ENCODER_PREFIXES = (

@@ -541,7 +541,7 @@ class TestLoadModelFullPrecision:
             backend.load_model("fake-model-path", precision="float16")
 
         call_kwargs = mod.AutoPipelineForText2Image.from_pretrained.call_args[1]
-        assert call_kwargs["torch_dtype"] == "fp16-sentinel"
+        assert call_kwargs["dtype"] == "fp16-sentinel"
 
 
 # ---------------------------------------------------------------------------
@@ -986,7 +986,7 @@ class TestImageToImage:
             backend.image_to_image(model=model, image=Image.new("RGB", (64, 64)), prompt="sharper", strength=0.3, steps=4, seed=42, guidance=0.5)
 
         assert [call.args[0] for call in from_pipe.call_args_list] == [model, model]
-        assert all(call.kwargs["torch_dtype"] is model.vae.dtype for call in from_pipe.call_args_list)  # never float32
+        assert all(call.kwargs["dtype"] is model.vae.dtype for call in from_pipe.call_args_list)  # never float32
         assert all(not isinstance(value, MagicMock) for value in vars(backend).values())
 
     def test_skip_signal_returns_none(self, win_backend):

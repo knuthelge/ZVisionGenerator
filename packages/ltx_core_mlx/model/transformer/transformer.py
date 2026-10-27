@@ -302,6 +302,7 @@ class BasicAVTransformerBlock(nn.Module):
         video_attention_mask: mx.array | None = None,
         audio_attention_mask: mx.array | None = None,
         video_cross_attention_mask: mx.array | None = None,
+        audio_cross_attention_mask: mx.array | None = None,
         perturbations: BatchedPerturbationConfig | None = None,
         block_idx: int = 0,
         nag: NAGGuidance | None = None,
@@ -329,6 +330,8 @@ class BasicAVTransformerBlock(nn.Module):
             audio_attention_mask: Attention mask for audio self-attention.
             video_cross_attention_mask: Optional additive bias (broadcastable to
                 (B, 1, Nv, Nt)) for the video→text cross-attention (Prompt Relay).
+            audio_cross_attention_mask: Optional additive bias (broadcastable to
+                (B, 1, Na, Nt)) for the audio→text cross-attention (Prompt Relay).
             perturbations: Optional perturbation config for STG guidance.
                 When provided, generates masks that zero out attention outputs
                 for perturbed samples in the batch.
@@ -451,6 +454,7 @@ class BasicAVTransformerBlock(nn.Module):
                 + self.audio_attn2(
                     audio_normed,
                     encoder_hidden_states=text_scaled,
+                    attention_mask=audio_cross_attention_mask,
                     **nag_kwargs,
                 )
                 * a_gate_ca

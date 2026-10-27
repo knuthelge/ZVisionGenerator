@@ -241,7 +241,7 @@ def load_nf4_transformer(model_path: str, compute_dtype: torch.dtype, *, prequan
     options: dict[str, Any] = {}
     if not prequantized:
         options["quantization_config"] = _nf4_configs(compute_dtype, keep_modules)[1]
-    return (model_class or DiffusersAutoModel).from_pretrained(model_path, subfolder="transformer", torch_dtype=compute_dtype, **options)
+    return (model_class or DiffusersAutoModel).from_pretrained(model_path, subfolder="transformer", dtype=compute_dtype, **options)
 
 
 def _nf4_configs(compute_dtype: torch.dtype, keep_modules: tuple[str, ...] = ()) -> tuple[Any, Any]:
@@ -290,7 +290,7 @@ def _stream_fp8_transformer(component_dir: Path, compute_dtype: torch.dtype, mod
     files = _weight_files(component_dir)
     if not files:
         # Weights in another format (e.g. an old .bin checkpoint) cannot stream: load them in full, then cast.
-        return cast_to_fp8((model_class or DiffusersAutoModel).from_pretrained(str(component_dir), torch_dtype=compute_dtype), compute_dtype, keep_patterns)
+        return cast_to_fp8((model_class or DiffusersAutoModel).from_pretrained(str(component_dir), dtype=compute_dtype), compute_dtype, keep_patterns)
     # AutoModel.from_config reads a path as a pipeline folder; a component's own config is passed as a dict.
     config = json.loads((component_dir / "config.json").read_text(encoding="utf-8"))
     model = cast_to_fp8(empty_diffusers_model(config, compute_dtype, model_class), compute_dtype, keep_patterns)
@@ -302,7 +302,7 @@ def empty_diffusers_model(config: dict[str, Any], compute_dtype: torch.dtype, mo
     """Return the diffusers model *config* describes, without weights (on the meta device), in *compute_dtype*.
 
     Modules the model keeps in float32 stay in float32. Non-persistent buffers (the rotary frequencies) keep the values
-    and dtype the constructor gave them, as they do under ``from_pretrained(torch_dtype=...)``: no state dict holds them, so
+    and dtype the constructor gave them, as they do under ``from_pretrained(dtype=...)``: no state dict holds them, so
     a cast to *compute_dtype* would round them for good. *model_class* builds models diffusers' ``AutoModel`` cannot
     resolve by name (pipeline-specific ones).
     """

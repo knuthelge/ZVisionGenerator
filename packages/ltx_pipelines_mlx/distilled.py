@@ -93,7 +93,8 @@ class Stage1Result:
         resolved_images: Resolved multi-anchor I2V conditioning inputs.
         video_embeds: Video text embeddings from prompt encoding.
         audio_embeds: Audio text embeddings from prompt encoding.
-        relay_mask: Prompt Relay cross-attention mask builder.
+        relay_mask: Prompt Relay video cross-attention mask builder.
+        relay_audio_mask: Prompt Relay audio cross-attention mask builder.
         x0_model: The stage 1 X0 model, reused for stage 2 when tiling is off; ``None`` once
             released (DFR drops it before its temporal rounds reload a clean DiT).
         nag: Normalized Attention Guidance input (encoded negative prompt + settings) for every
@@ -108,6 +109,7 @@ class Stage1Result:
     video_embeds: mx.array
     audio_embeds: mx.array
     relay_mask: Callable
+    relay_audio_mask: Callable
     x0_model: X0Model | None
     nag: NAGGuidance | None = None
 
@@ -138,11 +140,44 @@ def resolve_stage1_frames(
     """
     resolved_images = list(images) if images else []
     if image is not None and not resolved_images:
-        resolved_images = [ImageConditioningInput(path=image, frame_idx=0, strength=1.0)]
+        resolved_images = [ImageConditioningInput.at(image, 0, 1.0)]
     resolved_images = resolve_frame_indices(resolved_images, num_frames)
     if canvas_for is not None:
         num_frames, generated_keyframes = canvas_for(num_frames)
     return num_frames, generated_keyframes, resolved_images
+
+
+def _check_stage1_resume(
+    resume: Stage1Result,
+    video_state: LatentState,
+    audio_state: LatentState,
+    latent_dims: tuple[int, int, int],
+) -> None:
+    """Refuse a stage-1 result that does not belong to the request being rendered.
+
+    The checks cover what a different request would change: the latent grid (size, frame count),
+    the video and audio token counts, and the generated-keyframe slots. They cannot see a different
+    prompt or seed with the same shapes; keying a saved stage 1 to its request stays the caller's job.
+
+    Raises:
+        ValueError: on any mismatch.
+    """
+    F, H, W = latent_dims
+    problems = []
+    if tuple(resume.latent_dims) != (F, H, W):
+        problems.append(f"latent grid {tuple(resume.latent_dims)} vs {(F, H, W)}")
+    expected_video = (1, F * H * W, video_state.latent.shape[-1])
+    if tuple(resume.video_tokens.shape) != expected_video:
+        problems.append(f"video tokens {tuple(resume.video_tokens.shape)} vs {expected_video}")
+    if tuple(resume.audio_tokens.shape) != tuple(audio_state.latent.shape):
+        problems.append(f"audio tokens {tuple(resume.audio_tokens.shape)} vs {tuple(audio_state.latent.shape)}")
+    layout = video_state.generated_keyframe_layout
+    slots = 0 if layout is None else layout.num_keyframes
+    got = 0 if resume.generated_keyframes is None else resume.generated_keyframes.shape[2]
+    if got != slots:
+        problems.append(f"{got} generated keyframe slots vs {slots}")
+    if problems:
+        raise ValueError("The stage-1 result does not match this request: " + "; ".join(problems) + ".")
 
 
 class DistilledPipeline(TI2VidTwoStagesPipeline):
@@ -202,10 +237,9 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
             return
 
         if self.dit is None:
-            transformer_path = self.model_dir / "transformer.safetensors"
-            if not transformer_path.exists():
-                transformer_path = self._resolve_safetensors(self.model_dir, "transformer-distilled")
-            self.dit = self._load_transformer_with_optional_streaming(transformer_path)
+            self.dit = self._load_transformer_with_optional_streaming(
+                self._resolve_distilled_transformer(self.model_dir)
+            )
 
         self._load_vae_encoder()
 
@@ -224,6 +258,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
         audio_text_embeds: mx.array,
         sigmas: list[float],
         video_cross_attention_mask: mx.array | None,
+        audio_cross_attention_mask: mx.array | None = None,
         on_step,
         seed: int,
         ancestral: bool,
@@ -262,6 +297,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
                 audio_text_embeds=audio_text_embeds,
                 sigmas=sigmas,
                 video_cross_attention_mask=video_cross_attention_mask,
+                audio_cross_attention_mask=audio_cross_attention_mask,
                 on_step=on_step,
                 **nag_kwargs,
             )
@@ -276,6 +312,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
             stepper=EulerAncestralDiffusionStep(eta=ANCESTRAL_ETA, s_noise=ANCESTRAL_S_NOISE),
             noise_seed=seed + noise_seed_offset,
             video_cross_attention_mask=video_cross_attention_mask,
+            audio_cross_attention_mask=audio_cross_attention_mask,
             on_step=on_step,
             **nag_kwargs,
         )
@@ -379,8 +416,10 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
         enable_teacache: bool = False,
         negative_prompt: str | None = None,
         nag: NAGConfig | None = None,
+        return_stage1: bool = False,
+        stage1: Stage1Result | None = None,
         **_unused_kwargs,
-    ) -> tuple[mx.array, mx.array]:
+    ) -> tuple[mx.array, mx.array] | tuple[mx.array, mx.array, Stage1Result]:
         """Generate video using the distilled two-stage pipeline.
 
         Args:
@@ -407,12 +446,23 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
             nag: Normalized Attention Guidance settings: the negative prompt acts inside the
                 text cross-attentions of both stages, without an unconditional pass.
                 ``None`` (default) keeps the plain distilled flow.
+            return_stage1: Also return the :class:`Stage1Result` of this run, so a preview
+                (for example ``stage2_steps=1``) can be finished later without running stage 1
+                again. Its ``video_tokens``, ``audio_tokens``, ``generated_keyframes`` and
+                ``latent_dims`` are plain arrays and ints the caller can save as it likes.
+            stage1: Resume from a previous run's stage 1 instead of denoising it again. Only
+                ``video_tokens``, ``audio_tokens``, ``generated_keyframes`` and ``latent_dims``
+                are read; everything else is rebuilt for this request (prompt encoding, image
+                conditioning, models), and the arrays must match the state this request
+                builds, or a ``ValueError`` is raised. With the same request, the result is
+                bit-identical to a plain render.
             **_unused_kwargs: Accepted (and ignored) for signature compatibility
                 with :meth:`TI2VidTwoStagesPipeline.generate_two_stage`. CFG / STG
                 flags don't apply to the distilled flow.
 
         Returns:
-            Tuple of (video_latent, audio_latent) at full resolution.
+            Tuple of (video_latent, audio_latent) at full resolution, plus the
+            :class:`Stage1Result` when ``return_stage1`` is set.
 
         Raises:
             ValueError: when ``enable_teacache`` is requested on an LTX-2.5 pack,
@@ -435,10 +485,11 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
             enable_teacache=enable_teacache,
             negative_prompt=negative_prompt,
             nag=nag,
+            resume=stage1,
         )
         video_half = self.video_patchifier.unpatchify(stage1.video_tokens, stage1.latent_dims)
         video_upscaled = self._upsample_latent(video_half)
-        return self._stage2(
+        video, audio = self._stage2(
             stage1,
             video_upscaled,
             num_frames=num_frames,
@@ -447,6 +498,9 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
             stage2_steps=stage2_steps,
             extra_conditionings=[],
         )
+        if return_stage1:
+            return video, audio, stage1
+        return video, audio
 
     def _stage1(
         self,
@@ -467,6 +521,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
         video_fps: float | None = None,
         negative_prompt: str | None = None,
         nag: NAGConfig | None = None,
+        resume: Stage1Result | None = None,
     ) -> tuple[Stage1Result, int, int, int]:
         """Encode the prompt and denoise stage 1 at half resolution.
 
@@ -499,6 +554,8 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
                 is set (already validated by :func:`resolve_distilled_nag`).
             nag: Active NAG settings, or ``None``. The encoded guidance is returned in
                 ``Stage1Result.nag`` for stage 2 and the DFR passes.
+            resume: A previous run's stage 1 to reuse instead of the denoise loop: its arrays
+                are checked against the states built here (:func:`_check_stage1_resume`).
 
         Returns:
             Tuple of (stage1 result, resolved num_frames, resolved height, resolved width).
@@ -545,6 +602,9 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
         # the mask is rebuilt each stage because tokens-per-frame (H*W) differs.
         num_text_tokens = video_embeds.shape[1]
         relay_mask = self._prompt_relay_mask_builder(prompt_relay, relay_token_ranges, num_text_tokens)
+        relay_audio_mask = self._prompt_relay_audio_mask_builder(
+            prompt_relay, relay_token_ranges, num_text_tokens, default_audio_strength=1.0
+        )
 
         # --- Load distilled DiT + VAE encoder + upsampler ---
         self.load()
@@ -611,6 +671,28 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
 
         x0_model = X0Model(stage1_dit)
 
+        if resume is not None:
+            _check_stage1_resume(resume, video_state, audio_state, (F, H_half, W_half))
+            self.generated_keyframes = resume.generated_keyframes
+            return (
+                Stage1Result(
+                    video_tokens=resume.video_tokens,
+                    audio_tokens=resume.audio_tokens,
+                    generated_keyframes=resume.generated_keyframes,
+                    latent_dims=(F, H_half, W_half),
+                    resolved_images=resolved_images,
+                    video_embeds=video_embeds,
+                    audio_embeds=audio_embeds,
+                    relay_mask=relay_mask,
+                    relay_audio_mask=relay_audio_mask,
+                    x0_model=x0_model,
+                    nag=nag_guidance,
+                ),
+                num_frames,
+                height,
+                width,
+            )
+
         self._pre_denoise_flush(video_state, audio_state)
         output_1 = self._run_denoise_loop(
             model=x0_model,
@@ -620,6 +702,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
             audio_text_embeds=audio_embeds,
             sigmas=sigmas_1,
             video_cross_attention_mask=relay_mask(F, H_half, W_half, video_state.latent.shape[1]),
+            audio_cross_attention_mask=relay_audio_mask(F, audio_state),
             on_step=self._stepwise_hook(F, H_half, W_half, stage=1),
             seed=seed,
             ancestral=self._is_25,
@@ -630,7 +713,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
             aggressive_cleanup()
 
         # --- Upscale (same denorm/upsample/renorm as TI2VidTwoStagesPipeline) ---
-        # Strip appended keyframe tokens (multi-anchor with frame_idx>0).
+        # Strip appended keyframe tokens (guide-bound images, generated keyframe slots).
         self.generated_keyframes = extract_generated_keyframes(
             output_1.video_latent, video_state.generated_keyframe_layout, self.video_patchifier, (H_half, W_half)
         )
@@ -646,6 +729,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
                 video_embeds=video_embeds,
                 audio_embeds=audio_embeds,
                 relay_mask=relay_mask,
+                relay_audio_mask=relay_audio_mask,
                 x0_model=x0_model,
                 nag=nag_guidance,
             ),
@@ -713,6 +797,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
         video_embeds = stage1.video_embeds
         audio_embeds = stage1.audio_embeds
         relay_mask = stage1.relay_mask
+        relay_audio_mask = stage1.relay_audio_mask
         x0_model = stage1.x0_model
 
         H_full = H_half * 2
@@ -737,6 +822,8 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
         if self.low_memory:
             self.image_conditioner.free()
             self.upsampler = None
+            # load() must bring them back on the next generate_two_stage of this pipeline.
+            self._loaded = False
             aggressive_cleanup()
 
         # --- Stage 2: full resolution refine (no LoRA swap — already distilled) ---
@@ -785,6 +872,7 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
                 audio_text_embeds=audio_embeds,
                 sigmas=sigmas_2,
                 video_cross_attention_mask=relay_mask(F, H_full, W_full, video_state_2.latent.shape[1]),
+                audio_cross_attention_mask=relay_audio_mask(F, audio_state_2),
                 on_step=self._stepwise_hook(F, H_full, W_full, stage=2),
                 seed=seed,
                 ancestral=self._is_25,
@@ -815,4 +903,4 @@ class DistilledPipeline(TI2VidTwoStagesPipeline):
         return video_latent, audio_latent
 
 
-__all__ = ["DistilledPipeline"]
+__all__ = ["DistilledPipeline", "Stage1Result"]

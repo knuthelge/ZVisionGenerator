@@ -190,7 +190,7 @@ class TestAbsentOptionalComponents:
 
         model, _ = DiffusersVideoBackend().load_model(_LTX25_REPO, quantize=4, mode="t2v")
 
-        assert model.text_to_video.load_kwargs == {"transformer": None, "connectors": "connectors", "text_encoder": None, "torch_dtype": "bfloat16", **_ABSENT}
+        assert model.text_to_video.load_kwargs == {"transformer": None, "connectors": "connectors", "text_encoder": None, "dtype": "bfloat16", **_ABSENT}
 
     @pytest.mark.parametrize("index", [_LTX23_INDEX, None])
     def test_a_2_3_load_passes_exactly_the_kwargs_it_always_did(self, monkeypatch, tmp_path, index):
@@ -201,7 +201,7 @@ class TestAbsentOptionalComponents:
 
         model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v")
 
-        assert model.text_to_video.load_kwargs == {"transformer": None, "connectors": "connectors", "text_encoder": None, "torch_dtype": "bfloat16"}
+        assert model.text_to_video.load_kwargs == {"transformer": None, "connectors": "connectors", "text_encoder": None, "dtype": "bfloat16"}
 
 
 class TestLoadOptions:

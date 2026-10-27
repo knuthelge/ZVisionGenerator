@@ -92,7 +92,11 @@ def ltx_memory(monkeypatch):
     monkeypatch.setitem(sys.modules, "ltx_core_mlx.utils.memory", memory)
     monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.scheduler", SimpleNamespace(STAGE_2_SIGMAS=[0.9, 0.7, 0.4, 0.0]))
     monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.utils", MagicMock())
-    monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.utils.args", SimpleNamespace(ImageConditioningInput=lambda **fields: SimpleNamespace(**fields)))
+    monkeypatch.setitem(
+        sys.modules,
+        "ltx_pipelines_mlx.utils.args",
+        SimpleNamespace(ImageConditioningInput=SimpleNamespace(at=lambda path, frame_idx, strength, crf=None: SimpleNamespace(path=path, frame_idx=frame_idx, strength=strength, crf=crf))),
+    )
     return memory
 
 

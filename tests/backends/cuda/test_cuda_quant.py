@@ -131,7 +131,7 @@ class TestModelClass:
         with patch.object(quant, "_weight_files", return_value=[]), patch.object(quant, "cast_to_fp8", side_effect=lambda component, _dtype, _keep=(): component) as mock_cast:
             quant._stream_fp8_transformer(tmp_path / "transformer", "bf16", _Custom, ("^t_embedder",))
 
-        _Custom.from_pretrained.assert_called_once_with(str(tmp_path / "transformer"), torch_dtype="bf16")
+        _Custom.from_pretrained.assert_called_once_with(str(tmp_path / "transformer"), dtype="bf16")
         libs.diffusers.AutoModel.from_pretrained.assert_not_called()
         assert mock_cast.call_args.args[2] == ("^t_embedder",)
 

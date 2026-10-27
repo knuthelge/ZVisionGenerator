@@ -261,7 +261,7 @@ class TestLoadOrder:
         pipeline = _load(folder, None)
 
         assert "transformer-bf16" in log and log[-1] == "offload"
-        assert loaded["transformer-bf16"].kwargs["torch_dtype"] == torch.bfloat16
+        assert loaded["transformer-bf16"].kwargs["dtype"] == torch.bfloat16
         assert pipeline._ziv_resident is False
 
     def test_the_text_encoder_is_nf4_at_every_level_and_prequantized_for_a_stored_copy(self, loading, models):

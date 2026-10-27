@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import httpx
+from huggingface_hub.utils import httpx
 import pytest
 from huggingface_hub.errors import GatedRepoError
 from huggingface_hub.utils import filter_repo_objects
@@ -176,7 +176,7 @@ def test_root_files_cover_diffusers_transformers_aux_files() -> None:
 
 
 def _diffusers_expected_files(repo_id: str, passed_components: tuple[str, ...]) -> set[str]:
-    """Return the files ``DiffusionPipeline.download`` needs in the snapshot to skip its own ``snapshot_download`` (diffusers 0.41 logic)."""
+    """Return the files ``DiffusionPipeline.download`` needs in the snapshot to skip its own ``snapshot_download`` (diffusers 0.42 logic)."""
     import fnmatch
     import os
     import re

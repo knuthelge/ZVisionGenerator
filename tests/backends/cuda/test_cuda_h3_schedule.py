@@ -1,4 +1,4 @@
-"""Tests for the H3 sigma schedules and row timesteps, with contracts pinned to diffusers 0.41.0."""
+"""Tests for the H3 sigma schedules and row timesteps, with contracts pinned to diffusers 0.42.0."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _values(timesteps) -> list[float]:
 
 
 def test_diffusers_is_the_pinned_release():
-    assert diffusers.__version__ == "0.41.0"
+    assert diffusers.__version__ == "0.42.0"
 
 
 def test_constants():
@@ -102,7 +102,7 @@ def test_row_timesteps_accepts_tensor_scalars():
     assert unique.tolist() == pytest.approx([float(t)])
 
 
-# --- contracts against diffusers 0.41.0 ---------------------------------------------------------------------------
+# --- contracts against diffusers 0.42.0 ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("frames", [22, 124, 413])

@@ -2,7 +2,7 @@
 
 ## ltx-core-mlx and ltx-pipelines-mlx
 
-Vendored from [dgrauet/ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) at commit de4a12d3cd14f345b2ec680eb63f4114b927b435.
+Vendored from [dgrauet/ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) at commit 895201df379b079c2154738bcf92005b7a371923.
 
 MIT License
 

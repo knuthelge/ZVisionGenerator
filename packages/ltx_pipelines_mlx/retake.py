@@ -53,10 +53,17 @@ from ltx_core_mlx.utils.audio import load_audio
 from ltx_core_mlx.utils.ffmpeg import probe_video_info
 from ltx_core_mlx.utils.image import load_video_frames
 from ltx_core_mlx.utils.memory import aggressive_cleanup
-from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions
+from ltx_core_mlx.utils.positions import (
+    AUDIO_DOWNSAMPLE_FACTOR,
+    AUDIO_HOP_LENGTH,
+    AUDIO_SAMPLE_RATE,
+    VIDEO_TEMPORAL_SCALE,
+    compute_audio_positions,
+    compute_audio_token_count,
+    compute_video_positions,
+)
 from ltx_pipelines_mlx._base import BasePipeline, reject_negative_prompt
 from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, ltx2_schedule, shorten_schedule
-from ltx_pipelines_mlx.utils.progress import phase
 from ltx_pipelines_mlx.utils.samplers import DenoiseOutput, denoise_loop, guided_denoise_loop
 
 _materialize = getattr(mx, "eval")  # noqa: B009 -- security hook flags mx.eval pattern
@@ -135,6 +142,39 @@ def encode_source_audio_latent(
         audio_T = compute_audio_token_count(num_frames, frame_rate=frame_rate)
         audio_latent = mx.zeros((1, 8, audio_T, 16), dtype=mx.bfloat16)
     return audio_latent
+
+
+def audio_window_tokens(start_frame: int, end_frame: int, num_audio_tokens: int, frame_rate: float) -> tuple[int, int]:
+    """The audio tokens ``[start, end)`` whose time interval overlaps latent frames ``[start_frame, end_frame)``.
+
+    As upstream's ``TemporalRegionMask``: the window spans the pixel frames of its latent frames (causal fix: latent
+    frame ``k`` covers ``[max(0, 8k - 7), 8k + 1)``) converted to seconds, and an audio token is regenerated when its
+    own interval (``[max(0, 4i - 3), 4i + 1)`` mel frames of 10 ms, the bounds behind ``compute_audio_positions``)
+    overlaps it. Mapping frames to tokens proportionally instead started the audio window late (token 15 instead of
+    10 for latent frames 2-5 of a 49-frame clip at 24 fps).
+
+    Args:
+        start_frame: First latent frame of the window.
+        end_frame: Latent frame after the window.
+        num_audio_tokens: Number of audio tokens.
+        frame_rate: Video frames per second.
+
+    Returns:
+        ``(start, end)`` token indices; ``start == end`` when no token overlaps.
+    """
+    t = VIDEO_TEMPORAL_SCALE
+    start_time = max(0, start_frame * t + 1 - t) / frame_rate
+    end_time = max(0, end_frame * t + 1 - t) / frame_rate
+    sec_per_mel = AUDIO_HOP_LENGTH / AUDIO_SAMPLE_RATE
+    d = AUDIO_DOWNSAMPLE_FACTOR
+    inside = [
+        i
+        for i in range(num_audio_tokens)
+        if max(0, (i + 1) * d + 1 - d) * sec_per_mel > start_time and max(0, i * d + 1 - d) * sec_per_mel < end_time
+    ]
+    if not inside:
+        return 0, 0
+    return inside[0], inside[-1] + 1
 
 
 @dataclass(frozen=True)
@@ -389,7 +429,7 @@ class RetakePipeline(BasePipeline):
         if self.distilled:
             reject_negative_prompt(negative_prompt, type(self).__name__)
             # --- Text encoding (positive only, no CFG) + distilled transformer ---
-            video_embeds, audio_embeds = self._encode_positive_prompt(prompt)
+            ((video_embeds, audio_embeds),) = self._encode_prompts(prompt)
             neg_video_embeds = neg_audio_embeds = None
             if self.dit is None:
                 self.dit = self._load_distilled_transformer()
@@ -434,10 +474,8 @@ class RetakePipeline(BasePipeline):
 
         # Audio state
         if regenerate_audio:
-            # Apply same temporal mask to audio
-            audio_tokens_per_video_frame = audio_T / F
-            audio_start = round(start_frame * audio_tokens_per_video_frame)
-            audio_end = round(end_frame * audio_tokens_per_video_frame)
+            # The audio tokens whose time interval overlaps the window (upstream ``TemporalRegionMask``)
+            audio_start, audio_end = audio_window_tokens(start_frame, end_frame, audio_T, frame_rate)
 
             audio_mask = mx.zeros((1, audio_T, 1), dtype=mx.bfloat16)
             audio_mask = audio_mask.at[:, audio_start:audio_end, :].add(
@@ -483,27 +521,9 @@ class RetakePipeline(BasePipeline):
 
         return video_latent, audio_latent
 
-    def _encode_positive_prompt(self, prompt: str) -> tuple[mx.array, mx.array]:
-        """Load the text encoder, encode the prompt alone, materialize, free the encoder.
-
-        The positive half of :meth:`_encode_text_with_negative`, for the distilled
-        mode (upstream encodes ``[prompt]`` only when ``distilled``).
-        """
-        self._load_text_encoder()
-        with phase("Encoding prompt", verbose=self.verbose):
-            video_embeds, audio_embeds = self._encode_text(prompt)
-            _materialize(video_embeds, audio_embeds)
-        self.text_encoder = None
-        self.feature_extractor = None
-        aggressive_cleanup()
-        return video_embeds, audio_embeds
-
     def _load_distilled_transformer(self) -> LTXModel:
         """Load the distilled transformer, resolved as :meth:`DistilledPipeline.load` does."""
-        transformer_path = self.model_dir / "transformer.safetensors"
-        if not transformer_path.exists():
-            transformer_path = self._resolve_safetensors(self.model_dir, "transformer-distilled")
-        return self._load_transformer_with_optional_streaming(transformer_path)
+        return self._load_transformer_with_optional_streaming(self._resolve_distilled_transformer(self.model_dir))
 
     def _guided_denoise(
         self,

@@ -70,27 +70,30 @@ def apply_compute_dtype_from_env(dit: LTXModel) -> LTXModel:
 
 
 def unfused_loras_requested(lora_mode: str, low_ram_streaming: bool) -> bool:
-    """Whether the LoRA mode applies to a DiT loaded with ``low_ram_streaming``.
+    """Whether to attach LoRAs to a **resident** DiT as run-time adapters instead of fusing them.
 
-    ``--low-ram`` keeps fusing each block's LoRAs as the block is bound (the fused copy is thrown away
-    after the block runs), so the setting only changes resident models; a note says so.
+    Under ``--low-ram`` this is ``False``: the streamed path takes the mode through
+    :class:`~ltx_core_mlx.loader.block_streaming.BlockLoraSource` instead (``fuse=False`` sources feed
+    run-time adapters on the streamed block, see :func:`streamed_lora_fuse`).
 
     Args:
         lora_mode: The pipeline's parsed ``LTX2_LORA_MODE`` (:attr:`BasePipeline.lora_mode`).
         low_ram_streaming: Whether the pipeline streams the DiT blocks.
 
     Returns:
-        ``True`` when LoRAs should be attached as run-time adapters instead of fused.
+        ``True`` when the resident DiT should get adapters instead of an in-place fusion.
     """
-    if lora_mode != "unfused":
-        return False
-    if low_ram_streaming:
-        print(
-            "note: LTX2_LORA_MODE=unfused does not apply under --low-ram; LoRAs are fused per block at bind",
-            file=sys.stderr,
-        )
-        return False
-    return True
+    return lora_mode == "unfused" and not low_ram_streaming
+
+
+def streamed_lora_fuse(lora_mode: str) -> bool:
+    """``BlockLoraSource(fuse=...)`` for a task LoRA streamed under ``--low-ram``.
+
+    ``fused`` fuses each block's delta at bind (dequantize, add, re-quantize); ``unfused`` feeds the
+    factors to run-time adapters on the streamed block, so the quantized weights stay as stored.
+    The distilled LoRA is always fused (rank 384 / 450 on every block linear).
+    """
+    return lora_mode != "unfused"
 
 
 def reject_negative_prompt(negative_prompt: str | None, pipeline_name: str) -> None:
@@ -465,23 +468,36 @@ class BasePipeline:
         Returns:
             Tuple of (video_embeds, audio_embeds, neg_video_embeds, neg_audio_embeds).
         """
+        negative = DEFAULT_NEGATIVE_PROMPT if negative_prompt is None else negative_prompt
+        (video_embeds, audio_embeds), (neg_video_embeds, neg_audio_embeds) = self._encode_prompts(prompt, negative)
+        return video_embeds, audio_embeds, neg_video_embeds, neg_audio_embeds
+
+    def _encode_prompts(self, *prompts: str) -> list[tuple[mx.array, mx.array]]:
+        """Load the text encoder, encode each prompt, materialize it, free the encoder.
+
+        Each prompt is materialized on its own (see :meth:`_encode_text_with_negative`). The
+        distilled paths that encode the prompt alone call it with one prompt.
+
+        Returns:
+            One ``(video_embeds, audio_embeds)`` pair per prompt, in order.
+        """
         _materialize = getattr(mx, "eval")  # noqa: B009 -- security hook flags mx.eval pattern
 
         self._load_text_encoder()
 
+        encoded = []
         with phase("Encoding prompt", verbose=self.verbose):
-            video_embeds, audio_embeds = self._encode_text(prompt)
-            _materialize(video_embeds, audio_embeds)
-            negative = DEFAULT_NEGATIVE_PROMPT if negative_prompt is None else negative_prompt
-            neg_video_embeds, neg_audio_embeds = self._encode_text(negative)
-            _materialize(neg_video_embeds, neg_audio_embeds)
+            for text in prompts:
+                video_embeds, audio_embeds = self._encode_text(text)
+                _materialize(video_embeds, audio_embeds)
+                encoded.append((video_embeds, audio_embeds))
 
         # Free text encoder before loading heavy components
         self.text_encoder = None
         self.feature_extractor = None
         aggressive_cleanup()
 
-        return video_embeds, audio_embeds, neg_video_embeds, neg_audio_embeds
+        return encoded
 
     def _load_vae_encoder(self) -> None:
         """Load VAE encoder via the :class:`ImageConditioner` block."""
@@ -540,6 +556,16 @@ class BasePipeline:
             return versioned[-1]
         return model_dir / f"{stem}.safetensors"
 
+    @classmethod
+    def _resolve_distilled_transformer(cls, model_dir: Path) -> Path:
+        """Return the distilled transformer checkpoint of a pack.
+
+        ``transformer.safetensors`` when the pack ships a single transformer, else the
+        (possibly versioned) ``transformer-distilled*.safetensors`` via :meth:`_resolve_safetensors`.
+        """
+        single = model_dir / "transformer.safetensors"
+        return single if single.exists() else cls._resolve_safetensors(model_dir, "transformer-distilled")
+
     def _load_transformer_with_optional_streaming(self, transformer_path: Path) -> LTXModel:
         """Load a transformer from ``transformer_path``; honors ``_pending_loras``.
 
@@ -563,7 +589,6 @@ class BasePipeline:
 
                 return apply_compute_dtype_from_env(_impl(transformer_path, low_ram_streaming=self.low_ram_streaming))
 
-            # Before the --low-ram branch, so the note that unfused does not apply there is printed.
             unfused = unfused_loras_requested(self.lora_mode, self.low_ram_streaming)
             if self.low_ram_streaming:
                 from ltx_core_mlx.loader.block_streaming import BlockLoraSource
@@ -584,6 +609,7 @@ class BasePipeline:
                             block_prefix=LTXV_LORA_BLOCK_PREFIX,
                             strength=strength,
                             sd_ops=LTXV_LORA_COMFY_RENAMING_MAP,
+                            fuse=streamed_lora_fuse(self.lora_mode),
                         )
                     )
                 object.__setattr__(model, "_lora_sources", sources)
@@ -720,41 +746,12 @@ class BasePipeline:
 
         # Stage 1: DiT (largest component); LoRA fusion happens inside the wrapper.
         if self.dit is None:
-            transformer_path = model_dir / "transformer.safetensors"
-            if not transformer_path.exists():
-                transformer_path = self._resolve_safetensors(model_dir, "transformer-distilled")
-
-            self.dit = self._load_transformer_with_optional_streaming(transformer_path)
+            self.dit = self._load_transformer_with_optional_streaming(self._resolve_distilled_transformer(model_dir))
 
         # Stage 2: VAE + audio (smaller components)
         self._load_decoders()
 
         self._loaded = True
-
-    def _encode_text_and_load(self, prompt: str) -> tuple[mx.array, mx.array]:
-        """Encode text, then finish loading remaining components.
-
-        In low_memory mode this ensures Gemma is freed before the
-        transformer is loaded, keeping peak memory under control.
-        """
-        # Load text encoder + connector if not already loaded
-        self._load_text_encoder()
-
-        # Encode text
-        video_embeds, audio_embeds = self._encode_text(prompt)
-        # NOTE: mx.eval is MLX graph evaluation, NOT Python eval()
-        mx.eval(video_embeds, audio_embeds)
-
-        # Free text encoder before loading heavy components
-        if self.low_memory:
-            self.text_encoder = None
-            self.feature_extractor = None
-            aggressive_cleanup()
-
-        # Load remaining components (DiT, VAE, vocoder)
-        self.load()
-
-        return video_embeds, audio_embeds
 
     def _encode_nag(self, negative_prompt: str, config: NAGConfig) -> NAGGuidance:
         """Encode the NAG negative prompt and bind it to ``config`` (text encoder already loaded).
@@ -840,6 +837,62 @@ class BasePipeline:
                 num_text_tokens=num_text_tokens,
                 epsilon=prompt_relay.epsilon,
                 strength=prompt_relay.strength,
+            )
+
+        return _build
+
+    @staticmethod
+    def _prompt_relay_audio_mask_builder(
+        prompt_relay: PromptRelayInput | None,
+        token_ranges: list[tuple[int, int]] | None,
+        num_text_tokens: int,
+        default_audio_strength: float,
+    ) -> Callable[[int, LatentState | None], mx.array | None]:
+        """Return a per-stage builder for the additive audio->text cross-attn bias (``audio_attn2``).
+
+        The closure takes ``(latent_f, audio_state)`` and is called once per stage: the
+        stage's audio tokens are laid on the video's latent-frame timeline (token *i* at
+        ``i * latent_f / num_audio_tokens``), with the same segments as
+        :meth:`_prompt_relay_mask_builder`. It returns ``None`` (and builds nothing) when
+        Prompt Relay is off, when the audio strength is 0 (a video-only relay then passes
+        exactly what it passed before the audio mask existed), and for an absent or frozen
+        audio stream, which is conditioning and is not generated.
+
+        ``default_audio_strength`` applies when ``prompt_relay.audio_strength`` is ``None``:
+        the distilled paths pass ``1.0``; the dev + CFG paths pass ``0.0``. On the CFG
+        two-stage path the audio mask did not move the speech into its segments (2.5 q8,
+        384x640x97, segments 6/7: one seed unchanged, another lost its first line, with
+        STG, the isolated-modality pass, audio CFG or the rescale changed one at a time),
+        so it is opt-in there.
+        """
+        audio_strength = (
+            default_audio_strength
+            if prompt_relay is None or prompt_relay.audio_strength is None
+            else prompt_relay.audio_strength
+        )
+        if token_ranges is None or audio_strength == 0.0:
+            return lambda latent_f, audio_state: None
+        from ltx_core_mlx.conditioning.prompt_relay import (
+            build_relay_mask_audio,
+            distribute_segment_lengths,
+        )
+
+        epsilon = prompt_relay.epsilon if prompt_relay.audio_epsilon is None else prompt_relay.audio_epsilon
+
+        def _build(latent_f: int, audio_state: LatentState | None) -> mx.array | None:
+            if audio_state is None or audio_state.frozen:
+                return None
+            seg_lengths = distribute_segment_lengths(
+                len(prompt_relay.local_prompts), latent_f, prompt_relay.segment_lengths
+            )
+            return build_relay_mask_audio(
+                token_ranges=token_ranges,
+                segment_lengths=seg_lengths,
+                num_audio_tokens=audio_state.latent.shape[1],
+                latent_frames=latent_f,
+                num_text_tokens=num_text_tokens,
+                epsilon=epsilon,
+                strength=audio_strength,
             )
 
         return _build

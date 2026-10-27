@@ -333,7 +333,7 @@ class A2VidPipelineTwoStage(TI2VidTwoStagesPipeline):
         enc_w_half = W_half * 32
         resolved_images = list(images) if images else []
         if image is not None and not resolved_images:
-            resolved_images = [ImageConditioningInput(path=image, frame_idx=0, strength=1.0)]
+            resolved_images = [ImageConditioningInput.at(image, 0, 1.0)]
         resolved_images = resolve_frame_indices(resolved_images, num_frames)
         # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
         resolved_images = self.image_conditioner.resolve_crf(resolved_images)
@@ -349,8 +349,7 @@ class A2VidPipelineTwoStage(TI2VidTwoStagesPipeline):
                     video_encoder=encoder,
                     frame_rate=frame_rate,
                 )
-                mx.synchronize()
-                return conds
+                return conds  # evaluated by combined_image_conditionings
 
             conditionings_1 = self.image_conditioner(_encode_combined, free_after=self.low_memory)
             if self.low_memory:
@@ -411,7 +410,7 @@ class A2VidPipelineTwoStage(TI2VidTwoStagesPipeline):
             self._load_upsampler()
         assert self.upsampler is not None
 
-        # Strip appended keyframe tokens (multi-anchor with frame_idx>0).
+        # Strip appended keyframe tokens (guide-bound images, generated keyframe slots).
         gen_tokens_1 = output_1.video_latent[:, : F * H_half * W_half, :]
         video_half = self.video_patchifier.unpatchify(gen_tokens_1, (F, H_half, W_half))
         H_full = H_half * 2
@@ -422,7 +421,8 @@ class A2VidPipelineTwoStage(TI2VidTwoStagesPipeline):
             v_denorm = encoder.denormalize_latent(v_mlx).transpose(0, 4, 1, 2, 3)
             v_up = self.upsampler(v_denorm)
             v_up_renorm = encoder.normalize_latent(v_up.transpose(0, 2, 3, 4, 1)).transpose(0, 4, 1, 2, 3)
-            mx.synchronize()
+            # Evaluate before the encoder is freed (``mx.synchronize()`` only waits for queued work).
+            mx.eval(v_up_renorm)
             conds: list = []
             if resolved_images:
                 enc_h_full = H_full * 32

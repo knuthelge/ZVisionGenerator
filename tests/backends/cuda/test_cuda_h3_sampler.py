@@ -1,4 +1,4 @@
-"""Tests for the H3 denoise loop, with contracts pinned to diffusers 0.41.0 and no real weights.
+"""Tests for the H3 denoise loop, with contracts pinned to diffusers 0.42.0 and no real weights.
 
 Most tests drive the loop with a stand-in transformer that records every forward and returns a velocity that depends on
 the rows alone. The plain and keyframe paths are also compared bit for bit with diffusers' own loop blocks on a tiny

@@ -755,14 +755,17 @@ def ltx_transformer_source(config: dict[str, Any], model_name: str | None = None
 def ltx_companion_repos(config: dict[str, Any], repo_id: str) -> tuple[str, ...]:
     """Return the other Hugging Face repos the diffusers LTX backend downloads beside *repo_id*.
 
-    These are the single-file transformer and the latent upsampler, when *repo_id* is the configured
-    ``video_model_presets.ltx.diffusers.default_repo``; otherwise none.
+    These are the single-file transformer and the latent upsampler, as repo ids without a revision, when *repo_id*
+    is the configured ``video_model_presets.ltx.diffusers.default_repo`` (at any revision); otherwise none.
     """
     diffusers = ((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}
-    if diffusers.get("default_repo") != repo_id:
+    default_repo = diffusers.get("default_repo")
+    own = split_huggingface_revision(repo_id)[0]
+    if not isinstance(default_repo, str) or split_huggingface_revision(default_repo)[0] != own:
         return ()
     sources = (ltx_transformer_source(config), ltx_latent_upsampler_source(config))
-    return tuple(dict.fromkeys(source[0] for source in sources if source is not None and source[0] != repo_id))
+    companions = (split_huggingface_revision(source[0])[0] for source in sources if source is not None)
+    return tuple(dict.fromkeys(companion for companion in companions if companion != own))
 
 
 def _ltx_path(version: str | None) -> str:

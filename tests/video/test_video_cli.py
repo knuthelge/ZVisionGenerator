@@ -6,7 +6,7 @@ import warnings
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import httpx
+from huggingface_hub.utils import httpx
 import pytest
 from huggingface_hub.errors import GatedRepoError
 

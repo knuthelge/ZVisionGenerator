@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from unittest.mock import patch
 
-import httpx
+from huggingface_hub.utils import httpx
 import pytest
 from huggingface_hub.errors import GatedRepoError
 

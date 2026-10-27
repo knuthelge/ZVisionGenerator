@@ -190,7 +190,7 @@ def enhancer_plan(repo: str, revision: str | None) -> tuple[DownloadTarget, ...]
 
 def _offline_as_none(plan: Callable[[], tuple[DownloadTarget, ...]]) -> tuple[DownloadTarget, ...] | None:
     """Run *plan*, returning ``None`` when the model's file list cannot be read (no connection, or no cached index)."""
-    import httpx
+    from huggingface_hub.utils import httpx
     from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
     try:
