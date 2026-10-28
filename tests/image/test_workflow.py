@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 
+from tests._images import is_bluish, is_reddish, write_sideways_photo
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.workflows import build_workflow
@@ -16,6 +17,7 @@ from zvisiongenerator.workflows.image_stages import (
     resolve_prompt_stage,
     suppress_negative_stage,
     load_reference_stage,
+    load_references_stage,
     text_to_image_stage,
     upscale_stage,
     contrast_stage,
@@ -59,7 +61,7 @@ def _default_args(**overrides):
 class TestBuildWorkflow:
     """Verify build_workflow() assembles the correct stage list."""
 
-    _HEAD = [resolve_prompt_stage, suppress_negative_stage, load_reference_stage, text_to_image_stage]
+    _HEAD = [resolve_prompt_stage, suppress_negative_stage, load_reference_stage, load_references_stage, text_to_image_stage]
 
     @pytest.mark.parametrize(
         ("args", "post_stages"),
@@ -390,3 +392,111 @@ class TestReviewStage:
 
         artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (8, 8)))
         assert review_stage(self._request(None), artifacts) is StageOutcome.success
+
+
+# ---------------------------------------------------------------------------
+# References
+# ---------------------------------------------------------------------------
+
+
+def _reference_request(paths, *, cap=4, backend=None, **overrides):
+    return ImageGenerationRequest(
+        backend=backend or _make_mock_backend(),
+        model="fake",
+        model_family="flux2_klein",
+        max_reference_images=cap,
+        prompt="the woman from image 1",
+        width=64,
+        height=64,
+        reference_paths=tuple(str(path) for path in paths),
+        **overrides,
+    )
+
+
+def _save_images(tmp_path, sizes):
+    paths = []
+    for index, size in enumerate(sizes):
+        path = tmp_path / f"ref{index}.png"
+        Image.new("RGBA", size, color=(index * 40, 10, 10, 255)).save(path)
+        paths.append(path)
+    return paths
+
+
+class TestReferences:
+    def test_loads_each_reference_rgb_at_its_own_size(self, tmp_path):
+        request = _reference_request(_save_images(tmp_path, [(100, 50), (30, 90)]))
+        artifacts = ImageWorkingArtifacts()
+
+        assert load_references_stage(request, artifacts) is StageOutcome.success
+
+        assert [(image.mode, image.size) for image in artifacts.reference_images] == [("RGB", (100, 50)), ("RGB", (30, 90))]
+        assert artifacts.image is None
+
+    def test_no_references_is_a_noop(self):
+        artifacts = ImageWorkingArtifacts()
+
+        assert load_references_stage(_reference_request([]), artifacts) is StageOutcome.success
+        assert artifacts.reference_images == []
+
+    def test_more_than_the_cap_is_refused_and_none_is_loaded(self, tmp_path):
+        paths = _save_images(tmp_path, [(16, 16)] * 3)
+        artifacts = ImageWorkingArtifacts()
+
+        assert load_references_stage(_reference_request(paths[:2], cap=2), ImageWorkingArtifacts()) is StageOutcome.success
+        with pytest.raises(ValueError):
+            load_references_stage(_reference_request(paths, cap=2), artifacts)
+
+        assert artifacts.reference_images == []
+
+    def test_text_to_image_passes_references_to_the_backend(self):
+        backend = _make_mock_backend()
+        refs = [Image.new("RGB", (32, 32))]
+        artifacts = ImageWorkingArtifacts(resolved_prompt="p", reference_images=refs)
+
+        text_to_image_stage(_reference_request(["a.png"], backend=backend), artifacts)
+
+        assert backend.text_to_image.call_args.kwargs["reference_images"] == refs
+        backend.image_to_image.assert_not_called()
+
+    def test_start_image_and_references_go_to_image_to_image_together(self):
+        backend = _make_mock_backend()
+        refs = [Image.new("RGB", (32, 32))]
+        artifacts = ImageWorkingArtifacts(resolved_prompt="p", image=Image.new("RGB", (64, 64)), reference_images=refs)
+
+        text_to_image_stage(_reference_request(["a.png"], backend=backend, image_path="start.png"), artifacts)
+
+        assert backend.image_to_image.call_args.kwargs["reference_images"] == refs
+
+    def test_upscale_refine_passes_the_references(self):
+        backend = _make_mock_backend()
+        refs = [Image.new("RGB", (32, 32))]
+        artifacts = ImageWorkingArtifacts(resolved_prompt="p", image=Image.new("RGB", (64, 64)), reference_images=refs)
+        request = _reference_request(["a.png"], backend=backend, upscale_factor=2, upscale_denoise=0.3, upscale_sharpen=False)
+
+        upscale_stage(request, artifacts)
+
+        assert backend.image_to_image.call_args.kwargs["reference_images"] == refs
+
+
+# ---------------------------------------------------------------------------
+# Start image
+# ---------------------------------------------------------------------------
+
+
+def _start_request(image_path, *, width, height):
+    return ImageGenerationRequest(backend=_make_mock_backend(), model="fake", prompt="p", width=width, height=height, image_path=str(image_path))
+
+
+class TestStartImage:
+    def test_a_sideways_photo_is_loaded_upright_before_it_is_filled(self, tmp_path):
+        request = _start_request(write_sideways_photo(tmp_path / "phone.jpg"), width=40, height=80)
+        artifacts = ImageWorkingArtifacts()
+
+        assert load_reference_stage(request, artifacts) is StageOutcome.success
+
+        assert artifacts.image.size == (40, 80)
+        assert is_reddish(artifacts.image.getpixel((20, 4))) and is_bluish(artifacts.image.getpixel((20, 75)))
+
+    def test_a_missing_start_image_is_refused(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_reference_stage(_start_request(tmp_path / "gone.png", width=8, height=4), ImageWorkingArtifacts())

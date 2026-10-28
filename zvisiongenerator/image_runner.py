@@ -96,7 +96,9 @@ def run_batch(
 
     # Resolve supports_negative_prompt from config; a preset variant may override the family's value
     _family = model_info.family
-    supports_neg = model_capabilities(config, _family, get_variant_key(model_info))["supports_negative_prompt"]
+    capabilities = model_capabilities(config, _family, get_variant_key(model_info))
+    supports_neg = capabilities["supports_negative_prompt"]
+    max_references = capabilities["max_reference_images"]
 
     # Resolve size from config
     sizes = config.get("sizes", {})
@@ -147,6 +149,7 @@ def run_batch(
         print("No active prompt sets found. Exiting.")
         _emit_progress(progress_callback, "batch_completed", mode="image", total_iterations=0, completed_iterations=0)
         return
+    reference_paths = tuple(getattr(args, "reference_paths", None) or ())
     ran_iterations = 0
     print(f"Total iterations to run: {total_iterations}\n")
     _emit_progress(progress_callback, "batch_started", mode="image", total_iterations=total_iterations, total_runs=args.runs)
@@ -310,6 +313,7 @@ def run_batch(
                             model_name=args.model,
                             model_family=_family,
                             supports_negative_prompt=supports_neg,
+                            max_reference_images=max_references,
                             lora_paths=getattr(args, "lora_paths", None),
                             lora_weights=getattr(args, "lora_weights", None),
                             prompt=prompt,
@@ -361,6 +365,7 @@ def run_batch(
                             upscale_save_pre=(args.upscale_save_pre if args.upscale else False),
                             image_path=args.image_path,
                             image_strength=args.image_strength,
+                            reference_paths=reference_paths,
                             sharpen_amount_normal=sharpen_normal,
                             sharpen_amount_upscaled=sharpen_upscaled,
                             sharpen_amount_pre_upscale=sharpen_pre_upscale,

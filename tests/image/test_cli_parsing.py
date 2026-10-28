@@ -570,3 +570,64 @@ class TestPostProcessingFlags:
             TestCLIValidation()._run_main(["-m", "fake", *argv])
 
         assert excinfo.value.code == 2
+
+
+class TestReferenceFlag:
+    """``--reference`` takes a comma-separated list, checked against the model's cap and the files."""
+
+    _MAIN_MOCKS = TestCLIValidation._MAIN_MOCKS
+    _run_main_with_overrides = TestCLIValidation._run_main_with_overrides
+
+    _KLEIN = {
+        "detect_image_model": lambda _path: MagicMock(family="flux2_klein", size="4b"),
+        "resolve_defaults": lambda *a, **kw: {"steps": 4, "guidance": 1.0, "scheduler": None, "max_reference_images": 4},
+        "get_backend": lambda: _backend("flux2_klein"),
+    }
+
+    @staticmethod
+    def _images(tmp_path, count):
+        paths = []
+        for index in range(count):
+            path = tmp_path / f"ref{index}.png"
+            path.write_bytes(b"fake")
+            paths.append(str(path))
+        return paths
+
+    def _run_klein(self, argv, **overrides):
+        self._run_main_with_overrides(["--prompt", "ok", "-m", "klein", *argv], **{**self._KLEIN, **overrides})
+
+    def test_the_list_reaches_the_runner_in_order_and_combines_with_a_start_image(self, tmp_path):
+        refs = self._images(tmp_path, 3)
+        start = tmp_path / "start.png"
+        start.write_bytes(b"fake")
+        seen = {}
+
+        self._run_klein(["--reference", ",".join(refs), "--image", str(start)], run_batch=lambda *a, **kw: seen.update(args=a[4]))
+
+        assert seen["args"].reference_paths == refs
+        assert seen["args"].image_path == str(start)
+
+    def test_no_flag_means_no_references(self):
+        seen = {}
+
+        self._run_klein([], run_batch=lambda *a, **kw: seen.update(args=a[4]))
+
+        assert seen["args"].reference_paths == []
+
+    def test_a_model_without_references_is_refused_before_loading(self, tmp_path):
+        backend = _backend("zimage")
+
+        with pytest.raises(SystemExit) as excinfo:
+            self._run_main_with_overrides(["--prompt", "ok", "--reference", self._images(tmp_path, 1)[0], "-m", "zit"], get_backend=lambda: backend)
+
+        assert excinfo.value.code == 2
+        backend.load_model.assert_not_called()
+
+    def test_a_file_that_is_not_an_existing_image_is_refused(self, tmp_path):
+        ran = []
+
+        with pytest.raises(SystemExit) as excinfo:
+            self._run_klein(["--reference", str(tmp_path / "gone.png")], run_batch=lambda *a, **kw: ran.append(a))
+
+        assert excinfo.value.code == 2
+        assert ran == []

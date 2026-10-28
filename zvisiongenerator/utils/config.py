@@ -502,6 +502,7 @@ def model_capabilities(config: dict[str, Any], family: str, variant: str | None 
         "supports_scheduler": capability("supports_scheduler", True),
         "supports_json_prompt": capability("supports_json_prompt", False),
         "supports_first_sigma": capability("supports_first_sigma", False),
+        "max_reference_images": capability("max_reference_images", 0),
         "negative_prompt_hint": capability("negative_prompt_hint", None),
         "dimension_min": capability("dimension_min", 16),
         "dimension_max": capability("dimension_max", None),

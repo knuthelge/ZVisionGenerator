@@ -238,6 +238,7 @@ model_presets:
 
   flux2_klein:
     supports_negative_prompt: false
+    max_reference_images: 4  # BFL documents up to 4; neither library enforces a count
     default_scheduler:
       mflux: null
       diffusers: null

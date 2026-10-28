@@ -470,6 +470,8 @@ class DiffusersBackend:
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        *,
+        reference_images: list[Image.Image] | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
@@ -482,7 +484,9 @@ class DiffusersBackend:
         if self._model_info.family == "flux2_klein":
             width, height = _klein_size(model, image)
             klein_guidance = guidance if guidance is not None else 1.0
-            return self._latent_image_to_image(model, image, prompt, strength, steps, seed, klein_guidance, (width, height), _klein_img2img_latents, skip_signal, step_callback)
+            return self._latent_image_to_image(
+                model, image, prompt, strength, steps, seed, klein_guidance, (width, height), _klein_img2img_latents, skip_signal, step_callback, reference_images=reference_images
+            )
         from diffusers import AutoPipelineForImage2Image
 
         # Built per call from the loaded components (cheap): a scheduler swap stays on this pipeline only, and
@@ -530,11 +534,14 @@ class DiffusersBackend:
         make_latents: Callable[..., torch.Tensor],
         skip_signal: Any | None,
         step_callback: Any | None,
+        *,
+        reference_images: list[Image.Image] | None = None,
     ) -> Image.Image | None:
         """Run img2img through a text-to-image pipeline that diffusers ships without an img2img variant.
 
         The image is VAE-encoded, noised to the run's first sigma and denoised over the tail of the schedule.
         ``make_latents(pipe, image, sigmas, width, height, generator)`` returns the noised latents for the family.
+        *reference_images* go to the pipeline's ``image`` input, beside the start image's latents.
         """
         torch.cuda.empty_cache()
         generator = torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None
@@ -550,6 +557,8 @@ class DiffusersBackend:
             guidance_scale=guidance_scale,
             generator=generator,
         )
+        if reference_images:
+            pipe_kwargs["image"] = reference_images
         if skip_signal is not None or step_callback is not None:
             pipe_kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, len(sigmas), height, width))
 
@@ -638,6 +647,8 @@ class DiffusersBackend:
         steps_explicit: bool = False,
         guidance_explicit: bool = False,
         first_sigma: float | None = None,
+        *,
+        reference_images: list[Image.Image] | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
@@ -667,6 +678,8 @@ class DiffusersBackend:
                 kwargs["guidance_scale"] = 1.0
             if not _is_flux and negative_prompt is not None:
                 kwargs["negative_prompt"] = negative_prompt
+            if reference_images:
+                kwargs["image"] = reference_images
             if skip_signal is not None or step_callback is not None:
                 kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, steps, height, width))
 

@@ -24,6 +24,8 @@ from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.filename import unique_output_path
 from zvisiongenerator.utils.provenance import EXIF_IMAGE_DESCRIPTION, build_image_config_payload, embed_png_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
+from zvisiongenerator.utils.input_images import open_image_upright
+from zvisiongenerator.utils.references import check_reference_count, load_reference_image
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 
 
@@ -82,7 +84,7 @@ def suppress_negative_stage(request: ImageGenerationRequest, artifacts: ImageWor
 
 
 def load_reference_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
-    """Load, resize (scale-to-fill), and center-crop reference image.
+    """Load the start image upright and on white, resize (scale-to-fill), and center-crop it.
 
     Sets artifacts.image so that text_to_image_stage branches into img2img.
     No-op if request.image_path is None.
@@ -91,22 +93,36 @@ def load_reference_stage(request: ImageGenerationRequest, artifacts: ImageWorkin
         return StageOutcome.success
 
     if not os.path.isfile(request.image_path):
-        raise FileNotFoundError(f"Reference image not found: {request.image_path}")
+        raise FileNotFoundError(f"Start image not found: {request.image_path}")
 
-    with Image.open(request.image_path) as ref_img:
-        ref_img = ref_img.convert("RGB")
+    ref_img = open_image_upright(request.image_path)
 
-        # Scale-to-fill then center-crop to target dimensions
-        src_w, src_h = ref_img.size
-        scale = max(request.width / src_w, request.height / src_h)
-        scaled_w = round(src_w * scale)
-        scaled_h = round(src_h * scale)
-        ref_img = ref_img.resize((scaled_w, scaled_h), Image.LANCZOS)
-        left = (scaled_w - request.width) // 2
-        top = (scaled_h - request.height) // 2
-        ref_img = ref_img.crop((left, top, left + request.width, top + request.height))
+    # Scale-to-fill then center-crop to target dimensions
+    src_w, src_h = ref_img.size
+    scale = max(request.width / src_w, request.height / src_h)
+    scaled_w = round(src_w * scale)
+    scaled_h = round(src_h * scale)
+    ref_img = ref_img.resize((scaled_w, scaled_h), Image.LANCZOS)
+    left = (scaled_w - request.width) // 2
+    top = (scaled_h - request.height) // 2
+    artifacts.image = ref_img.crop((left, top, left + request.width, top + request.height))
+    return StageOutcome.success
 
-        artifacts.image = ref_img.copy()
+
+def load_references_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
+    """Put the references into ``artifacts.reference_images``, each upright, RGB, at most 1 MP and at its own aspect.
+
+    Unlike the start image, a reference is not resized or cropped to the output size; the model sizes it.
+    No-op if request.reference_paths is empty.
+
+    Raises:
+        ValueError: When the model takes no references, there are more than it takes, or a file is not a readable image.
+        FileNotFoundError: When a reference file does not exist.
+    """
+    if not request.reference_paths:
+        return StageOutcome.success
+    check_reference_count(request.model_family, len(request.reference_paths), request.max_reference_images)
+    artifacts.reference_images = [load_reference_image(path) for path in request.reference_paths]
     return StageOutcome.success
 
 
@@ -139,7 +155,8 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
 
     If a previous stage (load_reference_stage) set artifacts.image,
     this becomes an img2img call with effective steps derived from
-    request.image_strength. Otherwise, standard text-to-image.
+    request.image_strength. Otherwise, standard text-to-image. References
+    loaded by load_references_stage go to either call.
     """
     prompt = artifacts.resolved_prompt or request.prompt
     neg = None if artifacts.metadata.get("negative_suppressed") else request.negative_prompt
@@ -147,10 +164,14 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
     prompt_one_line = " ".join(prompt.split())
     print(f"Prompt: \n{prompt_one_line}\n")
 
+    reference_images = artifacts.reference_images or None
+    if reference_images:
+        print(f"References: {len(reference_images)} image(s)")
+
     start = time.perf_counter()
     if artifacts.image is not None:
-        # Reference image was loaded by load_reference_stage — do img2img
-        print(f"Reference image: {request.image_path} (strength={request.image_strength})")
+        # Start image was loaded by load_reference_stage — do img2img
+        print(f"Start image: {request.image_path} (strength={request.image_strength})")
         effective_steps = math.floor(request.steps / request.image_strength) if request.image_strength > 0 else request.steps
         image = request.backend.image_to_image(
             model=request.model,
@@ -164,6 +185,7 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
             negative_prompt=neg,
             skip_signal=request.skip_signal,
             step_callback=emit_step_progress(request.step_callback, phase="image_refine", total_steps=effective_steps),
+            reference_images=reference_images,
         )
     else:
         image = request.backend.text_to_image(
@@ -181,6 +203,7 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
             steps_explicit=request.steps_explicit,
             guidance_explicit=request.guidance_explicit,
             first_sigma=request.first_sigma,
+            reference_images=reference_images,
         )
     elapsed = time.perf_counter() - start
     artifacts.generation_time += elapsed
@@ -212,7 +235,7 @@ def review_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifac
 
 
 def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
-    """Lanczos resize + optional CAS pre-sharpen + i2i refinement.
+    """Lanczos resize + optional CAS pre-sharpen + i2i refinement, which sees the references the render used.
 
     No-op if upscale_factor is None or no image exists.
     """
@@ -278,6 +301,8 @@ def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifa
         negative_prompt=neg,
         skip_signal=request.skip_signal,
         step_callback=emit_step_progress(request.step_callback, phase="image_upscale", total_steps=effective_steps),
+        # The refinement keeps the references, so the people and objects they fix stay the same in the larger image.
+        reference_images=artifacts.reference_images or None,
     )
     elapsed = time.perf_counter() - start
     artifacts.generation_time += elapsed

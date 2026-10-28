@@ -48,8 +48,9 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--seed` | random | Seed, for repeatable images |
 | `--first-sigma` | `1.004` | Ideogram 4 only: first-step sigma, in `(0.0, 2.0]`. `1.005`–`1.006` more reliably avoid a grey "blocked by safety filter" frame for harmless prompts |
 | `--lora` | none | LoRAs with optional weights: `name:0.8,name2:0.5` (default weight 1.0) |
-| `--image` | none | Reference image for image-to-image |
-| `--image-strength` | `0.5` | How far the result may move from the reference, 0–1 |
+| `--image` | none | Start image for image-to-image |
+| `--image-strength` | `0.5` | How far the result may move from the start image, 0–1 |
+| `--reference` | none | Comma-separated reference images whose content the result keeps, named "image 1", "image 2" in the prompt; FLUX.2 Klein takes up to 4. Combines with `--image` |
 | `--upscale` | off | Upscale factor: `2` or `4` |
 | `--upscale-denoise` | from config | Denoise strength of the upscale pass |
 | `--upscale-steps` | per model | Steps of the upscale pass |

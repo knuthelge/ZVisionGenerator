@@ -1324,3 +1324,47 @@ class TestFlux2KleinImg2Img:
 
         assert mod._klein_size(pipe, Image.new("RGB", (70, 50))) == (64, 48)
         assert mod._klein_size(pipe, Image.new("RGB", (5, 5))) == (16, 16)
+
+
+class TestFlux2KleinReferences:
+    """References reach the Klein pipeline as its ``image`` list, and no other family takes them."""
+
+    @staticmethod
+    def _backend(mod, family="flux2_klein"):
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family=family)
+        return backend
+
+    @staticmethod
+    def _refs():
+        return [Image.new("RGB", (40, 30)), Image.new("RGB", (20, 60))]
+
+    def test_text_to_image_passes_the_references_as_image(self, win_backend):
+        mod, _, _ = win_backend
+        pipe = MagicMock(return_value=SimpleNamespace(images=[Image.new("RGB", (64, 64))]), _interrupt=False)
+        refs = self._refs()
+
+        self._backend(mod).text_to_image(model=pipe, prompt="p", width=64, height=64, seed=1, steps=4, guidance=1.0, reference_images=refs)
+
+        assert pipe.call_args.kwargs["image"] == refs
+
+    def test_text_to_image_without_references_passes_no_image(self, win_backend):
+        mod, _, _ = win_backend
+        pipe = MagicMock(return_value=SimpleNamespace(images=[Image.new("RGB", (64, 64))]), _interrupt=False)
+
+        self._backend(mod).text_to_image(model=pipe, prompt="p", width=64, height=64, seed=1, steps=4, guidance=1.0)
+
+        assert "image" not in pipe.call_args.kwargs
+
+    def test_start_image_and_references_share_one_call(self, win_backend):
+        mod, _, _ = win_backend
+        pipe = MagicMock(return_value=SimpleNamespace(images=[Image.new("RGB", (64, 48))]), vae_scale_factor=8, _interrupt=False)
+        refs = self._refs()
+
+        with patch.object(mod, "_klein_img2img_latents", return_value="noised-latents"):
+            self._backend(mod).image_to_image(model=pipe, image=Image.new("RGB", (70, 50)), prompt="p", strength=0.4, steps=8, seed=1, guidance=1.0, reference_images=refs)
+
+        kwargs = pipe.call_args.kwargs
+        assert kwargs["image"] == refs
+        assert kwargs["latents"] == "noised-latents"
+        assert "strength" not in kwargs

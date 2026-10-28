@@ -136,6 +136,14 @@ def is_remote_lora_reference(value: str) -> bool:
     return parse_huggingface_repo_reference(value) is not None
 
 
+def is_existing_file(path: str) -> bool:
+    """Return whether *path* names an existing file, expanding ``~``; a path the OS cannot look up is not one."""
+    try:
+        return Path(path).expanduser().is_file()
+    except OSError:
+        return False
+
+
 def collapse_home(path: str, home: str | None = None) -> str:
     """Replace a leading home directory in *path* with ``~``, leaving other values unchanged.
 
