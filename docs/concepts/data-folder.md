@@ -31,9 +31,9 @@ The Web UI saves to the **Output folder** on the [Config page](../web-ui/config.
 
 Files are named after the prompt set and the time: `portrait_2026-10-04_14-03-22.png`. When a name is taken, `_2`, `_3`… is added, so nothing is overwritten. An inline prompt's set is `prompt`. Videos follow the same pattern.
 
-Every file records the settings it was made with: prompt and negative prompt, scene, model, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quant, generation time, upscale method and its settings, and the sharpen, contrast and saturation amounts. An enhanced prompt also keeps your own prompt and the enhance options. The Web UI viewer shows them under **Details**, and **Reuse settings** loads them.
+Every file records the settings it was made with: prompt and negative prompt, scene, model, seed, steps, guidance, scheduler, size, LoRAs, start image and strength, references, quant, generation time, upscale method and its settings, and the sharpen, contrast and saturation amounts. An enhanced prompt also keeps your own prompt and the enhance options. The Web UI viewer shows them under **Details**, and **Reuse settings** loads them.
 
-Paths inside your home folder, such as LoRAs, models and reference images, are recorded as `~/…`, so a shared file doesn't show your user name. The prompt is stored as written.
+Paths inside your home folder, such as LoRAs, models, start images and references, are recorded as `~/…`, so a shared file doesn't show your user name. The prompt is stored as written.
 
 ## Hugging Face token
 

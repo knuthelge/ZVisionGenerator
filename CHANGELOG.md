@@ -21,9 +21,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 #### Video
 - **Next, Pause and Repeat for video jobs.** Video jobs in the Web UI and `ziv-video` (**n**, **p**, **r**, **q**, with or without `--review`) take the same controls as image jobs. Next stops the current video at its next step and moves on, Pause waits after the current video, and Repeat makes the same prompt again with a new seed. During a review, Next declines the upscale. A Next or Quit pressed on a video's final step saves the video first. On a Mac, MiniMax H3 text to video cannot stop mid-clip, so Next and Quit take effect when the clip finishes
 
+#### Images
+- **References on FLUX.2 Klein.** Give `klein4b` or `klein9b` up to four images (a person, an object, a place or a style) and the result keeps what is in them: in the Web UI, the **References** section of Text to Image and Image to Image, or `--reference` in `ziv-image`. Name them "image 1", "image 2" in the prompt. A start image still sets the layout, an upscale made while generating refines with them too, and **Reuse settings** brings them back
+- **The prompt enhancer keeps "image 1", "image 2".** It describes the new scene instead of what the references show, and retries a rewrite that drops one of those phrases
+
 ### Changed
 
 #### Web UI
+- **Image to Image's "Reference image" is now "Start image".** The name says what it does, and "reference" now means an image whose content the result keeps. In the viewer and the gallery menus, **Use as reference** is **Use as**, with **Start image**, **First frame** and **Last frame**
 - **The prompt box bars are reorganised.** The tabs only say which text you see. A status line under the box says what Generate sends, with **Re-enhance** and **Use mine** beside **Out of date**. **Use mine** replaces **Clear**
 
 #### Video
@@ -37,12 +42,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **macOS needs macOS 14 Sonoma or newer**, as MLX and PyTorch do
 
 ### Fixed
-- **Converting a MiniMax H3 checkpoint refuses Ref2VA (reference-to-video) checkpoints,** which used to convert as if they were the normal model
+- **A picked start image or last frame stays while you visit other pages.** Going to the Gallery or the Prompts page and back no longer drops an image you uploaded from your device. **Reset** also clears the uploaded last frame
+- **Phone photos are upright.** A photo taken on a phone no longer comes out sideways when used as a start image or as a video's first or last frame, and a transparent image goes on white
 - **Pause after a failed image pauses the job.** A Pause pressed while an image fails now pauses the job, instead of leaving the Pause button stuck on "Pausing"
 - **The remaining-time estimate stays sensible.** An image skipped with Next no longer pulls the estimate down, and after Repeats it can no longer go negative; the final count includes the repeats
 - **A repeated image can always be reviewed.** When you discard an image and Repeat it, Approve and Discard no longer stay disabled for the new render if the Web UI lost its connection meanwhile
 - **Windows/Linux: the LTX-2.3 downloads are pinned to a fixed revision**, so a file Lightricks renames or deletes upstream no longer breaks `ltx-4` and `ltx-8`
 - **Windows/Linux: the first Web UI page load is fast.** It no longer waits about 5 seconds when an LTX model is downloaded
+- **Converting a MiniMax H3 checkpoint refuses Ref2VA (reference-to-video) checkpoints,** which used to convert as if they were the normal model
+- **An image you upload is saved once.** Sending the same start image, last frame or reference again reuses the saved copy in the output folder's `.web_uploads`
+- **Coming back from a video tab restores your image model.** Text to Image, then Image to Video, then Text to Image used to land on the default image model; it now returns to the model you used, and a video tab likewise remembers its video model
 
 ## [0.14.0b1] - 2026-10-26
 

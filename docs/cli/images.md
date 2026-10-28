@@ -49,7 +49,17 @@ ziv-image -m krea2 -q 4 --prompt "a mountain lake"
 ziv-image -m klein9b --image photo.jpg --image-strength 0.4 --prompt "A woman in a red dress"
 ```
 
-`--image-strength` (0–1, default 0.5) sets how far the result may move from the image. See [Reference images](../concepts/images.md#reference-images).
+`--image-strength` (0–1, default 0.5) sets how far the result may move from the start image. See [Start image](../concepts/images.md#start-image).
+
+## Keep what is in other images
+
+`--reference` takes a comma-separated list of up to four images whose person, object, place or style the result keeps. Refer to them in the prompt by number, in order:
+
+```bash
+ziv-image -m klein9b --reference woman.jpg,backpack.jpg --prompt "the woman from image 1 wearing the backpack from image 2, on a rainy street"
+```
+
+Only FLUX.2 Klein takes references; other models refuse the flag. It also refuses more images than the model takes and a file that is missing or isn't a PNG, JPEG or WebP. See [References](../concepts/images.md#references) for what works and what it costs.
 
 ## Add LoRAs
 

@@ -32,7 +32,7 @@ The **top bar** has the pages and, on the Workspace, the five workflows:
 | Workflow | Makes |
 |---|---|
 | Text to Image | An image from a prompt |
-| Image to Image | An image steered by a reference image |
+| Image to Image | An image steered by a start image |
 | Text to Video | A video from a prompt |
 | Image to Video | A video that starts from an image |
 | Extend Video | More of a video you already have |

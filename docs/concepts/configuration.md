@@ -156,9 +156,11 @@ The Web UI.
 
 ## `model_presets` and `video_model_presets`
 
-Per-family defaults and capabilities, such as `default_steps`, `default_guidance`, `default_scheduler` and `supports_negative_prompt`. `video_model_presets.ltx` and `video_model_presets.h3` also hold each video family's frame rule, steps, capabilities and the pinned repositories and files it loads on each platform; `video_model_presets.ltx.versions` holds LTX-2.5's differences from LTX-2.3.
+Per-family defaults and capabilities, such as `default_steps`, `default_guidance`, `default_scheduler`, `supports_negative_prompt` and `max_reference_images`. `video_model_presets.ltx` and `video_model_presets.h3` also hold each video family's frame rule, steps, capabilities and the pinned repositories and files it loads on each platform; `video_model_presets.ltx.versions` holds LTX-2.5's differences from LTX-2.3.
 
 A family can split into variants (`variants.<name>`), such as FLUX.2 Klein distilled and base, or MOSS-Image Turbo and SFT. A variant sets its own steps, guidance and upscale steps, and may also set capability flags such as `supports_negative_prompt`; a flag it sets wins over the family's value. A variant that turns off the negative prompt may also set `negative_prompt_hint`, a sentence added to the warning shown when a negative prompt is ignored. For MOSS-Image, Turbo turns off the negative prompt and points to `moss-sft`; SFT keeps it.
+
+`max_reference_images` is how many [reference images](images.md#references) a family takes; `0`, the default, means none. FLUX.2 Klein sets `4`.
 
 You rarely need to change these. They are documented in the packaged `config.yaml`.
 

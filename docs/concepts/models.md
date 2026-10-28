@@ -22,7 +22,7 @@ All built-in models download without a Hugging Face account. Where the original 
 
 ### FLUX.2 Klein
 
-`klein4b` and `klein9b` are distilled to 4 steps. They don't use a negative prompt.
+`klein4b` and `klein9b` are distilled to 4 steps. They don't use a negative prompt. They also take up to four [references](images.md#references): images of a person, object, place or style the result should keep.
 
 ### Z-Image Turbo
 
@@ -47,7 +47,7 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 `ideo` is Ideogram 4 Instant, fal's distilled Ideogram 4. It makes an image in 8 steps, and its guidance is built in, so a guidance setting is ignored.
 
 - **Sizes** must be 256–2048 pixels, in steps of 16. Presets beyond that, such as `xl` at `16:9`, are refused before the model loads.
-- **No reference image or upscale while generating**, and no negative prompt. The [plain upscale](upscaling.md#plain-upscale) of a finished image works.
+- **No start image, references or upscale while generating**, and no negative prompt. The [plain upscale](upscaling.md#plain-upscale) of a finished image works.
 - **LoRAs** work. Ones made for Ideogram 4 load onto Instant, but they were trained on the base model, so check the results. On Windows and Linux a LoRA adds about 1 GB of GPU memory.
 
 **Captions.** Ideogram 4 reads structured JSON captions. A plain prompt is wrapped into one for you, but such a sparse caption often comes out as a flat cut-out on a checkerboard background, especially for posters and product shots. For a fuller caption, let the [prompt enhancer](prompt-enhancer.md#json-captions-ideogram-4) write one (Smart writes better ones than Fast), or write your own with `--json-prompt` or the Web UI's JSON mode.
@@ -89,7 +89,7 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 
 - **Sizes** are multiples of 16, from about 0.25 to 4 megapixels. The model is made for about 1–2 megapixels; above that, Turbo's 4 steps look softer, so use 6–8 steps.
 - **Text.** Put the words you want in the image in quotes in the prompt.
-- **Reference image, upscale, LoRAs and live previews** work. LoRAs must be MOSS-Image LoRAs: see [LoRAs](loras.md). The Turbo LoRA stays on, and a LoRA of your own is added on top.
+- **Start image, upscale, LoRAs and live previews** work. LoRAs must be MOSS-Image LoRAs: see [LoRAs](loras.md). The Turbo LoRA stays on, and a LoRA of your own is added on top.
 - **No JSON captions.** MOSS-Image takes plain prompts, so `--json-prompt` and the enhancer's JSON format don't apply.
 
 **The first job builds the model** in `~/.ziv/models/moss` or `~/.ziv/models/moss-sft` from the shared download, which takes a moment. The community Turbo LoRA comes from `akhaliq/MOSS-Image-SFT-4-steps`; its pin is in the `moss_image` section of the [configuration](configuration.md).
