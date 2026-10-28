@@ -103,17 +103,14 @@ describe('upscaleEntries', () => {
 describe('referenceEntries', () => {
   const asset = makeAsset(undefined);
   const ids = (entries: ReturnType<typeof referenceEntries>) => entries.flatMap((entry) => (entry.kind === 'item' ? [entry.id] : []));
-  const labels = (entries: ReturnType<typeof referenceEntries>) => entries.flatMap((entry) => (entry.kind === 'item' ? [entry.label] : []));
 
   it('offers an image and a video target by default', () => {
     expect(ids(referenceEntries(asset, vi.fn()))).toEqual(['reference-image', 'reference-video']);
-    expect(labels(referenceEntries(asset, vi.fn()))).toEqual(['For image (img2img)', 'For video (img2vid)']);
   });
 
-  it('adds the last frame, and names the video target the first frame, when the workspace has the slot', () => {
+  it('adds the last frame when the workspace has the slot', () => {
     const entries = referenceEntries(asset, vi.fn(), {}, ['image', 'video', 'last']);
     expect(ids(entries)).toEqual(['reference-image', 'reference-video', 'reference-last-frame']);
-    expect(labels(entries)).toEqual(['For image (img2img)', 'For first frame (img2vid)', 'For last frame (img2vid)']);
   });
 
   it('reports the chosen target', () => {

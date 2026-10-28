@@ -208,6 +208,8 @@ def _source_request_fields(source: UpscaleSource, recorded: RecordedSettings) ->
         # Recorded only: the upscale workflow never loads the reference, but Reuse settings needs it.
         "image_path": recorded.image_path,
         "image_strength": recorded.image_strength if recorded.image_strength is not None else ImageGenerationRequest.image_strength,
+        # Recorded only, like the start image: the upscale refines without references, but Reuse settings brings them back.
+        "reference_paths": recorded.reference_images,
         "output_dir": str(Path(source.path).parent),
         "upscale_source": source.path,
         # An enhanced source keeps the user's own prompt and how it was enhanced, so the upscale still shows and reuses them.

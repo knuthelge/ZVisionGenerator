@@ -99,6 +99,25 @@ describe('cliCommand', () => {
     expect(caveats).toEqual(['uploaded_image']);
   });
 
+  it('lists the references in prompt order after the start image, and only for an image', () => {
+    const settings = { mode: 'image', prompt: 'a', image_path: '/in/start.png', image_strength: '0.6', reference: ['/in/a.png', '/in/b c.png'] };
+
+    expect(cliCommand(settings)).toEqual({ command: "ziv image --prompt a --image /in/start.png --image-strength 0.6 --reference '/in/a.png,/in/b c.png'", caveats: [] });
+    expect(cliCommand({ mode: 'video', prompt: 'a', reference: ['/in/a.png'] }).command).not.toContain('--reference');
+    expect(cliCommand({ mode: 'image', prompt: 'a', reference: ' ' }).command).not.toContain('--reference');
+  });
+
+  it('names an uploaded reference by file name, in its place, and reports it', () => {
+    const form = new FormData();
+    form.append('prompt', 'a');
+    form.append('reference', '/in/a.png');
+    form.append('reference', new File(['x'], 'mine.png', { type: 'image/png' }));
+    const settings = formSettings(form);
+
+    expect(settings).toMatchObject({ reference: ['/in/a.png', 'mine.png'], reference_upload: 'true' });
+    expect(cliCommand({ mode: 'image', ...settings })).toEqual({ command: 'ziv image --prompt a --reference /in/a.png,mine.png', caveats: ['uploaded_image'] });
+  });
+
   it('names the last frame after the first, for video only', () => {
     const video = { mode: 'video', workflow: 'img2vid', prompt: 'a', image_path: '/in/start.png', end_image_path: '/in/end.png' };
 

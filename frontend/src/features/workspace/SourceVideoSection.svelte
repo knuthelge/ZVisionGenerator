@@ -135,8 +135,6 @@
 <PathBrowser bind:open={browsing} purpose="source_video" initialPath={pathText.trim() || sourcePath} onchoose={(path) => chooseSource(path)} />
 
 <style>
-  .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
-
   /* Facts wrap between facts only, so a fact such as "145 frames" never splits. */
   .source-facts { font-family: var(--font-mono); }
   .fact { white-space: nowrap; }

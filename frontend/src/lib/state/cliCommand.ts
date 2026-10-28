@@ -36,10 +36,16 @@ export function shellQuote(arg: string): string {
   return `'${arg.replaceAll("'", `'\\''`)}'`;
 }
 
-/** Collect a form's text fields as job settings; an uploaded file is recorded by its file name. */
+/**
+ * Collect a form's text fields as job settings; an uploaded file is recorded by its file name.
+ *
+ * A file among the repeated `reference` values is also marked by `reference_upload`, because its name and a typed path are
+ * both text.
+ */
 export function formSettings(form: FormData): JobSettings {
   const settings: Record<string, string[]> = {};
   for (const [key, value] of form.entries()) {
+    if (key === 'reference' && typeof value !== 'string') settings.reference_upload = ['true'];
     (settings[key] ??= []).push(typeof value === 'string' ? value : value.name);
   }
   return Object.fromEntries(Object.entries(settings).map(([key, list]) => [key, list.length === 1 ? list[0] : list]));
@@ -175,6 +181,14 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
     flag('--end-image', endUpload ?? text(settings, 'end_image_path'));
   }
   if (!isVideo && imagePath !== undefined) flag('--image-strength', text(settings, 'image_strength'));
+  // References go as one comma-separated list in prompt order; an uploaded one is named by its file name, with the same caveat.
+  if (!isVideo) {
+    const references = values(settings, 'reference').map((value) => value.trim()).filter(Boolean);
+    if (references.length > 0) {
+      args.push('--reference', references.join(','));
+      if (settings.reference_upload !== undefined && !caveats.includes('uploaded_image')) caveats.push('uploaded_image');
+    }
+  }
 
   if (isVideo) {
     if (settings.audio !== undefined && !checked(settings, 'audio')) args.push('--no-audio');

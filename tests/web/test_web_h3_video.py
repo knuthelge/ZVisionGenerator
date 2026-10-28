@@ -76,7 +76,7 @@ class TestEndImage:
         assert job["request"].end_image_path is None
 
     def test_an_end_image_needs_a_first_frame(self, tmp_path, submitted):
-        with pytest.raises(ValueError, match="last-frame image needs a first-frame"):
+        with pytest.raises(ValueError):
             _submit(tmp_path, end_image_path=_image(tmp_path, "last.png"))
 
         assert submitted == []

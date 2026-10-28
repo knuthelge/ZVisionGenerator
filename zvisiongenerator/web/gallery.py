@@ -20,6 +20,7 @@ from zvisiongenerator.core.ideogram4 import is_json_caption
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.enhance_record import enhance_record_summary
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
+from zvisiongenerator.utils.paths import is_existing_file
 from zvisiongenerator.utils.provenance import (
     UPSCALE_WORKFLOW,
     RecordedSettings,
@@ -32,6 +33,7 @@ from zvisiongenerator.utils.provenance import (
     recorded_settings,
 )
 from zvisiongenerator.utils.config import model_capabilities
+from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
 from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedvr2_options, seedvr2_video_option, upscale_options, upscale_output_size
 from zvisiongenerator.utils.video_probe import ffprobe_json, parse_probe
@@ -41,9 +43,8 @@ from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedF
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
 
-_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
-GALLERY_MEDIA_EXTENSIONS = _IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+GALLERY_MEDIA_EXTENSIONS = frozenset(IMAGE_EXTENSIONS) | VIDEO_EXTENSIONS
 _STAGING_DIR_NAMES = frozenset({".web_uploads"})
 # Scratch names the video tools create beside the finished outputs: the splice's directories (see ``video_splice``),
 # and the hidden temp files of an in-place MP4 rewrite and the video upscale's work folders (see ``ffmpeg.staging_path``).
@@ -104,6 +105,8 @@ class GalleryAsset:
     upscaled: bool = False
     # The image a first-and-last-frame clip ends on.
     end_image_path: str | None = None
+    # The references an image was made with, in prompt order.
+    reference_images: tuple[str, ...] = ()
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
@@ -254,7 +257,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         workflow_available = False
         fallback_reasons.append("missing_source_video")
 
-    reuse_params: dict[str, str] = {"workflow": resolved_workflow}
+    reuse_params: dict[str, str | list[str]] = {"workflow": resolved_workflow}
     if asset.has_reusable_config:
         reuse_params.update(_reuse_text_params(asset, video=workflow_mode(resolved_workflow) == "video"))
         if resolved_model:
@@ -294,6 +297,9 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             # The last frame travels with its first frame, so a Reuse that falls back to text-to-video drops both.
             if resolved_workflow == "img2vid" and asset.end_image_path is not None:
                 reuse_params["end_image_path"] = asset.end_image_path
+        if asset.reference_images:
+            # A repeated parameter, in prompt order; the Workspace keeps what its model takes.
+            reuse_params["reference_path"] = list(asset.reference_images)
         if asset.negative_prompt and workflow_mode(resolved_workflow) == "image":
             reuse_params["negative_prompt"] = asset.negative_prompt
         if asset.scheduler and workflow_mode(resolved_workflow) == "image":
@@ -323,6 +329,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "extend_frames": asset.extend_frames,
         "image_path": asset.reference_image_path,
         "end_image_path": asset.end_image_path,
+        "reference_images": list(asset.reference_images),
         "file_path": asset.filesystem_path,
         "seed": asset.seed,
         "steps": asset.steps,
@@ -339,7 +346,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             "model_available": model_available,
             "fallback_reasons": fallback_reasons,
         },
-        "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params)}",
+        "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params, doseq=True)}",
         "details": _asset_details_json(asset),
         "enhance": _asset_enhance_json(asset),
         "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else _video_upscale_json(asset, web_config.seedvr2),
@@ -377,12 +384,7 @@ def _extend_reuse_params(asset: GalleryAsset, *, source_missing: bool) -> dict[s
 
 def _source_video_exists(path: str | None) -> bool:
     """Return whether the recorded source video of an extension is still a file."""
-    if not path:
-        return False
-    try:
-        return Path(path).expanduser().is_file()
-    except OSError:
-        return False
+    return bool(path) and is_existing_file(path)
 
 
 def output_media_url(root: Path, path: Path) -> str | None:
@@ -507,6 +509,7 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -
         frame_count=metadata["frame_count"],
         reference_image_path=metadata["reference_image_path"],
         end_image_path=metadata["end_image_path"],
+        reference_images=metadata["reference_images"],
         lora=metadata["lora"],
         has_reusable_config=metadata["has_reusable_config"],
         negative_prompt=metadata["negative_prompt"],
@@ -562,6 +565,7 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "frame_count": recorded.frame_count,
         "reference_image_path": recorded.image_path,
         "end_image_path": recorded.end_image_path,
+        "reference_images": recorded.reference_images,
         "lora": recorded.lora,
         "has_reusable_config": bool(config) and not (kind == "video" and _is_orphan_upscale(recorded)),
         "negative_prompt": recorded.negative_prompt,
@@ -749,7 +753,7 @@ def _paginate_assets(assets: list[GalleryAsset], *, page: int, page_size: int) -
 
 def _asset_kind(path: Path) -> str | None:
     suffix = path.suffix.lower()
-    if suffix in _IMAGE_EXTENSIONS:
+    if suffix in IMAGE_EXTENSIONS:
         return "image"
     if suffix in VIDEO_EXTENSIONS:
         return "video"

@@ -43,7 +43,9 @@ export interface GalleryAsset {
   image_path?: string | null;
   /** The image a first-and-last-frame clip ends on; absent or null for other assets. */
   end_image_path?: string | null;
-  /** Absolute path of the asset file on the host; lets the asset become a reference image. */
+  /** The references an image was made with, in prompt order; empty for assets made without any. */
+  reference_images?: string[];
+  /** Absolute path of the asset file on the host; lets the asset become a start image or frame. */
   file_path?: string;
   seed?: number | null;
   steps?: number | null;
@@ -334,7 +336,10 @@ export interface EnhanceContext {
   frames: number | null;
   fps: number | null;
   audio: boolean;
+  /** A start image is supplied (img2img's image, or a video's first frame). */
   reference_image: boolean;
+  /** How many reference images are supplied; the prompt names them "image 1", "image 2". */
+  references?: number;
   /** The clip also ends on a supplied last-frame image. */
   end_image?: boolean;
   /** Extend only: the video being continued; the server reads its size, frame rate and recorded text. */
@@ -655,6 +660,8 @@ export interface ImageModelDefaults {
   supports_json_prompt: boolean;
   supports_first_sigma: boolean;
   supports_scheduler: boolean;
+  /** How many reference images the model takes; 0 means none. */
+  max_reference_images: number;
   dimension_min: number;
   dimension_max: number | null;
   dimension_step: number;
@@ -798,7 +805,15 @@ export interface DraftState {
   loraString: string;
   /** LoRAs last chosen for each model family (keyed `model:<id>` when the family is unknown); `loraString` holds the current family's. */
   lorasByFamily: Record<string, string>;
+  /** The image model last chosen in an image workflow; coming back from a video workflow restores it. Empty before one was chosen. */
+  lastImageModel: string;
+  /** The video model last chosen in a video workflow; coming back from an image workflow restores it. Empty before one was chosen. */
+  lastVideoModel: string;
   referenceImagePath: string | null;
+  /** The reference images, in prompt order ("image 1" is the first). An image uploaded from this device has an empty path here and its file in the Workspace. */
+  referenceImagePaths: string[];
+  /** Paths in `referenceImagePaths` whose file was gone when Reuse brought them back; the row stays and blocks Generate. */
+  missingReferencePaths: string[];
   /** Image to Video: the image the clip ends on; null when the model has no last frame or none is chosen. */
   endImagePath: string | null;
   referenceImageStrength: number;
@@ -860,6 +875,9 @@ export interface DraftState {
   /** The slug of the settings preset the form started from; null when none. Cleared on a mode switch, Reset, a loaded source's settings and when the preset is deleted. */
   appliedPreset: string | null;
 }
+
+/** Workspace prefill parameters; a name can repeat (`reference_path`), which makes its value a list. */
+export type PrefillParams = Record<string, string | string[]>;
 
 export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'sidebarCollapsed' | 'lastGeneratedAt' | 'version'>>;
 

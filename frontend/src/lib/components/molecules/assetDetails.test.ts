@@ -27,11 +27,20 @@ describe('assetDetailSections', () => {
   });
   const labels = (asset: GalleryAsset) => assetDetailSections(asset).generation.map((fact) => fact.label);
 
-  it('lists the last frame after the reference, by file name', () => {
+  it('lists the last frame after the first frame, by file name', () => {
     const asset = clip({ image_path: '/in/start.png', end_image_path: '/in/end.png' });
     const generation = assetDetailSections(asset).generation;
-    expect(labels(asset).indexOf('Last frame')).toBe(labels(asset).indexOf('Reference') + 1);
+    expect(labels(asset).indexOf('Last frame')).toBe(labels(asset).indexOf('First frame') + 1);
     expect(generation.find((fact) => fact.label === 'Last frame')?.value).toBe('end.png');
+  });
+
+  it('lists the references of an image by file name, in order, apart from its start image', () => {
+    const asset = clip({ media_type: 'image', workflow: 'img2img', image_path: '/in/start.png', reference_images: ['/in/woman.png', '/in/jacket.png'] });
+    const generation = assetDetailSections(asset).generation;
+
+    expect(generation.find((fact) => fact.label === 'Start image')?.value).toBe('start.png');
+    expect(generation.find((fact) => fact.label === 'References')?.value).toBe('woman.png, jacket.png');
+    expect(labels(clip({ media_type: 'image' }))).not.toContain('References');
   });
 
   it('leaves the last frame out of a clip without one', () => {

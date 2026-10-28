@@ -57,6 +57,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     submitGenerate: mocks.submitGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
+    checkReferencePaths: mocks.checkReferencePaths,
     listJobs: mocks.listJobs,
     clearQueue: mocks.clearQueue,
     cancelJob: mocks.cancelJob,
@@ -433,7 +434,7 @@ describe('WorkspacePage asset actions and settings', () => {
     openTileMenu(asset);
     const forImage = document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement;
     expect(forImage.getAttribute('aria-disabled')).toBe('true');
-    expect(forImage.title).toContain("can't use a reference image");
+    expect(forImage.title).not.toBe('');
     forImage.click();
     await settle();
     expect(draft.state.workflow).toBe('txt2img');

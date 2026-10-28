@@ -1,5 +1,6 @@
 import { api } from './client';
-import type { WorkspaceContext, JobContext, JobList, JobSnapshot, GalleryPage } from '$lib/types';
+import { parseQuery } from '$lib/prefillParams';
+import type { WorkspaceContext, JobContext, JobList, JobSnapshot, GalleryPage, PrefillParams } from '$lib/types';
 
 export function getWorkspaceContext(params?: Record<string, string>): Promise<WorkspaceContext> {
   const query = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -41,18 +42,18 @@ export function clearQueue(): Promise<{ cancelled: string[] }> {
   return api.delete<{ cancelled: string[] }>('/api/jobs/queue');
 }
 
-export function parseUrlPrefill(): Record<string, string> {
-  const params: Record<string, string> = {};
+export function parseUrlPrefill(): PrefillParams {
   // The hash is the one form the app emits (#/workspace?...), and the one the Workspace clears after applying it.
-  const source = window.location.hash.replace(/^#\/[^?]*\??/, '');
-  if (!source) return params;
-  new URLSearchParams(source).forEach((value, key) => {
-    params[key] = value;
-  });
-  return params;
+  return parseQuery(window.location.hash.replace(/^#\/[^?]*\??/, ''));
 }
 
 /** Remember that the first-run dialog was skipped, so the Workspace stops offering it. */
 export function skipFirstRun(): Promise<{ skipped: boolean }> {
   return api.post<{ skipped: boolean }>('/api/first-run/skip');
+}
+
+/** Ask which of the host-local reference paths are no longer files; the answer lists those paths. */
+export async function checkReferencePaths(paths: string[]): Promise<string[]> {
+  const { missing } = await api.post<{ missing: string[] }>('/api/references/check', { paths });
+  return missing;
 }

@@ -86,6 +86,11 @@ export const galleryStore = {
     return totalCount !== null && _pageSize !== null && assets.length < totalCount;
   },
 
+  /** The URL of the loaded asset stored at *path*, or null for no path or an asset the Gallery has not loaded. */
+  previewUrlFor(path: string | null | undefined): string | null {
+    return path ? (defaultView().assets.find((asset) => asset.file_path === path)?.url ?? null) : null;
+  },
+
   /** Start from the assets the Workspace context carried, before page one is known. */
   seed(assets: GalleryAsset[]): void {
     setDefault({ assets });

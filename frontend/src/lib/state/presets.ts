@@ -47,8 +47,8 @@ function _mode(state: Pick<DraftState, 'workflow'>): PresetMode {
 /** Return the draft keys applying a preset of the state's mode may write, apart from `appliedPreset`. */
 export function presetDraftKeys(state: Pick<DraftState, 'workflow'>): Set<DraftKey> {
   const owned = PRESET_KEYS[_mode(state)].flatMap((key) => DRAFT_KEYS[_mode(state)][key] ?? []);
-  // A preset may change the model, and with it the LoRAs remembered per family.
-  return new Set<DraftKey>([...owned, 'model', 'loraString', 'lorasByFamily']);
+  // A preset may change the model, and with it the LoRAs remembered per family and the model remembered for the mode.
+  return new Set<DraftKey>([...owned, 'model', 'loraString', 'lorasByFamily', 'lastImageModel', 'lastVideoModel']);
 }
 
 /** Return *value* while its feature is on, else null: a setting of an off feature is not saved. */

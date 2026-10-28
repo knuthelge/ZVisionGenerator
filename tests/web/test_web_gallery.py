@@ -1009,3 +1009,33 @@ def test_the_upscale_of_a_clip_with_no_recorded_settings_cannot_be_reused(tmp_pa
 
     assert result["has_reusable_config"] is False
     assert result["extend"] == {"available": False, "reason": EXTEND_UPSCALED_REASON}
+
+
+def _reuse_query(payload: dict) -> dict[str, list[str]]:
+    return parse_qs(urlsplit(payload["reuse_workspace_url"].removeprefix("#")).query, keep_blank_values=True)
+
+
+def test_an_image_with_references_lists_them_and_reuses_them_as_a_repeated_param(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    payload, _params = _image_reuse(tmp_path, {"reference_images": ["/in/a.png", "/in/b.png"]})
+
+    assert payload["reference_images"] == ["/in/a.png", "/in/b.png"]
+    assert _reuse_query(payload)["reference_path"] == ["/in/a.png", "/in/b.png"]
+    assert payload["reuse_state"]["fallback_reasons"] == []
+
+
+def test_references_are_carried_whatever_the_workflow(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    payload, _params = _image_reuse(tmp_path, {"workflow": "img2img", "image_path": "/in/start.png", "reference_images": ["/in/a.png"]})
+
+    query = _reuse_query(payload)
+    assert query["image_path"] == ["/in/start.png"]
+    assert query["reference_path"] == ["/in/a.png"]
+
+
+def test_an_image_without_references_names_none(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    payload, params = _image_reuse(tmp_path, {})
+
+    assert payload["reference_images"] == []
+    assert "reference_path" not in params

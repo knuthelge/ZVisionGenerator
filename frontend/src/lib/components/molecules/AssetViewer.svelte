@@ -124,7 +124,7 @@
   /** The keys that follow X for the factors this asset offers: "2 or 4" for an image, "2" for a video. */
   const upscaleKeys = $derived(asset ? offeredUpscaleFactors(asset).join(' or ') : '');
 
-  // A video offers Extend where an image offers Use as reference; the button is absent without the capability.
+  // A video offers Extend where an image offers Use as; the button is absent without the capability.
   const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
   const extendBlocked = $derived(asset ? extendReason(asset) : null);
 
@@ -678,9 +678,9 @@
           data-action="reference"
           aria-haspopup="menu"
           aria-expanded={referenceOpen}
-          title="Use as reference (E)"
+          title="Use as start image or frame (E)"
           onclick={() => { referenceOpen = !referenceOpen; }}
-        ><Icon name="reference" size={14} /><span class="viewer-btn-label">Use as reference</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
+        ><Icon name="reference" size={14} /><span class="viewer-btn-label">Use as</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}
       {#if showExtend}
         <button
@@ -940,7 +940,7 @@
       open={referenceOpen}
       anchor={referenceButton}
       items={referenceItems}
-      label="Use as reference"
+      label="Use as"
       onclose={() => { referenceOpen = false; }}
     />
     <ActionMenu

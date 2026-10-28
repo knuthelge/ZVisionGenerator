@@ -22,7 +22,7 @@ function contextOf(models: Record<string, VideoModelDefaults>): WorkspaceContext
   } as unknown as WorkspaceContext;
 }
 
-const stateFor = (model: string): DraftState => ({ workflow: 'txt2vid', model }) as DraftState;
+const stateFor = (model: string): DraftState => ({ workflow: 'txt2vid', model, referenceImagePaths: [] }) as unknown as DraftState;
 
 describe('workspaceCapabilities for a video model', () => {
   const context = contextOf({
@@ -65,7 +65,7 @@ describe('workspaceCapabilities for the last frame', () => {
       scheduler_options: [],
       workflow_contract: { values: ['txt2vid', 'img2vid'], definitions: { txt2vid: definition(VIDEO_CONTROLS), img2vid: definition(IMG2VID) }, field_precedence: { defaults: [], dimensions: '' } },
     } as unknown as WorkspaceContext;
-    return [context, (model) => ({ workflow, model }) as DraftState];
+    return [context, (model) => ({ workflow, model, referenceImagePaths: [] }) as unknown as DraftState];
   }
 
   it('offers the slot to a model that can end a clip on an image, in Image to Video only', () => {
@@ -79,6 +79,42 @@ describe('workspaceCapabilities for the last frame', () => {
     const [context, stateOf] = img2vid({ ltx: videoDefaults({ hidden_controls: END_CONTROLS }) });
     const caps = workspaceCapabilities(context, stateOf('ltx'));
     expect([caps.showEndImage, caps.showRefImage]).toEqual([false, true]);
+  });
+});
+
+describe('workspaceCapabilities for references', () => {
+  const imageContext = (cap: number | undefined, controls: string[] = ['references', 'references_clear']): WorkspaceContext => ({
+    image_model_defaults: { klein: { max_reference_images: cap }, zit: {} },
+    prompt_sources: ['inline'],
+    scheduler_options: [],
+    workflow_contract: {
+      values: ['txt2img'],
+      definitions: { txt2img: { mode: 'image', model_kind: 'image', visible_controls: controls, supports_reference_image: false, requires_reference_image: false, requires_source_video: false, clear_fields: [] } },
+      field_precedence: { defaults: [], dimensions: '' },
+    },
+  }) as unknown as WorkspaceContext;
+  const stateOf = (model: string): DraftState => ({ workflow: 'txt2img', model, referenceImagePaths: [] }) as unknown as DraftState;
+
+  it('shows the section with the model cap on a model that takes references', () => {
+    const caps = workspaceCapabilities(imageContext(4), stateOf('klein'));
+    expect([caps.showReferences, caps.maxReferences]).toEqual([true, 4]);
+  });
+
+  it('hides it for a model without references, and for a model that sends no cap', () => {
+    expect(workspaceCapabilities(imageContext(0), stateOf('klein')).showReferences).toBe(false);
+    expect(workspaceCapabilities(imageContext(4), stateOf('zit')).showReferences).toBe(false);
+  });
+
+  it('counts the first rows of the list the model takes, and none where the section is hidden', () => {
+    const state = (model: string, count: number): DraftState => ({ ...stateOf(model), referenceImagePaths: Array.from({ length: count }, (_, i) => `/in/${i}.png`) }) as DraftState;
+
+    expect(workspaceCapabilities(imageContext(4), state('klein', 3)).referenceCount).toBe(3);
+    expect(workspaceCapabilities(imageContext(2), state('klein', 3)).referenceCount).toBe(2);
+    expect(workspaceCapabilities(imageContext(0), state('klein', 3)).referenceCount).toBe(0);
+  });
+
+  it('hides it where the workflow does not list the controls', () => {
+    expect(workspaceCapabilities(imageContext(4, []), stateOf('klein')).showReferences).toBe(false);
   });
 });
 

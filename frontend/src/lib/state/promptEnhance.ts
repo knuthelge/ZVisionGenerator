@@ -175,15 +175,22 @@ export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, a
 }
 
 /**
- * The job facts an on-demand enhancement needs: frame shape, clip length, audio, reference image and last frame.
+ * The job facts an on-demand enhancement needs: frame shape, clip length, audio, reference image, references and last frame.
  *
  * An extension names its source, new frames and video model instead; the server reads the source's size, frame rate and recorded text,
  * and the model's family sets the step the new frames are a multiple of.
  *
  * @param sourceHasAudio Extend only: whether the source has audio, when known.
  * @param endImage Whether the clip also ends on a last-frame image (chosen, or uploaded and pending).
+ * @param references How many reference rows the draft has, uploads included (an uploaded row has an empty path in the draft).
  */
-export function enhanceContext(state: DraftState, audioSupported = true, sourceHasAudio: boolean | null = null, endImage = false): EnhanceContext {
+export function enhanceContext(
+  state: DraftState,
+  audioSupported = true,
+  sourceHasAudio: boolean | null = null,
+  endImage = false,
+  references = 0,
+): EnhanceContext {
   if (state.workflow === 'extend') {
     return {
       ratio: null,
@@ -208,6 +215,7 @@ export function enhanceContext(state: DraftState, audioSupported = true, sourceH
     fps: video ? state.fps : null,
     audio: hasAudio(state, audioSupported),
     reference_image: state.workflow === 'img2img' || state.workflow === 'img2vid',
+    references,
     end_image: video && endImage,
   };
 }

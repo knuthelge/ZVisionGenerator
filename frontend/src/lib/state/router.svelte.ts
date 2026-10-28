@@ -1,4 +1,5 @@
-import type { PageId, RouterState } from '$lib/types';
+import { buildQuery, firstValues } from '$lib/prefillParams';
+import type { PageId, PrefillParams, RouterState } from '$lib/types';
 
 // Parses hash routes ('#/workspace?...') used by the SPA shell.
 function parseLocation(): RouterState {
@@ -29,18 +30,18 @@ export const router = {
   get page(): PageId { return _router.page; },
   get params(): Record<string, string> { return _router.params; },
 
-  navigate(page: PageId, params: Record<string, string> = {}): void {
-    const hashParams = new URLSearchParams(params).toString();
+  navigate(page: PageId, params: PrefillParams = {}): void {
+    const hashParams = buildQuery(params);
     const hash = `#/${page}${hashParams ? '?' + hashParams : ''}`;
     window.history.pushState({}, '', hash);
-    _router = { page, params };
+    _router = { page, params: firstValues(params) };
   },
 
-  replace(page: PageId, params: Record<string, string> = {}): void {
-    const hashParams = new URLSearchParams(params).toString();
+  replace(page: PageId, params: PrefillParams = {}): void {
+    const hashParams = buildQuery(params);
     const hash = `#/${page}${hashParams ? '?' + hashParams : ''}`;
     window.history.replaceState({}, '', hash);
-    _router = { page, params };
+    _router = { page, params: firstValues(params) };
   }
 };
 

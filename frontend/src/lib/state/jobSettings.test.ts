@@ -13,7 +13,7 @@ describe('jobSettingsPrefill', () => {
       enhance_auto: 'true', enhance_settings: '{"style":"photo","mood":"keep","details":["lighting"],"length":"longer"}',
     });
 
-    expect(params).toEqual({ workflow: 'img2img', model: 'zit', steps: '9', guidance: '3.5', ratio: '2:3', size: 'm', lora: 'style:0.7', image_path: '/out/.web_uploads/ref.png' });
+    expect(params).toEqual({ workflow: 'img2img', model: 'zit', steps: '9', guidance: '3.5', ratio: '2:3', size: 'm', lora: 'style:0.7', image_path: '/out/.web_uploads/ref.png', reference_path: [] });
     expect(patch).toMatchObject({
       promptSource: 'inline', prompt: 'a lake', enhancedPrompt: '', negativePrompt: 'blur', seed: null, runs: 4, dimensionMode: 'ratio',
       referenceImageStrength: 0.6, quantize: 8, scheduler: null, firstSigma: null, jsonPromptEnabled: false,
@@ -21,6 +21,14 @@ describe('jobSettingsPrefill', () => {
       upscaleEnabled: true, upscaleFactor: 2, upscaleDenoise: null, upscaleSteps: 6, upscaleGuidance: null, upscaleSharpen: false,
       enhanceAuto: true, enhanceSettings: { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'longer', motion: [] },
     });
+  });
+
+  it('carries the references an image job ran with, in order, and none for a job without them', () => {
+    const { params } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'klein', prompt: 'a', reference_path: ['/in/a.png', '/out/.web_uploads/b.png'] });
+    expect(params.reference_path).toEqual(['/in/a.png', '/out/.web_uploads/b.png']);
+
+    expect(jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'klein', prompt: 'a', reference_path: '/in/only.png' }).params.reference_path).toEqual(['/in/only.png']);
+    expect(jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', model: 'ltx', prompt: 'a' }).params).not.toHaveProperty('reference_path');
   });
 
   it('carries a submitted last frame as a prefill param, like the first frame', () => {
@@ -32,7 +40,7 @@ describe('jobSettingsPrefill', () => {
   it('keeps a blank LoRA list so loading a job without LoRAs clears them', () => {
     const { params } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'zit', lora: '', steps: '' });
 
-    expect(params).toEqual({ workflow: 'txt2img', model: 'zit', lora: '' });
+    expect(params).toEqual({ workflow: 'txt2img', model: 'zit', lora: '', reference_path: [] });
   });
 
   it('restores the enhancer and format a job ran with', () => {

@@ -30,6 +30,7 @@ export function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): 
     supports_json_prompt: false,
     supports_first_sigma: false,
     supports_scheduler: true,
+    max_reference_images: 0,
     dimension_min: 16,
     dimension_max: null,
     dimension_step: 16,
@@ -140,6 +141,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           visible_controls: [
             'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+            'references', 'references_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'scheduler',
             'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
@@ -157,6 +159,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
+            'references', 'references_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed', 'scheduler',
             'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',

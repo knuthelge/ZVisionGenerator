@@ -3,7 +3,7 @@ import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
 /**
- * Build the actions for an asset's menu: reuse, reference, extend, upscale, download, delete.
+ * Build the actions for an asset's menu: reuse, use as, extend, upscale, download, delete.
  *
  * Reuse leads when offered: on a touch screen a grid tile shows only the menu button, so the menu is where the
  * tile's quick action lives.
@@ -26,7 +26,7 @@ export function assetMenuEntries(
   }
   if (onreference && canUseAsReference(asset)) {
     entries.push(
-      { kind: 'heading', label: 'Use as reference' },
+      { kind: 'heading', label: 'Use as' },
       ...referenceEntries(asset, onreference, referenceUnavailable, referenceTargets),
       { kind: 'separator' }
     );
@@ -102,9 +102,8 @@ function plainTitle(option: AssetUpscaleFactor, downloadSizeLabel: string | null
 export const DEFAULT_REFERENCE_TARGETS: readonly ReferenceTarget[] = ['image', 'video'];
 
 /**
- * Build the "use as reference" items for *targets*; a target the current model can't use is disabled with its reason.
- *
- * With a last-frame target on offer, the video item reads as the first frame so the pair is clear.
+ * Build the "Use as" items for *targets*: the start image, a video's first frame and its last frame. A target the
+ * current model can't use is disabled with its reason.
  */
 export function referenceEntries(
   asset: GalleryAsset,
@@ -112,12 +111,7 @@ export function referenceEntries(
   unavailable: Partial<Record<ReferenceTarget, string>> = {},
   targets: readonly ReferenceTarget[] = DEFAULT_REFERENCE_TARGETS
 ): ActionMenuEntry[] {
-  const hasLast = targets.includes('last');
-  const labels: Record<ReferenceTarget, string> = {
-    image: 'For image (img2img)',
-    video: hasLast ? 'For first frame (img2vid)' : 'For video (img2vid)',
-    last: 'For last frame (img2vid)',
-  };
+  const labels: Record<ReferenceTarget, string> = { image: 'Start image', video: 'First frame', last: 'Last frame' };
   return targets.map((target) => ({
     kind: 'item' as const,
     id: `reference-${target === 'last' ? 'last-frame' : target}`,

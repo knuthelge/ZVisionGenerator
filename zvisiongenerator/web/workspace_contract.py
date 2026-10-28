@@ -8,6 +8,9 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.video_family import VideoCapabilities
 
 
+# One repeated form field holds every reference (a file or a host path per row), so the rows keep their order.
+REFERENCE_FIELD = "reference"
+
 CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "txt2vid", "img2vid", "extend")
 PROMPT_SOURCE_VALUES = ("inline", "file")
 DEFAULT_PROMPT_SOURCE = "inline"
@@ -50,6 +53,8 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "prompt_file_option",
             "prompt_file_preview",
             "prompt_file_edit",
+            "references",
+            "references_clear",
             "ratio",
             "size",
             "custom_dimensions",
@@ -94,6 +99,8 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "reference_image",
             "reference_image_path",
             "reference_image_clear",
+            "references",
+            "references_clear",
             "ratio",
             "size",
             "custom_dimensions",
