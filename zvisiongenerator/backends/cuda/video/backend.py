@@ -26,6 +26,7 @@ from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS
 from zvisiongenerator.utils.paths import split_huggingface_revision
+from zvisiongenerator.utils.input_images import open_image_upright
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, cut_window_audio, window_audio_cut, window_frames
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
@@ -82,7 +83,6 @@ class _RuntimeDependencies:
     """Lazy-loaded runtime dependencies for diffusers video generation."""
 
     torch: Any
-    image_module: Any
     encode_video: Any
     pipeline_classes: _PipelineClasses
     diffusers_version: str
@@ -191,7 +191,6 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
 
     try:
         import torch
-        from PIL import Image
         import av  # noqa: F401 - the encoder needs it
         import diffusers
 
@@ -211,7 +210,6 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
 
     return _RuntimeDependencies(
         torch=torch,
-        image_module=Image,
         encode_video=encode_video,
         pipeline_classes=_resolve_pipeline_classes(diffusers, LTX2LatentUpsamplerModel, LTX2VideoCondition),
         diffusers_version=diffusers_version,
@@ -1084,11 +1082,10 @@ def _check_upscale_arguments(model: _LoadedVideoModel, stage1_steps: int | None)
 def _conditioning_image(model: _LoadedVideoModel, image_path: str, width: int, height: int) -> Any:
     """Open an i2v image, re-compress it at the model's CRF when it has one, and fit it to the clip's size."""
 
-    with model.runtime.image_module.open(image_path) as image:
-        source = image.convert("RGB")
-        if model.image_crf is not None:
-            source = recompress(source, model.image_crf)  # before the fit, as the model was trained
-        return _fit_image(source, width, height)
+    source = open_image_upright(image_path)
+    if model.image_crf is not None:
+        source = recompress(source, model.image_crf)  # before the fit, as the model was trained
+    return _fit_image(source, width, height)
 
 
 @contextmanager

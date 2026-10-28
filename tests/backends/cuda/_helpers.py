@@ -12,7 +12,6 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
-from PIL import Image
 
 import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
 from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
@@ -461,7 +460,6 @@ def _make_runtime(
 
     runtime = SimpleNamespace(
         torch=torch or _FakeTorch(),
-        image_module=Image,
         encode_video=_encode,
         pipeline_classes=SimpleNamespace(
             text_to_video=text_pipeline,

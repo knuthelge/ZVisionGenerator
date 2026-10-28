@@ -16,6 +16,7 @@ from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.hf_snapshot import pack_for_reference, snapshot_with
 from zvisiongenerator.utils.model_files import find_local_model_dir, ltx_mlx_bundled_text_encoder
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
+from zvisiongenerator.utils.input_images import upright_image_copies
 from zvisiongenerator.utils.video_extend import CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, carry_latent_frames, cut_window_audio, window_audio_cut, window_frames
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 from zvisiongenerator.utils.video_splice import build_segment_command, write_pcm16_wav
@@ -772,7 +773,8 @@ def _generate(
         raise ValueError("review needs stage1_steps: only the two-stage upscale has a half-size render to review")
     if (stage1_steps is not None) != model.upscale:
         raise ValueError(f"stage1_steps must be set exactly when the model is loaded for upscale (upscale={model.upscale}, stage1_steps={stage1_steps})")
-    with _generation_scope(model):
+    # The vendored pipeline opens the images itself, so a sideways or transparent one is handed over as an upright copy.
+    with _generation_scope(model), upright_image_copies(image_path, end_image_path) as (image_path, end_image_path):
         if stage1_steps is not None:
             _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback, review, end_image_path=end_image_path)
         else:

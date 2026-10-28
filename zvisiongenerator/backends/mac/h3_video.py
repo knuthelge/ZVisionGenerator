@@ -588,11 +588,12 @@ def _generate(
 
 
 def _fit_image(path: str | Path, width: int, height: int) -> Image.Image:
-    """Open an image as RGB, scaled to cover ``width x height`` and centre-cropped to it (as LTX does)."""
+    """Open an image upright and on white, scaled to cover ``width x height`` and centre-cropped to it (as LTX does)."""
     from PIL import Image, ImageOps
 
-    with Image.open(path) as opened:
-        return ImageOps.fit(opened.convert("RGB"), (width, height), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+    from zvisiongenerator.utils.input_images import open_image_upright
+
+    return ImageOps.fit(open_image_upright(path), (width, height), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
 
 
 def _fit_length(audio: np.ndarray, samples: int) -> np.ndarray:
