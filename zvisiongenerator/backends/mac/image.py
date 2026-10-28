@@ -34,6 +34,7 @@ from zvisiongenerator.backends.mac.memory import load_resident
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.progress_events import preview_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.lora_files import readable_lora_files
 
 # Per-run override slot, distinct from the always-on default constant (IDEOGRAM4_INITIAL_SIGMA).
 # The sentinel distinguishes "no override" (use the default) from "override to
@@ -351,7 +352,6 @@ class MfluxBackend:
 
         lora_kwargs = {}
         if lora_paths:
-            lora_kwargs["lora_paths"] = lora_paths
             lora_kwargs["lora_scales"] = lora_weights
 
         def build() -> Any:
@@ -403,7 +403,13 @@ class MfluxBackend:
                 _upcast_model_weights(model, ["vae"])
             return model
 
-        model = load_resident(build)
+        # mflux reads LoRAs only from files, so a file with names it cannot match is handed over as a renamed copy. mflux
+        # bakes the LoRAs into the weights while it builds the model, and load_resident evaluates every parameter, so
+        # the copies are not read again once it returns (or raises) and are removed then.
+        with readable_lora_files(lora_paths or [], model_info.family, "mflux") as readable_paths:
+            if lora_paths:
+                lora_kwargs["lora_paths"] = readable_paths
+            model = load_resident(build)
 
         self._model_info = model_info
         return model, model_info

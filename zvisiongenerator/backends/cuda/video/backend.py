@@ -23,6 +23,7 @@ from zvisiongenerator.backends.cuda.video.image_crf import recompress
 from zvisiongenerator.backends.cuda.video.runtime import configure_torch_runtime as _configure_torch_runtime
 from zvisiongenerator.backends.cuda.video.runtime import fit_image as _fit_image
 from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.lora_files import normalised_lora_state
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS
 from zvisiongenerator.utils.paths import split_huggingface_revision
@@ -37,6 +38,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MINIMUM_DIFFUSERS_VERSION = (0, 41, 0)
+# The family the diffusers backend loads LoRAs for, as the LoRA key normaliser names it.
+_LORA_FAMILY = "ltx"
 # The pipelines' own default prompt length, in tokens.
 _MAX_SEQUENCE_LENGTH = 1024
 # Tokens a token-wise layer (feed-forward, RMSNorm) computes at once: a feed-forward's 4x-wide activation is then
@@ -828,8 +831,9 @@ def _apply_loras(pipeline: Any, loras: list[tuple[str, float]]) -> None:
         lora_path = Path(path)
         adapter_name = f"lora_{index}"
         load_kwargs = {"adapter_name": adapter_name} if supports_adapter_name else {}
+        state = normalised_lora_state(lora_path, _LORA_FAMILY)
         try:
-            pipeline.load_lora_weights(str(lora_path), **load_kwargs)
+            pipeline.load_lora_weights(str(lora_path) if state is None else state, **load_kwargs)
         except TypeError as exc:
             raise RuntimeError(f"The installed diffusers LoRA API is incompatible with '{path}'.") from exc
         except Exception as exc:

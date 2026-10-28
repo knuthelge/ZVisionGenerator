@@ -196,6 +196,7 @@ describe('familyLabel', () => {
     expect(familyLabel('ideogram4')).toBe('Ideogram 4');
     expect(familyLabel('moss')).toBe('MOSS-Image');
     expect(familyLabel('ltx')).toBe('LTX');
+    expect(familyLabel('h3')).toBe('MiniMax H3');
   });
 
   it('falls back to the family for an unlisted size, and shows an unknown family as it is', () => {

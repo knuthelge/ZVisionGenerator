@@ -6,6 +6,7 @@ Everything the app keeps lives in one folder, `~/.ziv/`. It survives an update, 
 ~/.ziv/
 ├── models/          Converted models, stored quants and prepared copies (such as `h3@q4`), Ideogram 4 Instant and SeedVR2
 ├── loras/           LoRA .safetensors files
+├── cache/           Temporary files, such as a Mac job's renamed LoRA copies; empty between jobs
 ├── outputs/         Images and videos made in the Web UI (the default output folder)
 ├── presets/         Web UI presets: an image and a video folder, one .yaml file each
 ├── logs/            The error log of each command

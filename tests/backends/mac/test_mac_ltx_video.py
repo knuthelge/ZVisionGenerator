@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import sys
 from functools import partial
@@ -326,6 +327,65 @@ class TestLoadModel:
             handle, _ = LtxVideoBackend().load_model("model/path", upscale=upscale, loras=loras)
 
         assert handle.pipeline._pending_loras == loras
+
+    def test_a_lora_with_a_peft_adapter_name_is_set_as_a_copy_with_plain_names(self, classes, tmp_path, monkeypatch):
+        torch = pytest.importorskip("torch")
+        safetensors_torch = pytest.importorskip("safetensors.torch")
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "data"))
+        source = tmp_path / "peft.safetensors"
+        safetensors_torch.save_file(
+            {"diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.default.weight": torch.zeros(4, 8), "diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.default.weight": torch.zeros(8, 4)},
+            str(source),
+        )
+        plain = tmp_path / "plain.safetensors"
+        safetensors_torch.save_file(
+            {"diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight": torch.zeros(4, 8), "diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.weight": torch.zeros(8, 4)}, str(plain)
+        )
+
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path", loras=[(str(source), 0.7), (str(plain), 1.0)])
+
+        (copy, first_weight), (untouched, second_weight) = handle.pipeline._pending_loras
+        assert (first_weight, second_weight) == (0.7, 1.0)
+        assert untouched == str(plain)
+        assert Path(copy).parent.parent == tmp_path / "data" / "cache" / "loras"
+        assert Path(copy).name == source.name
+        assert set(safetensors_torch.load_file(copy)) == {"diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight", "diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.weight"}
+
+    @staticmethod
+    def _peft_lora(tmp_path, monkeypatch):
+        torch = pytest.importorskip("torch")
+        safetensors_torch = pytest.importorskip("safetensors.torch")
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "data"))
+        source = tmp_path / "peft.safetensors"
+        safetensors_torch.save_file(
+            {"diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.default.weight": torch.zeros(4, 8), "diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.default.weight": torch.zeros(8, 4)},
+            str(source),
+        )
+        return source, tmp_path / "data" / "cache" / "loras"
+
+    def test_the_copy_lives_as_long_as_the_handle_and_is_removed_when_the_job_drops_it(self, classes, tmp_path, monkeypatch):
+        source, cache = self._peft_lora(tmp_path, monkeypatch)
+
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path", loras=[(str(source), 0.7)])
+        ((copy, _weight),) = handle.pipeline._pending_loras
+        assert Path(copy).is_file()
+
+        del handle, _
+        gc.collect()
+
+        assert not Path(copy).exists()
+        assert list(cache.iterdir()) == []
+        assert source.is_file()
+
+    def test_a_load_that_fails_after_the_copy_was_made_removes_it(self, classes, tmp_path, monkeypatch):
+        source, cache = self._peft_lora(tmp_path, monkeypatch)
+
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", side_effect=ValueError("not an LTX model")), pytest.raises(ValueError, match="not an LTX model"):
+            LtxVideoBackend().load_model("model/path", loras=[(str(source), 1.0)])
+
+        assert list(cache.iterdir()) == []
 
     @pytest.mark.parametrize("upscale", [False, True])
     def test_pipeline_is_built_with_unfused_loras_and_the_default_cleared_after(self, classes, monkeypatch, upscale):

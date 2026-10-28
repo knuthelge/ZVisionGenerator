@@ -193,6 +193,21 @@ class TestLoraFormats:
 
         _assert_close(model.layers[0].proj.q(x), reference.layers[0].proj.q(x) + _delta(down, up, x))
 
+    @pytest.mark.parametrize("prefix", ["", "diffusion_model.", "base_model.model."])
+    def test_peft_adapter_names_are_dropped_and_the_layer_applies(self, model, tmp_path, prefix):
+        reference = copy.deepcopy(model)
+        down, up = _lora(8, DIM, DIM)
+        path = _save(tmp_path, {f"{prefix}layers.1.proj.k.lora_A.default.weight": down, f"{prefix}layers.1.proj.k.lora_B.default.weight": up})
+        x = torch.randn(5, DIM)
+
+        context = _no_warnings()
+        try:
+            _install(model, path, strength=0.5)
+        finally:
+            context.__exit__(None, None, None)
+
+        _assert_close(model.layers[1].proj.k(x), reference.layers[1].proj.k(x) + 0.5 * _delta(down, up, x))
+
     def test_l3_fused_qkv_gives_each_target_its_rows(self, model, tmp_path):
         reference = copy.deepcopy(model)
         down, up = _lora(3, 3 * DIM, DIM)

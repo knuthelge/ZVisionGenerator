@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zvisiongenerator.utils.lora_files import normalised_lora_state
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 __all__ = ["PREFIX", "TIMESTEP_MODULES", "LoraFile", "LoraMerger", "check_targets", "fetch_lora_state", "load_lora", "load_pairs", "merge", "pairs_from_state"]
 
 PREFIX = "transformer."
+_LOADER = "h3"
 # The timestep embedding: the folded AdaLN tables are a function of it, so no LoRA may change it.
 TIMESTEP_MODULES = ("time_embedder", "time_proj")
 _PAIR_KEY = re.compile(rf"{re.escape(PREFIX)}(.+)\.lora_([AB])\.weight")
@@ -83,8 +86,13 @@ def _metadata_scales(state: Mapping[str, torch.Tensor], metadata: Mapping[str, o
 
 
 def load_lora(path: Path | str) -> LoraFile:
-    """Load a user LoRA file (any format diffusers converts) with its effective ``alpha / rank`` per module."""
-    state, metadata = fetch_lora_state(str(path))
+    """Load a user LoRA file (any format diffusers converts) with its effective ``alpha / rank`` per module.
+
+    A file whose tensor names diffusers' H3 converter cannot read is renamed first (see :func:`~zvisiongenerator.utils.lora_files.normalised_lora_state`);
+    its metadata is then not read, as diffusers reads it only from a path.
+    """
+    renamed = normalised_lora_state(path, _LOADER, _LOADER)
+    state, metadata = fetch_lora_state(str(path) if renamed is None else renamed)
     return LoraFile(state=state, scales=_metadata_scales(state, metadata))
 
 

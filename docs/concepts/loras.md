@@ -39,6 +39,8 @@ The **weight** sets how strongly the LoRA applies: 1.0 is full strength, lower i
 - **Video on Windows and Linux:** LTX LoRAs in a diffusers-compatible format. An unsupported file or scale fails before generation with a message saying why.
 - **MiniMax H3:** H3 LoRAs in PEFT, ai-toolkit, kohya and ComfyUI formats. A LoRA that changes the model's timestep embedding is refused, and on macOS so is one that changes its AdaLN projections or anything outside its transformer blocks and text refiner. A LoRA adds a few percent to the time, and can break the seam of an extension.
 
+LoRAs from other trainers, such as PEFT adapter names (`lora_A.default.weight`) or Kohya names (`lora_unet_blocks_0_attn_wq`), are renamed to the names the model reads when they load; your file isn't changed. On a Mac this takes a temporary copy in `~/.ziv/cache/loras/`, as large as the LoRA, which is deleted after the job.
+
 A LoRA must match the model: LTX LoRAs for the LTX models, MiniMax H3 LoRAs for `h3`, MOSS-Image LoRAs for `moss` and `moss-sft`.
 
 With [quantization](quantization.md), the LoRA is applied on top of the quantized model when the job loads.

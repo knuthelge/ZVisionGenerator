@@ -17,6 +17,11 @@ def _lora(base: str, in_features: int, out_features: int, rank: int = 8, layout:
     return {f"{base}.{down}.weight": _entry(rank, in_features), f"{base}.{up}.weight": _entry(out_features, rank)}
 
 
+def _named_adapter(base: str, in_features: int, out_features: int, adapter: str = "default", rank: int = 8) -> dict:
+    """Return the two header entries of one PEFT module whose keys carry the adapter name."""
+    return {f"{base}.lora_A.{adapter}.weight": _entry(rank, in_features), f"{base}.lora_B.{adapter}.weight": _entry(out_features, rank)}
+
+
 def _lokr(base: str, w1: tuple[int, int], w2: tuple[int, int]) -> dict:
     return {f"{base}.lokr_w1": _entry(*w1), f"{base}.lokr_w2": _entry(*w2)}
 
@@ -294,3 +299,83 @@ class TestPrefixesAndPurity:
         header = _lora(f"{prefix}layers.0.adaln_modulation", 1152, 4608)
 
         assert _detect(header) == LoraFamily("ideogram4", None, "fingerprint")
+
+
+class TestPeftAdapterName:
+    def test_zimage_with_an_adapter_name(self):
+        header = _named_adapter("layers.0.attention.to_q", 3840, 3840) | _named_adapter("context_refiner.0.attention.to_k", 3840, 3840)
+
+        assert _detect(header) == LoraFamily("zimage", None, "fingerprint")
+
+
+class TestKohyaBlocksAndLayers:
+    def test_zimage_layers(self):
+        header = _lora("lora_unet_layers_0_adaLN_modulation_1", 256, 15360, layout="kohya") | _lora("lora_unet_layers_0_attention_to_q", 3840, 3840, layout="kohya")
+
+        assert _detect(header) == LoraFamily("zimage", None, "fingerprint")
+
+    def test_krea2_gate_and_text_fusion(self):
+        header = _lora("lora_unet_blocks_0_attn_gate", 6144, 6144, layout="kohya") | _lora("lora_unet_txtfusion_refiner_blocks_0_attn_wq", 6144, 6144, layout="kohya")
+
+        assert _detect(header) == LoraFamily("krea2", None, "fingerprint")
+
+    def test_blocks_without_a_known_marker_are_not_detected(self):
+        header = _lora("lora_unet_blocks_0_cross_attn_k", 5120, 5120, layout="kohya") | _lora("lora_unet_blocks_0_ffn_0", 5120, 13824, layout="kohya")
+
+        assert _detect(header) == LoraFamily(None, None, "none")
+
+
+class TestMiniMaxH3:
+    @pytest.mark.parametrize("prefix", ["", "diffusion_model."])
+    def test_native_block_names(self, prefix):
+        header = _lora(f"{prefix}blocks.0.attn.qkv_proj", 5376, 16128) | _lora(f"{prefix}blocks.0.mlp.fc1", 5376, 28672)
+
+        assert _detect(header) == LoraFamily("h3", None, "fingerprint")
+
+    @pytest.mark.parametrize("module", ["adaln_proj.linear", "attn.out_proj", "mlp.fc2"])
+    def test_each_native_module_fingerprints_the_family(self, module):
+        assert _detect(_lora(f"blocks.3.{module}", 5376, 5376)) == LoraFamily("h3", None, "fingerprint")
+
+    def test_several_adapters_on_one_module_are_not_merged_into_one_lora(self):
+        header = _named_adapter("blocks.0.attn.qkv_proj", 5376, 16128, "0") | _named_adapter("blocks.0.attn.qkv_proj", 5376, 16128, "1")
+
+        assert _detect(header) == LoraFamily(None, None, "none")
+
+    def test_musubi_flattened_names(self):
+        header = _lora("lora_unet_blocks_0_attn_qkv_proj", 5376, 16128, layout="kohya") | _lora("lora_unet_blocks_0_mlp_fc2", 14336, 5376, layout="kohya")
+
+        assert _detect(header) == LoraFamily("h3", None, "fingerprint")
+
+    @pytest.mark.parametrize("marker", ["token_refiner.refiner_blocks.0.attn.to_q", "time_embedder.linear_1", "video_patch_proj"])
+    def test_diffusers_blocks_beside_an_h3_only_module(self, marker):
+        header = {**_lora("transformer.transformer_blocks.0.attn.to_q", 5376, 5376), **_lora(f"transformer.{marker}", 5376, 5376)}
+
+        assert _detect(header) == LoraFamily("h3", None, "fingerprint")
+
+    def test_diffusers_blocks_alone_are_not_h3(self):
+        assert _detect(_lora("transformer.transformer_blocks.0.attn.to_q", 5376, 5376)) == LoraFamily(None, None, "none")
+
+    def test_another_width_is_rejected_by_the_guard(self):
+        header = _lora("blocks.0.attn.qkv_proj", 3072, 9216) | _lora("transformer_blocks.0.attn.to_q", 3072, 3072)
+
+        assert _detect(header) == LoraFamily(None, None, "none")
+
+    def test_a_token_refiner_of_another_model_is_rejected_by_the_guard(self):
+        header = {**_lora("transformer_blocks.0.attn.to_q", 3072, 3072), **_lora("context_embedder.token_refiner.refiner_blocks.0.attn.to_q", 3072, 3072)}
+
+        assert _detect(header) == LoraFamily(None, None, "none")
+
+    def test_wan_blocks_are_not_h3(self):
+        header = _lora("diffusion_model.blocks.0.self_attn.q", 5120, 5120) | _lora("diffusion_model.blocks.0.ffn.0", 5120, 13824)
+
+        assert _detect(header) == LoraFamily(None, None, "none")
+
+
+class TestLtxAudio:
+    def test_audio_attention_with_cross_modal_video_width(self):
+        header = _lora("diffusion_model.transformer_blocks.0.audio_attn1.to_q", 2048, 2048) | _lora("diffusion_model.transformer_blocks.0.audio_to_video_attn.to_k", 2048, 4096)
+
+        assert _detect(header) == LoraFamily("ltx", None, "fingerprint")
+
+    def test_audio_attention_of_audio_width_only_is_not_detected(self):
+        assert _detect(_lora("diffusion_model.transformer_blocks.0.audio_attn2.to_q", 2048, 2048)) == LoraFamily(None, None, "none")

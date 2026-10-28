@@ -67,6 +67,7 @@ const FAMILY_LABELS: Record<string, string> = {
   ideogram4: 'Ideogram 4',
   moss: 'MOSS-Image',
   ltx: 'LTX',
+  h3: 'MiniMax H3',
 };
 
 /** Return the family and size of the selected model, or null when the context does not list the model. */

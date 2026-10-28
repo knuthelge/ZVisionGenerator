@@ -151,6 +151,8 @@ zvisiongenerator/
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
+│   ├── lora_files.py              Give a loader a LoRA under the tensor names its family reads: the tensors renamed, or a temporary renamed copy of the file for loaders that take only a path
+│   ├── lora_keys.py               Pure rename of a LoRA's tensor names for each family's loaders (PEFT adapter names, Kohya names, prefixes), shared by the detector and every loader
 │   ├── ltx_converted.py           The manifest of a converted LTX model folder (LTX-2.3 or LTX-2.5)
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)

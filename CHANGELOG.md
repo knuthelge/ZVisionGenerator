@@ -52,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Converting a MiniMax H3 checkpoint refuses Ref2VA (reference-to-video) checkpoints,** which used to convert as if they were the normal model
 - **An image you upload is saved once.** Sending the same start image, last frame or reference again reuses the saved copy in the output folder's `.web_uploads`
 - **Coming back from a video tab restores your image model.** Text to Image, then Image to Video, then Text to Image used to land on the default image model; it now returns to the model you used, and a video tab likewise remembers its video model
+- **More LoRAs are listed under their model in Add LoRA, and they load.** LoRAs saved with PEFT adapter names or Kohya names, MiniMax H3 LoRAs and LTX LoRAs that adapt the audio attention are now recognised and applied instead of being skipped or failing. On a Mac such a LoRA needs a temporary copy, as large as the LoRA, in `~/.ziv/cache/loras/`
 
 ## [0.14.0b1] - 2026-10-26
 

@@ -143,7 +143,30 @@ class TestTurboMerge:
             LoraMerger({"time_embedder.linear_1": (torch.zeros(2, 2), torch.zeros(2, 2))}, TURBO_SCALE)
 
 
+def _write_peft_named(path: Path, factors: dict[str, tuple[torch.Tensor, torch.Tensor]], adapter: str) -> Path:
+    """Write a PEFT adapter file: checkpoint module names with the adapter name in each key."""
+    tensors = {}
+    for module, (down, up) in factors.items():
+        tensors[f"{module}.lora_A.{adapter}.weight"] = down.contiguous()
+        tensors[f"{module}.lora_B.{adapter}.weight"] = up.contiguous()
+    save_file(tensors, str(path))
+    return path
+
+
 class TestLoading:
+    def test_an_adapter_name_other_than_default_loads_like_a_plain_file(self, tmp_path: Path) -> None:
+        factors = lora_factors({k: SHAPES[k] for k in ("blocks.0.attn.qkv_proj", "blocks.0.mlp.fc2")}, 4)
+        plain = load_lora(write_lora(tmp_path / "a.safetensors", factors))
+        named = load_lora(_write_peft_named(tmp_path / "b.safetensors", factors, "lora_0"))
+        assert set(named.state) == set(plain.state)
+        for key, value in plain.state.items():
+            assert torch.equal(value, named.state[key])
+
+    def test_the_default_adapter_name_is_kept_for_diffusers_to_read_as_a_diffsynth_file(self, tmp_path: Path) -> None:
+        factors = lora_factors({"blocks.0.attn.qkv_proj": SHAPES["blocks.0.attn.qkv_proj"]}, 4)
+        with pytest.raises(ValueError, match="per-head-interleaved"):
+            load_lora(_write_peft_named(tmp_path / "a.safetensors", factors, "default"))
+
     def test_peft_and_kohya_files_convert_to_the_same_modules(self, tmp_path: Path) -> None:
         factors = lora_factors({k: SHAPES[k] for k in ("blocks.0.attn.qkv_proj", "blocks.0.mlp.fc2", "blocks.0.adaln_proj.linear")}, 4)
         peft = load_lora(write_lora(tmp_path / "a.safetensors", factors))
