@@ -10,7 +10,7 @@ from pathlib import Path
 _INVALID_NAME_PATTERN = re.compile(r"[/\\]|\.\.|[\x00]")
 
 
-def _validate_name(name: str) -> str:
+def validate_name(name: str) -> str:
     """Validate and normalise a LoRA name.
 
     Strips trailing .safetensors if present, then rejects names containing
@@ -52,7 +52,7 @@ def import_lora_local(source: Path, dest_dir: Path, name: str | None = None) -> 
     if source.suffix != ".safetensors":
         raise ValueError(f"Source must be a .safetensors file, got: {source.name}")
 
-    final_name = _validate_name(name if name is not None else source.stem)
+    final_name = validate_name(name if name is not None else source.stem)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{final_name}.safetensors"
 
@@ -102,7 +102,7 @@ def import_lora_hf(
         raise ValueError(f"File must be a .safetensors file, got: {filename}")
 
     stem = Path(filename).stem
-    final_name = _validate_name(name if name is not None else stem)
+    final_name = validate_name(name if name is not None else stem)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{final_name}.safetensors"
 

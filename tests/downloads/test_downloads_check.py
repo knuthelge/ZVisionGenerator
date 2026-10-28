@@ -110,3 +110,16 @@ def test_unrelated_errors_propagate():
         check_target(_TARGET, snapshot_download=_raising(ValueError("bad")))
     with pytest.raises(DryRunError):
         check_target(_TARGET, snapshot_download=_raising(_dry_run_error(ValueError("other"))))
+
+
+@pytest.mark.parametrize(("anonymous", "sends_token_false"), [(True, True), (False, False)])
+def test_an_anonymous_target_is_checked_without_the_token(anonymous: bool, sends_token_false: bool):
+    calls: list[dict] = []
+
+    def fake(repo_id, **kwargs):
+        calls.append(kwargs)
+        return [_info(1)]
+
+    check_target(DownloadTarget("owner/repo", local_dir="/tmp/x", anonymous=anonymous), snapshot_download=fake)
+
+    assert (calls[0].get("token") is False) is sends_token_false

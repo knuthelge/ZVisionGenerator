@@ -19,9 +19,12 @@ KLEIN = LoraFamilyInfo("flux2_klein", "4b")
 UNKNOWN = LoraFamilyInfo(None, None)
 
 
-def _write_lora(path: Path, *, extra: int = 0) -> Path:
-    """Write a header-only safetensors file; *extra* changes its size so its stat key differs."""
-    header = {"layer.lora_A.weight": {"dtype": "F16", "shape": [4, 8], "data_offsets": [0, 0]}, "__metadata__": {"ss_base_model_version": "klein_4b"}}
+def _write_lora(path: Path, *, extra: int = 0, caption: str | None = None) -> Path:
+    """Write a header-only safetensors file; *extra* changes its size so its stat key differs, *caption* is its single training caption."""
+    metadata = {"ss_base_model_version": "klein_4b"}
+    if caption:
+        metadata["ss_tag_frequency"] = json.dumps({"10_x": {caption: 30}})
+    header = {"layer.lora_A.weight": {"dtype": "F16", "shape": [4, 8], "data_offsets": [0, 0]}, "__metadata__": metadata}
     payload = json.dumps(header).encode("utf-8") + b" " * extra
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(struct.pack("<Q", len(payload)) + payload)
@@ -63,6 +66,31 @@ def test_a_warm_lookup_reads_no_file(loras_dir, reads):
 
     assert lookup(loras_dir, ["a"]) == {"a": KLEIN}
     assert reads == []
+
+
+def test_the_caption_trigger_comes_from_the_same_read_and_is_kept_for_the_next_lookup(loras_dir, reads):
+    _write_lora(loras_dir / "a.safetensors", caption="t3chnic4lly")
+    _write_lora(loras_dir / "b.safetensors")
+
+    first = lookup(loras_dir, ["a", "b"])
+    reads.clear()
+    again = lookup(loras_dir, ["a", "b"])
+
+    assert (first["a"].caption, first["b"].caption) == ("t3chnic4lly", None)
+    assert again == first
+    assert reads == []
+
+
+def test_looking_up_some_names_without_pruning_keeps_the_rows_of_the_rest(loras_dir, reads):
+    _write_lora(loras_dir / "a.safetensors")
+    _write_lora(loras_dir / "b.safetensors")
+    lookup(loras_dir, ["a", "b"])
+
+    lookup(loras_dir, ["a"], prune=False)
+
+    assert _rows(loras_dir) == ["a", "b"]
+    lookup(loras_dir, ["a"])
+    assert _rows(loras_dir) == ["a"]
 
 
 def test_a_changed_file_is_read_again(loras_dir, reads):

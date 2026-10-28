@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from zvisiongenerator.utils.video_model_detect import detect_video_model, is_known_video_repo
+from zvisiongenerator.utils.video_model_detect import detect_video_model, is_known_video_repo, known_ltx_repo_version
 
 
 class TestDetectVideoModel:
@@ -148,3 +148,21 @@ class TestDetectVideoModel:
         info = detect_video_model("your-org/ltx-custom-diffusers")
 
         assert info.family == "unknown"
+
+
+class TestKnownLtxRepoVersion:
+    @pytest.mark.parametrize(
+        ("model_path", "version"),
+        [
+            ("unsloth/LTX-2.5-FP8@7b40724", "2.5"),
+            ("MarceloFSO/ltx-2.5-mlx-q4-fast", "2.5"),
+            ("dgrauet/ltx-2.5-mlx-q4", "2.5"),
+            ("dgrauet/ltx-2.3-mlx-q4", "2.3"),
+            ("diffusers/LTX-2.3-Distilled-Diffusers@432e0d3", "2.3"),
+            ("MiniMaxAI/MiniMax-H3", None),
+            ("someone/unknown", None),
+            ("/models/ltx-2.5-mine", None),
+        ],
+    )
+    def test_a_known_ltx_repo_names_its_version_and_anything_else_none(self, model_path, version):
+        assert known_ltx_repo_version(model_path) == version

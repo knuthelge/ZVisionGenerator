@@ -11,6 +11,7 @@ drops its byte range from the cache right after; :class:`TensorFile` does the sa
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
@@ -31,6 +32,7 @@ __all__ = [
     "TensorFile",
     "iter_tensors",
     "read_header",
+    "header_and_metadata_from_bytes",
     "read_header_and_metadata",
     "read_metadata",
     "read_stream_tensors",
@@ -76,6 +78,19 @@ def read_header_and_metadata(path: Path) -> tuple[dict[str, dict], dict[str, str
     """
     _, header, metadata = _read_all(path)
     return header, metadata
+
+
+def header_and_metadata_from_bytes(data: bytes) -> tuple[dict[str, dict], dict[str, str]]:
+    """Return the header without the metadata entry, and the metadata, of a safetensors file whose first bytes are *data*.
+
+    *data* must hold the whole header (the 8-byte length and the JSON it names); the tensors need not be there.
+
+    Raises:
+        ValueError: If *data* does not start with a complete safetensors header.
+    """
+    _, header = _stream_header(io.BytesIO(data), "The data", len(data))
+    metadata = header.pop("__metadata__", None)
+    return header, metadata if isinstance(metadata, dict) else {}
 
 
 def _read_all(path: Path) -> tuple[int, dict[str, dict], dict[str, str]]:

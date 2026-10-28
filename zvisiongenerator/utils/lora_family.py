@@ -16,8 +16,8 @@ from zvisiongenerator.utils.lora_keys import normalise_lora_keys
 
 __all__ = ["LORA_FAMILY_VERSION", "LoraFamily", "detect_lora_family"]
 
-# Bump when the rules change so cached detections are recomputed.
-LORA_FAMILY_VERSION = 6
+# Bump when the rules change, or what a cached row holds (the family and the header's caption trigger), so cached rows are recomputed.
+LORA_FAMILY_VERSION = 7
 
 _METADATA_KEYS = ("ss_base_model_version", "release_base_model", "modelspec.architecture")
 _KEY_PREFIXES = ("diffusion_model.", "transformer.", "model.diffusion_model.", "base_model.model.")

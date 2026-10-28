@@ -42,7 +42,7 @@ from zvisiongenerator.backends import (
 )
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu, smart_budget_bytes
 from zvisiongenerator.converters.convert_checkpoint import H3_MODEL_TYPE, LTX_MODEL_TYPES, MODEL_TYPES, VIDEO_MODEL_TYPES
-from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
+from zvisiongenerator.converters.lora_import import import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
@@ -65,6 +65,8 @@ from zvisiongenerator.utils.config import (
     video_family,
 )
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
+from zvisiongenerator.utils.lora_trigger import clean_trigger
+from zvisiongenerator.utils.curated_loras import curated_by_id
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.subprocess_env import utf8_child_env
 from zvisiongenerator.utils.image_model_detect import detect_image_model
@@ -102,7 +104,15 @@ from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
-from zvisiongenerator.web.config_contract import persist_first_run_skipped, persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
+from zvisiongenerator.web.config_contract import (
+    discover_huggingface_enabled,
+    persist_discover_huggingface,
+    persist_first_run_skipped,
+    persist_writable_config_patch,
+    resolve_output_dir as resolve_config_output_dir,
+)
+from zvisiongenerator.web.discover_api import build_curated, check_json, hf_source, installed_sizes, list_json, curated_repo_index, curated_source, repo_json
+from zvisiongenerator.web.discover_hub import check_family, list_adapters, read_repo
 from zvisiongenerator.web.download_lane import DownloadLane
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
@@ -117,7 +127,11 @@ from zvisiongenerator.web.gallery import (
     resolve_output_asset_path,
 )
 from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, JobLogError
+from zvisiongenerator.web.hub_client import CachedFetch, HubError, validated_file, validated_repo
 from zvisiongenerator.web.json_fields import json_field
+from zvisiongenerator.web.lora_details import describe_installed
+from zvisiongenerator.web.lora_download import LoraInstaller, import_source
+from zvisiongenerator.web.lora_sources import SOURCES, LoraSourcesError
 from zvisiongenerator.web.recent_prompts import RecentPrompts, RecentPromptsError, recent_prompt_entry
 from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
 from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
@@ -159,6 +173,9 @@ job_log = JobLog(app_db.app_db_path)
 recent_prompts = RecentPrompts(app_db.app_db_path)
 web_runner = WebRunner(download_flights=download_flights, job_log=job_log)
 download_lane = DownloadLane(flights=download_flights)
+lora_sources = SOURCES
+lora_installer = LoraInstaller(download_lane, loras_dir=lambda: get_ziv_data_dir() / "loras", sources=lora_sources)
+hub_fetch = CachedFetch()
 logger = logging.getLogger(__name__)
 _ENHANCE_TERMINAL_FRAMES = frozenset({"done", "error"})
 # How long shutting down waits for a running Models-page download's child process to stop and clean up.
@@ -169,6 +186,7 @@ _LANE_SHUTDOWN_SECS = 10.0
 async def _lifespan(_: FastAPI):
     """Own the background worker pool for the life of the FastAPI app."""
     try:
+        await run_in_threadpool(lora_installer.sweep_staging)
         yield
     finally:
         download_lane.shutdown(join_timeout=_LANE_SHUTDOWN_SECS)
@@ -311,7 +329,7 @@ async def api_extend_source(request: Request) -> dict[str, Any]:
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
     try:
-        return await run_in_threadpool(extend_source_response, payload, load_web_config(), _media_output_root())
+        return await run_in_threadpool(extend_source_response, payload, load_web_config(), _media_output_root(), downloading_loras=lora_installer.pending_sizes())
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -1648,7 +1666,7 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
         family=model_info.family,
         mode="i2v" if image else "t2v",
         forwards=forwards or 8,
-        loras_bytes=lora_bytes_for_fit(lora, family=model_info.family),
+        loras_bytes=lora_bytes_for_fit(lora, family=model_info.family, downloading=lora_installer.pending_sizes()),
         review=bool(upscale) and review is True,
     )
     return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
@@ -1992,20 +2010,20 @@ def _import_local_lora_from_form(form: Any) -> dict[str, str]:
     }
 
 
-def _import_hf_lora_from_form(form: Any) -> dict[str, str]:
-    """Validate and import a LoRA from Hugging Face."""
-    repo_id = _required_text(form, "repo_id")
-    imported = import_lora_hf(
-        repo_id,
-        get_ziv_data_dir() / "loras",
-        filename=_optional_text(form, "filename"),
-        name=_optional_text(form, "name"),
-    )
-    return {
-        "tone": "success",
-        "message": f"Imported Hugging Face LoRA '{imported.stem}'.",
-        "detail": str(imported),
-    }
+def _import_hf_lora_from_form(form: Any) -> dict[str, Any]:
+    """Queue the import of a LoRA from Hugging Face on the download lane and return at once.
+
+    The name defaults to the file's stem and gets ``-2``, ``-3`` and so on when taken; a name the user typed that is
+    taken is refused.
+    """
+    source = import_source(_required_text(form, "repo_id"), _optional_text(form, "filename"))
+    typed = _optional_text(form, "name")
+    result = lora_installer.start(source, name=typed, suffix_on_clash=typed is None, default_name=Path(source.file).stem)
+    if result.status == "installed":
+        message = f"Hugging Face LoRA '{result.name}' is already installed."
+    else:
+        message = f"Downloading Hugging Face LoRA '{result.name}'."
+    return {"tone": "success", "message": message, "name": result.name, "outcome": result.status, "download": result.item}
 
 
 def _run_model_management_command(args: list[str]) -> str:
@@ -2207,13 +2225,15 @@ async def api_models_import_lora_local(request: Request) -> dict[str, Any]:
 
 @app.post("/api/models/import-lora/hf")
 async def api_models_import_lora_hf(request: Request) -> dict[str, Any]:
-    """Import a LoRA from Hugging Face into the configured data directory (JSON API)."""
+    """Start the download of a LoRA from Hugging Face on the download lane (JSON API); progress shows in ``GET /api/models/downloads``."""
     payload = await request.json()
     try:
         notice = await run_in_threadpool(_import_hf_lora_from_form, payload)
-    except (ValueError, FileNotFoundError, FileExistsError, RuntimeError) as exc:
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
+    return {"status": "ok", **notice}
 
 
 # The download routes are declared before DELETE /api/models/{name} so that path pattern cannot shadow them.
@@ -2366,23 +2386,201 @@ def api_delete_other_download(repo_id: str) -> dict[str, Any]:
     return {"status": "ok", "tone": "success", "message": f"Deleted the HuggingFace download of '{repo_id}'."}
 
 
+_LORA_DELETE_BLOCKED = "Delete is off while a job runs: the job may be loading this file. Wait for all jobs to finish, then try again."
+
+
 @app.delete("/api/loras/{name}")
 def api_delete_lora(name: str) -> dict[str, Any]:
-    """Delete a LoRA file from the data directory."""
-    _ensure_no_active_job()
+    """Delete a LoRA file from the data directory, and the record of where it came from."""
+    _ensure_no_active_job(_LORA_DELETE_BLOCKED)
     try:
         delete_lora(Path(load_web_config().data_dir) / "loras", name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Could not delete LoRA '{name}': {exc}") from exc
+    download_lane.forget("lora", name)
+    try:
+        lora_sources.forget(name)
+    except LoraSourcesError as exc:
+        warnings.warn(f"Could not forget where LoRA '{name}' came from ({exc}).", stacklevel=2)
     return {"status": "ok", "tone": "success", "message": f"Deleted LoRA '{name}'."}
 
 
-def _ensure_no_active_job() -> None:
-    """Refuse model and LoRA deletes while a generation job may be reading their files."""
+@app.put("/api/loras/{name}/trigger")
+async def api_set_lora_trigger(name: str, request: Request) -> dict[str, Any]:
+    """Set the trigger the user typed for an installed LoRA from ``{"trigger": text | null}``; null or blank clears it.
+
+    It is used only when no better source names a trigger, so the answer carries the trigger the LoRA now has and where it comes from.
+    """
+    payload = await request.json()
+    if not isinstance(payload, dict) or "trigger" not in payload or not isinstance(payload["trigger"], str | None):
+        raise HTTPException(status_code=422, detail="Expected a JSON object with a 'trigger' text, or null to clear it.")
+    path = _loras_dir() / f"{name}.safetensors"
+    if "/" in name or "\\" in name or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"LoRA not found: {name}")
+    try:
+        await run_in_threadpool(lora_sources.set_user_trigger, name, path.stat().st_size, clean_trigger(payload["trigger"]))
+        rows = await run_in_threadpool(lora_sources.rows, [name])
+    except LoraSourcesError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save the trigger: {exc}") from exc
+    details = describe_installed(_loras_dir(), [name], rows)[name]
+    return {"name": name, "trigger": details["trigger"], "trigger_source": details["trigger_source"], "user_trigger": rows[name].user_trigger if name in rows else None}
+
+
+def _loras_dir() -> Path:
+    """Return the folder installed LoRAs live in."""
+    return get_ziv_data_dir() / "loras"
+
+
+def _hf_unavailable(exc: HubError) -> HTTPException:
+    """Return the HTTP error for a Hugging Face read that failed: 404 for a missing repository, else 502 (503 when it could not be reached)."""
+    if exc.status == 404:
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=503 if exc.status is None else 502, detail=f"{exc} Hugging Face is needed to browse LoRAs there; curated LoRAs still work from the bundled list.")
+
+
+def _require_hf_enabled() -> None:
+    """Refuse Hugging Face browsing until the user has chosen to show Hugging Face LoRAs."""
+    if not discover_huggingface_enabled():
+        raise HTTPException(status_code=403, detail="Hugging Face LoRAs are not shown yet. Choose Show Hugging Face results in Discover LoRAs first.")
+
+
+def _repo_arg(repo: str) -> str:
+    """Return *repo* when it is a repository ID, else raise the 422."""
+    try:
+        return validated_repo(repo)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _file_arg(file: str) -> str:
+    """Return *file* when it is a ``.safetensors`` path inside a repository, else raise the 422."""
+    try:
+        return validated_file(file)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/discover/settings")
+async def api_discover_settings_set(request: Request) -> dict[str, Any]:
+    """Set whether Hugging Face LoRAs are shown, from ``{"hf_enabled": bool}``; the server keeps it, so it also applies when the app is opened from another device."""
+    payload = await request.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("hf_enabled"), bool):
+        raise HTTPException(status_code=422, detail="Expected a JSON object with a boolean 'hf_enabled'.")
+    await run_in_threadpool(persist_discover_huggingface, payload["hf_enabled"])
+    return {"hf_enabled": payload["hf_enabled"]}
+
+
+@app.get("/api/discover/curated")
+def api_discover_curated(family: str, size: str | None = None, version: str | None = None) -> dict[str, Any]:
+    """Return the curated LoRAs made for a model (family, and size or version where it has them), each with its state on this machine."""
+    entries = build_curated(family, size, version, sizes=installed_sizes(_loras_dir()), active=download_lane.active_items("lora"))
+    return {"family": family, "size": size, "version": version, "hf_enabled": discover_huggingface_enabled(), "entries": entries}
+
+
+@app.get("/api/discover/installed-thumbnails/{name}")
+def api_discover_installed_thumbnail(name: str) -> Response:
+    """Serve the preview picture kept when the Hugging Face LoRA *name* was downloaded, so the Installed tab shows it offline."""
+    try:
+        image = None if "/" in name or "\\" in name else lora_sources.image(name)
+    except LoraSourcesError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read the LoRA sources: {exc}") from exc
+    if image is None:
+        raise HTTPException(status_code=404, detail=f"No preview for: {name}")
+    # The address carries the download time, so a new download of the name is a new address.
+    return Response(content=image[1], media_type=image[0], headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@app.get("/api/discover/hf")
+async def api_discover_hf(family: str, size: str | None = None, version: str | None = None, q: str = "", sort: str = "downloads", cursor: str | None = None) -> dict[str, Any]:
+    """Return a page of the Hugging Face LoRAs made for a model's official base model (by size or LTX version), via the server so the browser never calls the Hub."""
+    _require_hf_enabled()
+    try:
+        page = await run_in_threadpool(list_adapters, hub_fetch, family=family, size=size, version=version, query=q, sort=sort, cursor=cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HubError as exc:
+        raise _hf_unavailable(exc) from exc
+    return list_json(page, curated=curated_repo_index())
+
+
+@app.get("/api/discover/hf/repo")
+async def api_discover_hf_repo(repo: str) -> dict[str, Any]:
+    """Return one Hugging Face repository's files, card facts and preview URLs; gated and adult-tagged repositories are refused."""
+    _require_hf_enabled()
+    _repo_arg(repo)
+    try:
+        detail = await run_in_threadpool(read_repo, hub_fetch, repo)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except HubError as exc:
+        raise _hf_unavailable(exc) from exc
+    return await run_in_threadpool(repo_json, detail, installer=lora_installer, curated=curated_repo_index())
+
+
+@app.get("/api/discover/hf/check")
+async def api_discover_hf_check(repo: str, file: str, family: str, size: str | None = None) -> dict[str, Any]:
+    """Say which model a repository file was made for by reading its safetensors header with a range request (at most 2 MB)."""
+    _require_hf_enabled()
+    _repo_arg(repo)
+    _file_arg(file)
+    try:
+        detail = await run_in_threadpool(read_repo, hub_fetch, repo)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except HubError as exc:
+        raise _hf_unavailable(exc) from exc
+    if file not in {entry.file for entry in detail.files}:
+        raise HTTPException(status_code=404, detail=f"'{file}' is not in {repo}.")
+    try:
+        result = await run_in_threadpool(check_family, hub_fetch, repo=repo, revision=detail.revision, file=file, family=family, size=size)
+    except HubError as exc:
+        raise _hf_unavailable(exc) from exc
+    return check_json(result, family=family, size=size)
+
+
+@app.post("/api/discover/download")
+async def api_discover_download(request: Request) -> dict[str, Any]:
+    """Start the download of a LoRA on the download lane, from ``{"curated_id"}`` or ``{"repo", "file", "name"?}``.
+
+    The name is decided before any bytes download. Pressing Use twice, or Use on a file that is already downloading,
+    returns the running item; a file that is already installed returns no item. A curated entry whose name belongs to
+    another file, and an open file whose name is taken, are answered as described by ``name`` and ``renamed``.
+    """
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Expected a JSON object.")
+    try:
+        if payload.get("curated_id") is not None:
+            entry = curated_by_id(str(payload["curated_id"]))
+            if entry is None:
+                raise HTTPException(status_code=404, detail=f"Unknown curated LoRA: {payload['curated_id']}")
+            source, name = curated_source(entry), entry.name
+        else:
+            _require_hf_enabled()
+            repo, file = _repo_arg(_required_json_string(payload, "repo")), _file_arg(_required_json_string(payload, "file"))
+            detail = await run_in_threadpool(read_repo, hub_fetch, repo)
+            chosen = next((entry for entry in detail.files if entry.file == file), None)
+            if chosen is None:
+                raise HTTPException(status_code=404, detail=f"'{file}' is not in {repo}.")
+            source, name = hf_source(detail, chosen), _coerce_optional_string(payload.get("name"))
+        result = await run_in_threadpool(lora_installer.start, source, name=name)
+    except HubError as exc:
+        raise _hf_unavailable(exc) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"name": result.name, "status": result.status, "renamed": result.renamed, "item": result.item, "trigger": source.trigger, "trigger_source": source.trigger_source}
+
+
+def _ensure_no_active_job(message: str = "Wait for all jobs to finish before deleting models or LoRAs.") -> None:
+    """Refuse model and LoRA deletes while a generation job may be reading their files; *message* says why."""
     if web_runner.get_active_exclusive_job_snapshot() is not None:
-        raise HTTPException(status_code=409, detail="Wait for all jobs to finish before deleting models or LoRAs.")
+        raise HTTPException(status_code=409, detail=message)
 
 
 def _ensure_not_downloading(*, repo_ids: tuple[str, ...] = (), paths: tuple[Path, ...] = (), any_cache: bool = False) -> None:

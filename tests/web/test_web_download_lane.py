@@ -137,6 +137,25 @@ class TestOrderAndQueue:
         assert second["id"] != first["id"]
 
 
+class TestForget:
+    def test_forgetting_a_row_drops_its_finished_items_and_keeps_queued_and_other_ones(self, ensure):
+        ensure.release.set()
+        lane = _lane(ensure)
+        done = _submit(lane, "a", kind="lora")
+        _wait_state(lane, done["id"], "done")
+        other = _submit(lane, "b", kind="lora")
+        _wait_state(lane, other["id"], "done")
+        ensure.release.clear()
+        again = _submit(lane, "a", kind="lora")
+
+        lane.forget("lora", "a")
+
+        assert {item["id"] for item in lane.snapshot()["items"]} == {other["id"], again["id"]}
+
+    def test_forgetting_a_row_that_is_not_there_does_nothing(self, ensure):
+        _lane(ensure).forget("lora", "missing")
+
+
 class TestCancel:
     def test_cancelling_a_queued_item_cancels_it_at_once_and_never_runs_it(self, ensure):
         lane = _lane(ensure)
@@ -392,3 +411,67 @@ class TestSharedFlightAndConcurrency:
         assert ensure.max_concurrent == 1
         queued = [entry for entry in lane.snapshot()["items"] if entry["state"] in ("queued", "running")]
         assert queued == []
+
+
+class TestFinalizeAndCleanup:
+    def test_finalize_runs_after_the_targets_are_on_disk_and_cleanup_after_it(self, ensure):
+        ensure.release.set()
+        order: list[str] = []
+        lane = _lane(ensure)
+
+        item = lane.submit(kind="lora", name="a", label="A", plan=_targets_for("a"), finalize=lambda: order.append("finalize"), cleanup=lambda: order.append("cleanup"))
+
+        _wait_state(lane, item["id"], "done")
+        assert order == ["finalize", "cleanup"]
+
+    def test_a_finalize_error_fails_the_item_with_its_text_and_still_cleans_up(self, ensure):
+        ensure.release.set()
+        cleaned: list[bool] = []
+        lane = _lane(ensure)
+
+        def finalize() -> None:
+            raise ValueError("The downloaded file does not match its published SHA-256.")
+
+        item = lane.submit(kind="lora", name="a", label="A", plan=_targets_for("a"), finalize=finalize, cleanup=lambda: cleaned.append(True))
+
+        final = _wait_state(lane, item["id"], "failed")
+        assert final["message"] == "The downloaded file does not match its published SHA-256."
+        assert cleaned == [True]
+
+    @pytest.mark.parametrize("outcome", [STOPPED, UNCHECKED])
+    def test_finalize_is_skipped_when_the_download_did_not_finish_but_cleanup_runs(self, outcome):
+        fake = _FakeEnsure(outcome)
+        fake.release.set()
+        calls: list[str] = []
+        lane = _lane(fake)
+
+        item = lane.submit(kind="lora", name="a", label="A", plan=_targets_for("a"), finalize=lambda: calls.append("finalize"), cleanup=lambda: calls.append("cleanup"))
+
+        _wait_state(lane, item["id"], "cancelled" if outcome == STOPPED else "failed")
+        assert calls == ["cleanup"]
+
+    def test_a_cleanup_error_does_not_stop_the_lane(self, ensure):
+        ensure.release.set()
+        lane = _lane(ensure)
+
+        def cleanup() -> None:
+            raise OSError("busy")
+
+        first = lane.submit(kind="lora", name="a", label="A", plan=_targets_for("a"), cleanup=cleanup)
+        second = _submit(lane, "b")
+
+        _wait_state(lane, first["id"], "done")
+        _wait_state(lane, second["id"], "done")
+
+    def test_extra_keys_appear_in_the_item_json_and_active_items_lists_one_kind(self, ensure):
+        lane = _lane(ensure)
+        lora = lane.submit(kind="lora", name="a", label="A", plan=_targets_for("a"), extra={"curated_id": "p1", "size_bytes": 7})
+        _submit(lane, "m")
+        assert ensure.started.acquire(timeout=_WAIT)
+
+        active = lane.active_items("lora")
+
+        assert [(item["id"], item["curated_id"], item["size_bytes"]) for item in active] == [(lora["id"], "p1", 7)]
+        ensure.release.set()
+        _wait_state(lane, lora["id"], "done")
+        assert lane.active_items("lora") == []

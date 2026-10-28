@@ -1,8 +1,9 @@
-"""Cache the detected model family of each LoRA file in the app database.
+"""Cache the detected model family and the caption trigger of each LoRA file in the app database.
 
 A lookup stats every LoRA and reads the cached rows of the folder. A LoRA that is new or whose file changed since
-it was cached has its safetensors header read and its family detected on the spot, and the result is stored for the
-next lookup. The database is only a cache: when it fails, every family is reported as unknown.
+it was cached has its safetensors header read once, its family detected and its single-caption trigger taken from the
+same read, and the result is stored for the next lookup, so a restart reads no header of a file that did not change.
+The database is only a cache: when it fails, every family is reported as unknown and no caption is found.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import warnings
 
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.lora_family import LORA_FAMILY_VERSION, LoraFamily, detect_lora_family
+from zvisiongenerator.utils.lora_trigger import caption_trigger
 from zvisiongenerator.utils.safetensors_stream import read_header_and_metadata
 
 __all__ = ["LoraFamilyInfo", "lookup"]
@@ -29,10 +31,11 @@ _DB_ERRORS = (sqlite3.Error, OSError, UnicodeError, OverflowError)
 
 @dataclass(frozen=True)
 class LoraFamilyInfo:
-    """The family of one LoRA, or ``None`` for both fields when it is unknown."""
+    """The family of one LoRA (``None`` for both fields when it is unknown), and the single caption in its header, if any."""
 
     family: str | None
     size_variant: str | None
+    caption: str | None = None
 
 
 _UNKNOWN = LoraFamilyInfo(None, None)
@@ -43,7 +46,7 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     conn.execute(
         f"CREATE TABLE IF NOT EXISTS {_TABLE} ("
         "root TEXT NOT NULL, name TEXT NOT NULL, mtime_ns INTEGER NOT NULL, ctime_ns INTEGER NOT NULL, "
-        "size INTEGER NOT NULL, family TEXT NULL, size_variant TEXT NULL, source TEXT NOT NULL, "
+        "size INTEGER NOT NULL, family TEXT NULL, size_variant TEXT NULL, source TEXT NOT NULL, caption TEXT NULL, "
         "PRIMARY KEY (root, name)) WITHOUT ROWID"
     )
     if from_version >= LORA_FAMILY_VERSION:
@@ -54,12 +57,13 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
 _COMPONENT = app_db.Component("loras", LORA_FAMILY_VERSION, _migrate)
 
 
-def lookup(loras_dir: str | Path, names: Sequence[str]) -> dict[str, LoraFamilyInfo]:
+def lookup(loras_dir: str | Path, names: Sequence[str], *, prune: bool = True) -> dict[str, LoraFamilyInfo]:
     """Return the family of each LoRA in *names*, detecting and caching the ones that are new or changed.
 
     Args:
         loras_dir: Directory holding ``<name>.safetensors`` files.
         names: LoRA names, the file stems.
+        prune: Forget the cached rows of the folder's files that are not in *names*; pass False when *names* is only some of the folder's LoRAs.
 
     Returns:
         One :class:`LoraFamilyInfo` per name; unknown for a missing file, an unreadable header, or when the
@@ -81,11 +85,11 @@ def lookup(loras_dir: str | Path, names: Sequence[str]) -> dict[str, LoraFamilyI
                 if name in cached and cached[name][0] == key:
                     result[name] = cached[name][1]
                     continue
-                found = _detect(paths[name])
-                result[name] = LoraFamilyInfo(found.family, found.size_variant)
-                fresh.append((root, name, *key, found.family, found.size_variant, found.source))
+                found, caption = _read(paths[name])
+                result[name] = LoraFamilyInfo(found.family, found.size_variant, caption)
+                fresh.append((root, name, *key, found.family, found.size_variant, found.source, caption))
             wanted = set(names)
-            stale = [name for name in cached if name not in wanted]
+            stale = [name for name in cached if name not in wanted] if prune else []
             _store(conn, root, fresh, stale)
     except _DB_ERRORS as exc:
         warnings.warn(f"The LoRA index is unavailable ({exc}); LoRA families are unknown for now.", stacklevel=2)
@@ -95,17 +99,17 @@ def lookup(loras_dir: str | Path, names: Sequence[str]) -> dict[str, LoraFamilyI
 
 def _cached_rows(conn: sqlite3.Connection, root: str) -> dict[str, tuple[app_db.StatKey, LoraFamilyInfo]]:
     """Return ``{name: (stat_key, info)}`` for every row stored under *root*."""
-    cursor = conn.execute(f"SELECT name, mtime_ns, ctime_ns, size, family, size_variant FROM {_TABLE} WHERE root = ?", (root,))
-    return {name: ((mtime_ns, ctime_ns, size), LoraFamilyInfo(family, size_variant)) for name, mtime_ns, ctime_ns, size, family, size_variant in cursor}
+    cursor = conn.execute(f"SELECT name, mtime_ns, ctime_ns, size, family, size_variant, caption FROM {_TABLE} WHERE root = ?", (root,))
+    return {name: ((mtime_ns, ctime_ns, size), LoraFamilyInfo(family, size_variant, caption)) for name, mtime_ns, ctime_ns, size, family, size_variant, caption in cursor}
 
 
-def _detect(path: Path) -> LoraFamily:
-    """Read *path*'s header and detect its family; an unreadable or non-safetensors file has no family."""
+def _read(path: Path) -> tuple[LoraFamily, str | None]:
+    """Read *path*'s header once and return its detected family and its single-caption trigger; an unreadable or non-safetensors file has neither."""
     try:
         header, metadata = read_header_and_metadata(path)
     except OSError, ValueError:
-        return LoraFamily(None, None, "none")
-    return detect_lora_family(header, metadata)
+        return LoraFamily(None, None, "none"), None
+    return detect_lora_family(header, metadata), caption_trigger(metadata)
 
 
 def _store(conn: sqlite3.Connection, root: str, rows: Sequence[tuple], stale: Sequence[str]) -> None:
@@ -114,9 +118,9 @@ def _store(conn: sqlite3.Connection, root: str, rows: Sequence[tuple], stale: Se
         return
     with app_db.transaction(conn):
         conn.executemany(
-            f"INSERT INTO {_TABLE} (root, name, mtime_ns, ctime_ns, size, family, size_variant, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            f"INSERT INTO {_TABLE} (root, name, mtime_ns, ctime_ns, size, family, size_variant, source, caption) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(root, name) DO UPDATE SET mtime_ns = excluded.mtime_ns, ctime_ns = excluded.ctime_ns, size = excluded.size, "
-            "family = excluded.family, size_variant = excluded.size_variant, source = excluded.source",
+            "family = excluded.family, size_variant = excluded.size_variant, source = excluded.source, caption = excluded.caption",
             rows,
         )
         conn.executemany(f"DELETE FROM {_TABLE} WHERE root = ? AND name = ?", [(root, name) for name in stale])

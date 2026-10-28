@@ -169,3 +169,19 @@ def test_running_the_module_emits_no_runtime_warning() -> None:
     assert "RuntimeWarning" not in err
     assert returncode == 1
     assert "error" in _protocol(out)[-1]
+
+
+@pytest.mark.parametrize(("anonymous", "expected"), [(True, {"token": False}), (False, {})])
+def test_main_sends_no_token_only_for_an_anonymous_target(monkeypatch: pytest.MonkeyPatch, anonymous: bool, expected: dict[str, Any]) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake(repo_id: str, **kwargs: Any) -> str:
+        seen.update(kwargs)
+        return "/cache"
+
+    _patch_download(monkeypatch, fake)
+    target = DownloadTarget("owner/repo", local_dir="/some/dir", anonymous=anonymous)
+
+    assert worker.main([target.to_json()]) == 0
+    assert {key: seen[key] for key in expected} == expected
+    assert ("token" in seen) is anonymous

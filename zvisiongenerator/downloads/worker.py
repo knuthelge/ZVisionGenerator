@@ -82,6 +82,7 @@ def main(argv: list[str] | None = None, *, start_lifeline: bool = False) -> int:
             allow_patterns=None if target.allow_patterns is None else list(target.allow_patterns),
             ignore_patterns=None if target.ignore_patterns is None else list(target.ignore_patterns),
             local_dir=target.local_dir,
+            **({"token": False} if target.anonymous else {}),
             tqdm_class=make_byte_sink(counts),
         )
     except Exception as exc:  # noqa: BLE001 - every failure is reported to the parent as a protocol line

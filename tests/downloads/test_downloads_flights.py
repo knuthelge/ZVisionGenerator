@@ -34,6 +34,15 @@ def test_different_keys_are_independent_flights():
     assert len(flights.active()) == 3
 
 
+def test_two_files_of_one_repo_in_one_folder_are_two_flights():
+    flights = DownloadFlights()
+    _, first_owner = flights.claim(_target(local_dir="/loras/.download-a", allow_patterns=("a.safetensors",)))
+    _, second_owner = flights.claim(_target(local_dir="/loras/.download-a", allow_patterns=("b.safetensors",)))
+    _, repeat_owner = flights.claim(_target(local_dir="/loras/.download-a", allow_patterns=("a.safetensors",)))
+
+    assert (first_owner, second_owner, repeat_owner) == (True, True, False)
+
+
 def test_main_revision_equals_none_revision():
     flights = DownloadFlights()
     flights.claim(_target())

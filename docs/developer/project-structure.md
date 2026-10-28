@@ -135,6 +135,8 @@ zvisiongenerator/
 │   ├── audio_resample.py          Polyphase resampling of multi-channel audio
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
+│   ├── curated_loras.json         The curated list: hand-checked Hugging Face LoRAs, each pinned to a commit, file, size and SHA-256, with its Hugging Face download count
+│   ├── curated_loras.py           Pure loader of the curated list: frozen `CuratedLora` entries and lookups by family, size or version, id and local name
 │   ├── enhance_record.py          Record how a prompt was enhanced for a generated asset, and read it back
 │   ├── ffmpeg.py                  ffmpeg availability check and install, the error for a failed ffmpeg or ffprobe run, and the hidden temp path of in-place rewrites
 │   ├── file_links.py              Hard-link model files into a new folder, copying where linking fails
@@ -152,8 +154,13 @@ zvisiongenerator/
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
 │   ├── lora_files.py              Give a loader a LoRA under the tensor names its family reads: the tensors renamed, or a temporary renamed copy of the file for loaders that take only a path
+│   ├── lora_install.py            Check a downloaded LoRA's size and SHA-256 and rename it into the LoRA folder in one step
 │   ├── lora_keys.py               Pure rename of a LoRA's tensor names for each family's loaders (PEFT adapter names, Kohya names, prefixes), shared by the detector and every loader
+│   ├── lora_names.py              The local name a downloaded LoRA is saved under: a slug of its repository name, numbered when taken
+│   ├── lora_preview.py            Shrink a Hugging Face preview image to the small WebP kept with a downloaded LoRA
+│   ├── lora_trigger.py            Read a LoRA's trigger text from a model card's instance prompt or a header's single caption
 │   ├── ltx_converted.py           The manifest of a converted LTX model folder (LTX-2.3 or LTX-2.5)
+│   ├── ltx_version.py             The LTX version (2.3 or 2.5) of a video model: its alias, known repo, converted manifest, or a local folder's config files
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
 │   ├── moss_build.py              MOSS-Image's pinned sources, model folders, build records and shared stored copies
@@ -187,17 +194,23 @@ zvisiongenerator/
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
 │   ├── defaults.py                Ratio and size defaults for Web UI contracts
-│   ├── download_lane.py           Models-page downloads: a queue run one at a time on its own thread, beside the job queue
+│   ├── discover_api.py            Discover LoRAs responses: the curated entries with their state, repository details, family checks and the sources to install
+│   ├── discover_hub.py            Read LoRAs from Hugging Face for Discover: adapters per base model, a repository's files and card, a file's family
+│   ├── download_lane.py           Models-page and LoRA downloads: a queue run one at a time on its own thread, beside the job queue
 │   ├── extend_api.py              Extend routes: check and describe a source video, fit its window to memory, build the rewrite context of an extension
 │   ├── first_run.py               The model the first-run dialog preselects, and the dialog's payload block
 │   ├── gallery.py                 Gallery inventory and response serialization
 │   ├── gallery_index.py           Gallery component of the app database: facts read from gallery files, reconciled with the folder on each listing
+│   ├── hub_client.py              Anonymous, size-capped reads of huggingface.co for Discover, with input validators and a short in-memory cache
 │   ├── instances.py               Record running Web UI servers for --background and --background-stop
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
 │   ├── job_log.py                 Job log component of the app database: entry builder, filters, paging and the `jobs_entries` store
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
+│   ├── lora_details.py            Describe installed LoRAs: their source and trigger, by the order of trust
+│   ├── lora_download.py           Install a LoRA through the download lane: choose its name, stage, verify and rename it, record its source
 │   ├── lora_index.py              LoRA component of the app database: the cached family of each LoRA file, detected from its header when first seen
 │   ├── lora_fit.py                Size the LoRAs a Web UI memory estimate covers (MiniMax H3 only), resolved as a job resolves them
+│   ├── lora_sources.py            LoRA sources component of the app database: where each downloaded LoRA came from and its trigger
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
 │   ├── model_download_plan.py     Plan a Models-page row's downloads: targets, whether it needs any, sizes and free space
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
