@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **macOS needs macOS 14 Sonoma or newer**, as MLX and PyTorch do
 
 ### Fixed
+- **Converting a MiniMax H3 checkpoint refuses Ref2VA (reference-to-video) checkpoints,** which used to convert as if they were the normal model
 - **Pause after a failed image pauses the job.** A Pause pressed while an image fails now pauses the job, instead of leaving the Pause button stuck on "Pausing"
 - **The remaining-time estimate stays sensible.** An image skipped with Next no longer pulls the estimate down, and after Repeats it can no longer go negative; the final count includes the repeats
 - **A repeated image can always be reviewed.** When you discard an image and Repeat it, Approve and Discard no longer stay disabled for the new render if the Web UI lost its connection meanwhile

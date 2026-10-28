@@ -144,6 +144,38 @@ def test_checkpoints_the_app_does_not_run_are_refused(tmp_path, kwargs):
         inspect_h3(_save_native(tmp_path, **kwargs))
 
 
+def _native_folder(tmp_path: Path, partition: str | None, *, folder: str = "transformer") -> Path:
+    """Write a MiniMax-style native tree (``<root>/model_index.json`` and ``<root>/<folder>/model.safetensors``) and return the file."""
+    root = tmp_path / "tree"
+    (root / folder).mkdir(parents=True)
+    if partition is not None:
+        (root / "model_index.json").write_text(json.dumps({"_minimax_h3": {"schema_version": 1, "partition": partition}}))
+    return _save_native(root / folder, name="model.safetensors")
+
+
+def test_the_fl2va_partition_converts(tmp_path):
+    assert inspect_h3(_native_folder(tmp_path, "fl2va")).layout == "comfyui"
+
+
+def test_a_partition_other_than_fl2va_is_refused(tmp_path):
+    with pytest.raises(ValueError, match=r"(?i)partition"):
+        inspect_h3(_native_folder(tmp_path, "ref2va"))
+
+
+def test_a_diffusers_reference_transformer_folder_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="Ref2VA"):
+        inspect_h3(_native_folder(tmp_path, None, folder="transformer_ref"))
+
+
+@pytest.mark.parametrize("index", [None, json.dumps({"_class_name": "MiniMaxH3ModularPipeline"})])
+def test_a_file_with_no_readable_partition_keeps_converting(tmp_path, index):
+    path = _native_folder(tmp_path, None)
+    if index is not None:
+        (tmp_path / "tree" / "model_index.json").write_text(index)
+
+    assert inspect_h3(path).layout == "comfyui"
+
+
 def test_a_file_of_another_model_is_refused(tmp_path):
     save_file({"model.diffusion_model.patchify_proj.weight": torch.ones(2, 2)}, str(tmp_path / "ltx.safetensors"))
 
