@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ConversionStatus, DownloadItem, DownloadList, DownloadPlan, CheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
+import type { LoraImportResult, ConversionStatus, DownloadItem, DownloadList, DownloadPlan, CheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
 
 export function getModelInventory(): Promise<ModelInventory> {
   return api.get<ModelInventory>('/api/models');
@@ -42,8 +42,8 @@ export function importLoraHF(data: {
   repo_id: string;
   filename?: string;
   name?: string;
-}): Promise<ModelOperationResult> {
-  return api.post<ModelOperationResult>('/api/models/import-lora/hf', data);
+}): Promise<LoraImportResult> {
+  return api.post<LoraImportResult>('/api/models/import-lora/hf', data);
 }
 
 export function deleteModel(name: string): Promise<ModelOperationResult> {

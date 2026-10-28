@@ -28,6 +28,21 @@ describe('SettingsStrip', () => {
     target.remove();
   });
 
+  it('marks the LoRA chip as downloading while its file arrives', () => {
+    const lora = (download: SettingChip['download']): SettingChip[] => [{ key: 'loras', label: 'LoRA', value: 'style', changed: false, on: true, download }];
+    app = flushSync(() => mount(SettingsStrip, { target, props: { chips: lora({ kind: 'downloading', percent: 40 }), activeKey: null, changedCount: 0, onopen: vi.fn(), onall: vi.fn() } }));
+
+    const chip = target.querySelector('[data-chip="loras"]') as HTMLElement;
+    expect(chip.dataset.download).toBe('downloading');
+  });
+
+  it('marks a failed LoRA chip', async () => {
+    const failed: SettingChip[] = [{ key: 'loras', label: 'LoRA', value: 'style', changed: false, on: true, download: { kind: 'failed' } }];
+    app = flushSync(() => mount(SettingsStrip, { target, props: { chips: failed, activeKey: null, changedCount: 0, onopen: vi.fn(), onall: vi.fn() } }));
+
+    expect((target.querySelector('[data-chip="loras"]') as HTMLElement).dataset.download).toBe('failed');
+  });
+
   it('shows one chip per setting with its value, the changed dot and All with the count', () => {
     const onopen = vi.fn();
     const onall = vi.fn();

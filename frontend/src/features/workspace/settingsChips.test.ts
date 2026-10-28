@@ -32,6 +32,13 @@ describe('settingsChips', () => {
     expect(pendingChips('extend')[1]?.key).toBe('extendSeconds');
   });
 
+  it('carries what the LoRA files are doing on the LoRA chip only', () => {
+    const chips = settingsChips(facts({ loraNames: ['style'], loraDownload: { kind: 'downloading', percent: 40 } }));
+
+    expect(chips.find((chip) => chip.key === 'loras')?.download).toEqual({ kind: 'downloading', percent: 40 });
+    expect(chips.filter((chip) => chip.download).map((chip) => chip.key)).toEqual(['loras']);
+  });
+
   it('orders an image workflow by how often each setting changes, model last', () => {
     expect(settingsChips(facts()).map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
   });

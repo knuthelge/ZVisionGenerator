@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
 import { downloadStore } from '$lib/state/downloads.svelte';
+import { draft } from '$lib/state/draft.svelte';
+import { router } from '$lib/state/router.svelte';
 import { addToast, dismissToast } from '$lib/state/toasts.svelte';
 import type { DownloadItem, DownloadPlan, ModelInventory } from '$lib/types';
 
@@ -1043,5 +1045,98 @@ describe('ModelsPage memory', () => {
     await settle();
     expect(target.querySelector('[data-testid="model-name"]')?.textContent).toBe('atlas');
     expect(modelApiMocks.getModelInventory).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('ModelsPage and Discover LoRAs', () => {
+  beforeEach(() => {
+    downloadStore.reset();
+    for (const mock of Object.values(modelApiMocks)) mock.mockReset();
+    modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
+    modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
+    router.replace('models');
+  });
+
+  it('links the LoRAs panel head to the Workspace with Discover open', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), loras: [{ name: 'style', size_label: '10 MB' }] });
+    mountModels();
+    await settle();
+
+    (target.querySelector('[data-testid="discover-loras"]') as HTMLButtonElement).click();
+
+    expect(router.page).toBe('workspace');
+    expect(router.params).toEqual({ discover: 'loras' });
+  });
+
+  it('offers the same from an empty LoRAs panel, as the main action', async () => {
+    mountModels();
+    await settle();
+
+    (target.querySelector('[data-testid="discover-loras-empty"]') as HTMLButtonElement).click();
+
+    expect(router.page).toBe('workspace');
+    expect(router.params).toEqual({ discover: 'loras' });
+  });
+
+  it('returns at once from a Hugging Face import, adopts its download and lists it as a row of the LoRAs table with its progress and Cancel', async () => {
+    const download = { id: 'd1', kind: 'lora' as const, name: 'my-lora', label: 'LoRA my-lora', state: 'running' as const, message: null, bytes_done: 40, bytes_total: 100 };
+    modelApiMocks.importLoraHF.mockResolvedValue({ status: 'ok', tone: 'success', message: 'Downloading my-lora.', name: 'my-lora', outcome: 'queued', download });
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [download] });
+    mountModels();
+    await settle();
+
+    typePath(target.querySelector('#import-hf-repo-id') as HTMLInputElement, 'owner/repository');
+    typePath(target.querySelector('#import-hf-filename') as HTMLInputElement, 'style.safetensors');
+    (target.querySelector('#import-hf-repo-id') as HTMLInputElement).closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(downloadStore.active('lora', 'my-lora')).not.toBeNull();
+    const row = target.querySelector('[data-testid="lora-download-row"]') as HTMLElement;
+    expect(row.textContent).toContain('my-lora');
+    expect(row.textContent).toContain('Cancel');
+    expect(row.closest('table')?.textContent).toContain('Name');
+    const progress = target.querySelector('[data-testid="download-progress"]') as HTMLElement;
+    expect(progress.textContent).toContain('40%');
+    expect(target.querySelector('[data-testid="download-progress"] [role="progressbar"]')).not.toBeNull();
+  });
+
+  it('lists a Download-only download from Discover as a row with Cancel, in place of the empty state, and drops it when it finishes', async () => {
+    const download = { id: 'd2', kind: 'lora' as const, name: 'style', label: 'LoRA style', state: 'queued' as const, message: null, curated_id: 'o-style' };
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [download] });
+    mountModels();
+    await settle();
+
+    expect(target.querySelector('[data-testid="discover-loras-empty"]')).toBeNull();
+    const row = target.querySelector('[data-testid="lora-download-row"]') as HTMLElement;
+    expect(row.textContent).toContain('style');
+    const cancel = vi.spyOn(downloadStore, 'cancel').mockResolvedValue();
+    (row.querySelector('[data-testid="download-cancel"]') as HTMLButtonElement).click();
+    await settle();
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ name: 'style' }));
+    cancel.mockRestore();
+
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [{ ...download, state: 'done' }] });
+    modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), loras: [{ name: 'style', size_label: '10 MB' }] });
+    await downloadStore.refresh();
+    await settle();
+
+    expect(target.querySelector('[data-testid="lora-download-row"]')).toBeNull();
+  });
+
+  it('takes a deleted LoRA off the Workspace chips and out of the per-family memory', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), loras: [{ name: 'style', size_label: '10 MB' }] });
+    modelApiMocks.deleteLora.mockResolvedValue({ tone: 'success', message: 'Deleted style.', detail: '' });
+    draft.patch({ loraString: 'style:1,other:1', lorasByFamily: { flux1: 'style:0.5' } });
+    mountModels();
+    await settle();
+
+    (target.querySelector('[data-testid="delete-button"]') as HTMLButtonElement).click();
+    await settle();
+    clickDialogButton('Delete');
+    await settle();
+
+    expect(draft.state.loraString).toBe('other:1');
+    expect(draft.state.lorasByFamily).toEqual({ flux1: '' });
   });
 });

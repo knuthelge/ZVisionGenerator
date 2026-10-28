@@ -40,7 +40,11 @@
         type="button"
         class="setchip"
         class:warn={chip.warn}
+        class:dl={chip.download?.kind === 'downloading'}
+        class:err={chip.download?.kind === 'failed'}
+        style:--p={chip.download?.kind === 'downloading' ? `${chip.download.percent ?? 0}%` : undefined}
         data-chip={chip.key}
+        data-download={chip.download?.kind}
         data-changed={chip.changed}
         data-applied={chip.applied}
         aria-expanded={activeKey === chip.key}
@@ -53,6 +57,7 @@
         {#if chip.key === 'model'}<Icon name="cube" size={14} />{/if}
         {#if chip.key === 'reference' || chip.key === 'references' || chip.key === 'endReference'}<Icon name="reference" size={14} />{/if}
         {#if chip.key === 'source'}<Icon name="film" size={14} />{/if}
+        {#if chip.download?.kind === 'downloading'}<Icon name="download" size={12} class="setchip-dl" />{:else if chip.download?.kind === 'failed'}<Icon name="alert" size={12} class="setchip-bad" />{/if}
         {#if chip.label}<span class="setchip-k">{chip.label}</span>{/if}
         <span class="setchip-v" class:on={chip.on}>{chip.value}</span>
         {#if chip.warn}<Icon name="alert" size={12} class="setchip-warn" />{/if}
@@ -79,6 +84,12 @@
   .setchip[aria-expanded='true'], .setchip[aria-expanded='true'] .setchip-k, .setchip[aria-expanded='true'] .setchip-v { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
   .setchip[aria-expanded='true'] .setchip-k, .setchip[aria-expanded='true'] .setchip-v { background: transparent; }
   .setchip :global(.setchip-warn) { color: var(--color-warning); }
+  /* A LoRA that downloads: a teal icon and a 2px line along the foot; one that failed: the error tint. */
+  .setchip.dl { overflow: hidden; }
+  .setchip.dl::after { content: ''; position: absolute; bottom: 0; left: 0; width: var(--p, 0%); height: 2px; background: var(--color-primary-main); }
+  .setchip :global(.setchip-dl) { color: var(--color-primary-main); }
+  .setchip.err { background: var(--color-error-surface); }
+  .setchip.err .setchip-v, .setchip :global(.setchip-bad) { color: var(--color-error); }
   .setchip-all { margin-left: 2px; gap: 8px; }
   .setchip-n { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-primary-main); }
 </style>

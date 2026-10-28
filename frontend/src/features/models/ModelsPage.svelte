@@ -3,11 +3,15 @@
   import { errorText } from '$lib/api/client';
   import { getModelInventory, convertCheckpoint, getConversionStatus, inspectCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
   import { downloadLine, partLabel } from '$lib/state/downloadProgress';
-  import { downloadStore } from '$lib/state/downloads.svelte';
+  import { draft } from '$lib/state/draft.svelte';
+  import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
+  import { loraDeleteInfo } from '$lib/state/loras';
+  import { router } from '$lib/state/router.svelte';
+  import { downloadStore, type PlannedKind } from '$lib/state/downloads.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
+  import { Alert, ConfirmDialog, EmptyState, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
   import { inventoryMemory } from '$lib/state/pageMemory';
@@ -91,13 +95,22 @@
 
   /** The row's name as a noun phrase without an article: "FLUX.2 Klein 9B", "Smart enhancer model". */
   function rowName(kind: DownloadKind, name: string): string {
+    if (kind === 'lora') return name;
     return kind === 'enhancer' ? `${ENHANCER_TIER_LABELS[name as EnhancerModelEntry['tier']] ?? name} enhancer model` : modelLabelFor(name);
   }
 
   /** The row's name for a sentence: enhancer models read "the Smart enhancer model". */
   function rowPhrase(kind: DownloadKind, name: string): string {
+    if (kind === 'lora') return name;
     return kind === 'enhancer' ? `the ${rowName(kind, name)}` : modelLabelFor(name);
   }
+
+  /** The LoRAs whose file is still downloading (an import, or Download in Discover): the table lists them with the files that are here. */
+  const downloadingLoras = $derived(
+    downloadStore.items
+      .filter((item) => item.kind === 'lora' && (item.state === 'queued' || item.state === 'running') && !inventory?.loras.some((lora) => lora.name === item.name))
+      .map((item) => item.name),
+  );
 
   /** What a running item's sub-row shows: the byte line split into segments, the percentage and the bar's numbers. */
   function downloadView(item: DownloadItem): { segments: string[]; part: string; percent: number | null; value: number; max: number; busy: boolean; valuetext: string } {
@@ -137,7 +150,7 @@
   }
 
   /** Ask the store to download the row, then put focus on the control now in its action cell. */
-  async function requestDownload(kind: DownloadKind, name: string): Promise<void> {
+  async function requestDownload(kind: PlannedKind, name: string): Promise<void> {
     await downloadStore.request(kind, name, rowPhrase(kind, name));
     await focusRowControl(rowKey(kind, name));
   }
@@ -318,6 +331,10 @@
     return `Delete the Hugging Face download of ${target.info.repo_id}?`;
   }
 
+  function loraSize(name: string): string | null {
+    return inventory?.loras.find((lora) => lora.name === name)?.size_label ?? null;
+  }
+
   function runDelete(target: NonNullable<typeof pendingDelete>): Promise<ModelOperationResult> {
     switch (target.type) {
       case 'model': return deleteModel(target.name);
@@ -333,6 +350,11 @@
     deleteOpen = true;
   }
 
+  /** Open the Workspace with Discover LoRAs open on the model it has chosen; the Models page has no drawer of its own. */
+  function discoverInWorkspace(): void {
+    router.navigate('workspace', { discover: 'loras' });
+  }
+
   async function confirmDelete(): Promise<void> {
     if (!pendingDelete) return;
     const target = pendingDelete;
@@ -340,6 +362,12 @@
     notice = null;
     try {
       const result = await runDelete(target);
+      // The file is gone: so are its chips and what each model remembers, or the next Generate would ask for it.
+      if (target.type === 'lora') {
+        draft.removeLora(target.name);
+        pendingTriggers.forget(target.name);
+        downloadStore.forgetLora(target.name);
+      }
       notice = { tone: 'success', message: result.message };
       addToast(result.message, 'success');
       await loadInventory();
@@ -367,10 +395,11 @@
     try {
       const result = await importLoraHF(data);
       if (result.tone === 'success') {
-        notice = { tone: 'success', message: result.message || 'LoRA downloaded successfully.' };
+        // The import returns at once: the file arrives on the download lane, and its progress shows as a row of the LoRAs table.
+        notice = { tone: 'success', message: result.message || 'LoRA download started.' };
         form.reset();
-        await loadInventory();
-        addToast('Operation started', 'success');
+        if (result.download) downloadStore.adopt(result.download);
+        if (result.outcome === 'installed') await loadInventory();
       } else {
         notice = { tone: 'error', message: result.message || 'Download failed.' };
         addToast('Operation failed', 'error');
@@ -435,7 +464,7 @@
   </td>
 {/snippet}
 
-{#snippet downloadButton(kind: DownloadKind, name: string, partial: boolean)}
+{#snippet downloadButton(kind: PlannedKind, name: string, partial: boolean)}
   {@const label = partial ? `Download the remaining files of ${rowPhrase(kind, name)}` : `Download ${rowPhrase(kind, name)}`}
   <Button size="sm" disabled={downloadStore.busy(kind, name)} aria-label={label} title={partial ? label : undefined} data-testid="download-button" onclick={() => void requestDownload(kind, name)}>
     <Icon name="download" size={14} />Download
@@ -713,9 +742,19 @@
         </div>
 
         <Panel title="LoRAs" icon="list" flush>
-          {#snippet actions()}{@render count(inventory!.loras.length)}{/snippet}
-          {#if inventory.loras.length === 0}
-            <p class="ui-help p-3 text-center">None found</p>
+          {#snippet actions()}
+            {#if inventory!.loras.length > 0}
+              <button type="button" class="ui-btn ui-btn-sm" data-testid="discover-loras" onclick={discoverInWorkspace}><Icon name="search" size={12} />Discover LoRAs<span class="font-normal text-text-muted"> in the Workspace</span></button>
+            {/if}
+            {@render count(inventory!.loras.length)}
+          {/snippet}
+          {#if inventory.loras.length === 0 && downloadingLoras.length === 0}
+            <EmptyState title="No LoRAs yet" class="p-6">
+              Find one for the model you're using, or import one below.
+              {#snippet actions()}
+                <button type="button" class="ui-btn ui-btn-primary" data-testid="discover-loras-empty" onclick={discoverInWorkspace}><Icon name="search" size={16} />Discover LoRAs in the Workspace</button>
+              {/snippet}
+            </EmptyState>
           {:else}
             <div class="@container overflow-x-auto px-1 pb-1">
               <table class="ui-table ui-table-comfortable sticky-actions">
@@ -727,6 +766,15 @@
                   </tr>
                 </thead>
                 <tbody>
+                  {#each downloadingLoras as name (name)}
+                    <tr class="dl-main" data-testid="lora-download-row">
+                      <td class="break-words">{name}</td>
+                      <td class="whitespace-nowrap font-mono">—</td>
+                      {#snippet none()}{/snippet}
+                      {@render downloadControl('lora', name, none)}
+                    </tr>
+                    {@render downloadSubRow('lora', name, 3)}
+                  {/each}
                   {#each inventory.loras as l}
                     <tr>
                       <td class="break-words">{l.name}</td>
@@ -925,7 +973,7 @@
 <ConfirmDialog
   bind:open={deleteOpen}
   question={pendingDelete ? deleteQuestion(pendingDelete) : ''}
-  info="This cannot be undone."
+  info={pendingDelete?.type === 'lora' ? loraDeleteInfo(loraSize(pendingDelete.name)) : 'This cannot be undone.'}
   confirmLabel="Delete"
   pending={deleting}
   onconfirm={confirmDelete}

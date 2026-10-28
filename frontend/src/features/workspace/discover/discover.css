@@ -1,0 +1,186 @@
+/* The Discover LoRAs drawer. Plain classes under .disc so the pieces share one stylesheet; every value is a design token.
+   The layout attribute on .disc (wide, tall, compact) carries the composition; sizes follow the touch tokens. */
+.disc { --disc-card: var(--color-bg-surface); --disc-bg: var(--color-bg-overlay); display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.disc[data-layout='compact'] { --disc-card: var(--color-bg-base); --disc-bg: var(--color-bg-surface); }
+
+/* Bar: the tabs (or Back and the name) with "for <model>" at the right. */
+.disc-bar { display: flex; flex: none; align-items: center; gap: 10px; min-height: 44px; padding: 6px 16px; border-bottom: 1px solid var(--color-border-subtle); }
+.disc-bar .disc-for { margin-left: auto; font-size: var(--text-ui); color: var(--color-text-muted); white-space: nowrap; }
+.disc-bar .ui-segmented > button { display: inline-flex; align-items: center; gap: 6px; }
+.disc-n { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 500; color: var(--color-text-muted); }
+.disc-bar h3 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; color: var(--color-text-primary); }
+.disc-back { margin-left: -8px; }
+
+.disc-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 20px; }
+.disc-scroll[hidden] { display: none; }
+
+/* A filter that sticks to the top of a long list, or the note a short one gets. */
+.disc-tools { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 12px 0 10px; background: var(--disc-bg); }
+.disc-filter { position: relative; flex: 1; min-width: 0; }
+.disc-filter > svg { position: absolute; left: 8px; top: 50%; translate: 0 -50%; color: var(--color-text-muted); pointer-events: none; }
+.disc-filter .ui-field { width: 100%; padding-left: 28px; }
+.disc-tools .ui-segmented { flex: none; }
+
+/* Curated and Installed: a gallery of tiles. */
+.disc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.disc-card { position: relative; display: flex; flex-direction: column; min-width: 0; width: 100%; border-radius: var(--radius-md); background: var(--disc-card); overflow: hidden; text-align: left; }
+.disc-img { position: relative; aspect-ratio: 1 / 1; background: var(--color-bg-surface-hover); overflow: hidden; }
+.disc-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.disc-noimg { display: grid; place-items: center; width: 100%; height: 100%; color: var(--color-text-muted); }
+.disc-badges { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+/* On an image a tinted badge would vanish: glass in the page's own shade, under the tone's text. */
+.disc-ib { display: inline-flex; align-items: center; gap: 4px; height: var(--spacing-badge); padding: 0 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--color-bg-overlay) 88%, transparent); font-size: var(--text-meta); font-weight: 700; color: var(--color-text-primary); }
+.disc-ib.on { color: var(--color-primary-main); }
+.disc-ib.warn { color: var(--color-warning); }
+.disc-ib.bad { color: var(--color-error); }
+.disc-cbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px 10px; }
+.disc-tl { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.disc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-content); font-weight: 600; color: var(--color-text-primary); }
+/* The "Tool" tag after a name: a small quiet badge. */
+.disc-tag { flex: none; height: var(--spacing-badge); padding: 0 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--color-text-muted) 18%, transparent); font-size: var(--text-meta); font-weight: 600; line-height: var(--spacing-badge); color: var(--color-text-secondary); }
+.disc-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); color: var(--color-text-secondary); }
+.disc-meta { display: flex; align-items: center; gap: 10px; margin-top: 3px; font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
+.disc-meta .r { margin-left: auto; font-family: var(--font-mono); }
+.disc-meta .disc-author { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); }
+.disc-meta > span { display: inline-flex; align-items: center; gap: 3px; }
+.disc-meta .w { color: var(--color-warning); }
+
+/* Hugging Face results: rows. */
+.disc-list { display: flex; flex-direction: column; }
+.disc-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 76px; padding: 6px 8px; border-radius: var(--radius-md); text-align: left; }
+.disc-row + .disc-row { box-shadow: 0 -1px 0 var(--color-border-subtle); }
+.disc-row .th { position: relative; flex: none; display: grid; place-items: center; width: 64px; height: 64px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
+.disc-row .th img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.disc-row .tx { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.disc-row .tl { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.disc-row .chev { flex: none; color: var(--color-text-muted); }
+@media (hover: hover) { .disc-row:hover { background-color: var(--color-bg-surface-hover); } .disc-card:hover .disc-name { text-decoration: underline; } }
+.disc-row:active, .disc-card:active { background-color: var(--color-bg-surface-hover); }
+/* The end of the Curated list, and the collapsed "Other models" row of the Installed one. */
+.disc-more { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: var(--spacing-control); margin-top: 14px; border-radius: var(--radius-md); background: var(--disc-card); font-size: var(--text-ui); font-weight: 600; color: var(--color-text-secondary); }
+.disc-others { display: flex; align-items: center; gap: 6px; min-height: var(--spacing-control); margin-top: 10px; padding: 0 2px; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-secondary); }
+.disc-others + .disc-grid { margin-top: 6px; }
+@media (hover: hover) { .disc-more:hover, .disc-others:hover { color: var(--color-text-primary); } }
+.disc-none { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 12px; text-align: center; }
+.disc-none p { margin: 0; font-size: var(--text-content); color: var(--color-text-secondary); }
+.disc-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 32px 12px; font-size: var(--text-ui); color: var(--color-text-muted); }
+
+/* Detail. */
+.disc-detail { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; padding-top: 14px; }
+.disc-hero { position: relative; aspect-ratio: 1 / 1; overflow: hidden; border-radius: var(--radius-md); background: var(--disc-card); touch-action: pan-y; }
+.disc-hero img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.disc-hero.empty { display: grid; place-items: center; aspect-ratio: auto; height: 200px; color: var(--color-text-muted); font-size: var(--text-ui); }
+.disc-hero .nav { position: absolute; top: 50%; translate: 0 -50%; display: grid; place-items: center; width: var(--spacing-control); height: var(--spacing-control); border-radius: 999px; }
+.disc-hero .nav.l { left: 8px; }
+.disc-hero .nav.r { right: 8px; }
+.disc-count { position: absolute; right: 8px; bottom: 8px; height: 20px; padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-bg-overlay) 88%, transparent); font-family: var(--font-mono); font-size: var(--text-meta); line-height: 20px; color: var(--color-text-primary); }
+.disc-thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+.disc-thumbs button { aspect-ratio: 1 / 1; overflow: hidden; border-radius: var(--radius-sm); opacity: 0.7; }
+.disc-thumbs button[aria-current='true'] { opacity: 1; box-shadow: 0 0 0 2px var(--color-primary-main); }
+.disc-thumbs img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.disc-dots { display: none; justify-content: center; gap: 6px; margin-top: 8px; }
+.disc-dots i { width: 6px; height: 6px; border-radius: 999px; background: var(--color-zinc-700); }
+.disc-dots i.on { background: var(--color-text-primary); }
+.disc-info { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.disc-lead { margin: 0; font-size: var(--text-content); line-height: 1.5; color: var(--color-text-secondary); }
+.disc-lead.repo { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-muted); overflow-wrap: anywhere; }
+.disc-kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: start; padding: 7px 0; border-top: 1px solid var(--color-border-subtle); font-size: var(--text-ui); }
+.disc-kv > span:first-child { padding-top: 1px; color: var(--color-text-muted); }
+.disc-kv .v { min-width: 0; overflow-wrap: anywhere; color: var(--color-text-primary); }
+.disc-kv .mono { font-family: var(--font-mono); }
+.disc-kv .ok { display: inline-flex; gap: 4px; align-items: center; font-weight: 600; color: var(--color-success); }
+.disc-kv .w { display: inline-flex; gap: 4px; align-items: center; color: var(--color-warning); }
+/* The Model card row is a link alone, in teal. */
+.disc-kv > .disc-wide { grid-column: 1 / -1; padding-top: 0; }
+.disc-kv > .disc-wide .ui-link { color: var(--color-primary-main); }
+.disc-kv .muted { color: var(--color-text-muted); }
+.disc-trig { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.disc-trig .ui-btn { flex: none; }
+/* A long trigger is cut with an ellipsis (the full words are in its tooltip). */
+.disc-code { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--color-bg-surface-hover); font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-primary); }
+.disc-edit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.disc-edit .ui-field { flex: 1; min-width: 8rem; }
+.disc-cli { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.disc-cli code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
+.disc-files { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.disc-files label { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: var(--text-ui); color: var(--color-text-primary); cursor: pointer; }
+.disc-files label .f { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-meta); }
+.disc-files label .s { margin-left: auto; flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
+.disc-files details > summary { cursor: pointer; margin-top: 4px; font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); }
+
+.disc-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+.disc-spacer { flex: 1; }
+/* Delete file: a text button on the left, in the muted tone of the page. */
+.disc-delete { color: var(--color-text-secondary); }
+.disc-why { display: flex; gap: 5px; align-items: flex-start; flex-basis: 100%; margin: 0; font-size: var(--text-meta); line-height: 1.4; color: var(--color-text-muted); }
+.disc-why > svg { flex: none; margin-top: 1px; }
+.disc-why.warn { color: var(--color-warning); }
+.disc-why.error { color: var(--color-error); }
+
+.disc-optin { display: flex; flex-direction: column; gap: 12px; max-width: 600px; margin: 32px auto; padding: 20px; border-radius: var(--radius-md); background: var(--disc-card); }
+.disc-optin h3 { margin: 0; font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; color: var(--color-text-primary); }
+.disc-optin p { margin: 0; font-size: var(--text-content); line-height: 1.5; color: var(--color-text-secondary); }
+.disc-optin .ok { color: var(--color-success); }
+.disc-optin .warn { color: var(--color-warning); }
+.disc-optin-table { width: 100%; border-collapse: collapse; font-size: var(--text-content); line-height: 1.4; color: var(--color-text-primary); }
+.disc-optin-table th, .disc-optin-table td { padding: 8px 10px; text-align: left; vertical-align: top; }
+.disc-optin-table thead th { font-weight: 700; }
+.disc-optin-table tbody th { font-weight: 400; color: var(--color-text-secondary); }
+.disc-optin-table tbody tr > * { border-top: 1px solid var(--color-border-subtle); }
+.disc-optin-table td, .disc-optin-table thead th:not(:first-child) { position: relative; padding-left: 28px; }
+.disc-optin-table td > span { position: absolute; left: 8px; top: 9px; display: inline-flex; }
+.disc-optin-table .hf { width: 34%; background: var(--color-warning-surface); }
+.disc-optin-table thead .hf { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.disc-optin-table tbody tr:last-child .hf { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+.disc-optin-either { display: flex; gap: 8px; align-items: flex-start; }
+.disc-optin-either > .ok { display: inline-flex; flex: none; margin-top: 3px; }
+.disc-optin-keys { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; padding: 12px; border-radius: var(--radius-md); background: var(--color-bg-surface-hover); font-size: var(--text-ui); line-height: 1.5; color: var(--color-text-secondary); }
+.disc-optin-keys dt { font-weight: 700; color: var(--color-text-primary); }
+.disc-optin-keys dd { margin: 0; }
+.disc-optin-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.disc-search { display: flex; gap: 8px; padding: 12px 0 10px; }
+.disc-search .disc-filter { flex: 1; }
+/* The line under the Hugging Face search: what is shown, and the way to turn it off. */
+.disc-hfnote { display: flex; align-items: center; gap: 6px; min-height: var(--spacing-control-sm); margin-bottom: 8px; font-size: var(--text-ui); color: var(--color-text-secondary); }
+.disc-hfnote > svg { flex: none; color: var(--color-text-muted); }
+.disc-hfnote > .ui-btn { margin-left: auto; }
+
+/* Tablet (touch, desktop composition): comfortable rows and fields. */
+.disc[data-layout='tall'] .disc-detail { grid-template-columns: minmax(0, 1fr) 280px; }
+
+/* Phone: the sheet. */
+.disc[data-layout='compact'] .disc-scroll { padding: 0 12px 16px; }
+.disc[data-layout='compact'] .disc-bar { padding: 6px 12px; min-height: 52px; }
+.disc[data-layout='compact'] .disc-bar .ui-segmented { flex: 1; }
+.disc[data-layout='compact'] .disc-bar .ui-segmented > button { flex: 1; justify-content: center; height: var(--spacing-control); font-size: var(--text-content); }
+.disc[data-layout='compact'] .disc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.disc[data-layout='compact'] .disc-detail { grid-template-columns: 1fr; gap: 14px; }
+.disc[data-layout='compact'] .disc-thumbs { display: none; }
+.disc[data-layout='compact'] .disc-dots { display: flex; }
+.disc[data-layout='compact'] .disc-hero:not(.empty) { aspect-ratio: 4 / 3; }
+.disc[data-layout='compact'] .disc-kv { grid-template-columns: 104px minmax(0, 1fr); padding: 10px 0; font-size: var(--text-content); }
+.disc[data-layout='compact'] .disc-lead { font-size: var(--text-title); }
+.disc[data-layout='compact'] .disc-optin { margin: 16px 0 -16px; padding-bottom: 0; border-radius: var(--radius-md) var(--radius-md) 0 0; }
+/* The sheet pins the answer to its bottom edge, full width with Show on top, while the box scrolls above it. */
+.disc[data-layout='compact'] .disc-optin-foot { position: sticky; bottom: -16px; flex-direction: column-reverse; margin: 0 -20px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--color-border-subtle); background: var(--disc-card); }
+.disc[data-layout='compact'] .disc-optin-foot .ui-btn { width: 100%; height: var(--spacing-control); }
+.disc[data-layout='compact'] .disc-why { font-size: var(--text-ui); }
+.disc[data-layout='compact'] .disc-row { min-height: 84px; padding: 8px 2px; }
+
+/* Touch: bigger thumbnails, rows and targets, at every width. */
+@media (pointer: coarse) {
+  .disc-row .th { width: 68px; height: 68px; }
+  .disc-name { font-size: var(--text-title); }
+  .disc-desc { font-size: var(--text-content); }
+  .disc-meta { font-size: var(--text-ui); }
+  .disc-kv { font-size: var(--text-content); padding: 9px 0; }
+  /* Small buttons, the tabs, the model card link and the file choices all reach the 40px touch size. */
+  .disc .ui-btn-sm { height: var(--spacing-control); }
+  .disc .ui-btn-sm.ui-btn-icon { width: var(--spacing-control); }
+  .disc-bar .ui-segmented > button { height: var(--spacing-control); }
+  .disc-kv .ui-link { display: inline-flex; align-items: center; min-height: var(--spacing-control); }
+  .disc-files label, .disc-files details > summary { display: flex; align-items: center; min-height: var(--spacing-control); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .disc-hero img { transition: none; }
+}

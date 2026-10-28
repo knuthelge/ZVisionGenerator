@@ -8,15 +8,19 @@ const api = vi.hoisted(() => ({
   startDownload: vi.fn(),
   getDownloads: vi.fn(),
   cancelDownload: vi.fn(),
+  importLoraHF: vi.fn(),
 }));
+const discover = vi.hoisted(() => ({ startDiscoverDownload: vi.fn() }));
 const confirm = vi.hoisted(() => ({ requestConfirm: vi.fn() }));
 const toasts = vi.hoisted(() => ({ addToast: vi.fn(() => 'toast-1') }));
 
 vi.mock('$lib/api/models', () => api);
+vi.mock('$lib/api/discover', () => discover);
 vi.mock('$lib/components/molecules/confirm.svelte', () => confirm);
 vi.mock('./toasts.svelte', () => toasts);
 
 import { downloadStore } from './downloads.svelte';
+import { chipDownload } from './loraDownloads';
 
 const plan = (overrides: Partial<DownloadPlan> = {}): DownloadPlan => ({
   kind: 'model',
@@ -38,7 +42,7 @@ describe('downloadStore', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     downloadStore.reset();
-    for (const mock of [...Object.values(api), confirm.requestConfirm, toasts.addToast]) mock.mockReset();
+    for (const mock of [...Object.values(api), discover.startDiscoverDownload, confirm.requestConfirm, toasts.addToast]) mock.mockReset();
     toasts.addToast.mockReturnValue('toast-1');
     api.getDownloads.mockResolvedValue({ items: [] });
   });
@@ -268,6 +272,144 @@ describe('downloadStore', () => {
 
       expect(toasts.addToast).toHaveBeenCalledWith('Already finished', 'error');
       expect(downloadStore.busy('model', 'klein9b')).toBe(false);
+    });
+  });
+
+  describe('LoRA downloads', () => {
+    const lora = (overrides: Partial<DownloadItem> = {}): DownloadItem => item({ id: 'l1', kind: 'lora', name: 'pixel_artist', label: 'LoRA pixel_artist', curated_id: 'a-pixel', ...overrides });
+
+    it('takes an item the server answered with into the lane at once and reads the lane again', async () => {
+      api.getDownloads.mockResolvedValue({ items: [lora({ state: 'running' })] });
+
+      downloadStore.adopt(lora());
+      expect(downloadStore.active('lora', 'pixel_artist')).not.toBeNull();
+      await advance();
+
+      expect(api.getDownloads).toHaveBeenCalled();
+    });
+
+    it('names every LoRA the lane knows, so a chip waiting on a file is kept', async () => {
+      api.getDownloads.mockResolvedValue({ items: [lora(), item()] });
+      const stop = downloadStore.startSync();
+      await advance();
+
+      expect(downloadStore.loraNames()).toEqual(['pixel_artist']);
+      stop();
+    });
+
+    it('starts a failed LoRA download again from its curated entry, and from its repository file otherwise', async () => {
+      discover.startDiscoverDownload.mockResolvedValue({ name: 'pixel_artist', status: 'queued', renamed: false, item: lora({ id: 'l2' }), trigger: null, trigger_source: null });
+
+      expect(await downloadStore.retryLora(lora({ state: 'failed' }))).toBe(true);
+      expect(discover.startDiscoverDownload).toHaveBeenLastCalledWith({ curated_id: 'a-pixel' });
+      expect(downloadStore.active('lora', 'pixel_artist')?.id).toBe('l2');
+
+      await downloadStore.retryLora(lora({ state: 'failed', curated_id: null, source_repo: 'o/r', source_file: 'f.safetensors' }));
+      expect(discover.startDiscoverDownload).toHaveBeenLastCalledWith({ repo: 'o/r', file: 'f.safetensors', name: 'pixel_artist' });
+    });
+
+    it('starts a failed Import again through the Import route with the same file and name, never through Discover', async () => {
+      api.importLoraHF.mockResolvedValue({ tone: 'success', message: 'ok', name: 'pixel_artist', outcome: 'queued', download: lora({ id: 'l4', anonymous: false }) });
+      const imported = lora({ state: 'failed', anonymous: false, curated_id: null, source_repo: 'o/private', source_file: 'f.safetensors' });
+
+      expect(await downloadStore.retryLora(imported)).toBe(true);
+
+      expect(api.importLoraHF).toHaveBeenCalledWith({ repo_id: 'o/private', filename: 'f.safetensors', name: 'pixel_artist' });
+      expect(discover.startDiscoverDownload).not.toHaveBeenCalled();
+      expect(downloadStore.active('lora', 'pixel_artist')?.id).toBe('l4');
+    });
+
+    it('starts a failed anonymous Discover download again through Discover, never through Import', async () => {
+      discover.startDiscoverDownload.mockResolvedValue({ name: 'pixel_artist', status: 'queued', renamed: false, item: lora({ id: 'l5' }), trigger: null, trigger_source: null });
+
+      await downloadStore.retryLora(lora({ state: 'failed', anonymous: true, curated_id: null, source_repo: 'o/r', source_file: 'f.safetensors' }));
+
+      expect(discover.startDiscoverDownload).toHaveBeenCalledWith({ repo: 'o/r', file: 'f.safetensors', name: 'pixel_artist' });
+      expect(api.importLoraHF).not.toHaveBeenCalled();
+    });
+
+    it('cannot retry an Import that does not say which file it was', async () => {
+      expect(await downloadStore.retryLora(lora({ anonymous: false, curated_id: null }))).toBe(false);
+      expect(api.importLoraHF).not.toHaveBeenCalled();
+    });
+
+    it('forgets the finished downloads of a LoRA whose file was deleted, so none speaks for it any more, and keeps a running one', async () => {
+      api.getDownloads.mockResolvedValue({ items: [lora({ state: 'done' }), lora({ id: 'l9', name: 'other', state: 'done' })] });
+      const stop = downloadStore.startSync();
+      await advance();
+      expect(chipDownload('pixel_artist', [], downloadStore.items)).toMatchObject({ state: 'downloading', percent: 100 });
+      downloadStore.markUnlisted('l1');
+      api.getDownloads.mockResolvedValue({ items: [lora({ id: 'l9', name: 'other', state: 'done' })] });
+
+      downloadStore.forgetLora('pixel_artist');
+      await advance();
+
+      expect(downloadStore.loraNames()).toEqual(['other']);
+      expect(chipDownload('pixel_artist', [], downloadStore.items)).toEqual({ state: 'ready' });
+      expect(downloadStore.unlisted.has('l1')).toBe(false);
+
+      api.getDownloads.mockResolvedValue({ items: [lora({ id: 'l10', state: 'running' }), lora({ id: 'l9', name: 'other', state: 'done' })] });
+      await downloadStore.refresh();
+      downloadStore.forgetLora('pixel_artist');
+      expect(downloadStore.active('lora', 'pixel_artist')?.id).toBe('l10');
+      stop();
+    });
+
+    it('keeps a failed LoRA download the server stopped listing, until a newer item for that LoRA arrives', async () => {
+      api.getDownloads.mockResolvedValueOnce({ items: [lora({ id: 'l1', state: 'failed' }), lora({ id: 'l2', name: 'other', state: 'done' })] });
+      await downloadStore.refresh();
+      api.getDownloads.mockResolvedValueOnce({ items: [] });
+      await downloadStore.refresh();
+
+      expect(downloadStore.items.map((item) => item.id)).toEqual(['l1']);
+      expect(chipDownload('pixel_artist', [], downloadStore.items).state).toBe('failed');
+
+      api.getDownloads.mockResolvedValueOnce({ items: [lora({ id: 'l3', state: 'running' })] });
+      await downloadStore.refresh();
+      expect(downloadStore.items.map((item) => item.id)).toEqual(['l3']);
+    });
+
+    it('says so when there is nothing to start it from, and when the request fails', async () => {
+      expect(await downloadStore.retryLora(lora({ curated_id: null }))).toBe(false);
+      expect(toasts.addToast).toHaveBeenCalledWith('Could not retry LoRA pixel_artist. Download it again from Discover.', 'error');
+
+      discover.startDiscoverDownload.mockRejectedValue(new ApiError('Bad', 409, 'The name is taken.'));
+      expect(await downloadStore.retryLora(lora())).toBe(false);
+      expect(toasts.addToast).toHaveBeenLastCalledWith('The name is taken.', 'error');
+      expect(downloadStore.busy('lora', 'pixel_artist')).toBe(false);
+    });
+
+    it('raises the failed toast with a Retry that starts the LoRA download again', async () => {
+      discover.startDiscoverDownload.mockResolvedValue({ name: 'pixel_artist', status: 'queued', renamed: false, item: lora({ id: 'l3' }), trigger: null, trigger_source: null });
+      api.getDownloads.mockResolvedValueOnce({ items: [lora({ state: 'running' })] }).mockResolvedValue({ items: [lora({ state: 'failed', message: 'The connection dropped.' })] });
+      const stop = downloadStore.startSync();
+      await advance();
+      await advance(1500);
+
+      const call = toasts.addToast.mock.calls.find((args) => (args as unknown[])[0] === 'The connection dropped.') as unknown as [string, string, { action: { run: () => void } }];
+      call[2].action.run();
+      await advance();
+
+      expect(discover.startDiscoverDownload).toHaveBeenCalledWith({ curated_id: 'a-pixel' });
+      stop();
+    });
+
+    describe('a failure the Workspace shows in its own error slot', () => {
+      const failedAfterRunning = async (items: DownloadItem[]): Promise<void> => {
+        api.getDownloads.mockResolvedValueOnce({ items: items.map((one) => ({ ...one, state: 'running' as const })) }).mockResolvedValue({ items });
+        const stop = downloadStore.startSync();
+        await advance();
+        await advance(1500);
+        stop();
+      };
+
+      it('never holds back the failure of a model download', async () => {
+        downloadStore.showFailuresInline(['klein9b']);
+
+        await failedAfterRunning([item({ state: 'failed', message: 'No space left.' })]);
+
+        expect(toasts.addToast.mock.calls.map((args) => (args as unknown[])[0])).toContain('No space left.');
+      });
     });
   });
 });

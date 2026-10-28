@@ -2,7 +2,8 @@
 // One poller keeps the lane current for every page that shows downloads (Models, Workspace); the request flow
 // (plan, free-space confirmation, start) and the done/failed toasts live here so they outlast the page that began them.
 
-import { cancelDownload, getDownloadPlan, getDownloads, startDownload } from '$lib/api/models';
+import { cancelDownload, getDownloadPlan, getDownloads, importLoraHF, startDownload } from '$lib/api/models';
+import { startDiscoverDownload, type DiscoverSource } from '$lib/api/discover';
 import { errorText, isRetryable } from '$lib/api/client';
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
 import type { DownloadItem } from '$lib/types';
@@ -10,6 +11,8 @@ import { downloadConfirmText } from './downloadConfirm';
 import { addToast } from './toasts.svelte';
 
 export type DownloadKind = DownloadItem['kind'];
+/** The kinds the Models page plans and starts itself; a LoRA is started by Discover or Import. */
+export type PlannedKind = Exclude<DownloadKind, 'lora'>;
 
 /** How a `request` ended: `present` when nothing was left to fetch, `declined` when the user said no (or the row was busy). */
 export type DownloadRequestResult = 'queued' | 'present' | 'declined' | 'failed';
@@ -20,6 +23,10 @@ const POLL_MS = 1000;
 let _items = $state<DownloadItem[]>([]);
 /** Rows (by key) whose plan is being read or whose download is being requested or cancelled. */
 let _busy = $state<ReadonlySet<string>>(new Set());
+/** Ids of finished LoRA downloads whose file the page gave up waiting to see listed. */
+let _unlisted = $state<ReadonlySet<string>>(new Set());
+/** Names of the LoRAs whose failed download the Workspace shows in its own error slot, so no toast says it again. */
+let _inlineFailures: ReadonlySet<string> = new Set();
 /** Whether the lane has been read once: what was already final at that point is not announced. */
 let _seeded = $state(false);
 
@@ -51,9 +58,25 @@ function notifyDownloaded(): void {
   for (const callback of [..._downloadedCallbacks]) callback();
 }
 
+/**
+ * What starts a LoRA's download again: the request it started with. An Import (which downloads with the user's login) goes
+ * through the Import route; a Discover download repeats its curated entry or repository file, anonymously. Null when the
+ * item does not say where it came from.
+ */
+function loraRetry(item: DownloadItem): (() => Promise<DownloadItem | null>) | null {
+  if (item.anonymous === false) {
+    if (!item.source_repo || !item.source_file) return null;
+    const request = { repo_id: item.source_repo, filename: item.source_file, name: item.name };
+    return async () => (await importLoraHF(request)).download;
+  }
+  const source: DiscoverSource | null = item.curated_id ? { curated_id: item.curated_id } : item.source_repo && item.source_file ? { repo: item.source_repo, file: item.source_file, name: item.name } : null;
+  return source ? async () => (await startDiscoverDownload(source)).item ?? null : null;
+}
+
 /** Raise an error toast whose Retry runs the Download flow again. */
-function addRetryToast(message: string, kind: DownloadKind, name: string, label: string): void {
-  addToast(message, 'error', { action: { label: 'Retry', run: () => void downloadStore.request(kind, name, label) } });
+function addRetryToast(message: string, item: Pick<DownloadItem, 'kind' | 'name' | 'label'> & Partial<DownloadItem>): void {
+  const run = item.kind === 'lora' ? () => void downloadStore.retryLora(item as DownloadItem) : () => void downloadStore.request(item.kind as PlannedKind, item.name, item.label);
+  addToast(message, 'error', { action: { label: 'Retry', run } });
 }
 
 /** Report an item that was seen queued or running and has since finished or failed. The first read only records states. */
@@ -65,7 +88,8 @@ function reportTransition(item: DownloadItem): void {
     addToast(`${item.label} downloaded`, 'success');
     notifyDownloaded();
   } else if (item.state === 'failed') {
-    addRetryToast(item.message || `Downloading ${item.label} failed.`, item.kind, item.name, item.label);
+    if (item.kind === 'lora' && _inlineFailures.has(item.name)) return;
+    addRetryToast(item.message || `Downloading ${item.label} failed.`, item);
   }
 }
 
@@ -76,8 +100,17 @@ function applyItem(item: DownloadItem): void {
   reportTransition(item);
 }
 
+/**
+ * The failed or cancelled LoRA downloads the page holds that a lane read no longer lists, for LoRAs the read says nothing
+ * else about. The server drops finished items after a while (and all of them on a restart), but a failed LoRA chip must
+ * keep holding Generate back until the user retries the download, deletes it or removes the chip.
+ */
+function keptLoraFailures(items: readonly DownloadItem[]): DownloadItem[] {
+  return _items.filter((kept) => kept.kind === 'lora' && (kept.state === 'failed' || kept.state === 'cancelled') && !items.some((item) => item.id === kept.id || (item.kind === 'lora' && item.name === kept.name)));
+}
+
 function applyItems(items: DownloadItem[]): void {
-  _items = items;
+  _items = [...items, ...keptLoraFailures(items)];
   for (const item of items) reportTransition(item);
   _seeded = true;
 }
@@ -128,6 +161,68 @@ export const downloadStore = {
     return _items.find((item) => isActive(item) && item.kind === kind && item.name === name) ?? null;
   },
 
+  /** Ids of finished LoRA downloads whose file never appeared in the LoRA list; their chips count as ready. */
+  get unlisted(): ReadonlySet<string> { return _unlisted; },
+
+  /** Record that the page stopped waiting for the file of the finished download *id* to be listed. */
+  markUnlisted(id: string): void {
+    _unlisted = new Set([..._unlisted, id]);
+  },
+
+  /** The names of the LoRAs the lane knows: downloading, failed, or done and not listed yet. */
+  loraNames(): string[] {
+    return _items.filter((item) => item.kind === 'lora').map((item) => item.name);
+  },
+
+  /**
+   * Say which LoRAs a page shows a failed download for in its own place (the Workspace's error slot): their failure
+   * raises no toast. Pass an empty list when that place goes away, so a failure on any other page is announced again.
+   */
+  showFailuresInline(names: Iterable<string>): void {
+    _inlineFailures = new Set(names);
+  },
+
+  /** Take an item the server just answered with into the lane at once, and read the lane again. */
+  adopt(item: DownloadItem): void {
+    applyItem(item);
+    void refresh();
+  },
+
+  /** Forget the finished downloads of the LoRA *name* once its file is deleted, so it can be downloaded again and nothing waits for the file. */
+  forgetLora(name: string): void {
+    const gone = new Set(_items.filter((item) => item.kind === 'lora' && item.name === name && !isActive(item)).map((item) => item.id));
+    if (gone.size === 0) return;
+    _items = _items.filter((item) => !gone.has(item.id));
+    _unlisted = new Set([..._unlisted].filter((id) => !gone.has(id)));
+    // A read that began before the delete may still bring the finished item back: read again once it is over.
+    void refresh();
+  },
+
+  /**
+   * Start a failed LoRA download again with the request it started with (an Import through the Import route, a Discover
+   * download through Discover); the new item replaces the failed one.
+   */
+  async retryLora(item: DownloadItem): Promise<boolean> {
+    const restart = loraRetry(item);
+    if (!restart) {
+      addToast(`Could not retry ${item.label}. Download it again from Discover.`, 'error');
+      return false;
+    }
+    const key = rowKey('lora', item.name);
+    if (_busy.has(key)) return false;
+    setBusy(key, true);
+    try {
+      const started = await restart();
+      if (started) this.adopt(started);
+      return true;
+    } catch (err) {
+      addToast(errorText(err, `Could not download ${item.label}.`), 'error');
+      return false;
+    } finally {
+      setBusy(key, false);
+    }
+  },
+
   /** Whether a request or cancel for the row is on its way. */
   busy(kind: DownloadKind, name: string): boolean {
     return _busy.has(rowKey(kind, name));
@@ -164,7 +259,7 @@ export const downloadStore = {
    * Read the plan, ask the user to confirm its size and free space, then queue the download.
    * *label* names the row in the error toast until the plan supplies its own.
    */
-  async request(kind: DownloadKind, name: string, label: string): Promise<DownloadRequestResult> {
+  async request(kind: PlannedKind, name: string, label: string): Promise<DownloadRequestResult> {
     const key = rowKey(kind, name);
     if (_busy.has(key)) return 'declined';
     setBusy(key, true);
@@ -185,7 +280,7 @@ export const downloadStore = {
       return 'queued';
     } catch (err) {
       const message = errorText(err, `Could not download ${shown}.`);
-      if (isRetryable(err)) addRetryToast(message, kind, name, shown);
+      if (isRetryable(err)) addRetryToast(message, { kind, name, label: shown });
       else addToast(message, 'error');
       return 'failed';
     } finally {
@@ -229,6 +324,8 @@ export const downloadStore = {
     _readAgain = false;
     _items = [];
     _busy = new Set();
+    _unlisted = new Set();
+    _inlineFailures = new Set();
     _seeded = false;
     _knownStates.clear();
     _downloadedCallbacks.clear();

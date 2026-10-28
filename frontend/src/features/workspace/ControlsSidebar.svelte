@@ -4,6 +4,7 @@
   import { draft } from '$lib/state/draft.svelte';
   import { extendGuard, extendModelSupport } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
+  import { generateBlock } from '$lib/state/generateBlock.svelte';
   import type { WorkspaceContext } from '$lib/types';
   import ComposePane from './ComposePane.svelte';
   import SettingsPane from './SettingsPane.svelte';
@@ -46,10 +47,11 @@
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   const authorityReady = $derived(context !== null && draft.authorityReady);
   const collapsed = $derived(draft.state.sidebarCollapsed && !tall);
+  const block = $derived(generateBlock(draft.state.loraString, context?.loras ?? []));
   // An extension waits for a source it can read; the strip's Generate follows the same rule as the footer's.
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendModelSupport(context, draft.state.model)));
   const blockNote = $derived(sourceGuard.note ?? referenceBlock);
-  const stripTitle = $derived(blockNote ? `${generateLabel}: ${blockNote.charAt(0).toLowerCase()}${blockNote.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
+  const stripTitle = $derived(block.waiting ? `Waiting for ${block.waiting.name}` : block.failures[0] ? `${generateLabel}: ${block.failures[0].name} didn't download` : blockNote ? `${generateLabel}: ${blockNote.charAt(0).toLowerCase()}${blockNote.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
 
   function setCollapsed(value: boolean): void {
     draft.update('sidebarCollapsed', value);
@@ -98,7 +100,7 @@
           class="strip-generate"
           aria-label={generateLabel}
           title={stripTitle}
-          disabled={busy || !authorityReady || sourceGuard.blocked || referenceBlock !== null}
+          disabled={busy || !authorityReady || sourceGuard.blocked || referenceBlock !== null || block.blocked}
         >
           <Icon name="bolt" size={18} />
         </button>

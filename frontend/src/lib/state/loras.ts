@@ -35,14 +35,29 @@ export function formatLoraString(chips: LoraChip[]): string {
   return chips.map((chip) => `${chip.name}:${chip.weight}`).join(',');
 }
 
-/** Keep only the LoRAs in a `ref:weight` list that are still installed, written back by name. */
-export function keepInstalledLoras(value: string, installed: LoraInfo[]): string {
-  return formatLoraString(parseLoraString(value, installed).filter((chip) => installed.some((lora) => lora.name === chip.name)));
+/**
+ * Keep only the LoRAs in a `ref:weight` list that are still installed, written back by name.
+ *
+ * *pending* names LoRAs whose file is not there yet because it is downloading (or failed to): they stay, so a family
+ * switch and back does not lose a chip Generate is waiting on.
+ */
+export function keepInstalledLoras(value: string, installed: LoraInfo[], pending: readonly string[] = []): string {
+  return formatLoraString(parseLoraString(value, installed).filter((chip) => pending.includes(chip.name) || installed.some((lora) => lora.name === chip.name)));
+}
+
+/** Take a LoRA out of a `ref:weight` list, whatever path or name it was written under. */
+export function withoutLora(value: string, name: string, installed: LoraInfo[]): string {
+  return formatLoraString(parseLoraString(value, installed).filter((chip) => chip.name !== name));
 }
 
 /** Show a LoRA by name: a path is shortened to its file name without the extension. */
 export function loraLabel(ref: string): string {
   return /[\\/]/.test(ref) ? fileName(ref).replace(/\.safetensors$/i, '') : ref;
+}
+
+/** What deleting a LoRA file takes with it: the file, and its chips on every model. */
+export function loraDeleteInfo(size: string | null): string {
+  return `The file leaves this computer${size ? ` (${size})` : ''}. Its chips come off too, on every model they're on, so the next Generate can't fail on it.`;
 }
 
 /** The family and size a model is, as far as the server detected them. */

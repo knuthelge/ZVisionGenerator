@@ -1,4 +1,6 @@
 <script lang="ts" module>
+  import type { IconName } from '../atoms/Icon.svelte';
+
   export interface ActionMenuItem {
     kind: 'item';
     id: string;
@@ -14,11 +16,15 @@
     checked?: boolean;
     /** Muted text after the label. */
     hint?: string;
+    /** An icon before the label. */
+    icon?: IconName;
     onselect?: () => void;
   }
 
   export type ActionMenuEntry =
     | { kind: 'heading'; label: string }
+    /** A sentence under the title, such as why something failed; not an action. */
+    | { kind: 'note'; text: string; tone?: 'error' }
     | { kind: 'separator' }
     | ActionMenuItem
     /** A row that shows or hides its items in place; the menu stays open. The state resets each time the menu opens. */
@@ -94,6 +100,7 @@
     {#if entry.checked !== undefined}
       <span class="action-menu-check" aria-hidden="true">{#if entry.checked}<Icon name="check" size={14} />{/if}</span>
     {/if}
+    {#if entry.icon}<Icon name={entry.icon} size={14} />{/if}
     <span class="action-menu-label">{entry.label}</span>
     {#if entry.hint}<span class="action-menu-hint">{entry.hint}</span>{/if}
   {/snippet}
@@ -127,6 +134,8 @@
     {#each items as entry, index (index)}
       {#if entry.kind === 'heading'}
         <p class="action-menu-heading ui-area-label" role="presentation">{entry.label}</p>
+      {:else if entry.kind === 'note'}
+        <p class="action-menu-note" class:error={entry.tone === 'error'} role="presentation">{entry.text}</p>
       {:else if entry.kind === 'separator'}
         <div class="action-menu-separator" role="separator"></div>
       {:else if entry.kind === 'group'}
@@ -182,6 +191,8 @@
   .action-sheet-body .action-menu-heading { padding: 6px 12px 8px; }
   .action-menu { z-index: var(--z-menu); min-width: 200px; max-height: min(60vh, 22rem); overflow-y: auto; padding: 4px; }
   .action-menu-heading { padding: 6px 8px 3px; }
+  .action-menu-note { max-width: 15rem; padding: 6px 8px 4px; font-size: var(--text-meta); line-height: 1.4; color: var(--color-text-muted); }
+  .action-menu-note.error { color: var(--color-error); }
   .action-menu-separator { height: 1px; margin: 4px 0; background: var(--color-border-subtle); }
   .action-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: var(--radius-sm); padding: 6px 8px; text-align: left; font-size: var(--text-ui); color: var(--color-text-secondary); }
   .action-menu-item:focus { background: var(--color-bg-surface-hover); color: var(--color-text-primary); outline: none; }

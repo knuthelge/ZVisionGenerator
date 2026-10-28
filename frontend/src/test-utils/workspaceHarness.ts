@@ -14,11 +14,12 @@ import { galleryStore } from '$lib/state/gallery.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import type { WorkspaceContext } from '$lib/types';
 import { makeGalleryPage } from './workspace';
 import {
-  browseApiMocks, configApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, modelApiMocks,
+  browseApiMocks, configApiMocks, discoverApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, modelApiMocks,
   presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, videoMemoryApiMocks, workspaceApiMocks,
 } from './workspaceMocks';
 
@@ -40,6 +41,9 @@ export function resetWorkspaceTest(): void {
   galleryStore.reset();
   jobStore.clearJob();
   downloadStore.reset();
+  pendingTriggers.reset();
+  for (const mock of Object.values(discoverApiMocks)) mock.mockReset();
+  discoverApiMocks.getCurated.mockImplementation(async (model) => ({ family: model.family, size: null, version: null, hf_enabled: false, entries: [] }));
   for (const mock of Object.values(presetApiMocks)) mock.mockReset();
   presetApiMocks.listPresets.mockResolvedValue([]);
   firstRun.reset();
@@ -47,6 +51,7 @@ export function resetWorkspaceTest(): void {
   workspaceApiMocks.skipFirstRun.mockClear();
   modelApiMocks.getDownloads.mockReset();
   modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
+  modelApiMocks.deleteLora.mockReset();
   toasts.splice(0, toasts.length);
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,

@@ -252,6 +252,8 @@ export interface ModelOption extends ModelStatusFields {
   type: 'image' | 'video';
   /** One-time download size on this platform, e.g. "35 GB"; image models only, null when unknown. */
   download_size_label?: string | null;
+  /** An LTX video model's version, as the server read it from the model (alias, repo or folder); null for other models. */
+  version?: '2.3' | '2.5' | null;
 }
 
 /** What the first-run dialog needs: whether it was skipped for good and the model it preselects. */
@@ -267,6 +269,42 @@ export interface LoraInfo {
   family?: string | null;
   /** The model size the LoRA fits within its family (for example `4b`); null or absent when it fits any. */
   size_variant?: string | null;
+  /** The id of the curated entry the file is, else null. */
+  curated_id?: string | null;
+  /** The name shown for the LoRA: the curated entry's, or the repository's for a Hugging Face download; null for a file of your own. */
+  title?: string | null;
+  /** The trigger words that go with the LoRA, comma-separated, else null. */
+  trigger?: string | null;
+  /** Where the trigger came from: `user` (typed), `curated`, `card` or `header`. */
+  trigger_source?: LoraTriggerSource | null;
+  /** Where the app downloaded the file from, else null (a hand-copied file). */
+  source?: LoraSource | null;
+  /** What the Hub showed when a Hugging Face file (not a curated one) was downloaded, kept for offline; else null. */
+  hub?: LoraHub | null;
+  /** The file's size in bytes and as shown, or null when it is not listed with one. */
+  size_bytes?: number | null;
+  size_label?: string | null;
+}
+
+/** The facts kept with a Hugging Face download, so the Installed tab describes it without a connection. */
+export interface LoraHub {
+  name: string;
+  author: string | null;
+  downloads: number | null;
+  licence: string | null;
+  licence_label: string | null;
+  model_card_url: string;
+  thumbnail_url: string | null;
+}
+
+export type LoraTriggerSource = 'user' | 'curated' | 'card' | 'header';
+
+export interface LoraSource {
+  repo: string | null;
+  revision: string | null;
+  file: string | null;
+  sha256: string | null;
+  curated_id: string | null;
 }
 
 export interface WorkspaceContext {
@@ -1246,6 +1284,13 @@ export interface ModelOperationResult {
   background?: boolean;
 }
 
+/** The answer to a Hugging Face LoRA import: it returns at once, and the file arrives on the download lane. */
+export interface LoraImportResult extends Omit<ModelOperationResult, 'detail'> {
+  name: string;
+  outcome: 'queued' | 'running' | 'installed';
+  download: DownloadItem | null;
+}
+
 /** What the converter found in a video checkpoint (LTX-2.3, LTX-2.5 or MiniMax H3) before converting it. */
 export interface CheckpointInspection {
   model_type: string;
@@ -1302,12 +1347,20 @@ export interface ModelDeleteInfo {
 /** One Models-page download in the downloads lane. */
 export type DownloadItem = {
   id: string;
-  kind: 'model' | 'enhancer';
+  kind: 'model' | 'enhancer' | 'lora';
   name: string;
   label: string;
   state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
   queue_position?: number;
   message: string | null;
+  /** A LoRA item: the curated entry it installs, where it comes from, and the size the download expects. */
+  curated_id?: string | null;
+  source_repo?: string | null;
+  source_file?: string | null;
+  source_revision?: string | null;
+  size_bytes?: number | null;
+  /** A LoRA item: false when it downloads with the user's Hugging Face login (an Import), true when it reads anonymously (Discover). */
+  anonymous?: boolean;
 } & Partial<DownloadProgressFields>;
 
 /** Response of `GET /api/models/downloads`: queued, running and recently finished items. */
@@ -1424,4 +1477,126 @@ export interface RecentPrompt {
   mode: WorkflowMode;
   /** Server time of the submit, in epoch seconds. */
   used_at: number;
+}
+
+/** A curated entry's state on this machine (`inuse` is the Workspace's own: a chip uses it). */
+export type CuratedState = 'available' | 'downloading' | 'installed' | 'name_taken';
+
+/** One curated LoRA, from `GET /api/discover/curated`. */
+export interface CuratedEntry {
+  id: string;
+  name: string;
+  family: string;
+  size_variant: string | null;
+  version: string | null;
+  display_name: string;
+  author: string;
+  description: string;
+  section: 'style' | 'tool';
+  what_it_does: string | null;
+  workflow: Workflow | null;
+  repo: string;
+  revision: string;
+  file: string;
+  size_bytes: number;
+  size_label: string;
+  trigger: string | null;
+  weight: number;
+  licence: string | null;
+  licence_label: string | null;
+  non_commercial: boolean;
+  /** The repository's Hugging Face download count when the list was last refreshed. */
+  downloads: number;
+  platforms: string[];
+  note: string | null;
+  previews: string[];
+  preview_videos: string[];
+  model_card_url: string;
+  state: CuratedState;
+  download: DownloadItem | null;
+}
+
+export interface CuratedList {
+  family: string;
+  size: string | null;
+  version: string | null;
+  hf_enabled: boolean;
+  entries: CuratedEntry[];
+}
+
+export type HfSort = 'downloads' | 'likes' | 'trending' | 'newest';
+
+/** One row of the Hugging Face listing. */
+export interface HfItem {
+  repo: string;
+  name: string;
+  author: string;
+  downloads: number;
+  likes: number;
+  files: number;
+  licence: string | null;
+  thumbnail: string | null;
+  curated_id: string | null;
+}
+
+export interface HfPage {
+  items: HfItem[];
+  next_cursor: string | null;
+  base_models: string[];
+}
+
+export interface HfFile {
+  file: string;
+  size_bytes: number;
+  size_label: string;
+  sha256: string | null;
+  step: number | null;
+  marked: boolean;
+  curated_id: string | null;
+  save_as: string;
+  renamed: boolean;
+  state: 'available' | 'downloading' | 'installed';
+}
+
+export interface HfRepo {
+  repo: string;
+  name: string;
+  author: string;
+  revision: string;
+  downloads: number;
+  likes: number;
+  licence: string | null;
+  licence_label: string | null;
+  base_model: string | null;
+  instance_prompt: string | null;
+  previews: string[];
+  preview_videos: string[];
+  model_card_url: string;
+  preselected: string | null;
+  files: HfFile[];
+  other_files: HfFile[];
+}
+
+export interface HfCheck {
+  status: 'match' | 'mismatch' | 'unknown';
+  family: string | null;
+  size_variant: string | null;
+  expected: { family: string; size_variant: string | null };
+}
+
+/** The answer to `POST /api/discover/download`. */
+export interface DiscoverDownload {
+  name: string;
+  status: 'queued' | 'running' | 'installed';
+  renamed: boolean;
+  item: DownloadItem | null;
+  trigger: string | null;
+  trigger_source: 'curated' | 'card' | null;
+}
+
+export interface LoraTriggerResult {
+  name: string;
+  trigger: string | null;
+  trigger_source: LoraTriggerSource | null;
+  user_trigger: string | null;
 }
