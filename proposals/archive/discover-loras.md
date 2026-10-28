@@ -1,6 +1,6 @@
 # Discover LoRAs: a curated list, and Hugging Face behind it
 
-**Status:** Proposed (2026-10-28)
+**Status:** Done (2026-10-28, unreleased; branch feat/discover-loras). Not yet verified on a Mac; see [Mac verification](#mac-verification).
 
 ## Problem
 
@@ -50,7 +50,7 @@ A hand-checked index of LoRAs, bundled in the package and updated by release. It
   - the repository's Hugging Face download count;
   - the platforms it was tested on;
   - two to four preview image URLs.
-- **One small thumbnail per entry is bundled** (about 25 KB), so the list browses offline, but only when the entry's licence allows redistribution. Otherwise the thumbnail loads from Hugging Face like the other previews.
+- **No pictures are bundled.** The list browses offline, but the tiles' pictures load from Hugging Face, so redistributing the authors' sample images is never needed.
 - **An entry is listed only after all of these pass:**
   - someone looked at its content and previews;
   - the licence was read: non-commercial entries are listed with a badge;
@@ -62,7 +62,7 @@ A hand-checked index of LoRAs, bundled in the package and updated by release. It
 - **No cap per family.** The list covers every family the app runs: Klein 4B/9B, Z-Image Turbo, Krea 2 Turbo, Ideogram 4 Instant, MOSS-Image, LTX-2.3, LTX-2.5 and MiniMax H3. Video ships with images, not after.
 - **Triggers are comma-separated words.** A card that lists several words (`Pixel Art, PixArFK`) gives all of them; a card whose trigger is a sentence or a prompt keeps the one word that triggers the LoRA. No word ends in a full stop.
 - **Checks:**
-  - **An offline contract test in `tests/contracts/`** checks the schema, that `id` and `name` are unique, that each family, size and version is one the app knows, that `revision` is a 40-character commit, `sha256` 64 hex characters and `file` ends in `.safetensors`, that thumbnails exist and stay within budget, that preview URLs are on `huggingface.co`, that licences come from the allowed set, and that triggers are clean comma-separated words.
+  - **An offline contract test in `tests/contracts/`** checks the schema, that `id` and `name` are unique, that each family, size and version is one the app knows, that `revision` is a 40-character commit, `sha256` 64 hex characters and `file` ends in `.safetensors`, that preview URLs are on `huggingface.co`, that licences come from the allowed set, and that triggers are clean comma-separated words.
   - **A network script, `make check-curated`, run before each release,** compares every pinned file's size and `lfs.sha256` with the Hub, and rewrites each entry's download count with the repository's current one (fetched with no token). It never changes a pin.
 
 ### 2. Where it lives: a Discover drawer in the Workspace
@@ -121,7 +121,7 @@ A curated LoRA shows its description under the images (a tool, what it does); a 
 - An open Hugging Face file defaults to a slug of the repo name, not the file stem.
 - A name already in use, on disk or by a running download, is caught when the download starts. A Hugging Face file then gets `-2`; a curated entry whose name another file holds is refused with the reason.
 
-**Where files came from.** A small table in the app database, `lora_sources_v2`, records for each downloaded file: its repo, commit, file, SHA-256, trigger text and curated `id`, and for a Hugging Face file the card's author, download count and licence, with its first preview image shrunk to a small WebP in a table of its own. It is separate from the LoRA index, so a rules version bump doesn't wipe it.
+**Where files came from.** A small table in the app database, `lora_sources_v1`, records for each downloaded file: its repo, commit, file, SHA-256, trigger text and curated `id`, and for a Hugging Face file the card's author, download count and licence, with its first preview image shrunk to a small WebP in a table of its own. It is separate from the LoRA index, so a rules version bump doesn't wipe it.
 
 ### 4. Open search: the Hugging Face tab
 
@@ -156,7 +156,7 @@ What's in the prompt box is exactly what the model gets, and nothing is inserted
 
 Recorded settings, Reuse, the copied CLI command, presets, recent prompts and Save to prompt file need no change.
 
-**Where the triggers come from,** in this order of trust, stored in `lora_sources_v2` (§3):
+**Where the triggers come from,** in this order of trust, stored in `lora_sources_v1` (§3):
 1. words the user types with **Edit** in the LoRA's detail, which always win;
 2. the curated entry's trigger words;
 3. the Hugging Face card's `instance_prompt`, saved when the LoRA is downloaded through Discover or Import and split at commas (and semicolons and line breaks) into words;
@@ -170,7 +170,7 @@ Never the file name or `ss_output_name`.
 |---|---|
 | A `lora` kind in the download lane (progress, cancel, toasts), staging per file and an atomic rename to the final name. The Models page Import uses it too, so Import returns at once and shows as a row of the LoRAs table | Two downloads of one entry make one download. Import and Discover of the same name make one file or a clear refusal |
 | Name rules (curated names, repo slugs, `-2`), checked when a download starts | A clash is reported before any bytes download |
-| `lora_sources_v2` and its preview-image table | A family-rules version bump leaves them intact; a Hugging Face download keeps its author, count, licence and image |
+| `lora_sources_v1` and its preview-image table | A family-rules version bump leaves them intact; a Hugging Face download keeps its author, count, licence and image |
 | The curated-list loader, contract test and `make check-curated` | The contract test fails on a duplicate name, a bad hash, an unknown family or a dirty trigger; the script refreshes the counts |
 | `GET /api/discover/curated?family=`, the Hugging Face proxy, the header check and the installed-preview route | The proxy refuses `repo=../x`, sends no token, and stops reading after 2 MB |
 | LTX stays one family in Add LoRA and the Hugging Face tab: research found 2.3 and 2.5 LoRAs identical in names and shapes, and only 4 of 639 name a version in their metadata. Curated entries carry the version, and Curated shows only the entries for the selected LTX model | A curated LTX-2.5 entry is not offered for `ltx-4` |
@@ -179,6 +179,20 @@ Never the file name or `ss_output_name`.
 | Delete removes chips and per-family memory, and says why while a job runs | Generate never fails on a LoRA the user just deleted |
 | The detail shows a copyable `ziv-model lora --hf <repo> --file <file> --name <name>` line | No new CLI flags |
 | Docs and changelog: Concepts LoRAs (curated vs Hugging Face, trust, triggers), the Web UI Workspace and Models pages, a developer page on how an entry gets curated, and `CHANGELOG.md` `[Unreleased]` | `make check` passes, including the strict docs build |
+
+## Mac verification
+
+To do before the merge. Skip a step whose model isn't downloaded.
+
+1. **Curated download (Z-Image Turbo).** Use *Lilien Jugendstil*. The chip downloads, Generate waits, and the image has the style. `~/.ziv/cache/loras/` stays empty.
+2. **Renamed copy, image.** Use `bdsqlsz/qinglong_DetailedEyes_Z-Image` from Hugging Face (Kohya names). A copy is in `~/.ziv/cache/loras/` while the model loads and gone once generation starts. The eyes show the effect.
+3. **Renamed copy, video (LTX-2.3).** Use `siraxe/VBVR-LTX2.3-diffsynth_comfyui` (PEFT names). The copy lasts for the job and is removed when it ends.
+4. **One curated LoRA per family.** Klein 4B *NASA Concept Art*, Klein 9B *Focal Length Slider*, Krea 2 *Pixel Art 32/64/128*, Ideogram 4 *Cartoon Assets*, LTX-2.3 *HelloWorld Interactor*, LTX-2.5 *BTS Movie Set*, H3 *Studio 1939*. Each loads with a visible effect and no error.
+5. **A file name with brackets.** Use *Clay Animation (Redmond)*. It downloads and loads.
+6. **The Hugging Face box.** Show, Not now and Turn off do what they say; on a phone the buttons stay pinned at the bottom.
+7. **Optional: a crash leftover.** Quit `ziv ui` while step 2's model loads. The next job that loads a LoRA removes the leftover copy.
+
+**Results:** none yet.
 
 ## Alternatives considered
 
@@ -195,5 +209,5 @@ Never the file name or `ss_output_name`.
 - **New CLI flags (`--curated`, `--list-curated`).** `ziv-model lora --hf … --file … --name …` already does the download. The detail shows that line instead.
 - **The chip carries the trigger, injected on the server.** It keeps the box clean and gives prompt files the trigger for free. But the text sent would no longer match what the recorded settings, Details, Copy prompt, recent prompts, Save to prompt file and the queue card show. The copied CLI command couldn't reproduce the job (`--lora name:0.8` can't hold a trigger, and the CLI has no access to the app database). Long card "triggers" would add unseen content. That's about 12 places to change. Mature tools (A1111/Forge activation text, InvokeAI's trigger picker) insert visibly too; the auto-injecting ones (SwarmUI `<trigger>`, ComfyUI auto-append nodes) call it best-effort. A `$trigger` placeholder for prompt files is a possible follow-up if LoRAs in prompt files turn out to be common.
 - **Fetching the curated list from the repo between releases.** The user chose bundling with releases. A remote list can be added later without changing the UI.
-- **Checking before download whether an open LoRA loads on this platform.** Researched on 1,710 real LTX and H3 headers: the loaders' verdicts depend only on key names and shapes, so a dry run of each platform's loader in a child process could answer (about 7 s and 1.1 GB per file). It's too much machinery for LoRAs we explicitly don't vouch for; the curated list carries tested platforms instead. Job-time errors for LoRAs that don't load are in the [backlog](backlog.md).
+- **Checking before download whether an open LoRA loads on this platform.** Researched on 1,710 real LTX and H3 headers: the loaders' verdicts depend only on key names and shapes, so a dry run of each platform's loader in a child process could answer (about 7 s and 1.1 GB per file). It's too much machinery for LoRAs we explicitly don't vouch for; the curated list carries tested platforms instead. Job-time errors for LoRAs that don't load are in the [backlog](../backlog.md).
 - **Recognising hand-copied curated files by hashing every LoRA.** Too slow for 1 GB video LoRAs, for a rare case.
