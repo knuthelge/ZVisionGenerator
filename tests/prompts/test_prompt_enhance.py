@@ -530,6 +530,14 @@ class TestMessages:
         assert image_rule in _system(EnhanceSettings(), context=EnhanceContext(reference_image=True))
         assert video_rule not in _system(EnhanceSettings(), mode="video") and image_rule not in _system(EnhanceSettings())
 
+    def test_references_rule_comes_with_the_start_image_rule(self):
+        only_references = context_rules("image", EnhanceContext(references=2))
+        both = context_rules("image", EnhanceContext(reference_image=True, references=2))
+        assert len(only_references) == 1 and len(both) == 2
+        assert both[1] == only_references[0]
+        assert only_references[0] in _system(EnhanceSettings(), context=EnhanceContext(references=2))
+        assert only_references[0] not in _system(EnhanceSettings())
+
     def test_a_last_frame_swaps_the_video_rule_for_the_two_frame_rule(self):
         first_only = context_rules("video", EnhanceContext(reference_image=True))[0]
         two_frames = context_rules("video", EnhanceContext(reference_image=True, end_image=True))[0]

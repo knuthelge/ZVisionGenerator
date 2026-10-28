@@ -537,6 +537,13 @@ class TestVideoExtend:
         assert (with_both.reference_image, with_both.end_image) == (True, True)
         assert (without.reference_image, without.end_image) == (True, False)
 
+    def test_context_counts_the_references_apart_from_the_start_image(self):
+        references = _job_context(_args(width=512, height=512, reference_paths=["a.png", "b.png"]), mode="image")
+        start_only = _job_context(_args(width=512, height=512, image_path="a.png"), mode="image")
+
+        assert (references.reference_image, references.references) == (False, 2)
+        assert (start_only.reference_image, start_only.references) == (True, 0)
+
     def test_other_jobs_do_not_extend(self):
         context = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=False), mode="video")
         assert context.extends is False and context.previous is None and context.new_seconds is None

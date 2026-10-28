@@ -6,7 +6,14 @@ import warnings
 
 import pytest
 
-from zvisiongenerator.utils.prompt_enhance import QUOTES_CHANGED_WARNING, EnhanceContext, EnhanceSettings, enforced_quotes, enhance_prompt
+from zvisiongenerator.utils.prompt_enhance import (
+    QUOTES_CHANGED_WARNING,
+    REFERENCES_DROPPED_WARNING,
+    EnhanceContext,
+    EnhanceSettings,
+    enforced_quotes,
+    enhance_prompt,
+)
 from zvisiongenerator.utils.prompt_enhance_video import enhance_video_prompt
 from zvisiongenerator.utils.prompt_quotes import find_text, lettering_spans, missing_quotes, quoted_texts
 
@@ -127,6 +134,49 @@ class TestImageRewrite:
             result = enhance_prompt(enhancer, self._PROMPT, EnhanceSettings(), mode="image", seed=1, ceiling=300)
         assert result.prompt == "A diner under an open 24 hours sign."
         assert result.warning == QUOTES_CHANGED_WARNING
+
+
+class TestReferences:
+    _PROMPT = "the woman from image 1 wearing the backpack from image 2 on a pier"
+    _CONTEXT = EnhanceContext(references=2)
+
+    @pytest.mark.parametrize(
+        ("output", "kept"),
+        [
+            ("The woman from image 1 wears the backpack from image 2, standing on a misty pier.", True),
+            ("The woman from Image 1 wears the backpack from IMAGE 2.", True),
+            ("The woman from image 1 stands on a misty pier.", False),
+            ("A woman from image 10 stands on a pier.", False),
+        ],
+    )
+    def test_a_rewrite_must_keep_every_reference_the_prompt_names(self, output, kept):
+        enhancer = _FakeEnhancer([output, output])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = enhance_prompt(enhancer, self._PROMPT, EnhanceSettings(), mode="image", seed=1, ceiling=300, context=self._CONTEXT)
+        assert (len(enhancer.messages), result.warning) == ((1, None) if kept else (2, REFERENCES_DROPPED_WARNING))
+
+    def test_retries_when_a_reference_is_dropped(self):
+        enhancer = _FakeEnhancer(["A woman wears a backpack on a pier.", "The woman from image 1 wears the backpack from image 2 on a pier."])
+        result = enhance_prompt(enhancer, self._PROMPT, EnhanceSettings(), mode="image", seed=1, ceiling=300, context=self._CONTEXT)
+        assert len(enhancer.messages) == 2
+        assert result.prompt.startswith("The woman from image 1")
+        assert result.warning is None
+
+    def test_keeps_the_last_usable_rewrite_with_a_warning(self):
+        enhancer = _FakeEnhancer(["A woman wears a backpack on a pier.", "A woman in a red coat carries a backpack on a pier."])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = enhance_prompt(enhancer, self._PROMPT, EnhanceSettings(), mode="image", seed=1, ceiling=300, context=self._CONTEXT)
+        assert result.prompt == "A woman in a red coat carries a backpack on a pier."
+        assert result.warning == REFERENCES_DROPPED_WARNING
+        assert any(str(warning.message) == REFERENCES_DROPPED_WARNING for warning in caught)
+
+    def test_image_words_are_free_without_references(self):
+        enhancer = _FakeEnhancer(["A portrait of a woman on a pier."])
+        result = enhance_prompt(enhancer, "the image 1 woman on a pier", EnhanceSettings(), mode="image", seed=1, ceiling=300)
+        assert len(enhancer.messages) == 1
+        assert result.warning is None
 
 
 class TestVideoRewrite:

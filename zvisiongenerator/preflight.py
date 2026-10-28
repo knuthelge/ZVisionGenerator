@@ -264,7 +264,7 @@ def _rewrite_all(
 
 
 def _job_context(args: argparse.Namespace, *, mode: str, family: VideoFamily | None = None) -> EnhanceContext:
-    """Return the rewrite context for a job from its arguments (frame size or ratio, frames, fps, audio, reference image, last frame).
+    """Return the rewrite context for a job from its arguments (frame size or ratio, frames, fps, audio, start image, references, last frame).
 
     A video job that extends a clip (``args.extend_source``) describes the generation window: the source's displayed
     size and frame rate, the carried plus new frames, and the new frames and the source's prompt for the extend modes.
@@ -284,6 +284,7 @@ def _job_context(args: argparse.Namespace, *, mode: str, family: VideoFamily | N
         fps=getattr(args, "fps", None),
         audio=not no_audio,
         reference_image=bool(getattr(args, "image_path", None)),
+        references=len(getattr(args, "reference_paths", None) or ()),
         end_image=bool(getattr(args, "end_image_path", None)),
     )
 
