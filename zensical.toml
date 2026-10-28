@@ -79,6 +79,7 @@ nav = [
       { "Model downloads" = "developer/downloads.md" },
       { "App database" = "developer/app-database.md" },
       { "Frontend" = "developer/frontend.md" },
+      { "Curated LoRA list" = "developer/curated-loras.md" },
     ] },
     { "Maintenance" = [
       { "Prompt-enhancer bench" = "developer/enhancer-bench.md" },
