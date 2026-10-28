@@ -20,7 +20,16 @@ The badge follows the quant you pick, so you can see whether `q8` or `q4` brings
 
 A model that isn't downloaded yet shows *not downloaded*, and downloads by itself when a job first needs it. While it downloads from the [Models](models.md) page, the picker shows its progress, for example *Downloading 42%*.
 
-The **Add LoRA** menu lists the LoRAs made for the selected model first, with the ones you used with it recently on top, and folds the rest under **Other models (n)**. LoRAs are remembered per model family, and per size for FLUX.2 Klein (4B and 9B keep separate LoRAs): switch to another family and you get the LoRAs you last used with it. See [LoRAs](../concepts/loras.md).
+The **Add LoRA** menu lists the LoRAs made for the selected model first, with the ones you used with it recently on top, and folds the rest under **Other models (n)**. Its last item, **Discover LoRAs…**, opens [Discover LoRAs](#discover-loras). LoRAs are remembered per model family, and per size for FLUX.2 Klein (4B and 9B keep separate LoRAs): switch to another family and you get the LoRAs you last used with it. See [LoRAs](../concepts/loras.md).
+
+### Discover LoRAs
+
+**Discover LoRAs…** is the last item of **Add LoRA** (on a phone, in the LoRAs menu under **All**), and **Add LoRA** opens it straight away when you have no LoRAs yet. What Curated and Hugging Face are is in [LoRAs](../concepts/loras.md#discover-loras).
+
+- The **Installed**, **Curated** and **Hugging Face** tabs each have a search. The first time you open **Hugging Face**, you confirm that you want its results.
+- Pick a LoRA to see its details. **Download** gets the file, and **Use in LoRAs** adds it to your chips, downloading it first if needed.
+
+While a LoRA downloads, **Generate** waits for it. If the download fails, the chip turns red and **Retry** appears above Generate.
 
 ## Presets
 
