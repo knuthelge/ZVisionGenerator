@@ -29,7 +29,7 @@ A **preset** saves your whole setup under a name, so you can bring it back in on
 ![The Preset menu open in the Workspace toolbar](../assets/screenshots/preset-menu.webp){ width="540" }
 
 - **What it keeps:** the model, quant, LoRAs and their weights, size, number of runs, steps, guidance, image strength, scheduler, post-processing and upscale settings including review. For video: the length, audio, low memory and upscale.
-- **What it leaves alone:** the prompt, seed, reference image and workflow.
+- **What it leaves alone:** the prompt, seed, start image, references and workflow.
 - **The menu** has **Update** (write the current settings into the preset), **Save as…**, **Rename…** and **Delete**. A dot on the control shows when the form differs from the applied preset.
 - Image and video have their own presets; only the ones for the current kind are listed.
 - A model or LoRA that is no longer installed is skipped.
@@ -84,7 +84,7 @@ Recents are kept in the app database on the server, not in the browser, so they 
 
 ### First and last frame
 
-Image to Video shows two slots under **Reference image**: **First frame** and an optional **Last frame**. Pick the last frame the same ways as the first: browse the server, upload from your device, drop an image on the slot, type a path, or choose **Use as reference** → **For last frame (img2vid)** on an image. See [First and last frame](../concepts/video.md#first-and-last-frame).
+Image to Video shows two slots under **Frames**: **First frame** and an optional **Last frame**. Pick the last frame the same ways as the first: browse the server, upload from your device, drop an image on the slot, type a path, or choose **Use as** → **Last frame** on an image. See [First and last frame](../concepts/video.md#first-and-last-frame).
 
 A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **Prompt (JSON)** mode for a structured caption.
 
@@ -96,7 +96,8 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 |---|---|
 | **Size** | **Ratio**, **Resolution**, or a custom **W × H**; **Duration (s)** for video |
 | **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
-| **Reference image** | The image for Image to Image or Image to Video, and **Img strength**. For video, a **First frame** and an optional **Last frame** |
+| **Start image** | The image for Image to Image, and **Img strength**. For video, **Frames**: a **First frame** and an optional **Last frame** |
+| **References** | Images whose content the result keeps (FLUX.2 Klein, in Text to Image and Image to Image) |
 | **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
 | **Post-processing** | **Sharpen**, **Contrast** and **Saturation** (images) |
 | **Video** | **Audio**, **Low memory** |
@@ -108,6 +109,15 @@ Groups and rows only show when the model and workflow use them.
 - **Seed** is random for every run unless you type one. The dice button picks a new one.
 
 What each setting does is in [Images](../concepts/images.md), [Video](../concepts/video.md) and [Upscaling](../concepts/upscaling.md).
+
+### References
+
+When the model takes [references](../concepts/images.md#references), **References** lists up to four image rows, each with a thumbnail, its name, and buttons to browse the server or upload from your device. Below the filled rows is an empty **Add reference** row. You can also drop several images on **Add reference** at once, or drop one on a filled row to replace it. The settings summary shows how many are set. On a phone, the **References** chip opens the same rows; a row whose image is gone has **Replace**, which swaps the next image you choose into that row and keeps its number.
+
+- **Number:** a row's position is its number in the prompt: the first row is "image 1". Removing a row renumbers the rest, and a line under the section reminds you to refer to them that way.
+- **A model without references, or a video tab,** hides the section and sends none, but keeps the list for when you come back. A model that takes fewer shows and sends the first ones, and the rest come back with a model that takes more.
+- **With a start image,** both apply. See [References with a start image](../concepts/images.md#references-with-a-start-image) for what to expect.
+- **Reuse settings** brings the references back. A row whose file has moved or been deleted is marked, and **Generate** stays off until you choose the file again or remove the row. Images you uploaded from your device stay while you visit other pages. After you reload the page the browser can't keep them, so those rows say **Choose this image again** and block **Generate** the same way.
 
 ### Settings are remembered
 
@@ -122,11 +132,11 @@ When you choose another model, the settings you changed are kept and the rest ta
 The terminal button in the *Settings* header copies a `ziv image` or `ziv video` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
 
 !!! note "When the command differs"
-    The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded reference image is named by its file name: replace it with the file's path.
+    The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path.
 
 ### Paths on the server
 
-Fields that take a path on the server's machine (prompt files, the output folder, checkpoints, LoRAs, reference images, source videos) have a folder button. It opens a file browser inside the Web UI, so it works the same on every system and from a phone.
+Fields that take a path on the server's machine (prompt files, the output folder, checkpoints, LoRAs, start images, references, source videos) have a folder button. It opens a file browser inside the Web UI, so it works the same on every system and from a phone.
 
 - It opens at the field's current path or the matching folder, and lists only the files the field accepts. **Show all** lists the rest; **Hidden files** shows names that start with a dot.
 - Your last five choices are under **Recent**.
@@ -134,13 +144,13 @@ Fields that take a path on the server's machine (prompt files, the output folder
 
 Typing in the field itself suggests matching folders and files: ++tab++ takes the first, the arrow keys and ++enter++ pick another, and ++down++ in an empty field suggests recent paths and the usual folders.
 
-The reference image also has an upload button for a picture on the device you're browsing from.
+The start image, the last frame and each reference also have an upload button for a picture on the device you're browsing from. A picture you uploaded as the start image or last frame stays while you visit other pages; a reload clears it.
 
 ## Generate
 
 Press **Generate**, or ++ctrl+enter++ (++cmd+enter++ on a Mac). ++ctrl+shift+enter++ generates with a new seed, even when the seed is locked.
 
-If the job can't start with the current settings, for example Image to Image without a reference image, the reason shows above the button. It goes away when you change a setting.
+If the job can't start with the current settings, for example Image to Image without a start image, the reason shows above the button. It goes away when you change a setting.
 
 ### While a job runs
 
@@ -190,6 +200,6 @@ Finished images and videos appear in the Gallery strip, newest first. It is the 
 
 Some models change what the Workspace offers:
 
-- **Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no reference image or upscale, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../concepts/models.md#ideogram-4-instant).
+- **Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no start image or upscale, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../concepts/models.md#ideogram-4-instant).
 - **Krea 2** hides **Scheduler**, because it samples with its own schedule.
 - **Video** adds **Duration (s)**, **Audio** and **Low memory**.

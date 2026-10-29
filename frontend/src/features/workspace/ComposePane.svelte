@@ -409,6 +409,7 @@
         {busy}
         {jobsActive}
         endImage={caps.showEndImage && (s.endImagePath !== null || endImagePending)}
+        references={caps.referenceCount}
         jsonCapable={caps.supportsJsonPrompt}
         extendSupport={extendModelSupport(context, s.model)}
         maxWords={caps.enhanceMaxWords}

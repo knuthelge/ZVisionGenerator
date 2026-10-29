@@ -31,7 +31,8 @@ from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import gallery_asset_to_json, list_gallery_assets
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry
 from zvisiongenerator.web.web_runner import JobConflictError
-from zvisiongenerator.workflows import build_seedvr2_upscale_workflow
+from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
+from zvisiongenerator.workflows.image_stages import load_references_stage
 
 _DEFAULTS = {
     "steps": 10,
@@ -210,6 +211,15 @@ def test_plan_carries_the_source_reference_image(monkeypatch, tmp_path):
 
     assert plan.request.image_path == "/out/ref.png"
     assert plan.request.image_strength == 0.6
+
+
+def test_plan_carries_the_source_references_for_reuse_only(monkeypatch, tmp_path):
+    _patch_model_resolution(monkeypatch)
+
+    plan = upscale_api.plan_upscale(_source(reference_images=("/out/a.png", "/out/b.png")), 2, _web_config(tmp_path), backend_name="mflux")
+
+    assert plan.request.reference_paths == ("/out/a.png", "/out/b.png")
+    assert load_references_stage not in build_upscale_workflow().stages
 
 
 def test_plan_without_settings_uses_default_model_and_notes_it(monkeypatch, tmp_path):

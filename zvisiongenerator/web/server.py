@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import io
 import json
 import logging
 import os
@@ -14,7 +16,6 @@ import subprocess
 import threading
 import sys
 import time
-import uuid
 import warnings
 from collections.abc import Iterator
 from contextlib import ExitStack, asynccontextmanager, contextmanager
@@ -49,6 +50,7 @@ from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils import app_db
+from zvisiongenerator.utils.atomic_write import write_bytes_atomic
 from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
     enhancer_tier_models,
@@ -88,6 +90,8 @@ from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhan
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
+from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
+from zvisiongenerator.utils.references import check_reference_count, check_reference_files, missing_reference_files
 from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_FACTOR
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
@@ -136,6 +140,7 @@ from zvisiongenerator.web.workspace_contract import (
     DEFAULT_PROMPT_SOURCE,
     PROMPT_FILE_CONTRACT,
     PROMPT_SOURCE_VALUES,
+    REFERENCE_FIELD,
     WORKFLOW_DEFINITIONS,
     build_workflow_contract,
     canonicalize_workflow,
@@ -143,7 +148,6 @@ from zvisiongenerator.web.workspace_contract import (
 )
 
 
-_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _DOCS_ASSETS_DIR = Path(__file__).resolve().parents[2] / "docs" / "assets"
 
 _WORKFLOW_DEFINITIONS = WORKFLOW_DEFINITIONS
@@ -312,6 +316,19 @@ async def api_extend_source(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/references/check")
+async def api_references_check(request: Request) -> dict[str, list[str]]:
+    """Report which of the given host-local reference paths are no longer files, so the Workspace can flag those rows."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    paths = payload.get("paths") if isinstance(payload, dict) else None
+    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+        raise HTTPException(status_code=422, detail="paths must be a list of strings.")
+    return {"missing": await run_in_threadpool(missing_reference_files, paths)}
 
 
 @app.post("/api/video/memory-fit")
@@ -567,7 +584,7 @@ def _body_choice(body: dict[str, Any], key: str, allowed: tuple[str, ...]) -> st
 
 
 def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> EnhanceContext:
-    """Validate the enhance request's job facts (frame size or ratio, frames, fps, audio, reference image).
+    """Validate the enhance request's job facts (frame size or ratio, frames, fps, audio, start image, references).
 
     A video request with ``context.source_video`` extends that clip: the server reads the clip's size, frame rate,
     recorded prompt and recorded scene itself, so only the source, the new length and the audio setting come from the client.
@@ -593,6 +610,9 @@ def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> Enha
     ratio = raw.get("ratio")
     if ratio is not None and not isinstance(ratio, str):
         raise ValueError("context.ratio must be a string such as '16:9'.")
+    references = raw.get("references", 0)
+    if isinstance(references, bool) or not isinstance(references, int) or references < 0:
+        raise ValueError("context.references must be a non-negative whole number.")
     return enhance_context(
         mode=mode,
         width=_positive("width"),
@@ -602,6 +622,7 @@ def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> Enha
         fps=_positive("fps"),
         audio=raw.get("audio") is True and supports_video_audio(),
         reference_image=raw.get("reference_image") is True,
+        references=references,
         end_image=raw.get("end_image") is True,
     )
 
@@ -752,12 +773,13 @@ def _public_job_context(
     width: int,
     height: int,
     output_dir: str,
-    uploads: dict[str, str | None],
+    uploads: dict[str, str | list[str] | None],
 ) -> dict[str, Any]:
     """Build the public context a job carries from submission on (shown in snapshots and the queue).
 
     ``width`` and ``height`` are the size the job renders at, which gives its preview the output's shape.
-    ``uploads`` maps each path setting (``image_path``, ``end_image_path``) to the file the job uses for it.
+    ``uploads`` maps each path setting (``image_path``, ``end_image_path``) to the file the job uses for it, and
+    ``reference_path`` to the list of every reference file in order.
     """
     requested_workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback=_default_workflow_for_mode(mode))
     workflow = _canonicalize_workflow(job_type, fallback=requested_workflow)
@@ -777,18 +799,24 @@ def _public_job_context(
     }
 
 
-def _submitted_settings(form: Any, *, uploads: dict[str, str | None]) -> dict[str, str | list[str]]:
+def _submitted_settings(form: Any, *, uploads: dict[str, str | list[str] | None]) -> dict[str, str | list[str]]:
     """Return the submitted text fields verbatim (repeated fields as lists); an upload becomes its saved path.
+
+    The repeated ``reference`` field is replaced by ``reference_path``, the resolved reference files in order, so Load
+    settings and Retry restore every row, uploads included.
 
     Args:
         form: The submitted form.
         uploads: Each path setting (such as ``image_path``) mapped to the file the job uses for it. An entry is recorded
-            only when the form carries the matching upload field (``image_file`` for ``image_path``).
+            only when the form carries the matching upload field (``image_file`` for ``image_path``). A list value
+            (``reference_path``) is recorded whole when it is not empty.
     """
     settings: dict[str, str | list[str]] = {}
     # Starlette's FormData repeats a key per value; plain mappings (tests, internal callers) have one item per key.
     items = form.multi_items() if hasattr(form, "multi_items") else form.items()
     for key, value in items:
+        if key == REFERENCE_FIELD:
+            continue
         if isinstance(value, list):
             settings[key] = [str(item) for item in value]
             continue
@@ -800,7 +828,10 @@ def _submitted_settings(form: Any, *, uploads: dict[str, str | None]) -> dict[st
         existing = settings[key]
         settings[key] = [*existing, value] if isinstance(existing, list) else [existing, value]
     for path_key, saved_path in uploads.items():
-        if saved_path and _is_uploaded_file(form.get(_upload_field(path_key))):
+        if isinstance(saved_path, list):
+            if saved_path:
+                settings[path_key] = list(saved_path)
+        elif saved_path and _is_uploaded_file(form.get(_upload_field(path_key))):
             settings[path_key] = saved_path
     return settings
 
@@ -826,7 +857,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         raise HTTPException(status_code=422, detail="The file must be inside the output folder.")
     if source_path.suffix.lower() in VIDEO_EXTENSIONS:
         return _video_upscale_from_body(source_path, factor, method)
-    if source_path.suffix.lower() not in _IMAGE_EXTENSIONS or not source_path.is_file():
+    if source_path.suffix.lower() not in IMAGE_EXTENSIONS or not source_path.is_file():
         raise HTTPException(status_code=404, detail=f"Unknown image: {asset_id}")
 
     web_config = load_web_config()
@@ -1078,6 +1109,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         upscale_save_pre=_checkbox(form, "upscale_save_pre"),
         review=bool(upscale) and _checkbox(form, "review"),
         image_path=_resolve_reference_image(form, output_dir),
+        reference_paths=_resolve_reference_images(form, output_dir),
         image_strength=_optional_float(form, "image_strength"),
         output=output_dir,
         model=model_name,
@@ -1094,7 +1126,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     if args.image_strength is None:
         args.image_strength = 0.5
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and args.image_path is None:
-        raise ValueError("Image-to-image requires a reference image.")
+        raise ValueError("Image to image requires a start image.")
     _validate_image_args(args, quantize_options=web_config.quantize_options)
 
     resolved_model = resolve_model_path(args.model, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
@@ -1194,6 +1226,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         upscale_sharpen=args.upscale_sharpen,
         upscale_save_pre=args.upscale_save_pre,
         image_path=args.image_path,
+        reference_paths=tuple(args.reference_paths),
+        max_reference_images=int(defaults.get("max_reference_images", 0)),
         image_strength=args.image_strength,
         sharpen=args.sharpen is not False,
         sharpen_amount_override=args.sharpen if isinstance(args.sharpen, float) else None,
@@ -1216,7 +1250,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         width=eff_width,
         height=eff_height,
         output_dir=args.output,
-        uploads={"image_path": args.image_path},
+        uploads={"image_path": args.image_path, "reference_path": args.reference_paths},
     )
     supported_controls = generation_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_image_request_job(
@@ -1294,9 +1328,9 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     _apply_enhance_submission(args, form, mode="video", json_caption=False)
     args.enhance_record = _enhance_record_from_form(form, mode="video", app_config=app_config)
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
-        raise ValueError("Image-to-video requires a reference image.")
+        raise ValueError("Image to video requires a first frame.")
     if end_image_path is not None and image_path is None:
-        raise ValueError("A last-frame image needs a first-frame reference image.")
+        raise ValueError("A last frame needs a first frame.")
     _validate_video_args(args)
 
     resolved_model, model_info = resolve_video_model(app_config, model_name)
@@ -1418,7 +1452,7 @@ def _resolve_prompt_submission_with_enhance(
     if prompt_source not in PROMPT_SOURCE_VALUES:
         raise ValueError(f"Unknown prompt source '{prompt_source}'.")
     if prompt_source == "file":
-        option_ids = form.getlist("prompt_option_id") if hasattr(form, "getlist") else [form.get("prompt_option_id")]
+        option_ids = _form_values(form, "prompt_option_id")
         _normalized_path, options = resolve_prompt_file_options(
             _required_text(form, "prompts_file"),
             [str(option_id).strip() for option_id in option_ids if option_id and str(option_id).strip()],
@@ -1529,8 +1563,7 @@ def _optional_float(form: Any, key: str) -> float | None:
 def _checkbox(form: Any, key: str, *, default: bool = False) -> bool:
     if key not in form:
         return default
-    values = getattr(form, "getlist", lambda _key: [form.get(_key, "")])(key)
-    normalized = [str(value).strip().lower() for value in values]
+    normalized = [str(value).strip().lower() for value in _form_values(form, key)]
     return any(value not in {"", "0", "false", "off", "no"} for value in normalized)
 
 
@@ -1555,8 +1588,15 @@ def _resolve_video_size(form: Any, web_config: WebUiConfig, ratio: str) -> str:
 
 def _optional_path(form: Any, key: str) -> str | None:
     value = _optional_text(form, key)
-    if value is None:
-        return None
+    return None if value is None else _host_local_file(value, key)
+
+
+def _host_local_file(value: str, key: str) -> str:
+    """Return the resolved path of the existing file on the Web UI host that *value* names.
+
+    Raises:
+        ValueError: When *value* is a URL or not an existing file; *key* names the field in the message.
+    """
     if "://" in value:
         raise ValueError(f"Field '{key}' must be a host-local file path on the machine running the Web UI host.")
     path = Path(value).expanduser()
@@ -1647,32 +1687,75 @@ def _resolve_reference_image(form: Any, output_dir: str, *, path_key: str = "ima
     """
     uploaded_file = form.get(_upload_field(path_key))
     if _is_uploaded_file(uploaded_file):
-        return _save_uploaded_reference_image(uploaded_file, output_dir)
+        return _save_upload(uploaded_file, output_dir)
     return _optional_path(form, path_key)
+
+
+def _resolve_reference_images(form: Any, output_dir: str) -> list[str]:
+    """Return the references a form carries, in the order the repeated ``reference`` field lists them.
+
+    Each ``reference`` value is either an uploaded file (saved under the output folder) or the text path of an image on
+    the Web UI host, so one field keeps the Workspace's row order. Blank text values are skipped.
+
+    Args:
+        form: The submitted form.
+        output_dir: The output folder uploads are saved under.
+
+    Raises:
+        ValueError: When a path is not an existing PNG, JPEG or WebP file on the host, or an upload is not a readable image.
+    """
+    paths: list[str] = []
+    for value in _form_values(form, REFERENCE_FIELD):
+        if _is_uploaded_file(value):
+            paths.append(_save_upload(value, output_dir))
+        elif isinstance(value, str) and value.strip():
+            path = _host_local_file(value.strip(), REFERENCE_FIELD)
+            check_reference_files([path])
+            paths.append(path)
+    return paths
+
+
+def _form_values(form: Any, key: str) -> list[Any]:
+    """Return every value a form carries under *key*, in order; ``[]`` when it carries none.
+
+    A multi-valued form (``getlist``) lists each repeat; a plain mapping yields its one value, or its items if that is a list.
+    """
+    if hasattr(form, "getlist"):
+        return list(form.getlist(key))
+    value = form.get(key)
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
 def _is_uploaded_file(value: Any) -> bool:
     return bool(getattr(value, "filename", None) and getattr(value, "file", None))
 
 
-def _save_uploaded_reference_image(uploaded_file: Any, output_dir: str) -> str:
-    original_name = Path(str(uploaded_file.filename)).name
-    suffix = Path(original_name).suffix.lower() or ".png"
-    if suffix not in _IMAGE_EXTENSIONS:
-        raise ValueError("Reference image must be a PNG, JPEG, or WebP file.")
+def _save_upload(uploaded_file: Any, output_dir: str) -> str:
+    """Save an uploaded image under ``.web_uploads``, named by the hash of its content so the same image is saved once.
 
-    upload_dir = Path(output_dir) / ".web_uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    candidate = upload_dir / f"{uuid.uuid4().hex}{suffix}"
+    Returns:
+        The path of the saved file; a file already there (same content, same name) is left as it is.
+
+    Raises:
+        ValueError: When the extension is not PNG, JPEG or WebP, or the bytes are not a readable image.
+    """
+    suffix = Path(Path(str(uploaded_file.filename)).name).suffix.lower() or ".png"
+    if suffix not in IMAGE_EXTENSIONS:
+        raise ValueError("Image must be a PNG, JPEG, or WebP file.")
     uploaded_file.file.seek(0)
-    candidate.write_bytes(uploaded_file.file.read())
+    data = uploaded_file.file.read()
     try:
-        with Image.open(candidate) as image:
+        with Image.open(io.BytesIO(data)) as image:
             image.verify()
-    except (FileNotFoundError, OSError, UnidentifiedImageError, ValueError) as exc:
-        candidate.unlink(missing_ok=True)
-        raise ValueError("Uploaded reference image is invalid or unreadable.") from exc
-    return str(candidate)
+    except (OSError, UnidentifiedImageError, ValueError) as exc:
+        raise ValueError("Uploaded image is invalid or unreadable.") from exc
+    path = Path(output_dir) / ".web_uploads" / f"{hashlib.sha256(data).hexdigest()}{suffix}"
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_bytes_atomic(path, data)
+    return str(path)
 
 
 def _resolve_output_dir(value: str | None) -> str:
@@ -1710,12 +1793,13 @@ def _validate_model_capabilities(args: argparse.Namespace, defaults: dict[str, A
         eff_height: The effective height (custom or size-preset) to validate.
 
     Raises:
-        ValueError: When the model does not support a requested reference
-            image / upscale / quantization, or when effective dimensions fall
+        ValueError: When the model does not support a requested start image,
+            reference images beyond its cap, upscale or quantization, or when effective dimensions fall
             outside the model's ``dimension_min``/``dimension_max``/``dimension_step``.
     """
     if args.image_path is not None and not defaults.get("supports_img2img", True):
-        raise ValueError("This model does not support reference-image (img2img) steering.")
+        raise ValueError("This model does not support start-image (img2img) steering.")
+    check_reference_count(args.model, len(getattr(args, "reference_paths", None) or ()), int(defaults.get("max_reference_images", 0)))
     if args.upscale is not None and not defaults.get("supports_upscale", True):
         raise ValueError("This model does not support upscaling.")
     if getattr(args, "quantize", None) is not None and not defaults.get("supports_quantize", True):

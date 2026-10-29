@@ -487,6 +487,8 @@
   .ui-select-shell:disabled { opacity: 0.4; }
   .ui-field:disabled { opacity: 0.4; cursor: not-allowed; }
   .ui-label { display: block; font-size: var(--text-ui); font-weight: 500; color: var(--color-text-secondary); }
+  /* A hint under an inspector row, lined up with the row's value column; the colour modifiers below recolour it. */
+  .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); line-height: 1.45; color: var(--color-text-muted); }
   .ui-help { font-size: var(--text-meta); line-height: 1.45; color: var(--color-text-muted); }
   .ui-help-error { color: var(--color-error); }
   .ui-help-success { color: var(--color-success); }

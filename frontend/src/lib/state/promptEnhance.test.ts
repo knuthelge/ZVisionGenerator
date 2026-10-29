@@ -127,7 +127,7 @@ describe('sound, direction and context', () => {
 
   it('describes the video job', () => {
     const video = state({ workflow: 'img2vid', ratio: '9:16', dimensionMode: 'ratio', width: 704, height: 448, frameCount: 97, fps: 24, audio: true });
-    expect(enhanceContext(video)).toEqual({ ratio: '9:16', width: null, height: null, frames: 97, fps: 24, audio: true, reference_image: true, end_image: false });
+    expect(enhanceContext(video)).toEqual({ ratio: '9:16', width: null, height: null, frames: 97, fps: 24, audio: true, reference_image: true, references: 0, end_image: false });
     expect(hasAudio(video)).toBe(true);
   });
 
@@ -146,7 +146,7 @@ describe('sound, direction and context', () => {
 
   it('describes the image job without video facts', () => {
     const image = state({ workflow: 'txt2img', ratio: '2:3', dimensionMode: 'custom', width: 1024, height: 576, frameCount: 97, fps: 24, audio: true });
-    expect(enhanceContext(image)).toEqual({ ratio: '2:3', width: 1024, height: 576, frames: null, fps: null, audio: false, reference_image: false, end_image: false });
+    expect(enhanceContext(image)).toEqual({ ratio: '2:3', width: 1024, height: 576, frames: null, fps: null, audio: false, reference_image: false, references: 0, end_image: false });
   });
 });
 

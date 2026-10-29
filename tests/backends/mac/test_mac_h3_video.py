@@ -24,6 +24,7 @@ from safetensors import safe_open  # noqa: E402
 from safetensors.torch import load_file, save_file  # noqa: E402
 
 from tests._factories import make_extend_source  # noqa: E402
+from tests._images import is_bluish, is_reddish, write_cutout, write_sideways_photo  # noqa: E402
 from tests._media import REAL, ffmpeg, numbered_frames  # noqa: E402
 from tests._paths import REPO_ROOT  # noqa: E402
 
@@ -673,6 +674,18 @@ class TestImageToVideo:
         fitted = np.asarray(env.staged[0]["images"][0])
         assert fitted.shape == (32, 32, 3)
         assert (fitted[:, 4:28, 0] > 200).all() and (fitted[:, 4:28, 2] < 60).all()
+
+    def test_the_first_and_last_frames_are_opened_upright_and_on_white(self, env, written, tmp_path):
+        first = write_sideways_photo(tmp_path / "phone.jpg")
+        last = write_cutout(tmp_path / "cutout.png")
+
+        H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), first, "a fox", 20, 40, 22, 7, 8, str(tmp_path / "out.mp4"), end_image=last)
+
+        upright, flattened = (np.asarray(image) for image in env.staged[0]["images"])
+        assert upright.shape == (40, 20, 3)
+        assert is_reddish(tuple(upright[2, 10])) and is_bluish(tuple(upright[37, 10]))
+        assert flattened.shape == (40, 20, 3)
+        assert tuple(flattened[20, 18]) == (255, 255, 255)
 
     def test_an_end_image_adds_a_last_anchor(self, env, written, tmp_path):
         model = _load(env, mode="i2v")

@@ -382,6 +382,24 @@ class TestImageCrf:
         assert call["image_crf"] == 0
         assert call["image"].size == (512, 384)
 
+    def test_a_sideways_transparent_image_is_conditioned_upright_and_on_white(self, monkeypatch, tmp_path):
+        _patch_runtime(monkeypatch, _make_runtime())
+        model, _ = DiffusersVideoBackend().load_model(_LTX25_REPO, quantize=4, mode="i2v", low_memory=False)
+        sideways = Image.new("RGBA", (40, 20), (255, 0, 0, 255))
+        sideways.paste((0, 0, 255, 0), (20, 0, 40, 20))  # the right half is transparent
+        exif = sideways.getexif()
+        exif[0x0112] = 6
+        input_path = tmp_path / "input.png"
+        sideways.save(input_path, exif=exif)
+
+        DiffusersVideoBackend().image_to_video(model=model, image_path=str(input_path), **_text_to_video_args(tmp_path, width=20, height=40))
+
+        (call,) = model.image_to_video.calls
+        image = call["image"]
+        assert image.size == (20, 40)
+        assert image.getpixel((10, 2)) == (255, 0, 0)  # the red half is on top once upright
+        assert image.getpixel((10, 37)) == (255, 255, 255)  # the transparent half, on white
+
     def test_a_two_stage_run_passes_the_skip_to_both_stages(self, monkeypatch, tmp_path, order):
         _patch_runtime(monkeypatch, _make_runtime())
         _patch_upsampler_io(monkeypatch)

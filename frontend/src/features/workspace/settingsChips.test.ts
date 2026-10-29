@@ -41,6 +41,16 @@ describe('settingsChips', () => {
     expect(settingsChips(facts({ caps, seconds: 5 })).map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'seed', 'runs', 'size', 'audio', 'loras', 'model']);
   });
 
+  it('adds the References chip after the start image only where the model takes references', () => {
+    const caps = { ...imageCaps, showRefImage: true, showReferences: true, maxReferences: 4 } as WorkspaceCapabilities;
+    const keys = (chips: ReturnType<typeof settingsChips>) => chips.map((chip) => chip.key);
+
+    expect(keys(settingsChips(facts({ caps })))).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'reference', 'references', 'size', 'loras', 'upscale', 'model']);
+    expect(settingsChips(facts({ caps: { ...caps, referenceCount: 0 } })).find((chip) => chip.key === 'references')).toMatchObject({ on: false });
+    expect(settingsChips(facts({ caps: { ...caps, referenceCount: 2 } })).find((chip) => chip.key === 'references')).toMatchObject({ on: true });
+    expect(keys(settingsChips(facts()))).not.toContain('references');
+  });
+
   it('adds Strength and Reference for image to image, and Source and Extend for an extension', () => {
     const i2i = { ...imageCaps, showI2IStrength: true, showRefImage: true } as WorkspaceCapabilities;
     expect(settingsChips(facts({ caps: i2i })).map((chip) => chip.key)).toContain('strength');
@@ -55,7 +65,7 @@ describe('settingsChips', () => {
     const video = { ...imageCaps, isImageMode: false, showRefImage: true, showFrameCount: true, showGuidance: false, showImageUpscale: false } as WorkspaceCapabilities;
     const withoutLast = settingsChips(facts({ caps: video, seconds: 5, referenceName: 'start.png' }));
     expect(withoutLast.map((chip) => chip.key)).not.toContain('endReference');
-    expect(withoutLast.find((chip) => chip.key === 'reference')).toMatchObject({ label: 'Reference', value: 'start.png', on: true });
+    expect(withoutLast.find((chip) => chip.key === 'reference')).toMatchObject({ value: 'start.png', on: true });
 
     const withLast = settingsChips(facts({ caps: { ...video, showEndImage: true } as WorkspaceCapabilities, seconds: 5, referenceName: 'start.png', endReferenceName: 'end.png' }));
     const keys = withLast.map((chip) => chip.key);

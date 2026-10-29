@@ -65,6 +65,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     submitGenerate: mocks.submitGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
+    checkReferencePaths: mocks.checkReferencePaths,
     listJobs: mocks.listJobs,
     clearQueue: mocks.clearQueue,
     cancelJob: mocks.cancelJob,
@@ -315,15 +316,15 @@ describe('WorkspacePage', () => {
     draft.update('prompt', 'A lighthouse at dusk');
     await mountWorkspace(makeContext());
     toasts.splice(0, toasts.length);
-    workspaceApiMocks.submitGenerate.mockRejectedValueOnce(new ApiError('rejected', 422, 'Image-to-image requires a reference image.'));
+    workspaceApiMocks.submitGenerate.mockRejectedValueOnce(new ApiError('rejected', 422, 'Image to image requires a start image.'));
 
     target.querySelector('form')!.requestSubmit();
     await settle();
 
-    expect(target.querySelector('[data-testid="generate-error"]')?.textContent).toContain('Image-to-image requires a reference image.');
+    expect(target.querySelector('[data-testid="generate-error"]')?.textContent).toContain('Image to image requires a start image.');
     expect(target.textContent).not.toContain('The Workspace could not load');
     expect(toasts[0]?.type).toBe('error');
-    expect(toasts[0]?.message).toBe('Image-to-image requires a reference image.');
+    expect(toasts[0]?.message).toBe('Image to image requires a start image.');
 
     draft.update('steps', draft.state.steps + 1);
     await settle();

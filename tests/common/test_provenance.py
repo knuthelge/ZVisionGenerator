@@ -111,6 +111,21 @@ class TestBuildImageConfigPayload:
 
         assert payload["negative_prompt"] is None
 
+    def test_references_are_recorded_in_order_only_when_set_and_read_back(self, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/home/me")))
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (64, 64)))
+        plain = build_image_config_payload(_make_image_request(), artifacts)
+        with_refs = build_image_config_payload(_make_image_request(reference_paths=("/home/me/a.png", "/srv/b.png")), artifacts)
+
+        assert "reference_images" not in plain
+        assert with_refs["reference_images"] == ["~/a.png", "/srv/b.png"]
+        assert recorded_settings(with_refs).reference_images == ("/home/me/a.png", "/srv/b.png")
+        assert recorded_settings(plain).reference_images == ()
+
+    @pytest.mark.parametrize("value", ["a.png", [1, None, ""], {"a": 1}])
+    def test_malformed_recorded_references_read_back_as_none(self, value):
+        assert recorded_settings({"reference_images": value}).reference_images == ()
+
     def test_generation_records_time_upscale_and_postprocessing(self):
         request = _make_image_request(
             upscale_factor=2,

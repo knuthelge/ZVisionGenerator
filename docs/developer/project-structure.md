@@ -69,12 +69,14 @@ zvisiongenerator/
 │   │       ├── token_chunking.py  Run token-wise layers (feed-forward, RMSNorm) over a long sequence in chunks
 │   │       └── weights.py         LTX weights: the transformer (single-file for LTX-2.3, the repo's own for LTX-2.5) and the Gemma 3 or Gemma 4 text encoder, prepared once per quantize level
 │   └── mac/                       macOS (MLX)
+│       ├── _temp_images.py        Temporary PNG files for mflux, which reads start and reference images from paths
 │       ├── download_plan.py       Hugging Face downloads the mflux image, MLX video and mlx-lm enhancer backends need (no mflux import until planning)
 │       ├── h3_converted.py        Write a converted MiniMax H3 folder (8-bit MLX transformer) from a fine-tune
 │       ├── h3_staged.py           MiniMax H3 image modes (MLX): keyframe, vision, prompt, denoise and decode phases that each load one component and drop it before the next
 │       ├── h3_video.py            MiniMax H3 video backend (MLX): file resolution, the 4-bit text-encoder copy, LoRA combining and Extend around the vendored port
 │       ├── image.py               Image backend (mflux)
 │       ├── image_preview.py       Cheap latent → RGB live previews for the mflux backend
+│       ├── klein_references.py    FLUX.2 Klein references (mflux): an edit view over the loaded model, and the start-image hook for references with img2img
 │       ├── ltx_converted.py       Write a converted LTX-2.3 MLX folder from a single-file checkpoint
 │       ├── memory.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
 │       ├── prompt_enhancer.py     Prompt-enhancer LLM (mlx-lm)
@@ -145,6 +147,7 @@ zvisiongenerator/
 │   ├── hf_snapshot.py             Find or download the files of one pinned Hugging Face revision (shared by the CUDA and macOS H3 backends)
 │   ├── ideogram4_instant.py       Ideogram 4 Instant's pinned build sources, model folder and build record
 │   ├── image_model_detect.py      Image model type detection
+│   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`) and the accepted extensions
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
@@ -165,6 +168,7 @@ zvisiongenerator/
 │   ├── quantized_weights.py       Decode community checkpoints' quantized weights (scaled FP8, INT8, ConvRot, W4A4, W4A8, W6A8, NVFP4, MXFP8) one weight at a time
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
+│   ├── references.py              Reference images: parse the `--reference` list and check the count and files against what a model takes
 │   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache; reads a header and its metadata in one bounded read
 │   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling, and the write-once stored-copy routine

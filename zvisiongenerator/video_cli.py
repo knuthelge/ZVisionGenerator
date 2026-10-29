@@ -92,8 +92,8 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         metavar="N",
         help=f"Frames to add with --extend, rounded to a multiple of the model's extension step ({EXTEND_FRAME_STEP} for LTX, 17 for MiniMax H3; at least one step).",
     )
-    parser.add_argument("--image", dest="image_path", type=str, default=None, help="Input image for image-to-video: the first frame.")
-    parser.add_argument("--end-image", dest="end_image_path", type=str, default=None, help="Last-frame image: the clip runs from --image to it. Needs --image.")
+    parser.add_argument("--image", dest="image_path", type=str, default=None, help="First frame for image-to-video.")
+    parser.add_argument("--end-image", dest="end_image_path", type=str, default=None, help="Last frame: the clip runs from --image to it. Needs --image.")
     parser.add_argument("--ratio", type=str, default=None, help="Aspect ratio for generated video (e.g. 16:9, 9:16, 1:1).")
     parser.add_argument("-s", "--size", type=str, default=None, help="Resolution scale (e.g. s, m, l). Default from config.")
     parser.add_argument("-W", "--width", type=int, default=None, help="Override video width. LTX: must be divisible by 32.")
@@ -342,7 +342,7 @@ def main(*, prog: str = "ziv-video") -> None:
     if args.upscale is not None and args.upscale != 2:
         parser.error("--upscale only supports factor 2")
     if args.end_image_path is not None and args.image_path is None:
-        parser.error("--end-image needs --image: the clip runs from the first-frame image to the last-frame image.")
+        parser.error("--end-image needs --image: a last frame needs a first frame.")
     if args.review and args.upscale is None:
         parser.error("--review needs --upscale: without an upscale there is no half-size render to review.")
     if args.review and not supports_video_upscale_review():
@@ -441,9 +441,9 @@ def main(*, prog: str = "ziv-video") -> None:
 
     # Validate --image file exists
     if args.image_path and not os.path.isfile(args.image_path):
-        parser.error(f"Image file not found: {args.image_path}")
+        parser.error(f"First frame not found: {args.image_path}")
     if args.end_image_path and not os.path.isfile(args.end_image_path):
-        parser.error(f"End image file not found: {args.end_image_path}")
+        parser.error(f"Last frame not found: {args.end_image_path}")
 
     # Validate T2V-only model with --image
     if args.image_path and not model_info.supports_i2v:

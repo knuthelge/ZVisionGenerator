@@ -58,7 +58,7 @@ Press <kbd>?</kbd> anywhere outside a text field to see every shortcut. ++cmd++ 
 | ++left++ / ++right++ | Previous / next asset |
 | ++home++ / ++end++ | First / last asset |
 | ++r++ | Reuse settings |
-| ++e++ | Use as reference (image) or Extend (video) |
+| ++e++ | Use as (image) or Extend (video) |
 | ++x++ then ++2++ / ++4++ | Plain upscale 2× / 4× of an image (a creative upscale where the plain one isn't offered); ++x++ then ++2++ upscales a video (Windows and Linux) |
 | ++d++ | Download |
 | ++c++ | Copy the prompt |

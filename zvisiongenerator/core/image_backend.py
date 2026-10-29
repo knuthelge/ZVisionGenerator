@@ -58,6 +58,8 @@ class ImageBackend(Protocol):
         steps_explicit: bool = False,
         guidance_explicit: bool = False,
         first_sigma: float | None = None,
+        *,
+        reference_images: list[Image.Image] | None = None,
     ) -> Image.Image | None:
         """Generate image from text. Returns None if skipped.
 
@@ -68,6 +70,10 @@ class ImageBackend(Protocol):
 
         first_sigma overrides Ideogram 4's first-step sigma for this run; other
         families ignore it.
+
+        reference_images are images whose content the result reuses, in prompt order, each at its own size.
+        Only families with a reference capability (``max_reference_images`` above 0 in the config) take them; the
+        caller checks the count against it before calling.
         """
         ...
 
@@ -84,8 +90,14 @@ class ImageBackend(Protocol):
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        *,
+        reference_images: list[Image.Image] | None = None,
     ) -> Image.Image | None:
-        """Refine image. Returns None if skipped."""
+        """Refine image. Returns None if skipped.
+
+        reference_images are images whose content the result reuses (see :meth:`text_to_image`); *image* stays the
+        start image that sets layout. Only families with a reference capability take them (see :meth:`text_to_image`).
+        """
         ...
 
     def stored_quant_format(self, bits: int) -> str | None:

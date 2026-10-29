@@ -65,6 +65,8 @@
     extendSupport?: ExtendModelSupport | null;
     /** The clip also ends on a last-frame image, so the rewrite must not invent a different ending. */
     endImage?: boolean;
+    /** How many reference images are set (uploads included); the rewrite keeps the prompt's "image 1", "image 2". */
+    references?: number;
     /** The image model takes JSON captions, so the popover offers Write as: Text or JSON. */
     jsonCapable?: boolean;
   }
@@ -76,6 +78,7 @@
     jobsActive = false,
     jsonCapable = false,
     endImage = false,
+    references = 0,
     extendSupport = null,
     maxWords,
     enhancing = $bindable(false),
@@ -171,7 +174,7 @@
           mode,
           settings: settingsPayload(requested, mode, audio),
           max_words: maxWords,
-          context: enhanceContext(draft.state, audioSupported, sourceHasAudio, endImage),
+          context: enhanceContext(draft.state, audioSupported, sourceHasAudio, endImage, references),
           ...(runTier === 'smart' ? { enhance_model: 'smart' as const } : {}),
           ...(runCaption ? { format: 'json' as const } : {}),
         },

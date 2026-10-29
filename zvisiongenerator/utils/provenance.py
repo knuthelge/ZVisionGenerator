@@ -33,7 +33,8 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     """Build the config payload embedded in a saved image.
 
     The top-level keys are the reusable settings (schema, workflow, prompt, negative prompt, model, family, seed,
-    steps, guidance, scheduler, dimensions, ratio, size, reference image, strength, LoRAs). ``generation`` records
+    steps, guidance, scheduler, dimensions, ratio, size, start image, strength, references (``reference_images``, only
+    when set), LoRAs). ``generation`` records
     how the file was made (time, upscale, post-processing) and ``source`` the image an upscale started from.
     An auto-enhanced prompt replaces the template prompt so the asset records what rendered. An enhanced prompt also
     records the user's own text as ``prompt_input`` and how it was enhanced as ``enhance`` (options, model, tier, format).
@@ -66,6 +67,8 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     }
     if request.image_path:
         payload["image_strength"] = request.image_strength
+    if request.reference_paths:
+        payload["reference_images"] = [_portable_path(path) for path in request.reference_paths]
     payload.update(_enhance_fields(request.enhance_record, prompt_input=_image_prompt_input(request, artifacts)))
     source = artifacts.metadata.get("upscale_source")
     if source:
@@ -332,6 +335,8 @@ class RecordedSettings:
     # The image a video clip ends on (a first-and-last-frame clip).
     end_image_path: str | None = None
     image_strength: float | None = None
+    # The references an image was made with, in prompt order.
+    reference_images: tuple[str, ...] = ()
     # Video scene as generated, and the user's own scene and prompt when the recorded ones were enhanced.
     scene: str | None = None
     scene_input: str | None = None
@@ -369,6 +374,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         image_path=_local_path(optional_text(config.get("image_path"))),
         end_image_path=_local_path(optional_text(config.get("end_image_path"))),
         image_strength=optional_float(config.get("image_strength")),
+        reference_images=_local_paths(config.get("reference_images")),
         scene=optional_text(config.get("scene")),
         scene_input=optional_text(config.get("scene_input")),
         prompt_input=optional_text(config.get("prompt_input")),
@@ -527,6 +533,13 @@ def _portable_path(path: Any) -> Any:
 def _local_path(path: str | None) -> str | None:
     """Read a recorded path back with ``~`` expanded to this user's home directory."""
     return expand_home(path) if path is not None else None
+
+
+def _local_paths(value: Any) -> tuple[str, ...]:
+    """Read recorded paths back with ``~`` expanded; anything but a list of non-blank strings gives none."""
+    if not isinstance(value, list):
+        return ()
+    return tuple(expand_home(item) for item in value if isinstance(item, str) and item.strip())
 
 
 def _format_loras(paths: list[str] | None, weights: list[float] | None) -> str | None:

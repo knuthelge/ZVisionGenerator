@@ -49,7 +49,7 @@ The finished clip plays in the preview and appears in the Gallery strip.
 
 ## Start from an image
 
-Choose **Image to Video**, then pick the first frame under **Reference image**: browse to a file, upload one from this device, or use one you made. In the [viewer](gallery.md#the-viewer), **Use as reference** → **For video (img2vid)** loads an image and puts its prompt in Scene.
+Choose **Image to Video**, then pick the first frame under **Frames**: browse to a file, upload one from this device, or use one you made. In the [viewer](gallery.md#the-viewer), **Use as** → **First frame** loads an image and puts its prompt in Scene.
 
 Describe in Action what happens from that frame on. The image is scaled to cover the video size and the overflow is cut from the centre, so pick a **Ratio** close to the image's shape.
 

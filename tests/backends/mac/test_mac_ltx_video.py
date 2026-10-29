@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import os
 import sys
 from functools import partial
@@ -13,6 +12,7 @@ from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from tests._factories import make_extend_source
 
@@ -36,6 +36,16 @@ from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 # ---------------------------------------------------------------------------
 
 _FPS = 24.0
+
+
+def _png(directory: Path, name: str, *, size: tuple[int, int] = (8, 6)) -> str:
+    """Return the path of a small opaque PNG named *name* in *directory*, written on first use."""
+    path = directory / name
+    if not path.exists():
+        Image.new("RGB", size, "blue").save(path)
+    return str(path)
+
+
 _LATENT_SHAPE = (3, 7, 11)  # (F, H, W)
 _AUDIO_TOKENS = 16
 _FAKE_DISTILLED_SIGMAS = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.2, 0.0]
@@ -667,16 +677,17 @@ class TestOneStageGeneration:
         assert "aggressive_cleanup" not in _call_names(ltx)
         assert pipe.prompt_encoder.call_args == call("a prompt", free_after=False)
 
-    def test_a_2_3_handle_never_calls_the_ancestral_loop(self, ltx):
-        _run_one_stage(_pipeline(ltx), image_path="/tmp/first.png")
+    def test_a_2_3_handle_never_calls_the_ancestral_loop(self, ltx, tmp_path):
+        _run_one_stage(_pipeline(ltx), image_path=_png(tmp_path, "first.png"))
 
         ltx.samplers.euler_ancestral_denoising_loop.assert_not_called()
         ltx.diffusion_steps.EulerAncestralDiffusionStep.assert_not_called()
 
-    @pytest.mark.parametrize("image_path", [None, "/tmp/first.png"])
-    def test_a_2_5_clip_runs_the_ancestral_loop_on_the_2_5_schedule(self, ltx, image_path):
+    @pytest.mark.parametrize("with_image", [False, True])
+    def test_a_2_5_clip_runs_the_ancestral_loop_on_the_2_5_schedule(self, ltx, with_image, tmp_path):
         pipe = _pipeline(ltx)
         pipe.dit = object()
+        image_path = _png(tmp_path, "first.png") if with_image else None
 
         _run_one_stage(pipe, image_path=image_path, steps=6, ltx25=True)
 
@@ -737,11 +748,11 @@ class TestOneStageGeneration:
         assert pipe.audio_decoder is not None
         assert pipe.vocoder is not None
 
-    def test_i2v_conditions_the_image_at_frame_zero(self, ltx):
+    def test_i2v_conditions_the_image_at_frame_zero(self, ltx, tmp_path):
         pipe = _pipeline(ltx)
-        input_image = _ImageConditioningInput(path="/tmp/in.png", frame_idx=0, strength=1.0)
+        input_image = _ImageConditioningInput(path=_png(tmp_path, "in.png"), frame_idx=0, strength=1.0)
 
-        _run_one_stage(pipe, image_path="/tmp/in.png")
+        _run_one_stage(pipe, image_path=_png(tmp_path, "in.png"))
 
         pipe.image_conditioner.resolve_crf.assert_called_once_with([input_image])
         F, H, W = _LATENT_SHAPE
@@ -755,42 +766,64 @@ class TestOneStageGeneration:
         )
         assert pipe.image_conditioner.call_args.kwargs == {"free_after": False}
 
-    def test_i2v_materializes_clean_latents_before_the_encoder_is_freed(self, ltx):
+    def test_i2v_materializes_clean_latents_before_the_encoder_is_freed(self, ltx, tmp_path):
         pipe = _pipeline(ltx)
 
-        _run_one_stage(pipe, image_path="/tmp/in.png")
+        _run_one_stage(pipe, image_path=_png(tmp_path, "in.png"))
 
         names = [c[0] for c in ltx.calls.method_calls if c[0] in {"combined_image_conditionings", "mx_eval", "conditioner_returned"}]
         assert names == ["combined_image_conditionings", "mx_eval", "conditioner_returned"]
         assert ltx.mx.eval.call_args.args == ("clean_a", "clean_b")
 
-    def test_an_end_image_is_pinned_to_the_last_frame_after_the_first(self, ltx):
+    def test_an_end_image_is_pinned_to_the_last_frame_after_the_first(self, ltx, tmp_path):
         pipe = _pipeline(ltx)
 
-        _run_one_stage(pipe, image_path="/tmp/first.png", end_image="/tmp/last.png")
+        _run_one_stage(pipe, image_path=_png(tmp_path, "first.png"), end_image=_png(tmp_path, "last.png"))
 
-        anchors = [_ImageConditioningInput(path="/tmp/first.png", frame_idx=0), _ImageConditioningInput(path="/tmp/last.png", frame_idx=48)]
+        anchors = [_ImageConditioningInput(path=_png(tmp_path, "first.png"), frame_idx=0), _ImageConditioningInput(path=_png(tmp_path, "last.png"), frame_idx=48)]
         pipe.image_conditioner.resolve_crf.assert_called_once_with(anchors)
         assert ltx.orchestration.combined_image_conditionings.call_args.args == (anchors,)
 
-    def test_an_end_image_materializes_the_keyframe_latent_next_to_the_first_frame_latent(self, ltx):
+    def test_an_end_image_materializes_the_keyframe_latent_next_to_the_first_frame_latent(self, ltx, tmp_path):
         pipe = _pipeline(ltx)
         ltx.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: [SimpleNamespace(clean_latent="first"), SimpleNamespace(keyframe_latent="last")]
 
-        _run_one_stage(pipe, image_path="/tmp/first.png", end_image="/tmp/last.png")
+        _run_one_stage(pipe, image_path=_png(tmp_path, "first.png"), end_image=_png(tmp_path, "last.png"))
 
         assert ltx.mx.eval.call_args.args == ("first", "last")
 
-    def test_an_end_image_without_a_first_image_is_refused(self, ltx):
+    def test_a_sideways_first_frame_is_handed_over_as_an_upright_copy(self, ltx, tmp_path):
+        pipe = _pipeline(ltx)
+        sideways = tmp_path / "phone.jpg"
+        photo = Image.new("RGB", (8, 4), "red")
+        exif = photo.getexif()
+        exif[0x0112] = 6  # stored rotated: shown 90 degrees clockwise
+        photo.save(sideways, exif=exif)
+        handed_over: list[tuple[str, tuple[int, int]]] = []
+
+        def _record(inputs):
+            for item in inputs:
+                with Image.open(item.path) as opened:
+                    handed_over.append((item.path, opened.size))
+            return inputs
+
+        pipe.image_conditioner.resolve_crf.side_effect = _record
+
+        _run_one_stage(pipe, image_path=str(sideways))
+
+        ((path, size),) = handed_over
+        assert path != str(sideways) and size == (4, 8)
+
+    def test_an_end_image_without_a_first_image_is_refused(self, ltx, tmp_path):
         from zvisiongenerator.backends.mac.video import _generate
 
         with pytest.raises(ValueError, match="end_image_path needs image_path"):
-            _generate(_handle(_pipeline(ltx)), "p", 704, 480, 49, 1, 8, "/tmp/o.mp4", None, None, None, end_image_path="/tmp/last.png")
+            _generate(_handle(_pipeline(ltx)), "p", 704, 480, 49, 1, 8, "/tmp/o.mp4", None, None, None, end_image_path=_png(tmp_path, "last.png"))
 
-    def test_i2v_frees_the_encoder_under_low_memory(self, ltx):
+    def test_i2v_frees_the_encoder_under_low_memory(self, ltx, tmp_path):
         pipe = _pipeline(ltx, low_memory=True)
 
-        _run_one_stage(pipe, image_path="/tmp/in.png")
+        _run_one_stage(pipe, image_path=_png(tmp_path, "in.png"))
 
         assert pipe.image_conditioner.call_args.kwargs == {"free_after": True}
 
@@ -820,9 +853,10 @@ class TestOneStageGeneration:
 class TestTwoStageGeneration:
     """Verify upscale runs through DistilledPipeline.generate_and_save with a progress adapter."""
 
-    @pytest.mark.parametrize("image_path", [None, "/tmp/in.png"])
-    def test_generate_and_save_receives_exactly_the_supported_kwargs(self, ltx, image_path):
+    @pytest.mark.parametrize("with_image", [False, True])
+    def test_generate_and_save_receives_exactly_the_supported_kwargs(self, ltx, with_image, tmp_path):
         pipe = MagicMock()
+        image_path = _png(tmp_path, "in.png") if with_image else None
         backend = LtxVideoBackend()
         kwargs = dict(model=_handle(pipe, upscale=True), prompt="p", width=704, height=480, num_frames=49, seed=7, steps=8, output_path="/tmp/o.mp4", stage1_steps=6)
 
@@ -843,12 +877,12 @@ class TestTwoStageGeneration:
         }
         assert result == Path("/tmp/o.mp4")
 
-    def test_an_end_image_passes_both_images_with_the_last_at_frame_minus_one(self, ltx):
+    def test_an_end_image_passes_both_images_with_the_last_at_frame_minus_one(self, ltx, tmp_path):
         pipe = MagicMock()
 
         LtxVideoBackend().image_to_video(
             model=_handle(pipe, upscale=True),
-            image_path="/tmp/first.png",
+            image_path=_png(tmp_path, "first.png"),
             prompt="p",
             width=704,
             height=480,
@@ -857,11 +891,11 @@ class TestTwoStageGeneration:
             steps=8,
             output_path="/tmp/o.mp4",
             stage1_steps=6,
-            end_image="/tmp/last.png",
+            end_image=_png(tmp_path, "last.png"),
         )
 
         kwargs = pipe.generate_and_save.call_args.kwargs
-        assert kwargs["images"] == [_ImageConditioningInput(path="/tmp/first.png", frame_idx=0), _ImageConditioningInput(path="/tmp/last.png", frame_idx=-1)]
+        assert kwargs["images"] == [_ImageConditioningInput(path=_png(tmp_path, "first.png"), frame_idx=0), _ImageConditioningInput(path=_png(tmp_path, "last.png"), frame_idx=-1)]
 
     def test_frame_rate_comes_from_the_handle(self, ltx):
         pipe = MagicMock()

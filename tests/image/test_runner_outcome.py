@@ -8,6 +8,7 @@ from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PIL import Image
 
 from tests._factories import _make_args, _make_plan
 
@@ -672,7 +673,6 @@ class TestReviewBeforeUpscale:
 
     @staticmethod
     def _workflow(upscale):
-        from PIL import Image
 
         from zvisiongenerator.workflows.image_stages import review_stage
 

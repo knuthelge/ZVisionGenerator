@@ -69,3 +69,33 @@ class TestRunnerResolvesDenoise:
 
         (call,) = mock_workflow.run.call_args_list
         assert call.args[0].upscale_denoise == expected
+
+
+class TestRunnerBuildsReferences:
+    """run_batch() carries the references and the model's cap into the request."""
+
+    def test_the_runner_puts_references_and_the_cap_into_the_request(self, config, tmp_path):
+        from PIL import Image
+
+        from zvisiongenerator.core.types import StageOutcome
+        from zvisiongenerator.image_runner import run_batch
+        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+
+        config["model_presets"] = {"flux2_klein": {"max_reference_images": 4}}
+        paths = [str(tmp_path / "a.png"), str(tmp_path / "b.png")]
+        for path in paths:
+            Image.new("RGB", (8, 8)).save(path)
+        args = _make_args(model="models/fake", size="m", reference_paths=paths)
+        backend = MagicMock()
+        backend.name = "mock"
+        model_info = ImageModelInfo(family="flux2_klein", is_distilled=True, size=None)
+        prompts_data = {"test_set": [("a cat", None)]}
+        workflow = MagicMock()
+        workflow.run.return_value = StageOutcome.success
+
+        with patch("zvisiongenerator.image_runner.build_workflow", return_value=workflow):
+            run_batch(backend, "fake_model", prompts_data, config, args, model_info=model_info, plan=_make_plan(prompts_data, args, config=config))
+
+        request = workflow.run.call_args.args[0]
+        assert request.reference_paths == tuple(paths)
+        assert request.max_reference_images == 4

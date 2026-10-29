@@ -71,13 +71,17 @@ Describe what the image shows in Scene and what happens in Action. The enhancer 
 
 ### First and last frame
 
-Image to video can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. Every video model takes one.
+Image to video can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. Every video model takes one. As with a start image, photos are turned upright by their orientation tag and transparent areas are filled with white.
 
 - **The last frame is a looser match than the first.** The clip ends close to the image, slightly softer. With MiniMax H3 the first frame is a close re-render of the image too, not the image pasted in.
 - **Use two images of the same scene,** seen from about the same place. If they show different places, the clip cuts (LTX) or dissolves (MiniMax H3) to the last image near the end.
 - **Give a big change time.** A new pose or a long camera move needs a few seconds; in a 2 s clip, LTX may cut to the last image instead of moving there.
 
 With a last frame, the enhancer writes the change that leads from one image to the other instead of inventing an ending. A clip made from two images records both, and **Reuse settings** loads both.
+
+### Keep a person, object or place in a clip
+
+Video models don't take [references](images.md#references), but images do. To put a particular person, object or place in a clip, make the first frame with FLUX.2 Klein and references, then use it for image to video; for a longer or bigger change, make a second image the same way and use it as the last frame. In the Web UI, **Use as → First frame** and **Last frame** in the viewer take an image straight there.
 
 ## Sound
 

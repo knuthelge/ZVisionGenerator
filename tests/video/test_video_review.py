@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PIL import Image
 
 from tests._factories import _make_mock_video_backend, _make_plan, _make_video_args
 from tests.video._helpers import make_ltx_info, make_video_request, patch_video_cli_for_preflight
@@ -119,8 +120,12 @@ def _generate(pipe, review, *, stage1_steps: int | None = 6, upscale: bool = Tru
 
 
 class TestLtxReviewWrapper:
-    @pytest.mark.parametrize("image_path", [None, "/in/start.png"])
-    def test_review_runs_between_the_stages_and_generate_and_save_runs_once(self, ltx_memory, image_path):
+    @pytest.mark.parametrize("with_image", [False, True])
+    def test_review_runs_between_the_stages_and_generate_and_save_runs_once(self, ltx_memory, with_image, tmp_path):
+        image_path = None
+        if with_image:
+            image_path = str(tmp_path / "start.png")
+            Image.new("RGB", (8, 6)).save(image_path)
         pipe = _FakeDistilledPipeline(low_memory=True)
         reviewed: list[str] = []
 

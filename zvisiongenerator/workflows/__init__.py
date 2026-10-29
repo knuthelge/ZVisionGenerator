@@ -12,6 +12,7 @@ from zvisiongenerator.workflows.image_stages import (
     resolve_prompt_stage,
     suppress_negative_stage,
     load_reference_stage,
+    load_references_stage,
     load_source_stage,
     review_stage,
     text_to_image_stage,
@@ -30,7 +31,7 @@ def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> Genera
     stages = [resolve_prompt_stage]
     if enhance:
         stages.append(enhance_prompt_stage)
-    stages += [suppress_negative_stage, load_reference_stage, text_to_image_stage]
+    stages += [suppress_negative_stage, load_reference_stage, load_references_stage, text_to_image_stage]
     if args.upscale:
         if review_enabled(args):
             stages.append(review_stage)

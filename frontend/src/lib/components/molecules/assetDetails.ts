@@ -38,8 +38,9 @@ export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
       generation.quantize ? { label: 'Quantize', value: `${generation.quantize}-bit` } : null,
       asset.frame_count ? { label: 'Frames', value: String(asset.frame_count) } : null,
       ...(asset.lora ? loraFacts(asset.lora) : []),
-      asset.image_path ? { label: 'Reference', value: fileName(asset.image_path), wide: details.image_strength == null && !asset.end_image_path } : null,
+      asset.image_path ? { label: isVideo ? 'First frame' : 'Start image', value: fileName(asset.image_path), wide: details.image_strength == null && !asset.end_image_path } : null,
       asset.end_image_path ? { label: 'Last frame', value: fileName(asset.end_image_path) } : null,
+      asset.reference_images?.length ? { label: 'References', value: asset.reference_images.map(fileName).join(', '), wide: true } : null,
       asset.image_path && details.image_strength != null ? { label: 'Strength', value: String(details.image_strength) } : null,
     ]),
     postProcessing: compact([

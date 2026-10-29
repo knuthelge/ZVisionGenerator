@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
+
 
 @dataclass(frozen=True)
 class BrowsePurpose:
@@ -85,7 +87,7 @@ _PURPOSES: dict[str, BrowsePurpose] = {
     "prompt_file_folder": BrowsePurpose(name="prompt_file_folder", kind="directory", label="Prompt file folder"),
     "checkpoint_file": BrowsePurpose(name="checkpoint_file", kind="existing_file", label="Checkpoint file", accepted_extensions=(".safetensors",), default_place="models"),
     "lora_file": BrowsePurpose(name="lora_file", kind="existing_file", label="LoRA file", accepted_extensions=(".safetensors",), default_place="loras"),
-    "reference_image": BrowsePurpose(name="reference_image", kind="existing_file", label="Reference image", accepted_extensions=(".png", ".jpg", ".jpeg", ".webp"), default_place="output"),
+    "reference_image": BrowsePurpose(name="reference_image", kind="existing_file", label="Image", accepted_extensions=IMAGE_EXTENSIONS, default_place="output"),
     "source_video": BrowsePurpose(name="source_video", kind="existing_file", label="Source video", accepted_extensions=SOURCE_VIDEO_EXTENSIONS, default_place="output"),
 }
 

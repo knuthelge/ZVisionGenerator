@@ -13,6 +13,7 @@
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
   import ReferenceSlot from './ReferenceSlot.svelte';
+  import ReferencesSection from './ReferencesSection.svelte';
   import SourceVideoSection from './SourceVideoSection.svelte';
   import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
 
@@ -35,6 +36,11 @@
     /** Preview for a last-frame path that points at a known asset. */
     endPreviewUrl?: string | null;
     onEndImageFileChange?: (file: File | null) => void;
+    /** The images uploaded as references, by row (Text to Image and Image to Image, on a model that takes references). */
+    referenceFiles?: (File | null)[];
+    /** Why a reference blocks Generate (a row whose image is gone), computed once by the Workspace; null when none does. */
+    referenceBlock?: string | null;
+    onReferenceFilesChange?: (files: (File | null)[]) => void;
     /** Copy the CLI command for the current settings; the button is hidden without it. */
     oncopycli?: () => void;
     /** Off: the footer closes the pane (`ondone`) instead of generating, where another button owns Generate. */
@@ -42,7 +48,7 @@
     ondone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, oncopycli, submit = true, ondone }: Props = $props();
+  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, referenceFiles = [], referenceBlock = null, onReferenceFilesChange = () => {}, oncopycli, submit = true, ondone }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -191,7 +197,7 @@
     draft.update('seed', s.seed !== null ? null : (lastSeed ?? randomSeed()));
   }
 
-  // --- Reference image ------------------------------------------------------
+  // --- Start image ----------------------------------------------------------
   const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : ''));
   const endName = $derived(endImageFile?.name ?? (s.endImagePath ? fileName(s.endImagePath) : ''));
   // The summary reads "start.png → end.png" once both are set, and the first alone (or None) otherwise.
@@ -200,13 +206,15 @@
   // --- Footer ---------------------------------------------------------------
   const promptFileMode = $derived(s.promptSource === 'file');
   const promptChoiceMissing = $derived(promptFileMode && s.promptFileOptionIds.length === 0);
-  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked);
-  // One reason at a time, linked to Generate: the source comes first, then the prompt file.
-  const generateReason = $derived(sourceGuard.note ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
+  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || referenceBlock !== null);
+  // One reason at a time, linked to Generate: the source comes first, then the references, then the prompt file.
+  const generateReason = $derived(sourceGuard.note ?? referenceBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
 
   function resetAll(): void {
     draft.resetSelections(context);
     onImageFileChange(null);
+    onEndImageFileChange(null);
+    onReferenceFilesChange([]);
   }
 
   function scrubber(value: number | null, spec: NumberSpec, onchange: (value: number) => void, disabled = false): ScrubOptions {
@@ -373,13 +381,13 @@
     </InspectorSection>
 
     {#if caps.showRefImage}
-      <InspectorSection id="reference" title="Reference image" summary={referenceSummary} active={Boolean(referenceName || (caps.showEndImage && endName))}>
+      <InspectorSection id="reference" title={caps.showEndImage ? 'Frames' : 'Start image'} summary={referenceSummary} active={Boolean(referenceName || (caps.showEndImage && endName))}>
         <ReferenceSlot
           idBase="ws-image"
           label={caps.showEndImage ? 'First frame' : 'Image'}
-          names={{ browse: 'Browse for a reference image', upload: 'Upload a reference image from this device', clear: 'Clear reference image', preview: 'Reference preview' }}
+          names={{ browse: 'Browse for a start image', upload: 'Upload a start image from this device', clear: 'Clear start image', preview: 'Start image preview' }}
           pathName="image_path"
-          placeholder="/path/to/reference.png"
+          placeholder="/path/to/start-image.png"
           emptyText="Browse or drop"
           path={s.referenceImagePath}
           file={imageFile}
@@ -405,6 +413,10 @@
           {#if endName}<p class="row-hint">The clip ends on this image; different scenes dissolve into each other.</p>{/if}
         {/if}
       </InspectorSection>
+    {/if}
+
+    {#if caps.showReferences}
+      <ReferencesSection max={caps.maxReferences} files={referenceFiles} onfileschange={onReferenceFilesChange} />
     {/if}
 
     {#if showPostprocess}
@@ -652,10 +664,6 @@
   @media (pointer: coarse) {
     .settings-pane :global(.inspector-select) { height: 32px; padding: 0 8px; background: var(--color-bg-surface-hover); font-size: 14px; }
   }
-  .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
-
-  /* The row hint's muted colour is scoped to this pane and would otherwise outrank the warning colour. */
-  .row-hint.ui-help-warning { color: var(--color-warning); }
   .memory-note { display: flex; align-items: flex-start; gap: 4px; }
   .memory-note :global(svg) { margin-top: 2px; }
   .extend-total { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-secondary); }

@@ -32,7 +32,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 |---|---|---|
 | **Details** | Shows the settings the file was made with | ++i++ |
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
-| **Use as reference** | Opens an image as the reference for Image to Image or Image to Video, with its prompt | ++e++ |
+| **Use as** | Opens an image as the start image of Image to Image, or the first or last frame of Image to Video, with its prompt | ++e++ |
 | **Extend** | Opens a video in Extend Video | ++e++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× (Windows and Linux) | ++x++ then ++2++ or ++4++ |
 | **Download** | Saves the file to this device | ++d++ |
@@ -43,24 +43,24 @@ Zoom into an image to see its real pixels: click it on a computer, or pinch or d
 
 ### Details
 
-**Details** lists what the file records: prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, reference image, quant, upscale and post-processing. See [Output files](../concepts/data-folder.md#output-files).
+**Details** lists what the file records: prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, references, quant, upscale and post-processing. See [Output files](../concepts/data-folder.md#output-files).
 
 When the prompt was enhanced, Details shows how, as one line such as *Fast · Cinematic, Melancholic, Longer*, with **Your prompt** under it.
 
 ### Reuse settings
 
-**Reuse settings** loads the file's settings into the Workspace: model, LoRAs, quant, size, seed and the rest.
+**Reuse settings** loads the file's settings into the Workspace: model, LoRAs, quant, size, seed, references and the rest.
 
 - For an enhanced prompt, **Your text** gets what you typed, **Enhanced** gets the rewrite, and the enhance options come back too.
 - For a video, Scene and Action are filled. A video that was itself an extension comes back with its source.
 
-### Use as reference
+### Use as
 
-**Use as reference** opens an image as the reference image, together with its prompt:
+**Use as** opens an image as an input, together with its prompt:
 
-- **For image (img2img)** puts the prompt in the Prompt box.
-- **For video (img2vid)** puts it in Scene, since it describes the first frame, and leaves Action for what happens.
-- **For last frame (img2vid)** makes it the last frame of an image-to-video clip.
+- **Start image** opens it as the start image of Image to Image and puts the prompt in the Prompt box.
+- **First frame** opens it as the first frame of Image to Video and puts the prompt in Scene, since it describes the first frame, and leaves Action for what happens.
+- **Last frame** makes it the last frame of an image-to-video clip.
 
 ### Upscale a video
 

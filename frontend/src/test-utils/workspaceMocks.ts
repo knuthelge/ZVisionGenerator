@@ -10,6 +10,7 @@ export const workspaceApiMocks = {
   submitGenerate: vi.fn<(formData: FormData) => Promise<JobContext>>(),
   getJobSnapshot: vi.fn<(jobId: string) => Promise<JobSnapshot>>(),
   parseUrlPrefill: vi.fn<() => Record<string, string>>(),
+  checkReferencePaths: vi.fn<(paths: string[]) => Promise<string[]>>(),
   listJobs: vi.fn(async () => ({ active_job: null as JobSnapshot | null, queued_jobs: [] as JobSnapshot[] })),
   clearQueue: vi.fn(async () => ({ cancelled: [] as string[] })),
   cancelJob: vi.fn(async () => undefined),

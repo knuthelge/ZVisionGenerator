@@ -13,7 +13,7 @@ How the app works, whichever way you use it. The [Web UI](../web-ui/index.md) an
 | [Models](models.md) | The built-in models, what each is good at, and how a model name is found |
 | [Prompts and prompt files](prompts.md) | Random choices, snippets, structured prompts, negative prompts and video scenes |
 | [Prompt enhancer](prompt-enhancer.md) | The local model that rewrites your prompts, and its options |
-| [Images](images.md) | Sizes, reference images and post-processing |
+| [Images](images.md) | Sizes, start image, references and post-processing |
 | [Video](video.md) | Scene and action, sizes, sound and extending a clip |
 | [Upscaling](upscaling.md) | Upscaling new images, existing images and video |
 | [LoRAs](loras.md) | Adding styles and subjects to a model |

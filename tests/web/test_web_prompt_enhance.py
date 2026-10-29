@@ -311,6 +311,18 @@ class TestEnhanceEndpoint:
         assert job["context"] == EnhanceContext(audio=True, seconds=97 / 24, orientation="portrait", reference_image=True)
         assert (job["settings"].sound, job["settings"].note) == (("ambient",), "at dusk")
 
+    def test_context_carries_the_reference_count(self):
+        def parsed(context):
+            return web_server._validate_enhance_body({"prompt": "a fox", "mode": "image", "context": context})["context"]
+
+        assert parsed({"references": 3, "reference_image": True}) == EnhanceContext(reference_image=True, references=3)
+        assert parsed({"width": 512, "height": 512}).references == 0
+
+    @pytest.mark.parametrize("value", [-1, "2", True])
+    def test_context_reference_count_is_a_non_negative_whole_number(self, value):
+        with pytest.raises(ValueError, match="context.references"):
+            web_server._validate_enhance_body({"prompt": "a fox", "mode": "image", "context": {"references": value}})
+
     def test_context_last_frame_is_a_strict_boolean(self):
         def parsed(value):
             return web_server._validate_enhance_body({"prompt": "a fox", "mode": "video", "context": {"reference_image": True, "end_image": value}})["context"]

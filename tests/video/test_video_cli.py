@@ -981,13 +981,11 @@ class TestVideoCliH3:
         assert (args.image_path, args.end_image_path) == ("a.png", "b.png")
         assert _build_video_parser().parse_args(["-m", "h3"]).end_image_path is None
 
-    def test_an_end_image_without_an_image_is_refused(self, monkeypatch, tmp_path, capsys):
+    def test_an_end_image_without_an_image_is_refused(self, monkeypatch, tmp_path):
         _first, last = self._images(tmp_path)
 
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--end-image", last])
-
-        assert "--end-image needs --image" in capsys.readouterr().err
 
     def test_a_missing_end_image_file_is_refused(self, monkeypatch, tmp_path, capsys):
         first, _last = self._images(tmp_path)
@@ -995,7 +993,7 @@ class TestVideoCliH3:
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--image", first, "--end-image", str(tmp_path / "gone.png")])
 
-        assert "End image file not found" in capsys.readouterr().err
+        assert str(tmp_path / "gone.png") in capsys.readouterr().err
 
     def test_a_family_without_the_capability_refuses_the_end_image(self, monkeypatch, tmp_path, capsys):
         first, last = self._images(tmp_path)

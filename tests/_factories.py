@@ -43,6 +43,7 @@ def _make_args(**overrides):
         review=False,
         image_path=None,
         image_strength=0.5,
+        reference_paths=None,
         output="outputs",
         model="test-model",
         sharpen=True,

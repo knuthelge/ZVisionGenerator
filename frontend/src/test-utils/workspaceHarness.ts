@@ -13,6 +13,7 @@ import type { sceneSource } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
+import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import type { WorkspaceContext } from '$lib/types';
 import { makeGalleryPage } from './workspace';
@@ -31,6 +32,8 @@ export function resetWorkspaceTest(): void {
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();
+  heldUploads.clearReferences();
+  heldUploads.clearFrames();
   workspaceMemory.forget();
   extendInspection.reset();
   clipMemory.reset();
@@ -47,7 +50,7 @@ export function resetWorkspaceTest(): void {
   toasts.splice(0, toasts.length);
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
-    galleryApiMocks.getGallery, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
+    galleryApiMocks.getGallery, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.checkReferencePaths, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
     videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
   ]) mock.mockReset();
@@ -58,6 +61,7 @@ export function resetWorkspaceTest(): void {
   workspaceApiMocks.cancelJob.mockClear();
   workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });
   workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
+  workspaceApiMocks.checkReferencePaths.mockResolvedValue([]);
   galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage());
 }
 

@@ -1,7 +1,8 @@
+import { parseQuery } from '$lib/prefillParams';
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
-import type { AssetUpscaleFactor, GalleryAsset, JobWorkflow, UpscaleFactor, UpscaleMethod, Workflow } from '$lib/types';
+import type { AssetUpscaleFactor, GalleryAsset, JobWorkflow, PrefillParams, UpscaleFactor, UpscaleMethod, Workflow } from '$lib/types';
 
-/** Which generation a reference image feeds: an image, a video's first frame, or a video's last frame. */
+/** Which generation a start image feeds: an image, a video's first frame, or a video's last frame. */
 export type ReferenceTarget = 'image' | 'video' | 'last';
 
 /** Callbacks for the actions every asset surface offers; an absent callback hides its action. */
@@ -67,35 +68,39 @@ const REFERENCE_WORKFLOWS: Record<ReferenceTarget, Workflow> = {
 
 const FALLBACK_REASON_TEXT: Record<string, string> = {
   workflow_media_mismatch: 'The saved workflow does not match this media type; the default workflow is used.',
-  missing_reference_image: 'The original reference image is unknown; reuse starts a text-to-media run instead.',
+  missing_reference_image: 'The original start image is unknown; reuse starts a text-to-media run instead.',
   model_not_configured: 'The original model is not configured here; the default model is used.',
   missing_source_video: 'The video this one continued has moved or been deleted; choose it again to extend.',
   extend_unavailable: 'Extending a video is not available here; reuse starts a text-to-video run instead.',
 };
 
-/** Return the workspace prefill params carried by an asset's reuse URL. */
-export function reuseParams(asset: GalleryAsset): Record<string, string> {
+/** Return the workspace prefill params carried by an asset's reuse URL; a name that repeats (`reference_path`) is a list, in order. */
+export function reuseParams(asset: GalleryAsset): PrefillParams {
   const query = (asset.reuse_workspace_url ?? '').replace(/^#\/[^?]*\??/, '');
-  const params: Record<string, string> = {};
-  if (query) new URLSearchParams(query).forEach((value, key) => { params[key] = value; });
+  const params = parseQuery(query);
+  // A reused image has exactly its source's references, none included: a blank name clears the ones already chosen.
+  if (query) params.reference_path ??= '';
   return params;
 }
 
-/** Return whether an asset can be used as a reference image. */
+/** Return whether an asset can be used as a start image or frame. */
 export function canUseAsReference(asset: GalleryAsset): boolean {
   return asset.media_type === 'image' && Boolean(asset.file_path);
 }
 
 /**
- * Return the workspace prefill params that make an asset the reference image, carrying its prompt.
+ * Return the workspace prefill params that make an asset the start image (or a frame), carrying its prompt.
  *
  * For a video the prompt describes what the first frame shows, so it fills the Scene and leaves the Action for what happens;
  * for an image it is the prompt. A last frame is not the opening scene, so it carries no text.
+ *
+ * `use_as` names the slot the asset fills (`start` or `last`). The Workspace reads it to drop only that slot's held upload,
+ * which tells a Use as from a Reuse when both arrive as address params; it is not a draft field.
  */
 export function referenceParams(asset: GalleryAsset, target: ReferenceTarget): Record<string, string> {
   const path = asset.file_path ?? '';
-  if (target === 'last') return { workflow: REFERENCE_WORKFLOWS[target], end_image_path: path };
-  const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: path };
+  if (target === 'last') return { workflow: REFERENCE_WORKFLOWS[target], end_image_path: path, use_as: 'last' };
+  const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: path, use_as: 'start' };
   if (asset.prompt) params[target === 'video' ? 'scene' : 'prompt'] = asset.prompt;
   return params;
 }

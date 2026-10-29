@@ -3,7 +3,8 @@ import { keepInstalledLoras, modelLoraFamily } from './loras';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
-import type { DraftState, ExtendSourceInfo, FrameRule, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import { firstValues, listOf } from '$lib/prefillParams';
+import type { DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -39,7 +40,11 @@ const DEFAULT_DRAFT: DraftState = {
   seed: null,
   loraString: '',
   lorasByFamily: {},
+  lastImageModel: '',
+  lastVideoModel: '',
   referenceImagePath: null,
+  referenceImagePaths: [],
+  missingReferencePaths: [],
   endImagePath: null,
   referenceImageStrength: 0,
   frameCount: 0,
@@ -104,6 +109,7 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   extend_frames: 'extend_length',
   image_path: 'reference_image_path',
   end_image_path: 'end_image_path',
+  reference_path: 'references',
   negative_prompt: 'negative_prompt',
   scheduler: 'scheduler',
 };
@@ -213,6 +219,13 @@ function _pickSettings(state: DraftState): SettingDefaults {
 
 function _isVideoWorkflow(workflow: Workflow): boolean {
   return workflowMode(workflow) === 'video';
+}
+
+/** Remember the state's model as the last one used in its own mode (image or video), whichever workflow is open. */
+function _rememberModel(ctx: WorkspaceContext, state: DraftState): DraftState {
+  if (ctx.video_models.some((model) => model.id === state.model)) return { ...state, lastVideoModel: state.model };
+  if (ctx.image_models.some((model) => model.id === state.model)) return { ...state, lastImageModel: state.model };
+  return state;
 }
 
 /** Return the backend defaults for a model in a workflow's mode, or null when none are known. */
@@ -487,7 +500,10 @@ export const draft = {
    * Only fields present in params are updated; absent fields are left unchanged. A param whose control the workflow
    * does not show is skipped, unless `ungated` is set.
    */
-  loadFromUrl(params: Record<string, string>, ctx: WorkspaceContext | null = null, options: { ungated?: boolean } = {}): void {
+  loadFromUrl(input: PrefillParams, ctx: WorkspaceContext | null = null, options: { ungated?: boolean } = {}): void {
+    // A name that repeats (reference_path) arrives as a list; every other parameter reads as its first value.
+    const params = firstValues(input);
+    const lists = Object.fromEntries(Object.entries(input).map(([key, value]) => [key, listOf(value)]));
     const prefill: WorkspacePrefill = {};
     let workflow = _draft.workflow;
     if (params.workflow && ctx) {
@@ -579,6 +595,13 @@ export const draft = {
     }
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
     if (params.end_image_path && canApply('end_image_path')) prefill.endImagePath = params.end_image_path;
+    // A named list, even an empty one, replaces the references: a reused image has exactly its source's. The list is kept
+    // whole, whatever the model takes; the Workspace shows and sends the first few. Flags from the rows they replace are
+    // dropped; the Workspace checks the new paths.
+    if (lists.reference_path !== undefined && canApply('reference_path')) {
+      prefill.referenceImagePaths = lists.reference_path.filter((path) => path !== '');
+      prefill.missingReferencePaths = [];
+    }
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
     if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;
     // A reused preset the current model does not offer keeps the current preset size instead.
@@ -608,7 +631,9 @@ export const draft = {
    * the backend contract.
    *
    * If preferredModel is provided, it is used when it exists in the valid model
-   * list for the current workflow; otherwise the context default is used.
+   * list for the current workflow; otherwise the context default is used. Without
+   * one, the draft's model is kept when valid, else the model last used in this
+   * mode (image or video) when it is still offered, else the context default.
    * With `keepSettings`, the settings and prompt source chosen for the same model are kept;
    * otherwise the model's defaults apply. With `keepChangedSettings`, a different model keeps
    * the settings that differ from the old model's defaults (fitted to the new model's sizes and
@@ -618,13 +643,17 @@ export const draft = {
     const workflow = _draft.workflow;
     const isVideoMode = _isVideoWorkflow(workflow);
     const validModels = isVideoMode ? ctx.video_models : ctx.image_models;
+    // The model the draft holds belongs to the mode it came from, which the workflow may just have left: remember it first.
+    _draft = _rememberModel(ctx, _draft);
 
-    // Determine model: preferredModel > current draft model (if still valid) > context default
-    const candidate = preferredModel ?? _draft.model;
-    const modelIsValid = candidate !== '' && validModels.some(m => m.id === candidate);
-    const model = modelIsValid
-      ? candidate
-      : ((isVideoMode ? ctx.current_video_model : ctx.current_image_model) ?? validModels[0]?.id ?? '');
+    // Determine model: preferredModel > current draft model (if still valid) > the model last used in this mode
+    // (if still valid) > context default. An explicit preferredModel that is not valid goes straight to the default.
+    const remembered = isVideoMode ? _draft.lastVideoModel : _draft.lastImageModel;
+    const candidates = preferredModel !== null ? [preferredModel] : [_draft.model, remembered];
+    const model = candidates.find((id) => id !== '' && validModels.some((m) => m.id === id))
+      ?? (isVideoMode ? ctx.current_video_model : ctx.current_image_model)
+      ?? validModels[0]?.id
+      ?? '';
 
     const sameModel = model === _draft.model;
     const keepSettings = options.keepSettings === true && sameModel;
@@ -642,7 +671,7 @@ export const draft = {
     } else if (keepChanged) {
       nextState = _fitToModel(ctx, { ...nextState, ..._changedSinceOldDefaults(ctx, _draft) });
     }
-    nextState = _applyCapabilityGates(ctx, nextState);
+    nextState = _rememberModel(ctx, _applyCapabilityGates(ctx, nextState));
 
     _draft = nextState;
     _authorityReady = true;
@@ -674,6 +703,9 @@ export const draft = {
       model: s.model,
       loraString: s.loraString,
       lorasByFamily: s.lorasByFamily,
+      // The model each mode last ran stays, so switching between image and video keeps coming back to it.
+      lastImageModel: s.lastImageModel,
+      lastVideoModel: s.lastVideoModel,
       quantize: s.quantize,
       historyCollapsed: s.historyCollapsed,
       sidebarCollapsed: s.sidebarCollapsed,

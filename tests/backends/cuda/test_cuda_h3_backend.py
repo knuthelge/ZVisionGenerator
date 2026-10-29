@@ -19,6 +19,7 @@ from PIL import Image
 torch = pytest.importorskip("torch")
 
 from tests._factories import make_extend_source  # noqa: E402
+from tests._images import is_bluish, is_reddish, write_cutout, write_sideways_photo  # noqa: E402
 
 from zvisiongenerator.backends.cuda.video.h3 import audio as h3_audio  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import backend as h3_backend  # noqa: E402
@@ -505,6 +506,16 @@ class TestImageToVideo:
         assert rig.last("denoise")["text_token_tags"] == (1, 1, 0, 0, 1)
         assert rig.row_sets == ["keyframe"]
         assert rig.last("schedulers")["schedule"] == PRESET.schedules[4]
+
+    def test_the_first_and_last_frames_are_opened_upright_and_on_white(self, rig, tmp_path):
+        model = _load(rig, mode="i2v")
+        first, last = write_sideways_photo(tmp_path / "phone.jpg"), write_cutout(tmp_path / "cutout.png")
+
+        H3VideoBackend().image_to_video(model, first, "waves", 32, 64, FRAMES, 3, 4, str(tmp_path / "out.mp4"), end_image=last)
+
+        upright, flattened = rig.last("presentation")["images"]
+        assert upright.size == (32, 64) and is_reddish(upright.getpixel((16, 3))) and is_bluish(upright.getpixel((16, 60)))
+        assert flattened.getpixel((30, 32)) == (255, 255, 255)
 
     def test_a_text_to_video_model_is_refused(self, rig, tmp_path):
         model = _load(rig)

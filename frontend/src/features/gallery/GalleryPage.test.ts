@@ -249,6 +249,7 @@ describe('GalleryPage regressions', () => {
       prompt: 'Reuse me',
       model: 'zit',
       seed: '9876',
+      reference_path: '',
     });
   });
 
@@ -263,7 +264,7 @@ describe('GalleryPage regressions', () => {
     flushSync();
     (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
 
-    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'img2vid', image_path: '/outputs/nested/asset.png', scene: asset.prompt });
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'img2vid', image_path: '/outputs/nested/asset.png', use_as: 'start', scene: asset.prompt });
   });
 
   it('sends a video to the Extend Video workflow from its menu, with its model, and leaves the text to the source', async () => {

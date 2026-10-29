@@ -13,6 +13,7 @@ from zvisiongenerator.utils.paths import (
     display_stem,
     expand_home,
     get_ziv_data_dir,
+    is_existing_file,
     is_explicit_local_path,
     is_huggingface_repo_id,
     is_remote_lora_reference,
@@ -356,3 +357,21 @@ class TestCanonicalModelName:
     @pytest.mark.parametrize("name", ["ltx-4", "/models/ltx", "./local", "unknown/repo", "single", "ideo"])
     def test_anything_else_comes_back_unchanged(self, name):
         assert self._name(name) == name
+
+
+class TestIsExistingFile:
+    def test_a_file_is_one_and_a_folder_or_missing_path_is_not(self, tmp_path):
+        (tmp_path / "a.png").write_bytes(b"x")
+
+        assert is_existing_file(str(tmp_path / "a.png"))
+        assert not is_existing_file(str(tmp_path))
+        assert not is_existing_file(str(tmp_path / "gone.png"))
+
+    def test_home_is_expanded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "a.png").write_bytes(b"x")
+
+        assert is_existing_file("~/a.png")
+
+    def test_a_path_the_os_cannot_look_up_is_not_a_file(self):
+        assert not is_existing_file("a\x00b.png")

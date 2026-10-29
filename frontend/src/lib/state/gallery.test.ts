@@ -164,3 +164,14 @@ describe('galleryStore views', () => {
     expect(store.view(oldest).assets).toEqual([]);
   });
 });
+
+describe('galleryStore previewUrlFor', () => {
+  it('finds the URL of a loaded asset by its path, and none for a path without one', () => {
+    store.seed([{ id: 'a0', media_type: 'image', file_path: '/out/a.png', url: '/media/a.png' } as GalleryAsset]);
+
+    expect(store.previewUrlFor('/out/a.png')).toBe('/media/a.png');
+    expect(store.previewUrlFor('/out/other.png')).toBeNull();
+    expect(store.previewUrlFor('')).toBeNull();
+    expect(store.previewUrlFor(null)).toBeNull();
+  });
+});

@@ -12,7 +12,8 @@
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
   import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
-  import { getWorkspaceCoreContext, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
+  import { referenceGuard, referenceRows } from '$lib/state/references';
+  import { checkReferencePaths, getWorkspaceCoreContext, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { updateConfig } from '$lib/api/config';
   import { workspaceMemory } from '$lib/state/pageMemory';
   import { deleteAsset } from '$lib/api/gallery';
@@ -65,8 +66,9 @@
   import { layout } from '$lib/state/layoutMode.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import { hasPendingJobSettings, takeJobSettings } from '$lib/state/pendingJobSettings.svelte';
+  import { heldUploads } from '$lib/state/heldUploads.svelte';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
@@ -106,9 +108,10 @@
   let submitError = $state.raw<{ message: string; draft: DraftState } | null>(null);
   const generateError = $derived(submitError?.draft === draft.state ? submitError.message : null);
   let formEl = $state<HTMLFormElement | undefined>(undefined);
-  let imageFile = $state<File | null>(null);
-  // The image uploaded as the last frame; like `imageFile`, it is not draft state and goes out on submit only.
-  let endImageFile = $state<File | null>(null);
+  // The images uploaded as the start image and the last frame are not draft state and go out on submit only; they are
+  // kept across pages in `heldUploads`.
+  const imageFile = $derived(heldUploads.image);
+  const endImageFile = $derived(heldUploads.endImage);
   let lightboxOpen = $state(false);
   let lightboxIndex = $state(0);
   let lightboxMode = $state<'history' | 'completed-output'>('history');
@@ -275,21 +278,18 @@
     return { destroy: () => { clearTimeout(idle); node.removeEventListener('wheel', onWheel); } };
   }
   // A reference path that points at a known asset can show that asset as its thumbnail.
-  const referencePreviewUrl = $derived(
-    draft.state.referenceImagePath
-      ? (galleryStore.assets.find((asset) => asset.file_path === draft.state.referenceImagePath)?.url ?? null)
-      : null
-  );
+  const referencePreviewUrl = $derived(galleryStore.previewUrlFor(draft.state.referenceImagePath));
   // The last-frame slot exists for Image to Video on a model that can end a clip on an image.
   const showEndImage = $derived(context !== null && workspaceCapabilities(context, draft.state).showEndImage);
-  const endPreviewUrl = $derived(
-    showEndImage && draft.state.endImagePath
-      ? (galleryStore.assets.find((asset) => asset.file_path === draft.state.endImagePath)?.url ?? null)
-      : null
-  );
+  // The reference rows Generate sends: the first few of the draft's list, as many as the model takes (none when the section is
+  // hidden). A longer list is kept whole, so a model that takes more brings the rest back.
+  const sentReferences = $derived(context === null ? [] : referenceRows(draft.state.referenceImagePaths, heldUploads.references).slice(0, workspaceCapabilities(context, draft.state).referenceCount));
+  // A reference whose file is gone blocks Generate: dropping it would renumber the prompt's "image 2".
+  const referenceBlock = $derived(referenceGuard(sentReferences, draft.state.missingReferencePaths));
+  const endPreviewUrl = $derived(showEndImage ? galleryStore.previewUrlFor(draft.state.endImagePath) : null);
   // A pending upload belongs to the slot: when the slot goes (another workflow or model), so does the upload.
   $effect(() => {
-    if (!showEndImage) endImageFile = null;
+    if (context !== null && !showEndImage) heldUploads.endImage = null;
   });
   // The asset menus offer the last frame only while its slot is showing.
   const referenceTargets = $derived<readonly ReferenceTarget[] | undefined>(showEndImage ? ['image', 'video', 'last'] : undefined);
@@ -407,7 +407,7 @@
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
   });
-  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked);
+  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || referenceBlock !== null);
   // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
   const controlsPending = $derived(!context || !authorityReady);
 
@@ -564,12 +564,32 @@
     openCompletedOutputViewer(jobOutputs.findIndex((output) => output.id === asset.id), trigger);
   }
 
+  /**
+   * Drop the uploads a prefill makes stale. The server prefers an uploaded file over a path, so a file held for a slot would
+   * win over what the prefill chose, or stay when the prefill names nothing (a reused clip without a last frame).
+   * A Use as (marked by `use_as`) sets one slot and drops only that slot's upload, leaving the other slot and the references.
+   * Any other prefill replaces the job's settings: the start image and the last frame always go, and the reference uploads
+   * only when the prefill replaces the reference rows, which a workflow without the References section does not take
+   * (video keeps its rows and their files).
+   */
+  function dropHeldUploads(params: PrefillParams): void {
+    if (params.use_as === 'start') heldUploads.clearStartImage();
+    else if (params.use_as === 'last') heldUploads.clearLastFrame();
+    else {
+      heldUploads.clearFrames();
+      if (params.reference_path !== undefined && visibleControls.has('references')) heldUploads.clearReferences();
+    }
+  }
+
   /** Apply workspace prefill params (workflow first, then model defaults, then the params on top). */
-  function applyPrefill(params: Record<string, string>, options: { keepSettings?: boolean } = {}): void {
+  function applyPrefill(params: PrefillParams, options: { keepSettings?: boolean } = {}): void {
     if (!context) return;
     if (params.workflow) draft.loadFromUrl({ workflow: params.workflow }, context);
-    draft.hydrateFromContext(context, params.model ?? null, options);
+    draft.hydrateFromContext(context, typeof params.model === 'string' ? params.model : null, options);
     draft.loadFromUrl(params, context);
+    dropHeldUploads(params);
+    // Recorded reference paths may have moved since; flag those rows, as a page load does.
+    if (params.reference_path !== undefined) void recheckReferences();
     // The prefill already re-hydrated for its workflow; the workflow-change effect must not redo it.
     _prevWorkflow = draft.state.workflow;
     // The source brings its own settings, so the form no longer starts from a preset.
@@ -582,8 +602,6 @@
     const { params, patch } = jobSettingsPrefill(settings, draft.state.enhanceSettingsVideo?.partsByWorkflow, step);
     applyPrefill(params);
     draft.patch(patch);
-    imageFile = null;
-    endImageFile = null;
     addToast(message, 'success');
   }
 
@@ -628,8 +646,6 @@
 
   function reuseAsset(asset: GalleryAsset): void {
     applyPrefill(reuseParams(asset));
-    imageFile = null;
-    endImageFile = null;
     closeLightbox();
     addToast(`Loaded settings from ${asset.filename}`, 'success');
   }
@@ -647,7 +663,7 @@
     const imageModel = isImageMode ? draft.state.model : (context.current_image_model ?? '');
     const videoModel = isImageMode ? (context.current_video_model ?? '') : draft.state.model;
     const reasons: Partial<Record<ReferenceTarget, string>> = {};
-    if (context.image_model_defaults?.[imageModel]?.supports_img2img === false) reasons.image = `${imageModel} can't use a reference image`;
+    if (context.image_model_defaults?.[imageModel]?.supports_img2img === false) reasons.image = `${imageModel} can't use a start image`;
     if (context.video_model_defaults?.[videoModel]?.supports_i2v === false) reasons.video = `${videoModel} can't start from an image`;
     return reasons;
   });
@@ -657,13 +673,11 @@
     const params = referenceParams(asset, target);
     if (draft.state.workflow === params.workflow) {
       draft.loadFromUrl(params, context);
+      dropHeldUploads(params);
       draft.saveDraft();
     } else applyPrefill(params, { keepSettings: true });
-    // The last frame takes only the path: the first frame, the text and the workflow stay as they are.
-    if (target === 'last') endImageFile = null;
-    else imageFile = null;
     closeLightbox();
-    addToast(`${asset.filename} is now the ${target === 'last' ? 'last frame' : 'reference image'}`, 'success');
+    addToast(`${asset.filename} is now the ${target === 'last' ? 'last frame' : 'start image'}`, 'success');
   }
 
   /** Make a video the source of an extension; its recorded scene and prompt fill the boxes once the server has described it. */
@@ -672,9 +686,9 @@
     const params = extendParams(asset);
     if (draft.state.workflow === params.workflow) {
       draft.loadFromUrl(params, context);
+      dropHeldUploads(params);
       draft.setAppliedPreset(null);
     } else applyPrefill(params, { keepSettings: true });
-    imageFile = null;
     closeLightbox();
     addToast(`${asset.filename} is now the source video`, 'success');
     void extendInspection.inspect(context, { replaceText: true });
@@ -730,6 +744,8 @@
       // A reference pointing at the deleted file would fail the next run.
       if (asset.file_path && draft.state.referenceImagePath === asset.file_path) draft.update('referenceImagePath', null);
       if (asset.file_path && draft.state.endImagePath === asset.file_path) draft.update('endImagePath', null);
+      // A reference row stays, flagged missing, so the prompt's "image 2" keeps meaning the same row.
+      if (asset.file_path && draft.state.referenceImagePaths.includes(asset.file_path)) void recheckReferences();
       addToast('Deleted', 'success');
     } catch {
       addToast('Delete failed', 'error');
@@ -820,6 +836,20 @@
     clipMemory.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps: stepOptionsFor(context, state.model) !== null, review: caps.showVideoUpscaleReview }));
   });
 
+  /**
+   * Ask the server which reference files are gone and flag those rows. The flags saved with the draft may be stale
+   * (a file can return or leave while the page was away), so the server's answer replaces them. A failed check leaves them.
+   */
+  async function recheckReferences(): Promise<void> {
+    const paths = draft.state.referenceImagePaths.filter((path) => path !== '');
+    if (paths.length === 0) return;
+    try {
+      draft.patch({ missingReferencePaths: await checkReferencePaths(paths) });
+    } catch {
+      // The flags stay as they were; Generate refuses a file that is not there.
+    }
+  }
+
   onMount(() => {
     const unsubscribeLifecycle = jobStore.subscribeLifecycle({
       onComplete: handleJobComplete,
@@ -874,6 +904,7 @@
         if (cancelled) return;
         workspaceMemory.set(ctx);
         adoptContext(ctx);
+        void recheckReferences();
         jobStore.seedQueue(ctx.queued_jobs ?? []);
         void jobStore.reconnectActiveJob({ snapshot: ctx.active_job });
         // "Generate this one" on the Prompts page: queue that prompt with these settings once the form exists.
@@ -976,12 +1007,17 @@
     // Send canonical workflow directly; backend accepts and normalises it.
     formData.set('mode', isImageMode ? 'image' : 'video');
     formData.set('workflow', draft.state.workflow);
-    // Attach image file only for workflows that actually use a reference image
+    // Attach image file only for workflows that actually use a start image
     if (imageFile && (draft.state.workflow === 'img2img' || draft.state.workflow === 'img2vid')) {
       formData.set('image_file', imageFile);
     }
     // The last frame goes only while its slot is showing; an upload wins over the typed path, as for the first frame.
     if (endImageFile && showEndImage) formData.set('end_image_file', endImageFile);
+    // References go as one repeated field, a file or a path per row in prompt order, so the rows keep their numbers.
+    for (const row of sentReferences) {
+      if (row.file) formData.append('reference', row.file);
+      else if (row.path) formData.append('reference', row.path);
+    }
     // Sync lora string
     formData.set('lora', formatLoraString(loraChips));
     // Each part with Enhanced text is sent enhanced and the other as written (never in JSON-caption, file, or auto-enhance mode).
@@ -1062,6 +1098,10 @@
     if (!formEl || !authorityReady || !formEl.reportValidity()) return;
     await settleExtendSource();
     if (extendBlocked()) return;
+    if (referenceBlock) {
+      addToast(referenceBlock, 'error');
+      return;
+    }
     if (promptChoiceMissing()) {
       addToast(context?.prompt_file.help.option_required ?? 'Choose a prompt first.', 'error');
       return;
@@ -1111,6 +1151,10 @@
     }
     await settleExtendSource();
     if (extendBlocked()) return;
+    if (referenceBlock) {
+      addToast(referenceBlock, 'error');
+      return;
+    }
     submitError = null;
     busy = true;
     draft.saveDraft();
@@ -1598,8 +1642,10 @@
             {endImageFile}
             {endPreviewUrl}
             lastSeed={galleryStore.assets[0]?.seed ?? null}
-            onImageFileChange={(f) => { imageFile = f; submitError = null; }}
-            onEndImageFileChange={(f) => { endImageFile = f; submitError = null; }}
+            onImageFileChange={(f) => { heldUploads.image = f; submitError = null; }}
+            onEndImageFileChange={(f) => { heldUploads.endImage = f; submitError = null; }}
+            referenceFiles={heldUploads.references}
+            onReferenceFilesChange={(files) => { heldUploads.references = files; submitError = null; }}
             onUseLatestAsEndFrame={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, 'last'); activeChip = null; }}
             onModelChange={switchModel}
             onUseLatestAsReference={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
@@ -1684,8 +1730,11 @@
           {endImageFile}
           {endPreviewUrl}
           lastSeed={galleryStore.assets[0]?.seed ?? null}
-          onImageFileChange={(f) => { imageFile = f; submitError = null; }}
-          onEndImageFileChange={(f) => { endImageFile = f; submitError = null; }}
+          onImageFileChange={(f) => { heldUploads.image = f; submitError = null; }}
+          onEndImageFileChange={(f) => { heldUploads.endImage = f; submitError = null; }}
+          referenceFiles={heldUploads.references}
+          {referenceBlock}
+          onReferenceFilesChange={(files) => { heldUploads.references = files; submitError = null; }}
         />
       </Sheet>
     </div>
@@ -1705,8 +1754,11 @@
         {endImageFile}
         {endPreviewUrl}
         lastSeed={galleryStore.assets[0]?.seed ?? null}
-        onImageFileChange={(f) => { imageFile = f; submitError = null; }}
-        onEndImageFileChange={(f) => { endImageFile = f; submitError = null; }}
+        onImageFileChange={(f) => { heldUploads.image = f; submitError = null; }}
+        onEndImageFileChange={(f) => { heldUploads.endImage = f; submitError = null; }}
+        referenceFiles={heldUploads.references}
+        {referenceBlock}
+        onReferenceFilesChange={(files) => { heldUploads.references = files; submitError = null; }}
         oncopycli={copyCliCommand}
       />
       {@render stage()}

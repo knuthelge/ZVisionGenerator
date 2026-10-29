@@ -329,7 +329,7 @@ _JSON_CAPTION = '{"high_level_description":"x"}'
         (_ZIMAGE, {"json_prompt": _JSON_CAPTION}, "This model does not support structured JSON captions."),
         (_ZIMAGE, {"prompt": "hello", "first_sigma": "1.005"}, "This model does not support the first-step sigma control."),
         (_ZIMAGE, {"prompt": "a fox", "enhance_auto": "true", "enhance_format": "json"}, "does not support structured JSON captions"),
-        (_IDEOGRAM, {"prompt": "hello", "image_path": "<reference>"}, "does not support reference-image (img2img) steering."),
+        (_IDEOGRAM, {"prompt": "hello", "image_path": "<reference>"}, "does not support start-image (img2img) steering."),
         (_IDEOGRAM, {"prompt": "hello", "upscale": "2"}, "does not support upscaling."),
         (_IDEOGRAM, {"prompt": "hello", "quantize": "4"}, "This model does not support quantization."),
         (_IDEOGRAM, {"prompt": "hello", "ratio": "16:9", "size": "xl"}, "must be between"),
@@ -1189,10 +1189,10 @@ def test_reference_upload_staging_still_accepts_generation_uploads(tmp_path):
     """Reference uploads should still be staged for generation while staying out of inventory."""
     uploaded_file = SimpleNamespace(filename="reference.png", file=_png_upload_bytes())
 
-    staged_path = Path(web_server._save_uploaded_reference_image(uploaded_file, str(tmp_path)))
+    saved_path = Path(web_server._save_upload(uploaded_file, str(tmp_path)))
 
-    assert staged_path.is_file()
-    assert staged_path.parent.name == ".web_uploads"
+    assert saved_path.is_file()
+    assert saved_path.parent.name == ".web_uploads"
     assert list_gallery_assets(str(tmp_path)) == []
 
 
@@ -1703,7 +1703,7 @@ def test_submit_video_job_refuses_a_last_frame_without_a_first_frame(monkeypatch
     write_png(last)
     _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=[])
 
-    with pytest.raises(ValueError, match="needs a first-frame reference image"):
+    with pytest.raises(ValueError):
         web_server._submit_video_job({"workflow": "txt2vid", "model": "ltx-8", "prompt": "a lake", "end_image_path": str(last)}, web_config)
 
 

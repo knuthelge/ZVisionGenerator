@@ -199,6 +199,12 @@ def test_packaged_config_krea2_capabilities(packaged_config):
     assert (caps["supports_img2img"], caps["supports_upscale"]) == (True, True)
 
 
+def test_packaged_config_references_only_on_klein(packaged_config):
+    assert model_capabilities(packaged_config, "flux2_klein")["max_reference_images"] == 4
+    assert model_capabilities(packaged_config, "flux2_klein", "distilled")["max_reference_images"] == 4
+    assert model_capabilities(packaged_config, "zimage")["max_reference_images"] == 0
+
+
 # ---------------------------------------------------------------------------
 # _deep_merge
 # ---------------------------------------------------------------------------

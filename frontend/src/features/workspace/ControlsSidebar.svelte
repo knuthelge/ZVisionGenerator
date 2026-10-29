@@ -26,6 +26,11 @@
     lastSeed?: number | null;
     onImageFileChange: (file: File | null) => void;
     onEndImageFileChange?: (file: File | null) => void;
+    /** The images uploaded as references, by row. */
+    referenceFiles?: (File | null)[];
+    /** Why a reference blocks Generate (a row whose image is gone), computed once by the Workspace; null when none does. */
+    referenceBlock?: string | null;
+    onReferenceFilesChange?: (files: (File | null)[]) => void;
     /** Copy the CLI command for the current settings. */
     oncopycli?: () => void;
     /** Portrait tablet: Compose and Settings sit side by side under the stage, and the sidebar never collapses. */
@@ -37,13 +42,14 @@
     onsettingsdone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, imageFile, referencePreviewUrl = null, endImageFile = null, endPreviewUrl = null, lastSeed = null, onImageFileChange, onEndImageFileChange = () => {}, oncopycli, tall = false, panes = 'both', settingsSubmit = true, onsettingsdone }: Props = $props();
+  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, imageFile, referencePreviewUrl = null, endImageFile = null, endPreviewUrl = null, lastSeed = null, onImageFileChange, onEndImageFileChange = () => {}, referenceFiles = [], referenceBlock = null, onReferenceFilesChange = () => {}, oncopycli, tall = false, panes = 'both', settingsSubmit = true, onsettingsdone }: Props = $props();
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   const authorityReady = $derived(context !== null && draft.authorityReady);
   const collapsed = $derived(draft.state.sidebarCollapsed && !tall);
   // An extension waits for a source it can read; the strip's Generate follows the same rule as the footer's.
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendModelSupport(context, draft.state.model)));
-  const stripTitle = $derived(sourceGuard.note ? `${generateLabel}: ${sourceGuard.note.charAt(0).toLowerCase()}${sourceGuard.note.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
+  const blockNote = $derived(sourceGuard.note ?? referenceBlock);
+  const stripTitle = $derived(blockNote ? `${generateLabel}: ${blockNote.charAt(0).toLowerCase()}${blockNote.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
 
   function setCollapsed(value: boolean): void {
     draft.update('sidebarCollapsed', value);
@@ -58,7 +64,7 @@
       {#if panes === 'both'}
         <ComposePane {context} {busy} {jobsActive} endImagePending={endImageFile !== null} oncollapse={tall ? undefined : () => setCollapsed(true)} />
       {/if}
-      <SettingsPane {context} {busy} {jobsActive} {submitError} {imageFile} {referencePreviewUrl} {endImageFile} {endPreviewUrl} {lastSeed} {onImageFileChange} {onEndImageFileChange} {oncopycli} submit={settingsSubmit} ondone={onsettingsdone} />
+      <SettingsPane {context} {busy} {jobsActive} {submitError} {imageFile} {referencePreviewUrl} {endImageFile} {endPreviewUrl} {lastSeed} {onImageFileChange} {onEndImageFileChange} {referenceFiles} {referenceBlock} {onReferenceFilesChange} {oncopycli} submit={settingsSubmit} ondone={onsettingsdone} />
     {:else}
       <div class="flex-1 overflow-y-auto p-3">
         <p class="flex items-center gap-2 text-ui text-text-muted" role="status"><Spinner size="sm" />Loading settings…</p>
@@ -92,7 +98,7 @@
           class="strip-generate"
           aria-label={generateLabel}
           title={stripTitle}
-          disabled={busy || !authorityReady || sourceGuard.blocked}
+          disabled={busy || !authorityReady || sourceGuard.blocked || referenceBlock !== null}
         >
           <Icon name="bolt" size={18} />
         </button>

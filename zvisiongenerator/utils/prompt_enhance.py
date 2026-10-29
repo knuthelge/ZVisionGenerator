@@ -40,6 +40,8 @@ PRESERVATION_RULES = (
     "Never add new people, animals, characters or major objects.",
 )
 QUOTES_CHANGED_WARNING = "A quoted text was changed in the rewrite."
+REFERENCES_DROPPED_WARNING = "A reference image named in the prompt was dropped from the rewrite."
+_REFERENCE_MENTION_RE = re.compile(r"\bimage\s+(\d+)\b", re.I)
 NO_USABLE_MESSAGE = "The enhancer returned no usable rewrite (empty, unchanged, or a refusal). Try different settings."
 
 
@@ -362,7 +364,10 @@ class EnhanceSettings:
 
 @dataclass(frozen=True)
 class EnhanceContext:
-    """Facts about the job that shape a rewrite: audio track, clip length, frame shape, reference image and last frame.
+    """Facts about the job that shape a rewrite: audio track, clip length, frame shape, start image, references and last frame.
+
+    ``reference_image`` is the start image (img2img's image, or a video's first frame); ``references`` counts the
+    reference images the prompt names as "image 1", "image 2".
 
     The last five fields describe extending an existing clip. ``seconds`` is then the whole window (the carried
     frames plus the new ones) and ``new_seconds`` the part the new action fills. ``previous`` is the source's
@@ -374,6 +379,7 @@ class EnhanceContext:
     seconds: float | None = None
     orientation: str | None = None
     reference_image: bool = False
+    references: int = 0
     end_image: bool = False
     extends: bool = False
     previous: str | None = None
@@ -459,6 +465,7 @@ def enhance_context(
     fps: float | None = None,
     audio: bool = False,
     reference_image: bool = False,
+    references: int = 0,
     end_image: bool = False,
     extends: bool = False,
     previous: str | None = None,
@@ -472,6 +479,8 @@ def enhance_context(
 
     Args:
         frames: The clip's frame count; when *extends*, the whole window (carried plus new frames).
+        reference_image: Whether a start image (img2img's image, or a video's first frame) is supplied.
+        references: How many reference images are supplied; the prompt names them "image 1", "image 2".
         end_image: Whether the clip also ends on a supplied image (video only; the rewrite then knows both frames are fixed).
         extends: Whether the job extends an existing video (video only); the fields below apply only then.
         previous: The source video's recorded prompt, "what just happened".
@@ -488,6 +497,7 @@ def enhance_context(
         seconds=seconds,
         orientation=_orientation(width, height, ratio),
         reference_image=reference_image,
+        references=references,
         extends=extending,
         previous=previous if extending else None,
         extract_from=extract_from if extending else None,
@@ -874,13 +884,33 @@ def quote_rules(spans: tuple[str, ...]) -> list[str]:
     return [f"Text in quotes is lettering or speech: copy it exactly, with its case, punctuation and quote marks: {listed}."]
 
 
+def references_rule(count: int) -> str:
+    """Return the rule for *count* reference images: keep the prompt's "image N" phrases and describe the new scene, not the references."""
+    names = [f'"image {number}"' for number in range(1, count + 1)]
+    listed = names[0] if count == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return (
+        f"{count} reference image{'s are' if count > 1 else ' is'} supplied, which the prompt names {listed}. "
+        "Keep those phrases exactly as written. You can't see the references, so don't describe what they show: "
+        "describe the new scene, action and composition around them."
+    )
+
+
+def _drops_reference(prompt: str, output: str, count: int) -> bool:
+    """Return whether *prompt* names a reference from 1 to *count* as "image N" that *output* does not."""
+
+    def named(text: str) -> set[int]:
+        return {number for number in map(int, _REFERENCE_MENTION_RE.findall(text)) if 1 <= number <= count}
+
+    return not named(prompt) <= named(output)
+
+
 def frame_rule(orientation: str) -> str:
     """Return the rule that fits the composition to a ``portrait``, ``landscape`` or ``square`` frame without naming it."""
     return f"Compose for a {orientation} frame; never mention the frame or its shape."
 
 
 def context_rules(mode: str, context: EnhanceContext, *, pace: str = KEEP) -> list[str]:
-    """Return the rules for the reference image, frame shape and clip length (how much action fits depends on *pace*)."""
+    """Return the rules for the start image, references, frame shape and clip length (how much action fits depends on *pace*)."""
     rules: list[str] = []
     if context.reference_image:
         if mode == "video" and context.end_image:
@@ -894,7 +924,9 @@ def context_rules(mode: str, context: EnhanceContext, *, pace: str = KEEP) -> li
                 "refer to the subject briefly and don't add appearance details the image already shows."
             )
         else:
-            rules.append("A reference image supplies the subject and layout. Refer to the subject briefly; apply the style and mood without re-describing its appearance.")
+            rules.append("A start image supplies the layout and colours. Refer to what it shows briefly; apply the style and mood without re-describing its appearance.")
+    if context.references:
+        rules.append(references_rule(context.references))
     if context.orientation is not None:
         rules.append(frame_rule(context.orientation))
     if mode == "video" and context.seconds is not None:
@@ -1010,13 +1042,14 @@ def enhance_prompt(
     on_text: Callable[[str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> EnhanceResult:
-    """Rewrite *prompt* with *enhancer*: generate, clean, and retry once if unusable or a quoted text was changed.
+    """Rewrite *prompt* with *enhancer*: generate, clean, and retry once if unusable, a quoted text was changed or a referenced "image N" was dropped.
 
     Expand ``{a|b}`` choices before calling: the model rewrites one concrete prompt. When no attempt keeps every quoted
-    text, the last usable one is returned with ``QUOTES_CHANGED_WARNING`` (also issued as a warning).
+    text and every "image N" the prompt names, the last usable one is returned with ``QUOTES_CHANGED_WARNING`` or
+    ``REFERENCES_DROPPED_WARNING`` (also issued as a warning).
 
     Args:
-        context: Job facts (audio track, clip length, frame shape, reference image).
+        context: Job facts (audio track, clip length, frame shape, start image, references).
         on_text: Receives the full in-progress text at most every
             ``TEXT_UPDATE_INTERVAL_SECONDS``, then the final text; a retry starts over from an empty string.
         cancelled: Polled per token; when it returns True generation stops and ``RuntimeError`` is raised.
@@ -1031,19 +1064,25 @@ def enhance_prompt(
     plan = plan_length(word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg)
     messages = build_messages(prompt, settings, mode=mode, plan=plan, context=context)
     spans = enforced_quotes(prompt, mode=mode, context=context or EnhanceContext())
-    changed_quotes: str | None = None
+    references = context.references if context is not None else 0
+    flawed: tuple[str, str] | None = None
     for attempt in range(2):
         raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         output = clean_output(raw)
         if is_unusable(output, prompt):
             continue
-        if not missing_quotes(spans, output):
+        if missing_quotes(spans, output):
+            problem = QUOTES_CHANGED_WARNING
+        elif _drops_reference(prompt, output, references):
+            problem = REFERENCES_DROPPED_WARNING
+        else:
             return _final(EnhanceResult(prompt=output, clamped=plan.clamped), on_text)
-        changed_quotes = output
-    if changed_quotes is None:
+        flawed = (output, problem)
+    if flawed is None:
         raise RuntimeError(NO_USABLE_MESSAGE)
-    warnings.warn(QUOTES_CHANGED_WARNING, stacklevel=2)
-    return _final(EnhanceResult(prompt=changed_quotes, clamped=plan.clamped, warning=QUOTES_CHANGED_WARNING), on_text)
+    output, problem = flawed
+    warnings.warn(problem, stacklevel=2)
+    return _final(EnhanceResult(prompt=output, clamped=plan.clamped, warning=problem), on_text)
 
 
 def _final(result: EnhanceResult, on_text: Callable[[str], None] | None) -> EnhanceResult:

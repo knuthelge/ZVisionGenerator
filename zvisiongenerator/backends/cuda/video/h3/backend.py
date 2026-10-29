@@ -55,6 +55,7 @@ from zvisiongenerator.utils.h3_memory import (
 )
 from zvisiongenerator.utils.h3_converted import read_converted_h3
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset
+from zvisiongenerator.utils.input_images import open_image_upright
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE as JOIN_SAMPLE_RATE
 from zvisiongenerator.utils.video_extend import EXTEND_FPS_TOLERANCE, cut_window_audio
@@ -649,14 +650,6 @@ def _extend(
 # ---- The backend ----------------------------------------------------------------------------------------------------------
 
 
-def _open_rgb(path: str | Path) -> Image.Image:
-    """Return the image at *path* converted to RGB."""
-    from PIL import Image
-
-    with Image.open(path) as image:
-        return image.convert("RGB")
-
-
 def _render_clip(
     model: _H3Model,
     spec: _ClipSpec,
@@ -844,7 +837,7 @@ class H3VideoBackend:
         _check_upscale_arguments(model, stage1_steps, review, width, height)
         forwards = _forwards(model.preset, steps if stage1_steps is None else stage1_steps)
         end_image = kwargs.get("end_image")
-        images = (_open_rgb(image_path), *((_open_rgb(end_image),) if end_image else ()))
+        images = (open_image_upright(image_path), *((open_image_upright(end_image),) if end_image else ()))
         spec = _ClipSpec(prompt=prompt, width=width, height=height, num_frames=num_frames, seed=seed, forwards=forwards, keyframes=images, anchors=("first", "last") if end_image else ("first",))
         try:
             _render_clip(model, spec, Path(output_path), stage1_steps=stage1_steps, step_callback=step_callback, review=review)

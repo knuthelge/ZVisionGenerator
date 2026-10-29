@@ -83,6 +83,8 @@ _PREFIXES = ("model.diffusion_model.", "diffusion_model.")
 _DROPPED = ("rope.inv_freq", "scaled_fp8")
 _NATIVE_MARK = "blocks.0.attn.qkv_proj.weight"
 _DIFFUSERS_MARK = "transformer_blocks.0.attn.to_q.weight"
+# The diffusers layout's folder for the reference-to-video transformer.
+_REF_FOLDER = "transformer_ref"
 _LORA_MARKS = (".lora_A.", ".lora_B.", ".lora_down.", ".lora_up.", "lora_unet_")
 # What a file's name or metadata may say about a step-distilled (turbo) checkpoint. Hints only: nothing is decided from them.
 _TURBO_WORDS = re.compile(r"turbo|lightning|lightx2v|distill|fused|(?<![0-9])[48][-_ ]?steps?", re.IGNORECASE)
@@ -159,6 +161,7 @@ def inspect_h3(path: Path) -> H3Checkpoint:
     else:
         raise ValueError(f"{path.name} is not a MiniMax H3 transformer.")
     _check_variant(path, metadata)
+    _check_partition(path)
     formats = quantization_formats(files)
     shapes_in_file = {short: decoded_shape(headers, name, formats.get(name)) for short, name in stripped.items()}
     curve_rank = _curve_rank(path, shapes_in_file)
@@ -217,6 +220,27 @@ def _check_variant(path: Path, metadata: dict[str, str]) -> None:
         return
     if isinstance(transformer, dict) and int(transformer.get("pdd_steps", 1) or 1) > 1:
         raise ValueError(f"{path.name} is a PDD checkpoint (stacked output heads), which the app doesn't run.")
+
+
+def _check_partition(path: Path) -> None:
+    """Refuse a checkpoint that its folder says is not the first-and-last-frame (``fl2va``) partition.
+
+    MiniMax's native layout names the partition in ``model_index.json`` beside the transformer folder (``Ref2VA/`` holds a
+    reference-to-video transformer with the same tensor names and shapes as ``FL2VA/``); the diffusers layout keeps it in
+    ``transformer_ref/``. A file with no such index (a ComfyUI single file) is let through.
+
+    Raises:
+        ValueError: If the folder is the reference-to-video partition, or any partition other than ``fl2va``.
+    """
+    if path.parent.name == _REF_FOLDER:
+        raise ValueError(f"{path.name} is a Ref2VA (reference-to-video) transformer, which the app doesn't convert; use the FL2VA transformer.")
+    index = path.parent.parent / "model_index.json"
+    try:
+        partition = json.loads(index.read_text(encoding="utf-8")).get("_minimax_h3", {}).get("partition")
+    except OSError, ValueError:
+        return
+    if isinstance(partition, str) and partition.lower() != "fl2va":
+        raise ValueError(f"{path.name} is the {partition} partition of MiniMax H3 ({index.name} says so), which the app doesn't convert; use the FL2VA transformer.")
 
 
 def _curve_rank(path: Path, shapes: dict[str, list[int]]) -> int | None:

@@ -15,7 +15,7 @@ With **Upscale** at 2× or 4× (`--upscale 2` or `4`), the image keeps the size 
 
 1. The model generates at a reduced size (the target ÷ the factor).
 2. The image is enlarged to the target size.
-3. It is sharpened, refined with image-to-image, and sharpened again.
+3. It is sharpened, refined with image-to-image, and sharpened again. The refinement sees the [references](images.md#references), if the image has any.
 
 | Setting | CLI | Default | Does |
 |---|---|---|---|

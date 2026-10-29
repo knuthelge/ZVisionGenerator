@@ -5,9 +5,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import importlib.metadata
-import os
 import sys
-import tempfile
 import threading
 import warnings
 from collections.abc import Callable, Iterator
@@ -29,7 +27,9 @@ import mlx.core as mx
 from mlx import nn
 from mlx.utils import tree_map
 
+from zvisiongenerator.backends.mac._temp_images import remove_file, save_temp_png
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
+from zvisiongenerator.backends.mac.klein_references import generate_with_references
 from zvisiongenerator.backends.mac.memory import load_resident
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.progress_events import preview_steps
@@ -447,15 +447,15 @@ class MfluxBackend:
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        *,
+        reference_images: list[Image.Image] | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
         if self._model_info.family == "ideogram4":
             raise ValueError("img2img is not supported for Ideogram 4.")
         # mflux requires a file path, not a PIL Image
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            image.save(f, format="PNG")
-            temp_path = f.name
+        temp_path = save_temp_png(image)
 
         checker = None
         progress_checker = None
@@ -491,7 +491,12 @@ class MfluxBackend:
             if not _is_flux and negative_prompt is not None:
                 gen_kwargs["negative_prompt"] = negative_prompt
 
-            result = model.generate_image(**gen_kwargs)
+            if reference_images:
+                # The start image is the img2img source; the references ride along as edit conditioning.
+                start_kwargs = {key: value for key, value in gen_kwargs.items() if key not in ("image_path", "image_strength")}
+                result = generate_with_references(model, reference_images, start_path=temp_path, image_strength=image_strength, **start_kwargs)
+            else:
+                result = model.generate_image(**gen_kwargs)
             return result.image
         except StopImageGenerationException:
             return None
@@ -499,10 +504,7 @@ class MfluxBackend:
             for callback in (checker, progress_checker):
                 if callback is not None:
                     _unregister_callback(model, callback)
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+            remove_file(temp_path)
             mx.clear_cache()
 
     def text_to_image(
@@ -521,6 +523,8 @@ class MfluxBackend:
         steps_explicit: bool = False,
         guidance_explicit: bool = False,
         first_sigma: float | None = None,
+        *,
+        reference_images: list[Image.Image] | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
@@ -564,7 +568,10 @@ class MfluxBackend:
             # Per-run Ideogram 4 first-step sigma override (affects the scheduler shim, not generate_image itself).
             sigma_ctx = _use_initial_sigma(first_sigma) if first_sigma is not None else contextlib.nullcontext()
             with sigma_ctx:
-                result = model.generate_image(**gen_kwargs)
+                if reference_images:
+                    result = generate_with_references(model, reference_images, **gen_kwargs)
+                else:
+                    result = model.generate_image(**gen_kwargs)
             return result.image
         except StopImageGenerationException:
             return None

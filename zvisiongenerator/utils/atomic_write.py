@@ -9,7 +9,15 @@ import uuid
 
 
 def write_text_atomic(path: Path, text: str) -> None:
-    """Atomically replace *path* with *text*.
+    """Atomically replace *path* with *text* as UTF-8, with the care of :func:`write_bytes_atomic`.
+
+    Newlines are written as the platform's line separator, as a text-mode ``open`` does.
+    """
+    write_bytes_atomic(path, text.replace("\n", os.linesep).encode("utf-8"))
+
+
+def write_bytes_atomic(path: Path, data: bytes) -> None:
+    """Atomically replace *path* with *data*.
 
     Concurrent readers see either the old or the new file, never a truncated one. A symlinked *path* is
     written through to its target, and an existing file's permissions are kept: the temp file is created
@@ -22,12 +30,13 @@ def write_text_atomic(path: Path, text: str) -> None:
     except FileNotFoundError:
         mode = None
     try:
-        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if mode is not None else 0o666)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        # O_BINARY (Windows only) keeps the C runtime from translating newlines in the written bytes.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        fd = os.open(temp_path, flags, 0o600 if mode is not None else 0o666)
+        with os.fdopen(fd, "wb") as handle:
             if mode is not None:
                 os.chmod(temp_path, mode)
-            handle.write(text)
+            handle.write(data)
         temp_path.replace(target)
     finally:
-        if temp_path.exists():
-            temp_path.unlink()
+        temp_path.unlink(missing_ok=True)

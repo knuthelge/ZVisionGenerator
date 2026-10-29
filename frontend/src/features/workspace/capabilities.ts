@@ -23,7 +23,14 @@ export interface WorkspaceCapabilities {
   showEnhanceAuto: boolean;
   enhancer: PromptEnhancerContract | null;
   enhanceMaxWords: number;
+  /** The start image (img2img's image, or a video's first frame). */
   showRefImage: boolean;
+  /** The References section: an image workflow on a model that takes reference images. */
+  showReferences: boolean;
+  /** How many references the model takes; 0 when the section is not shown. */
+  maxReferences: number;
+  /** How many of the draft's references the section shows and Generate sends: the first `maxReferences` of the list. */
+  referenceCount: number;
   /** Image to Video on a model that can end a clip on a given image: the Last frame slot. */
   showEndImage: boolean;
   showDimensions: boolean;
@@ -68,6 +75,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   const supportsNegativePrompt = isImageMode && (imageDefaults?.supports_negative_prompt ?? false);
   const enhancer = context?.prompt_enhancer ?? null;
   const showRefImage = (visible.has('reference_image') || visible.has('reference_image_path')) && supportsImg2img;
+  const maxReferences = isImageMode && visible.has('references') ? Math.max(0, imageDefaults?.max_reference_images ?? 0) : 0;
   const showImageUpscale = isImageMode && visible.has('image_upscale_enabled') && supportsUpscale;
 
   return {
@@ -92,6 +100,9 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
       ?? enhancer?.default_max_words
       ?? 300,
     showRefImage,
+    showReferences: maxReferences > 0,
+    maxReferences,
+    referenceCount: Math.min(state.referenceImagePaths.length, maxReferences),
     showEndImage: (visible.has('end_image') || visible.has('end_image_path')) && showRefImage,
     showDimensions: visible.has('ratio') || visible.has('size') || visible.has('custom_dimensions'),
     showRuns: visible.has('runs'),

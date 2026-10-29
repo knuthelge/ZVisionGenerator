@@ -27,6 +27,7 @@ function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageMo
     supports_json_prompt: false,
     supports_first_sigma: false,
     supports_scheduler: true,
+    max_reference_images: 0,
     dimension_min: 16,
     dimension_max: null,
     dimension_step: 16,
@@ -1770,8 +1771,8 @@ describe('applyPreset', () => {
 
   /** A context whose workflows show every control a preset sets, with two image and two video models. */
   const presetContext = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => {
-    const json = makeImageDefaults({ family: 'zimage', supports_negative_prompt: true, supports_json_prompt: true, supports_first_sigma: true, steps: 9, guidance: 0 });
-    const plain = makeImageDefaults({ family: 'flux1', supports_negative_prompt: false, supports_json_prompt: false, supports_first_sigma: false, steps: 28, guidance: 3.5 });
+    const json = makeImageDefaults({ family: 'zimage', supports_negative_prompt: true, supports_json_prompt: true, supports_first_sigma: true, steps: 9, guidance: 0, max_reference_images: 4 });
+    const plain = makeImageDefaults({ family: 'flux1', supports_negative_prompt: false, supports_json_prompt: false, supports_first_sigma: false, steps: 28, guidance: 3.5, max_reference_images: 4 });
     const ctx = makeContext({
       image_models: [{ id: 'json-model', label: 'JSON', type: 'image' }, { id: 'plain-model', label: 'Plain', type: 'image' }, { id: 'twin-model', label: 'Twin', type: 'image' }],
       image_model_defaults: { 'json-model': json, 'plain-model': plain, 'twin-model': { ...json } },
@@ -1806,7 +1807,7 @@ describe('applyPreset', () => {
   const MARKED: Partial<DraftState> = {
     workflow: 'img2img', promptSource: 'file', prompt: 'a prompt', scene: 'a scene', jsonPromptEnabled: true, jsonPrompt: '{"a":1}', negativePrompt: 'blurry',
     promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one', 'two'], promptFileLoaded: { path: '/prompts/set.yaml', count: 2 },
-    seed: 42, referenceImagePath: '/refs/ref.png', endImagePath: '/refs/end.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
+    seed: 42, referenceImagePath: '/refs/ref.png', referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
     enhancedHistory: [{ prompt: 'plain rewrite', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }, { prompt: '{"caption":"x"}', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }],
@@ -1831,7 +1832,7 @@ describe('applyPreset', () => {
 
     const after = draft.state;
     expect(after).toMatchObject(IMAGE_PRESET_DRAFT);
-    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
+    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'lastImageModel', 'lastVideoModel', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
     // Every key is either marked above or a preset key, so a new draft key must be classified here.
     const unclassified = Object.keys(after).filter((key) => !(key in MARKED) && !presetOwned.has(key) && key !== 'version');
     expect(unclassified).toEqual([]);
@@ -1856,7 +1857,7 @@ describe('applyPreset', () => {
     expect(after.enhancedHistory.map((entry) => entry.prompt)).toEqual(['plain rewrite']);
     // Everything else stays: prompt, scene, seed, prompt source, enhance options, workflow, reference, extend source.
     for (const key of ['prompt', 'scene', 'seed', 'promptSource', 'promptFilePath', 'promptFileOptionIds', 'enhancedScene', 'enhanceSettings', 'enhanceSettingsVideo', 'enhanceAuto',
-      'enhanceModel', 'enhanceFormat', 'workflow', 'referenceImagePath', 'extendSourcePath', 'extendFrames', 'sidebarCollapsed'] as (keyof DraftState)[]) {
+      'enhanceModel', 'enhanceFormat', 'workflow', 'referenceImagePath', 'referenceImagePaths', 'extendSourcePath', 'extendFrames', 'sidebarCollapsed'] as (keyof DraftState)[]) {
       expect(after[key], `${key} must be left alone`).toEqual(before[key]);
     }
   });
@@ -2053,5 +2054,217 @@ describe('applyPreset', () => {
     draft.setAppliedPreset('look');
     draft.resetSelections(ctx);
     expect(draft.state.appliedPreset).toBeNull();
+  });
+});
+
+describe('model remembered per mode', () => {
+  /** Klein takes 4 references and krea none; the server's default image model is krea, its default video model is ltx-a. */
+  const modeContext = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => {
+    const ctx = makeContext({
+      image_models: [{ id: 'krea', label: 'Krea', type: 'image' }, { id: 'klein4b', label: 'Klein 4B', type: 'image' }],
+      video_models: [{ id: 'ltx-a', label: 'LTX A', type: 'video' }, { id: 'ltx-b', label: 'LTX B', type: 'video' }],
+      image_model_defaults: { krea: makeImageDefaults(), klein4b: makeImageDefaults({ max_reference_images: 4 }) },
+      video_model_defaults: { 'ltx-a': makeVideoDefaults(), 'ltx-b': makeVideoDefaults() },
+      current_image_model: 'krea',
+      current_video_model: 'ltx-a',
+      ...overrides,
+    });
+    ctx.workflow_contract.definitions.txt2img.visible_controls.push('references', 'references_clear');
+    return ctx;
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('returns to the image model last used after a video workflow', () => {
+    const ctx = modeContext();
+    draft.hydrateFromContext(ctx, 'klein4b');
+
+    draft.onWorkflowChange('img2vid', ctx);
+    expect(draft.state.model).toBe('ltx-a');
+    draft.onWorkflowChange('txt2img', ctx);
+
+    expect(draft.state.model).toBe('klein4b');
+  });
+
+  it('returns to the video model last used after an image workflow', () => {
+    const ctx = modeContext();
+    draft.onWorkflowChange('img2vid', ctx);
+    draft.update('model', 'ltx-b');
+
+    draft.onWorkflowChange('txt2img', ctx);
+    expect(draft.state.model).toBe('krea');
+    draft.onWorkflowChange('txt2vid', ctx);
+
+    expect(draft.state.model).toBe('ltx-b');
+  });
+
+  it('remembers the model picked by hand through a model switch', () => {
+    const ctx = modeContext();
+    draft.hydrateFromContext(ctx, 'krea');
+    draft.hydrateFromContext(ctx, 'klein4b', { keepChangedSettings: true });
+
+    draft.onWorkflowChange('txt2vid', ctx);
+    draft.onWorkflowChange('txt2img', ctx);
+
+    expect(draft.state.model).toBe('klein4b');
+  });
+
+  it('keeps both remembered models through Reset', () => {
+    const ctx = modeContext();
+    draft.hydrateFromContext(ctx, 'klein4b');
+    draft.onWorkflowChange('txt2vid', ctx);
+    draft.update('model', 'ltx-b');
+
+    draft.resetSelections(ctx);
+    expect(draft.state.model).toBe('ltx-b');
+    draft.onWorkflowChange('txt2img', ctx);
+    expect(draft.state.model).toBe('klein4b');
+    draft.onWorkflowChange('txt2vid', ctx);
+
+    expect(draft.state.model).toBe('ltx-b');
+  });
+
+  it('survives a reload of the saved draft', () => {
+    const ctx = modeContext();
+    draft.hydrateFromContext(ctx, 'klein4b');
+    draft.onWorkflowChange('txt2vid', ctx);
+
+    draft.loadDraft();
+    draft.onWorkflowChange('txt2img', ctx);
+
+    expect(draft.state.model).toBe('klein4b');
+  });
+
+  it('lets a model named by the URL win over the remembered one', () => {
+    const ctx = modeContext();
+    draft.hydrateFromContext(ctx, 'klein4b');
+    draft.onWorkflowChange('txt2vid', ctx);
+
+    // The page's prefill: workflow first, then the model the URL names, then the rest of the params.
+    const params = { workflow: 'txt2img', model: 'krea' };
+    draft.loadFromUrl({ workflow: params.workflow }, ctx);
+    draft.hydrateFromContext(ctx, params.model);
+    draft.loadFromUrl(params, ctx);
+
+    expect(draft.state.model).toBe('krea');
+    expect(draft.state.lastImageModel).toBe('krea');
+  });
+
+  it('falls back to the default when the remembered model is no longer offered', () => {
+    draft.hydrateFromContext(modeContext(), 'klein4b');
+    draft.onWorkflowChange('txt2vid', modeContext());
+    const later = modeContext({
+      image_models: [{ id: 'krea', label: 'Krea', type: 'image' }],
+      image_model_defaults: { krea: makeImageDefaults() },
+    });
+
+    draft.onWorkflowChange('txt2img', later);
+
+    expect(draft.state.model).toBe('krea');
+  });
+
+});
+
+describe('references', () => {
+  /** Klein takes 4, "pair" takes 2, "flux-dev" takes none; only the image workflows list the controls. */
+  const referencesContext = (): WorkspaceContext => {
+    const ctx = makeContext({
+      image_models: [{ id: 'klein', label: 'Klein', type: 'image' }, { id: 'pair', label: 'Pair', type: 'image' }, { id: 'flux-dev', label: 'FLUX Dev', type: 'image' }],
+      image_model_defaults: {
+        klein: makeImageDefaults({ max_reference_images: 4 }),
+        pair: makeImageDefaults({ max_reference_images: 2 }),
+        'flux-dev': makeImageDefaults(),
+      },
+      current_image_model: 'klein',
+    });
+    const { definitions } = ctx.workflow_contract;
+    for (const workflow of ['txt2img', 'img2img'] as const) definitions[workflow].visible_controls.push('references', 'references_clear');
+    return ctx;
+  };
+  const PATHS = ['/in/a.png', '/in/b.png', '/in/c.png'];
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('keeps the whole list through a model that takes none or fewer, and back', () => {
+    const ctx = referencesContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.update('referenceImagePaths', PATHS);
+
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    expect(draft.state.referenceImagePaths).toEqual(PATHS);
+    draft.hydrateFromContext(ctx, 'pair');
+    expect(draft.state.referenceImagePaths).toEqual(PATHS);
+    draft.hydrateFromContext(ctx, 'klein');
+    expect(draft.state.referenceImagePaths).toEqual(PATHS);
+  });
+
+  it('keeps them while a video workflow is open, and brings them back to the image workflow', () => {
+    const ctx = referencesContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.patch({ referenceImagePaths: PATHS, missingReferencePaths: ['/in/c.png'] });
+
+    draft.onWorkflowChange('txt2vid', ctx);
+    expect(draft.state.referenceImagePaths).toEqual(PATHS);
+
+    draft.onWorkflowChange('txt2img', ctx);
+    expect(draft.state.referenceImagePaths).toEqual(PATHS);
+    expect(draft.state.missingReferencePaths).toEqual(['/in/c.png']);
+  });
+
+  describe('Reuse', () => {
+    it('brings back the references in order and drops the flags of the rows it replaces', () => {
+      const ctx = referencesContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.patch({ referenceImagePaths: ['/in/old.png'], missingReferencePaths: ['/in/old.png'] });
+
+      draft.loadFromUrl({ workflow: 'txt2img', model: 'klein', reference_path: PATHS }, ctx);
+
+      expect(draft.state.referenceImagePaths).toEqual(PATHS);
+      expect(draft.state.missingReferencePaths).toEqual([]);
+    });
+
+    it('takes a single reference as a list of one', () => {
+      const ctx = referencesContext();
+      draft.hydrateFromContext(ctx, 'klein');
+
+      draft.loadFromUrl({ reference_path: '/in/a.png' }, ctx);
+
+      expect(draft.state.referenceImagePaths).toEqual(['/in/a.png']);
+    });
+
+    it('clears the references already chosen when the URL names a blank list', () => {
+      const ctx = referencesContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.update('referenceImagePaths', PATHS);
+
+      draft.loadFromUrl({ reference_path: '' }, ctx);
+
+      expect(draft.state.referenceImagePaths).toEqual([]);
+    });
+
+    it('leaves the references alone when the URL does not name them', () => {
+      const ctx = referencesContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.update('referenceImagePaths', PATHS);
+
+      draft.loadFromUrl({ steps: '8' }, ctx);
+
+      expect(draft.state.referenceImagePaths).toEqual(PATHS);
+    });
+
+    it('ignores references for a workflow that does not show the section', () => {
+      const ctx = referencesContext();
+      draft.hydrateFromContext(ctx, 'klein');
+
+      draft.loadFromUrl({ workflow: 'txt2vid', reference_path: PATHS }, ctx);
+
+      expect(draft.state.referenceImagePaths).toEqual([]);
+    });
   });
 });

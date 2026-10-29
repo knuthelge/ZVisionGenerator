@@ -23,6 +23,8 @@ class ImageGenerationRequest:
     model_name: str | None = None
     model_family: str = "unknown"
     supports_negative_prompt: bool = False
+    # How many references the model takes; 0 means none.
+    max_reference_images: int = 0
 
     # LoRA
     lora_paths: list[str] | None = None
@@ -70,9 +72,11 @@ class ImageGenerationRequest:
     # Shows the small render before the upscale and returns whether to go on; set only when review is on.
     review: Callable[[Image.Image], bool] | None = None
 
-    # Reference image params
+    # Start image params (img2img)
     image_path: str | None = None
     image_strength: float = 0.5
+    # References: images whose content the result reuses, in prompt order; independent of the start image.
+    reference_paths: tuple[str, ...] = ()
 
     # Sharpening (from config)
     sharpen_amount_normal: float = 0.8
@@ -106,6 +110,8 @@ class ImageWorkingArtifacts:
     """Mutable — holds working state accumulated by image stages."""
 
     image: Image.Image | None = None
+    # The loaded references, each at its own size; ``image`` stays the start image.
+    reference_images: list[Image.Image] = field(default_factory=list)
     resolved_prompt: str | None = None
     generation_time: float = 0.0
     filename: str | None = None

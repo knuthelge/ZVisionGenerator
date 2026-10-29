@@ -1,5 +1,5 @@
 import { enhanceSettingsKey, prettyCaption, restoredEnhanceSettings, reusedEnhance, workflowMode } from './promptEnhance';
-import type { DraftState, EnhancedSource, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
+import type { DraftState, EnhancedSource, EnhanceParts, EnhanceSettings, JobSettings, PrefillParams, PromptSource, Workflow } from '$lib/types';
 import { EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
@@ -7,7 +7,7 @@ const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio',
 
 export interface JobSettingsPrefill {
   /** Applied like a reuse URL: workflow and model first, so their defaults load before the values. */
-  params: Record<string, string>;
+  params: PrefillParams;
   /** Every other submitted setting, applied to the draft afterwards. */
   patch: Partial<DraftState>;
 }
@@ -54,12 +54,14 @@ function enhanceRecord(value: string | undefined, workflow: Workflow): Pick<Enha
  * @param extendStep The step between the lengths the job's model can extend by.
  */
 export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: EnhanceSettings['partsByWorkflow'], extendStep: number = EXTEND_FRAME_STEP): JobSettingsPrefill {
-  const params: Record<string, string> = {};
+  const params: PrefillParams = {};
   for (const key of PREFILL_KEYS) {
     const value = first(settings, key);
     // A blank LoRA list is kept: the job ran without LoRAs, so loading it clears them.
     if (value !== undefined && (value !== '' || key === 'lora')) params[key] = value;
   }
+  // The references the job ran with, in prompt order; none named clears them, as the job had none.
+  if (first(settings, 'mode') !== 'video') params.reference_path = values(settings, 'reference_path');
 
   const promptSource = (first(settings, 'prompt_source') ?? 'inline') as PromptSource;
   const isVideo = first(settings, 'mode') === 'video';

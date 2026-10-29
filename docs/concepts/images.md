@@ -25,9 +25,9 @@ The **Base resolution** on the [Config page](../web-ui/config.md) changes the de
 - **Seed** picks the starting noise. The same model, prompt, settings and seed give the same image. Without a seed every image gets a random one, which is recorded in the file.
 - **Scheduler** decides how the steps are spaced. Z-Image uses `beta` by default; most other models have no choice.
 
-## Reference images
+## Start image
 
-A reference image is a starting point: the model starts from it and moves toward your prompt. This is **Image to Image** in the Web UI and `--image` in the CLI.
+A start image is a starting point: the model starts from it and moves toward your prompt, keeping its layout and colours. This is **Image to Image** in the Web UI and `--image` in the CLI.
 
 **Img strength** (`--image-strength`, 0–1, default 0.5) sets how far the result may move: low values stay close to the image, high values follow the prompt more.
 
@@ -36,9 +36,35 @@ ziv-image -m klein9b --image photo.jpg --image-strength 0.4 --prompt "A woman in
 ziv-image -m klein9b --image sketch.png --image-strength 0.8 --prompt "Cyberpunk cityscape"
 ```
 
-The image is resized to the target size. Ideogram 4 doesn't take a reference image.
+The image is resized to the target size. Photos are turned upright by their orientation tag, and transparent areas are filled with white. Ideogram 4 doesn't take a start image.
 
-In the Web UI viewer, **Use as reference** (++e++) opens an image as the reference together with its prompt.
+In the Web UI viewer, **Use as** → **Start image** (++e++) opens an image as the start image together with its prompt.
+
+## References
+
+A start image sets the layout. A **reference** is different: it is an image whose *content* the result reuses, such as a person, an object, a place or a style. You can give up to four, alone or combined, for example a woman from one photo, a backpack from another and a pier from a third.
+
+References work with FLUX.2 Klein 4B and 9B (`klein4b`, `klein9b`). In the Web UI, the **References** section appears in **Text to Image** and **Image to Image** when the selected model takes them; other models don't show it. In the CLI, `--reference` takes a comma-separated list, and other models refuse it.
+
+```bash
+ziv-image -m klein9b --reference woman.jpg,backpack.jpg --prompt "the woman from image 1 wearing the backpack from image 2, on a rainy street"
+```
+
+**Refer to each reference by its number, in order:** the first is "image 1", the second "image 2". The model reads those words in your prompt, so say which image supplies what: "the woman from image 1 wearing the backpack from image 2". The [prompt enhancer](prompt-enhancer.md#what-the-enhancer-knows-about-the-job) keeps these phrases.
+
+- **What works:** a person, an object, a place and a style, alone or combined. A person, an object and a place in one image works, and so does a person with a style.
+- **A style works best next to one other reference.** With four references, a style one tends to be ignored.
+- **Size:** each reference keeps its own aspect ratio and is scaled to at most about 1 megapixel. Photos are turned upright by their orientation tag, and transparent areas are filled with white. The result has the size you chose.
+- **Cost:** every reference makes each step slower and uses more memory. Three references roughly double the time per step on FLUX.2 Klein 4B, and four make it about two and a half times as long at a large size. Use as few as the picture needs.
+- **LoRAs** keep working.
+
+### References with a start image
+
+You can use both. The start image sets the layout and **Img strength** how much of it stays. On Klein's 4-step models, strength has few useful levels: where the layout stays, there is little room for new content, so a referenced person may not appear, and at a high strength the layout is lost. To put a referenced subject in a new scene, use references without a start image.
+
+### Upscale and Reuse
+
+An upscale made while generating refines with the same references, so what they fix stays the same in the larger image. [Upscaling a finished image](upscaling.md#upscaling-an-existing-image) later doesn't use them, but the upscaled image records them, so **Reuse settings** brings them back. In the Web UI, a reference whose file has since moved or been deleted keeps its row, so the numbers in your prompt still match; see [References](../web-ui/workspace.md#references).
 
 ## Post-processing
 

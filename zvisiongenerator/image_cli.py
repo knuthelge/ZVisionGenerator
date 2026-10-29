@@ -26,6 +26,7 @@ from zvisiongenerator.downloads import describe_refusal
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.prompt_enhance import image_enhance_entries
+from zvisiongenerator.utils.references import check_reference_count, check_reference_files, parse_reference_paths
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +85,16 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("--no-contrast", dest="contrast", action="store_const", const=False, help="Disable contrast adjustment.")
     parser.add_argument("--saturation", nargs="?", const=True, type=float, default=False, help="Apply saturation adjustment. Optional amount (1.0 = no change). Default: disabled.")
     parser.add_argument("--no-saturation", dest="saturation", action="store_const", const=False, help="Disable saturation adjustment.")
-    parser.add_argument("--image", dest="image_path", type=str, default=None, help="Path to a reference image for img2img steering.")
-    parser.add_argument("--image-strength", dest="image_strength", type=float, default=0.5, help="Denoising strength for reference image steering (0.0–1.0). Default: 0.5.")
+    parser.add_argument("--image", dest="image_path", type=str, default=None, help="Path to a start image for img2img.")
+    parser.add_argument("--image-strength", dest="image_strength", type=float, default=0.5, help="Denoising strength for the start image (0.0–1.0). Default: 0.5.")
+    parser.add_argument(
+        "--reference",
+        dest="reference_paths",
+        type=parse_reference_paths,
+        default=[],
+        metavar="PATH[,PATH...]",
+        help="Comma-separated reference images whose content the result reuses, in prompt order (image 1, image 2, ...). Klein models take up to 4. Can be combined with --image.",
+    )
     parser.add_argument("--seed", type=int, default=None, help="Seed for reproducible image generation. If not set, a random seed is used each run.")
     add_enhance_arguments(parser, mode="image")
     return parser
@@ -261,9 +270,14 @@ def main(*, prog: str = "ziv-image") -> None:
     if args.upscale and args.upscale_steps is None:
         args.upscale_steps = resolve_upscale_steps(defaults, args.steps)
     if args.image_path is not None and not os.path.isfile(args.image_path):
-        parser.error(f"Reference image not found: {args.image_path}")
+        parser.error(f"Start image not found: {args.image_path}")
     if not (0.0 <= args.image_strength <= 1.0):
         parser.error(f"--image-strength must be between 0.0 and 1.0, got {args.image_strength}")
+    try:
+        check_reference_count(model_info.family, len(args.reference_paths), defaults.get("max_reference_images", 0))
+        check_reference_files(args.reference_paths)
+    except ValueError as e:
+        parser.error(str(e))
 
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")
