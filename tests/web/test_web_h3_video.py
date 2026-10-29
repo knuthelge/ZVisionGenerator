@@ -19,6 +19,7 @@ from zvisiongenerator.web import config as web_config_module
 from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.config import WebUiDefaultModels
+from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 
 
 @pytest.fixture(autouse=True)
@@ -253,6 +254,20 @@ class TestExtendMemoryFit:
 
         assert [call["loras_bytes"] for call in calls] == [700]
 
+    def test_the_source_request_counts_loras_that_are_still_downloading(self, tmp_path, monkeypatch):
+        calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(extend_api_module, "_resolve_video_model", lambda model, _config: ("/models/h3", "h3"))
+        self._stub_an_inspected_source(tmp_path, monkeypatch)
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path)
+
+        extend_api_module.extend_source_response(
+            {"path": "clip.mp4", "extend_frames": 17, "model": "h3", "lora": "pending_style"}, _web_config(tmp_path), tmp_path, downloading_loras={"pending_style": 321}
+        )
+
+        assert [call["loras_bytes"] for call in calls] == [321]
+
     def test_the_fit_is_asked_for_the_models_family_in_extend_mode_at_its_window_and_default_steps(self, tmp_path, monkeypatch):
         calls: list[dict[str, Any]] = []
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
@@ -403,6 +418,14 @@ class TestMemoryFitHints:
 
         assert [call["loras_bytes"] for call in asked] == [3_500, 0]
 
+    def test_a_lora_that_is_still_downloading_is_sized_by_what_the_download_expects(self, tmp_path, asked, monkeypatch):
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_server.lora_installer, "pending_sizes", lambda: {"pending_style": 255_000_000})
+
+        self._fit(tmp_path, lora="pending_style:0.8")
+
+        assert asked[0]["loras_bytes"] == 255_000_000
+
     def test_review_counts_only_with_an_upscale(self, tmp_path, asked):
         self._fit(tmp_path, upscale=2, review=True)
         self._fit(tmp_path, upscale=2, review=False)
@@ -480,3 +503,24 @@ class TestExtendEnhanceContext:
     def test_the_model_must_be_a_string(self):
         with pytest.raises(ValueError, match="context.model must be a string"):
             extend_api_module.extend_context_from_body({"source_video": "clip.mp4", "model": 3}, "")
+
+
+class TestLoraFitWhileDownloading:
+    @pytest.fixture
+    def data_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path)
+        (tmp_path / "loras").mkdir()
+        return tmp_path
+
+    def test_a_lora_still_downloading_counts_the_size_it_will_have(self, data_dir):
+        assert lora_bytes_for_fit("pending_style:0.8", family="h3", downloading={"pending_style": 255_000_000}) == 255_000_000
+
+    def test_installed_and_downloading_loras_add_up(self, data_dir):
+        _lora_file(data_dir / "loras", "ready", 4_000)
+
+        assert lora_bytes_for_fit("ready:1.0,pending_style:0.5", family="h3", downloading={"pending_style": 700}) == 4_700
+
+    def test_the_file_counts_for_its_real_size_once_it_exists(self, data_dir):
+        _lora_file(data_dir / "loras", "pending_style", 900)
+
+        assert lora_bytes_for_fit("pending_style", family="h3", downloading={"pending_style": 700}) == 900

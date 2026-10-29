@@ -402,3 +402,35 @@ def test_image_defaults_carry_the_size_variant(monkeypatch):
 
     assert (klein["size_variant"], klein["size"]) == ("4b", "m")
     assert (failed["size_variant"], failed["size"]) == (None, "m")
+
+
+def test_ltx_video_models_carry_their_ltx_version_and_other_video_models_none(monkeypatch, tmp_path):
+    """The Workspace context says whether each LTX model is 2.3 or 2.5, from its alias, its repo or its folder's config."""
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "data"))
+    local = tmp_path / "local"
+    local.mkdir()
+    (local / "embedded_config.json").write_text('{"transformer": {"ff_bias": false}}', encoding="utf-8")
+    web_config = make_web_config()
+    web_config.video_model_options = ("ltx-8", "ltx25-4", "mine", "h3", "missing")
+    web_config.app_config["video_model_presets"] = {"ltx": {"versions": {"ltx25": {"aliases": ["ltx25-4"], "model_type": "ltx-2.5"}}}}
+    web_config.video_inventory = (
+        VideoInventoryEntry(name="ltx-8", family="ltx", supports_i2v=True, source="alias", resolved_path="diffusers/LTX-2.3-Distilled-Diffusers@abc"),
+        VideoInventoryEntry(name="ltx25-4", family="ltx", supports_i2v=True, source="alias", resolved_path="unsloth/LTX-2.5-FP8@abc"),
+        VideoInventoryEntry(name="mine", family="ltx", supports_i2v=True, source="installed", resolved_path=str(local)),
+        VideoInventoryEntry(name="h3", family="h3", supports_i2v=True, source="alias", resolved_path="MiniMaxAI/MiniMax-H3"),
+    )
+    monkeypatch.setattr(workspace_api_module, "describe_model_status", lambda *args, **kwargs: {"downloaded": True, "memory_fit": None})
+    monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
+
+    workspace = workspace_api_module.build_workspace_response(
+        web_config,
+        [],
+        active_job=None,
+        prompt_sources=["inline"],
+        default_prompt_source="inline",
+        prompt_file_contract={},
+        workflow_contract={},
+        build_bootstrap_view=lambda _cfg: make_workspace_bootstrap_view(),
+    )
+
+    assert {entry["id"]: entry["version"] for entry in workspace["video_models"]} == {"ltx-8": "2.3", "ltx25-4": "2.5", "mine": "2.5", "h3": None, "missing": None}

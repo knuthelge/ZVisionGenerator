@@ -241,6 +241,7 @@ class TestIdeogram4:
 
         assert order == ["load", "lora"]
         assert mock_loras.call_args.args == (pipeline, ["/l/a.safetensors"], [0.7])
+        assert mock_loras.call_args.kwargs == {"family": "ideogram4"}
 
     def _generate(self, mod, **overrides):
         backend = mod.DiffusersBackend()
@@ -696,6 +697,34 @@ class TestLoadModelLoRA:
         assert [call.args[0] for call in pipeline.load_lora_weights.call_args_list] == ["/l/a.safetensors", "/l/b.bin"]
         pipeline.set_adapters.assert_called_once_with(["lora_0", "lora_1"], adapter_weights=[0.8, 0.5])
         lokr_module.apply_lokr.assert_not_called()
+
+    def test_a_file_the_converter_cannot_read_goes_to_diffusers_under_its_normalised_names(self, loras):
+        mod, _, _, lokr_module = loras
+        renamed = self._parts(rest={"diffusion_model.a.lora_A.weight": 1, "diffusion_model.a.lora_B.weight": 2}, lora={"diffusion_model.a.lora_A.weight": 1})
+        seen: list[tuple[str, str]] = []
+
+        def normalised(path, family):
+            seen.append((path, family))
+            return renamed if path == "/l/peft.safetensors" else None
+
+        with patch.object(mod, "normalised_lora_state", side_effect=normalised):
+            pipeline = self._load(mod, ["/l/peft.safetensors", "/l/plain.safetensors"], [0.6, 1.0], family="flux2_klein")
+
+        assert seen == [("/l/peft.safetensors", "flux2_klein"), ("/l/plain.safetensors", "flux2_klein")]
+        assert [call.args[0] for call in pipeline.load_lora_weights.call_args_list] == [renamed.rest, "/l/plain.safetensors"]
+        pipeline.set_adapters.assert_called_once_with(["lora_0", "lora_1"], adapter_weights=[0.6, 1.0])
+        lokr_module.apply_lokr.assert_not_called()
+
+    def test_a_rejected_file_is_retried_from_its_normalised_tensors(self, loras):
+        mod, _, _, _ = loras
+        renamed = self._parts(rest={"a": 1, "d": 2}, lora={"a": 1}, unsupported=["layers.0.diff"])
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = lambda source, **_k: (_ for _ in ()).throw(ValueError("leftover keys")) if source is renamed.rest else None
+
+        with patch.object(mod, "normalised_lora_state", return_value=renamed), pytest.warns(UserWarning, match="unsupported type"):
+            self._load(mod, ["/l/peft.safetensors"], None, pipeline)
+
+        assert [call.args[0] for call in pipeline.load_lora_weights.call_args_list] == [renamed.rest, renamed.lora]
 
     def test_lokr_files_load_their_other_tensors_first_and_lokr_layers_last(self, loras):
         mod, parts, lokr_paths, lokr_module = loras

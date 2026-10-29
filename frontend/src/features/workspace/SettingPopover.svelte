@@ -8,6 +8,8 @@
   import { galleryStore } from '$lib/state/gallery.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { clipTimeNote, memoryFitNote } from '$lib/state/memoryFit';
+  import { addLoraChip, removeLoraChip } from '$lib/state/loraActions';
+  import { chipDownload } from '$lib/state/loraDownloads';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
   import { extendGuard, extendModelSupport, extendSourceFacts } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
@@ -73,9 +75,11 @@
     /** Make the latest output the reference image. */
     onUseLatestAsReference: () => void;
     onclose: () => void;
+    /** Open Discover LoRAs (the popover closes first). */
+    ondiscover?: () => void;
   }
 
-  let { key, context, busy, models, quantizeOptions, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, referenceFiles = [], onReferenceFilesChange = () => {}, onUseLatestAsEndFrame = () => {}, onModelChange, onUseLatestAsReference, onclose }: Props = $props();
+  let { key, context, busy, models, quantizeOptions, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, referenceFiles = [], onReferenceFilesChange = () => {}, onUseLatestAsEndFrame = () => {}, onModelChange, onUseLatestAsReference, onclose, ondiscover }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -177,7 +181,7 @@
   });
 
   function addLora(name: string): void {
-    draft.update('loraString', formatLoraString([...loraChips, { name, weight: 1.0 }]));
+    addLoraChip(loraChips, name, 1.0);
   }
 
   function setLoraWeight(name: string, weight: number | null): void {
@@ -400,11 +404,17 @@
       {/if}
     {:else if key === 'loras'}
       {#each loraChips as chip (chip.name)}
+        {@const file = chipDownload(chip.name, loraOptions, downloadStore.items, downloadStore.unlisted)}
         <div class="pop-lora">
           <span class="pop-item-text" title={chip.name}>{loraLabel(chip.name)}</span>
           <InspectorNumber ariaLabel="{loraLabel(chip.name)} weight" value={chip.weight} {...SPEC.loraWeight} stepper size="lg" onchange={(v) => setLoraWeight(chip.name, v)} />
-          <button type="button" class="ui-btn ui-btn-icon" aria-label="Remove {loraLabel(chip.name)}" onclick={() => draft.update('loraString', formatLoraString(loraChips.filter((c) => c.name !== chip.name)))}><Icon name="close" size={16} /></button>
+          <button type="button" class="ui-btn ui-btn-icon" aria-label="Remove {loraLabel(chip.name)}" onclick={() => removeLoraChip(loraChips, chip.name)}><Icon name="close" size={16} /></button>
         </div>
+        {#if file.state === 'downloading'}
+          <p class="ui-help" role="status"><Icon name="download" size={12} /> Downloading{file.percent === null ? '' : ` ${file.percent} %`}. Generate waits for it.</p>
+        {:else if file.state === 'failed'}
+          <p class="ui-alert ui-alert-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 flex-1 break-words">{file.reason}</span><button type="button" class="ui-btn ui-btn-sm" onclick={() => void downloadStore.retryLora(file.item)}>Retry</button></p>
+        {/if}
       {/each}
       {#if loraChips.length === 0}<p class="ui-help">No LoRA in use.</p>{/if}
       {#if addable.length}
@@ -428,6 +438,9 @@
         </div>
       {:else if loraOptions.length === 0}
         <p class="ui-help">No LoRA files in the LoRA folder.</p>
+      {/if}
+      {#if ondiscover}
+        <button type="button" class="pop-item" data-action="discover-loras" onclick={ondiscover}><Icon name="search" size={16} />Discover LoRAs…</button>
       {/if}
     {:else if key === 'upscale'}
       <label class="pop-row">Upscale after the render<Toggle ariaLabel="Enable upscale" checked={s.upscaleEnabled} disabled={busy} onchange={(e) => draft.update('upscaleEnabled', (e.currentTarget as HTMLInputElement).checked)} /></label>

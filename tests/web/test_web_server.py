@@ -2176,7 +2176,22 @@ class TestLoraFamilies:
 
         rows = workspace_client.get("/api/workspace", params={"include_history": "false"}).json()["loras"]
 
-        assert rows == [{"name": "style", "path": str(path), "family": "flux2_klein", "size_variant": "4b"}]
+        assert rows == [
+            {
+                "name": "style",
+                "path": str(path),
+                "family": "flux2_klein",
+                "size_variant": "4b",
+                "curated_id": None,
+                "title": None,
+                "trigger": None,
+                "trigger_source": None,
+                "source": None,
+                "hub": None,
+                "size_bytes": path.stat().st_size,
+                "size_label": "1 KB",
+            }
+        ]
 
     def test_a_lora_without_a_file_has_no_family(self, workspace_client):
         row = workspace_client.get("/api/workspace", params={"include_history": "false"}).json()["loras"][0]

@@ -44,3 +44,24 @@ def test_refuses_a_length_above_the_file_size(tmp_path):
 
     with pytest.raises(ValueError):
         read_header_and_metadata(path)
+
+
+class TestHeaderFromBytes:
+    def test_reads_a_header_from_the_first_bytes_of_a_file(self, tmp_path):
+        path = _write_safetensors(tmp_path / "w.safetensors", {"format": "pt"})
+
+        header, metadata = safetensors_stream.header_and_metadata_from_bytes(path.read_bytes() + b"tensor bytes that follow")
+
+        assert header == {"a.weight": {"dtype": "BF16", "shape": [4, 8], "data_offsets": [0, 0]}}
+        assert metadata == {"format": "pt"}
+
+    def test_a_header_cut_short_is_refused(self, tmp_path):
+        data = _write_safetensors(tmp_path / "w.safetensors", {}).read_bytes()
+
+        with pytest.raises(ValueError, match="safetensors"):
+            safetensors_stream.header_and_metadata_from_bytes(data[:-5])
+
+    @pytest.mark.parametrize("data", [b"", b"short", b"not a safetensors file at all"])
+    def test_other_data_is_refused(self, data):
+        with pytest.raises(ValueError, match="safetensors"):
+            safetensors_stream.header_and_metadata_from_bytes(data)

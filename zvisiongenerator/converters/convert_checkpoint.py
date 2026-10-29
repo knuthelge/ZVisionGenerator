@@ -549,10 +549,10 @@ def _cmd_model(args):
     # Determine output directory
     output_dir = get_ziv_data_dir() / "models"
     if args.name is not None:
-        from zvisiongenerator.converters.lora_import import _validate_name
+        from zvisiongenerator.converters.lora_import import validate_name
 
         try:
-            model_name = _validate_name(args.name)
+            model_name = validate_name(args.name)
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)

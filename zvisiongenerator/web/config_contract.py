@@ -194,6 +194,20 @@ def persist_first_run_skipped() -> None:
         write_user_config_override(override_config)
 
 
+def discover_huggingface_enabled() -> bool:
+    """Return whether the user chose to show Hugging Face LoRAs in Discover LoRAs (``ui.discover_huggingface``)."""
+    ui = read_user_config_override().get("ui")
+    return isinstance(ui, dict) and ui.get("discover_huggingface") is True
+
+
+def persist_discover_huggingface(enabled: bool) -> None:
+    """Record in the user config override whether Discover LoRAs shows Hugging Face LoRAs, keeping every other key."""
+    with _USER_CONFIG_WRITE_LOCK:
+        override_config = read_user_config_override()
+        _set_nested_mapping_value(override_config, ("ui", "discover_huggingface"), enabled)
+        write_user_config_override(override_config)
+
+
 def read_user_config_override() -> dict[str, Any]:
     """Read the mutable user config override file, if present."""
     config_path = get_ziv_data_dir() / "config.yaml"

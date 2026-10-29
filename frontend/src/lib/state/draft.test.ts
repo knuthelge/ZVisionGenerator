@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed } from './promptEnhance';
 import { presetDiffers } from './presets';
+import { downloadStore } from './downloads.svelte';
 import { changedSettings, draft, extendStepFor, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
 import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults } from '$lib/types';
 
@@ -1892,6 +1893,31 @@ describe('applyPreset', () => {
     draft.applyPreset(ctx, { ...IMAGE_PRESET, model: 'removed-model', settings: { ...IMAGE_PRESET.settings, lora: 'style-a:0.8,gone-one:1,gone-two:0.5' } });
 
     expect(draft.state).toMatchObject({ model: 'plain-model', loraString: 'style-a:0.8', steps: 17, ratio: '16:9' });
+  });
+
+  it('keeps a LoRA whose file is still downloading across a family switch and back, and drops one that is merely missing', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    downloadStore.adopt({ id: 'd1', kind: 'lora', name: 'coming', label: 'LoRA coming', state: 'running', message: null });
+    draft.patch({ loraString: 'style-a:1,coming:0.7,never-was:1' });
+
+    draft.hydrateFromContext(ctx, 'plain-model');
+    expect(draft.state.loraString).toBe('');
+    draft.hydrateFromContext(ctx, 'json-model');
+
+    expect(draft.state.loraString).toBe('style-a:1,coming:0.7');
+    downloadStore.reset();
+  });
+
+  it('removes a deleted LoRA from the chips and from what every model family remembers', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.patch({ loraString: 'style-a:1,detail-b:0.5', lorasByFamily: { flux1: 'detail-b:2,style-a:1', ltx: 'detail-b:1' } });
+
+    draft.removeLora('detail-b');
+
+    expect(draft.state.loraString).toBe('style-a:1');
+    expect(draft.state.lorasByFamily).toEqual({ flux1: 'style-a:1', ltx: '' });
   });
 
   it('applies a custom size as a custom size', () => {

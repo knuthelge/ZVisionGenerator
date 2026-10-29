@@ -136,6 +136,7 @@ The Web UI.
 | `startup_view` | `workspace` | The page that opens first: `workspace`, `gallery` or `config` |
 | `gallery_page_size` | `12` | How many items the Gallery loads at a time |
 | `first_run_skipped` | `false` | Set when the first-run dialog is skipped |
+| `discover_huggingface` | `false` | Set by **Show Hugging Face results** in Discover LoRAs; **Turn off** sets it back to `false` |
 
 ## `prompt_enhancer`
 

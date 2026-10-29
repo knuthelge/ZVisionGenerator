@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 #### Web UI
+- **Discover LoRAs.** **Discover LoRAs…** in **Add LoRA** finds LoRAs for your model: a curated list of checked LoRAs and, if you turn it on, a Hugging Face search. **Download** one, or turn on **Use in LoRAs** to add it to your chips; Generate waits for the download
+- **Trigger words in the prompt box.** A **Triggers** menu puts the trigger words of your LoRAs into the prompt, and counts the ones still missing
 - **Recent prompts.** A history button in the prompt box lists the prompts you generated in the current mode (image prompts, or video scenes and actions), newest first, with a filter that searches all of that mode's prompts. Pick one to bring it back: the prompt, a video's scene and the negative prompt, or a JSON caption into the `{ }` box on Ideogram 4. Press Alt+↑ in an empty prompt to open it. **Clear recents** removes the current mode's. They are kept on the server, so they are the same on every device
 - **The last five rewrites.** In the Enhanced tab, a `‹ 2 of 3 ›` stepper moves through the last five rewrites of the same text; Generate sends the one shown, with how it was written
 
@@ -29,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 #### Web UI
 - **Image to Image's "Reference image" is now "Start image".** The name says what it does, and "reference" now means an image whose content the result keeps. In the viewer and the gallery menus, **Use as reference** is **Use as**, with **Start image**, **First frame** and **Last frame**
+- **Importing a LoRA from Hugging Face on the Models page returns at once** and shows as a row of the LoRAs table with its progress and Cancel, like other downloads
 - **The prompt box bars are reorganised.** The tabs only say which text you see. A status line under the box says what Generate sends, with **Re-enhance** and **Use mine** beside **Out of date**. **Use mine** replaces **Clear**
 
 #### Video
@@ -52,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Converting a MiniMax H3 checkpoint refuses Ref2VA (reference-to-video) checkpoints,** which used to convert as if they were the normal model
 - **An image you upload is saved once.** Sending the same start image, last frame or reference again reuses the saved copy in the output folder's `.web_uploads`
 - **Coming back from a video tab restores your image model.** Text to Image, then Image to Video, then Text to Image used to land on the default image model; it now returns to the model you used, and a video tab likewise remembers its video model
+- **More LoRAs are listed under their model in Add LoRA, and they load.** LoRAs saved with PEFT adapter names or Kohya names, MiniMax H3 LoRAs and LTX LoRAs that adapt the audio attention are now recognised and applied instead of being skipped or failing. On a Mac such a LoRA needs a temporary copy, as large as the LoRA, in `~/.ziv/cache/loras/`
 
 ## [0.14.0b1] - 2026-10-26
 

@@ -6,12 +6,13 @@ Everything the app keeps lives in one folder, `~/.ziv/`. It survives an update, 
 ~/.ziv/
 ├── models/          Converted models, stored quants and prepared copies (such as `h3@q4`), Ideogram 4 Instant and SeedVR2
 ├── loras/           LoRA .safetensors files
+├── cache/           Temporary files, such as a Mac job's renamed LoRA copies; empty between jobs
 ├── outputs/         Images and videos made in the Web UI (the default output folder)
 ├── presets/         Web UI presets: an image and a video folder, one .yaml file each
 ├── logs/            The error log of each command
 ├── run/             Running Web UI servers
 ├── config.yaml      Your settings
-└── ziv.sqlite3      The Web UI's app database: the Gallery index and the job log
+└── ziv.sqlite3      The Web UI's app database: the Gallery index, the job log, recent prompts and LoRA sources
 ```
 
 Models downloaded from Hugging Face, such as the built-in aliases, are kept in the Hugging Face cache (`~/.cache/huggingface/hub` by default), which other tools share.
@@ -69,7 +70,7 @@ The Web UI keeps a record of finished jobs, with the reason each failed, in the 
 
 ## App database
 
-`ziv.sqlite3` holds the Gallery index and the [job log](#job-log). The Gallery index is what was read from each file in the output folder, so the Gallery opens fast after a restart. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` sit beside it.
+`ziv.sqlite3` holds the Gallery index, the [job log](#job-log), your recent prompts, and where each LoRA you downloaded in Discover came from. The Gallery index is what was read from each file in the output folder, so the Gallery opens fast after a restart. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` sit beside it.
 
 - The Gallery index rebuilds itself, so deleting the database while the server is stopped is safe for the Gallery; the next Gallery load reads every file once. The job log is not rebuilt, so deleting the database also clears it.
 - Files you delete, in the app or in the folder, are never shown.

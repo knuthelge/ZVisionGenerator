@@ -590,6 +590,21 @@ def test_load_model_applies_lora_weights(monkeypatch, tmp_path):
     assert model.text_to_video.adapter_calls == [(["lora_0"], [0.75])]
 
 
+def test_a_lora_with_a_peft_adapter_name_is_loaded_under_plain_names(monkeypatch, tmp_path):
+    torch = pytest.importorskip("torch")
+    save_file = pytest.importorskip("safetensors.torch").save_file
+    runtime = _make_runtime()
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
+    lora_path = tmp_path / "peft.safetensors"
+    save_file({"transformer_blocks.0.attn1.to_q.lora_A.default.weight": torch.zeros(4, 8), "transformer_blocks.0.attn1.to_q.lora_B.default.weight": torch.zeros(8, 4)}, str(lora_path))
+
+    model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", loras=[(str(lora_path), 1.0)])
+
+    ((loaded, adapter),) = model.text_to_video.loaded_loras
+    assert adapter == "lora_0"
+    assert set(loaded) == {"diffusion_model.transformer_blocks.0.attn1.to_q.lora_A.weight", "diffusion_model.transformer_blocks.0.attn1.to_q.lora_B.weight"}
+
+
 class _LoraNoMatchPipeline(_FakeTextPipeline):
     """A pipeline whose LoRA loads raise *error* for the paths in *unmatched*."""
 

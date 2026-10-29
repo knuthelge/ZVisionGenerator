@@ -9,7 +9,8 @@ Supported files are the formats seen in MOSS-Image LoRAs in the wild:
 * kohya, dotted (``diffusion_model.layers.N.proj.q.lora_down.weight``) or underscore (``lora_unet_layers_N_proj_q``),
   with ``alpha`` tensors;
 * ``lora_A``/``lora_B`` under ``diffusion_model.`` or ``model.diffusion_model.`` (no alpha), ``transformer.`` (alpha in
-  the file's ``lora_adapter_metadata``) or ``base_model.model.`` (PEFT adapter files);
+  the file's ``lora_adapter_metadata``) or ``base_model.model.`` (PEFT adapter files), with or without a PEFT adapter
+  name (``lora_A.default.weight``), which is dropped on reading;
 * LoKr (``lokr_w1``/``lokr_w2``);
 * a fused ``proj.qkv`` layer in any of these is split over the model's separate q, k and v layers.
 
@@ -31,12 +32,15 @@ from safetensors.torch import load_file
 
 from zvisiongenerator.backends.cuda.image.lokr import LoKrTerm, LoraParts, adapt_linear, base_linear, check_fits, lokr_factors, split_key, split_lora_tensors
 from zvisiongenerator.backends.cuda.lora_peft import warn_unmatched_lora
+from zvisiongenerator.utils.lora_files import normalised_lora_state
 
 __all__ = ["LoraFile", "install_loras", "moss_targets"]
 
 # Layer-name prefixes of the supported formats (those utils.lora_family accepts, plus kohya's); at most one is
 # stripped, the longest match first so ``model.diffusion_model.`` is not left half-stripped.
 _PREFIXES = ("model.diffusion_model.", "base_model.model.", "diffusion_model.", "transformer.", "lora_unet_")
+_FAMILY = "moss"
+_LOADER = "moss"
 _FUSED_SUFFIX = ".proj.qkv"
 _TOKEN_CHUNK = 4096
 # Tensors of layers that only an unsupported variant of the adapter can use.
@@ -129,7 +133,8 @@ def install_loras(transformer: torch.nn.Module, files: Sequence[LoraFile], *, de
 
 def _install_file(transformer: torch.nn.Module, file: LoraFile, names: dict[str, str], dim: int, device: torch.device | str) -> tuple[int, list[str]]:
     """Install one file's adapters; return how many layers were applied and the names of those skipped."""
-    parts = split_lora_tensors(load_file(file.path))
+    state = normalised_lora_state(file.path, _FAMILY, _LOADER)
+    parts = split_lora_tensors(load_file(file.path) if state is None else state)
     adapters, skipped = _file_adapters(parts, _alpha_from_metadata(file.path), file, device)
     planned: list[tuple[_Adapter, list[tuple[str, slice | None]]]] = []
     for layer, adapter in adapters.items():

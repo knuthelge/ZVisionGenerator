@@ -33,6 +33,7 @@ def check_target(target: DownloadTarget, *, snapshot_download: Callable[..., obj
             allow_patterns=None if target.allow_patterns is None else list(target.allow_patterns),
             ignore_patterns=None if target.ignore_patterns is None else list(target.ignore_patterns),
             local_dir=target.local_dir,
+            **({"token": False} if target.anonymous else {}),
             dry_run=True,
         )
     except DryRunError as exc:

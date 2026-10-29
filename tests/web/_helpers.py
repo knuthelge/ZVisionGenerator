@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import struct
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -17,6 +20,7 @@ from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web.config import WebUiDefaultModels
+from zvisiongenerator.web.hub_client import HubResponse
 
 
 def make_web_config() -> SimpleNamespace:
@@ -218,3 +222,91 @@ def stub_video_submission(monkeypatch, tmp_path) -> list[dict[str, object]]:
 def post_video(data: dict[str, object]):
     with TestClient(web_server.app) as client:
         return client.post("/api/generate", data={"mode": "video", "model": "ltx-8", **data})
+
+
+# ── Discover LoRAs ───────────────────────────────────────────────────────────
+
+COMMIT = "c" * 40
+SHA = "d" * 64
+
+
+def safetensors_bytes(keys: dict[str, list[int]] | None = None, metadata: dict[str, str] | None = None, *, tail: int = 0) -> bytes:
+    """Return the start of a safetensors file: its header (with *metadata*) and *tail* bytes of tensor data."""
+    header: dict[str, Any] = {name: {"dtype": "F16", "shape": shape, "data_offsets": [0, 0]} for name, shape in (keys or {"x.lora_A.weight": [4, 8]}).items()}
+    if metadata:
+        header["__metadata__"] = metadata
+    payload = json.dumps(header).encode("utf-8")
+    return struct.pack("<Q", len(payload)) + payload + b"\0" * tail
+
+
+def model_json(repo: str, *, sha: str = COMMIT, files: dict[str, int] | None = None, **fields: Any) -> dict[str, Any]:
+    """Return a Hub model record as the detail endpoint answers it."""
+    files = files if files is not None else {"lora.safetensors": 1000}
+    data: dict[str, Any] = {
+        "id": repo,
+        "sha": sha,
+        "downloads": 5,
+        "likes": 2,
+        "gated": False,
+        "tags": ["lora"],
+        "cardData": {"license": "apache-2.0", "base_model": "Tongyi-MAI/Z-Image-Turbo", "instance_prompt": "trg, more"},
+        "siblings": [{"rfilename": "README.md", "size": 10}] + [{"rfilename": name, "size": size, "lfs": {"sha256": SHA, "size": size}} for name, size in files.items()],
+    }
+    data.update(fields)
+    return data
+
+
+def _range_of(header: str | None, size: int) -> tuple[int, int]:
+    """Return the ``(first, last)`` byte of a ``Range: bytes=a-b`` header, or the whole of a *size* bytes body when there is none."""
+    if not header:
+        return 0, size - 1
+    first, _, last = header.removeprefix("bytes=").partition("-")
+    return int(first), min(int(last), size - 1) if last else size - 1
+
+
+class FakeHub:
+    """A ``Fetch`` that answers by URL path and records ``(url, headers, max_bytes)`` of every call.
+
+    Args:
+        listing: Answers for ``/api/models?filter=base_model:adapter:<base>``, by base repo: ``(items, next cursor or None)``.
+        models: Answers for ``/api/models/<repo>``, by repo.
+        files: Answers for ``/<repo>/resolve/<commit>/<file>``, by ``(repo, file)``: the bytes of the file.
+    """
+
+    def __init__(
+        self, *, listing: dict[str, tuple[list[dict[str, Any]], str | None]] | None = None, models: dict[str, dict[str, Any]] | None = None, files: dict[tuple[str, str], bytes] | None = None
+    ) -> None:
+        self.listing = listing or {}
+        self.models = models or {}
+        self.files = files or {}
+        self.calls: list[tuple[str, dict[str, str], int]] = []
+
+    def __call__(self, url: str, *, headers: dict[str, str] | None = None, max_bytes: int = 0) -> HubResponse:
+        self.calls.append((url, dict(headers or {}), max_bytes))
+        parts = urlsplit(url)
+        query = parse_qs(parts.query)
+        if parts.path == "/api/models":
+            base = query["filter"][0].removeprefix("base_model:adapter:")
+            items, cursor = self.listing.get(base, ([], None))
+            link = {"link": f'<https://huggingface.co/api/models?cursor={cursor}>; rel="next"'} if cursor else {}
+            return HubResponse(200, json.dumps(items).encode(), link)
+        if parts.path.startswith("/api/models/"):
+            repo = parts.path.removeprefix("/api/models/")
+            if repo not in self.models:
+                return HubResponse(404, b"", {})
+            return HubResponse(200, json.dumps(self.models[repo]).encode(), {})
+        if "/resolve/" in parts.path:
+            repo, _, rest = parts.path.lstrip("/").partition("/resolve/")
+            _commit, _, file = rest.partition("/")
+            body = self.files.get((repo, file))
+            if body is None:
+                return HubResponse(404, b"", {})
+            start, end = _range_of((headers or {}).get("Range"), len(body))
+            chunk = body[start : end + 1]
+            return HubResponse(206, chunk[:max_bytes] if max_bytes else chunk, {})
+        return HubResponse(404, b"", {})
+
+    @property
+    def urls(self) -> list[str]:
+        """Return the URL of every request."""
+        return [call[0] for call in self.calls]

@@ -43,6 +43,18 @@ describe('ActionMenu', () => {
     expect(row('a')?.textContent).toContain('Klein 9B');
   });
 
+  it('shows a note as plain text that is not an action, and an icon before an item label', () => {
+    mountMenu([
+      { kind: 'note', text: 'The connection dropped.', tone: 'error' },
+      { kind: 'item', id: 'retry', label: 'Retry download', icon: 'reset' },
+    ]);
+
+    expect(menu()?.querySelectorAll('[role="menuitem"]')).toHaveLength(1);
+    expect(menu()?.textContent).toContain('The connection dropped.');
+    expect(menu()?.querySelector('.action-menu-note')?.getAttribute('role')).toBe('presentation');
+    expect(row('retry')?.querySelector('svg')).not.toBeNull();
+  });
+
   it('selects an item by closing the menu and calling onselect', () => {
     const onselect = vi.fn();
     const onclose = vi.fn();

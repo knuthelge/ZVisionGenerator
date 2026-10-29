@@ -10,12 +10,16 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import { PromptFileField, Segmented } from '$lib/components/molecules';
   import { rewriteStepper } from '$lib/state/rewriteHistory';
+  import { parseLoraString } from '$lib/state/loras';
+  import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
   import type { DraftState, PromptSource, RecentPrompt, WorkspaceContext } from '$lib/types';
   import PromptEnhancer from './PromptEnhancer.svelte';
   import RecentPromptsMenu from './RecentPromptsMenu.svelte';
   import SavePromptMenu from './SavePromptMenu.svelte';
   import { promptToSave } from './savePrompt';
   import { workspaceCapabilities } from './capabilities';
+  import TriggerMenu from './TriggerMenu.svelte';
+  import { insertWordPatch, triggerMenu, triggerModes } from './triggerMenu';
 
   interface Props {
     context: WorkspaceContext;
@@ -132,6 +136,25 @@
   const showClipPrompt = $derived(clipPrompt.trim() !== '' && normalizePromptText(s.prompt) !== normalizePromptText(clipPrompt));
   const OUT_OF_DATE_TITLE = 'Your text changed after this was enhanced. It is still used until you choose Use mine or re-enhance.';
   const DEFAULT_SCENE_HELP = 'Used for prompts in the file that have no scene: of their own.';
+
+  // The trigger words of the LoRAs in use, marked where the text Generate sends already holds them; null when there is nothing to offer.
+  const triggers = $derived(triggerMenu({ state: s, modes: triggerModes(caps, s), chips: parseLoraString(s.loraString, context.loras), installed: context.loras, pending: pendingTriggers.all }));
+  /** The box each draft field is shown in, and the tab that holds it. */
+  const FIELD_BOXES = { scene: ['ws-scene', 'prompt'], enhancedScene: ['ws-enhanced-scene', 'enhanced'], prompt: ['ws-prompt', 'prompt'], enhancedPrompt: ['ws-enhanced-prompt', 'enhanced'] } as const;
+
+  /** Put a trigger word at the start of the text Generate sends, and show that text (the Enhanced tab when that is what is sent). */
+  function insertTrigger(word: string): void {
+    const patch = insertWordPatch(s, triggerModes(caps, s), word);
+    const keys = Object.keys(patch) as (keyof typeof FIELD_BOXES)[];
+    draft.patch(patch);
+    noticeText = null;
+    // Text edited by hand is no longer what the enhancer wrote.
+    if (keys.some((key) => key.startsWith('enhanced'))) forgetEnhanceRecord();
+    const [id, tab] = FIELD_BOXES[keys[0]];
+    // A finger would raise the keyboard over the result: the tab still changes, the focus stays.
+    if (!layout.coarse) void focusField(id, tab);
+    else if (showTabs) activeTab = tab;
+  }
 
   function countWords(text: string): number {
     return text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -428,6 +451,7 @@
       >{'{ }'} JSON</button>
     {/if}
     <span class="tools-spacer"></span>
+    {#if triggers}<TriggerMenu menu={triggers} onpick={insertTrigger} />{/if}
     <button
       bind:this={recentsButton}
       type="button"

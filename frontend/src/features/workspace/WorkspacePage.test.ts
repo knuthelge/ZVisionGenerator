@@ -89,6 +89,8 @@ vi.mock('$lib/api/recentPrompts', async () => (await import('../../test-utils/wo
 
 vi.mock('$lib/api/browse', async () => (await import('../../test-utils/workspaceMocks')).browseApiMocks);
 
+vi.mock('$lib/api/discover', async () => (await import('../../test-utils/workspaceMocks')).discoverApiMocks);
+
 vi.mock('$lib/api/presets', async () => (await import('../../test-utils/workspaceMocks')).presetApiMocks);
 
 vi.mock('$lib/api/models', async (importOriginal) => {
@@ -2630,7 +2632,7 @@ describe('WorkspacePage', () => {
       await settle();
       openPicker();
 
-      expect(actions()).toEqual(['b-recent', 'a-match', 'other-models']);
+      expect(actions()).toEqual(['b-recent', 'a-match', 'other-models', 'discover-loras']);
       const fold = picker()?.querySelector('[data-action="other-models"]') as HTMLElement;
       expect(fold.getAttribute('aria-expanded')).toBe('false');
 

@@ -30,6 +30,7 @@ from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
+from zvisiongenerator.utils.ltx_version import ltx_model_version
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
 from zvisiongenerator.utils.model_files import (
     directory_bytes,
@@ -47,6 +48,7 @@ from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, row_download_needed
 from zvisiongenerator.web.first_run import first_run_payload
+from zvisiongenerator.web.lora_details import installed_details
 from zvisiongenerator.web.lora_index import lookup as lookup_lora_families
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import (
@@ -138,7 +140,16 @@ def build_workspace_response(
         }
         for name in web_config.image_model_options
     ]
-    video_models = [{"id": name, "label": model_display_name(web_config.app_config, name), "type": "video", **status(video_entries.get(name), "video")} for name in web_config.video_model_options]
+    video_models = [
+        {
+            "id": name,
+            "label": model_display_name(web_config.app_config, name),
+            "type": "video",
+            "version": _video_row_version(web_config.app_config, video_entries.get(name)),
+            **status(video_entries.get(name), "video"),
+        }
+        for name in web_config.video_model_options
+    ]
     loras = _lora_rows(web_config)
     image_defaults = image_model_defaults_map.get(image_default_model) or _build_image_bootstrap_defaults(image_default_model or "", web_config)
     video_defaults = video_model_defaults_map.get(video_default_model) or _build_video_bootstrap_defaults(video_default_model or "", web_config)
@@ -266,7 +277,9 @@ def build_models_response(
     delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=inventory, app_config=web_config.app_config)
     disk_size = _disk_size_resolver(data_dir / "models", listed={entry.name for entry in inventory}, app_config=web_config.app_config, inventory=inventory)
     download_needed = _download_needed_resolver(web_config)
-    loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB"} for lora in list_loras(data_dir)]
+    lora_entries = list_loras(data_dir)
+    lora_details = installed_details(Path(web_config.loras_dir), [lora.name for lora in lora_entries])
+    loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB", **lora_details[lora.name]} for lora in lora_entries]
     image_rows = [
         {
             "name": entry.name,
@@ -430,6 +443,13 @@ def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:
     """Describe an installed stored quant (its base model and bits), or ``None`` for other models."""
     stored = stored_quant_of(entry)
     return None if stored is None else {"base_model": stored[0], "bits": stored[1]}
+
+
+def _video_row_version(app_config: dict[str, Any], entry: VideoInventoryEntry | None) -> str | None:
+    """Return the LTX version (``"2.3"`` or ``"2.5"``) of an LTX video model, or ``None`` for other video models."""
+    if entry is None or entry.family != "ltx":
+        return None
+    return ltx_model_version(app_config, entry.name, entry.resolved_path)
 
 
 def _converted_bits(entry: VideoInventoryEntry) -> int | None:
@@ -633,14 +653,16 @@ def _video_bootstrap_upscale() -> dict[str, Any]:
 
 
 def _lora_rows(web_config: WebUiConfig) -> list[dict[str, Any]]:
-    """Return one ``{name, path, family, size_variant}`` row per LoRA."""
+    """Return one ``{name, path, family, size_variant, curated_id, title, trigger, trigger_source, source, hub, size_bytes, size_label}`` row per LoRA."""
     families = lookup_lora_families(web_config.loras_dir, web_config.lora_options)
+    details = installed_details(Path(web_config.loras_dir), web_config.lora_options)
     return [
         {
             "name": name,
             "path": str(Path(web_config.loras_dir) / f"{name}.safetensors"),
             "family": families[name].family,
             "size_variant": families[name].size_variant,
+            **details[name],
         }
         for name in web_config.lora_options
     ]

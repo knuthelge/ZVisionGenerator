@@ -28,6 +28,7 @@ from zvisiongenerator.core.ideogram4 import sampler_settings
 from zvisiongenerator.core.moss import img2img_run_steps
 from zvisiongenerator.core.moss import sampler_settings as moss_sampler_settings
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.lora_files import normalised_lora_state
 from zvisiongenerator.utils.model_files import is_moss_model
 from zvisiongenerator.utils.moss_build import built_moss_base, turbo_lora_file
 from zvisiongenerator.utils.stored_quant import STORED_QUANT_BITS, stored_quant_bits
@@ -191,17 +192,17 @@ def _stream_to_gpu(pipeline: Any, torch_dtype: torch.dtype) -> None:
     pipeline.vae.to(device=device, dtype=torch_dtype)
 
 
-def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] | None, *, cpu_offload: bool = False) -> None:
+def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] | None, *, family: str, cpu_offload: bool = False) -> None:
     """Load LoRA files onto *pipeline*: through diffusers, with LoKr layers added as adapter terms.
 
-    A file without LoKr tensors goes to diffusers by path, so its metadata (such as ``lora_alpha``) applies. A file
-    with LoKr tensors is split: the rest goes to diffusers, the LoKr layers to :func:`apply_lokr` once every
-    standard LoRA has loaded, so diffusers always finds the layers it expects. LoKr layers that do not map onto the
-    model are skipped with a warning, as mflux does. A file none of whose tensors match the model is skipped with a warning. When *cpu_offload*
-    is set, model CPU offload is turned back on if loading a LoRA left it off.
+    A file diffusers can read as it is goes to diffusers by path, so its metadata (such as ``lora_alpha``) applies. A
+    file whose tensor names *family*'s converter cannot read goes under the names it can (see
+    :func:`~zvisiongenerator.utils.lora_files.normalised_lora_state`). A file with LoKr tensors is split: the rest goes
+    to diffusers, the LoKr layers to :func:`apply_lokr` once every standard LoRA has loaded, so diffusers always finds
+    the layers it expects. LoKr layers that do not map onto the model are skipped with a warning, as mflux does. A file
+    none of whose tensors match the model is skipped with a warning. When *cpu_offload* is set, model CPU offload is
+    turned back on if loading a LoRA left it off.
     """
-    from safetensors.torch import load_file
-
     from zvisiongenerator.backends.cuda.image.lokr import apply_lokr, split_lora_tensors
 
     weights = lora_weights if lora_weights is not None else [1.0] * len(lora_paths)
@@ -209,8 +210,9 @@ def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] 
     adapter_names: list[str] = []
     adapter_weights: list[float] = []
     for i, (path, weight) in enumerate(zip(lora_paths, weights, strict=True)):
-        parts = split_lora_tensors(load_file(path)) if _has_lokr(path) else None
-        if parts is not None:
+        state = _lora_state(path, family)
+        parts = split_lora_tensors(state) if state is not None else None
+        if parts is not None and parts.lokr:
             lokr_files.append((path, parts, weight))
         if (parts is None or parts.rest) and _load_lora_file(pipeline, path, parts, f"lora_{i}"):
             adapter_names.append(f"lora_{i}")
@@ -222,6 +224,16 @@ def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] 
         skipped = apply_lokr(pipeline, parts.lokr, weight, pin_memory=True)
         if skipped:
             warnings.warn(f"LoRA {Path(path).name}: skipped {len(skipped)} LoKr layers this model does not have (e.g. {skipped[0]}).", stacklevel=2)
+
+
+def _lora_state(path: str, family: str) -> dict[str, torch.Tensor] | None:
+    """Return the tensors of the LoRA at *path* when they must be handed to diffusers (renamed for *family*, or holding LoKr), else None."""
+    state = normalised_lora_state(path, family)
+    if state is None and _has_lokr(path):
+        from safetensors.torch import load_file
+
+        state = load_file(path)
+    return state
 
 
 def _has_lokr(path: str) -> bool:
@@ -398,7 +410,7 @@ class DiffusersBackend:
             bits = _supported_bits(stored_bits if stored_bits is not None else quantize)
             pipeline = load_ideogram4_pipeline(model_path, torch_dtype, bits, prequantized=stored_bits is not None)
             if lora_paths:
-                _load_loras(pipeline, lora_paths, lora_weights)
+                _load_loras(pipeline, lora_paths, lora_weights, family=model_info.family)
         elif model_info.family == "moss":
             stored_bits = stored_quant_bits(Path(model_path))
             bits = _supported_bits(stored_bits if stored_bits is not None else quantize)
@@ -441,7 +453,7 @@ class DiffusersBackend:
             _stream_to_gpu(pipeline, torch_dtype)
 
         if lora_paths:
-            _load_loras(pipeline, lora_paths, lora_weights, cpu_offload=bits == 4 and model_info.family in _Q4_CPU_OFFLOAD_FAMILIES)
+            _load_loras(pipeline, lora_paths, lora_weights, family=model_info.family, cpu_offload=bits == 4 and model_info.family in _Q4_CPU_OFFLOAD_FAMILIES)
         return pipeline
 
     def _step_callback_kwargs(self, skip_signal, step_callback, steps: int, height: int, width: int) -> dict[str, Any]:

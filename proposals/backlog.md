@@ -36,6 +36,14 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 - **macOS H3 refuses LoRAs with AdaLN modules** that CUDA accepts (`backends/mac/h3_video.py`). Documented limitation; in hand in the Mac test.
 - **Video provenance records the prompt template, not the resolved `{a|b}` choice** (`utils/provenance.py`), so an Extend without `--prompt` can pick the other option. Images record the resolved text.
 
+- **LoRAs that don't fit fail late, silently or with the wrong message** (found 2026-10-28 while researching Discover LoRAs, sampling 1,710 Hugging Face LTX and MiniMax H3 headers). They fail after the prompt is encoded, so minutes into a job.
+  - **macOS LTX silently ignores** LoRAs with no `lora_A`/`lora_B` pairs (LyCORIS, kohya, LoKr) and ones that match no module: about 9% of sampled LTX files. This happens in the vendored attach (`packages/ltx_core_mlx/loader/lora_adapters.py`), where the skipped list is dropped in `ltx_pipelines_mlx/_base.py`. Windows/Linux rejects the same files, so this is also a parity gap.
+  - **Windows/Linux LTX gives misleading errors for prefix-less or kohya keys:** "Adapter name(s) … not in the list of present adapters", or at a weight other than 1.0 "does not support explicit LoRA scales" (`backends/cuda/video/backend.py::_apply_loras`).
+  - **Zero-match and partial-match warnings never reach the job card.** `web/web_runner.py` doesn't capture warnings.
+  - **The docs over-claim.** `docs/concepts/loras.md` says an unsupported file or scale "fails before generation with a message saying why".
+
+  Fix: one clear error per case, using the loader's own verdict, surfaced on the job card; correct the docs.
+
 ## Code hygiene (no user impact)
 
 - `backends/__init__.py` `__all__` omits `convert_h3_checkpoint`, `supports_video_audio`, `supports_video_extend` and `supports_video_file_upscale`, which other modules import.

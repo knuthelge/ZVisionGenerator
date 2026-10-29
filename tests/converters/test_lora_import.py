@@ -8,19 +8,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from zvisiongenerator.converters.lora_import import (
-    _validate_name,
+    validate_name,
     import_lora_hf,
     import_lora_local,
 )
 
 
-# ── _validate_name ───────────────────────────────────────────────────────────
+# ── validate_name ───────────────────────────────────────────────────────────
 
 
 class TestValidateName:
     @pytest.mark.parametrize(("name", "expected"), [("my-lora", "my-lora"), ("my-lora.safetensors", "my-lora"), ("v1.0", "v1.0")])
     def test_valid_names_are_normalised(self, name, expected):
-        assert _validate_name(name) == expected
+        assert validate_name(name) == expected
 
     @pytest.mark.parametrize(
         ("name", "message"),
@@ -35,7 +35,7 @@ class TestValidateName:
     )
     def test_invalid_names_raise(self, name, message):
         with pytest.raises(ValueError, match=message):
-            _validate_name(name)
+            validate_name(name)
 
 
 # ── import_lora_local ────────────────────────────────────────────────────────

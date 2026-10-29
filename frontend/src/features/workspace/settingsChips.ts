@@ -19,6 +19,8 @@ export interface SettingChip {
   warn?: boolean;
   /** The preset chip's applied preset slug, empty when none is applied. */
   applied?: string;
+  /** The LoRA chip's files: one is downloading (how far, or null while its size is unknown) or one failed. */
+  download?: { kind: 'downloading'; percent: number | null } | { kind: 'failed' };
 }
 
 export interface ChipFacts {
@@ -36,6 +38,8 @@ export interface ChipFacts {
   extendChanged: boolean;
   /** The LoRA names in use. */
   loraNames: string[];
+  /** What the LoRA files are doing, when a download is on its way or failed. */
+  loraDownload?: SettingChip['download'];
   modelLabel: string;
   modelDownloaded: boolean;
   /** The start image's name (a video's first frame), or null. */
@@ -81,7 +85,7 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
     caps.showAudio || caps.showLowMemory || caps.showVideoUpscale
       ? { key: 'audio', label: 'Audio', value: caps.showAudio ? (s.audio ? 'on' : 'off') : s.lowMemory ? 'low mem' : 'off', changed: f.changed('audio', 'lowMemory', 'videoUpscaleEnabled'), on: caps.showAudio ? s.audio : s.lowMemory }
       : null,
-    { key: 'loras', label: 'LoRA', value: f.loraNames.length ? f.loraNames.join(', ') : 'none', changed: false, on: f.loraNames.length > 0 },
+    { key: 'loras', label: 'LoRA', value: f.loraNames.length ? f.loraNames.join(', ') : 'none', changed: false, on: f.loraNames.length > 0, download: f.loraDownload },
     caps.showImageUpscale ? { key: 'upscale', label: 'Upscale', value: s.upscaleEnabled ? `${s.upscaleFactor}×` : 'off', changed: f.changed('upscaleEnabled', 'upscaleFactor'), on: s.upscaleEnabled } : null,
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
   ];

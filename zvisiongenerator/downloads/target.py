@@ -23,6 +23,7 @@ class DownloadTarget:
         allow_patterns: Glob patterns to fetch; ``None`` fetches the whole repo.
         ignore_patterns: Glob patterns to skip.
         local_dir: A plain folder to download into instead of the Hub cache.
+        anonymous: Talk to the Hub without the user's token, for a file the user did not name themselves.
     """
 
     repo_id: str
@@ -30,11 +31,18 @@ class DownloadTarget:
     allow_patterns: tuple[str, ...] | None = None
     ignore_patterns: tuple[str, ...] | None = None
     local_dir: str | None = None
+    anonymous: bool = False
 
     @property
-    def key(self) -> tuple[str, str, str]:
-        """Identify the destination: repo, revision and local folder (empty for the cache)."""
-        return (self.repo_id, self.revision or "main", self.local_dir or "")
+    def key(self) -> tuple[str, str, str, tuple[str, ...]]:
+        """Identify the destination: repo, revision, local folder (empty for the cache) and, for a local folder, the files wanted.
+
+        A plain folder holds exactly the files its target asks for, so two targets that fetch different files of one
+        repo into one folder are different destinations. A cache target keeps the three-part key: its files are shared
+        blobs, which the Hub library locks itself.
+        """
+        files = tuple(sorted(self.allow_patterns or ())) if self.local_dir else ()
+        return (self.repo_id, self.revision or "main", self.local_dir or "", files)
 
     def to_json(self) -> str:
         """Serialize the target for the download child process."""
@@ -45,6 +53,7 @@ class DownloadTarget:
                 "allow_patterns": None if self.allow_patterns is None else list(self.allow_patterns),
                 "ignore_patterns": None if self.ignore_patterns is None else list(self.ignore_patterns),
                 "local_dir": self.local_dir,
+                "anonymous": self.anonymous,
             }
         )
 
@@ -60,6 +69,7 @@ class DownloadTarget:
             allow_patterns=None if allow is None else tuple(allow),
             ignore_patterns=None if ignore is None else tuple(ignore),
             local_dir=data.get("local_dir"),
+            anonymous=bool(data.get("anonymous", False)),
         )
 
 

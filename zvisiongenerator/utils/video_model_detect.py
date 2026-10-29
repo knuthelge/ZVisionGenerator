@@ -37,6 +37,23 @@ _VIDEO_MODEL_MAP: dict[str, tuple[str, str, bool, int, int, int]] = {
 }
 
 
+# Prefixes of the known LTX repos that hold LTX-2.5; every other known LTX repo is LTX-2.3.
+_LTX25_REPO_PREFIXES = ("unsloth/ltx-2.5", "marcelofso/ltx-2.5", "dgrauet/ltx-2.5")
+
+
+def known_ltx_repo_version(model_path: str) -> str | None:
+    """Return the LTX version (``"2.3"`` or ``"2.5"``) of a known LTX repo ID, or None when *model_path* is not one.
+
+    Cheap and offline, like :func:`is_known_video_repo`; the repo ID may carry an ``@revision``.
+    """
+    if not is_known_video_repo(model_path):
+        return None
+    lowered = model_path.strip().lower()
+    if not any(lowered.startswith(prefix) for prefix, entry in _VIDEO_MODEL_MAP.items() if entry[0] == "ltx"):
+        return None
+    return "2.5" if lowered.startswith(_LTX25_REPO_PREFIXES) else "2.3"
+
+
 def _looks_like_local_model_path(model_path: str) -> bool:
     """Return whether model_path should be treated as a local path.
 

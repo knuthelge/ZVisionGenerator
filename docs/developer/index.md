@@ -106,6 +106,7 @@ Future work is written up in `proposals/` before it is built: the problem, the e
 | `make clean` | Remove build artifacts, caches and the venv |
 | `make run` / `make model` | Run `ziv-image` / `ziv-model` with `ARGS="..."` |
 | `make enhance-bench` | Run the [prompt-enhancer bench](enhancer-bench.md) with `ARGS="..."`; loads a real model |
+| `make check-curated` | Compare the [curated LoRA list](curated-loras.md)'s pinned files with the Hugging Face Hub (network; run before a release) |
 | `make update-ltx` / `make update-seedvr2` / `make update-h3-mlx` | Re-vendor LTX, SeedVR2 or the MiniMax H3 MLX port. See [Vendored packages](vendored.md) |
 | `make e2e` / `make e2e-image` / `make e2e-video` | Smoke tests that load real models and write tiny outputs to `output/`; not part of `make check` |
 

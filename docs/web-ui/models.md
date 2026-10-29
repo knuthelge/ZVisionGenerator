@@ -73,6 +73,8 @@ What each type accepts is in [Converting checkpoints](../cli/models.md#convert-a
 ## Import a LoRA
 
 - **Import a local LoRA** copies a `.safetensors` file into `~/.ziv/loras/`.
-- **Download a LoRA from Hugging Face** fetches one from a repository; name the **File** when the repository has several.
+- **Download a LoRA from Hugging Face** fetches one from a repository; name the **File** when the repository has several. The download shows as a row of the LoRAs table with **Cancel**, like a model download. Without a **Name**, the file keeps its own name.
+
+**Discover LoRAs in the Workspace** opens [Discover LoRAs](workspace.md#discover-loras). Deleting a LoRA also removes its chips, and can't be done while a job runs.
 
 The LoRA is then in the Workspace's LoRA picker. See [LoRAs](../concepts/loras.md).

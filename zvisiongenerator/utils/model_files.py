@@ -265,6 +265,12 @@ def ltx2_text_encoder_class(model_dir: Path) -> str | None:
     return spec[1]
 
 
+def is_ltx25_diffusers_dir(model_dir: Path) -> bool:
+    """Return whether *model_dir* is an LTX-2 diffusers repo of LTX-2.5, which has a Gemma 4 text encoder (LTX-2.3 has Gemma 3)."""
+    text_encoder = ltx2_text_encoder_class(model_dir)
+    return text_encoder is not None and text_encoder.startswith(_GEMMA4_PREFIX)
+
+
 def _has_separate_transformer(model_dir: Path) -> bool:
     """Return whether *model_dir* is an LTX-2 pipeline whose transformer may load from a separate checkpoint instead of its folder.
 

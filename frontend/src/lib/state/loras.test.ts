@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { GalleryAsset, LoraInfo, WorkspaceContext } from '$lib/types';
-import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, loraMatches, modelLoraFamily, parseLoraString, recentLoraNames } from './loras';
+import { familyLabel, formatLoraString, groupLorasForModel, keepInstalledLoras, loraDeleteInfo, loraLabel, loraMatches, modelLoraFamily, parseLoraString, recentLoraNames, withoutLora } from './loras';
 
 const installed = [
   { name: 'film-grain', path: '/Users/me/.ziv/loras/film-grain.safetensors' },
@@ -196,10 +196,40 @@ describe('familyLabel', () => {
     expect(familyLabel('ideogram4')).toBe('Ideogram 4');
     expect(familyLabel('moss')).toBe('MOSS-Image');
     expect(familyLabel('ltx')).toBe('LTX');
+    expect(familyLabel('h3')).toBe('MiniMax H3');
   });
 
   it('falls back to the family for an unlisted size, and shows an unknown family as it is', () => {
     expect(familyLabel('flux2_klein', '20b')).toBe('Klein');
     expect(familyLabel('brand_new', '2b')).toBe('brand_new');
+  });
+});
+
+describe('keepInstalledLoras with downloads on their way', () => {
+  const installed = [{ name: 'here', path: '/l/here.safetensors' }];
+
+  it('keeps a chip whose file is still downloading, and drops one that is simply missing', () => {
+    expect(keepInstalledLoras('here:1,coming:0.8,gone:1', installed, ['coming'])).toBe('here:1,coming:0.8');
+  });
+
+  it('drops every missing chip when nothing is pending', () => {
+    expect(keepInstalledLoras('here:1,coming:0.8', installed)).toBe('here:1');
+  });
+});
+
+describe('withoutLora', () => {
+  it('removes a LoRA by name, also when it was written as a path', () => {
+    const installed = [{ name: 'style', path: '/l/style.safetensors' }, { name: 'other', path: '/l/other.safetensors' }];
+    expect(withoutLora('/l/style.safetensors:0.7,other:1', 'style', installed)).toBe('other:1');
+  });
+});
+
+describe('loraDeleteInfo', () => {
+  it('names the size when it is known', () => {
+    expect(loraDeleteInfo('255 MB')).toContain('(255 MB)');
+  });
+
+  it('leaves the size out when it is not known', () => {
+    expect(loraDeleteInfo(null)).toMatch(/^The file leaves this computer\. Its chips/);
   });
 });

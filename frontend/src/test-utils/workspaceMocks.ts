@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { DownloadItem, GalleryPage, JobContext, JobSnapshot, RecentPrompt, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
+import type { CuratedList, DownloadItem, GalleryPage, JobContext, JobSnapshot, RecentPrompt, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
 
 // The API mocks of the Workspace page tests. A test file wires them in with `vi.mock(path, async () => ...)`
 // factories that import this module, because `vi.mock` only hoists inside a test file.
@@ -69,4 +69,16 @@ export const recentPromptsApiMocks = {
 
 export const modelApiMocks = {
   getDownloads: vi.fn<() => Promise<{ items: DownloadItem[] }>>(),
+  deleteLora: vi.fn(),
+};
+
+/** The Discover LoRAs API: a model with nothing curated, the Hugging Face question unanswered. */
+export const discoverApiMocks = {
+  getCurated: vi.fn<(model: { family: string }) => Promise<CuratedList>>(),
+  getHfList: vi.fn(),
+  getHfRepo: vi.fn(),
+  getHfCheck: vi.fn(),
+  setDiscoverSettings: vi.fn(),
+  setLoraTrigger: vi.fn(),
+  startDiscoverDownload: vi.fn(),
 };

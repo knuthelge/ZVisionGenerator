@@ -1,11 +1,11 @@
-"""Run Models-page downloads one at a time on a thread of their own, beside the generation job queue."""
+"""Run Models-page and LoRA downloads one at a time on a thread of their own, beside the generation job queue."""
 
 from __future__ import annotations
 
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from itertools import count
 from typing import TYPE_CHECKING, Any
@@ -36,6 +36,9 @@ class _Item:
     name: str
     label: str
     plan: Callable[[], tuple[DownloadTarget, ...] | None]
+    finalize: Callable[[], None] | None = None
+    cleanup: Callable[[], None] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
     state: str = _QUEUED
     message: str | None = None
     report: DownloadReport | None = None
@@ -85,15 +88,31 @@ class DownloadLane:
         self._thread: threading.Thread | None = None
         self._closed = False
 
-    def submit(self, *, kind: str, name: str, label: str, plan: Callable[[], tuple[DownloadTarget, ...] | None]) -> dict[str, Any]:
+    def submit(
+        self,
+        *,
+        kind: str,
+        name: str,
+        label: str,
+        plan: Callable[[], tuple[DownloadTarget, ...] | None],
+        finalize: Callable[[], None] | None = None,
+        cleanup: Callable[[], None] | None = None,
+        extra: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Queue the download of the row *name* of *kind*, or return its queued or running item.
 
         Args:
-            kind: ``"model"`` or ``"enhancer"``.
-            name: The row's name or tier.
+            kind: ``"model"``, ``"enhancer"`` or ``"lora"``.
+            name: The row's name or tier; for a LoRA, the name it installs as.
             label: How the row reads in messages.
             plan: Returns the targets to fetch (called on the lane thread when the item starts), or ``None`` when
                 the plan cannot be made now.
+            finalize: Runs on the lane thread once every target is on disk; an exception it raises fails the item
+                with its text as the message.
+            cleanup: Runs on the lane thread when the item ends in any state it started in (done, failed or stopped);
+                it removes what the item staged. Its errors are ignored.
+            extra: Fixed keys merged into the item's JSON (for a LoRA: ``curated_id``, ``source_repo``, ``source_file``,
+                ``size_bytes``).
 
         Returns:
             The item as JSON.
@@ -107,7 +126,7 @@ class DownloadLane:
             existing = next((item for item in self._live_items() if (item.kind, item.name) == (kind, name)), None)
             if existing is not None:
                 return self._item_json(existing)
-            item = _Item(id=f"dl-{next(self._ids)}", kind=kind, name=name, label=label, plan=plan)
+            item = _Item(id=f"dl-{next(self._ids)}", kind=kind, name=name, label=label, plan=plan, finalize=finalize, cleanup=cleanup, extra=dict(extra or {}))
             self._items[item.id] = item
             self._queue.append(item)
             if self._thread is None:
@@ -130,6 +149,18 @@ class DownloadLane:
             elif item.state == _RUNNING:
                 item.cancel.set()
             return self._item_json(item)
+
+    def forget(self, kind: str, name: str) -> None:
+        """Drop the finished items of the row *name* of *kind* from the snapshot, so a download whose file was deleted stops being reported; queued and running items stay."""
+        with self._cond:
+            for item in [item for item in self._items.values() if (item.kind, item.name) == (kind, name) and item.state in _FINISHED]:
+                del self._items[item.id]
+
+    def active_items(self, kind: str) -> list[dict[str, Any]]:
+        """Return the queued and running items of *kind*, running first."""
+        with self._cond:
+            ordered = [*([self._running] if self._running is not None else []), *self._queue]
+            return [self._item_json(item) for item in ordered if item.kind == kind and item.state in (_QUEUED, _RUNNING)]
 
     def snapshot(self) -> dict[str, Any]:
         """Return the running item, the queued ones in order and the recently finished ones (newest first)."""
@@ -173,13 +204,26 @@ class DownloadLane:
                 self._finish(item, state, message)
 
     def _execute(self, item: _Item) -> tuple[str, str | None]:
-        """Run *item* and return its final ``(state, message)``; never raises."""
+        """Run *item*, then its cleanup, and return its final ``(state, message)``; never raises."""
+        try:
+            return self._run(item)
+        finally:
+            if item.cleanup is not None:
+                try:
+                    item.cleanup()
+                except Exception:  # noqa: BLE001 - a cleanup problem must not stop the lane
+                    pass
+
+    def _run(self, item: _Item) -> tuple[str, str | None]:
+        """Fetch *item*'s targets, finalize it and return its final ``(state, message)``; never raises."""
         unreachable = f"Could not reach Hugging Face to download {item.label}."
         try:
             targets = item.plan()
             if targets is None:
                 return _FAILED, unreachable
             outcome = self._ensure(targets, flights=self._flights, report=lambda report: self._record(item, report), cancelled=item.cancel.is_set)
+            if outcome == READY and item.finalize is not None:
+                item.finalize()
         except Exception as exc:  # noqa: BLE001 - one failing item must not stop the lane
             return _FAILED, str(exc) or f"Could not download {item.label}."
         if outcome == READY:
@@ -216,7 +260,7 @@ class DownloadLane:
 
     def _item_json(self, item: _Item) -> dict[str, Any]:
         """Return *item* as the API's ``DownloadItem`` (the caller holds the lock)."""
-        data: dict[str, Any] = {"id": item.id, "kind": item.kind, "name": item.name, "label": item.label, "state": item.state, "message": item.message}
+        data: dict[str, Any] = {"id": item.id, "kind": item.kind, "name": item.name, "label": item.label, "state": item.state, "message": item.message, **item.extra}
         if item.state == _QUEUED:
             data["queue_position"] = list(self._queue).index(item) + 1
         report = item.report

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import tempfile
+import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ from zvisiongenerator.utils.model_files import find_local_model_dir, ltx_mlx_bun
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.input_images import upright_image_copies
 from zvisiongenerator.utils.video_extend import CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, carry_latent_frames, cut_window_audio, window_audio_cut, window_frames
+from zvisiongenerator.utils.lora_files import readable_lora_files
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 from zvisiongenerator.utils.video_splice import build_segment_command, write_pcm16_wav
 from zvisiongenerator.utils.video_tail import read_source_tail
@@ -44,6 +46,8 @@ _COMPUTE_DTYPE_ENV = "LTX2_COMPUTE_DTYPE"
 _DEFAULT_COMPUTE_DTYPE = "float16"
 # Environment variable the vendored pipeline reads, when it is constructed, to fuse LoRAs into the weights or attach them.
 _LORA_MODE_ENV = "LTX2_LORA_MODE"
+# The family LoRAs are loaded for, as the LoRA key normaliser names it.
+_LORA_FAMILY = "ltx"
 # Fusing re-quantizes the q4/q8 weights, which loses most of a small LoRA's update; run-time adapters keep it at about
 # the same speed. A pipeline is built with unfused LoRAs unless the user has set the variable themselves.
 _DEFAULT_LORA_MODE = "unfused"
@@ -837,12 +841,20 @@ class LtxVideoBackend:
                 f"{model_path} is an LTX-2.5 pack but has no text_encoder.safetensors and text_encoder_config.json at its root; re-download it so the bundled Gemma 4 text encoder is present."
             )
 
-        if loras:
-            # ltx-pipelines-mlx attaches (or, with LTX2_LORA_MODE=fused, fuses) _pending_loras while it loads the transformer
-            pipeline._pending_loras = loras  # noqa: SLF001
+        with contextlib.ExitStack() as copies:
+            if loras:
+                # ltx-pipelines-mlx attaches (or, with LTX2_LORA_MODE=fused, fuses) _pending_loras while it loads the transformer
+                # It reads LoRAs only from files, so a file with names it cannot match is handed over as a renamed copy.
+                readable = copies.enter_context(readable_lora_files([path for path, _ in loras], _LORA_FAMILY, "mlx"))
+                pipeline._pending_loras = [(path, strength) for path, (_, strength) in zip(readable, loras, strict=True)]  # noqa: SLF001
 
-        model_info = detect_video_model(model_path)
-        return _LtxModel(pipeline=pipeline, frame_rate=float(model_info.default_fps), upscale=upscale, low_ram_streaming=streaming, ltx25=ltx25), model_info
+            model_info = detect_video_model(model_path)
+            model = _LtxModel(pipeline=pipeline, frame_rate=float(model_info.default_fps), upscale=upscale, low_ram_streaming=streaming, ltx25=ltx25)
+            release_copies = copies.pop_all().close
+        # The transformer loads on the first generation, and with low-RAM streaming every denoising step reads the LoRA
+        # file again (BlockLoraSource memory-maps it), so the copies live as long as the handle does: until the job drops it.
+        weakref.finalize(model, release_copies)
+        return model, model_info
 
     def text_to_video(
         self,

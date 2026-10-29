@@ -600,3 +600,5 @@ ui:
     video: ltx-8
   # Set once the first-run dialog is skipped; a user setting, not part of the writable config contract.
   first_run_skipped: false
+  # Set when Show Hugging Face LoRAs is chosen in Discover LoRAs; a user setting, not part of the writable config contract.
+  discover_huggingface: false

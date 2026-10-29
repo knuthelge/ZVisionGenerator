@@ -44,6 +44,15 @@
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { clipMemoryRequest } from '$lib/state/memoryFit';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames, type LoraChip } from '$lib/state/loras';
+  import { chipDownload, failureText, waitText } from '$lib/state/loraDownloads';
+  import { waitForListing } from '$lib/state/loraListing';
+  import { addLoraChip, removeLoraChip } from '$lib/state/loraActions';
+  import { generateBlock } from '$lib/state/generateBlock.svelte';
+  import { dockHeight } from '$lib/actions/dockHeight';
+  import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
+  import DiscoverDrawer, { type LoraUse } from './discover/DiscoverDrawer.svelte';
+  import { discoverTarget } from './discover/discoverView';
+  import WaitingLabel from './WaitingLabel.svelte';
   import QueuePanel from './QueuePanel.svelte';
   import FirstRunDialog from './FirstRunDialog.svelte';
   import { firstRun, shouldOfferFirstRun } from './firstRun.svelte';
@@ -362,6 +371,15 @@
 
   // Active lora chips parsed from draft.state.loraString; reused settings record paths, shown by LoRA name.
   const loraChips = $derived<LoraChip[]>(parseLoraString(draft.state.loraString, loraOptions));
+  // What the chips hold Generate back for: a download on its way, or one that failed.
+  const block = $derived(generateBlock(draft.state.loraString, loraOptions));
+  const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : undefined);
+  // The error slot names a failed LoRA download; while it is on screen, its toast would say the same thing again.
+  const failureSlotShown = $derived(compact || tall || !draft.state.sidebarCollapsed);
+  $effect(() => {
+    downloadStore.showFailuresInline(failureSlotShown ? loraChips.map((chip) => chip.name) : []);
+    return () => downloadStore.showFailuresInline([]);
+  });
 
   // The phone's settings strip: one chip per setting, derived from the same state the inspector shows.
   // Before the context answers, placeholder chips give the strip its size, so the stage never has to shrink later.
@@ -385,6 +403,7 @@
       extendSeconds: sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null,
       extendChanged: false,
       loraNames: loraChips.map((chip) => loraLabel(chip.name)),
+      loraDownload: block.failures.length > 0 ? { kind: 'failed' } : block.waiting ? { kind: 'downloading', percent: block.waiting.percent } : undefined,
       modelLabel: selectedModel?.label ?? s.model,
       modelDownloaded: selectedModel?.downloaded !== false,
       referenceName: imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : null),
@@ -407,7 +426,7 @@
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
   });
-  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || referenceBlock !== null);
+  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || referenceBlock !== null || block.blocked);
   // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
   const controlsPending = $derived(!context || !authorityReady);
 
@@ -428,6 +447,28 @@
 
   let loraPopoverOpen = $state(false);
   let loraButtonEl = $state<HTMLButtonElement | null>(null);
+  // Discover LoRAs: the drawer, and the red chip's menu.
+  let discoverOpen = $state(false);
+  let openDiscoverWhenReady = $state(false);
+  let failedChip = $state<{ name: string; anchor: HTMLElement } | null>(null);
+  const discover = $derived(context && draft.state.model ? discoverTarget(context, draft.state.model, selectedModel?.label ?? draft.state.model) : null);
+  function openDiscover(): void {
+    loraPopoverOpen = false;
+    if (sheetOpen) {
+      // On a phone the toolbar sits inside All settings: close it first, so the drawer does not open over it.
+      sheetOpen = false;
+      void tick().then(() => { discoverOpen = true; });
+      return;
+    }
+    discoverOpen = true;
+  }
+  $effect(() => {
+    if (!openDiscoverWhenReady || !context || !authorityReady) return;
+    untrack(() => {
+      openDiscoverWhenReady = false;
+      discoverOpen = true;
+    });
+  });
   // The picker leads with the LoRAs that fit the selected model; the rest fold away under "Other models".
   // Reading the model through its own derived keeps the groups from being rebuilt on every other draft edit.
   const draftModel = $derived(draft.state.model);
@@ -456,6 +497,7 @@
         })),
       });
     }
+    entries.push({ kind: 'separator' }, { kind: 'item', id: 'discover-loras', label: 'Discover LoRAs…', icon: 'search', onselect: openDiscover });
     return entries;
   });
 
@@ -472,13 +514,81 @@
   function addLora(name: string): void {
     const existing = loraChips.find((c) => c.name === name);
     if (existing) { loraPopoverOpen = false; return; }
-    draft.update('loraString', formatLoraString([...loraChips, { name, weight: 1.0 }]));
+    addLoraChip(loraChips, name, 1.0);
     loraPopoverOpen = false;
   }
 
-  function removeLora(name: string): void {
-    draft.update('loraString', formatLoraString(loraChips.filter((c) => c.name !== name)));
+  /** Add LoRA: with no LoRA file yet there is no list to choose from, so it opens Discover. */
+  function toggleLoraMenu(): void {
+    if (loraOptions.length === 0) openDiscover();
+    else loraPopoverOpen = !loraPopoverOpen;
   }
+
+  const removeLora = (name: string): void => removeLoraChip(loraChips, name);
+
+  /** What turning on Use in LoRAs brought back: a chip at its weight, and the trigger of a file that is still downloading. The drawer stays open. */
+  function useDiscoveredLora(use: LoraUse): void {
+    addLoraChip(loraChips, use.name, use.weight);
+    if (use.downloading) pendingTriggers.set(use.name, use.trigger);
+  }
+
+  /** A deleted file's chips go, on this model and on every other the draft remembers. */
+  function dropDeletedLora(name: string): void {
+    draft.removeLora(name, loraOptions);
+    pendingTriggers.forget(name);
+    if (context) context = { ...context, loras: context.loras.filter((lora) => lora.name !== name) };
+  }
+
+  /** Read the LoRA rows again: a typed trigger, a download that finished, a file that was deleted. */
+  function refreshLoras(): void {
+    getWorkspaceCoreContext()
+      .then((fresh) => {
+        if (!context) return;
+        context = { ...context, loras: fresh.loras };
+        workspaceMemory.set(context);
+      })
+      .catch(() => undefined);
+  }
+
+  // A LoRA whose download is done but whose file the page has not listed yet: read the list again, pausing longer each
+  // time, until it appears. If it never does, its chip counts as ready so Generate is not held back for good (the
+  // server refuses a missing file when Generate is pressed).
+  const watchedListings = new Set<string>();
+  let listingStopped = false;
+  function watchListing(name: string, itemId: string): void {
+    if (watchedListings.has(itemId)) return;
+    watchedListings.add(itemId);
+    const read = async () => {
+      const fresh = await getWorkspaceCoreContext();
+      if (context) {
+        context = { ...context, loras: fresh.loras };
+        workspaceMemory.set(context);
+      }
+      return fresh.loras;
+    };
+    void waitForListing(name, read, { stopped: () => listingStopped }).then((result) => {
+      if (result === 'gave-up') downloadStore.markUnlisted(itemId);
+    });
+  }
+  $effect(() => {
+    if (!context) return;
+    for (const chip of loraChips) {
+      const status = chipDownload(chip.name, loraOptions, downloadStore.items, downloadStore.unlisted);
+      if (status.state === 'downloading' && status.item?.state === 'done') watchListing(chip.name, status.item.id);
+    }
+  });
+
+  const failedChipItems = $derived.by<ActionMenuEntry[]>(() => {
+    const name = failedChip?.name;
+    if (!name) return [];
+    const status = chipDownload(name, loraOptions, downloadStore.items, downloadStore.unlisted);
+    const item = status.state === 'failed' ? status.item : null;
+    return [
+      { kind: 'note', text: status.state === 'failed' ? status.reason : `${name} didn't download.`, tone: 'error' },
+      { kind: 'item', id: 'retry-lora', label: 'Retry download', icon: 'reset', disabled: item === null, onselect: () => { if (item) void downloadStore.retryLora(item); } },
+      { kind: 'item', id: 'remove-lora', label: 'Remove', icon: 'close', onselect: () => removeLora(name) },
+    ];
+  });
 
   function updateLoraWeight(name: string, weight: number): void {
     draft.update('loraString', formatLoraString(loraChips.map((c) => (c.name === name ? { name, weight } : c))));
@@ -512,7 +622,7 @@
     getWorkspaceCoreContext()
       .then((fresh) => {
         if (request !== modelStatusRequest || !context) return;
-        context = { ...context, image_models: fresh.image_models, video_models: fresh.video_models };
+        context = { ...context, image_models: fresh.image_models, video_models: fresh.video_models, loras: fresh.loras };
         workspaceMemory.set(context);
       })
       .catch(() => undefined);
@@ -860,7 +970,14 @@
     const stopDownloadSync = downloadStore.startSync();
     const stopDownloaded = downloadStore.onDownloaded(refreshModelStatus);
     const urlParams = parseUrlPrefill();
+    // The Models page links here to open Discover LoRAs; the flag is not a setting and leaves the address at once.
+    const wantsDiscover = urlParams.discover !== undefined;
+    delete urlParams.discover;
     const hasUrlParams = Object.keys(urlParams).length > 0;
+    if (wantsDiscover) {
+      openDiscoverWhenReady = true;
+      if (!hasUrlParams) router.replace('workspace');
+    }
 
     // Load stored draft as the baseline state.
     draft.loadDraft();
@@ -974,6 +1091,7 @@
       clipMemory.reset();
       stopDownloadSync();
       stopDownloaded();
+      listingStopped = true;
       unsubscribeLifecycle();
       if (historyTimer) clearTimeout(historyTimer);
       document.removeEventListener('keydown', handleKeydown);
@@ -1149,6 +1267,8 @@
     if (!run && promptChoiceMissing()) {
       return;
     }
+    // A LoRA chip whose file is downloading (or failed) holds every run back, the keyboard's included.
+    if (block.blocked) return;
     await settleExtendSource();
     if (extendBlocked()) return;
     if (referenceBlock) {
@@ -1331,10 +1451,24 @@
         {#if authorityReady}
           <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
             <!-- Chips -->
-            {#each loraChips as chip}
-              <!-- Neutral chip: coral is reserved for $snippet syntax in prompts. -->
-              <div class="ui-chip lora-chip">
-                <span class="max-w-28 truncate" title={chip.name}>{loraLabel(chip.name)}</span>
+            {#each loraChips as chip (chip.name)}
+              {@const file = chipDownload(chip.name, loraOptions, downloadStore.items, downloadStore.unlisted)}
+              <!-- Neutral chip: coral is reserved for $snippet syntax in prompts. Its file may be downloading (a line along its foot) or have failed (red). -->
+              <div
+                class="ui-chip lora-chip"
+                class:ui-chip-dl={file.state === 'downloading'}
+                class:ui-chip-err={file.state === 'failed'}
+                data-download={file.state === 'ready' ? undefined : file.state}
+                style:--p={file.state === 'downloading' ? `${file.percent ?? 0}%` : undefined}
+              >
+                {#if file.state === 'downloading'}<Icon name="download" size={11} />{/if}
+                {#if file.state === 'failed'}
+                  <button type="button" class="lora-failed" aria-haspopup="menu" aria-expanded={failedChip?.name === chip.name} title={file.reason} onclick={(e) => { failedChip = { name: chip.name, anchor: e.currentTarget }; }}>
+                    <Icon name="alert" size={11} /><span class="max-w-28 truncate">{loraLabel(chip.name)}</span>
+                  </button>
+                {:else}
+                  <span class="max-w-28 truncate" title={file.state === 'downloading' ? `Downloading ${file.percent ?? 0} %. Generate waits for it.` : chip.name}>{loraLabel(chip.name)}</span>
+                {/if}
                 <input
                   type="number"
                   step="0.1"
@@ -1359,10 +1493,10 @@
               type="button"
               bind:this={loraButtonEl}
               class="ui-btn ui-btn-add"
-              disabled={loraOptions.length === 0}
-              aria-haspopup="menu"
-              aria-expanded={loraPopoverOpen}
-              onclick={() => (loraPopoverOpen = !loraPopoverOpen)}
+              disabled={!discover && loraOptions.length === 0}
+              aria-haspopup={loraOptions.length === 0 ? 'dialog' : 'menu'}
+              aria-expanded={loraOptions.length === 0 ? discoverOpen : loraPopoverOpen}
+              onclick={toggleLoraMenu}
             >
               <Icon name="plus" size={12} />
               Add LoRA
@@ -1374,6 +1508,14 @@
               label="Available LoRAs"
               items={loraMenuItems}
               onclose={() => (loraPopoverOpen = false)}
+            />
+            <ActionMenu
+              open={failedChip !== null}
+              anchor={failedChip?.anchor ?? null}
+              align="start"
+              label="Download failed"
+              items={failedChipItems}
+              onclose={() => { failedChip = null; }}
             />
           </div>
         {:else}
@@ -1628,7 +1770,7 @@
     <div class="compact-workspace" data-testid="compact-workspace">
       {@render stage()}
       <!-- Always in the frame, even before the context answers: a loading state never changes the stage's height. -->
-      <div class="compact-controls">
+      <div class="compact-controls" use:dockHeight={'--toast-dock'}>
         {#if activeChip && context}
           <button type="button" class="pop-scrim" aria-label="Close setting" tabindex="-1" onclick={() => { activeChip = null; }}></button>
           <SettingPopover
@@ -1650,11 +1792,19 @@
             onModelChange={switchModel}
             onUseLatestAsReference={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
             onclose={() => { activeChip = null; }}
+            ondiscover={() => { activeChip = null; openDiscover(); }}
           />
         {/if}
         {#if context}<PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />{/if}
         <SettingsStrip {chips} activeKey={activeChip} {changedCount} pending={controlsPending} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
         <div class="composer" class:expanded={composerOpen} data-testid="composer">
+          {#if block.failures.length > 0}
+            {@const failedItem = chipDownload(block.failures[0].name, loraOptions, downloadStore.items, downloadStore.unlisted)}
+            <p class="ui-alert ui-alert-error composer-error" role="alert" data-testid="lora-failure">
+              <Icon name="alert" size={14} /><span class="min-w-0 flex-1 break-words">{failureText(block.failures[0])}</span>
+              {#if failedItem.state === 'failed'}<button type="button" class="ui-btn ui-btn-sm" onclick={() => void downloadStore.retryLora(failedItem.item)}>Retry</button>{/if}
+            </p>
+          {/if}
           {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
           <div class="composer-row" hidden={composerOpen}>
             <button type="button" class="composer-summary" aria-label="Edit the prompt" disabled={controlsPending} onclick={() => void openComposer()}>
@@ -1666,12 +1816,19 @@
                 id="ws-submit-compact"
                 type="submit"
                 class="composer-generate ui-btn ui-btn-primary ui-holdable"
+                class:ui-btn-wait={block.waiting !== null}
+                style:--p={block.waiting ? `${block.waiting.percent ?? 0}%` : undefined}
                 disabled={compactSubmitDisabled}
-                title="Hold for more"
+                title={block.waiting ? waitFull : 'Hold for more'}
+                aria-label={block.waiting ? waitFull : undefined}
                 use:hold={{ onhold: () => { generateMenuOpen = true; } }}
               >
-                <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
-                {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
+                {#if block.waiting}
+                  <WaitingLabel waiting={block.waiting} compact />
+                {:else}
+                  <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
+                  {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
+                {/if}
               </button>
               <button
                 bind:this={generateButton}
@@ -1690,7 +1847,15 @@
             {#if context}<ComposePane {context} {busy} jobsActive={jobStore.jobsActive} endImagePending={endImageFile !== null} />{/if}
             <div class="composer-foot">
               <button type="button" class="ui-btn" onclick={() => { composerOpen = false; }}>Done</button>
-              <button type="submit" class="ui-btn ui-btn-primary ui-btn-main" disabled={compactSubmitDisabled}><Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}</button>
+              <button
+                type="submit"
+                class="ui-btn ui-btn-primary ui-btn-main"
+                class:ui-btn-wait={block.waiting !== null}
+                style:--p={block.waiting ? `${block.waiting.percent ?? 0}%` : undefined}
+                disabled={compactSubmitDisabled}
+                aria-label={block.waiting ? waitFull : undefined}
+                title={block.waiting ? waitFull : undefined}
+              >{#if block.waiting}<WaitingLabel waiting={block.waiting} compact />{:else}<Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}{/if}</button>
             </div>
           </div>
         </div>
@@ -1776,6 +1941,19 @@
   />
 {/if}
 
+{#if context}
+  <DiscoverDrawer
+    bind:open={discoverOpen}
+    {context}
+    target={discover}
+    chips={loraChips}
+    onuse={useDiscoveredLora}
+    onstop={removeLora}
+    ondeleted={dropDeletedLora}
+    onloraschange={refreshLoras}
+  />
+{/if}
+
 <!-- One viewer for history and completed outputs -->
 <AssetViewer
   assets={lightboxAssets}
@@ -1799,6 +1977,8 @@
 <style>
   /* Chips in the toolbar share the height of the selects beside them. */
   .lora-chip { height: var(--spacing-control); padding: 0 8px; border-radius: var(--radius-sm); color: var(--color-text-primary); }
+  .lora-chip.ui-chip-err, .lora-chip.ui-chip-err .lora-weight, .lora-chip.ui-chip-err .lora-remove { color: var(--color-error); }
+  .lora-failed { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: inherit; }
   .lora-weight { field-sizing: content; min-width: 2ch; border-radius: var(--radius-xs); background: transparent; text-align: center; font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); appearance: textfield; -moz-appearance: textfield; }
   /* Browsers without field-sizing would give the number its default width of 150px or more. */
   @supports not (field-sizing: content) { .lora-weight { width: 4.5ch; } }
@@ -1818,9 +1998,9 @@
     :global(:root:has(.workspace-layout.sidebar-collapsed)) { --toast-inset-left: 56px; }
     :global(:root:has(.workspace-layout.tall)) { --toast-inset-left: 0px; }
   }
-  /* Phone: toasts dock above the composer and the strip. */
-  :global(:root:has(.compact-workspace)) { --toast-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
-  :global(:root:has(.compact-workspace .job-bar)) { --toast-bottom: calc(224px + env(safe-area-inset-bottom, 0px)); }
+  /* Phone: toasts sit above the strip, the composer and any message over Generate, whatever height they have (`dockHeight` measures them). */
+  :global(:root:has(.compact-workspace)) { --toast-bottom: calc(var(--toast-dock, 120px) + 12px); }
+  :global(:root:has(.compact-workspace .job-bar)) { --toast-bottom: calc(var(--toast-dock, 120px) + 104px); }
   /* The phone composition. */
   .compact-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .compact-workspace > :global(.workspace-preview) { flex: 1; min-height: 0; }

@@ -1,10 +1,11 @@
 import { extendPrefillFor } from './extend';
-import { keepInstalledLoras, modelLoraFamily } from './loras';
+import { downloadStore } from './downloads.svelte';
+import { keepInstalledLoras, modelLoraFamily, withoutLora } from './loras';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
 import { firstValues, listOf } from '$lib/prefillParams';
-import type { DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -255,7 +256,7 @@ function _swapFamilyLoras(ctx: WorkspaceContext, state: DraftState, fromModel: s
   if (fromKey === toKey) return {};
   return {
     lorasByFamily: { ...state.lorasByFamily, [fromKey]: state.loraString },
-    loraString: keepInstalledLoras(state.lorasByFamily[toKey] ?? '', ctx.loras),
+    loraString: keepInstalledLoras(state.lorasByFamily[toKey] ?? '', ctx.loras, downloadStore.loraNames()),
   };
 }
 
@@ -786,6 +787,16 @@ export const draft = {
     // Switching between image and video ends the applied preset's hold; presets belong to one mode.
     const leavesMode = key === 'workflow' && workflowMode(value as Workflow) !== workflowMode(_draft.workflow);
     _draft = { ..._draft, [key]: value, ...(leavesMode ? { appliedPreset: null } : {}) };
+    this.saveDraft();
+  },
+
+  /**
+   * Take a LoRA out of the current chips and out of what each model family remembers, so no later Generate or family
+   * switch can ask for a file that is gone. *installed* lets a chip written as a path be matched by its name.
+   */
+  removeLora(name: string, installed: LoraInfo[] = []): void {
+    const lorasByFamily = Object.fromEntries(Object.entries(_draft.lorasByFamily).map(([key, value]) => [key, withoutLora(value, name, installed)]));
+    _draft = { ..._draft, loraString: withoutLora(_draft.loraString, name, installed), lorasByFamily };
     this.saveDraft();
   },
 

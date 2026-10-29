@@ -36,6 +36,8 @@ from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.path_browser import SOURCE_VIDEO_EXTENSIONS
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from zvisiongenerator.core.video_family import VideoFamily
 
 EXTEND_UNAVAILABLE_MESSAGE = "Extending a video is not available on this platform."
@@ -131,12 +133,13 @@ def _resolve_video_model(model: str | None, app_config: dict[str, Any]) -> tuple
     return resolved, detect_video_model(resolved).family
 
 
-def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Path) -> dict[str, Any]:
+def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Path, *, downloading_loras: Mapping[str, int] | None = None) -> dict[str, Any]:
     """Build the ``POST /api/extend/source`` response for a request body.
 
     The optional ``steps`` are the steps the job would run; they set MiniMax H3's estimated time. The optional ``lora`` is the
     job's ``name:weight,...`` list, whose files H3 holds in memory; the estimate is ``None`` when it names a LoRA that is not there.
-    An extension is never upscaled, so Review does not change its estimate and is not sent.
+    An extension is never upscaled, so Review does not change its estimate and is not sent. *downloading_loras* maps the
+    LoRAs still downloading to the size they will have, so their files count before they exist.
 
     Raises:
         ValueError: If the body, path, length, model, steps or low-memory flag is invalid.
@@ -164,7 +167,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Pa
     window = window_frames(extend_frames, family) if extend_frames is not None else None
     memory_fit = None
     if inspection.source is not None and extend_frames is not None:
-        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, extend_frames, low_memory is not False, steps, lora, web_config)
+        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, extend_frames, low_memory is not False, steps, lora, web_config, downloading_loras)
     frame_count = probe.frame_count if probe is not None else None
     return {
         "path": str(path),
@@ -197,7 +200,15 @@ def _source_duration(probe: Any, fps: float, frame_count: int | None) -> float |
 
 
 def _extend_memory_fit(
-    resolved_model: tuple[str, str] | None, model: str | None, source: ExtendSource, extend_frames: int, low_memory: bool, steps: int | None, lora: str | None, web_config: WebUiConfig
+    resolved_model: tuple[str, str] | None,
+    model: str | None,
+    source: ExtendSource,
+    extend_frames: int,
+    low_memory: bool,
+    steps: int | None,
+    lora: str | None,
+    web_config: WebUiConfig,
+    downloading_loras: Mapping[str, int] | None = None,
 ) -> dict[str, Any] | None:
     """Return how an extension window fits this machine's memory (``status``, ``required_gb``, ``budget_gb``, and an estimated ``expected_seconds`` for H3), or ``None`` when unknown.
 
@@ -211,7 +222,7 @@ def _extend_memory_fit(
     description = video_family_on_platform(web_config.app_config, family)
     window = window_frames(extend_frames, description)
     try:
-        loras_bytes = lora_bytes_for_fit(lora, family=family)
+        loras_bytes = lora_bytes_for_fit(lora, family=family, downloading=downloading_loras)
     except ValueError:
         return None
     return clip_memory_fit(

@@ -12,10 +12,12 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
+from zvisiongenerator.utils.lora_keys import normalise_lora_keys
+
 __all__ = ["LORA_FAMILY_VERSION", "LoraFamily", "detect_lora_family"]
 
-# Bump when the rules change so cached detections are recomputed.
-LORA_FAMILY_VERSION = 4
+# Bump when the rules change, or what a cached row holds (the family and the header's caption trigger), so cached rows are recomputed.
+LORA_FAMILY_VERSION = 7
 
 _METADATA_KEYS = ("ss_base_model_version", "release_base_model", "modelspec.architecture")
 _KEY_PREFIXES = ("diffusion_model.", "transformer.", "model.diffusion_model.", "base_model.model.")
@@ -26,10 +28,14 @@ _LORA_PAIRS = ((".lora_A.weight", ".lora_B.weight"), (".lora_down.weight", ".lor
 _LINEAR1_OUT = {36864: ("flux2_klein", "9b"), 27648: ("flux2_klein", "4b"), 21504: ("flux1", None)}
 # The single-block ``proj_mlp`` output width of the FLUX.1 diffusers layout (4 x the hidden size).
 _PROJ_MLP_OUT = {12288: ("flux1", None)}
-# Kohya names a block ``single_blocks_0_linear1``; the dotted form is ``single_blocks.0.linear1``.
-_KOHYA_BLOCK = re.compile(r"^lora_unet_((?:single|double)_blocks)_(\d+)_")
-# MOSS-Image names its attention and feed-forward projections ``layers.N.proj.q`` (``layers_N_proj_q`` in Kohya names).
-_MOSS_PROJ = re.compile(r"(?:^|[._])layers[._]\d+[._]proj[._](?:q|k|v|o|qkv|ffn_up_gate|ffn_down)(?:\.|$)")
+# Krea 2 gates its attention (``attn.gate``, ``attn.to_gate``).
+_KREA2_GATE = re.compile(r"attn\.(?:to_)?gate")
+# LTX-2 attention blocks: ``attn1``/``attn2`` for video and ``audio_attn1``/``audio_attn2`` for audio.
+_LTX_ATTN = re.compile(r"\.(?:audio_)?attn[12]\.")
+# MiniMax H3 native block modules (``blocks.N.attn.qkv_proj``), also under ``transformer_blocks``.
+_H3_BLOCK = re.compile(r"(?:^|\.)blocks\.\d+\.(?:attn\.(?:qkv|out)_proj|mlp\.fc[12]|adaln_proj)")
+# MOSS-Image names its attention and feed-forward projections ``layers.N.proj.q``.
+_MOSS_PROJ = re.compile(r"(?:^|\.)layers\.\d+\.proj\.(?:q|k|v|o|qkv|ffn_up_gate|ffn_down)(?:\.|$)")
 # The model hidden size that must appear among the adapted weights' input or output widths.
 _HIDDEN_SIZE = {
     ("zimage", None): 3840,
@@ -37,6 +43,7 @@ _HIDDEN_SIZE = {
     ("moss", None): 3072,
     ("krea2", None): 6144,
     ("ltx", None): 4096,
+    ("h3", None): 5376,
     ("flux2_klein", "9b"): 4096,
     ("flux2_klein", "4b"): 3072,
     ("flux1", None): 3072,
@@ -92,10 +99,7 @@ def _family_from_metadata(metadata: Mapping[str, str]) -> tuple[str, str | None]
 
 
 def _strip_prefix(name: str) -> str:
-    """Return *name* without one leading trainer prefix, with a Kohya block name written in its dotted form."""
-    kohya = _KOHYA_BLOCK.match(name)
-    if kohya is not None:
-        return f"{kohya.group(1)}.{kohya.group(2)}.{name[kohya.end() :]}"
+    """Return *name* without one leading trainer prefix."""
     for prefix in _KEY_PREFIXES:
         if name.startswith(prefix):
             return name[len(prefix) :]
@@ -136,6 +140,8 @@ def _adapted_dims(header: Mapping[str, Any]) -> dict[str, tuple[int, int]]:
 
 def _family_from_fingerprint(header: Mapping[str, Any]) -> tuple[str, str | None] | None:
     """Return the fingerprinted ``(family, size_variant)`` that also passes the hidden-size guard, or None."""
+    renames = normalise_lora_keys(header)
+    header = {renames.get(key, key): entry for key, entry in header.items()}
     keys = {_strip_prefix(key) for key in header}
     dims = _adapted_dims(header)
     found = _match_fingerprint(keys, dims)
@@ -162,6 +168,14 @@ def _by_layer_width(dims: Mapping[str, tuple[int, int]]) -> tuple[str, str | Non
     return next((family for family in (("zimage", None), ("ideogram4", None)) if _HIDDEN_SIZE[family] in widths), None)
 
 
+def _is_h3(keys: set[str]) -> bool:
+    """Return whether *keys* name MiniMax H3 modules: its native block layout, or diffusers blocks beside an H3-only module."""
+    if any(_H3_BLOCK.search(key) for key in keys):
+        return True
+    diffusers_blocks = any(key.startswith("transformer_blocks.") and ".attn.to_q" in key for key in keys)
+    return diffusers_blocks and any(part in key for key in keys for part in ("token_refiner", "time_embedder", "video_patch_proj"))
+
+
 def _match_fingerprint(keys: set[str], dims: Mapping[str, tuple[int, int]]) -> tuple[str, str | None] | None:
     """Return the first family whose key pattern matches *keys*, before the hidden-size guard."""
 
@@ -173,12 +187,14 @@ def _match_fingerprint(keys: set[str], dims: Mapping[str, tuple[int, int]]) -> t
 
     if starts("single_blocks.") and starts("double_blocks."):
         return _by_single_block_width(dims, "single_blocks.", "linear1", _LINEAR1_OUT)
-    if has(".attn.gate", ".attn.to_gate") and has("txtfusion", "text_fusion") and not has("attn1."):
+    if any(_KREA2_GATE.search(key) for key in keys) and has("txtfusion", "text_fusion") and not has("attn1."):
         return ("krea2", None)
     if starts("single_transformer_blocks.") and starts("transformer_blocks."):
         return _by_single_block_width(dims, "single_transformer_blocks.", "attn.to_qkv_mlp_proj", _LINEAR1_OUT) or _by_single_block_width(dims, "single_transformer_blocks.", "proj_mlp", _PROJ_MLP_OUT)
-    if has("transformer_blocks.") and has(".attn1.", ".attn2."):
+    if has("transformer_blocks.") and any(_LTX_ATTN.search(key) for key in keys):
         return ("ltx", None)
+    if _is_h3(keys):
+        return ("h3", None)
     if any(_MOSS_PROJ.search(key) for key in keys):
         return ("moss", None)
     if has("layers.") and has("noise_refiner", "context_refiner", "cap_embedder"):

@@ -342,6 +342,11 @@
   .ui-btn-primary { background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
   @media (hover: hover) { .ui-btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); } }
   .ui-btn-primary:disabled { opacity: 1; background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
+  /* A button that waits on a download: its text is cut before its percentage, and a 3px bar along its foot shows how far. */
+  .ui-btn-wait { position: relative; overflow: hidden; min-width: 0; }
+  .ui-btn-wait-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ui-btn-wait-p { flex: none; font-family: var(--font-mono); font-weight: 500; }
+  .ui-btn-wait::after { content: ''; position: absolute; bottom: 0; left: 0; width: var(--p, 0%); height: 3px; background: var(--color-primary-main); }
   .ui-btn-quiet { background: transparent; color: var(--color-text-muted); }
   .ui-btn-danger { background: color-mix(in srgb, var(--color-error) 14%, transparent); color: var(--color-error); }
   @media (hover: hover) { .ui-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-error) 22%, transparent); color: var(--color-error); } }
@@ -533,6 +538,11 @@
   }
   @media (hover: hover) { button.ui-chip:hover:not(:disabled) { color: var(--color-text-primary); } }
   .ui-chip[aria-pressed='true'] { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
+  /* A chip that downloads: a teal icon, and a 2px line along its foot. */
+  .ui-chip-dl { position: relative; overflow: hidden; }
+  .ui-chip-dl::after { content: ''; position: absolute; bottom: 0; left: 0; width: var(--p, 0%); height: 2px; background: var(--color-primary-main); }
+  .ui-chip-dl > svg { color: var(--color-primary-main); }
+  .ui-chip.ui-chip-err { background: var(--color-error-surface); color: var(--color-error); }
 
   /* Badges are tinted fills; neutral ones use secondary text so they read on every shade. */
   .ui-badge { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; height: var(--spacing-badge); padding: 0 5px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--color-text-muted) 14%, transparent); font-size: var(--text-meta); font-weight: 600; white-space: nowrap; color: var(--color-text-secondary); }

@@ -52,7 +52,7 @@ class DownloadFlights:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._flights: dict[tuple[str, str, str], Flight] = {}
+        self._flights: dict[tuple[str, str, str, tuple[str, ...]], Flight] = {}
 
     def claim(self, target: DownloadTarget) -> tuple[Flight, bool]:
         """Join the running flight for *target*'s key, or register a new one.

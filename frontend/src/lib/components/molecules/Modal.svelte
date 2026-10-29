@@ -183,7 +183,7 @@
           <button
             type="button"
             onclick={close}
-            class="ui-btn ui-btn-quiet ui-btn-icon ui-btn-sm"
+            class="modal-close ui-btn ui-btn-quiet ui-btn-icon ui-btn-sm"
             aria-label="Close dialog"
           >
             <Icon name="close" size={14} />
@@ -210,6 +210,8 @@
   .modal-root { animation: modal-fade 140ms ease-out; }
   .modal-dialog { animation: modal-rise 180ms cubic-bezier(0.32, 0.72, 0, 1); }
   .modal-dialog[data-placement='side'] { animation: modal-slide 200ms cubic-bezier(0.32, 0.72, 0, 1); }
+  /* A finger gets the full touch size for Close. */
+  @media (pointer: coarse) { .modal-close { width: var(--spacing-control); height: var(--spacing-control); } }
   @keyframes modal-fade { from { opacity: 0; } }
   @keyframes modal-rise { from { opacity: 0; translate: 0 8px; scale: 0.98; } }
   @keyframes modal-slide { from { translate: 100% 0; } }

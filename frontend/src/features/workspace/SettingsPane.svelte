@@ -8,6 +8,9 @@
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
+  import { generateBlock } from '$lib/state/generateBlock.svelte';
+  import { chipDownload, failureText, waitText } from '$lib/state/loraDownloads';
+  import { downloadStore } from '$lib/state/downloads.svelte';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
@@ -15,6 +18,7 @@
   import ReferenceSlot from './ReferenceSlot.svelte';
   import ReferencesSection from './ReferencesSection.svelte';
   import SourceVideoSection from './SourceVideoSection.svelte';
+  import WaitingLabel from './WaitingLabel.svelte';
   import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
 
   interface Props {
@@ -206,7 +210,10 @@
   // --- Footer ---------------------------------------------------------------
   const promptFileMode = $derived(s.promptSource === 'file');
   const promptChoiceMissing = $derived(promptFileMode && s.promptFileOptionIds.length === 0);
-  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || referenceBlock !== null);
+  // A LoRA chip whose file is downloading (or failed) holds Generate back.
+  const block = $derived(generateBlock(s.loraString, context.loras));
+  const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : null);
+  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || referenceBlock !== null || block.blocked);
   // One reason at a time, linked to Generate: the source comes first, then the references, then the prompt file.
   const generateReason = $derived(sourceGuard.note ?? referenceBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
 
@@ -599,6 +606,13 @@
     {#if generateReason}
       <p id="ws-generate-reason" class="ui-alert ui-alert-warning footer-note">{generateReason}</p>
     {/if}
+    {#if block.failures.length > 0}
+      {@const failedItem = chipDownload(block.failures[0].name, context.loras, downloadStore.items, downloadStore.unlisted)}
+      <p class="ui-alert ui-alert-error footer-note" role="alert" data-testid="lora-failure">
+        <Icon name="alert" size={14} /><span class="min-w-0 flex-1 break-words">{failureText(block.failures[0])}{block.failures.length > 1 ? ` (${block.failures.length - 1} more)` : ''}</span>
+        {#if failedItem.state === 'failed'}<button type="button" class="ui-btn ui-btn-sm" onclick={() => void downloadStore.retryLora(failedItem.item)}>Retry</button>{/if}
+      </p>
+    {/if}
     {#if submitError}
       <p class="ui-alert ui-alert-error footer-note" role="alert" data-testid="generate-error">
         <Icon name="alert" size={14} /><span class="min-w-0 break-words">{submitError}</span>
@@ -623,11 +637,19 @@
           type="submit"
           disabled={submitDisabled}
           aria-describedby={generateReason ? 'ws-generate-reason' : undefined}
+          aria-label={waitFull ?? undefined}
+          title={waitFull ?? undefined}
           class="ui-btn ui-btn-primary ui-btn-main"
+          class:ui-btn-wait={block.waiting !== null}
+          style:--p={block.waiting ? `${block.waiting.percent ?? 0}%` : undefined}
         >
-          <Icon name="bolt" size={16} />
-          <span>{busy ? 'Submitting…' : jobsActive ? 'Add to queue' : 'Generate'}</span>
-          <kbd>⌘↵</kbd>
+          {#if block.waiting}
+            <WaitingLabel waiting={block.waiting} />
+          {:else}
+            <Icon name="bolt" size={16} />
+            <span>{busy ? 'Submitting…' : jobsActive ? 'Add to queue' : 'Generate'}</span>
+            <kbd>⌘↵</kbd>
+          {/if}
         </button>
       {:else}
         <button type="button" class="ui-btn ui-btn-main" onclick={ondone}>Done</button>

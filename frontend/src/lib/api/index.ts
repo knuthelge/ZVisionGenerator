@@ -11,3 +11,4 @@ export * from './browse';
 export * from './jobLog';
 export * from './presets';
 export * from './recentPrompts';
+export * from './discover';
