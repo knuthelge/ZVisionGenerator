@@ -15,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 
 #### Web UI
-- **Discover LoRAs.** **Discover LoRAs…** in **Add LoRA** finds LoRAs for your model: a curated list of checked LoRAs and, if you turn it on, a Hugging Face search. **Download** one, or turn on **Use in LoRAs** to add it to your chips; Generate waits for the download
+- **Discover LoRAs.** **Discover LoRAs…** in **Add LoRA** finds LoRAs for your model: a curated list of checked LoRAs and, if you turn it on, a Hugging Face search. **Download** one, or turn on **Use in LoRAs** to add it to your chips; Generate waits for the download. The Hugging Face search has a content filter that hides what it can; if it hides a LoRA you want to use, set `ui.discover_content_filter: off`
 - **Trigger words in the prompt box.** A **Triggers** menu puts the trigger words of your LoRAs into the prompt, and counts the ones still missing
 - **Recent prompts.** A history button in the prompt box lists the prompts you generated in the current mode (image prompts, or video scenes and actions), newest first, with a filter that searches all of that mode's prompts. Pick one to bring it back: the prompt, a video's scene and the negative prompt, or a JSON caption into the `{ }` box on Ideogram 4. Press Alt+↑ in an empty prompt to open it. **Clear recents** removes the current mode's. They are kept on the server, so they are the same on every device
 - **The last five rewrites.** In the Enhanced tab, a `‹ 2 of 3 ›` stepper moves through the last five rewrites of the same text; Generate sends the one shown, with how it was written

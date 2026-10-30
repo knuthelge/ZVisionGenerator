@@ -105,6 +105,7 @@ from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_ups
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
 from zvisiongenerator.web.config_contract import (
+    discover_content_filter_setting,
     discover_huggingface_enabled,
     persist_discover_huggingface,
     persist_first_run_skipped,
@@ -112,7 +113,8 @@ from zvisiongenerator.web.config_contract import (
     resolve_output_dir as resolve_config_output_dir,
 )
 from zvisiongenerator.web.discover_api import build_curated, check_json, hf_source, installed_sizes, list_json, curated_repo_index, curated_source, repo_json
-from zvisiongenerator.web.discover_hub import check_family, list_adapters, read_repo
+from zvisiongenerator.web.discover_hub import RepoDetail, check_family, list_adapters, read_repo
+from zvisiongenerator.web.listing_filter import ListingFilter, content_filter_level, listing_filter_for, packaged_listing_filter
 from zvisiongenerator.web.download_lane import DownloadLane
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
@@ -2440,6 +2442,16 @@ def _hf_unavailable(exc: HubError) -> HTTPException:
     return HTTPException(status_code=503 if exc.status is None else 502, detail=f"{exc} Hugging Face is needed to browse LoRAs there; curated LoRAs still work from the bundled list.")
 
 
+def _listing_rules() -> ListingFilter:
+    """Return the content filter at the level ``ui.discover_content_filter`` sets."""
+    return listing_filter_for(content_filter_level(discover_content_filter_setting()), packaged_listing_filter())
+
+
+def _read_listed_repo(repo: str) -> RepoDetail:
+    """Return a repository's detail from the Hub, refused when the content filter's current level hides it."""
+    return read_repo(hub_fetch, repo, rules=_listing_rules())
+
+
 def _require_hf_enabled() -> None:
     """Refuse Hugging Face browsing until the user has chosen to show Hugging Face LoRAs."""
     if not discover_huggingface_enabled():
@@ -2497,7 +2509,7 @@ async def api_discover_hf(family: str, size: str | None = None, version: str | N
     """Return a page of the Hugging Face LoRAs made for a model's official base model (by size or LTX version), via the server so the browser never calls the Hub."""
     _require_hf_enabled()
     try:
-        page = await run_in_threadpool(list_adapters, hub_fetch, family=family, size=size, version=version, query=q, sort=sort, cursor=cursor)
+        page = await run_in_threadpool(lambda: list_adapters(hub_fetch, family=family, size=size, version=version, query=q, sort=sort, cursor=cursor, rules=_listing_rules()))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HubError as exc:
@@ -2507,11 +2519,11 @@ async def api_discover_hf(family: str, size: str | None = None, version: str | N
 
 @app.get("/api/discover/hf/repo")
 async def api_discover_hf_repo(repo: str) -> dict[str, Any]:
-    """Return one Hugging Face repository's files, card facts and preview URLs; gated and adult-tagged repositories are refused."""
+    """Return one Hugging Face repository's files, card facts and preview URLs; repositories Discover does not list are refused."""
     _require_hf_enabled()
     _repo_arg(repo)
     try:
-        detail = await run_in_threadpool(read_repo, hub_fetch, repo)
+        detail = await run_in_threadpool(_read_listed_repo, repo)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except HubError as exc:
@@ -2526,7 +2538,7 @@ async def api_discover_hf_check(repo: str, file: str, family: str, size: str | N
     _repo_arg(repo)
     _file_arg(file)
     try:
-        detail = await run_in_threadpool(read_repo, hub_fetch, repo)
+        detail = await run_in_threadpool(_read_listed_repo, repo)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except HubError as exc:
@@ -2560,7 +2572,7 @@ async def api_discover_download(request: Request) -> dict[str, Any]:
         else:
             _require_hf_enabled()
             repo, file = _repo_arg(_required_json_string(payload, "repo")), _file_arg(_required_json_string(payload, "file"))
-            detail = await run_in_threadpool(read_repo, hub_fetch, repo)
+            detail = await run_in_threadpool(_read_listed_repo, repo)
             chosen = next((entry for entry in detail.files if entry.file == file), None)
             if chosen is None:
                 raise HTTPException(status_code=404, detail=f"'{file}' is not in {repo}.")

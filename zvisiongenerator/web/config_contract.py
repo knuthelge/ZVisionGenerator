@@ -200,6 +200,12 @@ def discover_huggingface_enabled() -> bool:
     return isinstance(ui, dict) and ui.get("discover_huggingface") is True
 
 
+def discover_content_filter_setting() -> object:
+    """Return the user's ``ui.discover_content_filter`` value, or None when the user config does not set it."""
+    ui = read_user_config_override().get("ui")
+    return ui.get("discover_content_filter") if isinstance(ui, dict) else None
+
+
 def persist_discover_huggingface(enabled: bool) -> None:
     """Record in the user config override whether Discover LoRAs shows Hugging Face LoRAs, keeping every other key."""
     with _USER_CONFIG_WRITE_LOCK:

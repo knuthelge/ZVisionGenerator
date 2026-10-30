@@ -22,7 +22,7 @@
 <div class="disc-optin">
   <h3>Curated is checked. Hugging Face is not.</h3>
   <p>Hugging Face tab has every LoRA the community authors list for this model. Show those here too?</p>
-  <Alert tone="warning"><strong>On Hugging Face, content filtering is left to the community, so adult content will show up.</strong> Only repos their authors actually tag as adult can be, and are, excluded.</Alert>
+  <Alert tone="warning"><strong>Hugging Face has adult content.</strong> We filter out what we can, but some will still show up.</Alert>
   <table class="disc-optin-table">
     <thead>
       <tr>

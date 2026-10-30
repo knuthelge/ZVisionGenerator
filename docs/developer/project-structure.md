@@ -206,6 +206,8 @@ zvisiongenerator/
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
 │   ├── job_log.py                 Job log component of the app database: entry builder, filters, paging and the `jobs_entries` store
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
+│   ├── listing_filter.py          The content filter: whether Discover lists a Hugging Face repository, by the words in its names
+│   ├── listing_filter.json        The content filter's terms, base64-encoded
 │   ├── lora_details.py            Describe installed LoRAs: their source and trigger, by the order of trust
 │   ├── lora_download.py           Install a LoRA through the download lane: choose its name, stage, verify and rename it, record its source
 │   ├── lora_index.py              LoRA component of the app database: the cached family of each LoRA file, detected from its header when first seen

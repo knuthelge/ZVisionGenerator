@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+from functools import partial
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from tests.web._helpers import COMMIT, SHA, FakeHub, model_json, safetensors_bytes
-from zvisiongenerator.web.discover_hub import BASE_MODELS, RepoFile, base_repos, check_family, choose_files, clean_repo_name, list_adapters, preview_url, read_repo
+from zvisiongenerator.web import discover_hub
+from zvisiongenerator.web.discover_hub import BASE_MODELS, RepoFile, base_repos, check_family, choose_files, clean_repo_name, preview_url
 from zvisiongenerator.web.hub_client import HubError, HubResponse
+from zvisiongenerator.web.listing_filter import ListingFilter
 
 _ZIMAGE = "Tongyi-MAI/Z-Image-Turbo"
+# Made-up terms: a whole word and a stem.
+_RULES = ListingFilter(frozenset({"zap"}), ("zzpix",))
+list_adapters = partial(discover_hub.list_adapters, rules=_RULES)
+read_repo = partial(discover_hub.read_repo, rules=_RULES)
 
 
 def _item(repo: str, **fields) -> dict:
@@ -59,6 +66,55 @@ class TestListing:
         page = list_adapters(FakeHub(listing={_ZIMAGE: (items, None)}), family="zimage")
 
         assert [row["repo"] for row in page["items"]] == ["o/ok"]
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"id": "o/MysticZap"},
+            {"id": "o/ZAP_v2"},
+            {"id": "o/krea2zzpixmix"},
+            {"tags": ["lora", "zap"]},
+            {"cardData": {"tags": ["Zzpix"]}},
+            {"cardData": {"instance_prompt": ["zap", "studio"]}},
+            {"cardData": {"instance_prompt": "zzpix style"}},
+            {"siblings": [{"rfilename": "style.safetensors"}, {"rfilename": "images/zzpix_01.png"}]},
+            {"cardData": {"tags": ["not-for-all-audiences"]}},
+        ],
+    )
+    def test_a_repository_the_listing_filter_keeps_out_is_never_listed(self, fields):
+        page = list_adapters(FakeHub(listing={_ZIMAGE: ([_item("o/r", **fields)], None)}), family="zimage")
+
+        assert page["items"] == []
+
+    def test_an_adult_tagged_repository_is_listed_when_the_rules_do_not_hide_the_tag(self):
+        item = _item("o/r", tags=["lora", "not-for-all-audiences"])
+
+        page = discover_hub.list_adapters(FakeHub(listing={_ZIMAGE: ([item], None)}), family="zimage", rules=ListingFilter(frozenset(), (), hide_adult_tagged=False))
+
+        assert [row["repo"] for row in page["items"]] == ["o/r"]
+
+    def test_a_word_inside_another_word_does_not_keep_a_repository_out(self):
+        page = list_adapters(FakeHub(listing={_ZIMAGE: ([_item("o/zapper-style")], None)}), family="zimage")
+
+        assert [row["repo"] for row in page["items"]] == ["o/zapper-style"]
+
+    def test_a_page_with_every_row_left_out_reads_the_next_hub_page(self):
+        hub = FakeHub(pages={(_ZIMAGE, ""): ([_item("o/zap")], "C1"), (_ZIMAGE, "C1"): ([_item("o/ok")], "C2")})
+
+        page = list_adapters(hub, family="zimage")
+
+        assert [row["repo"] for row in page["items"]] == ["o/ok"]
+        assert page["next_cursor"] is not None
+        assert len(hub.calls) == 2
+
+    def test_reading_more_hub_pages_stops_after_the_extra_pages(self):
+        hub = FakeHub(listing={_ZIMAGE: ([_item("o/zap")], "C1")})
+
+        page = list_adapters(hub, family="zimage")
+
+        assert page["items"] == []
+        assert page["next_cursor"] is not None
+        assert len(hub.calls) == 1 + discover_hub._EXTRA_PAGES
 
     def test_a_row_carries_what_the_list_shows(self):
         card = {"license": "apache-2.0", "widget": [{"output": {"url": "images/p.png"}}, {"output": {"url": "https://evil.example/x.png"}}]}
@@ -236,8 +292,12 @@ class TestReadRepo:
 
     @pytest.mark.parametrize("fields", [{"gated": "auto"}, {"gated": "manual"}, {"tags": ["lora", "not-for-all-audiences"]}, {"private": True}])
     def test_a_gated_private_or_adult_repository_is_refused(self, fields):
-        with pytest.raises(ValueError, match="gated|adult"):
+        with pytest.raises(ValueError):
             read_repo(FakeHub(models={"o/r": model_json("o/r", **fields)}), "o/r")
+
+    def test_a_repository_the_listing_filter_keeps_out_is_refused(self):
+        with pytest.raises(ValueError):
+            read_repo(FakeHub(models={"o/r": model_json("o/r", files={"zzpix.safetensors": 1})}), "o/r")
 
     def test_a_missing_repository_is_a_404(self):
         with pytest.raises(HubError) as raised:

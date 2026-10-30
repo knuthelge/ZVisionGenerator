@@ -269,14 +269,21 @@ class FakeHub:
 
     Args:
         listing: Answers for ``/api/models?filter=base_model:adapter:<base>``, by base repo: ``(items, next cursor or None)``.
+        pages: Answers for the same listing by ``(base repo, cursor)``, with ``""`` for the first page; checked before *listing*.
         models: Answers for ``/api/models/<repo>``, by repo.
         files: Answers for ``/<repo>/resolve/<commit>/<file>``, by ``(repo, file)``: the bytes of the file.
     """
 
     def __init__(
-        self, *, listing: dict[str, tuple[list[dict[str, Any]], str | None]] | None = None, models: dict[str, dict[str, Any]] | None = None, files: dict[tuple[str, str], bytes] | None = None
+        self,
+        *,
+        listing: dict[str, tuple[list[dict[str, Any]], str | None]] | None = None,
+        pages: dict[tuple[str, str], tuple[list[dict[str, Any]], str | None]] | None = None,
+        models: dict[str, dict[str, Any]] | None = None,
+        files: dict[tuple[str, str], bytes] | None = None,
     ) -> None:
         self.listing = listing or {}
+        self.pages = pages or {}
         self.models = models or {}
         self.files = files or {}
         self.calls: list[tuple[str, dict[str, str], int]] = []
@@ -287,7 +294,8 @@ class FakeHub:
         query = parse_qs(parts.query)
         if parts.path == "/api/models":
             base = query["filter"][0].removeprefix("base_model:adapter:")
-            items, cursor = self.listing.get(base, ([], None))
+            page = (base, query.get("cursor", [""])[0])
+            items, cursor = self.pages[page] if page in self.pages else self.listing.get(base, ([], None))
             link = {"link": f'<https://huggingface.co/api/models?cursor={cursor}>; rel="next"'} if cursor else {}
             return HubResponse(200, json.dumps(items).encode(), link)
         if parts.path.startswith("/api/models/"):

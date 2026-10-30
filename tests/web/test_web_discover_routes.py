@@ -219,6 +219,19 @@ class TestHubProxy:
         assert again.status_code == 200
         assert "cursor=NEXT" in hf_on.hub.urls[1]
 
+    @pytest.mark.parametrize(("setting", "listed"), [(None, ["o/ok"]), ("off", ["o/ok", "o/named"]), ("explicit", ["o/ok", "o/named", "o/tagged"])])
+    def test_the_content_filter_setting_picks_what_is_hidden(self, hf_on, setting, listed):
+        base = {"downloads": 1, "likes": 1, "gated": False, "siblings": [{"rfilename": "a.safetensors"}], "cardData": {}}
+        named = next(iter(web_server.packaged_listing_filter().stems))
+        items = [{**base, "id": "o/ok", "tags": []}, {**base, "id": "o/named", "tags": [named]}, {**base, "id": "o/tagged", "tags": ["not-for-all-audiences"]}]
+        hf_on.hub.listing["Tongyi-MAI/Z-Image-Turbo"] = (items, None)
+        if setting is not None:
+            (hf_on.data / "config.yaml").write_text(yaml.safe_dump({"ui": {"discover_huggingface": True, "discover_content_filter": setting}}), encoding="utf-8")
+
+        body = hf_on.client.get("/api/discover/hf", params={"family": "zimage"}).json()
+
+        assert [item["repo"] for item in body["items"]] == listed
+
     def test_an_ltx_model_lists_only_the_adapters_of_its_version(self, hf_on):
         hf_on.hub.listing["Lightricks/LTX-2.5"] = ([], None)
 

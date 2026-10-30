@@ -1,8 +1,8 @@
 """Read LoRAs from Hugging Face for Discover: adapters per base model, one repository's files and card, and a file's family.
 
 Everything here takes a :data:`~zvisiongenerator.web.hub_client.Fetch`, so it reads the Hub anonymously and boundedly
-and tests need no network. Gated repositories and repositories tagged ``not-for-all-audiences`` are dropped from every
-listing and refused as a detail.
+and tests need no network. Gated and private repositories, and repositories the content filter
+(:mod:`~zvisiongenerator.web.listing_filter`) hides, are dropped from every listing and refused as a detail.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from zvisiongenerator.utils.lora_family import detect_lora_family
 from zvisiongenerator.utils.lora_trigger import card_triggers
 from zvisiongenerator.utils.model_files import disk_size_label
 from zvisiongenerator.utils.safetensors_stream import header_and_metadata_from_bytes
+from zvisiongenerator.web.listing_filter import ListingFilter, is_filtered
 from zvisiongenerator.web.hub_client import HEADER_READ_BYTES, HUB_ROOT, Fetch, HubError, api_url, resolve_url, validated_file, validated_repo
 
 __all__ = [
@@ -39,6 +40,8 @@ __all__ = [
 
 ADULT_TAG = "not-for-all-audiences"
 PAGE_SIZE = 30
+# How many more Hub pages a listing reads when every row of a page was dropped.
+_EXTRA_PAGES = 2
 MAX_QUERY_CHARS = 100
 # The official base repositories whose adapters the Hub lists, by family and size or version; ``None`` is the whole family.
 # A family listed by size or version has no ``None`` entry: asking for it without either lists every one.
@@ -205,9 +208,33 @@ def _get_json(fetch: Fetch, url: str) -> Any:
         raise HubError("Hugging Face sent an answer that could not be read.", response.status) from exc
 
 
-def _is_listable(item: Mapping[str, Any]) -> bool:
-    """Return whether a repository may be listed: not gated, not private and not tagged for adult audiences."""
-    return item.get("gated") in (False, None) and not item.get("private") and ADULT_TAG not in (item.get("tags") or ())
+def _card(item: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return a Hub model's card data, or an empty mapping when it has none."""
+    card = item.get("cardData")
+    return card if isinstance(card, Mapping) else {}
+
+
+def _strings(value: object) -> list[str]:
+    """Return *value* as a list of strings: a string alone, the strings of a list, or nothing."""
+    if isinstance(value, str):
+        return [value]
+    return [entry for entry in value if isinstance(entry, str)] if isinstance(value, list) else []
+
+
+def _names(item: Mapping[str, Any]) -> list[str]:
+    """Return the names the content filter reads: the repository ID, tags, card tags, card trigger words and file names."""
+    card = _card(item)
+    files = [entry.get("rfilename") for entry in item.get("siblings") or () if isinstance(entry, Mapping)]
+    return [*_strings(item.get("id")), *_strings(item.get("tags")), *_strings(card.get("tags")), *_strings(card.get("instance_prompt")), *_strings(files)]
+
+
+def _is_listable(item: Mapping[str, Any], rules: ListingFilter) -> bool:
+    """Return whether a repository may be listed: not gated, not private and not hidden by *rules*."""
+    if item.get("gated") not in (False, None) or item.get("private"):
+        return False
+    if rules.hide_adult_tagged and (ADULT_TAG in _strings(item.get("tags")) or ADULT_TAG in _strings(_card(item).get("tags"))):
+        return False
+    return not is_filtered(_names(item), rules)
 
 
 def _safetensors(siblings: Sequence[Any]) -> list[str]:
@@ -227,19 +254,17 @@ def _first_preview(card: Mapping[str, Any], repo: str) -> str | None:
     return images[0] if images else None
 
 
-def _row(item: Mapping[str, Any]) -> dict[str, Any] | None:
+def _row(item: Mapping[str, Any], rules: ListingFilter) -> dict[str, Any] | None:
     """Return the listing row for one Hub model, or None when it must not be listed."""
     repo = item.get("id")
     try:
         validated_repo(repo)
     except ValueError:
         return None
-    if not _is_listable(item):
-        return None
     files = _safetensors(item.get("siblings") or ())
-    if not files:
+    if not files or not _is_listable(item, rules):
         return None
-    card = item.get("cardData") if isinstance(item.get("cardData"), Mapping) else {}
+    card = _card(item)
     return {
         "repo": repo,
         "name": clean_repo_name(repo),
@@ -297,12 +322,15 @@ def list_adapters(
     query: str = "",
     sort: str = "downloads",
     cursor: str | None = None,
+    rules: ListingFilter,
 ) -> dict[str, Any]:
     """Return one page of the LoRAs the Hub lists as adapters of the official base model(s) of *family*.
 
     The page merges one Hub page per base repository, ordered by *sort*, with a repository that is an adapter of several
-    of them listed once; gated, private and adult-tagged repositories, and repositories without a ``.safetensors``
-    file, are left out, so a page can hold fewer than ``PAGE_SIZE`` rows.
+    of them listed once; gated and private repositories, repositories *rules* hides, and repositories without a
+    ``.safetensors`` file are left out, so a page can hold fewer than ``PAGE_SIZE`` rows. When every row of
+    those Hub pages is left out, the next ones are read, up to ``_EXTRA_PAGES`` times, so a page is empty only when the
+    Hub has no more or nothing in those pages could be listed.
 
     Args:
         fetch: Reads the Hub.
@@ -312,6 +340,7 @@ def list_adapters(
         query: Words to search for; blank lists everything.
         sort: A key of ``SORTS``.
         cursor: The ``next_cursor`` of the previous page, or None for the first page.
+        rules: The content filter at its current level.
 
     Returns:
         ``{"items": [...], "next_cursor": str | None, "base_models": [...]}``.
@@ -327,26 +356,40 @@ def list_adapters(
     rows: list[dict[str, Any]] = []
     following: dict[str, str] = {}
     seen: set[str] = set()
-    for base, hub_cursor in pending.items():
-        params = {"filter": f"base_model:adapter:{base}", "sort": SORTS[sort], "direction": -1, "limit": PAGE_SIZE, "search": query.strip()[:MAX_QUERY_CHARS] or None, "cursor": hub_cursor or None}
-        url = api_url("models", params, repeated={"expand[]": _LIST_FIELDS})
-        response = fetch(url)
-        if response.status != 200 or response.truncated:
-            raise HubError(f"Hugging Face answered with status {response.status}.", response.status)
-        try:
-            items = json.loads(response.body)
-        except ValueError as exc:
-            raise HubError("Hugging Face sent an answer that could not be read.", response.status) from exc
-        for item in items:
-            row = _row(item) if isinstance(item, Mapping) else None
-            if row is not None and row["repo"] not in seen:
-                seen.add(row["repo"])
-                rows.append(row)
-        if (next_cursor := _next_cursor(response.headers.get("link"))) is not None:
-            following[base] = next_cursor
+    for _ in range(1 + _EXTRA_PAGES):
+        following = {}
+        for base, hub_cursor in pending.items():
+            items, next_cursor = _adapter_page(fetch, base, sort=sort, query=query, hub_cursor=hub_cursor)
+            for item in items:
+                row = _row(item, rules) if isinstance(item, Mapping) else None
+                if row is not None and row["repo"] not in seen:
+                    seen.add(row["repo"])
+                    rows.append(row)
+            if next_cursor is not None:
+                following[base] = next_cursor
+        if rows or not following:
+            break
+        pending = following
     if len(bases) > 1:
         rows.sort(key=lambda row: _SORT_VALUES[sort](row), reverse=True)
     return {"items": rows, "next_cursor": _encode_cursor(following), "base_models": list(bases)}
+
+
+def _adapter_page(fetch: Fetch, base: str, *, sort: str, query: str, hub_cursor: str) -> tuple[list[Any], str | None]:
+    """Return one Hub page of the adapters of *base* and the Hub cursor of the next page, or None on the last page.
+
+    Raises:
+        HubError: If the Hub answers with an error status, an oversized body or something that is not a JSON list.
+    """
+    params = {"filter": f"base_model:adapter:{base}", "sort": SORTS[sort], "direction": -1, "limit": PAGE_SIZE, "search": query.strip()[:MAX_QUERY_CHARS] or None, "cursor": hub_cursor or None}
+    response = fetch(api_url("models", params, repeated={"expand[]": _LIST_FIELDS}))
+    if response.status != 200 or response.truncated:
+        raise HubError(f"Hugging Face answered with status {response.status}.", response.status)
+    try:
+        items = json.loads(response.body)
+    except ValueError as exc:
+        raise HubError("Hugging Face sent an answer that could not be read.", response.status) from exc
+    return (items if isinstance(items, list) else []), _next_cursor(response.headers.get("link"))
 
 
 def choose_files(files: Sequence[RepoFile]) -> tuple[RepoFile | None, tuple[RepoFile, ...], tuple[RepoFile, ...]]:
@@ -396,23 +439,28 @@ def _repo_files(siblings: Sequence[Any]) -> tuple[RepoFile, ...]:
     return tuple(found)
 
 
-def read_repo(fetch: Fetch, repo: str) -> RepoDetail:
+def read_repo(fetch: Fetch, repo: str, *, rules: ListingFilter) -> RepoDetail:
     """Return the detail of the repository *repo*.
 
+    Args:
+        fetch: Reads the Hub.
+        repo: The repository ID.
+        rules: The content filter at its current level.
+
     Raises:
-        ValueError: If *repo* is not a repository ID, or the repository is gated, private or tagged for adult audiences.
+        ValueError: If *repo* is not a repository ID, or the repository is gated, private or hidden by *rules*.
         HubError: If the Hub cannot answer, or has no such repository.
     """
     validated_repo(repo)
     data = _get_json(fetch, api_url(f"models/{repo}", {"blobs": "true"}))
     if not isinstance(data, Mapping):
         raise HubError("Hugging Face sent an answer that could not be read.")
-    if not _is_listable(data):
-        raise ValueError("That repository is gated or marked for adult audiences, so Discover does not offer it.")
+    if not _is_listable(data, rules):
+        raise ValueError("Discover does not offer that repository: it is gated, private or hidden by the content filter.")
     revision = data.get("sha")
     if not isinstance(revision, str) or len(revision) != 40:
         raise HubError("Hugging Face did not say which commit that repository is at.")
-    card = data.get("cardData") if isinstance(data.get("cardData"), Mapping) else {}
+    card = _card(data)
     images, videos = _previews(card, repo, revision)
     base = card.get("base_model")
     if isinstance(base, list):
