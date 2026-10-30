@@ -39,4 +39,4 @@ Vitest: the store's views, removal and merge contracts; the viewer's escape laye
 
 ## Out of scope
 
-Favourites and search stay in [their own proposal](../gallery-search-favourites.md) and sit on the same store. A Share action needs a secure context, which a plain http address on the network is not. The film strip stays as it is; it already works as a scrubber on both devices.
+A Share action needs a secure context, which a plain http address on the network is not. The film strip stays as it is; it already works as a scrubber on both devices.

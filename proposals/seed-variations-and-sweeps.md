@@ -33,7 +33,7 @@ The two most common next steps after a good output are "more like this, differen
   - Values: a list (`4, 6, 8`), a range (`3..6`, `0.4..0.8 step 0.1`) or, for Seed, `random × N`.
 - The section's summary line shows the count: "Steps × Guidance · 9 jobs". The Generate button reads **Generate 9 jobs**, with a cap of 50.
 - On submit the client expands the draft into one job per combination and posts them in order; the queue keeps the order. Each job's context carries `sweep: {id, x: {name, value}, y?: {name, value}}`, and the output's provenance records the same under `generation.sweep`.
-- The completed-outputs grid and the viewer details show the axis values under each output ("steps 6 · guidance 4"). The Gallery search from [Search and favourites](gallery-search-favourites.md) can find a whole sweep by `sweep:<id>`.
+- The completed-outputs grid and the viewer details show the axis values under each output ("steps 6 · guidance 4").
 - The Copy CLI command copies the base command plus a comment line listing the values, since the CLI has no sweep flag; that is recorded as a caveat the way `prompt_options` is.
 
 ### Docs and changelog
