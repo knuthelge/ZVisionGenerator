@@ -1,16 +1,17 @@
 """ImageBackend Protocol — explicit contract for platform-specific image inference engines.
 
 Protocol requires name, load_model, text_to_image, image_to_image, stored_quant_format, quantizes_from_files,
-save_quantized, write_quantized_files.
+save_quantized, write_quantized_files, prepare_prompts.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from PIL import Image
 
+from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
 
@@ -27,6 +28,7 @@ class ImageBackend(Protocol):
     - quantizes_from_files(): whether a level's stored quant is written from the source files
     - save_quantized(): write a loaded quantized model's weights for reuse
     - write_quantized_files(): write a stored quant straight from the source files
+    - prepare_prompts(): encode a job's prompts before its first generation
     """
 
     name: str  # "mflux" or "diffusers"
@@ -123,5 +125,15 @@ class ImageBackend(Protocol):
         """Write the stored quant of the local model *source* at *bits* into directory *path*, without loading it.
 
         Stops early, leaving an incomplete folder, once *cancelled* returns true.
+        """
+        ...
+
+    def prepare_prompts(self, model: Any, prompts: Sequence[JobPrompt], *, width: int, height: int, cancelled: Callable[[], bool] | None = None) -> None:
+        """Encode the job's prompts before its first generation, so the backend may free its text encoder.
+
+        Every later ``text_to_image``/``image_to_image`` call on *model* must use a prompt and negative prompt from
+        *prompts*, at *width* by *height*; only size-keyed encoders such as Ideogram 4 use the size. Returns early,
+        with the real text encoder back on *model*, once *cancelled* returns true; prompt-cache entries already made stay.
+        A backend with nothing to prepare does nothing.
         """
         ...

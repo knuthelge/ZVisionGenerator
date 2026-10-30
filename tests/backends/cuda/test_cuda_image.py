@@ -17,6 +17,7 @@ import pytest
 from PIL import Image
 
 import zvisiongenerator.schedulers.beta_sigmas  # noqa: F401  (import scipy for real here; its first import under the fake ``torch`` fails and corrupts numpy)
+from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
 
@@ -197,6 +198,20 @@ class TestLoadModelCudaCheck:
             mod.DiffusersBackend().load_model("fake-model-path")
 
         mock_detect.assert_not_called()
+
+
+class TestPreparePrompts:
+    """The CUDA backend has no text encoder to free: preparing prompts touches nothing."""
+
+    def test_prepare_prompts_does_nothing(self, win_backend):
+        mod, _, _ = win_backend
+        model, cancelled = MagicMock(), MagicMock()
+
+        result = mod.DiffusersBackend().prepare_prompts(model, (JobPrompt("p", None),), width=64, height=64, cancelled=cancelled)
+
+        assert result is None
+        assert model.mock_calls == []
+        assert cancelled.mock_calls == []
 
 
 class TestIdeogram4:

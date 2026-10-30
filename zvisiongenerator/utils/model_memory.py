@@ -225,7 +225,8 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     float32, FP8 and pre-quantized weights stay as stored, and quantizing packs 2-D weights. Only the
     files the loader reads count (see :func:`model_weight_files`), minus the text encoder's unused LM head,
     and headers are read once for all levels. Ideogram 4 adds its measured working memory at 1024x1024, whose VAE
-    decode peaks far above the weights; other families add the fixed margin.
+    decode peaks far above the weights; other families add the fixed margin. The estimate covers the weights
+    resident at load, including the text encoder; it does not count the per-prompt encodings kept for the job.
 
     Args:
         model_dir: Directory holding the model's safetensors files.

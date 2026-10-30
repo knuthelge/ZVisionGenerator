@@ -28,6 +28,7 @@ from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.upscale_runner import upscale_prompts
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
@@ -349,6 +350,89 @@ class TestWebRunner:
         assert loader_calls == {"model_ref": "/models/zit", "quantize": 8, "model_name": "zit", "lora_paths": ["/l.safetensors"]}
         assert runs == [(request, workflow)]
 
+    def test_image_model_upscale_prepares_its_prompt_before_running(self, tmp_path, monkeypatch):
+        """The image-model branch pre-encodes the job's prompt on the loaded backend and model, then runs the upscale."""
+        order: list = []
+        model = MagicMock(name="model")
+
+        def _fake_run_upscale(backend, loaded, request, workflow, *, progress_callback, skip_signal):
+            order.append("run_upscale")
+            progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        backend = stub_request_job(monkeypatch)
+        backend.prepare_prompts.side_effect = lambda *_a, **_kw: order.append("prepare_prompts")
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (model, MagicMock(name="model_info")))
+        monkeypatch.setattr(web_runner_module, "run_upscale", _fake_run_upscale)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", resolved_prompt="rendered", model_name="zit", upscale_factor=2, upscale_source="/out/a.png", width=1664, height=2432)
+
+        try:
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(name="workflow"), model_ref="/models/zit", config={}, context={"output_dir": str(tmp_path)})
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert order == ["prepare_prompts", "run_upscale"]
+        args, kwargs = backend.prepare_prompts.call_args
+        assert args[0] is model
+        assert args[1] == upscale_prompts(request)
+        assert (kwargs["width"], kwargs["height"]) == (1664, 2432)
+        assert kwargs["cancelled"]() is False
+
+    def test_quit_queued_while_preparing_prompts_cancels_the_upscale(self, tmp_path, monkeypatch):
+        """The prepare step sees a queued quit through its cancelled callback, and the upscale then reports batch_cancelled."""
+        control = SkipSignal()
+        events: list = []
+        seen: list = []
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        backend = stub_request_job(monkeypatch)
+
+        def _prepare(_model, _prompts, *, width, height, cancelled):
+            control.queue_action("quit")
+            seen.append(cancelled())
+
+        backend.prepare_prompts.side_effect = _prepare
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="model_info")))
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_name="zit", upscale_factor=2, upscale_source=str(tmp_path / "a.png"))
+        workflow = MagicMock(name="workflow")
+
+        try:
+            runner._run_upscale_request(request=request, workflow=workflow, model_ref="/models/zit", config={}, progress_callback=events.append, control_signal=control)
+        finally:
+            runner.shutdown()
+
+        assert seen == [True]
+        workflow.run.assert_not_called()
+        assert events[-1]["type"] == "batch_cancelled"
+
+    def test_upscale_without_a_loaded_model_skips_prompt_preparation(self, tmp_path, monkeypatch):
+        """A quit during the build leaves no model; nothing is encoded and the upscale still reports the cancel."""
+        control = SkipSignal()
+        events: list = []
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        backend = stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+
+        def _build_cancelled(*_a, **_kw):
+            control.queue_action("quit")
+            return False
+
+        monkeypatch.setattr(web_runner_module, "ensure_built_model", _build_cancelled)
+        monkeypatch.setattr(web_runner_module, "detect_image_model", lambda _ref: MagicMock(name="model_info"))
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_name="zit", upscale_factor=2, upscale_source=str(tmp_path / "a.png"))
+        workflow = MagicMock(name="workflow")
+
+        try:
+            runner._run_upscale_request(request=request, workflow=workflow, model_ref="/models/zit", config={}, progress_callback=events.append, control_signal=control)
+        finally:
+            runner.shutdown()
+
+        backend.prepare_prompts.assert_not_called()
+        workflow.run.assert_not_called()
+        assert events[-1]["type"] == "batch_cancelled"
+
     @pytest.mark.parametrize(("weights", "replaces_download", "label"), [(MLX_WEIGHTS, True, "SeedVR2 7B q8"), (FP8_WEIGHTS, False, "SeedVR2 7B fp8")])
     def test_seedvr2_upscale_loads_its_own_model_and_reports_the_copy_phases(self, tmp_path, monkeypatch, weights, replaces_download, label):
         """A SeedVR2 request loads through load_seedvr2 (never the image loader); its load events replace the download only where a copy is stored."""
@@ -391,6 +475,7 @@ class TestWebRunner:
         assert snapshot["status"] == "completed"
         assert load_calls == [(upscaler, "seedvr2-7b", tmp_path / "models")]
         assert runs == [(upscaler, model, request, workflow)]
+        upscaler.prepare_prompts.assert_not_called()
         assert [(event["phase"], event["quantize"], event["replaces_download"]) for event in events] == [("downloading", 8, replaces_download), ("saving_quant", 8, replaces_download)]
         assert {event["model"] for event in events} == {label}
 

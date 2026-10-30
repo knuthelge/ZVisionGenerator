@@ -9,7 +9,7 @@ from typing import Any
 
 from PIL import Image
 
-from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
+from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts, JobPrompt
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
@@ -19,7 +19,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import RecordedSettings, image_prompt_text, read_png_config, recorded_settings
-from zvisiongenerator.workflows import generation_prompt
+from zvisiongenerator.workflows import generation_negative, generation_prompt
 
 _UPSCALE_FAILURE_MESSAGE = "Upscale failed."
 
@@ -58,6 +58,13 @@ def read_upscale_source(path: str | Path) -> UpscaleSource:
         config = None
     settings = recorded_settings(config) if isinstance(config, dict) and config else None
     return UpscaleSource(path=str(source), width=width, height=height, rendered_prompt=rendered_prompt, settings=settings)
+
+
+def upscale_prompts(request: ImageGenerationRequest) -> tuple[JobPrompt, ...]:
+    """Return the one prompt the upscale's refine pass conditions on."""
+    prompt = generation_prompt(request.prompt, request.resolved_prompt)
+    negative_prompt = generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt)
+    return (JobPrompt(prompt=prompt, negative_prompt=negative_prompt),)
 
 
 def run_upscale(
