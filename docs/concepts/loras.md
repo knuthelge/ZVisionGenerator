@@ -15,10 +15,14 @@ LoRAs live in `~/.ziv/loras/` as `.safetensors` files. To add one:
 **Discover LoRAs** in the Workspace finds LoRAs for your model and downloads them into `loras/`. See [Workspace](../web-ui/workspace.md#discover-loras) for how to use it.
 
 - **Curated** LoRAs were checked by us: the card, the previews, the licence, and that the file works with the model. The list ships with the app; its pictures load from Hugging Face. A **Tool** does something, such as a transition, instead of giving a look. **Non-commercial** marks a licence that forbids commercial use.
-- **Hugging Face** lists every LoRA authors publish for the model, unchecked. Content filtering is left to the community, so adult content will show up. You turn it on once for this ziv, and **Turn off** hides it again.
+- **Hugging Face** lists the LoRAs authors publish for the model, unchecked. You turn it on once for this ziv, and **Turn off** hides it again.
 - Discover never sends your Hugging Face login.
 
 A Hugging Face file is saved under the repository's name, with `-2` added when that name is taken.
+
+### Content filter
+
+Hugging Face leaves content filtering to its community, so Discover filters out what it can. It hides repos that Hugging Face tags as adult, and repos whose names, tags or file names use explicit terms. The filter does its best but can't catch everything, so some adult content still shows up. Now and then it may also hide a LoRA that is fine. If it hides one you want to use, set `ui.discover_content_filter` to `off` in the [config](configuration.md#ui). Repos tagged as adult stay hidden.
 
 ## Trigger words
 

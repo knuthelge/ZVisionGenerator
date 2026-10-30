@@ -701,6 +701,16 @@ describe('Discover LoRAs drawer: Hugging Face', () => {
     expect(input('Search Hugging Face')).not.toBeNull();
   });
 
+  it('offers Show more instead of the empty message when a page is empty but more follow', async () => {
+    api.getHfList.mockResolvedValue({ items: [], next_cursor: 'c1', base_models: [] });
+    await mountDrawer([entry()], { list: { hf_enabled: true } });
+    clickByText('Hugging Face');
+    await settle();
+    await settle();
+
+    expect(buttons(dialog()!)).toContain('Show more');
+  });
+
   it('searches after a pause, sorts, and appends the next page on Show more', async () => {
     api.getHfList.mockResolvedValueOnce({ items: [{ repo: 'x/one', name: 'One', author: 'x', downloads: 1, likes: 1, files: 1, licence: 'mit', thumbnail: null, curated_id: null }], next_cursor: 'c1', base_models: [] })
       .mockResolvedValue({ items: [{ repo: 'x/two', name: 'Two', author: 'x', downloads: 1, likes: 1, files: 1, licence: 'mit', thumbnail: null, curated_id: null }], next_cursor: null, base_models: [] });

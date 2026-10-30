@@ -137,6 +137,7 @@ The Web UI.
 | `gallery_page_size` | `12` | How many items the Gallery loads at a time |
 | `first_run_skipped` | `false` | Set when the first-run dialog is skipped |
 | `discover_huggingface` | `false` | Set by **Show Hugging Face results** in Discover LoRAs; **Turn off** sets it back to `false` |
+| `discover_content_filter` | `on` | The Discover LoRAs [content filter](loras.md#content-filter). Set `off` if it hides a LoRA you want to use; repos tagged as adult stay hidden |
 
 ## `prompt_enhancer`
 

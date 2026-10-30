@@ -109,7 +109,7 @@
   </Alert>
 {:else if !loaded}
   <p class="disc-loading" role="status"><Spinner size="sm" />Asking Hugging Face…</p>
-{:else if items.length === 0}
+{:else if items.length === 0 && !cursor}
   <div class="disc-none"><p>{query.trim() ? `Nothing on Hugging Face matches “${query.trim()}”.` : 'No LoRAs found.'}</p></div>
 {:else}
   <div class="disc-list" aria-busy={loading || undefined}>

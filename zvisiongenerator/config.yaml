@@ -602,3 +602,6 @@ ui:
   first_run_skipped: false
   # Set when Show Hugging Face LoRAs is chosen in Discover LoRAs; a user setting, not part of the writable config contract.
   discover_huggingface: false
+  # Discover's content filter on Hugging Face results: hides repos tagged as adult and repos named with explicit terms.
+  # Set to off if it hides a LoRA you want to use; repos tagged as adult stay hidden.
+  discover_content_filter: on
