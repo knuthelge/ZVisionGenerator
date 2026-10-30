@@ -8,7 +8,7 @@ import importlib.metadata
 import sys
 import threading
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 from PIL import Image
@@ -31,6 +31,8 @@ from zvisiongenerator.backends.mac._temp_images import remove_file, save_temp_pn
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
 from zvisiongenerator.backends.mac.klein_references import generate_with_references
 from zvisiongenerator.backends.mac.memory import load_resident
+from zvisiongenerator.backends.mac.prompt_encoding import prepare_prompts as _prepare_prompts
+from zvisiongenerator.core import JobPrompt
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.progress_events import preview_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
@@ -39,9 +41,8 @@ from zvisiongenerator.utils.lora_files import readable_lora_files
 # Per-run override slot, distinct from the always-on default constant (IDEOGRAM4_INITIAL_SIGMA).
 # The sentinel distinguishes "no override" (use the default) from "override to
 # None" (disable the sigma adjustment for one run).
-# The override is thread-local so concurrent web generations (the web runner uses a
-# ThreadPoolExecutor) are isolated: each thread only sees its own override, and the
-# always-on default (no override set on a thread) uses the module constant.
+# The override is thread-local, so a run only ever sees the override set on its own thread; the web runner runs one
+# job at a time on its single worker thread.
 _INITIAL_SIGMA_UNSET = object()
 _initial_sigma_override = threading.local()
 
@@ -439,6 +440,23 @@ class MfluxBackend:
                 model.save_model(path)
             return
         model.save_model(path)
+
+    def prepare_prompts(self, model: Any, prompts: Sequence[JobPrompt], *, width: int, height: int, cancelled: Callable[[], bool] | None = None) -> None:
+        """Encode the job's prompts and free *model*'s text encoder, so its memory is available for generation.
+
+        Families without an entry in :mod:`~zvisiongenerator.backends.mac.prompt_encoding` keep their encoder loaded.
+        Returns early, leaving *model* as loaded, once *cancelled* returns true.
+
+        Args:
+            model: A model returned by :meth:`load_model`.
+            prompts: Every prompt and negative prompt the job's generations use.
+            width: The width the job generates at.
+            height: The height the job generates at.
+            cancelled: Polled before each encode.
+        """
+        if self._model_info is None:
+            raise RuntimeError("load_model() must be called before generation")
+        _prepare_prompts(model, self._model_info.family, prompts, width=width, height=height, cancelled=cancelled)
 
     def image_to_image(
         self,

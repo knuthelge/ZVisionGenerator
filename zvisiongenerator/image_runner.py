@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.core.image_backend import ImageBackend
-from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
+from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts, JobPrompt
 from zvisiongenerator.core.job_plan import JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
@@ -33,7 +33,7 @@ from zvisiongenerator.utils.config import get_variant_key, model_capabilities, m
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import default_upscale_denoise
-from zvisiongenerator.workflows import build_workflow
+from zvisiongenerator.workflows import build_workflow, generation_negative, generation_prompt
 from zvisiongenerator.utils.enhance_record import planned_enhance_record
 
 
@@ -61,6 +61,37 @@ def _negative_prompt_warning(config: dict[str, Any], args: argparse.Namespace, m
     name = model_display_name(config, Path(args.model).name)
     hint = model_capabilities(config, model_info.family, variant)["negative_prompt_hint"]
     return f"{name} does not support negative prompts; it was ignored.{f' {hint}' if hint else ''}"
+
+
+def _job_prompts(
+    plan: JobPlan,
+    prompts_data: dict[str, list[tuple[str, str | None]]],
+    *,
+    supports_negative: bool,
+) -> tuple[JobPrompt, ...]:
+    """Return every prompt the job's generations can condition on, once each and in first-use order.
+
+    The text is the one the generation stage sends (:func:`~zvisiongenerator.workflows.generation_prompt.generation_prompt`).
+    Retries, repeats and the upscale refine reuse it. The negative is the prompt file's when *supports_negative*, else
+    ``None``.
+
+    Args:
+        plan: The job's planned iterations.
+        prompts_data: Prompt set name to ``(prompt, negative_prompt)`` entries.
+        supports_negative: Whether the model takes negative prompts.
+
+    Returns:
+        The distinct prompts; an iteration whose entry *prompts_data* lacks is left out.
+    """
+    job_prompts: dict[JobPrompt, None] = {}
+    for it in plan.iterations:
+        text = generation_prompt(it.prompt, it.resolved_prompt, it.enhanced_prompt)
+        try:
+            negative = generation_negative(prompts_data[it.set_name][it.prompt_index][1], supports_negative=supports_negative)
+        except KeyError, IndexError:
+            continue  # a plan that does not match the batch is rejected by the batch loop
+        job_prompts[JobPrompt(text, negative)] = None
+    return tuple(job_prompts)
 
 
 def run_batch(
@@ -114,6 +145,10 @@ def run_batch(
     use_ratio = args.ratio if args.width is None and args.height is None else None
     use_size = args.size if args.width is None and args.height is None else None
 
+    # The size the first generation runs at; an upscale refines it up to the requested size.
+    gen_width = round_to_alignment(width // args.upscale) if args.upscale else width
+    gen_height = round_to_alignment(height // args.upscale) if args.upscale else height
+
     # Warn if preset dimensions drift under upscale round-trip
     if args.upscale is not None and args.width is None and args.height is None:
         for dim_name, dim_val in [("width", width), ("height", height)]:
@@ -149,6 +184,14 @@ def run_batch(
         print("No active prompt sets found. Exiting.")
         _emit_progress(progress_callback, "batch_completed", mode="image", total_iterations=0, completed_iterations=0)
         return
+    if model is not None:
+        backend.prepare_prompts(
+            model,
+            _job_prompts(plan, prompts_data, supports_negative=supports_neg),
+            width=gen_width,
+            height=gen_height,
+            cancelled=(lambda: skip_signal.pending() == "quit") if skip_signal is not None else None,
+        )
     reference_paths = tuple(getattr(args, "reference_paths", None) or ())
     ran_iterations = 0
     print(f"Total iterations to run: {total_iterations}\n")
@@ -196,10 +239,7 @@ def run_batch(
 
                     planned = plan.iteration_for(ran_iterations, run_index=run_idx, set_name=set_name, prompt_index=prompt_idx)
 
-                    # Suppress negative prompt if model doesn't support it
-                    effective_negative = negative_prompt
-                    if not supports_neg:
-                        effective_negative = None
+                    effective_negative = generation_negative(negative_prompt, supports_negative=supports_neg)
 
                     seed = planned.seed
                     _emit_progress(
@@ -230,11 +270,11 @@ def run_batch(
                         model_family=_family,
                         supports_negative_prompt=supports_neg,
                         prompt=prompt,
-                        negative_prompt=effective_negative if supports_neg else None,
+                        negative_prompt=effective_negative,
                         ratio=use_ratio,
                         size=use_size,
-                        width=round_to_alignment(width // args.upscale) if args.upscale else width,
-                        height=round_to_alignment(height // args.upscale) if args.upscale else height,
+                        width=gen_width,
+                        height=gen_height,
                         steps=args.steps,
                         guidance=args.guidance,
                         seed=seed,
@@ -320,8 +360,8 @@ def run_batch(
                             negative_prompt=effective_negative,
                             ratio=use_ratio,
                             size=use_size,
-                            width=round_to_alignment(width // args.upscale) if args.upscale else width,
-                            height=round_to_alignment(height // args.upscale) if args.upscale else height,
+                            width=gen_width,
+                            height=gen_height,
                             seed=seed,
                             steps=args.steps,
                             guidance=args.guidance,

@@ -7,13 +7,17 @@ reference. Weights, baked LoRAs and the callback registry (progress, previews, S
 A start image and references together need one more step: the edit path starts from pure noise, so
 :func:`_start_image_latents` scopes a hook that builds the first latents from the start image with
 ``Flux2Klein._prepare_img2img_latents`` instead.
+
+mflux encodes each reference lazily and evaluates all of them together, so peak memory grows with the number of
+references. The view's VAE is an :class:`_EvaluatingVAE`, which evaluates every reference as it is encoded. That keeps
+the peak at that of a single image and leaves the output unchanged.
 """
 
 from __future__ import annotations
 
 import contextlib
 from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PIL import Image
 from mflux.models.common.config.config import Config
@@ -23,6 +27,10 @@ from mflux.utils.generated_image import GeneratedImage
 from mlx import nn
 
 from zvisiongenerator.backends.mac._temp_images import remove_file, save_temp_png
+from zvisiongenerator.backends.mac.memory import evaluate
+
+if TYPE_CHECKING:
+    import mlx.core as mx
 
 # What ``Flux2Initializer.init`` sets on a model; the view shares each by reference. A contract test pins this list.
 SHARED_ATTRIBUTES = (
@@ -46,6 +54,24 @@ SHARED_ATTRIBUTES = (
 DEFAULT_SCHEDULER = "flow_match_euler_discrete"
 
 
+class _EvaluatingVAE:
+    """Stand in for a VAE whose ``encode`` returns computed arrays; every other attribute is the wrapped VAE's own.
+
+    mflux encodes the references through ``VAEUtil.encode(vae=...)``, which calls ``vae.encode``. Each result is
+    computed before the next reference is encoded, instead of all of them together.
+    """
+
+    def __init__(self, vae: Any) -> None:
+        self._vae = vae
+
+    def encode(self, *args: Any, **kwargs: Any) -> mx.array:
+        """Encode with the wrapped VAE and evaluate the result now."""
+        return evaluate(self._vae.encode(*args, **kwargs))
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._vae, name)
+
+
 def reference_view(model: Any) -> Flux2KleinEdit:
     """Return a ``Flux2KleinEdit`` over *model*'s components, built without loading anything.
 
@@ -53,12 +79,14 @@ def reference_view(model: Any) -> Flux2KleinEdit:
         model: A loaded ``Flux2Klein``.
 
     Returns:
-        An edit model whose weights, tokenizers and callback registry are *model*'s own objects.
+        An edit model whose weights, tokenizers and callback registry are *model*'s own objects. Its ``vae`` is an
+        :class:`_EvaluatingVAE` around *model*'s.
     """
     view = Flux2KleinEdit.__new__(Flux2KleinEdit)
     nn.Module.__init__(view)
     for name in SHARED_ATTRIBUTES:
         setattr(view, name, getattr(model, name))
+    view.vae = _EvaluatingVAE(model.vae)
     return view
 
 
@@ -69,7 +97,7 @@ def _start_image_latents(model: Any, config: Config) -> Iterator[None]:
     ``Flux2KleinEdit.generate_image`` calls ``_Flux2KleinEditHelpers.prepare_generation_latents`` for its latents,
     which are pure noise. Inside the block that helper returns what ``Flux2Klein`` builds for img2img from
     ``config.image_path``, so the run denoises the start image's tail of the schedule while the references condition
-    it. The helper is put back on exit.
+    it. The latents are evaluated before they are returned. The helper is put back on exit.
 
     Args:
         model: The loaded ``Flux2Klein``, which builds the img2img latents.
@@ -78,7 +106,9 @@ def _start_image_latents(model: Any, config: Config) -> Iterator[None]:
     original = _Flux2KleinEditHelpers.prepare_generation_latents
 
     def prepare_generation_latents(*, seed: int, height: int, width: int) -> Any:
-        return model._prepare_img2img_latents(seed=seed, config=config)
+        prepared = model._prepare_img2img_latents(seed=seed, config=config)
+        evaluate(prepared[:2])
+        return prepared
 
     _Flux2KleinEditHelpers.prepare_generation_latents = staticmethod(prepare_generation_latents)
     try:
@@ -107,7 +137,8 @@ def generate_with_references(
             optionally ``scheduler``, as for ``Flux2Klein.generate_image``.
 
     Returns:
-        The generated image. ``image_strength`` is never passed to the edit path on a references-only run: mflux
+        The generated image. Each reference is evaluated as it is encoded and the start image's latents before the
+        references are read. ``image_strength`` is never passed to the edit path on a references-only run: mflux
         would start a partial schedule from the first reference.
     """
     generate_kwargs.setdefault("scheduler", DEFAULT_SCHEDULER)

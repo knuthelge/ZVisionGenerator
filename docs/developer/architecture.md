@@ -33,11 +33,11 @@ graph TD
 1. **An entry point** turns flags or a form into arguments: `image_cli` and `video_cli` for the CLI, `web/server.py` for the Web UI, which hands the job to the single worker thread in `web/web_runner.py`.
 2. **Preflight** plans every iteration (seed, `{a|b}` choices, enhancement), and, if asked, loads the prompt enhancer, rewrites the prompts and unloads it. It returns a frozen `JobPlan`. See [Jobs and workflows](workflows.md#job-phases-preflight-and-generation).
 3. **Downloads** fetch any model files that are missing, as their own step with progress. See [Model downloads](downloads.md).
-4. **The runner** loads the model through the backend, then runs the workflow once per iteration of the plan.
+4. **The runner** loads the model through the backend, lets the backend prepare the job's prompts (`prepare_prompts`; on macOS this encodes them all and frees the text encoder), then runs the workflow once per iteration of the plan.
 5. **The workflow** is a list of stage functions built for the job: resolve the prompt, generate, review, upscale, sharpen, save. See [Workflow stages](workflows.md#workflow-stages).
 6. **Saving** embeds the settings in the PNG or MP4 (`utils/provenance.py`), which is what the Gallery reads back and **Reuse settings** loads.
 
-Only one model is resident at a time: the enhancer is gone before the generation model loads.
+Only one model is resident at a time: the enhancer is gone before the generation model loads; on macOS an image model's text encoder is freed before the first image.
 
 ## Layers
 

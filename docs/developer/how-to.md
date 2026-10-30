@@ -53,7 +53,7 @@ A new family touches every layer, so write a proposal first.
 
 - **Config:** a `model_presets` entry with its defaults and capability flags (`supports_negative_prompt`, `supports_img2img`, `supports_upscale`, `supports_scheduler`, `dimension_min`, …). The Web UI reads capabilities from here, never from the family name.
 - **Detection:** `utils/image_model_detect.py` or `utils/video_model_detect.py`.
-- **Backends:** loading and generation in `backends/mac/` and `backends/cuda/`, behind the existing protocol.
+- **Backends:** loading and generation in `backends/mac/` and `backends/cuda/`, behind the existing protocol; on macOS, an entry in `backends/mac/prompt_encoding.py` (without one, the family keeps its text encoder loaded).
 - **Downloads:** the planners in `backends/*/download_plan.py`, which must mirror the files the loader reads. See [Model downloads](downloads.md).
 - **Memory:** an estimate in `utils/model_memory.py`, for the badges.
 - **Previews:** latent-to-RGB factors in `core/latent_preview.py`, for the live preview.

@@ -1,4 +1,4 @@
-"""Image core types — ImageGenerationRequest, ImageWorkingArtifacts, ImageStage."""
+"""Image core types — JobPrompt, ImageGenerationRequest, ImageWorkingArtifacts, ImageStage."""
 
 from __future__ import annotations
 
@@ -8,6 +8,19 @@ from typing import Any, Callable
 from PIL import Image
 
 from zvisiongenerator.core.types import StageOutcome
+
+
+@dataclass(frozen=True)
+class JobPrompt:
+    """A prompt a job's generations condition on.
+
+    Attributes:
+        prompt: The text the generation sends.
+        negative_prompt: The negative prompt, or ``None`` when the model takes none.
+    """
+
+    prompt: str
+    negative_prompt: str | None
 
 
 @dataclass(frozen=True)

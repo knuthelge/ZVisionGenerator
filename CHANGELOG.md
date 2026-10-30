@@ -37,6 +37,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 #### Video
 - **macOS: LTX LoRAs apply at full strength.** On `ltx-4`, `ltx-8` and `ltx25-4` a LoRA lost much of its effect to the model's quantization; it now shows fully, at about the same speed. A weight you raised to make up for it may now be too high
 
+#### Images
+- **Image jobs on a Mac use less memory.** Once the job's prompts are encoded, the model's text encoder is freed, so generating needs about 4–8 GB less; Krea 2 `q8` no longer swaps on a 32 GB Mac. Images are unchanged
+
 #### Platforms and libraries
 - **Pillow 13**, which fixes heap overflows in its JPEG and FlashPix decoders that a crafted image could trigger
 - **Windows/Linux: diffusers 0.42**

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error,
 from zvisiongenerator.backends.cuda.memory import configure_allocator
 from zvisiongenerator.backends.cuda.quant import load_fp8_components, load_nf4_components, write_fp8_copy
 from zvisiongenerator.core.ideogram4 import sampler_settings
+from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.core.moss import img2img_run_steps
 from zvisiongenerator.core.moss import sampler_settings as moss_sampler_settings
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
@@ -385,6 +386,9 @@ class DiffusersBackend:
             write_moss_stored_copy(Path(source), Path(path), bits, torch.bfloat16, self.stored_quant_format(bits), cancelled)
             return
         write_fp8_copy(Path(source), Path(path), torch.bfloat16, cancelled)
+
+    def prepare_prompts(self, model: Any, prompts: Sequence[JobPrompt], *, width: int, height: int, cancelled: Callable[[], bool] | None = None) -> None:
+        """Do nothing: diffusers moves its text encoders off the GPU itself."""
 
     def load_model(
         self,

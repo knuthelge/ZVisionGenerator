@@ -1,14 +1,16 @@
 # References for FLUX.2 Klein
 
-**Status:** In progress (2026-10-28): implemented and verified on Windows/Linux; the macOS checks are left
+**Status:** Done (2026-10-30, unreleased; branch feat/mac-memory-klein-kv): implemented and verified on Windows/Linux and on a 32 GB Mac (browser flows checked; Safari itself not tested); the release is left
 
 ## Progress
 
-Implemented on `feat/klein-references`: core, both backends, CLI, recorded settings and Reuse, Web server, Web UI, prompt enhancer and docs. The Windows/Linux spike and a browser pass in Chromium passed.
+Implemented on `feat/klein-references`: core, both backends, CLI, recorded settings and Reuse, Web server, Web UI, prompt enhancer and docs. The Windows/Linux spike and a browser pass in Chromium passed. The macOS test below passed on a 32 GB Mac.
 
-Left: the macOS test below, then the release.
+Left: the release.
 
 ### macOS test
+
+Done on a 32 GB Mac: all nine steps were run and pass; step 9's browser flows were checked in Chromium, and Safari itself was not tested. Reading the references one at a time and encoding the job's prompts before generating (both macOS memory changes) bring four references on Klein 9B `q8` at size `m` within memory: the whole job peaks at about 21 GB, where reading all references at once and keeping the text encoder loaded peaked at about 35 GB and swapped 7 GB. On Klein 4B, four references peak at about 17 GB instead of 34. The steps stay as the checklist that was run.
 
 Make four references with `klein4b` first (a person, an object, a place, a style), size `m`, seed fixed.
 
@@ -20,7 +22,7 @@ Make four references with `klein4b` first (a person, an object, a place, a style
 6. **Upscale.** References with a 2× upscale while generating: finishes, and the person stays.
 7. **Progress and Stop.** Live preview updates and Next stops a references run.
 8. **Tests.** `uv run pytest tests/backends/mac tests/contracts`.
-9. **Safari.** References rows: add, drop several, replace, remove; a missing row blocks Generate; phone width: the chip's popover and Replace.
+9. **Browser (Safari).** Checked in Chromium; Safari itself not tested. References rows: add, drop several, replace, remove; a missing row blocks Generate; phone width: the chip's popover and Replace.
 
 ### Windows/Linux spike (10 GB card, 32 GB RAM, size l = 1408×1408, 4 steps, seed 7)
 
@@ -124,8 +126,8 @@ A contract test pins the attribute names against `Flux2Initializer.init` and the
 - **Reuse the img2img slot for one reference.** Rejected: different semantics (layout vs content) under one label is what made "Reference image" ambiguous in the first place.
 - **A fresh `Flux2KleinEdit` on macOS.** Rejected: loads Klein a second time (35 GB download, double memory).
 - **Other models (researched 2026-10-28).** Krea 2 and MOSS-Image only through community LoRAs with licence problems; LTX's Ingredients IC-LoRA wants a composed sheet, not photos; Z-Image's Edit/Omni checkpoints aren't released; Ideogram 4 has no open route. MiniMax H3's Ref2VA was built and spiked on Windows/Linux, then dropped: a 62 GB second model, text to video only (no first/last frames), about 480p on a 10 GB card, and a weaker face (0.24–0.40) than Klein's (0.67). Its one lasting change is that the H3 converter now refuses Ref2VA checkpoints.
-- **Klein 9B-kv** (cached reference attention, up to 2.5× faster with references). Not now: a separate gated download; worth measuring once references are used.
+- **Klein 9B-kv** (cached reference attention, up to 2.5× faster with references). Measured on a Mac and not adopted: on Apple Silicon with mflux 0.24 the KV path was slower and used much more memory than Klein 9B with references (one reference about 4× slower; four references about 2.5× slower with roughly three times the peak), while quality was comparable. An ungated copy that is byte-identical exists, so gating is no longer the reason.
 
 ## Relation to other proposals
 
-[Edit images](image-editing.md) Phase 2 ("Klein edits") is the instruction-edit side of the same Klein mechanism. Once this ships, it reduces to the editor's **Edit** tool calling the references path with the source image as reference 1, and its `supports_edit` flag becomes `max_reference_images > 0`.
+[Edit images](../image-editing.md) Phase 2 ("Klein edits") is the instruction-edit side of the same Klein mechanism. Once this ships, it reduces to the editor's **Edit** tool calling the references path with the source image as reference 1, and its `supports_edit` flag becomes `max_reference_images > 0`.

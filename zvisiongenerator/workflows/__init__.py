@@ -7,6 +7,7 @@ import argparse
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.workflows import seedvr2_stages
+from zvisiongenerator.workflows.generation_prompt import generation_negative, generation_prompt
 from zvisiongenerator.workflows.image_stages import (
     enhance_prompt_stage,
     resolve_prompt_stage,
@@ -23,7 +24,7 @@ from zvisiongenerator.workflows.image_stages import (
     save_image_stage,
 )
 
-__all__ = ["build_workflow", "build_upscale_workflow", "build_seedvr2_upscale_workflow", "build_video_workflow"]
+__all__ = ["generation_negative", "generation_prompt", "build_workflow", "build_upscale_workflow", "build_seedvr2_upscale_workflow", "build_video_workflow"]
 
 
 def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:

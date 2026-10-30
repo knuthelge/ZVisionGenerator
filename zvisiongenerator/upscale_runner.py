@@ -9,7 +9,7 @@ from typing import Any
 
 from PIL import Image
 
-from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
+from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts, JobPrompt
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
@@ -19,6 +19,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import RecordedSettings, image_prompt_text, read_png_config, recorded_settings
+from zvisiongenerator.workflows import generation_negative, generation_prompt
 
 _UPSCALE_FAILURE_MESSAGE = "Upscale failed."
 
@@ -59,6 +60,13 @@ def read_upscale_source(path: str | Path) -> UpscaleSource:
     return UpscaleSource(path=str(source), width=width, height=height, rendered_prompt=rendered_prompt, settings=settings)
 
 
+def upscale_prompts(request: ImageGenerationRequest) -> tuple[JobPrompt, ...]:
+    """Return the one prompt the upscale's refine pass conditions on."""
+    prompt = generation_prompt(request.prompt, request.resolved_prompt)
+    negative_prompt = generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt)
+    return (JobPrompt(prompt=prompt, negative_prompt=negative_prompt),)
+
+
 def run_upscale(
     backend: Any,
     model: Any,
@@ -85,7 +93,7 @@ def run_upscale(
         "prompt_index": 0,
         "total_prompts": 1,
     }
-    prompt = request.resolved_prompt or request.prompt
+    prompt = generation_prompt(request.prompt, request.resolved_prompt)
     _emit_progress(progress_callback, "batch_started", mode="image", total_iterations=1, total_runs=1)
     _emit_progress(progress_callback, "prompt_started", **context, prompt=prompt, seed=request.seed)
     if skip.consume() == "quit":

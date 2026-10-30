@@ -87,3 +87,27 @@ def test_stored_quant_format_tracks_the_mflux_version(image_mac):
     import importlib.metadata
 
     assert module.MfluxBackend().stored_quant_format(8) == f"mflux-{importlib.metadata.version('mflux')}"
+
+
+def test_prepare_prompts_delegates_with_the_loaded_family(image_mac, monkeypatch):
+    module, _mx = image_mac
+    backend, model = _load_zimage(module, monkeypatch)
+    delegate = MagicMock(name="prepare_prompts")
+    monkeypatch.setattr(module, "_prepare_prompts", delegate)
+    prompts = (module.JobPrompt("p", None),)
+    cancelled = MagicMock(name="cancelled")
+
+    assert backend.prepare_prompts(model, prompts, width=64, height=128, cancelled=cancelled) is None
+
+    delegate.assert_called_once_with(model, "zimage", prompts, width=64, height=128, cancelled=cancelled)
+
+
+def test_prepare_prompts_before_load_model_raises(image_mac, monkeypatch):
+    module, _mx = image_mac
+    delegate = MagicMock(name="prepare_prompts")
+    monkeypatch.setattr(module, "_prepare_prompts", delegate)
+
+    with pytest.raises(RuntimeError):
+        module.MfluxBackend().prepare_prompts(MagicMock(), (module.JobPrompt("p", None),), width=64, height=64)
+
+    delegate.assert_not_called()

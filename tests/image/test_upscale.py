@@ -8,10 +8,10 @@ import pytest
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
-from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
+from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts, JobPrompt
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
-from zvisiongenerator.upscale_runner import read_upscale_source, run_upscale
+from zvisiongenerator.upscale_runner import read_upscale_source, run_upscale, upscale_prompts
 from zvisiongenerator.utils.provenance import embed_png_config, read_png_config
 from zvisiongenerator.utils.seedvr2 import SeedVR2Tier, estimate_seedvr2_bytes, seedvr2_over_budget
 from zvisiongenerator.utils.upscale import (
@@ -437,6 +437,50 @@ def test_upscale_workflow_saves_upscaled_image_with_provenance(tmp_path):
     assert payload["source"] == {"path": str(source), "width": 32, "height": 16, "workflow": "txt2img"}
     assert payload["generation"]["upscale"]["factor"] == 2
     assert backend.image_to_image.call_args.kwargs["prompt"] == "a red barn"
+
+
+# ── Prompts the refine pass conditions on ───────────────────────────────────
+
+
+def test_upscale_prompts_use_the_rendered_prompt():
+    request = ImageGenerationRequest(backend=None, model=None, prompt="{a|b} cat", resolved_prompt="a cat", negative_prompt="blurry", supports_negative_prompt=True, width=1664, height=2432)
+
+    assert upscale_prompts(request) == (JobPrompt(prompt="a cat", negative_prompt="blurry"),)
+
+
+def test_upscale_prompts_use_the_prompt_when_the_rendered_one_is_empty():
+    request = ImageGenerationRequest(backend=None, model=None, prompt="template", resolved_prompt="")
+
+    assert upscale_prompts(request)[0].prompt == "template"
+
+
+def test_upscale_prompts_fall_back_to_the_prompt_without_a_rendered_one():
+    request = ImageGenerationRequest(backend=None, model=None, prompt="", resolved_prompt=None)
+
+    assert upscale_prompts(request)[0].prompt == ""
+
+
+def test_upscale_prompts_drop_a_negative_the_model_does_not_support():
+    request = ImageGenerationRequest(backend=None, model=None, prompt="p", negative_prompt="blurry", supports_negative_prompt=False)
+
+    assert upscale_prompts(request)[0].negative_prompt is None
+
+
+@pytest.mark.parametrize(
+    ("supports_negative", "resolved_prompt"),
+    [(True, "a red barn"), (False, "a red barn"), (True, None)],
+)
+def test_the_upscale_workflow_sends_a_prompt_that_upscale_prompts_lists(tmp_path, supports_negative, resolved_prompt):
+    source = _write_png(tmp_path / "portrait.png", size=(32, 16))
+    backend = MagicMock()
+    backend.image_to_image.side_effect = lambda **kwargs: kwargs["image"]
+    request = _request(tmp_path, source, backend=backend, resolved_prompt=resolved_prompt, negative_prompt="blurry", supports_negative_prompt=supports_negative, sharpen=False)
+
+    build_upscale_workflow(sharpen=False).run(request, ImageWorkingArtifacts())
+
+    call = backend.image_to_image.call_args
+    listed = {(job_prompt.prompt, job_prompt.negative_prompt) for job_prompt in upscale_prompts(request)}
+    assert (call.kwargs["prompt"], call.kwargs["negative_prompt"]) in listed
 
 
 # ── Runner events ───────────────────────────────────────────────────────────

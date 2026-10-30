@@ -37,7 +37,7 @@ from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.seedvr2_loader import load_seedvr2
-from zvisiongenerator.upscale_runner import run_upscale
+from zvisiongenerator.upscale_runner import run_upscale, upscale_prompts
 from zvisiongenerator.video_file_upscale_runner import run_video_file_upscale
 from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
@@ -818,6 +818,8 @@ class WebRunner:
             backend, model = _load_seedvr2_with_progress(request.upscale_model, progress_callback, mode="image")
         else:
             backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal, config=config)
+            if model is not None:
+                backend.prepare_prompts(model, upscale_prompts(request), width=request.width, height=request.height, cancelled=lambda: control_signal.pending() == "quit")
         run_upscale(backend, model, request, workflow, progress_callback=progress_callback, skip_signal=control_signal)
 
     def _run_video_file_upscale_request(
