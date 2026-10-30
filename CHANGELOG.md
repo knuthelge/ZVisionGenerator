@@ -6,59 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.14.0b2] - 2026-10-30
+
 ### Upgrading from 0.13
-- **Windows: install again with the new command in [Install](https://knuthelge.github.io/ZVisionGenerator/install/)** to move to PyTorch's CUDA 13.2 build. An upgrade keeps the CUDA 13.0 index, which gets no PyTorch updates after 2.14
-- **Stored q4 and q8 image copies are made again once**, on the first job with each model, after the library updates
-- **Windows/Linux: the first `ltx-4` or `ltx-8` job needs a connection once**, to link the files already on disk to the pinned LTX-2.3 revision. Nothing downloads again
-- **macOS: the same seed can give a slightly different image**, and a LoRA in diffusers format can apply at a different strength, because mflux now reads its alpha
+- **macOS needs macOS 14 Sonoma or newer**
+- **Windows: install again with the command in [Install](https://knuthelge.github.io/ZVisionGenerator/install/)** to move to PyTorch's CUDA 13.2 build
+- **Windows/Linux: the first `ltx-4` or `ltx-8` job needs a connection once** to pin the LTX-2.3 files; nothing downloads again
+- **Stored q4 and q8 image copies are made again once**
+- **macOS: the same seed can give a slightly different image**, and a diffusers-format LoRA can apply at a different strength
 
 ### Added
-
-#### Web UI
-- **Discover LoRAs.** **Discover LoRAs…** in **Add LoRA** finds LoRAs for your model: a curated list of checked LoRAs and, if you turn it on, a Hugging Face search. **Download** one, or turn on **Use in LoRAs** to add it to your chips; Generate waits for the download. The Hugging Face search has a content filter that hides what it can; if it hides a LoRA you want to use, set `ui.discover_content_filter: off`
-- **Trigger words in the prompt box.** A **Triggers** menu puts the trigger words of your LoRAs into the prompt, and counts the ones still missing
-- **Recent prompts.** A history button in the prompt box lists the prompts you generated in the current mode (image prompts, or video scenes and actions), newest first, with a filter that searches all of that mode's prompts. Pick one to bring it back: the prompt, a video's scene and the negative prompt, or a JSON caption into the `{ }` box on Ideogram 4. Press Alt+↑ in an empty prompt to open it. **Clear recents** removes the current mode's. They are kept on the server, so they are the same on every device
-- **The last five rewrites.** In the Enhanced tab, a `‹ 2 of 3 ›` stepper moves through the last five rewrites of the same text; Generate sends the one shown, with how it was written
-
-#### Video
-- **Next, Pause and Repeat for video jobs.** Video jobs in the Web UI and `ziv-video` (**n**, **p**, **r**, **q**, with or without `--review`) take the same controls as image jobs. Next stops the current video at its next step and moves on, Pause waits after the current video, and Repeat makes the same prompt again with a new seed. During a review, Next declines the upscale. A Next or Quit pressed on a video's final step saves the video first. On a Mac, MiniMax H3 text to video cannot stop mid-clip, so Next and Quit take effect when the clip finishes
-
-#### Images
-- **References on FLUX.2 Klein.** Give `klein4b` or `klein9b` up to four images (a person, an object, a place or a style) and the result keeps what is in them: in the Web UI, the **References** section of Text to Image and Image to Image, or `--reference` in `ziv-image`. Name them "image 1", "image 2" in the prompt. A start image still sets the layout, an upscale made while generating refines with them too, and **Reuse settings** brings them back
-- **The prompt enhancer keeps "image 1", "image 2".** It describes the new scene instead of what the references show, and retries a rewrite that drops one of those phrases
+- **Discover LoRAs** in **Add LoRA**: a curated list and an optional Hugging Face search, with download and **Use in LoRAs**
+- **References on FLUX.2 Klein:** up to four images whose content the result keeps (**References** in the Web UI, `--reference` in `ziv-image`)
+- **Next, Pause and Repeat for video jobs**, in the Web UI and `ziv-video`
+- **Recent prompts** in the prompt box, kept on the server
+- **Trigger words:** a **Triggers** menu adds your LoRAs' trigger words to the prompt
+- **The last five rewrites:** a stepper in the Enhanced tab
 
 ### Changed
-
-#### Web UI
-- **Image to Image's "Reference image" is now "Start image".** The name says what it does, and "reference" now means an image whose content the result keeps. In the viewer and the gallery menus, **Use as reference** is **Use as**, with **Start image**, **First frame** and **Last frame**
-- **Importing a LoRA from Hugging Face on the Models page returns at once** and shows as a row of the LoRAs table with its progress and Cancel, like other downloads
-- **The prompt box bars are reorganised.** The tabs only say which text you see. A status line under the box says what Generate sends, with **Re-enhance** and **Use mine** beside **Out of date**. **Use mine** replaces **Clear**
-
-#### Video
-- **macOS: LTX LoRAs apply at full strength.** On `ltx-4`, `ltx-8` and `ltx25-4` a LoRA lost much of its effect to the model's quantization; it now shows fully, at about the same speed. A weight you raised to make up for it may now be too high
-
-#### Images
-- **Image jobs on a Mac use less memory.** Once the job's prompts are encoded, the model's text encoder is freed, so generating needs about 4–8 GB less; Krea 2 `q8` no longer swaps on a 32 GB Mac. Images are unchanged
-
-#### Platforms and libraries
-- **Pillow 13**, which fixes heap overflows in its JPEG and FlashPix decoders that a crafted image could trigger
-- **Windows/Linux: diffusers 0.42**
-- **macOS: mflux 0.24 and MLX 0.32.4.** MLX 0.32.4 fixes an attention crash on M1 and M2
-- **macOS: LTX is updated to ltx-2-mlx 0.18.** On Macs that stream the model (24 GB or less), a LoRA's weights outside the transformer blocks now apply, and image to video needs about 1.4 GB less memory
-- **macOS needs macOS 14 Sonoma or newer**, as MLX and PyTorch do
+- **Image to Image's "Reference image" is now "Start image"**, and **Use as reference** is **Use as**
+- **The prompt box bars are reorganised**, with a status line that says what Generate sends
+- **Importing a LoRA from Hugging Face** runs as a download on the Models page
+- **macOS: LTX LoRAs apply at full strength.** A weight you raised to make up for it may now be too high
+- **macOS: image jobs use about 4–8 GB less memory**
+- **Libraries:** Pillow 13 (security fixes), diffusers 0.42, mflux 0.24, MLX 0.32.4 (fixes a crash on M1 and M2) and ltx-2-mlx 0.18
 
 ### Fixed
-- **A picked start image or last frame stays while you visit other pages.** Going to the Gallery or the Prompts page and back no longer drops an image you uploaded from your device. **Reset** also clears the uploaded last frame
-- **Phone photos are upright.** A photo taken on a phone no longer comes out sideways when used as a start image or as a video's first or last frame, and a transparent image goes on white
-- **Pause after a failed image pauses the job.** A Pause pressed while an image fails now pauses the job, instead of leaving the Pause button stuck on "Pausing"
-- **The remaining-time estimate stays sensible.** An image skipped with Next no longer pulls the estimate down, and after Repeats it can no longer go negative; the final count includes the repeats
-- **A repeated image can always be reviewed.** When you discard an image and Repeat it, Approve and Discard no longer stay disabled for the new render if the Web UI lost its connection meanwhile
-- **Windows/Linux: the LTX-2.3 downloads are pinned to a fixed revision**, so a file Lightricks renames or deletes upstream no longer breaks `ltx-4` and `ltx-8`
-- **Windows/Linux: the first Web UI page load is fast.** It no longer waits about 5 seconds when an LTX model is downloaded
-- **Converting a MiniMax H3 checkpoint refuses Ref2VA (reference-to-video) checkpoints,** which used to convert as if they were the normal model
-- **An image you upload is saved once.** Sending the same start image, last frame or reference again reuses the saved copy in the output folder's `.web_uploads`
-- **Coming back from a video tab restores your image model.** Text to Image, then Image to Video, then Text to Image used to land on the default image model; it now returns to the model you used, and a video tab likewise remembers its video model
-- **More LoRAs are listed under their model in Add LoRA, and they load.** LoRAs saved with PEFT adapter names or Kohya names, MiniMax H3 LoRAs and LTX LoRAs that adapt the audio attention are now recognised and applied instead of being skipped or failing. On a Mac such a LoRA needs a temporary copy, as large as the LoRA, in `~/.ziv/cache/loras/`
+- An uploaded start image or last frame no longer disappears when you switch pages
+- Leaving a video tab returns to the image model you used
+- The same uploaded image is saved only once
+- Phone photos are upright, and transparent images go on white
+- More LoRA formats (PEFT, Kohya, MiniMax H3, LTX audio) are recognised and load
+- Pause after a failed image, the remaining-time estimate, and review after a Repeat
+- Windows/Linux: LTX-2.3 downloads are pinned, and the first Web UI page load no longer stalls
+- Converting a MiniMax H3 Ref2VA checkpoint is refused
 
 ## [0.14.0b1] - 2026-10-26
 
