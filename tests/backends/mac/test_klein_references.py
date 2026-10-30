@@ -7,6 +7,7 @@ patched, so the real ``Flux2KleinEdit`` loop runs without any weights.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +19,7 @@ mx = pytest.importorskip("mlx.core")
 from mflux.callbacks.callback_registry import CallbackRegistry  # noqa: E402
 from mflux.models.common.compute_precision import ComputePrecision  # noqa: E402
 from mflux.models.common.config.model_config import ModelConfig  # noqa: E402
+from mflux.models.common.vae.vae_util import VAEUtil  # noqa: E402
 from mflux.models.flux2 import Flux2Klein  # noqa: E402
 from mflux.models.flux2.latent_creator.flux2_latent_creator import Flux2LatentCreator  # noqa: E402
 from mflux.models.flux2.variants.edit.flux2_klein_edit_helpers import _Flux2KleinEditHelpers  # noqa: E402
@@ -129,6 +131,169 @@ def test_the_hook_is_removed_when_generation_fails(mflux_stubs):
 
     assert _Flux2KleinEditHelpers.prepare_generation_latents is original
     assert not any(os.path.exists(path) for path in mflux_stubs["reference_paths"])
+
+
+def _stub_vae() -> SimpleNamespace:
+    """Return a VAE stand-in whose encoder yields 32-channel latents at an eighth of the image size."""
+
+    def encode(image):
+        return mx.ones((1, 32, image.shape[-2] // 8, image.shape[-1] // 8))
+
+    bn = SimpleNamespace(running_mean=mx.zeros(128), running_var=mx.ones(128), eps=1e-5)
+    return SimpleNamespace(encode=encode, bn=bn)
+
+
+@pytest.fixture
+def reference_paths(tmp_path):
+    """Return a factory for PNG files on disk, one per requested size."""
+
+    def make(count: int) -> list[str]:
+        paths = []
+        for index in range(count):
+            path = tmp_path / f"ref{index}.png"
+            Image.new("RGB", (64, 48)).save(path)
+            paths.append(str(path))
+        return paths
+
+    return make
+
+
+@pytest.fixture
+def evaluations():
+    """Count the arrays ``evaluate`` is asked to compute, while still computing them."""
+    real = klein_references.evaluate
+    calls = []
+
+    def counting(array):
+        calls.append(array)
+        return real(array)
+
+    with patch.object(klein_references, "evaluate", counting):
+        yield calls
+
+
+def _stub_klein(vae: SimpleNamespace) -> Flux2Klein:
+    """Return a fake ``Flux2Klein`` whose VAE is *vae* and whose reference conditioning is mflux's own."""
+    model = _fake_klein()
+    model.vae = vae
+    vae.decode_packed_latents = lambda packed, tiling_config=None: mx.zeros((1, 3, 64, 64))
+    return model
+
+
+def _stub_prompt_encoding():
+    return patch.object(_Flux2KleinEditHelpers, "encode_text", staticmethod(lambda *a, **k: (mx.zeros((1, 8, 16)), mx.zeros((1, 8, 4), dtype=mx.int32))))
+
+
+class TestEvaluatingVAE:
+    def test_each_reference_is_evaluated_before_the_next_is_encoded(self, reference_paths):
+        events = []
+        vae = _stub_vae()
+        encode = vae.encode
+        vae.encode = lambda image: (events.append("encode"), encode(image))[1]
+        real = klein_references.evaluate
+
+        def recording(array):
+            events.append("evaluate")
+            return real(array)
+
+        with patch.object(klein_references, "evaluate", recording):
+            _Flux2KleinEditHelpers.prepare_reference_image_conditioning(vae=klein_references._EvaluatingVAE(vae), tiling_config=None, image_paths=reference_paths(3))
+
+        assert events == ["encode", "evaluate"] * 3
+
+    def test_the_conditioning_is_identical_with_and_without_the_wrapper(self, reference_paths):
+        paths = reference_paths(3)
+        vae = _stub_vae()
+
+        plain_latents, plain_ids = _Flux2KleinEditHelpers.prepare_reference_image_conditioning(vae=vae, tiling_config=None, image_paths=paths)
+        latents, ids = _Flux2KleinEditHelpers.prepare_reference_image_conditioning(vae=klein_references._EvaluatingVAE(vae), tiling_config=None, image_paths=paths)
+
+        assert mx.array_equal(latents, plain_latents)
+        assert mx.array_equal(ids, plain_ids)
+        assert sorted({int(t) for t in ids[0, :, 0].tolist()}) == [10, 20, 30]
+
+    def test_other_attributes_are_the_wrapped_vaes_own(self):
+        vae = _stub_vae()
+        wrapper = klein_references._EvaluatingVAE(vae)
+
+        assert wrapper.bn is vae.bn
+        assert getattr(wrapper, "latent_channels", 16) == 16
+        with pytest.raises(AttributeError):
+            wrapper.missing
+
+    def test_the_tiled_path_encodes_through_the_wrapper(self):
+        vae = _stub_vae()
+        vae.latent_channels = 32  # read through the wrapper
+        tiling = SimpleNamespace(vae_encode_tiled=True, vae_encode_tile_size=64, vae_encode_tile_overlap=16)
+        evaluated = []
+        real = klein_references.evaluate
+
+        def recording(array):
+            evaluated.append(array)
+            return real(array)
+
+        with patch.object(klein_references, "evaluate", recording):
+            encoded = VAEUtil.encode(vae=klein_references._EvaluatingVAE(vae), image=mx.zeros((1, 3, 128, 128)), tiling_config=tiling)
+
+        assert encoded.shape[1] == 32
+        assert evaluated
+
+
+class TestReferenceView:
+    def test_the_view_shares_the_models_components_and_wraps_its_vae(self):
+        model = _stub_klein(_stub_vae())
+
+        view = klein_references.reference_view(model)
+
+        for name in klein_references.SHARED_ATTRIBUTES:
+            if name != "vae":
+                assert getattr(view, name) is getattr(model, name)
+        assert view.vae.bn is model.vae.bn
+        assert view.vae.decode_packed_latents is model.vae.decode_packed_latents
+
+    def test_the_loaded_model_keeps_its_own_vae(self):
+        vae = _stub_vae()
+        model = _stub_klein(vae)
+
+        klein_references.reference_view(model)
+
+        assert model.vae is vae
+
+    def test_a_run_evaluates_one_encode_per_reference(self, evaluations):
+        model = _stub_klein(_stub_vae())
+        original = VAEUtil.encode
+
+        with _stub_prompt_encoding():
+            klein_references.generate_with_references(model, [Image.new("RGB", (32, 32))] * 3, **_GEN)
+
+        assert len(evaluations) == 3
+        assert VAEUtil.encode is original  # nothing outside the view is patched
+
+    def test_a_start_image_run_evaluates_the_references_and_the_start_latents(self, evaluations):
+        model = _stub_klein(_stub_vae())
+        start_encodes = []
+
+        def img2img_latents(self, *, seed, config):
+            start_encodes.append(VAEUtil.encode(vae=model.vae, image=mx.zeros((1, 3, 16, 16))))
+            return Flux2LatentCreator.prepare_packed_latents(seed=seed, height=config.height, width=config.width, batch_size=1)
+
+        with _stub_prompt_encoding(), patch.object(Flux2Klein, "_prepare_img2img_latents", img2img_latents):
+            klein_references.generate_with_references(model, [Image.new("RGB", (32, 32))] * 2, start_path="start.png", image_strength=0.5, **_GEN)
+
+        assert len(evaluations) == 3  # the two references, then the start image's latents
+        assert len(start_encodes) == 1
+
+
+def test_the_start_image_hook_evaluates_its_latents_before_returning(mflux_stubs):
+    model = _fake_klein()
+    config = MagicMock()
+    evaluated = []
+
+    with patch.object(klein_references, "evaluate", lambda value: evaluated.append(value) or value):
+        with klein_references._start_image_latents(model, config):
+            latents, latent_ids, _, _ = _Flux2KleinEditHelpers.prepare_generation_latents(seed=1, height=64, width=64)
+
+    assert [array for batch in evaluated for array in batch] == [latents, latent_ids]
 
 
 class TestBackendDispatch:

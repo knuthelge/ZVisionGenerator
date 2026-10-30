@@ -71,6 +71,14 @@ def materialize_weights(model: Any) -> None:
         mx.eval(parameter)
 
 
+def evaluate[T](value: T) -> T:
+    """Evaluate the lazy MLX *value* (an array, or a list or tuple of them) now and return it."""
+    import mlx.core as mx
+
+    mx.eval(value)
+    return value
+
+
 def apply_buffer_cache_policy() -> None:
     """Cap MLX's free-buffer cache and drop what loading left behind."""
     import mlx.core as mx

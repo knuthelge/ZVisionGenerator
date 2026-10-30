@@ -73,6 +73,12 @@ class TestBufferCachePolicy:
         fake_utils.tree_flatten.assert_called_once_with(model.parameters.return_value)
         assert mx.eval.call_args_list == [call(first), call(second), call(third)]
 
+    def test_evaluate_computes_its_argument_and_returns_it(self, mx):
+        value = object()
+
+        assert memory.evaluate(value) is value
+        mx.eval.assert_called_once_with(value)
+
     def test_policy_caps_the_cache_then_clears_it(self, mx):
         apply_buffer_cache_policy()
 
