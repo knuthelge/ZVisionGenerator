@@ -19,6 +19,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import RecordedSettings, image_prompt_text, read_png_config, recorded_settings
+from zvisiongenerator.workflows import generation_prompt
 
 _UPSCALE_FAILURE_MESSAGE = "Upscale failed."
 
@@ -85,7 +86,7 @@ def run_upscale(
         "prompt_index": 0,
         "total_prompts": 1,
     }
-    prompt = request.resolved_prompt or request.prompt
+    prompt = generation_prompt(request.prompt, request.resolved_prompt)
     _emit_progress(progress_callback, "batch_started", mode="image", total_iterations=1, total_runs=1)
     _emit_progress(progress_callback, "prompt_started", **context, prompt=prompt, seed=request.seed)
     if skip.consume() == "quit":

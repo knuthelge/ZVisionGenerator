@@ -27,6 +27,7 @@ from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.input_images import open_image_upright
 from zvisiongenerator.utils.references import check_reference_count, load_reference_image
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
+from zvisiongenerator.workflows.generation_prompt import generation_negative, generation_prompt
 
 
 def emit_step_progress(
@@ -77,8 +78,8 @@ def enhance_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkin
 
 
 def suppress_negative_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
-    """Single point of truth: suppress negative prompt if model doesn't support it."""
-    if not request.supports_negative_prompt and request.negative_prompt:
+    """Record that the model's lack of negative-prompt support dropped the request's negative prompt."""
+    if request.negative_prompt and generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt) is None:
         artifacts.metadata["negative_suppressed"] = True
     return StageOutcome.success
 
@@ -158,8 +159,8 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
     request.image_strength. Otherwise, standard text-to-image. References
     loaded by load_references_stage go to either call.
     """
-    prompt = artifacts.resolved_prompt or request.prompt
-    neg = None if artifacts.metadata.get("negative_suppressed") else request.negative_prompt
+    prompt = generation_prompt(request.prompt, artifacts.resolved_prompt)
+    neg = generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt)
 
     prompt_one_line = " ".join(prompt.split())
     print(f"Prompt: \n{prompt_one_line}\n")
@@ -285,8 +286,8 @@ def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifa
     else:
         effective_steps = request.steps
 
-    prompt = artifacts.resolved_prompt or request.prompt
-    neg = None if artifacts.metadata.get("negative_suppressed") else request.negative_prompt
+    prompt = generation_prompt(request.prompt, artifacts.resolved_prompt)
+    neg = generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt)
 
     start = time.perf_counter()
     image = request.backend.image_to_image(
@@ -361,7 +362,7 @@ def save_image_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArt
 
     os.makedirs(os.path.dirname(artifacts.filepath) or ".", exist_ok=True)
 
-    prompt = artifacts.resolved_prompt or request.prompt
+    prompt = generation_prompt(request.prompt, artifacts.resolved_prompt)
 
     # PNG metadata
     metadata = PngInfo()

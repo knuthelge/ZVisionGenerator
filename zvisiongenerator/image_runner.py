@@ -33,7 +33,7 @@ from zvisiongenerator.utils.config import get_variant_key, model_capabilities, m
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import default_upscale_denoise
-from zvisiongenerator.workflows import build_workflow
+from zvisiongenerator.workflows import build_workflow, generation_negative
 from zvisiongenerator.utils.enhance_record import planned_enhance_record
 
 
@@ -196,10 +196,7 @@ def run_batch(
 
                     planned = plan.iteration_for(ran_iterations, run_index=run_idx, set_name=set_name, prompt_index=prompt_idx)
 
-                    # Suppress negative prompt if model doesn't support it
-                    effective_negative = negative_prompt
-                    if not supports_neg:
-                        effective_negative = None
+                    effective_negative = generation_negative(negative_prompt, supports_negative=supports_neg)
 
                     seed = planned.seed
                     _emit_progress(
@@ -230,7 +227,7 @@ def run_batch(
                         model_family=_family,
                         supports_negative_prompt=supports_neg,
                         prompt=prompt,
-                        negative_prompt=effective_negative if supports_neg else None,
+                        negative_prompt=effective_negative,
                         ratio=use_ratio,
                         size=use_size,
                         width=round_to_alignment(width // args.upscale) if args.upscale else width,

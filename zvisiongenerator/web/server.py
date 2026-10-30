@@ -101,7 +101,7 @@ from zvisiongenerator.video_file_upscale_runner import read_video_upscale_source
 from zvisiongenerator.utils.video_extend import apply_extend_args, extend_step, require_extend_family
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.video_support import unsupported_video_request
-from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
+from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow, generation_prompt
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
 from zvisiongenerator.web.config_contract import (
@@ -899,7 +899,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
     context = {
         "workflow": "upscale",
         "job_type": "Upscale",
-        "prompt": plan.request.resolved_prompt or plan.request.prompt,
+        "prompt": generation_prompt(plan.request.prompt, plan.request.resolved_prompt),
         "model": upscale_model,
         "model_label": model_display_name(web_config.app_config, upscale_model),
         "runs": 1,
