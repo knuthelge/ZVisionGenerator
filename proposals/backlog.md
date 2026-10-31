@@ -44,6 +44,9 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 
   Fix: one clear error per case, using the loader's own verdict, surfaced on the job card; correct the docs.
 
+- **W4A8 checkpoints that keep their quantization records in the safetensors metadata are rejected** (found 2026-10-25, [checkpoint conversion](archive/ltx25-h3-checkpoint-conversion.md)). Some community LTX-2.5 W4A8+INT8 ConvRot files store them in `__metadata__._quantization_metadata` instead of `comfy_quant` tensors, and `utils/quantized_weights.py` reads only the `comfy_quant` form, so conversion fails with "stored as I8 with a scale but no quantization record" on every platform. Fix: read the records from the metadata when no `comfy_quant` tensors are present.
+- **Quantized LTX connectors always read as "can't tell"** (`connectors_status`, `converters/ltx_checkpoint.py`). They are compared by exact bf16 hash, which rounding never matches, so a Mac conversion writes about 4 GB of connectors that are usually stock's, and Windows/Linux uses stock's even when they were trained. Fix: compare the decoded tensors with stock's within the format's quantization error, so most come out stock or changed.
+
 ## Code hygiene (no user impact)
 
 - `backends/__init__.py` `__all__` omits `convert_h3_checkpoint`, `supports_video_audio`, `supports_video_extend` and `supports_video_file_upscale`, which other modules import.
@@ -53,7 +56,6 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 - `backends/cuda/video/h3/lora.py` docstring mentions a planning label ("C11's `load_copy`"); `h3/conditioning.py` imports the private `_weight_files` from `decode.py`.
 - The Windows CUDA install command is hand-copied into `docs/install.md` while the code carries it as `CUDA_INSTALL_COMMAND` in `backends/cuda/driver.py`; a later index change (cu130 to cu131) would leave the error message and the docs apart. A test in `tests/common/test_docs_reference.py` asserting the docs contain the constant would tie them. Decision: skipped for v1.
 - Docs: `docs/developer/downloads.md` names `ziv convert --model-type h3`; the command is `ziv model model --model-type h3`. `docs/install.md` says Apple Silicon (M1 or newer) but the locked mlx and torch wheels need macOS 14. `core/video_backend.py` says `mode` is accepted and ignored for LTX; the CUDA LTX backend raises on a mismatched mode.
-- `ltx25-h3-checkpoint-conversion.md` stays open until its two macOS findings are settled: W4A8 files that keep their records in the safetensors metadata, and the LTX connectors' design rule.
 
 ## Accepted as is
 

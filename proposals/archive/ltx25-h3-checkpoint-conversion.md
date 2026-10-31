@@ -1,6 +1,6 @@
 # Convert LTX-2.5 and MiniMax H3 fine-tunes
 
-**Status:** Implemented on all three platforms; macOS gates run as a minimal set, two open findings (2026-10-25), shipping in v0.13.0. The Windows/Linux gates ran on the reference card; the macOS gates ran on a 32 GiB M5 as a minimal set (Part 3 G3 and G4, Part 4 G6). See [Implementation and results](#implementation-and-results-2026-10-25) and [macOS gate results](#macos-gate-results-2026-10-25).
+**Status:** Done (2026-10-31, v0.13.0). Implemented on all three platforms. The connectors' design rule is decided (see [The connectors' design rule](#the-connectors-design-rule-decided-2026-10-31)); the W4A8 metadata reader and a tolerance comparison for quantized connectors moved to the [backlog](../backlog.md). The Windows/Linux gates ran on the reference card; the macOS gates ran on a 32 GiB M5 as a minimal set (Part 3 G3 and G4, Part 4 G6). See [Implementation and results](#implementation-and-results-2026-10-25) and [macOS gate results](#macos-gate-results-2026-10-25).
 
 Four parts, in this order:
 
@@ -9,9 +9,9 @@ Four parts, in this order:
 3. LTX-2.5 on macOS
 4. MiniMax H3 on macOS
 
-Part 1 comes first, and its work (per-model naming and conversion) may run alongside Parts 2 and 3, since it touches different modules. Parts 3 and 4 started after the Mac test of the shipped LTX-2.5 and H3 support ([ltx-2.5-mac-test-plan.md](archive/ltx-2.5-mac-test-plan.md)) passed. Each part opens with a spike and a gate table, and is built only once its gates pass.
+Part 1 comes first, and its work (per-model naming and conversion) may run alongside Parts 2 and 3, since it touches different modules. Parts 3 and 4 started after the Mac test of the shipped LTX-2.5 and H3 support ([ltx-2.5-mac-test-plan.md](ltx-2.5-mac-test-plan.md)) passed. Each part opens with a spike and a gate table, and is built only once its gates pass.
 
-This follows [Convert LTX-2.3 checkpoints](archive/ltx-checkpoint-conversion.md), and it picks up an item that [LTX-2.5 and MiniMax H3](ltx-2.5.md) left out of scope: "Converting single-file fine-tunes for either family."
+This follows [Convert LTX-2.3 checkpoints](ltx-checkpoint-conversion.md), and it picks up an item that [LTX-2.5 and MiniMax H3](../ltx-2.5.md) left out of scope: "Converting single-file fine-tunes for either family."
 
 ## Problem
 
@@ -82,7 +82,7 @@ Run on an M5 with 32 GiB, on the fix branch `fix/mac-video` after the Mac test's
 
 **A reader finding.** A community LTX-2.5 W4A8+INT8 ConvRot file is rejected: `model.diffusion_model.audio_embeddings_connector.transformer_1d_blocks.0.attn1.to_v.weight is stored as I8 with a scale but no quantization record`. Its quantization records live in the safetensors `__metadata__` key `_quantization_metadata` (`asym_w4a8_int8`, `group_size` 16, `convrot_groupsize` 256) with no `comfy_quant` tensors, and `utils/quantized_weights.py` reads only the `comfy_quant` form. The rejection is platform-independent, and a second community file in the same layout is rejected the same way.
 
-**An observation to check against the design rule.** G3's fine-tune has FP8 connectors, which read as "can't tell" (96 of their Linears are FP8, so they can't match the pins), yet the Mac writer wrote its own `connector.safetensors` from the checkpoint (4.03 GB, +3.75 GiB of disk) instead of linking stock's. The Windows/Linux results above say that "can't tell" connectors use stock's. Part 3's design rule says connectors are linked only when the pins say they are stock, and otherwise written from the checkpoint; the two statements disagree. Which one is intended is open.
+**An observation checked against the design rule.** G3's fine-tune has FP8 connectors, which read as "can't tell" (96 of their Linears are FP8, so they can't match the pins), and the Mac writer wrote its own `connector.safetensors` from the checkpoint (4.03 GB, +3.75 GiB of disk) instead of linking stock's. This follows Part 3's design rule; the Windows/Linux results above, where "can't tell" connectors use stock's, describe the other platform. See [The connectors' design rule](#the-connectors-design-rule-decided-2026-10-31).
 
 **Result: image to video with a converted H3 model follows the start image when the checkpoint does.** A community H3 fine-tune converted the normal way (the converter merges the turbo LoRA, then rounds to 8 bit) gives frame 0 at 27.5 dB PSNR and 0.857 SSIM against the start image, equal to stock `h3` (27.7 dB, 0.866) at the same size. Two other community H3 checkpoints ignored the start image (9.5 dB and 5.1 dB): one was converted with `--turbo` (nothing merged by the converter) and one with the converter's merge, so the behavior follows the checkpoint, not the converter. The staged path itself runs as designed on a converted folder (`--size xs --frames 33 --image <start>`: keyframes peak 14.1, vision 1.2, prompt 13.5 GiB; 162.5 s, 14.0 GiB, no swap).
 
@@ -92,10 +92,19 @@ A control on stock `h3` with the turbo LoRA off gave frame 0 at 12.9 dB, so the 
 
 Part 4's build decision (G0–G3 and G5 pass) is met in substance: G3's bar was set too low, and G6 covers G5.
 
+### The connectors' design rule (decided 2026-10-31)
+
+The rule differs by platform on purpose:
+
+- **macOS** writes the checkpoint's own connectors whenever they are changed or "can't tell", and links stock's only when the pins say they are stock. A fine-tune may have trained its connectors, and quietly swapping in stock's would render something other than the fine-tune; the cost is about 4 GB of disk.
+- **Windows and Linux** can't carry custom connectors: changed ones are refused, and "can't tell" ones use stock's with a note.
+
 ### Follow-ups
 
-- **Read `__metadata__._quantization_metadata`.** Extend `utils/quantized_weights.py` to take the quantization records from the safetensors metadata when no `comfy_quant` tensors are present, so the W4A8 files above convert.
-- **The connectors' design rule.** Decide whether "can't tell" connectors link stock's or are written from the checkpoint (see the observation above).
+Both moved to the [backlog](../backlog.md):
+
+- **Read `__metadata__._quantization_metadata`**, so the W4A8 files above convert.
+- **Compare quantized connectors within tolerance** instead of by hash, so most "can't tell" connectors read as stock or changed.
 
 ## Evidence
 
@@ -195,7 +204,7 @@ LTX-2.5, from headers:
 ### Sources and licences
 
 - **Licences.** LTX-2.5 is under the [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x), and every Lightricks 2.5 repo is gated (auto-approved). H3 is under the MiniMax H3 community licence, and the MiniMaxAI repo is ungated. Converted models are derivatives and keep those terms.
-- **The standing rule** (2026-10-22, [ltx-2.5.md](ltx-2.5.md)): the app downloads from ungated sources and links to the original. The download dialog shows a short licence line, which is built by the download-licence work on another branch (see [Licence notice](ltx-2.5.md#licence-notice)). A download this proposal adds gets a licence entry there, and nothing more.
+- **The standing rule** (2026-10-22, [ltx-2.5.md](../ltx-2.5.md)): the app downloads from ungated sources and links to the original. The download dialog shows a short licence line, which is built by the download-licence work on another branch (see [Licence notice](../ltx-2.5.md#licence-notice)). A download this proposal adds gets a licence entry there, and nothing more.
 
 ## Proposed change
 
@@ -441,7 +450,7 @@ Part 3 started after the Mac test passed (2026-10-25).
 2. **The 2.5 base** is the shipped `ltx25-4` repo (ungated and pinned), which anyone who uses `ltx25-4` has already downloaded. It only has q4, so for q8 the converter writes its own `quantize_config.json`.
 3. **`embedded_config.json`** comes from the checkpoint's metadata, in stock's spelling. When the checkpoint has none, it comes from the 2.5 base, never from 2.3's.
 4. **Connectors** are linked when the pins say they are stock. Otherwise they are written from the checkpoint, which costs about 4 GB more disk.
-5. **The level.** The form preselects q4 until the Mac test has measured q8's headroom ([ltx-2.5.md](ltx-2.5.md), open question 4).
+5. **The level.** The form preselects q4 until the Mac test has measured q8's headroom ([ltx-2.5.md](../ltx-2.5.md), open question 4).
 
 **Spike**, on the 32 GB Mac:
 
@@ -457,7 +466,7 @@ Decision: build once G0–G3 pass. q8 is offered only if G4 passes.
 
 **Risks:**
 
-- **The mirror.** The base is a mirror of a gated repo. Its file hashes are recorded in [ltx-2.5.md](ltx-2.5.md).
+- **The mirror.** The base is a mirror of a gated repo. Its file hashes are recorded in [ltx-2.5.md](../ltx-2.5.md).
 - **Determinism.** `mx.quantize` must round the same way across MLX versions. It reproduced 2.3 bit for bit on Metal.
 
 ### Part 4: MiniMax H3 on macOS (size L)
@@ -513,7 +522,7 @@ Decision: build once G0–G3 and G5 pass. If G4 fails (RTN visibly worse than ca
 - **Changed LTX connectors on Windows/Linux:** refused, as for 2.3.
 - **Converting H3 LoRAs** from ComfyUI's format.
 - **Calibrated INT8** on the Mac.
-- **H3 Ref2VA fine-tunes:** Ref2VA isn't supported ([ltx-2.5.md](ltx-2.5.md)).
+- **H3 Ref2VA fine-tunes:** Ref2VA isn't supported ([ltx-2.5.md](../ltx-2.5.md)).
 - **The licence notice:** the download-licence work on another branch.
 
 ### Docs and tests
@@ -539,7 +548,7 @@ Decision: build once G0–G3 and G5 pass. If G4 fails (RTN visibly worse than ca
 - **Diffusers-layout H3 only.** Rejected by the user: most fine-tunes are single files.
 - **Reading the gated files for the LTX-2.5 pins.** Not needed: the gated listing gives the official oids, and the ungated copies with equal oids are the same bytes. The gated content is never read, and users never need an account.
 - **No LTX-2.5 pins.** Rejected: verified sources exist for every item.
-- **Applying the turbo LoRA at run time for converted H3 models.** Rejected: the 2b decision in [ltx-2.5.md](ltx-2.5.md) kept the turbo LoRA merged into the stored copy, and a converted model follows stock.
+- **Applying the turbo LoRA at run time for converted H3 models.** Rejected: the 2b decision in [ltx-2.5.md](../ltx-2.5.md) kept the turbo LoRA merged into the stored copy, and a converted model follows stock.
 - **Vendoring upstream's `build_quant.py` for the Mac.** Rejected: it loads the whole bf16 transformer, which doesn't fit 32 GB, and it needs `save_sharded`, which isn't vendored.
 - **Calibrated INT8 on the Mac.** Deferred: it needs activations recorded on the same source revision, plus a CUDA device.
 - **Keeping the bf16 AdaLN projection in converted H3 folders**, so a schedule change could rebuild the tables without the source. Rejected for now: it would add the 13.0B AdaLN parameters (about 26 GB in bf16) to every converted model. Converting again is the remedy, as it is for LTX.
