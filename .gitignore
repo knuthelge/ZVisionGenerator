@@ -48,3 +48,6 @@ site/
 
 # Prompt-enhancer bench results (machine-specific)
 bench/enhance/runs/
+
+# Transparent-background bench renders and mattes
+bench/transparent/runs/

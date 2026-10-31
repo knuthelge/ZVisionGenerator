@@ -1,0 +1,25 @@
+# Transparent-background bench subjects. Each one stresses a different part of a matte.
+# A render's prompt is the subject plus one background suffix. `plain` is for the noise-tilt renders (tilt.py), whose
+# background colour comes from the starting noise instead of the prompt.
+
+backgrounds:
+  grey: ", isolated on a plain light grey studio background"
+  green: ", isolated on a solid flat pure green (#00FF00) chroma key background, evenly lit, no shadows"
+  magenta: ", isolated on a solid flat pure magenta (#FF00FF) chroma key background, evenly lit, no shadows"
+  blue: ", isolated on a solid flat pure blue (#0000FF) chroma key background, evenly lit, no shadows"
+  cyan: ", isolated on a solid flat pure cyan (#00FFFF) chroma key background, evenly lit, no shadows"
+  white: ", isolated on a pure white background"
+  black: ", isolated on a pure black background"
+  plain: ", isolated on a plain solid background"
+
+subjects:
+  hair: portrait of a young woman with voluminous curly hair, backlit, fine flyaway strands, waist-up photo
+  fur: a fluffy long-haired cat sitting upright, full body photo
+  glass: a clear glass wine bottle half filled with water, refraction and highlights, product photo
+  smoke: a thin wisp of white smoke rising from a burning incense stick
+  product: a white running sneaker, side view, soft cast shadow under it, product photo
+  logo: 'flat vector logo, the word "ZVISION" in bold letters inside a thick ring'
+  lineart: black ink line art of a small dragon, thin clean strokes, no shading
+  sheer: a dancer mid-twirl holding a sheer translucent chiffon scarf, full body photo
+  dark: a black cat with black fur sitting, full body photo
+  parrot: a bright green parrot perched on a short branch

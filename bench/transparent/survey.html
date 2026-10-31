@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transparent background: blind test</title>
+<style>
+  :root { color-scheme: dark; --bg: #141414; --panel: #1f1f1f; --text: #e8e8e8; --muted: #9a9a9a; --accent: #6ea8fe; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  header .progress { font-weight: 600; }
+  header .bar { flex: 1 1 160px; height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+  header .bar > div { height: 100%; background: var(--accent); width: 0; }
+  .group { display: flex; gap: 4px; flex-wrap: wrap; }
+  .group span { color: var(--muted); margin-right: 4px; align-self: center; }
+  button { background: var(--panel); color: var(--text); border: 1px solid #333; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #555; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  main { padding: 0 16px 16px; }
+  .stage, .choices { max-width: calc((100vh - 190px) * 3 + 24px); margin: 0 auto; }
+  .stage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  figure { margin: 0; }
+  figcaption { color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  .view { aspect-ratio: 1; overflow: hidden; border-radius: 8px; background: #222; }
+  .view.zoomed { overflow: auto; }
+  .view img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .view.zoomed img { width: 300%; height: 300%; }
+  .cut { background: linear-gradient(to right, #000 50%, #fff 50%) top / 100% 50% no-repeat, linear-gradient(to right, #f0f 50%, #2a7a2a 50%) bottom / 100% 50% no-repeat; }
+  .cut.checker { background: repeating-conic-gradient(#bdbdbd 0 25%, #fff 0 50%) 0 0 / 24px 24px; }
+  .cut.black { background: #000; }
+  .cut.white { background: #fff; }
+  .cut.magenta { background: #f0f; }
+  .choices { display: grid; grid-template-columns: 2fr 1fr 1fr 2fr; gap: 12px; margin-top: 12px; }
+  @media (max-width: 1000px) {
+    .stage, .choices { max-width: none; }
+    .stage { grid-template-columns: 1fr 1fr; }
+    .stage .original { grid-column: 1 / -1; justify-self: center; width: 40%; }
+  }
+  .choices button { padding: 14px; font-size: 16px; }
+  .choices button.picked { border-color: var(--accent); color: var(--accent); }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 8px; text-align: center; }
+  .done { text-align: center; padding: 15vh 16px; font-size: 20px; }
+  @media (max-width: 720px) {
+    .stage { grid-template-columns: 1fr; }
+    .stage .original { width: 60%; }
+    .choices { grid-template-columns: 1fr 1fr; }
+    .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="progress" id="progress">…</div>
+  <div class="bar"><div id="bar"></div></div>
+  <div class="group" id="backdrops"><span>Backdrop</span></div>
+  <div class="group"><button id="zoom">Zoom 3×</button><button id="back">Back</button></div>
+</header>
+<main id="main"></main>
+<script>
+const BACKDROPS = [["mixed", "Mixed"], ["checker", "Checker"], ["black", "Black"], ["white", "White"], ["magenta", "Magenta"]];
+let questions = [], answers = {}, index = 0, backdrop = "mixed", zoomed = false;
+
+const main = document.getElementById("main");
+for (const [key, label] of BACKDROPS) {
+  const button = document.createElement("button");
+  button.textContent = label;
+  button.dataset.key = key;
+  button.onclick = () => { backdrop = key; render(); };
+  document.getElementById("backdrops").append(button);
+}
+document.getElementById("zoom").onclick = () => { zoomed = !zoomed; render(); };
+document.getElementById("back").onclick = () => { if (index > 0) { index -= 1; render(); } };
+
+function firstOpen() {
+  const open = questions.findIndex(q => !(q.id in answers));
+  return open === -1 ? questions.length : open;
+}
+
+function view(src, cut) {
+  const box = document.createElement("div");
+  box.className = "view" + (cut ? " cut" + (backdrop === "mixed" ? "" : " " + backdrop) : "") + (zoomed ? " zoomed" : "");
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = "";
+  box.append(img);
+  return box;
+}
+
+function figure(label, box) {
+  const fig = document.createElement("figure");
+  const cap = document.createElement("figcaption");
+  cap.textContent = label;
+  fig.append(cap, box);
+  return fig;
+}
+
+function syncScroll(boxes) {
+  for (const box of boxes) {
+    box.addEventListener("scroll", () => {
+      for (const other of boxes) if (other !== box) { other.scrollLeft = box.scrollLeft; other.scrollTop = box.scrollTop; }
+    });
+  }
+}
+
+function render() {
+  for (const b of document.querySelectorAll("#backdrops button")) b.classList.toggle("on", b.dataset.key === backdrop);
+  document.getElementById("zoom").classList.toggle("on", zoomed);
+  const done = Object.keys(answers).length;
+  document.getElementById("progress").textContent = `${Math.min(index + 1, questions.length)} / ${questions.length}`;
+  document.getElementById("bar").style.width = `${(100 * done) / questions.length}%`;
+  main.replaceChildren();
+  if (index >= questions.length) {
+    const end = document.createElement("div");
+    end.className = "done";
+    end.textContent = `All ${questions.length} done. Thank you!`;
+    main.append(end);
+    return;
+  }
+  const q = questions[index];
+  const original = view(`/img/${q.id}/o`, false);
+  const a = view(`/img/${q.id}/a`, true);
+  const b = view(`/img/${q.id}/b`, true);
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  const source = figure("Original", original);
+  source.className = "original";
+  stage.append(source, figure("A", a), figure("B", b));
+  const choices = document.createElement("div");
+  choices.className = "choices";
+  for (const [choice, label] of [["a", "A is better"], ["equal", "Equal"], ["bad", "Both bad"], ["b", "B is better"]]) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    button.classList.toggle("picked", answers[q.id] === choice);
+    button.onclick = () => answer(choice);
+    choices.append(button);
+  }
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = "Keys: 1 = A, 2 = B, E = equal, X = both bad, ← back, Z zoom";
+  main.append(stage, choices, hint);
+  syncScroll([original, a, b]);
+}
+
+async function answer(choice) {
+  const q = questions[index];
+  const response = await fetch("/api/answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: q.id, choice }) });
+  if (!response.ok) { alert("Saving failed; please try again."); return; }
+  answers[q.id] = choice;
+  index = firstOpen() > index ? firstOpen() : index + 1;
+  render();
+}
+
+document.addEventListener("keydown", event => {
+  const keys = { "1": "a", "2": "b", e: "equal", x: "bad" };
+  const choice = keys[event.key.toLowerCase()];
+  if (choice && index < questions.length) answer(choice);
+  else if (event.key === "ArrowLeft" && index > 0) { index -= 1; render(); }
+  else if (event.key.toLowerCase() === "z") { zoomed = !zoomed; render(); }
+});
+
+fetch("/api/plan").then(r => r.json()).then(data => {
+  questions = data.questions;
+  answers = data.answers;
+  index = firstOpen();
+  render();
+});
+</script>
+</body>
+</html>
