@@ -56,8 +56,18 @@ export ZIV_DATA_DIR=/var/tmp/ziv-docs/data HF_HOME=/var/tmp/ziv-docs/hf HF_HUB_C
 ziv ui --port 8790 --no-browser
 ```
 
-- **Models:** download FLUX.2 Klein 4B and the Fast enhancer from its Models page, and set `ui.default_models.image: klein4b` in its `config.yaml`.
-- **Content:** generate demo images with the app into its output folder, and put a demo prompt file at `prompts/demo.yaml` in its data folder. Make one striking image with the enhancer and keep it the newest output; it is the hero the Workspace, viewer and Home shots show. Its file name is `_HERO` in the script.
+- **Models:** download FLUX.2 Klein 4B and the Fast enhancer from its Models page. The seeded `config.yaml` sets `ui.default_models.image: klein4b`.
+- **Content:** seed the data folder from the stored demo set in `scripts/docs_demo/`, which sits outside `docs/` so the site doesn't publish it. It holds the config, the demo prompt file and six demo images with their metadata. The Gallery sorts by modification time, which version control doesn't keep, so touch the images oldest first to make the hero (`_HERO` in the script) the newest:
+
+  ```bash
+  mkdir -p "$ZIV_DATA_DIR/outputs" "$ZIV_DATA_DIR/prompts"
+  cp scripts/docs_demo/config.yaml "$ZIV_DATA_DIR/"
+  cp scripts/docs_demo/prompts/demo.yaml "$ZIV_DATA_DIR/prompts/"
+  cp scripts/docs_demo/outputs/*.png "$ZIV_DATA_DIR/outputs/"
+  for f in $(ls scripts/docs_demo/outputs | sort -t_ -k2); do touch "$ZIV_DATA_DIR/outputs/$f"; sleep 1; done
+  ```
+
+  Generate new demo content with the app only when the set should change, and copy the result back into `scripts/docs_demo/`. Make one striking image with the enhancer and keep it the newest output; it is the hero the Workspace, viewer and Home shots show.
 - **Browser:** the script opens a fresh browser profile for every shot, so no settings or recent paths carry over.
 - **Check before you capture:** open the Web UI and look at the Config and Models pages for anything that isn't demo content.
 
@@ -70,7 +80,7 @@ make docs-screenshots URL=http://localhost:8790 EMPTY_URL=http://localhost:8791
 make docs-screenshots URL=http://localhost:8790 ONLY=gallery-page,viewer-details
 ```
 
-Each shot writes `docs/assets/screenshots/<name>.webp` at 1.5× pixel density. The job shots run real jobs, and delete their outputs afterwards so the hero stays the newest image. Look at every shot before you commit it.
+Each shot writes `docs/assets/screenshots/<name>.webp` at 1.5× pixel density. The job shots run real jobs. They start from an empty job log and delete their outputs afterwards, so the log shows only their jobs and the hero stays the newest image. Look at every shot before you commit it.
 
 Shots crop to the part being explained (the job card, the Job log, the Preset menu) where they can, so a change elsewhere doesn't make them wrong.
 

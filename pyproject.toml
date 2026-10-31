@@ -114,6 +114,9 @@ raw-options = { version_scheme = "no-guess-dev" }
 [tool.hatch.build.hooks.vcs]
 version-file = "zvisiongenerator/_version.py"
 
+[tool.hatch.build.targets.sdist]
+exclude = ["scripts/docs_demo"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx", "packages/minimax_h3_mlx", "packages/seedvr2_torch", "packages/moss_image"]
 

@@ -24,7 +24,7 @@ _DESKTOP = {"width": 1440, "height": 900}
 _PHONE = {"width": 390, "height": 844}
 _SCALE = 1.5
 # The newest output: the image the Workspace and viewer shots show. Generated with the enhancer for the docs.
-_HERO = "web_2026-10-30_21-58-33.png"
+_HERO = "prompt_2026-10-31_13-32-30.png"
 _DEMO_PROMPT_FILE = "/var/tmp/ziv-docs/data/prompts/demo.yaml"
 
 
@@ -63,6 +63,12 @@ def _output_ids(url: str) -> set[str]:
         return {asset["id"] for asset in json.load(response).get("assets", [])}
 
 
+def _clear_job_log(url: str) -> None:
+    """Empty the job log through the app, so the Job log shot shows only the jobs these shots run."""
+    request = urllib.request.Request(f"{url}/api/jobs/log", method="DELETE", headers={"Origin": url})
+    urllib.request.urlopen(request).read()
+
+
 def _post_json(url: str, body: dict) -> None:
     """POST *body* to *url* as JSON, ignoring a conflict for something that already exists."""
     request = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", "Origin": url.split("/api/")[0]})
@@ -83,6 +89,7 @@ async def _dismiss_toasts(page: Page) -> None:
 async def shot_job_running(browser: Browser, url: str) -> None:
     """Start a job and capture it at 75%: the live preview beside the job card, and the card alone."""
     before = _output_ids(url)
+    _clear_job_log(url)
     page = await _page(browser, url)
     await page.get_by_placeholder("Describe the scene...").fill("A lighthouse on a cliff at golden hour, waves below, seabirds, warm light")
     await page.get_by_role("button", name="Generate").last.click()
@@ -168,6 +175,9 @@ async def shot_preset_menu(browser: Browser, url: str) -> None:
 async def shot_phone_workspace(browser: Browser, url: str) -> None:
     page = await _page(browser, url, phone=True)
     await page.wait_for_timeout(1500)
+    # The strip scrolls sideways; bring the Images chip into view.
+    await page.locator('[data-testid="settings-strip"] .setchip[aria-label^="Images"]').scroll_into_view_if_needed()
+    await page.wait_for_timeout(500)
     _save(await page.screenshot(), "phone-workspace")
 
 

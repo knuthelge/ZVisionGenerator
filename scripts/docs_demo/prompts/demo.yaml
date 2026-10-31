@@ -1,0 +1,24 @@
+snippets:
+  morning: early morning light, soft mist, shallow depth of field
+  poster: bold flat shapes, limited palette, clean vector style
+
+fox:
+  - prompt: A red fox sitting in fresh snow, $morning, close-up
+  - prompt: A red fox {leaping|curled up} in a {birch|pine} forest, $morning
+
+lighthouse:
+  - prompt: A lighthouse on a rocky coast during a storm, waves crashing, dramatic sky
+    enhance:
+      style: cinematic
+      mood: dramatic
+
+cafe:
+  - prompt: A cozy corner café on a rainy evening, warm window light, people inside
+    negative: blurry, low quality
+
+poster:
+  - prompt: A travel poster for a mountain village, $poster, the text "ALPINE"
+
+robot:
+  - active: false
+    prompt: A small friendly robot watering plants on a balcony
