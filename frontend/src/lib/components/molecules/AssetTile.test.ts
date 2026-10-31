@@ -91,7 +91,7 @@ describe('AssetTile', () => {
     mountTile({ asset, onreference, ondelete });
 
     openMenu(asset);
-    expect(menuActions()).toEqual(['reference-image', 'reference-video', 'download', 'delete']);
+    expect(menuActions()).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame', 'download', 'delete']);
     expect(document.querySelector('[data-action="download"]')?.getAttribute('href')).toBe(asset.url);
 
     (document.querySelector('[data-action="reference-video"]') as HTMLButtonElement).click();
@@ -102,6 +102,25 @@ describe('AssetTile', () => {
     openMenu(asset);
     (document.querySelector('[data-action="delete"]') as HTMLButtonElement).click();
     expect(ondelete).toHaveBeenCalledWith(asset);
+  });
+
+  it('shows the use-as hints and disables a target with its reason as the tooltip', () => {
+    const asset = makeAsset();
+    const onreference = vi.fn();
+    mountTile({
+      asset,
+      onreference,
+      useAs: { reference: { disabled: false, hint: 'next slot' }, image: { disabled: true, hint: "Ideogram 4 can't use a start image" } },
+    });
+
+    openMenu(asset);
+    const image = document.querySelector('[data-action="reference-image"]') as HTMLElement;
+    expect(document.querySelector('[data-action="reference-reference"]')?.textContent).toContain('next slot');
+    expect(image.getAttribute('aria-disabled')).toBe('true');
+    expect(image.getAttribute('title')).toBe("Ideogram 4 can't use a start image");
+    image.click();
+    flushSync();
+    expect(onreference).not.toHaveBeenCalled();
   });
 
   it('runs an upscale from the menu, disabling a factor over a limit', () => {

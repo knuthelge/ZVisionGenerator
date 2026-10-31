@@ -4,7 +4,7 @@ Videos are made with LTX-2.3 and come with sound. This walks you through a short
 
 ## 1. Pick the video model
 
-Choose **Text to Video** in the top bar. The model picker offers:
+Choose **Video** in the top bar. The model picker offers:
 
 | Model | Alias | Needs |
 |---|---|---|
@@ -49,11 +49,11 @@ The finished clip plays in the preview and appears in the Gallery strip.
 
 ## Start from an image
 
-Choose **Image to Video**, then pick the first frame under **Frames**: browse to a file, upload one from this device, or use one you made. In the [viewer](gallery.md#the-viewer), **Use as** → **First frame** loads an image and puts its prompt in Scene.
+In **Video**, add the first frame in the **Images** section of *Settings*: browse to a file, upload one from this device, or use one you made. The clip starts on it instead of from the prompt alone. In the [viewer](gallery.md#the-viewer), **Use as** → **First frame** loads an image and puts its prompt in Scene.
 
 Describe in Action what happens from that frame on. The image is scaled to cover the video size and the overflow is cut from the centre, so pick a **Ratio** close to the image's shape.
 
-You can also pick a **Last frame**, and the clip runs from the first image to the last. See [First and last frame](../concepts/video.md#first-and-last-frame).
+You can add a **Last frame** under it at any time; it is used once there is a first frame, and the clip then runs from the first image to the last. See [First and last frame](../concepts/video.md#first-and-last-frame).
 
 ## Make it longer
 

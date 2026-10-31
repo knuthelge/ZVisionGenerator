@@ -64,6 +64,62 @@ describe('ActionMenu', () => {
     expect(onselect).toHaveBeenCalledTimes(1);
   });
 
+  describe('disabled items', () => {
+    const entries = (onselect = vi.fn()): ActionMenuEntry[] => [
+      { kind: 'item', id: 'first', label: 'First' },
+      { kind: 'item', id: 'off', label: 'Off', disabled: true, hint: 'No last frame', onselect },
+      { kind: 'item', id: 'last', label: 'Last', disabled: true, onselect },
+    ];
+    const keydown = (key: string) => flushSync(() => menu()?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+
+    it('stay in reach of the arrow keys, Home and End so their reason can be read', () => {
+      mountMenu(entries());
+      expect(document.activeElement).toBe(row('first'));
+      keydown('ArrowDown');
+      expect(document.activeElement).toBe(row('off'));
+      keydown('ArrowDown');
+      expect(document.activeElement).toBe(row('last'));
+      keydown('ArrowDown');
+      expect(document.activeElement).toBe(row('first'));
+      keydown('ArrowUp');
+      expect(document.activeElement).toBe(row('last'));
+      keydown('Home');
+      expect(document.activeElement).toBe(row('first'));
+      keydown('End');
+      expect(document.activeElement).toBe(row('last'));
+    });
+
+    it('do nothing on click or Enter, and leave the menu open', () => {
+      const onselect = vi.fn();
+      const onclose = vi.fn();
+      mountMenu(entries(onselect), onclose);
+      keydown('ArrowDown');
+      flushSync(() => row('off')?.click());
+      expect(onselect).not.toHaveBeenCalled();
+      expect(onclose).not.toHaveBeenCalled();
+    });
+
+    it('keep their menuitem role and aria-disabled, and stay in the menu when every item is off', () => {
+      const onselect = vi.fn();
+      mountMenu([{ kind: 'item', id: 'a', label: 'A', disabled: true, onselect }, { kind: 'item', id: 'b', label: 'B', checked: false, disabled: true, onselect }]);
+      expect(row('a')?.getAttribute('role')).toBe('menuitem');
+      expect(row('a')?.getAttribute('aria-disabled')).toBe('true');
+      expect(row('b')?.getAttribute('role')).toBe('menuitemradio');
+      expect(row('b')?.getAttribute('aria-disabled')).toBe('true');
+      // Nothing can be chosen, yet the keys still have a place to start and to read the reasons from.
+      expect(document.activeElement).toBe(row('a'));
+      keydown('ArrowDown');
+      expect(document.activeElement).toBe(row('b'));
+      flushSync(() => row('b')?.click());
+      expect(onselect).not.toHaveBeenCalled();
+    });
+
+    it('open with the first item that can be chosen focused', () => {
+      mountMenu([{ kind: 'item', id: 'off', label: 'Off', disabled: true }, { kind: 'item', id: 'on', label: 'On' }]);
+      expect(document.activeElement).toBe(row('on'));
+    });
+  });
+
   describe('group', () => {
     const entries = (defaultOpen?: boolean): ActionMenuEntry[] => [
       { kind: 'item', id: 'first', label: 'First' },

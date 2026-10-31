@@ -6,7 +6,8 @@
   import { jobStatusLine } from '$lib/state/jobStatusLine';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { router } from '$lib/state/router.svelte';
-  import type { PageId, Workflow } from '$lib/types';
+  import { visibleTabs, workspaceTab, WORKSPACE_TABS } from '$lib/state/workspaceTab';
+  import type { PageId, Workflow, WorkspaceTab } from '$lib/types';
 
   interface Props {
     currentPage: PageId;
@@ -25,16 +26,10 @@
   let { currentPage, workflows = null, onmenu, onstatus, onjoblog, ontitle }: Props = $props();
 
   const PAGE_TITLES: Record<PageId, string> = { workspace: 'Workspace', prompts: 'Prompts', gallery: 'Gallery', models: 'Models', config: 'Config' };
-  const WORKFLOW_LABELS: { id: Workflow; label: string }[] = [
-    { id: 'txt2img', label: 'Text to Image' },
-    { id: 'img2img', label: 'Image to Image' },
-    { id: 'img2vid', label: 'Image to Video' },
-    { id: 'txt2vid', label: 'Text to Video' },
-    { id: 'extend', label: 'Extend Video' }
-  ];
-  // Until the contract is known the four always-available workflows show; Extend Video appears only when the server lists it.
-  const visibleWorkflows = $derived(WORKFLOW_LABELS.filter((item) => (workflows === null ? item.id !== 'extend' : workflows.includes(item.id))));
-  const workflowLabel = $derived(WORKFLOW_LABELS.find((item) => item.id === draft.state.workflow)?.label ?? '');
+  // Until the contract is known Image and Video show; Extend Video appears only when the server lists it.
+  const tabs = $derived(visibleTabs(workflows));
+  const activeTab = $derived(workspaceTab(draft.state.workflow));
+  const tabLabel = $derived(WORKSPACE_TABS.find((tab) => tab.id === activeTab)?.label ?? '');
   const onWorkspace = $derived(currentPage === 'workspace');
   const status = $derived(jobStatusLine(jobStore.current, jobStore.queuedJobs.length));
 </script>
@@ -49,14 +44,14 @@
       class="strip-select-box"
       triggerClass="strip-select ui-select-shell"
       ariaLabel="Workflow"
-      value={draft.state.workflow}
-      options={visibleWorkflows.map((item) => ({ value: item.id, label: item.label }))}
-      onchange={(next) => draft.update('workflow', next as Workflow)}
+      value={activeTab}
+      options={tabs.map((item) => ({ value: item.id, label: item.label }))}
+      onchange={(next) => draft.setTab(next as WorkspaceTab)}
     >
       {#snippet trigger()}
         <span class="flex min-w-0 items-center gap-1.5">
           <MascotHome placement={mascotHome.placement} size={20} />
-          <span class="truncate">{workflowLabel}</span>
+          <span class="truncate">{tabLabel}</span>
         </span>
       {/snippet}
     </Select>

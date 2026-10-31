@@ -2,14 +2,15 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import { errorText } from '$lib/api/client';
   import { keepLoadedTail } from '$lib/state/pageMerge';
-  import { galleryMemory } from '$lib/state/pageMemory';
+  import { galleryMemory, workspaceMemory } from '$lib/state/pageMemory';
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
   import { galleryStore, type GalleryQuery, type MediaFilter, type SortOrder } from '$lib/state/gallery.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { extendParams, referenceParams, reuseParams, useAsState, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, UpscaleFactor, UpscaleMethod } from '$lib/types';
   import { Button, Spinner } from '$lib/components/atoms';
@@ -369,12 +370,17 @@
     galleryStore.removeAssets(newlyDeleted);
     jobStore.removeOutputs(deletedIds);
     // A workspace reference pointing at a deleted file would fail the next run.
+    // Without a context the model's capabilities are unknown, so the start image is assumed usable.
     if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.referenceImagePath)) {
-      draft.update('referenceImagePath', null);
+      draft.setStartImage('image', null, null);
+    }
+    if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.firstFramePath)) {
+      draft.setStartImage('video', null, null);
     }
     if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.endImagePath)) {
-      draft.update('endImagePath', null);
+      draft.setLastFrame(null);
     }
+    // A reference row stays, as in the Workspace; the Workspace flags it missing when it next checks its images.
     const visibleIds = new Set(assets.map((asset) => asset.id));
     selected = new Set(
       Array.from(selected).filter((id) => !deletedIds.has(id) && visibleIds.has(id))
@@ -438,8 +444,16 @@
     router.navigate('workspace', reuseParams(asset));
   }
 
+  // What the Use as items show comes from the Workspace as it was last seen; before it was ever opened, nothing is known.
+  const useAs = $derived(useAsState(workspaceMemory.get(), draft.state));
+
   function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
-    router.navigate('workspace', referenceParams(asset, target));
+    if (!asset.file_path) return;
+    // A route's params replace the reference list, so a reference waits for the Workspace and joins it there.
+    if (target === 'reference') {
+      requestReference(asset.file_path);
+      router.navigate('workspace');
+    } else router.navigate('workspace', referenceParams(asset, target));
   }
 
   function extendAsset(asset: GalleryAsset): void {
@@ -579,6 +593,7 @@
             onpreview={selectMode ? (asset) => toggleSelect(asset, !selected.has(asset.id)) : openViewer}
             onreuse={reuseInWorkspace}
             onreference={useAsReference}
+            {useAs}
             onextend={extendAsset}
             onupscale={upscaleAsset}
             ondelete={deleteSingle}
@@ -628,6 +643,7 @@
   onnearend={() => { if (hasMore) void loadMorePages(); }}
   onreuse={reuseInWorkspace}
   onreference={useAsReference}
+  {useAs}
   onextend={extendAsset}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}

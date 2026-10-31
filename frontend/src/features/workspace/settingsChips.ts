@@ -1,10 +1,11 @@
 import type { WorkspaceCapabilities } from './capabilities';
+import type { ImagesSummary } from './imagesSummary';
 import type { DraftState, Workflow } from '$lib/types';
 
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
-  | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'strength' | 'seed' | 'runs'
-  | 'reference' | 'references' | 'endReference' | 'source' | 'size' | 'audio' | 'loras' | 'upscale' | 'model';
+  | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'seed' | 'runs'
+  | 'source' | 'images' | 'size' | 'audio' | 'loras' | 'upscale' | 'model';
 
 export interface SettingChip {
   key: ChipKey;
@@ -42,12 +43,10 @@ export interface ChipFacts {
   loraDownload?: SettingChip['download'];
   modelLabel: string;
   modelDownloaded: boolean;
-  /** The start image's name (a video's first frame), or null. */
-  referenceName: string | null;
-  /** The last frame's name, or null. */
-  endReferenceName: string | null;
   /** Extend: the source clip's name, or null. */
   sourceName: string | null;
+  /** The Images section's summary; null where the section is not offered (a model that can use no image, Extend Video). */
+  images: ImagesSummary | null;
   /** The clip or extension may not fit memory. */
   memoryWarn: boolean;
   /** The applied settings preset's name, or null when none is applied. */
@@ -61,8 +60,8 @@ export interface ChipFacts {
 const fmt = (value: number): string => (Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2))));
 
 /**
- * Chips in the order their settings change in the loop: every run (length, steps, guidance, strength, seed, batch),
- * per series (start image, references or source, size, audio, LoRAs), at the end (upscale), at the start (model). The preset, which
+ * Chips in the order their settings change in the loop: every run (length, steps, guidance, seed, batch),
+ * per series (images or source, size, audio, LoRAs), at the end (upscale), at the start (model). The preset, which
  * sets many of them at once, comes before all.
  */
 export function settingsChips(f: ChipFacts): SettingChip[] {
@@ -73,13 +72,10 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
     caps.showExtendLength ? { key: 'extendSeconds', label: 'Extend', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.extendChanged, warn: f.memoryWarn } : null,
     caps.showSteps ? { key: 'steps', label: 'Steps', value: fmt(s.steps), changed: f.changed('steps') } : null,
     caps.showGuidance ? { key: 'guidance', label: 'Guidance', value: fmt(s.guidance), changed: f.changed('guidance') } : null,
-    caps.showI2IStrength ? { key: 'strength', label: 'Strength', value: fmt(s.referenceImageStrength), changed: f.changed('referenceImageStrength') } : null,
     caps.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
     caps.showRuns ? { key: 'runs', label: 'Batch', value: `×${s.runs}`, changed: f.changed('runs') } : null,
-    // With a last frame beside it, the start image is the first frame.
-    caps.showRefImage ? { key: 'reference', label: caps.showEndImage ? 'First' : 'Start', value: f.referenceName ?? 'none', changed: false, on: f.referenceName !== null } : null,
-    caps.showReferences ? { key: 'references', label: 'References', value: caps.referenceCount > 0 ? String(caps.referenceCount) : 'none', changed: false, on: caps.referenceCount > 0 } : null,
-    caps.showEndImage ? { key: 'endReference', label: 'Last', value: f.endReferenceName ?? 'none', changed: false, on: f.endReferenceName !== null } : null,
+    // One chip for every image the tab takes; its value is the section's summary, and its dot shows a Strength off its default.
+    f.images ? { key: 'images', label: 'Images', value: f.images.text, changed: s.workflow === 'img2img' && caps.showI2IStrength && f.changed('referenceImageStrength'), on: f.images.tone === 'active', warn: f.images.tone === 'error' } : null,
     caps.showSourceVideo ? { key: 'source', label: 'Source', value: f.sourceName ?? 'none', changed: false, on: f.sourceName !== null, warn: s.missingSourceVideo } : null,
     caps.showDimensions ? { key: 'size', label: '', value: `${f.width}×${f.height}`, changed: f.changed('ratio', 'size', 'dimensionMode') } : null,
     caps.showAudio || caps.showLowMemory || caps.showVideoUpscale
@@ -93,11 +89,13 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
 }
 
 /** The chips the strip shows before the context is known, so the frame is complete from the first frame. */
+const PENDING_IMAGE_CHIPS: [ChipKey, string][] = [['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['runs', 'Batch'], ['images', 'Images'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']];
+const PENDING_VIDEO_CHIPS: [ChipKey, string][] = [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['images', 'Images'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']];
 const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
-  txt2img: [['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['runs', 'Batch'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']],
-  img2img: [['steps', 'Steps'], ['guidance', 'Guidance'], ['strength', 'Strength'], ['seed', 'Seed'], ['runs', 'Batch'], ['reference', 'Start'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']],
-  txt2vid: [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
-  img2vid: [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['reference', 'Start'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
+  txt2img: PENDING_IMAGE_CHIPS,
+  img2img: PENDING_IMAGE_CHIPS,
+  txt2vid: PENDING_VIDEO_CHIPS,
+  img2vid: PENDING_VIDEO_CHIPS,
   extend: [['extendSeconds', 'Extend'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['source', 'Source'], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
 };
 

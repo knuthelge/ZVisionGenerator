@@ -12,6 +12,9 @@ export type UpscaleMethod = 'seedvr2' | 'creative';
 
 export type WorkflowMode = 'image' | 'video';
 
+/** What the user picks in the top bar: an image, a video, or the continuation of a video. The workflow follows from it and the tab's images. */
+export type WorkspaceTab = 'image' | 'video' | 'extend';
+
 export type PromptSource = 'inline' | 'file';
 
 export interface ReuseState {
@@ -751,7 +754,6 @@ export interface WorkflowContractEntry {
   mode: WorkflowMode;
   model_kind: WorkflowMode;
   visible_controls: string[];
-  supports_reference_image: boolean;
   requires_reference_image: boolean;
   /** The workflow continues a chosen video (extend). */
   requires_source_video: boolean;
@@ -815,6 +817,19 @@ export interface WritableConfigSchema {
 
 // ── Draft / workspace form state ──────────────────────────────────────────────
 
+/** The text a tab keeps for itself: what is typed, and the Enhanced text made from it. Image and Video each hold one; Extend Video shares Video's. */
+export interface TabText {
+  prompt: string;
+  scene: string;
+  negativePrompt: string;
+  jsonPromptEnabled: boolean;
+  jsonPrompt: string;
+  enhancedPrompt: string;
+  enhancedScene: string;
+  enhancedFrom: EnhancedSource | null;
+  enhancedHistory: EnhancedRewrite[];
+}
+
 export interface DraftState {
   workflow: Workflow;
   promptSource: PromptSource;
@@ -847,13 +862,22 @@ export interface DraftState {
   lastImageModel: string;
   /** The video model last chosen in a video workflow; coming back from an image workflow restores it. Empty before one was chosen. */
   lastVideoModel: string;
+  /** Image tab: the start image's path on the host; null when none is set or it was uploaded (`referenceImageUpload`). */
   referenceImagePath: string | null;
+  /** Image tab: the file name of a start image uploaded from this device (its file is in `heldUploads` and the upload store); null when none. */
+  referenceImageUpload: string | null;
+  /** Video tab: the first frame's path on the host; null when none is set or it was uploaded (`firstFrameUpload`). */
+  firstFramePath: string | null;
+  /** Video tab: the file name of a first frame uploaded from this device; null when none. */
+  firstFrameUpload: string | null;
   /** The reference images, in prompt order ("image 1" is the first). An image uploaded from this device has an empty path here and its file in the Workspace. */
   referenceImagePaths: string[];
-  /** Paths in `referenceImagePaths` whose file was gone when Reuse brought them back; the row stays and blocks Generate. */
+  /** Image paths (start image, first frame, last frame, references) found gone; the slot stays and blocks Generate while it is used. */
   missingReferencePaths: string[];
-  /** Image to Video: the image the clip ends on; null when the model has no last frame or none is chosen. */
+  /** Video tab: the path of the image the clip ends on; null when none is chosen or it was uploaded (`endImageUpload`). It is kept while the first frame or the model's last frame is absent, and sent only while used. */
   endImagePath: string | null;
+  /** Video tab: the file name of a last frame uploaded from this device; null when none. */
+  endImageUpload: string | null;
   referenceImageStrength: number;
   frameCount: number;
   fps: number;
@@ -892,6 +916,11 @@ export interface DraftState {
   enhancedFrom: EnhancedSource | null;
   /** The last rewrites of one source text, oldest first; browser-local. Written only by Enhance, Reset and the JSON capability gate. */
   enhancedHistory: EnhancedRewrite[];
+  /**
+   * The text of the mode (image or video) that is not open; the fields from `prompt` to `enhancedHistory` (the same as
+   * `TabText`) hold the open one's. Opening the other mode swaps the two. Empty until the first switch.
+   */
+  savedText: Partial<Record<WorkflowMode, TabText>>;
   /** Last-used enhancement options for images; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;
   /** Last-used enhancement options for video, with the Rewrite choice of each video workflow; null until any are picked. */

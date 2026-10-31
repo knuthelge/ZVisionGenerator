@@ -1,7 +1,7 @@
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
   import { router } from '$lib/state/router.svelte';
-  import { assetAspect, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+  import { assetAspect, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
   import { Icon, Spinner } from '$lib/components/atoms';
   import { AssetTile } from '$lib/components/molecules';
   import type { GalleryAsset } from '$lib/types';
@@ -10,9 +10,8 @@
     assets: GalleryAsset[];
     loading?: boolean;
     deletingIds?: ReadonlySet<string>;
-    referenceUnavailable?: Partial<Record<ReferenceTarget, string>>;
-    /** The reference targets each tile's menu offers; absent offers an image and a video. */
-    referenceTargets?: readonly ReferenceTarget[];
+    /** What each tile's Use as items show: which targets are disabled, and their hints. */
+    useAs?: UseAsState;
     totalCount?: number | null;
     hasMore?: boolean;
     loadingMore?: boolean;
@@ -23,8 +22,7 @@
     assets,
     loading = false,
     deletingIds = new Set<string>(),
-    referenceUnavailable = {},
-    referenceTargets = undefined,
+    useAs = {},
     totalCount = null,
     hasMore = false,
     loadingMore = false,
@@ -106,7 +104,7 @@
       {:else}
         {#each assets as asset (asset.id)}
           <div role="listitem" class="strip-item" style="height: {TILE_HEIGHT_PX}px; width: {Math.round(TILE_HEIGHT_PX * assetAspect(asset))}px">
-            <AssetTile {asset} density="compact" deleting={deletingIds.has(asset.id)} {referenceUnavailable} {referenceTargets} class="h-full w-full" {...handlers} />
+            <AssetTile {asset} density="compact" deleting={deletingIds.has(asset.id)} {useAs} class="h-full w-full" {...handlers} />
           </div>
         {/each}
         {#if hasMore}

@@ -1,3 +1,4 @@
+import { imageSupport } from '$lib/state/imageSlots';
 import type { DraftState, ImageModelDefaults, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 
 /** Which workspace controls apply to the current workflow and model. */
@@ -23,16 +24,12 @@ export interface WorkspaceCapabilities {
   showEnhanceAuto: boolean;
   enhancer: PromptEnhancerContract | null;
   enhanceMaxWords: number;
-  /** The start image (img2img's image, or a video's first frame). */
+  /** The start image slot: img2img's image, or a video's first frame. It shows in both image workflows of a tab, not on a model that cannot start from an image. */
   showRefImage: boolean;
-  /** The References section: an image workflow on a model that takes reference images. */
-  showReferences: boolean;
-  /** How many references the model takes; 0 when the section is not shown. */
+  /** How many references the model takes; 0 when the list is not shown. */
   maxReferences: number;
-  /** How many of the draft's references the section shows and Generate sends: the first `maxReferences` of the list. */
-  referenceCount: number;
-  /** Image to Video on a model that can end a clip on a given image: the Last frame slot. */
-  showEndImage: boolean;
+  /** The model can end a clip on a given image: the Last frame slot is offered, whether or not a first frame is set. */
+  takesLastFrame: boolean;
   showDimensions: boolean;
   showRuns: boolean;
   showFrameCount: boolean;
@@ -69,14 +66,16 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     ? ((context?.image_model_defaults?.[state.model] ?? context?.defaults) as ImageModelDefaults | undefined)
     : undefined;
   // Permissive fallbacks keep models without explicit capability flags unaffected.
-  const supportsImg2img = imageDefaults?.supports_img2img ?? true;
   const supportsUpscale = imageDefaults?.supports_upscale ?? true;
   const supportsScheduler = imageDefaults?.supports_scheduler ?? true;
   const supportsNegativePrompt = isImageMode && (imageDefaults?.supports_negative_prompt ?? false);
   const enhancer = context?.prompt_enhancer ?? null;
-  const showRefImage = (visible.has('reference_image') || visible.has('reference_image_path')) && supportsImg2img;
-  const maxReferences = isImageMode && visible.has('references') ? Math.max(0, imageDefaults?.max_reference_images ?? 0) : 0;
+  // What the model takes for images is `imageSupport`'s; the workflow's contract decides which of it the workflow shows.
+  const images = imageSupport(context, state.model, isImageMode ? 'image' : 'video');
+  const showRefImage = (visible.has('reference_image') || visible.has('reference_image_path')) && images.start;
+  const maxReferences = visible.has('references') ? images.references : 0;
   const showImageUpscale = isImageMode && visible.has('image_upscale_enabled') && supportsUpscale;
+  const takesLastFrame = (visible.has('end_image') || visible.has('end_image_path')) && images.last;
 
   return {
     isImageMode,
@@ -100,10 +99,8 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
       ?? enhancer?.default_max_words
       ?? 300,
     showRefImage,
-    showReferences: maxReferences > 0,
     maxReferences,
-    referenceCount: Math.min(state.referenceImagePaths.length, maxReferences),
-    showEndImage: (visible.has('end_image') || visible.has('end_image_path')) && showRefImage,
+    takesLastFrame,
     showDimensions: visible.has('ratio') || visible.has('size') || visible.has('custom_dimensions'),
     showRuns: visible.has('runs'),
     showFrameCount: visible.has('frame_count'),

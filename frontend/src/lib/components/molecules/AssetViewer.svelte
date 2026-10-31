@@ -21,7 +21,7 @@
 <script lang="ts">
   import { Icon, ShortcutList } from '$lib/components/atoms';
   import { isTyping } from '$lib/keyboard';
-  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
@@ -45,10 +45,8 @@
     /** Where these assets come from, e.g. "History"; shown under the filename. */
     setLabel?: string;
     deletingIds?: ReadonlySet<string>;
-    /** Reference targets the current model can't use, with the reason. */
-    referenceUnavailable?: Partial<Record<ReferenceTarget, string>>;
-    /** The reference targets the menu offers; absent offers an image and a video. */
-    referenceTargets?: readonly ReferenceTarget[];
+    /** What the Use as items show: which targets are disabled, and their hints. */
+    useAs?: UseAsState;
     /** Called when the viewer nears the end of the list, so a paged source can load more. */
     onnearend?: () => void;
     onclose: () => void;
@@ -63,8 +61,7 @@
     open,
     setLabel = '',
     deletingIds = new Set<string>(),
-    referenceUnavailable = {},
-    referenceTargets = undefined,
+    useAs = {},
     onnearend,
     onclose,
     onnavigate,
@@ -115,7 +112,7 @@
   });
 
   const referenceItems = $derived<ActionMenuEntry[]>(
-    asset && onreference ? referenceEntries(asset, onreference, referenceUnavailable, referenceTargets) : []
+    asset && onreference ? referenceEntries(asset, onreference, useAs) : []
   );
 
   const upscaleItems = $derived<ActionMenuEntry[]>(
@@ -135,7 +132,7 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
   const moreItems = $derived.by<ActionMenuEntry[]>(() => {
     if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable, referenceTargets);
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, useAs);
     if (!asset.prompt) return entries;
     const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(asset.prompt!) };
     // Copy the prompt sits with Reuse at the top, before the first separator.

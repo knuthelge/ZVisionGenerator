@@ -18,83 +18,46 @@
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
-  import type { ChipKey } from './settingsChips';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { sheetDrag } from '$lib/actions/sheetDrag';
   import { fly } from 'svelte/transition';
-  import { tick } from 'svelte';
-  import { IMAGE_ACCEPT, isMissingRow, missingReason, referenceRows, splitImageFiles } from '$lib/state/references';
-  import { referenceEditor } from './referenceEditor';
-  import ReferenceThumbContent from './ReferenceThumbContent.svelte';
-
-  /** What an image picker shows and does: the first frame and the last frame use the same one. */
-  interface ImagePickerOptions {
-    /** The chip that opens the picker; keys its file input. */
-    slot: ChipKey;
-    preview: string | null;
-    previewAlt: string;
-    name: string | null;
-    emptyText: string;
-    clearLabel: string;
-    onclear: () => void;
-    onfile: (file: File | null) => void;
-    onbrowse: () => void;
-    onlatest: () => void;
-    pathId: string;
-    placeholder: string;
-    path: string | null;
-    onpath: (text: string) => void;
-    onpick: (path: string) => void;
-    help?: string;
-  }
+  import ImagesPopover from './ImagesPopover.svelte';
+  import type { ImagesView } from './imagesView';
+  import type { ChipKey } from './settingsChips';
 
   interface Props {
     key: ChipKey;
     context: WorkspaceContext;
     busy: boolean;
+    /** The images view of the open tab, computed once by the Workspace. */
+    images: ImagesView;
     /** The models the workflow can use, with their status. */
     models: ModelOption[];
     /** Quantization choices for the model, or null when it has none. */
     quantizeOptions: number[] | null;
-    imageFile: File | null;
-    referencePreviewUrl: string | null;
     lastSeed: number | null;
-    onImageFileChange: (file: File | null) => void;
-    /** The last frame: an uploaded image, the preview of a known path, and the changes the page keeps. */
-    endImageFile?: File | null;
-    endPreviewUrl?: string | null;
-    onEndImageFileChange?: (file: File | null) => void;
-    /** The images uploaded as references, by row, and the change the page keeps. */
-    referenceFiles?: (File | null)[];
-    onReferenceFilesChange?: (files: (File | null)[]) => void;
-    /** Make the latest output the last frame. */
-    onUseLatestAsEndFrame?: () => void;
     /** Pick a model: the page re-hydrates the defaults for it. */
     onModelChange: (model: string) => void;
-    /** Make the latest output the reference image. */
-    onUseLatestAsReference: () => void;
     onclose: () => void;
     /** Open Discover LoRAs (the popover closes first). */
     ondiscover?: () => void;
   }
 
-  let { key, context, busy, models, quantizeOptions, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, referenceFiles = [], onReferenceFilesChange = () => {}, onUseLatestAsEndFrame = () => {}, onModelChange, onUseLatestAsReference, onclose, ondiscover }: Props = $props();
+  let { key, context, busy, images, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
   const defaults = $derived(settingDefaultsFor(context, { workflow: s.workflow, model: s.model }));
   const TITLES: Record<ChipKey, string> = {
-    seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', strength: 'Image strength', seed: 'Seed', runs: 'Batch size',
-    reference: 'Start image', references: 'References', endReference: 'Last frame', source: 'Source video', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', model: 'Model',
+    seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', seed: 'Seed', runs: 'Batch size',
+    source: 'Source video', images: 'Images', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', model: 'Model',
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
-  // With a last frame beside it, the start image is the first frame.
-  const title = $derived(key === 'reference' && caps.showEndImage ? 'First frame' : TITLES[key]);
   /** The settings a popover's Reset puts back; none for the ones that have no default (model, LoRAs, files). */
   const RESET_KEYS: Partial<Record<ChipKey, SettingKey[]>> = {
-    seconds: ['frameCount'], steps: ['steps'], guidance: ['guidance'], strength: ['referenceImageStrength'], seed: ['seed'], runs: ['runs'],
+    seconds: ['frameCount'], steps: ['steps'], guidance: ['guidance'], seed: ['seed'], runs: ['runs'],
     size: ['ratio', 'size', 'dimensionMode'], audio: ['audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleReview'], upscale: ['upscaleEnabled', 'upscaleFactor', 'upscaleReview'],
   };
   const resetKeys = $derived(RESET_KEYS[key] ?? []);
@@ -189,89 +152,13 @@
     draft.update('loraString', formatLoraString(loraChips.map((chip) => (chip.name === name ? { name, weight } : chip))));
   }
 
-  // --- Reference and last frame ---
-  // Both pick an image the same ways; each has its own upload, preview and server browser.
-  const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : null));
-  const endName = $derived(endImageFile?.name ?? (s.endImagePath ? fileName(s.endImagePath) : null));
-  let browsing = $state(false);
-  let browsingEnd = $state(false);
-  // The hidden file input of each picker, by the chip key that opens it.
-  let fileInputs = $state<Partial<Record<ChipKey, HTMLInputElement | null>>>({});
-  let filePreviewUrl = $state<string | null>(null);
-  let endFilePreviewUrl = $state<string | null>(null);
-  // Forget a browsed file once it stops being the image, so choosing it again fires a change.
+  // --- Images ---
+  // The popover holds the section's groups; when the model can use no image (or the tab is Extend Video) it has nothing to show.
+  const imagesVisible = $derived(images.visible);
   $effect(() => {
-    const input = fileInputs.reference;
-    if (!imageFile && input) input.value = '';
+    if (key === 'images' && !imagesVisible) onclose();
   });
-  $effect(() => {
-    const input = fileInputs.endReference;
-    if (!endImageFile && input) input.value = '';
-  });
-  $effect(() => {
-    const url = imageFile ? URL.createObjectURL(imageFile) : null;
-    filePreviewUrl = url;
-    return () => { if (url) URL.revokeObjectURL(url); };
-  });
-  $effect(() => {
-    const url = endImageFile ? URL.createObjectURL(endImageFile) : null;
-    endFilePreviewUrl = url;
-    return () => { if (url) URL.revokeObjectURL(url); };
-  });
-  const referencePreview = $derived(filePreviewUrl ?? referencePreviewUrl);
-  const endPreview = $derived(endFilePreviewUrl ?? endPreviewUrl);
-
-  function chooseImagePath(path: string): void {
-    onImageFileChange(null);
-    draft.update('referenceImagePath', path);
-  }
-
-  function chooseEndImagePath(path: string): void {
-    onEndImageFileChange(null);
-    draft.update('endImagePath', path);
-  }
-
-  // --- References ---
-  // The rows are listed with a small thumbnail, a number over the name and a remove button. A row whose image is gone also
-  // has Replace: it points the add items below at that row, so the new image keeps its number.
-  // A list longer than the model takes keeps its other rows out of sight (and out of Generate); a row removed here brings one back.
-  const refRows = $derived(referenceRows(s.referenceImagePaths, referenceFiles));
-  const refCap = $derived(caps.maxReferences);
-  const refShown = $derived(refRows.slice(0, refCap));
-  const refFree = $derived(refCap - refRows.length);
-  let browsingRef = $state(false);
-  let refFileInput = $state<HTMLInputElement | null>(null);
-  let replacingRef = $state<number | null>(null);
-  // The row being replaced, as long as it is still there and still missing.
-  const refTarget = $derived(replacingRef !== null && refRows[replacingRef] && isMissingRow(refRows[replacingRef], s.missingReferencePaths) ? replacingRef : null);
-  const refEditor = referenceEditor({ rows: () => refRows, max: () => refCap, onfileschange: (files) => onReferenceFilesChange(files) });
-  const latestImage = $derived(galleryStore.assets[0]?.media_type === 'image' ? galleryStore.assets[0] : null);
-
-  async function removeRef(index: number): Promise<void> {
-    refEditor.remove(index);
-    await tick();
-    // Focus stays in the popover: the remove button now in this position, else the first way to add one.
-    (document.getElementById(`pop-ref-${index + 1}-remove`) ?? document.getElementById('pop-ref-add-device'))?.focus();
-  }
-
-  function chooseRefFiles(input: HTMLInputElement): void {
-    const chosen = [...(input.files ?? [])];
-    // Forget the choice at once, so choosing the same files again still fires a change.
-    input.value = '';
-    if (refTarget === null) {
-      refEditor.appendFiles(chosen);
-      return;
-    }
-    const [first] = splitImageFiles(chosen).supported;
-    if (first) refEditor.replaceWithFile(refTarget, first);
-    else refEditor.appendFiles(chosen);
-  }
-
-  /** Take a server path as the row being replaced, or as the next row when none is. */
-  function chooseRefPath(path: string): void {
-    if (refTarget === null) refEditor.append([{ path, file: null }]);
-    else refEditor.replaceWithPath(refTarget, path);
-  }
+  const title = $derived(TITLES[key]);
 
   // --- Source video ---
   // The popover only picks the video; the path field that submits it lives in the All sheet, so nothing here has a name.
@@ -303,27 +190,28 @@
   }
 
   const selectedModel = $derived(models.find((model) => model.id === s.model) ?? null);
+
+  /**
+   * Publish the room above the popover's anchor as `--pop-room`: the height between the top of the phone's workspace (under
+   * the top bar) and the top of the controls it rises from. It follows the controls as the composer opens and closes. Only
+   * `.image-pop` reads it.
+   */
+  function popoverRoom(node: HTMLElement): { destroy: () => void } {
+    const anchor = node.parentElement;
+    const area = node.closest<HTMLElement>('.compact-workspace');
+    if (!anchor || !area) return { destroy() {} };
+    const publish = (): void => {
+      node.style.setProperty('--pop-room', `${Math.max(0, Math.floor(anchor.getBoundingClientRect().top - area.getBoundingClientRect().top))}px`);
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(anchor);
+    observer.observe(area);
+    return { destroy: () => observer.disconnect() };
+  }
 </script>
 
-{#snippet imagePicker(p: ImagePickerOptions)}
-  <div class="pop-ref">
-    <span class="pop-thumb">{#if p.preview}<img src={p.preview} alt={p.previewAlt}>{:else}<Icon name="reference" size={20} />{/if}</span>
-    <span class="pop-item-text" class:muted={!p.name}>{p.name ?? p.emptyText}</span>
-    {#if p.name}<button type="button" class="ui-btn ui-btn-icon" aria-label={p.clearLabel} onclick={p.onclear}><Icon name="close" size={16} /></button>{/if}
-  </div>
-  <div class="pop-list">
-    <button type="button" class="pop-item" onclick={() => fileInputs[p.slot]?.click()}><Icon name="upload" size={16} />Choose from this device<small>photos or files</small></button>
-    <input bind:this={fileInputs[p.slot]} type="file" accept={IMAGE_ACCEPT} class="hidden" onchange={(e) => p.onfile(e.currentTarget.files?.[0] ?? null)}>
-    <button type="button" class="pop-item" onclick={p.onbrowse}><Icon name="folder" size={16} />Browse the server<small>output and reference folders</small></button>
-    {#if galleryStore.assets[0]?.media_type === 'image'}
-      <button type="button" class="pop-item" onclick={p.onlatest}><Icon name="film" size={16} />Use the latest output</button>
-    {/if}
-  </div>
-  <PathInput id={p.pathId} purpose="reference_image" class="ui-field pop-path" placeholder={p.placeholder} value={p.path ?? ''} oninput={p.onpath} onpick={p.onpick} />
-  {#if p.help}<p class="ui-help">{p.help}</p>{/if}
-{/snippet}
-
-<div class="setting-popover ui-sheet" use:sheetDrag={{ onclose }} in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
+<div class="setting-popover ui-sheet" class:image-pop={key === 'images'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
   <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
   <div class="ui-sheet-head" data-sheet-handle>
     <h3 class="ui-area-label">{title}</h3>
@@ -341,10 +229,6 @@
     {:else if key === 'guidance'}
       <InspectorNumber ariaLabel="Guidance" value={s.guidance} {...SPEC.guidance} stepper size="lg" onchange={(v) => v !== null && draft.update('guidance', v)} />
       <input class="ui-range pop-range" type="range" aria-label="Guidance" {...SPEC.guidance} value={s.guidance} style:--fill={rangeFill(s.guidance, SPEC.guidance)} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
-    {:else if key === 'strength'}
-      <InspectorNumber ariaLabel="Image strength" value={s.referenceImageStrength} {...SPEC.strength} stepper size="lg" onchange={(v) => v !== null && draft.update('referenceImageStrength', v)} />
-      <input class="ui-range pop-range" type="range" aria-label="Image strength" {...SPEC.strength} value={s.referenceImageStrength} style:--fill={rangeFill(s.referenceImageStrength, SPEC.strength)} oninput={(e) => draft.update('referenceImageStrength', Number(e.currentTarget.value))}>
-      <p class="ui-help">How far from the start image the result may go.</p>
     {:else if key === 'runs'}
       <InspectorNumber ariaLabel="Batch size" value={s.runs} {...SPEC.runs} stepper size="lg" onchange={(v) => v !== null && draft.update('runs', v)} />
       <input class="ui-range pop-range" type="range" aria-label="Batch size" min={1} max={16} step={1} value={Math.min(s.runs, 16)} style:--fill={rangeFill(Math.min(s.runs, 16), { min: 1, max: 16 })} oninput={(e) => draft.update('runs', Number(e.currentTarget.value))}>
@@ -462,62 +346,8 @@
           <label class="pop-row">Review the small render first<Toggle ariaLabel="Review before upscaling" checked={s.videoUpscaleReview} disabled={busy} onchange={(e) => draft.update('videoUpscaleReview', (e.currentTarget as HTMLInputElement).checked)} /></label>
         {/if}
       {/if}
-    {:else if key === 'reference'}
-      {@render imagePicker({
-        slot: 'reference', preview: referencePreview, previewAlt: 'Start image preview', name: referenceName, emptyText: 'No start image yet', clearLabel: 'Clear start image',
-        onclear: () => { onImageFileChange(null); draft.update('referenceImagePath', null); },
-        onfile: onImageFileChange, onbrowse: () => { browsing = true; },
-        onlatest: onUseLatestAsReference, pathId: 'ws-pop-image-path', placeholder: '/path/to/start-image.png', path: s.referenceImagePath,
-        onpath: (text) => draft.update('referenceImagePath', text || null), onpick: chooseImagePath,
-      })}
-      <PathBrowser bind:open={browsing} purpose="reference_image" initialPath={s.referenceImagePath} onchoose={chooseImagePath} />
-    {:else if key === 'endReference'}
-      {@render imagePicker({
-        slot: 'endReference', preview: endPreview, previewAlt: 'Last frame preview', name: endName, emptyText: 'No last frame', clearLabel: 'Clear last frame',
-        onclear: () => { onEndImageFileChange(null); draft.update('endImagePath', null); },
-        onfile: onEndImageFileChange, onbrowse: () => { browsingEnd = true; },
-        onlatest: onUseLatestAsEndFrame, pathId: 'ws-pop-end-image-path', placeholder: '/path/to/last-frame.png', path: s.endImagePath,
-        onpath: (text) => draft.update('endImagePath', text || null), onpick: chooseEndImagePath,
-        help: 'Optional. The clip ends on this image; different scenes dissolve into each other.',
-      })}
-      <PathBrowser bind:open={browsingEnd} purpose="reference_image" initialPath={s.endImagePath} onchoose={chooseEndImagePath} />
-    {:else if key === 'references'}
-      {#if refShown.length > 0}
-        <div class="pop-refs">
-          {#each refShown as row, index (index)}
-            {@const number = index + 1}
-            {@const gone = isMissingRow(row, s.missingReferencePaths)}
-            {@const name = row.file?.name ?? (row.path ? fileName(row.path) : '')}
-            <div class="pop-refrow" role="group" aria-label="Image {number}">
-              <span class="pop-thumb" class:missing={gone}>{#if gone}<Icon name="alert" size={16} />{:else}<ReferenceThumbContent file={row.file} url={galleryStore.previewUrlFor(row.path)} alt="Image {number} preview" />{/if}</span>
-              <span class="pop-refrow-text">
-                <span class="pop-refrow-num">Image {number}</span>
-                <span class="pop-refrow-name" class:missing={gone} title={name}>{name}</span>
-                {#if gone}<span class="pop-refrow-error">{missingReason(row)}</span>{/if}
-              </span>
-              {#if gone}<button id="pop-ref-{number}-replace" type="button" class="ui-btn ui-btn-sm" aria-pressed={refTarget === index} aria-label="Replace image {number}" onclick={() => { replacingRef = refTarget === index ? null : index; }}>Replace</button>{/if}
-              <button id="pop-ref-{number}-remove" type="button" class="ui-btn ui-btn-icon" aria-label="Remove image {number}" onclick={() => void removeRef(index)}><Icon name="close" size={16} /></button>
-            </div>
-          {/each}
-        </div>
-      {/if}
-      {#if refFree > 0 || refTarget !== null}
-        <div class="pop-group">
-          <h4 class="ui-area-label pop-group-label">{refTarget === null ? `Add image ${refRows.length + 1}` : `Replace image ${refTarget + 1}`}</h4>
-          <div class="pop-list">
-            <button id="pop-ref-add-device" type="button" class="pop-item" onclick={() => refFileInput?.click()}><Icon name="upload" size={16} />Choose from this device<small>photos or files</small></button>
-            <input bind:this={refFileInput} type="file" accept={IMAGE_ACCEPT} multiple={refTarget === null} class="hidden" onchange={(e) => chooseRefFiles(e.currentTarget)}>
-            <button type="button" class="pop-item" onclick={() => { browsingRef = true; }}><Icon name="folder" size={16} />Browse the server<small>output and reference folders</small></button>
-            {#if latestImage?.file_path}
-              <button type="button" class="pop-item" onclick={() => { const path = latestImage.file_path; if (path) chooseRefPath(path); }}><Icon name="film" size={16} />Use the latest output</button>
-            {/if}
-          </div>
-        </div>
-      {:else}
-        <p class="ui-help">That's all {refCap} this model takes. Remove one to add another.</p>
-      {/if}
-      <p class="ui-help">Refer to them in the prompt as image 1, image 2…</p>
-      <PathBrowser bind:open={browsingRef} purpose="reference_image" initialPath={null} onchoose={chooseRefPath} />
+    {:else if key === 'images'}
+      <ImagesPopover {context} {images} />
     {:else if key === 'source'}
       <div class="pop-ref">
         <span class="pop-thumb">{#if sourceThumbUrl}<video src={sourceThumbUrl} muted preload="metadata" aria-hidden="true"></video>{:else}<Icon name="film" size={20} />{/if}</span>
@@ -544,6 +374,10 @@
 <style>
   .setting-popover { display: flex; flex-direction: column; }
   .pop-body { display: flex; flex-direction: column; gap: 12px; padding: 4px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px)); max-height: 60dvh; overflow-y: auto; }
+  /* An image popover is the tallest one, and a phone's open composer leaves little room above the strip: it takes the room
+     the page measured (`--pop-room`) and its body scrolls, so the title, Reset and Close stay under the top bar. */
+  .setting-popover.image-pop { max-height: var(--pop-room, none); }
+  .image-pop .pop-body { flex: 1 1 auto; min-height: 0; max-height: none; }
   .pop-range { width: 100%; height: 36px; }
   .pop-range::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10px; }
   .pop-range::-moz-range-thumb { width: 24px; height: 24px; }
@@ -562,20 +396,8 @@
   .pop-lora { display: flex; align-items: center; gap: 10px; min-height: 48px; font-size: 15px; }
   .pop-lora :global(.inspector-number-wrap) { flex: none; width: 170px; }
   .pop-ref { display: flex; align-items: center; gap: 12px; min-height: 56px; font-size: 15px; }
-  .pop-refs { display: flex; flex-direction: column; }
-  .pop-refrow { display: flex; align-items: center; gap: 12px; min-height: 52px; font-size: 15px; }
-  .pop-refrow + .pop-refrow { border-top: 1px solid var(--color-border-subtle); }
-  .pop-refrow .pop-thumb { width: 40px; height: 40px; }
-  .pop-refrow-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 1px; }
-  .pop-refrow-num { font-size: var(--text-ui); color: var(--color-text-muted); }
-  .pop-refrow-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pop-thumb.missing { background: var(--color-error-surface); color: var(--color-error); }
-  .pop-refrow-name.missing, .pop-refrow-error { color: var(--color-error); }
-  .pop-refrow-error { font-size: var(--text-meta); line-height: 1.4; }
-  .pop-group { padding: 0 2px; }
-  .pop-group-label { padding: 0 0 4px; }
   .pop-thumb { display: grid; flex: none; place-items: center; width: 56px; height: 56px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
-  .pop-thumb img, .pop-thumb video { width: 100%; height: 100%; object-fit: cover; }
+  .pop-thumb video { width: 100%; height: 100%; object-fit: cover; }
   .pop-facts { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .pop-item:disabled { opacity: 0.5; }
   .pop-fold { color: var(--color-text-muted); }

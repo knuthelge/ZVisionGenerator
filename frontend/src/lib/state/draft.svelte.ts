@@ -1,11 +1,14 @@
 import { extendPrefillFor } from './extend';
 import { downloadStore } from './downloads.svelte';
+import { heldUploads } from './heldUploads.svelte';
+import { imageSupport, lastSlotPatch, startSlotPatch, type SlotValue, type ImageTab } from './imageSlots';
 import { keepInstalledLoras, modelLoraFamily, withoutLora } from './loras';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
+import { workflowFor, workspaceTab } from './workspaceTab';
 import { firstValues, listOf } from '$lib/prefillParams';
-import type { LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { WorkspaceTab, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -44,9 +47,13 @@ const DEFAULT_DRAFT: DraftState = {
   lastImageModel: '',
   lastVideoModel: '',
   referenceImagePath: null,
+  referenceImageUpload: null,
+  firstFramePath: null,
+  firstFrameUpload: null,
   referenceImagePaths: [],
   missingReferencePaths: [],
   endImagePath: null,
+  endImageUpload: null,
   referenceImageStrength: 0,
   frameCount: 0,
   fps: 24,
@@ -78,6 +85,7 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedScene: '',
   enhancedFrom: null,
   enhancedHistory: [],
+  savedText: {},
   enhanceSettings: null,
   enhanceSettingsVideo: null,
   enhanceAuto: false,
@@ -118,9 +126,6 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
 const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> = {
   negative_prompt: { negativePrompt: '' },
   guidance: { guidance: DEFAULT_DRAFT.guidance },
-  image_path: { referenceImagePath: null },
-  end_image_path: { endImagePath: null },
-  image_strength: { referenceImageStrength: DEFAULT_DRAFT.referenceImageStrength },
   quantize: { quantize: null },
   frames: { frameCount: DEFAULT_DRAFT.frameCount },
   audio: { audio: DEFAULT_DRAFT.audio },
@@ -138,6 +143,79 @@ const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> =
   upscale_sharpen: { upscaleSharpen: true },
   upscale_save_pre: {},
 };
+
+/**
+ * Return the state with the workflow its tab and images call for. The tab stays; whether it starts from text or from an
+ * image follows from the tab's start image and whether the model takes one.
+ */
+function _withDerivedWorkflow(ctx: WorkspaceContext | null, state: DraftState): DraftState {
+  const tab = workspaceTab(state.workflow);
+  const workflow = workflowFor(tab, state, imageSupport(ctx, state.model, tab === 'video' ? 'video' : 'image').start);
+  return workflow === state.workflow ? state : { ...state, workflow };
+}
+
+/** The draft fields that hold a tab's own text: what is typed and the Enhanced text made from it. */
+const TEXT_KEYS = [
+  'prompt', 'scene', 'negativePrompt', 'jsonPromptEnabled', 'jsonPrompt', 'enhancedPrompt', 'enhancedScene', 'enhancedFrom', 'enhancedHistory',
+] as const satisfies readonly (keyof TabText)[];
+
+const EMPTY_TEXT: TabText = {
+  prompt: '', scene: '', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [],
+};
+
+function _textOf(state: DraftState): TabText {
+  return Object.fromEntries(TEXT_KEYS.map((key) => [key, state[key]])) as unknown as TabText;
+}
+
+/**
+ * Return the state with the text of the mode a workflow belongs to. Image and Video each keep their own: moving to the other
+ * mode saves the open text under the mode being left and brings back what the entered one saved (nothing, for a mode not
+ * visited yet). Video and Extend Video share one text, so moving between them changes nothing.
+ */
+function _withTextOfMode(state: DraftState, workflow: Workflow): DraftState {
+  const from = workflowMode(state.workflow);
+  const to = workflowMode(workflow);
+  if (from === to) return state;
+  const { [to]: entering, ...rest } = state.savedText;
+  return { ...state, ...(entering ?? EMPTY_TEXT), savedText: { ...rest, [from]: _textOf(state) } };
+}
+
+/** The draft fields that hold an image path: one per slot, and the reference rows. */
+const SLOT_KEYS = ['referenceImagePath', 'firstFramePath', 'endImagePath', 'referenceImagePaths'] as const satisfies readonly (keyof DraftState)[];
+
+/** The paths the state's image slots hold (the start image, the frames and the reference rows); a slot can hold the empty path of an upload. */
+export function slotPaths(state: Pick<DraftState, (typeof SLOT_KEYS)[number]>, keys: readonly (typeof SLOT_KEYS)[number][] = SLOT_KEYS): string[] {
+  return keys.flatMap((key) => {
+    const value = state[key];
+    return Array.isArray(value) ? value : value ? [value] : [];
+  });
+}
+
+/** The draft fields that hold each tab's images, with the upload markers and Strength. Extend Video holds none. */
+const TAB_IMAGE_KEYS = {
+  image: ['referenceImagePath', 'referenceImageUpload', 'referenceImagePaths', 'referenceImageStrength'],
+  video: ['firstFramePath', 'firstFrameUpload', 'endImagePath', 'endImageUpload'],
+  extend: [],
+} as const satisfies Record<WorkspaceTab, readonly (keyof DraftState)[]>;
+
+/** The image fields of the tabs other than the open one: what a Reset keeps. */
+function _imagesOfOtherTabs(state: DraftState, tab: WorkspaceTab): Partial<DraftState> {
+  const cleared: readonly (keyof DraftState)[] = TAB_IMAGE_KEYS[tab];
+  const kept = Object.values(TAB_IMAGE_KEYS).flat().filter((key) => !cleared.includes(key));
+  return Object.fromEntries(kept.map((key) => [key, state[key]]));
+}
+
+/** The state's missing-file flags without the one for a replaced path, unless another slot still holds that path. */
+function _withoutFlag(state: DraftState, replaced: string | null): string[] {
+  if (!replaced || slotPaths(state).includes(replaced)) return state.missingReferencePaths;
+  return state.missingReferencePaths.filter((path) => path !== replaced);
+}
+
+/** The missing-file flags of the paths that slots a prefill leaves alone still hold. */
+function _flagsOfUntouchedSlots(state: DraftState, prefill: Partial<DraftState>): string[] {
+  const kept = new Set(slotPaths(state, SLOT_KEYS.filter((key) => !(key in prefill))));
+  return state.missingReferencePaths.filter((path) => kept.has(path));
+}
 
 function _applyImageDefaults(state: DraftState, defaults: ImageModelDefaults): DraftState {
   const pp = defaults.postprocess;
@@ -443,8 +521,6 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftS
     if (hidden.has('video_upscale_enabled')) nextState.videoUpscaleEnabled = false;
     if (hidden.has('video_upscale_review')) nextState.videoUpscaleReview = false;
     if (hidden.has('low_memory') && video) nextState.lowMemory = video.low_memory;
-    // The last frame is an Image to Video setting of the model: switching to one without it drops the image.
-    if (hidden.has('end_image_path')) nextState.endImagePath = null;
     if (video?.step_options?.length) nextState.steps = snapSteps(nextState.steps, video.step_options);
     if (workflow === 'extend' && nextState.extendFrames !== null) nextState.extendFrames = snapExtendFrames(nextState.extendFrames, extendStepFor(ctx, model));
   } else {
@@ -500,8 +576,12 @@ export const draft = {
   * Apply URL query/hash params to the draft using canonical workflow values only.
    * Only fields present in params are updated; absent fields are left unchanged. A param whose control the workflow
    * does not show is skipped, unless `ungated` is set.
+   *
+   * The images go to the slots of the tab the params open (`image_path` is the start image in Image and the first frame in
+   * Video). With `replaceSlots`, every slot of that tab is set and one the params do not name is emptied; a Use as
+   * (`use_as`) sets only its slot. With a context, the workflow is derived from the images at the end.
    */
-  loadFromUrl(input: PrefillParams, ctx: WorkspaceContext | null = null, options: { ungated?: boolean } = {}): void {
+  loadFromUrl(input: PrefillParams, ctx: WorkspaceContext | null = null, options: { ungated?: boolean; replaceSlots?: boolean } = {}): void {
     // A name that repeats (reference_path) arrives as a list; every other parameter reads as its first value.
     const params = firstValues(input);
     const lists = Object.fromEntries(Object.entries(input).map(([key, value]) => [key, listOf(value)]));
@@ -594,15 +674,24 @@ export const draft = {
       const supported = (_modelDefaultsFor(ctx, workflow, prefill.model ?? _draft.model) as ImageModelDefaults | null)?.supports_quantize === true;
       prefill.quantize = supported && params.quantize !== '' && ctx.quantize_options.includes(level) ? level : null;
     }
-    if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
-    if (params.end_image_path && canApply('end_image_path')) prefill.endImagePath = params.end_image_path;
-    // A named list, even an empty one, replaces the references: a reused image has exactly its source's. The list is kept
-    // whole, whatever the model takes; the Workspace shows and sends the first few. Flags from the rows they replace are
-    // dropped; the Workspace checks the new paths.
-    if (lists.reference_path !== undefined && canApply('reference_path')) {
-      prefill.referenceImagePaths = lists.reference_path.filter((path) => path !== '');
-      prefill.missingReferencePaths = [];
+    // The images belong to the tab the prefill opens. A Use as (`use_as`) sets only its slot; a full prefill replaces every
+    // slot of the tab, so what it does not name is empty (a reused text-made asset has no start image).
+    const slotTab = workspaceTab(workflow);
+    const replacing = options.replaceSlots === true && params.use_as === undefined;
+    if (slotTab !== 'extend') {
+      if (params.image_path && canApply('image_path')) Object.assign(prefill, startSlotPatch(slotTab, { path: params.image_path }));
+      else if (replacing) Object.assign(prefill, startSlotPatch(slotTab, null));
     }
+    if (slotTab === 'video') {
+      if (params.end_image_path && canApply('end_image_path')) Object.assign(prefill, lastSlotPatch({ path: params.end_image_path }));
+      else if (replacing) Object.assign(prefill, lastSlotPatch(null));
+    }
+    // A named list, even an empty one, replaces the references: a reused image has exactly its source's. The list is kept
+    // whole, whatever the model takes; the Workspace shows and sends the first few.
+    if (lists.reference_path !== undefined && canApply('reference_path')) prefill.referenceImagePaths = lists.reference_path.filter((path) => path !== '');
+    else if (replacing && slotTab === 'image') prefill.referenceImagePaths = [];
+    // Flags from the slots the prefill replaced are dropped, those of the other slots stay; the Workspace checks the new paths.
+    if (SLOT_KEYS.some((key) => key in prefill)) prefill.missingReferencePaths = _flagsOfUntouchedSlots(_draft, prefill);
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
     if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;
     // A reused preset the current model does not offer keeps the current preset size instead.
@@ -622,7 +711,9 @@ export const draft = {
     else if (prefill.width !== undefined || prefill.height !== undefined) prefill.dimensionMode = 'custom';
     // A model named here without a re-hydration still swaps LoRAs by family; LoRAs the URL names win over remembered ones.
     const loras = ctx && prefill.model !== undefined ? _swapFamilyLoras(ctx, _draft, _draft.model, prefill.model) : {};
-    _draft = { ..._draft, ...loras, ...prefill };
+    // Opening the other mode brings back its own text first, so a prefill sets the opened tab's text only.
+    _draft = { ..._withTextOfMode(_draft, workflow), ...loras, ...prefill };
+    if (ctx) _draft = _withDerivedWorkflow(ctx, _draft);
   },
 
   /**
@@ -674,32 +765,72 @@ export const draft = {
     }
     nextState = _rememberModel(ctx, _applyCapabilityGates(ctx, nextState));
 
-    _draft = nextState;
+    // The workflow follows from the tab and its images, whatever the model: one it cannot start from an image runs from text.
+    _draft = _withDerivedWorkflow(ctx, nextState);
     _authorityReady = true;
     this.saveDraft();
   },
 
   /**
-   * Switch workflow and re-hydrate all model/defaults from context for the new
-   * workflow mode. Called when the user changes the workflow via the top nav.
+   * Open a tab: the workflow becomes the one its images call for. When the tab is of the other mode (image or video) the
+   * applied preset is forgotten and the text swaps to what that mode kept. The model and defaults follow when the Workspace calls `onTabChange` with its context.
+   * Without a context the model's capabilities are unknown, so the tab's start image is assumed to be usable.
    */
-  onWorkflowChange(workflow: Workflow, ctx: WorkspaceContext): void {
-    _draft = { ..._draft, workflow };
-    _authorityReady = false;
-    // Switching between workflows of the same mode keeps the model, so it keeps the user's settings too.
+  setTab(tab: WorkspaceTab): void {
+    if (tab === workspaceTab(_draft.workflow)) return;
+    const workflow = workflowFor(tab, _draft, true);
+    const leavesMode = workflowMode(workflow) !== workflowMode(_draft.workflow);
+    _draft = { ..._withTextOfMode(_draft, workflow), workflow, ...(leavesMode ? { appliedPreset: null } : {}) };
+    this.saveDraft();
+  },
+
+  /**
+   * Re-hydrate the model and defaults for the tab that was just opened (`setTab`). Switching between tabs of the same mode
+   * keeps the model, so it keeps the user's settings too.
+   */
+  onTabChange(ctx: WorkspaceContext): void {
     this.hydrateFromContext(ctx, null, { keepSettings: true });
   },
 
   /**
+   * Set or clear the start image of a tab (the first frame in Video): the draft holds its path or the upload's file name,
+   * the file is held for Generate, the replaced path's missing flag is dropped, and the workflow is derived again. Nothing
+   * else changes, so the settings and the model stay.
+   *
+   * @param ctx Tells whether the model takes a start image; without it one is assumed.
+   */
+  setStartImage(tab: ImageTab, value: SlotValue, ctx: WorkspaceContext | null): void {
+    const replaced = tab === 'image' ? _draft.referenceImagePath : _draft.firstFramePath;
+    heldUploads.setStart(tab, value !== null && 'file' in value ? value.file : null);
+    const patched = { ..._draft, ...startSlotPatch(tab, value) };
+    _draft = _withDerivedWorkflow(ctx, { ...patched, missingReferencePaths: _withoutFlag(patched, replaced) });
+    this.saveDraft();
+  },
+
+  /** Set or clear the last frame: the draft holds its path or the upload's file name, and the file is held for Generate. */
+  setLastFrame(value: SlotValue): void {
+    const patched = { ..._draft, ...lastSlotPatch(value) };
+    heldUploads.setLastFrame(value !== null && 'file' in value ? value.file : null);
+    _draft = { ...patched, missingReferencePaths: _withoutFlag(patched, _draft.endImagePath) };
+    this.saveDraft();
+  },
+
+  /**
    * Reset all generation selections to the model's defaults, keeping the
-   * workflow, model, LoRAs, quantization, and prompt inputs (including the
+   * tab, model, LoRAs, quantization, and the prompt inputs of both tabs (including the
    * Enhanced prompt) untouched. Enhancement options and auto-enhance reset. The applied preset clears, since its
-   * settings are gone.
+   * settings are gone. The open tab's images clear with their upload markers and held files (Image: the start image, the
+   * references and Strength; Video: the first and last frame; Extend Video: none), so its workflow falls back to text.
+   * The other tabs keep theirs.
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
+    const tab = workspaceTab(s.workflow);
+    const kept = { ...DEFAULT_DRAFT, ..._imagesOfOtherTabs(s, tab) };
+    const keptPaths = slotPaths(kept);
     _draft = {
-      ...DEFAULT_DRAFT,
+      ...kept,
+      missingReferencePaths: s.missingReferencePaths.filter((path) => keptPaths.includes(path)),
       workflow: s.workflow,
       model: s.model,
       loraString: s.loraString,
@@ -717,6 +848,8 @@ export const draft = {
       extendPrefill: s.extendPrefill,
       extendFrames: _extendSource?.fps ? defaultExtendFrames(_extendSource.fps, extendStepFor(ctx, s.model)) : s.extendFrames,
     };
+    // Reset empties the open tab's images, the uploads held for them included; Extend Video holds none.
+    if (tab !== 'extend') heldUploads.clearTab(tab);
     this.hydrateFromContext(ctx, s.model);
     // Restore prompt inputs after hydration, which re-applies the default prompt source.
     _draft = {
@@ -734,6 +867,7 @@ export const draft = {
       enhancedScene: s.enhancedScene,
       enhancedFrom: s.enhancedFrom,
       enhancedHistory: s.enhancedHistory,
+      savedText: s.savedText,
     };
     this.saveDraft();
   },
@@ -755,7 +889,8 @@ export const draft = {
     this.hydrateFromContext(ctx, model);
     // Every preset key lands, whether or not the workflow shows its control.
     this.loadFromUrl(params, ctx, { ungated: true });
-    _draft = { ..._draft, ...patch, ...kept };
+    // The kept workflow predates the preset's model, so it is derived again from the tab's images and that model.
+    _draft = _withDerivedWorkflow(ctx, { ..._draft, ...patch, ...kept });
     // The restored text and options meet the new model again, as they do when it is picked by hand.
     _draft = _applyCapabilityGates(ctx, _draft);
     // A custom size or step count the preset carried may exceed the kept model's limits, as after a manual model switch.
@@ -784,9 +919,7 @@ export const draft = {
   },
 
   update<K extends keyof DraftState>(key: K, value: DraftState[K]): void {
-    // Switching between image and video ends the applied preset's hold; presets belong to one mode.
-    const leavesMode = key === 'workflow' && workflowMode(value as Workflow) !== workflowMode(_draft.workflow);
-    _draft = { ..._draft, [key]: value, ...(leavesMode ? { appliedPreset: null } : {}) };
+    _draft = { ..._draft, [key]: value };
     this.saveDraft();
   },
 
@@ -865,6 +998,7 @@ export const draft = {
     _draft = { ...DEFAULT_DRAFT };
     _authorityReady = false;
     _extendSource = null;
+    heldUploads.clear();
     localStorage.removeItem(STORAGE_KEY);
   }
 };

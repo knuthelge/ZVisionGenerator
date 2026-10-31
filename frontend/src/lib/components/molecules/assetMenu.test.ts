@@ -104,25 +104,29 @@ describe('referenceEntries', () => {
   const asset = makeAsset(undefined);
   const ids = (entries: ReturnType<typeof referenceEntries>) => entries.flatMap((entry) => (entry.kind === 'item' ? [entry.id] : []));
 
-  it('offers an image and a video target by default', () => {
-    expect(ids(referenceEntries(asset, vi.fn()))).toEqual(['reference-image', 'reference-video']);
-  });
+  it('lists Start image, Reference, First frame and Last frame with hints', () => {
+    const entries = referenceEntries(asset, vi.fn(), {
+      reference: { disabled: false, hint: 'next slot' },
+      last: { disabled: true, hint: 'LTX has no last frame' },
+    });
 
-  it('adds the last frame when the workspace has the slot', () => {
-    const entries = referenceEntries(asset, vi.fn(), {}, ['image', 'video', 'last']);
-    expect(ids(entries)).toEqual(['reference-image', 'reference-video', 'reference-last-frame']);
+    expect(ids(entries)).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame']);
+    expect(entries.flatMap((entry) => (entry.kind === 'item' ? [entry.label] : []))).toEqual(['Start image', 'Reference', 'First frame', 'Last frame']);
+    expect(entries[1]).toMatchObject({ hint: 'next slot', disabled: false, title: undefined });
+    expect(entries[3]).toMatchObject({ hint: 'LTX has no last frame', disabled: true, title: 'LTX has no last frame' });
+    expect(entries[0]).toMatchObject({ disabled: false, hint: undefined });
   });
 
   it('reports the chosen target', () => {
     const onreference = vi.fn();
-    for (const entry of referenceEntries(asset, onreference, {}, ['image', 'video', 'last'])) if (entry.kind === 'item') entry.onselect?.();
-    expect(onreference.mock.calls.map(([, target]) => target)).toEqual(['image', 'video', 'last']);
+    for (const entry of referenceEntries(asset, onreference)) if (entry.kind === 'item') entry.onselect?.();
+    expect(onreference.mock.calls.map(([, target]) => target)).toEqual(['image', 'reference', 'video', 'last']);
   });
 
-  it('carries the targets through the asset menu', () => {
+  it('carries the use-as state through the asset menu', () => {
     const usable = { ...asset, file_path: '/outputs/out/a.png' };
-    const menu = assetMenuEntries(usable, { onreference: vi.fn() }, false, {}, ['image', 'video', 'last']);
+    const menu = assetMenuEntries(usable, { onreference: vi.fn() }, false, { image: { disabled: true, hint: 'Ideogram 4 can\'t use a start image' } });
+    expect(menu.find((entry) => entry.kind === 'item' && entry.id === 'reference-image')).toMatchObject({ disabled: true });
     expect(ids(menu)).toContain('reference-last-frame');
-    expect(ids(assetMenuEntries(usable, { onreference: vi.fn() }))).not.toContain('reference-last-frame');
   });
 });

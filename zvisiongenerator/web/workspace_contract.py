@@ -35,6 +35,10 @@ PROMPT_FILE_CONTRACT = {
         "ignored_scene_image": "Scene entries are ignored for image workflows.",
     },
 }
+
+# The controls of the last-frame slot. Only a family that declares ``end_frame`` offers them.
+END_FRAME_CONTROLS = ("end_image", "end_image_path", "end_image_clear")
+
 WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     "txt2img": {
         "mode": "image",
@@ -53,6 +57,9 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "prompt_file_option",
             "prompt_file_preview",
             "prompt_file_edit",
+            "reference_image",
+            "reference_image_path",
+            "reference_image_clear",
             "references",
             "references_clear",
             "ratio",
@@ -74,10 +81,9 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "image_upscale_sharpen",
             "image_upscale_review",
         ],
-        "supports_reference_image": False,
         "requires_reference_image": False,
         "requires_source_video": False,
-        "clear_fields": ["image_path", "end_image_path", "image_strength", "frames", "audio", "low_memory"],
+        "clear_fields": ["frames", "audio", "low_memory"],
     },
     "img2img": {
         "mode": "image",
@@ -121,10 +127,9 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "image_upscale_sharpen",
             "image_upscale_review",
         ],
-        "supports_reference_image": True,
         "requires_reference_image": True,
         "requires_source_video": False,
-        "clear_fields": ["end_image_path", "frames", "audio", "low_memory"],
+        "clear_fields": ["frames", "audio", "low_memory"],
     },
     "txt2vid": {
         "mode": "video",
@@ -142,6 +147,10 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "prompt_file_option",
             "prompt_file_preview",
             "prompt_file_edit",
+            "reference_image",
+            "reference_image_path",
+            "reference_image_clear",
+            *END_FRAME_CONTROLS,
             "ratio",
             "size",
             "custom_dimensions",
@@ -155,15 +164,11 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "video_upscale_factor",
             "video_upscale_review",
         ],
-        "supports_reference_image": False,
         "requires_reference_image": False,
         "requires_source_video": False,
         "clear_fields": [
             "negative_prompt",
             "guidance",
-            "image_path",
-            "end_image_path",
-            "image_strength",
             "quantize",
             "sharpen_enabled",
             "sharpen_amount",
@@ -198,9 +203,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "reference_image",
             "reference_image_path",
             "reference_image_clear",
-            "end_image",
-            "end_image_path",
-            "end_image_clear",
+            *END_FRAME_CONTROLS,
             "ratio",
             "size",
             "custom_dimensions",
@@ -214,7 +217,6 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "video_upscale_factor",
             "video_upscale_review",
         ],
-        "supports_reference_image": True,
         "requires_reference_image": True,
         "requires_source_video": False,
         "clear_fields": [
@@ -261,15 +263,11 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "audio",
             "low_memory",
         ],
-        "supports_reference_image": False,
         "requires_reference_image": False,
         "requires_source_video": True,
         "clear_fields": [
             "negative_prompt",
             "guidance",
-            "image_path",
-            "end_image_path",
-            "image_strength",
             "quantize",
             "sharpen_enabled",
             "sharpen_amount",
@@ -293,10 +291,6 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
         ],
     },
 }
-
-
-# The controls of the last-frame slot. Only a family that declares ``end_frame`` offers them.
-END_FRAME_CONTROLS = ("end_image", "end_image_path", "end_image_clear")
 
 # The workflow controls a video family loses when it lacks a capability, by capability name.
 _CONTROLS_WITHOUT_CAPABILITY = {

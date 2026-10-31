@@ -97,29 +97,47 @@ describe('TopNav workflow tabs', () => {
     return Array.from(target.querySelectorAll('nav[aria-label="Workflow"] button')).map((tab) => tab.textContent?.trim() ?? '');
   }
 
-  it('lists the four workflows until the contract is known, then adds Extend Video after Text to Video when it lists extend', () => {
+  it('shows Image and Video until the contract is known, then adds Extend Video when it lists extend', () => {
     const props = reactiveProps<{ currentPage: string; workflows: Workflow[] | null }>({ currentPage: 'workspace', workflows: null });
     app = flushSync(() => mount(TopNav, { target, props }));
-    expect(workflowTabs()).toEqual(['Text to Image', 'Image to Image', 'Image to Video', 'Text to Video']);
+    expect(workflowTabs()).toEqual(['Image', 'Video']);
 
     flushSync(() => { props.workflows = [...BASE, 'extend']; });
-    expect(workflowTabs()).toEqual(['Text to Image', 'Image to Image', 'Image to Video', 'Text to Video', 'Extend Video']);
+    expect(workflowTabs()).toEqual(['Image', 'Video', 'Extend Video']);
   });
 
-  it('has no Extend Video tab when the contract does not list extend', () => {
+  it('shows Extend Video only when the contract lists it', () => {
     mountNav({ workflows: BASE });
-    expect(workflowTabs()).not.toContain('Extend Video');
-    expect(workflowTabs()).toHaveLength(4);
+    expect(workflowTabs()).toEqual(['Image', 'Video']);
   });
 
-  it('switches the draft to the extend workflow and marks the tab pressed', () => {
+  it('marks Image for both txt2img and img2img, and Video for both video workflows', () => {
     mountNav({ workflows: [...BASE, 'extend'] });
-    const tab = Array.from(target.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workflow"] button')).find((button) => button.textContent?.trim() === 'Extend Video')!;
-    expect(tab.getAttribute('aria-pressed')).toBe('false');
+    const pressed = () => Array.from(target.querySelectorAll('nav[aria-label="Workflow"] button[aria-pressed="true"]')).map((tab) => tab.textContent?.trim());
+    expect(pressed()).toEqual(['Image']);
 
-    flushSync(() => tab.click());
+    flushSync(() => draft.update('workflow', 'img2img'));
+    expect(pressed()).toEqual(['Image']);
+
+    flushSync(() => draft.update('workflow', 'img2vid'));
+    expect(pressed()).toEqual(['Video']);
+  });
+
+  it('calls draft.setTab with the clicked tab and marks it pressed', () => {
+    mountNav({ workflows: [...BASE, 'extend'] });
+    const setTab = vi.spyOn(draft, 'setTab');
+    const tab = (label: string) => Array.from(target.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workflow"] button')).find((button) => button.textContent?.trim() === label)!;
+
+    flushSync(() => tab('Extend Video').click());
+    expect(setTab).toHaveBeenCalledWith('extend');
     expect(draft.state.workflow).toBe('extend');
-    expect(tab.getAttribute('aria-pressed')).toBe('true');
+    expect(tab('Extend Video').getAttribute('aria-pressed')).toBe('true');
+    expect(tab('Image').getAttribute('aria-pressed')).toBe('false');
+
+    flushSync(() => tab('Video').click());
+    expect(setTab).toHaveBeenCalledWith('video');
+    expect(draft.state.workflow).toBe('txt2vid');
+    setTab.mockRestore();
   });
 
   it('shows no workflow tabs outside the Workspace', () => {

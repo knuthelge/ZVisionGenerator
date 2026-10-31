@@ -1,8 +1,7 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
-  import { InspectorRow, PathBrowser, PathInput } from '$lib/components/molecules';
-  import { fileName } from '$lib/components/molecules/assetDetails';
+  import { InspectorRow, PathBrowser } from '$lib/components/molecules';
   import ReferenceThumbContent from './ReferenceThumbContent.svelte';
   import { IMAGE_ACCEPT, splitImageFiles, unsupportedMessage } from '$lib/state/references';
   import { addToast } from '$lib/state/toasts.svelte';
@@ -16,19 +15,16 @@
   }
 
   interface Props {
-    /** Prefix of the slot's element ids (`<idBase>-browse`, `-file`, `-path` and `-label`). */
+    /** Prefix of the slot's element ids (`<idBase>-browse`, `-file`, `-clear` and `-label`). */
     idBase: string;
     /** The image row's label. */
     label: string;
     names: ReferenceSlotNames;
-    /** The path field's form name; the path is submitted under it. */
-    pathName?: string;
-    placeholder?: string;
     /** Shown in the name column while the slot is empty. */
     emptyText: string;
     /** The empty text reads as optional rather than as a prompt to act. */
     emptyMuted?: boolean;
-    /** The host path chosen or typed; null when none. */
+    /** The host path chosen; null when none. */
     path: string | null;
     /** An image uploaded from this device, attached on submit only while it is the slot's image. */
     file: File | null;
@@ -36,11 +32,9 @@
     previewUrl: string | null;
     onfilechange: (file: File | null) => void;
     onpathchange: (path: string | null) => void;
-    /** Show the Path row under the image row; a slot whose paths are submitted elsewhere hides it. */
-    pathRow?: boolean;
     /** The glyph in the thumbnail while the slot is empty. */
     emptyIcon?: IconName;
-    /** Show the clear button; an empty add slot has nothing to clear. */
+    /** Show the clear button; a slot with no image has nothing to clear. */
     clearable?: boolean;
     /** The upload takes several files at once and hands them to `onfileschange` (in order) instead of `onfilechange`. */
     onfileschange?: (files: File[]) => void;
@@ -50,11 +44,15 @@
     missing?: boolean;
     /** The explanation under a missing image; the slot's group points at it. */
     error?: string;
+    /** The image's name; empty while the slot holds none. */
+    name?: string;
+    /** The image is kept but not used: the thumbnail fades to grey and the label and name turn muted. */
+    unused?: boolean;
   }
 
   let {
-    idBase, label, names, pathName, placeholder, emptyText, emptyMuted = false, path, file, previewUrl, onfilechange, onpathchange,
-    pathRow = true, emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error,
+    idBase, label, names, emptyText, emptyMuted = false, path, file, previewUrl, onfilechange, onpathchange,
+    emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error, name = '', unused = false,
   }: Props = $props();
 
   let dragOver = $state(false);
@@ -65,8 +63,6 @@
   $effect(() => {
     if (!file && fileInput) fileInput.value = '';
   });
-
-  const name = $derived(file?.name ?? (path ? fileName(path) : ''));
 
   /** Take a host path as the image, replacing an uploaded file. */
   function choosePath(chosen: string): void {
@@ -107,8 +103,10 @@
 
 <div
   class="reference-drop"
+  class:unused
+  data-unused={unused}
   role="group"
-  aria-labelledby="{idBase}-label"
+  aria-label={name ? `${label}: ${name}` : label}
   aria-describedby={error ? `${idBase}-error` : undefined}
   data-dragover={dragOver}
   ondragover={(e) => { e.preventDefault(); dragOver = true; }}
@@ -137,21 +135,6 @@
     {/if}
   </InspectorRow>
   {#if error}<p id="{idBase}-error" class="row-hint ui-help-error">{error}</p>{/if}
-  {#if pathRow}
-    <InspectorRow label="Path" forId="{idBase}-path">
-      <PathInput
-        id="{idBase}-path"
-        name={pathName}
-        purpose="reference_image"
-        class="inspector-text"
-        plain
-        {placeholder}
-        value={path ?? ''}
-        oninput={(text) => onpathchange(text || null)}
-        onpick={choosePath}
-      />
-    </InspectorRow>
-  {/if}
 </div>
 <PathBrowser bind:open={browsing} purpose="reference_image" initialPath={path} onchoose={choosePath} />
 
@@ -161,6 +144,9 @@
   .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
   .reference-thumb :global(img) { width: 100%; height: 100%; object-fit: cover; }
   .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
+  /* A slot that is kept but not used: the picture fades to grey, the words stay readable. */
+  .reference-drop.unused .reference-thumb :global(img) { opacity: 0.4; filter: grayscale(1); }
+  .reference-drop.unused :global(.inspector-label), .reference-drop.unused .reference-name { color: var(--color-text-muted); }
   .reference-name.empty { color: var(--color-text-muted); }
   .reference-name.drop { color: var(--color-primary-main); }
   /* A file that is gone: the thumbnail takes the error surface and the name the error colour. */

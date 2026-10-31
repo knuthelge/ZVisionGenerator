@@ -3,7 +3,6 @@
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection, Select } from '$lib/components/molecules';
-  import { fileName } from '$lib/components/molecules/assetDetails';
   import { extendGuard, extendModelSupport } from '$lib/state/extend';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
@@ -15,8 +14,8 @@
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
-  import ReferenceSlot from './ReferenceSlot.svelte';
-  import ReferencesSection from './ReferencesSection.svelte';
+  import ImagesSection from './ImagesSection.svelte';
+  import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
   import WaitingLabel from './WaitingLabel.svelte';
   import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
@@ -29,22 +28,10 @@
     jobsActive?: boolean;
     /** Why the server refused the last Generate, shown above the button. */
     submitError?: string | null;
-    imageFile: File | null;
-    /** Preview for a reference path that points at a known asset. */
-    referencePreviewUrl: string | null;
     /** Seed of the most recent output, reused when the seed gets locked. */
     lastSeed: number | null;
-    onImageFileChange: (file: File | null) => void;
-    /** An image uploaded as the last frame (Image to Video, on a model that has one). */
-    endImageFile?: File | null;
-    /** Preview for a last-frame path that points at a known asset. */
-    endPreviewUrl?: string | null;
-    onEndImageFileChange?: (file: File | null) => void;
-    /** The images uploaded as references, by row (Text to Image and Image to Image, on a model that takes references). */
-    referenceFiles?: (File | null)[];
-    /** Why a reference blocks Generate (a row whose image is gone), computed once by the Workspace; null when none does. */
-    referenceBlock?: string | null;
-    onReferenceFilesChange?: (files: (File | null)[]) => void;
+    /** The images view of the open tab, computed once by the Workspace: Generate waits while an image the run uses is gone. */
+    images: ImagesView;
     /** Copy the CLI command for the current settings; the button is hidden without it. */
     oncopycli?: () => void;
     /** Off: the footer closes the pane (`ondone`) instead of generating, where another button owns Generate. */
@@ -52,7 +39,7 @@
     ondone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, endImageFile = null, endPreviewUrl = null, onEndImageFileChange = () => {}, referenceFiles = [], referenceBlock = null, onReferenceFilesChange = () => {}, oncopycli, submit = true, ondone }: Props = $props();
+  let { context, busy, jobsActive = false, submitError = null, lastSeed, images, oncopycli, submit = true, ondone }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -201,27 +188,19 @@
     draft.update('seed', s.seed !== null ? null : (lastSeed ?? randomSeed()));
   }
 
-  // --- Start image ----------------------------------------------------------
-  const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : ''));
-  const endName = $derived(endImageFile?.name ?? (s.endImagePath ? fileName(s.endImagePath) : ''));
-  // The summary reads "start.png → end.png" once both are set, and the first alone (or None) otherwise.
-  const referenceSummary = $derived(caps.showEndImage && endName ? `${referenceName || 'None'} → ${endName}` : referenceName || 'None');
-
   // --- Footer ---------------------------------------------------------------
   const promptFileMode = $derived(s.promptSource === 'file');
   const promptChoiceMissing = $derived(promptFileMode && s.promptFileOptionIds.length === 0);
   // A LoRA chip whose file is downloading (or failed) holds Generate back.
   const block = $derived(generateBlock(s.loraString, context.loras));
   const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : null);
-  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || referenceBlock !== null || block.blocked);
-  // One reason at a time, linked to Generate: the source comes first, then the references, then the prompt file.
-  const generateReason = $derived(sourceGuard.note ?? referenceBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
+  const imageBlock = $derived(images.block);
+  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || block.blocked);
+  // One reason at a time, linked to Generate: the source comes first, then the images, then the prompt file.
+  const generateReason = $derived(sourceGuard.note ?? imageBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
 
   function resetAll(): void {
     draft.resetSelections(context);
-    onImageFileChange(null);
-    onEndImageFileChange(null);
-    onReferenceFilesChange([]);
   }
 
   function scrubber(value: number | null, spec: NumberSpec, onchange: (value: number) => void, disabled = false): ScrubOptions {
@@ -339,12 +318,6 @@
           <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...SPEC.guidance} value={s.guidance} style:--fill={rangeFill(s.guidance, SPEC.guidance)} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
-      {#if caps.showI2IStrength}
-        <InspectorRow label="Img strength" forId="ws-image-strength" scrubber={scrubber(s.referenceImageStrength, SPEC.strength, (v) => draft.update('referenceImageStrength', v))} changed={changed('referenceImageStrength')} onreset={() => reset('referenceImageStrength')}>
-          <InspectorNumber id="ws-image-strength" name="image_strength" value={s.referenceImageStrength} {...SPEC.strength} onchange={(v) => v !== null && draft.update('referenceImageStrength', v)} />
-          <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...SPEC.strength} value={s.referenceImageStrength} style:--fill={rangeFill(s.referenceImageStrength, SPEC.strength)} oninput={(e) => draft.update('referenceImageStrength', Number(e.currentTarget.value))}>
-        </InspectorRow>
-      {/if}
       {#if caps.showSeed}
         <InspectorRow label="Seed" forId="ws-seed" changed={changed('seed')} onreset={() => reset('seed')}>
           <InspectorNumber id="ws-seed" name="seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" stepper={false} onchange={(v) => draft.update('seed', v)} />
@@ -387,44 +360,7 @@
       {/if}
     </InspectorSection>
 
-    {#if caps.showRefImage}
-      <InspectorSection id="reference" title={caps.showEndImage ? 'Frames' : 'Start image'} summary={referenceSummary} active={Boolean(referenceName || (caps.showEndImage && endName))}>
-        <ReferenceSlot
-          idBase="ws-image"
-          label={caps.showEndImage ? 'First frame' : 'Image'}
-          names={{ browse: 'Browse for a start image', upload: 'Upload a start image from this device', clear: 'Clear start image', preview: 'Start image preview' }}
-          pathName="image_path"
-          placeholder="/path/to/start-image.png"
-          emptyText="Browse or drop"
-          path={s.referenceImagePath}
-          file={imageFile}
-          previewUrl={referencePreviewUrl}
-          onfilechange={onImageFileChange}
-          onpathchange={(path) => draft.update('referenceImagePath', path)}
-        />
-        {#if caps.showEndImage}
-          <ReferenceSlot
-            idBase="ws-end-image"
-            label="Last frame"
-            names={{ browse: 'Browse for a last-frame image', upload: 'Upload a last-frame image from this device', clear: 'Clear last frame', preview: 'Last frame preview' }}
-            pathName="end_image_path"
-            placeholder="/path/to/last-frame.png"
-            emptyText="Optional"
-            emptyMuted
-            path={s.endImagePath}
-            file={endImageFile}
-            previewUrl={endPreviewUrl}
-            onfilechange={onEndImageFileChange}
-            onpathchange={(path) => draft.update('endImagePath', path)}
-          />
-          {#if endName}<p class="row-hint">The clip ends on this image; different scenes dissolve into each other.</p>{/if}
-        {/if}
-      </InspectorSection>
-    {/if}
-
-    {#if caps.showReferences}
-      <ReferencesSection max={caps.maxReferences} files={referenceFiles} onfileschange={onReferenceFilesChange} />
-    {/if}
+    <ImagesSection {context} {images} {busy} />
 
     {#if showPostprocess}
       <InspectorSection id="postprocess" title="Post-processing" summary={postprocessOn ? `${postprocessOn} on` : 'Off'} active={postprocessOn > 0}>
@@ -624,7 +560,7 @@
         type="button"
         disabled={busy}
         onclick={resetAll}
-        title="Reset settings to model defaults (keeps model, LoRAs, quantization, and prompt)"
+        title="Reset settings and images to model defaults (keeps model, LoRAs, quantization and prompt)"
         aria-label="Reset settings"
         class="ui-btn"
       >

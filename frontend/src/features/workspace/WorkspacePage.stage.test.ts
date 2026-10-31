@@ -7,15 +7,18 @@ import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
+import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { hasPendingReference, requestReference } from '$lib/state/pendingReference.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { toasts } from '$lib/state/toasts.svelte';
+import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { EnhanceFrame, SettingsPreset, JobContext, PromptEnhancerContract, WorkspaceContext, GalleryAsset } from '$lib/types';
 
 import WorkspacePage from './WorkspacePage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
-import { makeAsset, makeContext, makeGalleryPage } from '../../test-utils/workspace';
-import { answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
+import { makeAsset, makeContext, makeGalleryPage, makeImageDefaults } from '../../test-utils/workspace';
+import { addFiles, answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
@@ -327,10 +330,9 @@ describe('WorkspacePage asset actions and settings', () => {
     await settle();
 
     expect(draft.state.workflow).toBe('img2img');
-    expect((target.querySelector('input[name="image_path"]') as HTMLInputElement).value).toBe('/outputs/out/first.png');
-    // The reference row previews the known asset.
-    expect(target.querySelector(`[data-section="reference"] img[src="${asset.url}"]`)).not.toBeNull();
-    expect(new FormData(target.querySelector('form')!).get('image_path')).toBe('/outputs/out/first.png');
+    expect(draft.state.referenceImagePath).toBe('/outputs/out/first.png');
+    // The start image row previews the known asset.
+    expect(target.querySelector(`[data-section="images"] img[src="${asset.url}"]`)).not.toBeNull();
   });
 
   it('deletes an asset from history after confirmation', async () => {
@@ -404,6 +406,179 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(new FormData(target.querySelector('form')!).get('width')).toBe('1008');
   });
 
+  it('places Use as images by tab, each in its own slot and without a toast', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    const held = new File(['img'], 'held.png', { type: 'image/png' });
+    await mountWithHistory([asset]);
+    heldUploads.setStart('video', held);
+
+    // Within the Image tab the start image goes in place.
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
+    await settle();
+    expect(draft.state).toMatchObject({ workflow: 'img2img', referenceImagePath: '/outputs/out/first.png' });
+
+    // The first frame opens the Video tab; the Image tab keeps its start image.
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
+    await settle();
+    expect(draft.state).toMatchObject({ workflow: 'img2vid', firstFramePath: '/outputs/out/first.png', referenceImagePath: '/outputs/out/first.png' });
+    // The frame it replaced was an upload; the slot now holds the path alone.
+    expect(heldUploads.start('video')).toBeNull();
+
+    // The last frame stays on the Video tab.
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
+    await settle();
+    expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/first.png' });
+
+    expect(toasts).toEqual([]);
+  });
+
+  it('Use as forgets the upload it replaces in the store, so it does not come back after a reload', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    const store = memoryUploadStore();
+    heldUploads.useStore(store);
+    await heldUploads.restore();
+    await mountWithHistory([asset]);
+    heldUploads.setStart('image', new File(['img'], 'held-start.png', { type: 'image/png' }));
+    heldUploads.setStart('video', new File(['img'], 'held-first.png', { type: 'image/png' }));
+    heldUploads.setLastFrame(new File(['img'], 'held-last.png', { type: 'image/png' }));
+    await heldUploads.persisted();
+
+    for (const action of ['reference-image', 'reference-video', 'reference-last-frame']) {
+      openTileMenu(asset);
+      (document.querySelector(`[role="menu"] [data-action="${action}"]`) as HTMLButtonElement).click();
+      await settle();
+    }
+    await heldUploads.persisted();
+
+    expect(await store.get('image')).toBeNull();
+    expect(await store.get('video')).toBeNull();
+  });
+
+  it('Use as start image from Video keeps the scene and action of Video', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png', prompt: 'a red fox' });
+    draft.update('workflow', 'txt2vid');
+    await mountWithHistory([asset]);
+    draft.patch({ scene: 'a castle', prompt: 'a knight rides in' });
+    await settle();
+
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'img2img', prompt: 'a red fox', referenceImagePath: '/outputs/out/first.png' });
+    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('a red fox');
+
+    draft.setTab('video');
+    await settle();
+    expect(draft.state).toMatchObject({ scene: 'a castle', prompt: 'a knight rides in' });
+    expect((target.querySelector('#ws-scene') as HTMLTextAreaElement).value).toBe('a castle');
+    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('a knight rides in');
+  });
+
+  describe('Use as -> Reference', () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png', prompt: 'a red fox' });
+
+    /** "zit" takes 3 references and "flux-lite" none; the Image tab lists the reference controls. */
+    function referencesContext(): WorkspaceContext {
+      const context = makeContext({
+        history_assets: [asset],
+        image_model_defaults: { zit: makeImageDefaults({ max_reference_images: 3 }), 'flux-lite': makeImageDefaults() },
+      });
+      for (const workflow of ['txt2img', 'img2img'] as const) context.workflow_contract.definitions[workflow].visible_controls.push('references', 'references_clear');
+      return context;
+    }
+
+    async function mountReferences(context = referencesContext()): Promise<void> {
+      galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+    }
+
+    const toastMessages = (): string[] => toasts.map((toast) => toast.message);
+
+    it('adds the next image, keeps the prompt and toasts Added as image 2', async () => {
+      await mountReferences();
+      draft.patch({ prompt: 'my prompt', referenceImagePaths: ['/in/a.png'] });
+      await settle();
+
+      openTileMenu(asset);
+      const item = document.querySelector('[role="menu"] [data-action="reference-reference"]') as HTMLButtonElement;
+      expect(item.hasAttribute('aria-disabled')).toBe(false);
+      item.click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ prompt: 'my prompt', referenceImagePaths: ['/in/a.png', '/outputs/out/first.png'] });
+      expect(toasts).toMatchObject([{ message: 'Added as image 2', type: 'success' }]);
+    });
+
+    it('opens the Image tab from the Video tab and changes no text', async () => {
+      draft.update('workflow', 'txt2vid');
+      await mountReferences();
+      draft.patch({ scene: 'my scene', prompt: 'my action' });
+      await settle();
+
+      openTileMenu(asset);
+      (document.querySelector('[role="menu"] [data-action="reference-reference"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ workflow: 'txt2img', model: 'zit', prompt: '', referenceImagePaths: ['/outputs/out/first.png'] });
+      expect(toastMessages()).toEqual(['Added as image 1']);
+
+      draft.setTab('video');
+      await settle();
+      expect(draft.state).toMatchObject({ scene: 'my scene', prompt: 'my action' });
+    });
+
+    it('shows why a full list takes no more and adds nothing', async () => {
+      await mountReferences();
+      draft.patch({ referenceImagePaths: ['/in/a.png', '/in/b.png', '/in/c.png'] });
+      await settle();
+
+      openTileMenu(asset);
+      const full = document.querySelector('[role="menu"] [data-action="reference-reference"]') as HTMLButtonElement;
+      expect(full.getAttribute('aria-disabled')).toBe('true');
+      full.click();
+      await settle();
+
+      expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '/in/b.png', '/in/c.png']);
+      expect(toasts).toEqual([]);
+    });
+
+    it('adds a reference the Gallery asked for once the restore has settled', async () => {
+      let release: (value: null) => void = () => {};
+      const gate = new Promise<null>((resolve) => { release = resolve; });
+      const store = memoryUploadStore();
+      heldUploads.useStore({ ...store, get: () => gate });
+      requestReference('/outputs/out/first.png');
+
+      await mountReferences();
+      expect(draft.state.referenceImagePaths).toEqual([]);
+      expect(hasPendingReference()).toBe(true);
+
+      release(null);
+      await settle();
+
+      expect(draft.state.referenceImagePaths).toEqual(['/outputs/out/first.png']);
+      expect(hasPendingReference()).toBe(false);
+      expect(toastMessages()).toEqual(['Added as image 1']);
+    });
+
+    it('toasts the reason when the model cannot take a pending reference', async () => {
+      draft.update('model', 'flux-lite');
+      requestReference('/outputs/out/first.png');
+
+      await mountReferences();
+
+      expect(draft.state.referenceImagePaths).toEqual([]);
+      expect(toasts).toMatchObject([{ message: 'flux-lite takes none', type: 'info' }]);
+      expect(hasPendingReference()).toBe(false);
+    });
+  });
+
   it('shows video preset dimensions for the chosen ratio and size', async () => {
     workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
       video_ratios: ['16:9', '9:16'],
@@ -446,11 +621,7 @@ describe('WorkspacePage asset actions and settings', () => {
     await mountWithHistory([asset]);
     const submitSpy = workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-ref' } as JobContext);
 
-    const fileInput = target.querySelector('#ws-image-file') as HTMLInputElement;
-    const browsed = new File(['img'], 'browsed.png', { type: 'image/png' });
-    Object.defineProperty(fileInput, 'files', { configurable: true, value: [browsed] });
-    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
+    await addFiles(target, 'start', new File(['img'], 'browsed.png', { type: 'image/png' }));
 
     openTileMenu(asset);
     (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
@@ -1375,6 +1546,24 @@ describe('WorkspacePage extend', () => {
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         flushSync();
       }
+    });
+  });
+
+  describe('a prefill that opens Extend Video', () => {
+    it('leaves the uploads of the Image and Video tabs alone, as Extend holds no image of its own', async () => {
+      const png = (name: string) => new File(['img'], name, { type: 'image/png' });
+      heldUploads.setStart('image', png('start.png'));
+      heldUploads.setReferences([png('ref.png')]);
+      heldUploads.setStart('video', png('first.png'));
+      heldUploads.setLastFrame(png('last.png'));
+
+      await mountExtend({ params: { workflow: 'extend', source_video: SOURCE } });
+
+      expect(draft.state.workflow).toBe('extend');
+      expect(heldUploads.start('image')?.name).toBe('start.png');
+      expect(heldUploads.references).toHaveLength(1);
+      expect(heldUploads.start('video')?.name).toBe('first.png');
+      expect(heldUploads.lastFrame?.name).toBe('last.png');
     });
   });
 

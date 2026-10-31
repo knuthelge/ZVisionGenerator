@@ -18,21 +18,22 @@
   import SavePromptMenu from './SavePromptMenu.svelte';
   import { promptToSave } from './savePrompt';
   import { workspaceCapabilities } from './capabilities';
+  import type { ImagesView } from './imagesView';
   import TriggerMenu from './TriggerMenu.svelte';
   import { insertWordPatch, triggerMenu, triggerModes } from './triggerMenu';
 
   interface Props {
     context: WorkspaceContext;
     busy: boolean;
+    /** The images view of the open tab, computed once by the Workspace; the enhancer counts the last frame and references it sends. */
+    images: ImagesView;
     /** A job is running or queued. */
     jobsActive?: boolean;
-    /** A last-frame image is uploaded and not yet submitted; the enhancer counts it as a last frame. */
-    endImagePending?: boolean;
     /** Fold the sidebar into its strip; no button is shown when absent. */
     oncollapse?: () => void;
   }
 
-  let { context, busy, jobsActive = false, endImagePending = false, oncollapse }: Props = $props();
+  let { context, busy, images, jobsActive = false, oncollapse }: Props = $props();
 
   /** Remember the loaded prompts file; an unchanged file is not written again. */
   function setPromptFileLoaded(loaded: DraftState['promptFileLoaded']): void {
@@ -431,8 +432,8 @@
         variant="inline"
         {busy}
         {jobsActive}
-        endImage={caps.showEndImage && (s.endImagePath !== null || endImagePending)}
-        references={caps.referenceCount}
+        endImage={images.sent.end !== null}
+        references={images.references?.rows.length ?? 0}
         jsonCapable={caps.supportsJsonPrompt}
         extendSupport={extendModelSupport(context, s.model)}
         maxWords={caps.enhanceMaxWords}

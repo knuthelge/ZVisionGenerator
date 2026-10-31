@@ -16,6 +16,7 @@ import { workspaceMemory } from '$lib/state/pageMemory';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
+import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { WorkspaceContext } from '$lib/types';
 import { makeGalleryPage } from './workspace';
 import {
@@ -33,8 +34,7 @@ export function resetWorkspaceTest(): void {
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();
-  heldUploads.clearReferences();
-  heldUploads.clearFrames();
+  heldUploads.useStore(memoryUploadStore());
   workspaceMemory.forget();
   extendInspection.reset();
   clipMemory.reset();
@@ -195,4 +195,32 @@ export async function submitForm(target: ParentNode): Promise<FormData> {
   await settle();
   const [submitted] = workspaceApiMocks.submitGenerate.mock.calls.at(-1) ?? [];
   return submitted as FormData;
+}
+
+/** The slots of the Images section a test can fill. */
+export type AddKind = 'start' | 'reference' | 'last';
+
+// The slot rows of the Images section by kind: the start image (the first frame in Video), the empty reference row, the last frame.
+const SLOT_IDS: Record<AddKind, string> = { start: 'ws-image', reference: 'ws-ref-add', last: 'ws-end-image' };
+
+/** Open the server browser from a slot's Browse button in the Images section (choose in it with `chooseInBrowser`). */
+export async function chooseSource(container: ParentNode, kind: AddKind): Promise<void> {
+  flushSync(() => (container.querySelector(`#${SLOT_IDS[kind]}-browse`) as HTMLButtonElement).click());
+  await settle();
+}
+
+/** Pick files for a slot through its file input, as its Upload button does. */
+export async function addFiles(container: ParentNode, kind: AddKind, ...files: File[]): Promise<void> {
+  const input = container.querySelector(`#${SLOT_IDS[kind]}-file`) as HTMLInputElement;
+  Object.defineProperty(input, 'files', { configurable: true, value: files });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+}
+
+/** Fire a drag event carrying *files* at *node*. */
+export function dragFiles(node: Element, type: 'dragover' | 'drop' | 'dragleave', files: File[] = []): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files, dropEffect: 'none' } });
+  node.dispatchEvent(event);
+  return event;
 }

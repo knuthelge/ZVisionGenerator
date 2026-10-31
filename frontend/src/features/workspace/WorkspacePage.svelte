@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
   import { api, errorText } from '$lib/api/client';
-  import { draft, extendStepFor, videoTimingFor } from '$lib/state/draft.svelte';
+  import { draft, extendStepFor, slotPaths, videoTimingFor } from '$lib/state/draft.svelte';
+  import { hasPath } from '$lib/state/imageSlots';
   import { anyEnhancedUsed, enhancedPartUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { downloadStore, type DownloadRequestResult } from '$lib/state/downloads.svelte';
@@ -12,12 +13,11 @@
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
   import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
-  import { referenceGuard, referenceRows } from '$lib/state/references';
   import { checkReferencePaths, getWorkspaceCoreContext, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { updateConfig } from '$lib/api/config';
   import { workspaceMemory } from '$lib/state/pageMemory';
   import { deleteAsset } from '$lib/api/gallery';
-  import { canExtend, extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { canExtend, extendParams, referenceParams, reuseParams, useAsState, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { Icon, MascotSpot } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
@@ -63,6 +63,8 @@
   import GalleryStrip from './GalleryStrip.svelte';
   import SettingsStrip from './SettingsStrip.svelte';
   import SettingPopover from './SettingPopover.svelte';
+  import { imagesSummary } from './imagesSummary';
+  import { currentImagesView } from './imagesView';
   import PresetMenu from './PresetMenu.svelte';
   import { pendingChips, settingsChips, type ChipKey } from './settingsChips';
   import { Sheet } from '$lib/components/molecules';
@@ -72,13 +74,16 @@
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
   import { workspaceCapabilities } from './capabilities';
+  import { referenceEditor } from './referenceEditor';
   import { acceptsPageShortcut, hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import { hasPendingJobSettings, takeJobSettings } from '$lib/state/pendingJobSettings.svelte';
+  import { hasPendingReference, takeReference } from '$lib/state/pendingReference.svelte';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
+  import { workspaceTab } from '$lib/state/workspaceTab';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
@@ -118,10 +123,6 @@
   let submitError = $state.raw<{ message: string; draft: DraftState } | null>(null);
   const generateError = $derived(submitError?.draft === draft.state ? submitError.message : null);
   let formEl = $state<HTMLFormElement | undefined>(undefined);
-  // The images uploaded as the start image and the last frame are not draft state and go out on submit only; they are
-  // kept across pages in `heldUploads`.
-  const imageFile = $derived(heldUploads.image);
-  const endImageFile = $derived(heldUploads.endImage);
   let lightboxOpen = $state(false);
   let lightboxIndex = $state(0);
   let lightboxMode = $state<'history' | 'completed-output'>('history');
@@ -287,22 +288,10 @@
     node.addEventListener('wheel', onWheel, { passive: false });
     return { destroy: () => { clearTimeout(idle); node.removeEventListener('wheel', onWheel); } };
   }
-  // A reference path that points at a known asset can show that asset as its thumbnail.
-  const referencePreviewUrl = $derived(galleryStore.previewUrlFor(draft.state.referenceImagePath));
-  // The last-frame slot exists for Image to Video on a model that can end a clip on an image.
-  const showEndImage = $derived(context !== null && workspaceCapabilities(context, draft.state).showEndImage);
-  // The reference rows Generate sends: the first few of the draft's list, as many as the model takes (none when the section is
-  // hidden). A longer list is kept whole, so a model that takes more brings the rest back.
-  const sentReferences = $derived(context === null ? [] : referenceRows(draft.state.referenceImagePaths, heldUploads.references).slice(0, workspaceCapabilities(context, draft.state).referenceCount));
-  // A reference whose file is gone blocks Generate: dropping it would renumber the prompt's "image 2".
-  const referenceBlock = $derived(referenceGuard(sentReferences, draft.state.missingReferencePaths));
-  const endPreviewUrl = $derived(showEndImage ? galleryStore.previewUrlFor(draft.state.endImagePath) : null);
-  // A pending upload belongs to the slot: when the slot goes (another workflow or model), so does the upload.
-  $effect(() => {
-    if (context !== null && !showEndImage) heldUploads.endImage = null;
-  });
-  // The asset menus offer the last frame only while its slot is showing.
-  const referenceTargets = $derived<readonly ReferenceTarget[] | undefined>(showEndImage ? ['image', 'video', 'last'] : undefined);
+  // Which images the open tab uses (uploads picked from this device are held in `heldUploads`, not in the draft), what a
+  // submit sends and why Generate is off when one of them is gone: dropping a reference would renumber the prompt's "image 2".
+  const images = $derived(context === null ? null : currentImagesView(context));
+  const imageBlock = $derived(images?.block ?? null);
   // Keep the preview occupied until the latest image has painted. Videos show at once:
   // some browsers load nothing until play is pressed, so no load event is guaranteed.
   const latestLoading = $derived(
@@ -344,7 +333,8 @@
   const isImageMode = $derived(
     draft.state.workflow === 'txt2img' || draft.state.workflow === 'img2img'
   );
-  const authorityReady = $derived(context !== null && draft.authorityReady);
+  // Generate waits for the stored uploads too: until they are read back a lost upload cannot be told from one still coming.
+  const authorityReady = $derived(context !== null && draft.authorityReady && heldUploads.restored);
 
   const imageModels = $derived(context?.image_models ?? []);
   const videoModels = $derived(context?.video_models ?? []);
@@ -409,9 +399,8 @@
       loraDownload: block.failures.length > 0 ? { kind: 'failed' } : block.waiting ? { kind: 'downloading', percent: block.waiting.percent } : undefined,
       modelLabel: selectedModel?.label ?? s.model,
       modelDownloaded: selectedModel?.downloaded !== false,
-      referenceName: imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : null),
-      endReferenceName: endImageFile?.name ?? (s.endImagePath ? fileName(s.endImagePath) : null),
       sourceName: s.extendSourcePath ? fileName(s.extendSourcePath) : null,
+      images: images?.visible ? imagesSummary(images) : null,
       memoryWarn: memoryStatus === 'tight' || memoryStatus === 'too_large',
       presetName: activePreset?.name ?? null,
       presetSlug: activePreset?.slug ?? null,
@@ -429,7 +418,7 @@
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
   });
-  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || referenceBlock !== null || block.blocked);
+  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || block.blocked);
   // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
   const controlsPending = $derived(!context || !authorityReady);
 
@@ -681,30 +670,32 @@
    * Drop the uploads a prefill makes stale. The server prefers an uploaded file over a path, so a file held for a slot would
    * win over what the prefill chose, or stay when the prefill names nothing (a reused clip without a last frame).
    * A Use as (marked by `use_as`) sets one slot and drops only that slot's upload, leaving the other slot and the references.
-   * Any other prefill replaces the job's settings: the start image and the last frame always go, and the reference uploads
-   * only when the prefill replaces the reference rows, which a workflow without the References section does not take
-   * (video keeps its rows and their files).
+   * Any other prefill replaces the images of the tab it opens, and only that tab's uploads go.
    */
   function dropHeldUploads(params: PrefillParams): void {
-    if (params.use_as === 'start') heldUploads.clearStartImage();
-    else if (params.use_as === 'last') heldUploads.clearLastFrame();
-    else {
-      heldUploads.clearFrames();
-      if (params.reference_path !== undefined && visibleControls.has('references')) heldUploads.clearReferences();
-    }
+    const tab = workspaceTab(draft.state.workflow);
+    // Extend Video holds no image of its own, so a prefill that opens it leaves every tab's uploads alone.
+    if (tab === 'extend') return;
+    if (params.use_as === 'start') heldUploads.setStart(tab, null);
+    else if (params.use_as === 'last') heldUploads.setLastFrame(null);
+    else heldUploads.clearTab(tab);
   }
 
-  /** Apply workspace prefill params (workflow first, then model defaults, then the params on top). */
-  function applyPrefill(params: PrefillParams, options: { keepSettings?: boolean } = {}): void {
+  /**
+   * Apply workspace prefill params (workflow first, then model defaults, then the params on top). The image paths are checked
+   * afterwards, unless `recheck` is off for a caller that checks them itself.
+   */
+  function applyPrefill(params: PrefillParams, options: { keepSettings?: boolean; recheck?: boolean } = {}): void {
     if (!context) return;
     if (params.workflow) draft.loadFromUrl({ workflow: params.workflow }, context);
     draft.hydrateFromContext(context, typeof params.model === 'string' ? params.model : null, options);
-    draft.loadFromUrl(params, context);
+    // A prefill that is not a Use as sets every slot of its tab, an unnamed one emptied; the workflow follows from the images.
+    draft.loadFromUrl(params, context, { replaceSlots: !params.use_as });
     dropHeldUploads(params);
-    // Recorded reference paths may have moved since; flag those rows, as a page load does.
-    if (params.reference_path !== undefined) void recheckReferences();
-    // The prefill already re-hydrated for its workflow; the workflow-change effect must not redo it.
-    _prevWorkflow = draft.state.workflow;
+    // Recorded image paths may have moved since; flag those slots, as a page load does.
+    if (options.recheck !== false) void recheckImages();
+    // The prefill already re-hydrated for its tab; the tab-change effect must not redo it.
+    _prevTab = workspaceTab(draft.state.workflow);
     // The source brings its own settings, so the form no longer starts from a preset.
     draft.setAppliedPreset(null);
   }
@@ -770,27 +761,53 @@
     if (job) closeLightbox();
   }
 
-  // Reference targets the model that would run them can't use, with the reason shown in the menu.
-  const referenceUnavailable = $derived.by<Partial<Record<ReferenceTarget, string>>>(() => {
-    if (!context) return {};
-    const imageModel = isImageMode ? draft.state.model : (context.current_image_model ?? '');
-    const videoModel = isImageMode ? (context.current_video_model ?? '') : draft.state.model;
-    const reasons: Partial<Record<ReferenceTarget, string>> = {};
-    if (context.image_model_defaults?.[imageModel]?.supports_img2img === false) reasons.image = `${imageModel} can't use a start image`;
-    if (context.video_model_defaults?.[videoModel]?.supports_i2v === false) reasons.video = `${videoModel} can't start from an image`;
-    return reasons;
+  // What the Use as menus show: each target's hint, or why it can't be used, from the model its tab opens on.
+  const useAs = $derived(useAsState(context, draft.state));
+
+  // Reference rows are added to the Image tab's list whichever tab is open.
+  const useAsEditor = referenceEditor(() => images?.references?.max ?? 0);
+
+  /** Add an image as the next reference on the Image tab, keeping the prompt; a model that can't take one says why. */
+  function addReference(path: string): void {
+    const state = useAs.reference;
+    if (!context || !state) return;
+    if (state.disabled) {
+      if (state.hint) addToast(state.hint, 'info');
+      return;
+    }
+    if (workspaceTab(draft.state.workflow) !== 'image') {
+      draft.setTab('image');
+      draft.onTabChange(context);
+      _prevTab = workspaceTab(draft.state.workflow);
+    }
+    useAsEditor.append([{ path, file: null }]);
+    addToast(`Added as image ${draft.state.referenceImagePaths.length}`, 'success');
+  }
+
+  // An image the Gallery sent as a reference waits until the draft and the stored uploads are back, then joins the list.
+  $effect(() => {
+    if (!authorityReady || !hasPendingReference()) return;
+    const path = takeReference();
+    if (path) untrack(() => addReference(path));
   });
 
   function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
-    if (!asset.file_path || referenceUnavailable[target]) return;
+    if (!asset.file_path) return;
+    if (target === 'reference') {
+      addReference(asset.file_path);
+      closeLightbox();
+      return;
+    }
+    if (useAs[target]?.disabled) return;
     const params = referenceParams(asset, target);
-    if (draft.state.workflow === params.workflow) {
+    // The slot sits on a tab: within it the image just goes in place, and the opened tab shows it without a toast.
+    if (workspaceTab(draft.state.workflow) === workspaceTab(params.workflow as Workflow)) {
       draft.loadFromUrl(params, context);
       dropHeldUploads(params);
       draft.saveDraft();
+      void recheckImages();
     } else applyPrefill(params, { keepSettings: true });
     closeLightbox();
-    addToast(`${asset.filename} is now the ${target === 'last' ? 'last frame' : 'start image'}`, 'success');
   }
 
   /** Make a video the source of an extension; its recorded scene and prompt fill the boxes once the server has described it. */
@@ -854,11 +871,13 @@
       await deleteAsset(asset.id);
       jobStore.removeOutputs([asset.id]);
       galleryStore.removeAssets([asset]);
-      // A reference pointing at the deleted file would fail the next run.
-      if (asset.file_path && draft.state.referenceImagePath === asset.file_path) draft.update('referenceImagePath', null);
-      if (asset.file_path && draft.state.endImagePath === asset.file_path) draft.update('endImagePath', null);
+      // A slot pointing at the deleted file would fail the next run: it empties, and the workflow follows from what is left.
+      const path = asset.file_path;
+      if (path && draft.state.referenceImagePath === path) draft.setStartImage('image', null, context);
+      if (path && draft.state.firstFramePath === path) draft.setStartImage('video', null, context);
+      if (path && draft.state.endImagePath === path) draft.setLastFrame(null);
       // A reference row stays, flagged missing, so the prompt's "image 2" keeps meaning the same row.
-      if (asset.file_path && draft.state.referenceImagePaths.includes(asset.file_path)) void recheckReferences();
+      if (path && draft.state.referenceImagePaths.includes(path)) void recheckImages();
       addToast('Deleted', 'success');
     } catch {
       addToast('Delete failed', 'error');
@@ -915,15 +934,16 @@
     }
   });
 
-  // Track prev workflow to detect user-initiated changes after context loads.
-  let _prevWorkflow: Workflow | null = null;
+  // Track the previous tab to detect user-initiated changes after context loads. A start image or first frame changes the
+  // workflow within its tab and needs no re-hydration.
+  let _prevTab: WorkspaceTab | null = null;
 
   $effect(() => {
-    const currentWorkflow = draft.state.workflow;
-    if (_prevWorkflow !== null && context !== null && currentWorkflow !== _prevWorkflow) {
-      draft.onWorkflowChange(currentWorkflow, context);
+    const currentTab = workspaceTab(draft.state.workflow);
+    if (_prevTab !== null && context !== null && currentTab !== _prevTab) {
+      draft.onTabChange(context);
     }
-    _prevWorkflow = currentWorkflow;
+    _prevTab = currentTab;
   });
 
   // An extension's source is described by the server: on load, and again when its length, model or memory setting change
@@ -950,11 +970,12 @@
   });
 
   /**
-   * Ask the server which reference files are gone and flag those rows. The flags saved with the draft may be stale
-   * (a file can return or leave while the page was away), so the server's answer replaces them. A failed check leaves them.
+   * Ask the server which image files are gone and flag those slots: the start image, the first and last frame and the
+   * reference rows. The flags saved with the draft may be stale (a file can return or leave while the page was away), so the
+   * server's answer replaces them. A failed check leaves them.
    */
-  async function recheckReferences(): Promise<void> {
-    const paths = draft.state.referenceImagePaths.filter((path) => path !== '');
+  async function recheckImages(): Promise<void> {
+    const paths = slotPaths(draft.state).filter(hasPath);
     if (paths.length === 0) return;
     try {
       draft.patch({ missingReferencePaths: await checkReferencePaths(paths) });
@@ -972,6 +993,8 @@
     });
     const stopDownloadSync = downloadStore.startSync();
     const stopDownloaded = downloadStore.onDownloaded(refreshModelStatus);
+    // Read the uploads held in the browser back; Generate waits for them.
+    void heldUploads.restore();
     const urlParams = parseUrlPrefill();
     // The Models page links here to open Discover LoRAs; the flag is not a setting and leaves the address at once.
     const wantsDiscover = urlParams.discover !== undefined;
@@ -1003,14 +1026,15 @@
       if (hasUrlParams && !prefillApplied) {
         prefillApplied = true;
         // A link into the workspace loads a source's settings; a saved draft keeps its own unless the link names a model.
-        applyPrefill(urlParams, { keepSettings: !urlParams.model });
+        // The server's context check follows right after, so the prefill does not ask for the paths too.
+        applyPrefill(urlParams, { keepSettings: !urlParams.model, recheck: false });
         // The prefill is in the draft now; drop it from the address so a reload or Back keeps the user's edits.
         router.replace('workspace');
       } else {
         // A saved draft keeps its settings across visits and restarts.
         draft.hydrateFromContext(ctx, null, { keepSettings: true });
-        // The workflow-change $effect must not fire for the initial state.
-        _prevWorkflow = draft.state.workflow;
+        // The tab-change $effect must not fire for the initial state.
+        _prevTab = workspaceTab(draft.state.workflow);
       }
     }
 
@@ -1024,7 +1048,7 @@
         if (cancelled) return;
         workspaceMemory.set(ctx);
         adoptContext(ctx);
-        void recheckReferences();
+        void recheckImages();
         jobStore.seedQueue(ctx.queued_jobs ?? []);
         void jobStore.reconnectActiveJob({ snapshot: ctx.active_job });
         // "Generate this one" on the Prompts page: queue that prompt with these settings once the form exists.
@@ -1032,6 +1056,8 @@
         if (run) {
           void (async () => {
             await tick();
+            // Generate waits for the held uploads, so the run does too.
+            await heldUploads.restore();
             // A saved source has not been described yet; the run waits for the answer rather than being refused for want of it.
             if (ctx && draft.state.workflow === 'extend' && draft.state.extendSourcePath) await extendInspection.inspect(ctx);
             if (!cancelled) await submitForm(run);
@@ -1128,14 +1154,15 @@
     // Send canonical workflow directly; backend accepts and normalises it.
     formData.set('mode', isImageMode ? 'image' : 'video');
     formData.set('workflow', draft.state.workflow);
-    // Attach image file only for workflows that actually use a start image
-    if (imageFile && (draft.state.workflow === 'img2img' || draft.state.workflow === 'img2vid')) {
-      formData.set('image_file', imageFile);
-    }
-    // The last frame goes only while its slot is showing; an upload wins over the typed path, as for the first frame.
-    if (endImageFile && showEndImage) formData.set('end_image_file', endImageFile);
+    // The images come from the images view, not the form's inputs: an upload wins over a path.
+    const sent = images?.sent ?? { image: null, strength: null, end: null };
+    if (typeof sent.image === 'string') formData.set('image_path', sent.image);
+    else if (sent.image !== null) formData.set('image_file', sent.image);
+    if (sent.strength !== null) formData.set('image_strength', String(sent.strength));
+    if (typeof sent.end === 'string') formData.set('end_image_path', sent.end);
+    else if (sent.end !== null) formData.set('end_image_file', sent.end);
     // References go as one repeated field, a file or a path per row in prompt order, so the rows keep their numbers.
-    for (const row of sentReferences) {
+    for (const row of images?.references?.rows ?? []) {
       if (row.file) formData.append('reference', row.file);
       else if (row.path) formData.append('reference', row.path);
     }
@@ -1219,8 +1246,8 @@
     if (!formEl || !authorityReady || !formEl.reportValidity()) return;
     await settleExtendSource();
     if (extendBlocked()) return;
-    if (referenceBlock) {
-      addToast(referenceBlock, 'error');
+    if (imageBlock) {
+      addToast(imageBlock, 'error');
       return;
     }
     if (promptChoiceMissing()) {
@@ -1274,8 +1301,8 @@
     if (block.blocked) return;
     await settleExtendSource();
     if (extendBlocked()) return;
-    if (referenceBlock) {
-      addToast(referenceBlock, 'error');
+    if (imageBlock) {
+      addToast(imageBlock, 'error');
       return;
     }
     submitError = null;
@@ -1599,8 +1626,7 @@
                   onreference={useAsReference}
                   onextend={extendAsset}
                   onupscale={upscaleAsset}
-                  {referenceUnavailable}
-                  {referenceTargets}
+                  {useAs}
                   ondelete={deleteWorkspaceAsset}
                 />
                 {@render assetMeta(output)}
@@ -1628,8 +1654,7 @@
                       onreference={useAsReference}
                       onextend={extendAsset}
                       onupscale={upscaleAsset}
-                      {referenceUnavailable}
-                      {referenceTargets}
+                      {useAs}
                       ondelete={deleteWorkspaceAsset}
                     />
                   {/each}
@@ -1704,8 +1729,7 @@
               onreference={useAsReference}
               onextend={extendAsset}
               onupscale={upscaleAsset}
-              {referenceUnavailable}
-              {referenceTargets}
+              {useAs}
               ondelete={deleteWorkspaceAsset}
             />
             {@render assetMeta(latest)}
@@ -1759,8 +1783,7 @@
           onreference={useAsReference}
           onextend={extendAsset}
           onupscale={upscaleAsset}
-          {referenceUnavailable}
-          {referenceTargets}
+          {useAs}
           ondelete={deleteWorkspaceAsset}
         />
       {/if}
@@ -1774,26 +1797,17 @@
       {@render stage()}
       <!-- Always in the frame, even before the context answers: a loading state never changes the stage's height. -->
       <div class="compact-controls" use:dockHeight={'--toast-dock'}>
-        {#if activeChip && context}
+        {#if activeChip && context && images}
           <button type="button" class="pop-scrim" aria-label="Close setting" tabindex="-1" onclick={() => { activeChip = null; }}></button>
           <SettingPopover
             key={activeChip}
             {context}
             {busy}
+            {images}
             models={currentModels}
             quantizeOptions={supportsQuantize ? quantizeOptions : null}
-            {imageFile}
-            {referencePreviewUrl}
-            {endImageFile}
-            {endPreviewUrl}
             lastSeed={galleryStore.assets[0]?.seed ?? null}
-            onImageFileChange={(f) => { heldUploads.image = f; submitError = null; }}
-            onEndImageFileChange={(f) => { heldUploads.endImage = f; submitError = null; }}
-            referenceFiles={heldUploads.references}
-            onReferenceFilesChange={(files) => { heldUploads.references = files; submitError = null; }}
-            onUseLatestAsEndFrame={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, 'last'); activeChip = null; }}
             onModelChange={switchModel}
-            onUseLatestAsReference={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
             onclose={() => { activeChip = null; }}
             ondiscover={() => { activeChip = null; openDiscover(); }}
           />
@@ -1847,7 +1861,7 @@
             <ActionMenu open={generateMenuOpen} anchor={generateButton} label="Generate" items={generateMenuItems} onclose={() => { generateMenuOpen = false; }} />
           </div>
           <div class="composer-pane" hidden={!composerOpen}>
-            {#if context}<ComposePane {context} {busy} jobsActive={jobStore.jobsActive} endImagePending={endImageFile !== null} />{/if}
+            {#if context && images}<ComposePane {context} {busy} {images} jobsActive={jobStore.jobsActive} />{/if}
             <div class="composer-foot">
               <button type="button" class="ui-btn" onclick={() => { composerOpen = false; }}>Done</button>
               <button
@@ -1893,16 +1907,8 @@
           jobsActive={jobStore.jobsActive}
           queuedCount={jobStore.queuedJobs.length}
           submitError={generateError}
-          {imageFile}
-          {referencePreviewUrl}
-          {endImageFile}
-          {endPreviewUrl}
           lastSeed={galleryStore.assets[0]?.seed ?? null}
-          onImageFileChange={(f) => { heldUploads.image = f; submitError = null; }}
-          onEndImageFileChange={(f) => { heldUploads.endImage = f; submitError = null; }}
-          referenceFiles={heldUploads.references}
-          {referenceBlock}
-          onReferenceFilesChange={(files) => { heldUploads.references = files; submitError = null; }}
+          {images}
         />
       </Sheet>
     </div>
@@ -1917,16 +1923,8 @@
         jobsActive={jobStore.jobsActive}
         queuedCount={jobStore.queuedJobs.length}
         submitError={generateError}
-        {imageFile}
-        {referencePreviewUrl}
-        {endImageFile}
-        {endPreviewUrl}
         lastSeed={galleryStore.assets[0]?.seed ?? null}
-        onImageFileChange={(f) => { heldUploads.image = f; submitError = null; }}
-        onEndImageFileChange={(f) => { heldUploads.endImage = f; submitError = null; }}
-        referenceFiles={heldUploads.references}
-        {referenceBlock}
-        onReferenceFilesChange={(files) => { heldUploads.references = files; submitError = null; }}
+        {images}
         oncopycli={copyCliCommand}
       />
       {@render stage()}
@@ -1971,8 +1969,7 @@
   onreuse={reuseAsset}
   onreference={useAsReference}
   onextend={extendAsset}
-  {referenceUnavailable}
-  {referenceTargets}
+  {useAs}
   onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}
 />

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
+import { draft } from '$lib/state/draft.svelte';
+import type { AssetUpscaleFactor, DraftState, GalleryAsset } from '$lib/types';
 
-import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, workflowLabel } from './assetActions';
+import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
+import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -146,6 +148,68 @@ describe('extend actions', () => {
     expect(workflowLabel('extend')).toBe('Extend video');
     expect(describeFallbackReason('missing_source_video')).not.toBe('missing_source_video');
     expect(describeFallbackReason('extend_unavailable')).not.toBe('extend_unavailable');
+  });
+});
+
+describe('useAsState', () => {
+  const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, lastImageModel: '', lastVideoModel: '', referenceImagePaths: [], ...overrides });
+  const context = () => makeContext({
+    image_models: [
+      { id: 'klein', label: 'Klein 9B', type: 'image' },
+      { id: 'ideogram', label: 'Ideogram 4', type: 'image' },
+    ],
+    video_models: [{ id: 'ltx-8', label: 'LTX 2.3', type: 'video' }, { id: 'h3', label: 'MiniMax H3', type: 'video' }],
+    image_model_defaults: { klein: makeImageDefaults({ max_reference_images: 4 }), ideogram: makeIdeogramDefaults() },
+    video_model_defaults: {
+      'ltx-8': makeVideoDefaults({ hidden_controls: ['end_image_path'] }),
+      h3: makeVideoDefaults(),
+    },
+    current_image_model: 'klein',
+    current_video_model: 'ltx-8',
+  });
+
+  it('shows nothing without a context', () => {
+    expect(useAsState(null, state())).toEqual({});
+  });
+
+  it('reads the model each tab opens on', () => {
+    // Image tab open on Ideogram: the start image is unavailable; the video tab opens on the video model last used.
+    const onImage = useAsState(context(), state({ workflow: 'txt2img', model: 'ideogram', lastVideoModel: 'h3' }));
+    expect(onImage.image).toEqual({ disabled: true, hint: "Ideogram 4 can't use a start image" });
+    expect(onImage.reference).toEqual({ disabled: true, hint: 'Ideogram 4 takes none' });
+    expect(onImage.video).toEqual({ disabled: false });
+    expect(onImage.last).toEqual({ disabled: false });
+
+    // Video tab open on LTX: the image tab opens on the image model last used, Klein.
+    const onVideo = useAsState(context(), state({ workflow: 'txt2vid', model: 'ltx-8', lastImageModel: 'klein' }));
+    expect(onVideo.image).toEqual({ disabled: false });
+    expect(onVideo.reference).toMatchObject({ disabled: false });
+    expect(onVideo.last).toEqual({ disabled: true, hint: 'LTX 2.3 has no last frame' });
+
+    // Neither mode used yet: the context's current models.
+    const fresh = useAsState(context(), state({ workflow: 'txt2img', model: '' }));
+    expect(fresh.reference).toMatchObject({ disabled: false });
+    expect(fresh.last).toEqual({ disabled: true, hint: 'LTX 2.3 has no last frame' });
+  });
+
+  it('names a video model that cannot start from an image', () => {
+    const ctx = context();
+    ctx.video_model_defaults['h3'] = makeVideoDefaults({ supports_i2v: false });
+    const result = useAsState(ctx, state({ workflow: 'txt2vid', model: 'h3' }));
+    expect(result.video).toEqual({ disabled: true, hint: "MiniMax H3 can't start from an image" });
+    expect(result.last?.disabled).toBe(true);
+  });
+
+  it('offers a reference while there is room, and says why not once the list is full or the model takes none', () => {
+    const open = useAsState(context(), state({ workflow: 'img2img', model: 'klein', referenceImagePaths: ['/a.png', '/b.png'] }));
+    expect(open.reference).toMatchObject({ disabled: false });
+
+    const full = useAsState(context(), state({ workflow: 'img2img', model: 'klein', referenceImagePaths: ['/a.png', '/b.png', '/c.png', '/d.png'] }));
+    expect(full.reference?.disabled).toBe(true);
+    expect(full.reference?.hint).toBeTruthy();
+
+    const none = useAsState(context(), state({ workflow: 'txt2img', model: 'ideogram' }));
+    expect(none.reference).toEqual({ disabled: true, hint: 'Ideogram 4 takes none' });
   });
 });
 

@@ -107,10 +107,10 @@ For video, one rewrite returns two parts, a **scene** and an **action** (see [Sc
 | Scene and action | `both` | A rewritten scene and action. With no scene, your text is split into both. |
 | Action only | `action` | Your scene kept exactly as written, and an action written to fit it. |
 
-The default depends on the workflow:
+The default depends on the workflow, and on whether a first frame is set. The choice is remembered separately for runs with and without a first frame:
 
-- **Text to Video** rewrites both, splitting what you wrote: setting, look and camera setup go to the scene, events in order to the action.
-- **Image to Video** rewrites the action only when you gave a scene (what the image shows), so it isn't restyled. With a blank scene it writes a short scene too.
+- **Video without a first frame** rewrites both, splitting what you wrote: setting, look and camera setup go to the scene, events in order to the action.
+- **Video with a first frame** rewrites the action only when you gave a scene (what the image shows), so it isn't restyled. With a blank scene it writes a short scene too.
 - **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. It uses the previous clip's prompt as context, so it doesn't repeat its actions or lines.
 
 Action only needs a scene; with a blank one, both parts are written. Style, Mood, Theme and Focus on have no effect with Action only, since they shape the scene.

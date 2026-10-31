@@ -5,6 +5,7 @@
   import { isReviewing } from '$lib/state/jobView';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { Badge, Icon, MascotHome, Wordmark } from '$lib/components/atoms';
+  import { visibleTabs, workspaceTab } from '$lib/state/workspaceTab';
   import type { PageId, Workflow } from '$lib/types';
 
   interface Props {
@@ -24,18 +25,10 @@
     { id: 'config', label: 'Config' }
   ];
 
-  const workflowItems: { id: Workflow; label: string }[] = [
-    { id: 'txt2img', label: 'Text to Image' },
-    { id: 'img2img', label: 'Image to Image' },
-    { id: 'img2vid', label: 'Image to Video' },
-    { id: 'txt2vid', label: 'Text to Video' },
-    { id: 'extend', label: 'Extend Video' }
-  ];
-
   const reviewWaiting = $derived(isReviewing(jobStore.current));
-  // Until the contract is known the four always-available workflows show; Extend Video appears only when the server lists it.
-  const visibleWorkflows = $derived(workflowItems.filter((item) => (workflows === null ? item.id !== 'extend' : workflows.includes(item.id))));
-
+  // Until the contract is known Image and Video show; Extend Video appears only when the server lists it.
+  const tabs = $derived(visibleTabs(workflows));
+  const activeTab = $derived(workspaceTab(draft.state.workflow));
 </script>
 
 <header class="app-nav">
@@ -48,13 +41,13 @@
 
     {#if currentPage === 'workspace'}
       <nav class="workflow-tabs" aria-label="Workflow">
-        {#each visibleWorkflows as item (item.id)}
+        {#each tabs as item (item.id)}
           <button
             type="button"
             class="nav-tab"
-            class:active={draft.state.workflow === item.id}
-            aria-pressed={draft.state.workflow === item.id}
-            onclick={() => draft.update('workflow', item.id)}
+            class:active={activeTab === item.id}
+            aria-pressed={activeTab === item.id}
+            onclick={() => draft.setTab(item.id)}
           >
             {item.label}
           </button>
@@ -97,8 +90,15 @@
   @media (hover: hover) { .nav-tab:hover { color: var(--color-text-primary); } }
   .nav-tab:focus-visible { outline-offset: -2px; }
   .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }
+  /* Under 1000 px the bar tightens to stay on one row (a 744 px portrait tablet fits, with the Review badge). */
   @media (max-width: 1000px) {
-    .app-nav { flex-wrap: wrap; gap: 0; padding: 0 12px; }
+    .app-nav { gap: 8px; padding: 0 12px; }
+    .nav-workflows { gap: 16px; }
+    .nav-tab { padding: 0 8px; }
+  }
+  /* Too narrow for one row: the workflow tabs take a second row. */
+  @media (max-width: 739px) {
+    .app-nav { flex-wrap: wrap; gap: 0; }
     .nav-workflows { display: contents; }
     .brand { min-height: 44px; }
     .workflow-tabs { order: 3; width: 100%; min-height: 40px; border-top: 1px solid var(--color-border-subtle); }

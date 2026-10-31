@@ -89,3 +89,30 @@ describe('GalleryStrip infinite scroll', () => {
     expect(MockIntersectionObserver.instances).toHaveLength(0);
   });
 });
+
+describe('GalleryStrip Use as menu', () => {
+  function openMenu(filename: string): void {
+    (target.querySelector(`button[aria-label="More actions for ${filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+  }
+
+  it('lists the four Use as targets on a tile and passes each its state', () => {
+    const onreference = vi.fn();
+    render({
+      assets: [{ ...makeAsset('a.png'), file_path: '/outputs/a.png' }],
+      onreference,
+      useAs: { reference: { disabled: true, hint: 'Ideogram 4 takes none' }, last: { disabled: false } },
+    });
+
+    openMenu('a.png');
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menu"] [data-action^="reference-"]')];
+    expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame']);
+    expect(items[1].getAttribute('aria-disabled')).toBe('true');
+    expect(items[1].getAttribute('title')).toBe('Ideogram 4 takes none');
+    items[1].click();
+    expect(onreference).not.toHaveBeenCalled();
+
+    items[2].click();
+    expect(onreference).toHaveBeenCalledWith(expect.objectContaining({ id: 'a.png' }), 'video');
+  });
+});
