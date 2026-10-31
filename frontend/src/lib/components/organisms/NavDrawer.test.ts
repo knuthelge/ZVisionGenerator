@@ -26,6 +26,16 @@ describe('NavDrawer', () => {
     expect(document.body.querySelector('[data-testid="nav-drawer"]')).toBeNull();
   });
 
+  it('names the app Z-Vision for assistive technology, with only decorative drawings beside the name', () => {
+    app = flushSync(() => mount(NavDrawer, { target, props: { open: true, currentPage: 'workspace', onnavigate: vi.fn(), onclose: vi.fn() } }));
+
+    const brand = document.body.querySelector('h1') as HTMLElement;
+    expect(brand.textContent?.trim()).toBe('Z-Vision');
+    const drawings = Array.from(brand.querySelectorAll('svg, img'));
+    expect(drawings.length).toBeGreaterThan(0);
+    expect(drawings.every((drawing) => drawing.getAttribute('aria-hidden') === 'true' || drawing.getAttribute('alt') === '')).toBe(true);
+  });
+
   it('lists the five pages, marks the current one, navigates and closes', () => {
     const onnavigate = vi.fn();
     const onclose = vi.fn();

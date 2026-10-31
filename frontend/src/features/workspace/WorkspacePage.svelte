@@ -27,6 +27,7 @@
     REACTION_DURATION_MS,
     TYPING_DURATION_MS,
     mascotMood as pickMascotMood,
+    mascotProgress as pickMascotProgress,
     mascotSpot as pickMascotSpot,
     mascotTool as pickMascotTool,
     type MascotReaction,
@@ -320,6 +321,8 @@
     typing,
     drowsy,
   }));
+  // The creating mood's canvas follows the running job's real steps.
+  const mascotProgress = $derived(pickMascotProgress(jobStore.current));
   // A running job decides the tool; otherwise the form's workflow does.
   const mascotTool = $derived(pickMascotTool(jobStore.isRunning ? jobStore.current?.workflow : draft.state.workflow));
   const lightboxAssets = $derived<GalleryAsset[]>(
@@ -1646,7 +1649,7 @@
                 <!-- Blob rides the bar, peeking over its top edge. -->
                 <div class="job-bar-mascot">
                   {#if mascotAt === 'job'}
-                    <MascotSpot mood={mascotMood} tool={mascotTool} size={56} />
+                    <MascotSpot mood={mascotMood} tool={mascotTool} progress={mascotProgress} size={56} />
                   {/if}
                 </div>
                 <JobBar
@@ -1662,7 +1665,7 @@
               <!-- Blob hosts the job: it stands on the card, clear of the forming image. His place stays when he goes home. -->
               <div class="job-view-mascot">
                 {#if mascotAt === 'job'}
-                  <MascotSpot mood={mascotMood} tool={mascotTool} size={112} />
+                  <MascotSpot mood={mascotMood} tool={mascotTool} progress={mascotProgress} size={112} />
                 {/if}
               </div>
               <JobCard

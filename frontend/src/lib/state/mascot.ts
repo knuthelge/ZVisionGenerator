@@ -1,5 +1,6 @@
 import type { MascotMood, MascotTool } from '$lib/components/atoms/Mascot.svelte';
 import type { ActiveJobState, JobWorkflow } from '$lib/types';
+import { jobPhase, stepFraction } from './jobView';
 
 /**
  * A short-lived reaction: to a job finishing, failing, being stopped, or getting
@@ -81,6 +82,15 @@ export function mascotMood({ job, reaction, loadError, loading, greeting, typing
   if (typing) return 'curious';
   if (drowsy) return 'sleeping';
   return 'idle';
+}
+
+/**
+ * Report how far the running job's generate steps have come (0 to 1), or undefined while it reports none: before its
+ * steps are known, between the items of a batch, and in the stages around generating, including the upscale, whose
+ * own steps would otherwise read as the creating canvas starting over.
+ */
+export function mascotProgress(job: ActiveJobState | null): number | undefined {
+  return job && jobPhase(job) === 'generate' && job.stageName !== 'upscale' && job.totalSteps > 0 ? stepFraction(job) : undefined;
 }
 
 /** Pick what the mascot holds: a clapperboard for video workflows, otherwise a brush. */

@@ -1,6 +1,6 @@
 {
-  "name": "ZVision Generator",
-  "short_name": "ziv",
+  "name": "Z-Vision Generator",
+  "short_name": "Z-Vision",
   "description": "Generate images and videos with local models.",
   "start_url": "/app",
   "scope": "/",

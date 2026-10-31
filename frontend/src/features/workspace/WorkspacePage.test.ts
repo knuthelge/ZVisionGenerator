@@ -471,6 +471,20 @@ describe('WorkspacePage', () => {
       expect(mascotHome.placement.away).toBe(true);
     });
 
+    it('lets the mascot\'s canvas follow the job\'s real steps', async () => {
+      const running = jobSnap('job-live', 'running', { last_event: { type: 'step_progress', current_step: 4, total_steps: 20, elapsed_secs: 2, eta_secs: 8 } });
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: running, queued_jobs: [] });
+      await mountWorkspace(makeContext({ active_job: running, queued_jobs: [] }));
+      const drawing = (): string => (target.querySelector('[data-testid="job-view"] svg[role="img"]') as SVGSVGElement).innerHTML;
+      const early = drawing();
+
+      lastEventSource().emit('step_progress', { type: 'step_progress', job_id: 'job-live', current_step: 12, total_steps: 20, elapsed_secs: 6, eta_secs: 4 });
+      await settle();
+
+      // The mascot is still creating; only the picture on his canvas has moved on.
+      expect(drawing()).not.toBe(early);
+    });
+
     it('submits once for a held Cmd+Enter', async () => {
       draft.update('prompt', 'Once');
       await mountWorkspace(makeContext());

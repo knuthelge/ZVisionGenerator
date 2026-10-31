@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState, JobStatus } from '$lib/types';
-import { homePlacement, mascotMood, mascotSpot, mascotTool, type MascotSpotSignals } from './mascot';
+import { homePlacement, mascotMood, mascotProgress, mascotSpot, mascotTool, type MascotSpotSignals } from './mascot';
 
 function job(status: JobStatus, currentStep = 0, totalSteps = 0, overrides: Partial<ActiveJobState> = {}): ActiveJobState {
   return { status, currentStep, totalSteps, stageName: '', outputs: [], ...overrides } as ActiveJobState;
@@ -129,5 +129,19 @@ describe('homePlacement', () => {
   it('is home off the Workspace once the job ended, reacting to it', () => {
     expect(homePlacement(null, job('completed'), 'txt2img', 'cheerful')).toEqual({ away: false, mood: 'cheerful', tool: 'brush' });
     expect(homePlacement(null, null, 'txt2vid')).toEqual({ away: false, mood: 'idle', tool: 'clapper' });
+  });
+});
+
+describe('mascotProgress', () => {
+  it('is the share of the job\'s steps done', () => {
+    expect(mascotProgress(job('running', 5, 20))).toBe(0.25);
+    expect(mascotProgress(job('running', 20, 20))).toBe(1);
+  });
+
+  it('is unknown without a job, before the steps are known, and in the stages around generating', () => {
+    expect(mascotProgress(null)).toBeUndefined();
+    expect(mascotProgress(job('running', 0, 0))).toBeUndefined();
+    expect(mascotProgress(job('running', 5, 20, { phase: 'load' }))).toBeUndefined();
+    expect(mascotProgress(job('running', 5, 20, { stageName: 'upscale' }))).toBeUndefined();
   });
 });

@@ -12,3 +12,4 @@ export { default as Icon } from './Icon.svelte';
 export { default as InspectorNumber } from './InspectorNumber.svelte';
 export { default as ShortcutList } from './ShortcutList.svelte';
 export { default as StepProgress } from './StepProgress.svelte';
+export { default as Wordmark } from './Wordmark.svelte';
