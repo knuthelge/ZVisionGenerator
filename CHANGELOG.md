@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **The Workspace has one Image and one Video tab**, beside Extend Video. A start image or first frame in the new **Images** section of Settings decides whether a run starts from an image; references and the last frame sit there too. Each tab keeps its own prompt and images, uploaded images stay after a reload, and **Reset** clears the open tab's images. On a phone, one **Images** chip opens them
 - **Images are picked with Browse the server or uploaded**; the Path field is gone. "Img strength" is now **Strength**
 
+### Fixed
+- **The `beta` scheduler works on FLUX.2 Klein.** On macOS it failed with an error; on Windows/Linux it spaced the steps differently from ComfyUI's `beta`
+
 ## [0.14.0b2] - 2026-10-30
 
 ### Upgrading from 0.13

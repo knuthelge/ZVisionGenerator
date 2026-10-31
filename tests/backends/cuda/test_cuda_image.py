@@ -974,22 +974,33 @@ class TestTextToImage:
 
         assert mock_model.scheduler is original_scheduler
 
-    def test_zimage_beta_passes_beta_sigmas(self, win_backend):
-        """Z-Image gets the beta grid as ``sigmas`` so the model shift applies after the beta spacing."""
-        mod, _, _ = win_backend
-        backend, mock_model = self._ready_backend(mod)
-        _t2i(backend, mock_model, steps=6, guidance=0.0, scheduler="beta")
-        sigmas = mock_model.call_args[1]["sigmas"]
-        assert len(sigmas) == 6
-        assert sigmas[0] == pytest.approx(1.0)
-        assert sigmas == sorted(sigmas, reverse=True)
+    @pytest.mark.parametrize("family", ["zimage", "krea2", "flux2_klein"])
+    def test_beta_passes_the_beta_grid_as_sigmas(self, win_backend, family):
+        """Every model gets the unshifted beta grid as ``sigmas``, so its own shift applies after the beta spacing."""
+        from zvisiongenerator.schedulers.beta_sigmas import beta_sigmas
 
-    def test_other_families_beta_passes_no_sigmas(self, win_backend):
         mod, _, _ = win_backend
         backend, mock_model = self._ready_backend(mod)
-        backend._model_info = _make_model_info(family="flux2")
-        _t2i(backend, mock_model, guidance=None, scheduler="beta")
-        assert "sigmas" not in mock_model.call_args[1]
+        backend._model_info = _make_model_info(family=family)
+        _t2i(backend, mock_model, steps=6, guidance=1.0, scheduler="beta")
+        assert mock_model.call_args[1]["sigmas"] == pytest.approx(beta_sigmas(6))
+
+    def test_beta_keeps_a_dynamic_shift_scheduler(self, win_backend):
+        mod, _, _ = win_backend
+        pipe = MagicMock()
+        scheduler = pipe.scheduler
+        scheduler.config = {"use_dynamic_shifting": True}
+        mod._apply_beta_scheduler(pipe, 4)
+        assert pipe.scheduler is scheduler
+
+    def test_beta_switches_a_fixed_shift_scheduler_to_dynamic_shifting(self, win_backend):
+        """Z-Image's scheduler has a fixed shift; with custom sigmas it must take the pipeline's ``mu`` instead."""
+        mod, _, diffusers_mod = win_backend
+        pipe = MagicMock()
+        pipe.scheduler.config = {"use_dynamic_shifting": False, "shift": 3.0}
+        mod._apply_beta_scheduler(pipe, 4)
+        diffusers_mod.FlowMatchEulerDiscreteScheduler.from_config.assert_called_once_with({"use_dynamic_shifting": False, "shift": 3.0}, use_dynamic_shifting=True)
+        assert pipe.scheduler is diffusers_mod.FlowMatchEulerDiscreteScheduler.from_config.return_value
 
     def test_no_scheduler_passes_no_sigmas(self, win_backend):
         mod, _, _ = win_backend

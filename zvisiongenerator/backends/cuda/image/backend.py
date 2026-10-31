@@ -69,23 +69,21 @@ def _img2img_sigmas(steps: int, strength: float) -> list[float]:
     return grid[steps - img2img_run_steps(steps, strength) :]
 
 
-def _apply_beta_scheduler(pipe: Any, family: str, steps: int) -> dict[str, Any]:
-    """Switch *pipe* to the beta schedule and return the extra pipeline kwargs it needs.
+def _apply_beta_scheduler(pipe: Any, steps: int) -> dict[str, Any]:
+    """Switch *pipe* to ComfyUI's beta schedule and return the extra pipeline kwargs it needs.
 
-    Z-Image matches mflux: the pipeline gets the beta grid as ``sigmas`` and shifts it with the
-    resolution-dependent ``mu``, so the shift applies after the beta spacing. diffusers' own
-    ``use_beta_sigmas`` shifts first and spreads the beta spacing over the shifted range, which ends the
-    schedule at sigma 0.25 instead of near 0. Other families keep ``use_beta_sigmas``.
+    The pipeline gets the beta grid as ``sigmas`` and shifts it with its own ``mu``, so the shift applies after the
+    beta spacing, as in ComfyUI and mflux. diffusers' own ``use_beta_sigmas`` shifts first and spreads the beta spacing
+    over the shifted range, a different schedule (for FLUX.2 Klein it ends near sigma 0.01 instead of 0.68). A scheduler
+    with a fixed shift (Z-Image's) is switched to dynamic shifting so it takes the pipeline's ``mu``.
     """
     from diffusers import FlowMatchEulerDiscreteScheduler
 
-    if family == "zimage":
-        from zvisiongenerator.schedulers.beta_sigmas import beta_sigmas
+    from zvisiongenerator.schedulers.beta_sigmas import beta_sigmas
 
+    if not pipe.scheduler.config.get("use_dynamic_shifting", False):
         pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config, use_dynamic_shifting=True)
-        return {"sigmas": beta_sigmas(steps)}
-    pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config, use_beta_sigmas=True)
-    return {}
+    return {"sigmas": beta_sigmas(steps)}
 
 
 def _krea2_size(pipe: Any, image: Image.Image) -> tuple[int, int]:
@@ -509,7 +507,7 @@ class DiffusersBackend:
         # no reference to the model outlives the job. Without a dtype, from_pipe casts the shared components to
         # float32; the VAE carries the dtype the model loaded in.
         img2img = AutoPipelineForImage2Image.from_pipe(model, dtype=model.vae.dtype)
-        scheduler_kwargs = _apply_beta_scheduler(img2img, self._model_info.family, steps) if scheduler == "beta" else {}
+        scheduler_kwargs = _apply_beta_scheduler(img2img, steps) if scheduler == "beta" else {}
 
         _is_flux = self._model_info.family in ("flux1", "flux2", "flux2_klein")
 
@@ -674,7 +672,7 @@ class DiffusersBackend:
             return self._moss_generate(model, prompt, width, height, seed, steps, guidance, negative_prompt, skip_signal, step_callback)
         original_scheduler = model.scheduler
         try:
-            scheduler_kwargs = _apply_beta_scheduler(model, self._model_info.family, steps) if scheduler == "beta" else {}
+            scheduler_kwargs = _apply_beta_scheduler(model, steps) if scheduler == "beta" else {}
             _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
 
             generator = torch.Generator(device="cpu").manual_seed(seed)

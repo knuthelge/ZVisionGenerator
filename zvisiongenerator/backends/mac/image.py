@@ -173,6 +173,15 @@ def _instant_ideogram4() -> Iterator[None]:
 _KREA2_SAMPLER = "euler"
 
 
+_BETA_SCHEDULER = "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
+_KLEIN_BETA_SCHEDULER = "zvisiongenerator.schedulers.beta_scheduler.KleinBetaScheduler"
+
+
+def _family_scheduler(family: str, scheduler: str | None) -> str | None:
+    """Return the mflux scheduler path for *family*: FLUX.2 Klein's beta keeps Klein's own step-dependent shift."""
+    return _KLEIN_BETA_SCHEDULER if family == "flux2_klein" and scheduler == _BETA_SCHEDULER else scheduler
+
+
 def _krea2_turbo_config() -> ModelConfig:
     """Return mflux's Krea 2 config with Turbo's fixed timestep shift (mu = 1.15), the shift Krea trained it at.
 
@@ -508,7 +517,8 @@ class MfluxBackend:
                 image_strength=image_strength,
                 guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
             )
-            if scheduler is not None:
+            # As on Windows/Linux, Klein's refine passes (image to image, upscale) keep Klein's own schedule.
+            if scheduler is not None and self._model_info.family != "flux2_klein":
                 gen_kwargs["scheduler"] = scheduler
             if self._model_info.family == "krea2":
                 gen_kwargs["scheduler"] = _KREA2_SAMPLER
@@ -583,7 +593,7 @@ class MfluxBackend:
                     guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
                 )
                 if scheduler is not None:
-                    gen_kwargs["scheduler"] = scheduler
+                    gen_kwargs["scheduler"] = _family_scheduler(self._model_info.family, scheduler)
                 if self._model_info.family == "krea2":
                     gen_kwargs["scheduler"] = _KREA2_SAMPLER
                 if not _is_flux and negative_prompt is not None:

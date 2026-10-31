@@ -80,10 +80,9 @@ saturation:
   default_amount: 1.0
 
 schedulers:
+  # ComfyUI's "beta": the beta(0.6, 0.6) grid, then the model's own timestep shift. diffusers gets the grid as custom sigmas.
   beta:
     mflux_class: "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
-    # diffusers: Z-Image gets the beta grid as custom sigmas (same shape as mflux); other models use
-    # FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)
 
 platforms:
   darwin: macOS
