@@ -1,17 +1,15 @@
 # Krea 2: beta scheduler and upscale defaults, and beta on FLUX.2 Klein
 
-**Status:** In progress (2026-10-31)
+**Status:** Done (2026-10-31, unreleased; commits e17f666, 7f0526b)
 
 **Shipped (unreleased, on `main`):**
 - Krea 2 defaults to the `beta` scheduler on both platforms and shows **Scheduler**.
 - A new `simple` scheduler gives any model's own evenly spaced steps.
 - Krea 2 upscales refine for 5 steps instead of 3, and an upscale while generating no longer sharpens first.
-- `beta` on FLUX.2 Klein matches ComfyUI on Windows/Linux. On macOS it has a fix for its error that hasn't been run on a Mac yet.
+- `beta` on FLUX.2 Klein matches ComfyUI on Windows/Linux, and runs on macOS.
 - Ideogram 4 hides the Scheduler control it ignored.
 
-Windows/Linux is verified on a 10 GB card.
-
-**Left:** the macOS check. Nothing on the macOS side has run on a Mac: the Krea 2 beta adapter, Klein's beta scheduler and its timesteps, and Klein's refine passes. Run the [Mac test plan](#mac-test-plan) and archive this proposal once it passes.
+Verified on Windows/Linux on a 10 GB card and on a 32 GB Mac (see [Results](#results)).
 
 ## Problem
 
@@ -76,66 +74,70 @@ Separate finding, not fixed here: a Krea 2 2× upscale to 1280×1920 runs out of
 - **What's new on a Mac:**
   - Krea 2 gets the `beta` schedule through a swap of mflux's scheduler registry.
   - FLUX.2 Klein's `beta` gets its own scheduler with `timesteps`, on both the plain and the references path.
-  - Klein's refine passes ignore the scheduler.
-  - The per-model Sharpen default, `simple`, and Ideogram 4 without a Scheduler.
+  - Krea 2's upscale refines for 5 steps without sharpening first.
+- **Already covered elsewhere, so not run here:** `make check` runs on macOS in CI. The real-mflux tests in `tests/backends/mac` pin the beta sigmas, the registry restore and that image to image keeps its own schedule on both models. The Sharpen default, the `--upscale-sharpen` flags, "Copy as CLI command" and `simple` resolving to the model's own schedule are platform-independent and unit-tested.
+- **Also covered here:** a smoke test of the merged Workspace Image and Video tabs and of Blob on the Mac's real backends and in Safari.
 - **Machine:** an Apple Silicon Mac with 32 GB.
-- **When:** run from `main` once the branch is merged.
-- **Time:** about 1 hour 10 minutes, mostly unattended generation (table below). Downloads and the first q8 copy of each model are not included; S2 does those first.
-- **Disk:**
-  - Downloads of whichever models are missing: `krea2` 36 GB, `klein9b` 35 GB, `zit` 33 GB.
-  - Plus one stored q8 copy per model. The Models page lists their sizes.
-  - Outputs under 1 GB.
-  - If none of the models are on the Mac yet, keep at least 150 GB free.
-- **Order:** S1–S3, T0, K1–K5, C1–C4, Z1, W1, then V (all the looking) at the end.
-- **Failures outside this work:** T0 can show Mac-only test failures unrelated to this branch. Record them, compare them with a run on the commit before the merge, and don't let them block the rest.
+- **Models:** `krea2`, `klein9b` and one video model already on disk. Use `-q N` (and the same **Quantize** in the Web UI) matching a stored `<name>@qN` copy, so nothing new is built and the full-precision model isn't loaded.
+- **Time:** about 35 minutes.
 
 | Step | What | Min |
 |---|---|---|
-| S1–S3 | Update, helpers, first q8 run of each model (copies not counted) | 5 |
-| T0 | `make check` and the Mac beta tests | 10 |
-| K1–K5 | Krea 2: `beta`, `simple`, upscale, Sharpen back on, image to image | 20 |
-| C1–C4 | Klein 9B: `beta` vs default, upscale, image to image, references | 15 |
-| Z1 | Z-Image with `simple` | 3 |
-| W1 | Web UI: Scheduler, Sharpen, Copy as CLI command, Ideogram 4 | 10 |
-| V | One visual pass | 5 |
-| Total | | about 70 |
+| P0 | Mac backend tests | 1 |
+| K1–K3 | Krea 2: `beta`, `simple`, upscale | 12 |
+| C1 | Klein 9B: `beta` vs default | 6 |
+| E–H | Web UI: Klein `beta` with a reference, image to image, persistence, video | 13 |
+| I | Blob | 3 |
+| Total | | about 35 |
 
 **Setup**
 
-- **S1.** `git switch main && git pull && make install`.
-- **S2.** Download `krea2`, `klein9b` and `zit` if they are missing (Models page, or let the first run fetch them). Then run one throwaway `-q 8` image per model, for example `ziv image -m krea2 -q 8 --prompt test -W 512 -H 512 -o /tmp/ziv-warmup`. The first `-q 8` run of each model saves a `<name>@q8` copy and takes several minutes; later runs load it.
-- **S3.** In the terminal you'll use for every step:
+Run everything from the checkout under test after `make install`, with `uv run ziv`. In the terminal you'll use for every step:
 
 ```bash
+export Q=8   # the bits of the stored copies
 export OUT=~/ziv-mac-krea-test
 export PORTRAIT="Close-up portrait photo of a woman in her thirties with freckles and natural skin texture, looking at the camera, soft window light from the side, 85mm lens, shallow depth of field, loose strands of hair across her forehead, plain grey wall behind her."
 export SWEATER="Half-body photo of a bearded man in his fifties wearing a chunky cable-knit wool sweater, standing on a windy harbour pier on an overcast day, fishing boats and ropes behind him, weathered face with wrinkles, natural light, shot on a 50mm lens."
-latest() { ls -t "$1"/*.png | grep -v _preupscale | head -1; }
+latest() { ls -t "$1"/*.png | head -1; }
 # Pixels only: the files always differ, because each PNG records its scheduler and time.
 same() { uv run python -I -c "import sys; from PIL import Image, ImageChops; a,b=(Image.open(p).convert('RGB') for p in sys.argv[1:3]); print('identical' if ImageChops.difference(a,b).getbbox() is None else 'different')" "$1" "$2"; }
 meta() { uv run python -I -c "import json,sys; from zvisiongenerator.utils.provenance import read_png_config; c=read_png_config(sys.argv[1]); print(json.dumps({'scheduler': c.get('scheduler'), 'upscale': c['generation'].get('upscale')}))" "$1"; }
 ```
 
-If a `same` check that should be `identical` prints `different`, run both commands again into new folders before calling it a failure, to rule out run-to-run noise.
-
 **Steps**
 
 | Step | Run | Pass if |
 |---|---|---|
-| T0 | `make check`, then `uv run pytest tests/backends/mac/test_mac_beta_schedule.py -v` | The second command shows `9 passed` and no skips. For `make check`, see Failures outside this work above |
-| K1 | `ziv image -m krea2 -q 8 --prompt "$PORTRAIT" --seed 4242 -W 832 -H 1248 -o $OUT/k1` | `meta "$(latest $OUT/k1)"` shows `"scheduler": "beta"` |
-| K2 | `ziv image -m krea2 -q 8 --prompt "$PORTRAIT" --seed 4242 -W 832 -H 1248 --scheduler simple -o $OUT/k2` | `meta` shows `"scheduler": "simple"`, and `same "$(latest $OUT/k1)" "$(latest $OUT/k2)"` prints `different`. If it prints `identical`, the beta swap did nothing |
-| K3 | `ziv image -m krea2 -q 8 --prompt "$SWEATER" --seed 4242 -W 1024 -H 1536 --upscale 2 -o $OUT/k3` | The second mflux progress bar ends at `5/5`, and `meta` shows `"steps": 5` and no `pre_sharpen` under `upscale` |
-| K4 | `ziv image -m krea2 -q 8 --prompt "$SWEATER" --seed 4242 -W 1024 -H 1536 --upscale 2 --upscale-sharpen -o $OUT/k4` | `meta` shows `"pre_sharpen": 0.8`, and `same` K3 K4 prints `different` |
-| K5 | `ziv image -m krea2 -q 8 --prompt "$PORTRAIT" --seed 4242 --image "$(latest $OUT/k1)" --image-strength 0.3 --steps 8 --scheduler beta -o $OUT/k5b`, then the same with `--scheduler simple -o $OUT/k5s` | `same` K5b K5s prints `identical` (Krea's image to image stays evenly spaced) |
-| C1 | `ziv image -m klein9b -q 8 --prompt "$PORTRAIT" --seed 4242 -W 832 -H 1248 --scheduler beta -o $OUT/c1`, then the same without `--scheduler` and with `-o $OUT/c1d` | Both finish with no error, `same` C1 C1d prints `different`, and C1 looks like a normal Klein image (V) |
-| C2 | `ziv image -m klein9b -q 8 --prompt "$PORTRAIT" --seed 4242 -W 832 -H 1248 --scheduler beta --upscale 2 -o $OUT/c2` | It finishes, the second progress bar ends at `2/2`, and `meta` shows `"pre_sharpen": 0.8` (Klein keeps Sharpen on) |
-| C3 | `ziv image -m klein9b -q 8 --prompt "$PORTRAIT" --seed 4242 --image "$(latest $OUT/c1d)" --image-strength 0.3 --scheduler beta -o $OUT/c3b`, then the same without `--scheduler` and with `-o $OUT/c3d` | `same` C3b C3d prints `identical` (Klein's image to image keeps its own schedule) |
-| C4 | `ziv image -m klein9b -q 8 --prompt "$PORTRAIT, as image 1" --seed 4242 -W 832 -H 1248 --scheduler beta --reference "$(latest $OUT/c1d)" -o $OUT/c4` | It finishes with no error and looks like a normal Klein image (V). References run through a separate mflux loop that also reads the beta timesteps |
-| Z1 | `ziv image -m zit -q 8 --prompt "$PORTRAIT" --seed 4242 -W 832 -H 1248 --scheduler simple -o $OUT/z1s`, then the same without `--scheduler` and with `-o $OUT/z1` | `meta` shows `"scheduler": "simple"` and `"beta"`, and `same` Z1s Z1 prints `different` |
-| W1 | `ziv ui --host local`, Image tab, in this order | (1) **Reset**. Pick Klein 9B and set **Upscale** to 2×: **Sharpen** is on. (2) Switch to Krea 2: **Sharpen** is off, and **Scheduler** offers "Auto (model default)", `beta` and `simple`. (3) **Copy as CLI command**: contains neither `--upscale-sharpen` nor `--no-upscale-sharpen`. (4) Turn **Sharpen** on and copy again: contains `--upscale-sharpen`. (5) **Reset**, pick Klein 9B, Upscale 2×, turn **Sharpen** off, copy: contains `--no-upscale-sharpen`. (6) Pick Ideogram 4: there is no **Scheduler** row |
-| V | Open K1 and K2, K3 and K4, C1 and C1d, and C4 at 100% | K1 shows more pore and freckle detail than K2. K3's knit has no coloured specks. C1 and C4 are not washed out or noisy next to C1d |
+| P0 | `uv run pytest tests/backends/mac -rs -q` | Everything passes with no skips |
+| K1 | `uv run ziv image -m krea2 -q $Q --prompt "$PORTRAIT" --seed 4242 -W 832 -H 1248 -o $OUT/k1` | `meta "$(latest $OUT/k1)"` shows `"scheduler": "beta"` |
+| K2 | The same with `--scheduler simple -o $OUT/k2` | `meta` shows `"scheduler": "simple"`, `same` K1 K2 prints `different` (`identical` means the beta swap did nothing), and at 100% K1 shows more pore and freckle detail than K2 |
+| K3 | `uv run ziv image -m krea2 -q $Q --prompt "$SWEATER" --seed 4242 -W 1024 -H 1536 --upscale 2 -o $OUT/k3` | The second progress bar ends at `5/5`, `meta` shows `"steps": 5` and no `pre_sharpen` under `upscale`, and the knit has no coloured specks |
+| C1 | `uv run ziv image -m klein9b -q $Q --prompt "$PORTRAIT" --seed 4242 -W 832 -H 1248 --scheduler beta -o $OUT/c1`, then the same without `--scheduler` and with `-o $OUT/c1d` | Both finish with no error, `same` C1 C1d prints `different`, and C1 is not washed out or noisy next to C1d |
+| E | `uv run ziv ui --host local` in Safari (not a Private window), Image tab: Klein 9B, **Scheduler** `beta`, upload C1d from Finder as a **Reference**, prompt "$PORTRAIT, as image 1" | It finishes, looks like a normal Klein image, and `meta` on its output shows `"scheduler": "beta"`. This is the only real-weights run of Klein's references loop with `beta` |
+| F | Image tab: Krea 2, upload K1 as the start image, **Strength** 0.3 | The job is labelled Image to Image and finishes |
+| G | Reload the page | The prompt and the uploaded images are still there. **Reset** clears only the open tab's images. **Use as → Reference** in the viewer adds a reference. At Upscale 2×, **Sharpen** is on for Klein 9B and off for Krea 2. Ideogram 4 has no **Scheduler** row |
+| H | Video tab, **Low memory** on, the smallest size and fewest frames | With a first frame, the job is labelled Image to Video and finishes. Without one, it is labelled Text to Video and starts stepping (cancel it). Extend Video opens |
+| I | Watch Blob while E–H run | He appears and moves between his spots, the small canvas beside him denoises during a job, and the tab title reads Z-Vision Generator. With Reduce Motion on (System Settings → Accessibility → Display), he appears at once with still frames |
 
 A Mac image of the same prompt and seed won't match a Windows/Linux one: the platforms draw different starting noise. Compare the character of the skin texture only, if at all.
 
-Record wall time, pass or fail and the `meta` output per step under a Results heading here, fix any failure on the branch, and archive this proposal once every step passes.
+
+## Results
+
+Run on 2026-10-31 at `c0c90bc`, Apple M5 with 32 GB, `-q 8`. Web UI steps in Playwright's WebKit with an isolated data folder. Every step passes.
+
+| Step | Wall time | Result | Notes |
+|---|---|---|---|
+| P0 | 28 s | Pass | 394 passed, no skips |
+| K1 | 3 min 33 s (incl. saving `krea2@q8`) | Pass | `{"scheduler": "beta", "upscale": null}` |
+| K2 | 3 min 3 s | Pass | `{"scheduler": "simple", "upscale": null}`; `same` K1 K2: `different`; K1 shows clearly more freckle, pore and wrinkle detail |
+| K3 | 5 min 20 s | Pass | Second bar `5/5`; `{"scheduler": "beta", "upscale": {"denoise": 0.4, "factor": 2, "method": "creative", "steps": 5}}`; 1024×1536, clean knit |
+| C1 | 1 min 21 s (incl. saving `klein9b@q8`) + 1 min 6 s | Pass | C1 `{"scheduler": "beta", "upscale": null}`, C1d `{"scheduler": null, "upscale": null}`; `different`; C1 is clean |
+| E | 3 min 30 s | Pass | `{"scheduler": "beta", "upscale": null}`; a normal portrait. Recorded as Text to Image, since a reference alone doesn't make a run image to image |
+| F | 4 min 20 s | Pass | Recorded as Image to Image (`img2img`). The output is over-textured (cracked pores), the same-size detail pass described in [Evidence](#evidence); not changed by this work |
+| G | — | Pass | Prompts, uploads and the Video tab's first frame survive a reload and a browser restart; Reset clears only the Image tab's images; Use as → Reference works; Sharpen on for Klein 9B and off for Krea 2 at 2×; no Scheduler row on Ideogram 4 |
+| H | 31 s | Pass | `ltx-4`, Low memory, 256×256, 9 frames: Image to Video finishes; Text to Video starts stepping and cancels; Extend Video opens |
+| I | — | Pass | Title "Z-Vision Generator"; Blob animates and the denoise canvas resolves during a job; with reduced motion he appears at once with still frames |
+
+Not checked: video thumbnails in the Gallery and preview stay blank in headless WebKit while the files play; check them in Safari.
