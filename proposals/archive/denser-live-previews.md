@@ -1,10 +1,8 @@
 # A live preview on every step
 
-**Status:** In progress (2026-10-26)
+**Status:** Done (2026-10-31, unreleased)
 
-**Shipped (unreleased):** a preview on every step but the last on both platforms, the macOS preview on the step's own report, the frontend note, docs and CHANGELOG, as measured below.
-
-**Left:** the macOS check. Run one `zit` job in the Web UI on a Mac and confirm the steps report evenly, with a preview from step 1. Archive this proposal once it passes.
+**Shipped (unreleased):** a preview on every step but the last on both platforms, the macOS preview on the step's own report, the frontend note, docs and CHANGELOG, as measured below. The macOS check passed on 2026-10-31: a `zit` job in the Web UI on a Mac showed a live preview on every step.
 
 ## Problem
 
