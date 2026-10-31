@@ -24,7 +24,7 @@ _DESKTOP = {"width": 1440, "height": 900}
 _PHONE = {"width": 390, "height": 844}
 _SCALE = 1.5
 # The newest output: the image the Workspace and viewer shots show. Generated with the enhancer for the docs.
-_HERO = "astronaut_2026-10-25_13-18-32.png"
+_HERO = "web_2026-10-30_21-58-33.png"
 _DEMO_PROMPT_FILE = "/var/tmp/ziv-docs/data/prompts/demo.yaml"
 
 
