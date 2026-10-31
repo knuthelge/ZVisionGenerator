@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DraftState } from '$lib/types';
 import type { WorkspaceCapabilities } from './capabilities';
+import type { ImagesSummary } from './imagesSummary';
 import { pendingChips, settingsChips, type ChipFacts } from './settingsChips';
 
 const imageCaps = {
@@ -17,7 +18,7 @@ const state = {
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
   return {
     caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null, extendChanged: false,
-    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, referenceName: null, endReferenceName: null, sourceName: null, memoryWarn: false,
+    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, memoryWarn: false,
     presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
   };
@@ -26,10 +27,11 @@ function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
 describe('settingsChips', () => {
   it('offers placeholder chips in the workflow order, with no value, while the context loads', () => {
     const image = pendingChips('txt2img');
-    expect(image.map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
+    expect(image.map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
     expect(image.every((chip) => chip.value === '—' && !chip.changed)).toBe(true);
-    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'size', 'audio', 'loras', 'model']);
+    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'size', 'audio', 'loras', 'model']);
     expect(pendingChips('extend')[1]?.key).toBe('extendSeconds');
+    expect(pendingChips('extend').map((chip) => chip.key)).not.toContain('images');
   });
 
   it('carries what the LoRA files are doing on the LoRA chip only', () => {
@@ -48,42 +50,55 @@ describe('settingsChips', () => {
     expect(settingsChips(facts({ caps, seconds: 5 })).map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'seed', 'runs', 'size', 'audio', 'loras', 'model']);
   });
 
-  it('adds the References chip after the start image only where the model takes references', () => {
-    const caps = { ...imageCaps, showRefImage: true, showReferences: true, maxReferences: 4 } as WorkspaceCapabilities;
-    const keys = (chips: ReturnType<typeof settingsChips>) => chips.map((chip) => chip.key);
+  describe('the Images chip', () => {
+    const summary = (overrides: Partial<ImagesSummary> = {}): ImagesSummary => ({ text: 'pond.png · 2 references', tone: 'active', ...overrides });
+    const images = (f: Partial<ChipFacts>) => settingsChips(facts(f)).find((chip) => chip.key === 'images');
 
-    expect(keys(settingsChips(facts({ caps })))).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'reference', 'references', 'size', 'loras', 'upscale', 'model']);
-    expect(settingsChips(facts({ caps: { ...caps, referenceCount: 0 } })).find((chip) => chip.key === 'references')).toMatchObject({ on: false });
-    expect(settingsChips(facts({ caps: { ...caps, referenceCount: 2 } })).find((chip) => chip.key === 'references')).toMatchObject({ on: true });
-    expect(keys(settingsChips(facts()))).not.toContain('references');
+    it('is one chip for every image, between Batch and Size, with the section summary as its value', () => {
+      const keys = settingsChips(facts({ images: summary() })).map((chip) => chip.key);
+
+      expect(keys).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
+      expect(images({ images: summary() })).toMatchObject({ label: 'Images', value: 'pond.png · 2 references', on: true });
+    });
+
+    it('is left out where the section is not offered', () => {
+      expect(images({ images: null })).toBeUndefined();
+    });
+
+    it('reads None unlit, and warns when an image the run uses is gone', () => {
+      expect(images({ images: summary({ text: 'None', tone: 'muted' }) })).toMatchObject({ value: 'None', on: false, warn: false });
+      expect(images({ images: summary({ tone: 'error' }) })).toMatchObject({ on: false, warn: true });
+    });
+
+    it('carries the changed flag of Strength while an image-to-image run offers it', () => {
+      const caps = { ...imageCaps, showI2IStrength: true } as WorkspaceCapabilities;
+      const changed = (...keys: string[]) => keys.includes('referenceImageStrength');
+
+      expect(images({ images: summary(), caps, state: { ...state, workflow: 'img2img' } as DraftState, changed })?.changed).toBe(true);
+      expect(images({ images: summary(), caps, state: { ...state, workflow: 'txt2img' } as DraftState, changed })?.changed).toBe(false);
+      expect(images({ images: summary(), caps: imageCaps, state: { ...state, workflow: 'img2img' } as DraftState, changed })?.changed).toBe(false);
+    });
+
+    it('replaces the old per-image chips', () => {
+      const everything = { ...imageCaps, showRefImage: true, takesLastFrame: true, maxReferences: 4, showI2IStrength: true } as WorkspaceCapabilities;
+      const keys = settingsChips(facts({ caps: everything, images: summary() })).map((chip) => chip.key as string);
+
+      for (const key of ['strength', 'reference', 'references', 'endReference']) expect(keys).not.toContain(key);
+    });
   });
 
-  it('adds Strength and Reference for image to image, and Source and Extend for an extension', () => {
-    const i2i = { ...imageCaps, showI2IStrength: true, showRefImage: true } as WorkspaceCapabilities;
-    expect(settingsChips(facts({ caps: i2i })).map((chip) => chip.key)).toContain('strength');
-    expect(settingsChips(facts({ caps: i2i })).map((chip) => chip.key)).toContain('reference');
+  it("a tab's two workflows share placeholders", () => {
+    const keys = (workflow: Parameters<typeof pendingChips>[0]) => pendingChips(workflow).map((chip) => chip.key);
+
+    expect(keys('img2img')).toEqual(keys('txt2img'));
+    expect(keys('img2vid')).toEqual(keys('txt2vid'));
+  });
+
+  it('adds Source and Extend for an extension', () => {
     const extend = { ...imageCaps, isImageMode: false, showExtendLength: true, showSourceVideo: true, showGuidance: false, showImageUpscale: false, showDimensions: false } as WorkspaceCapabilities;
     const keys = settingsChips(facts({ caps: extend, extendSeconds: 3, sourceName: 'harbour.mp4' })).map((chip) => chip.key);
     expect(keys.slice(0, 2)).toEqual(['preset', 'extendSeconds']);
     expect(keys).toContain('source');
-  });
-
-  it('adds a Last chip after the reference chip only where the model has a last frame, and calls the reference First then', () => {
-    const video = { ...imageCaps, isImageMode: false, showRefImage: true, showFrameCount: true, showGuidance: false, showImageUpscale: false } as WorkspaceCapabilities;
-    const withoutLast = settingsChips(facts({ caps: video, seconds: 5, referenceName: 'start.png' }));
-    expect(withoutLast.map((chip) => chip.key)).not.toContain('endReference');
-    expect(withoutLast.find((chip) => chip.key === 'reference')).toMatchObject({ value: 'start.png', on: true });
-
-    const withLast = settingsChips(facts({ caps: { ...video, showEndImage: true } as WorkspaceCapabilities, seconds: 5, referenceName: 'start.png', endReferenceName: 'end.png' }));
-    const keys = withLast.map((chip) => chip.key);
-    expect(keys.indexOf('endReference')).toBe(keys.indexOf('reference') + 1);
-    expect(withLast.find((chip) => chip.key === 'reference')).toMatchObject({ label: 'First', value: 'start.png' });
-    expect(withLast.find((chip) => chip.key === 'endReference')).toMatchObject({ label: 'Last', value: 'end.png', on: true });
-  });
-
-  it('shows an empty Last chip as none and off', () => {
-    const caps = { ...imageCaps, isImageMode: false, showRefImage: true, showEndImage: true } as WorkspaceCapabilities;
-    expect(settingsChips(facts({ caps })).find((chip) => chip.key === 'endReference')).toMatchObject({ value: 'none', on: false });
   });
 
   it('shows values, the changed flag and the on state', () => {

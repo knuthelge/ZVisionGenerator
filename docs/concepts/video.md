@@ -1,6 +1,6 @@
 # Video
 
-Videos are made with LTX or MiniMax H3, with sound, from a prompt (**Text to Video**) or from a starting image (**Image to Video**). **Extend Video** continues a clip you already have.
+Videos are made with LTX or MiniMax H3, with sound, from a prompt or from a starting image. In the Web UI, **Video** makes both: add a first frame in its **Images** section to start from an image. **Extend Video** continues a clip you already have.
 
 ## Models
 
@@ -65,13 +65,13 @@ LTX runs at 8 steps, the most it takes; fewer steps are faster and rougher. Mini
 
 ## Image to video
 
-The starting image is scaled to cover the video size, keeping its shape, and whatever overflows is cut from the centre. Pick a ratio close to the image's shape to keep all of it.
+In the Web UI, add the starting image as the **First frame** in the **Images** section of **Video**; without one, the clip is made from the prompt. In the CLI it is `--image`. The starting image is scaled to cover the video size, keeping its shape, and whatever overflows is cut from the centre. Pick a ratio close to the image's shape to keep all of it.
 
 Describe what the image shows in Scene and what happens in Action. The enhancer doesn't see the image, so for image to video it writes about motion and change.
 
 ### First and last frame
 
-Image to video can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. Every video model takes one. As with a start image, photos are turned upright by their orientation tag and transparent areas are filled with white.
+Image to video can also take a **last frame** (`--end-image`): the clip runs from the first image to the last. Every video model takes one. In the Web UI, the **Last frame** group sits under the first frame; a last frame kept without a first frame is greyed out and not used until a first frame is added. As with a start image, photos are turned upright by their orientation tag and transparent areas are filled with white.
 
 - **The last frame is a looser match than the first.** The clip ends close to the image, slightly softer. With MiniMax H3 the first frame is a close re-render of the image too, not the image pasted in.
 - **Use two images of the same scene,** seen from about the same place. If they show different places, the clip cuts (LTX) or dissolves (MiniMax H3) to the last image near the end.
@@ -110,7 +110,7 @@ On a Mac, MiniMax H3 text to video cannot stop in the middle of a clip, so **Nex
 
 Extend continues a clip from where it ends: it generates what happens next, with sound, and writes a new file. Your original clip is never changed.
 
-**Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from the **Extend Video** workflow with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
+**Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from the **Extend Video** tab with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
 
 The extension takes the source's size and frame rate, and starts from its model and LoRAs when they're still installed.
 

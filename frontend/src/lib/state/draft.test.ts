@@ -1,12 +1,21 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
-import { anyEnhancedUsed } from './promptEnhance';
+import { anyEnhancedUsed, isEnhancedStale, rememberedParts } from './promptEnhance';
 import { presetDiffers } from './presets';
 import { downloadStore } from './downloads.svelte';
 import { changedSettings, draft, extendStepFor, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
-import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults } from '$lib/types';
+import { heldUploads } from './heldUploads.svelte';
+import { memoryUploadStore } from './uploadStore';
+import { workspaceTab } from './workspaceTab';
+import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults, Workflow } from '$lib/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Open the tab a workflow belongs to the way the top bar and the Workspace do: pick it, then re-hydrate for it. */
+function openTab(workflow: Workflow, ctx: WorkspaceContext): void {
+  draft.setTab(workspaceTab(workflow));
+  draft.onTabChange(ctx);
+}
 
 function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageModelDefaults {
   return {
@@ -67,7 +76,7 @@ function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoMo
     frame_count: 97,
     audio: true,
     low_memory: true,
-    supports_i2v: false,
+    supports_i2v: true,
     supports_quantize: false,
     quantize: null,
     max_steps: 8,
@@ -110,17 +119,15 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         txt2img: {
           mode: 'image',
           model_kind: 'image',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed'],
-          supports_reference_image: false,
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed'],
           requires_reference_image: false,
           requires_source_video: false,
-          clear_fields: ['image_path', 'image_strength', 'frames', 'audio', 'low_memory'],
+          clear_fields: ['frames', 'audio', 'low_memory'],
         },
         img2img: {
           mode: 'image',
           model_kind: 'image',
           visible_controls: ['workflow', 'model', 'prompt_inline', 'negative_prompt', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed'],
-          supports_reference_image: true,
           requires_reference_image: true,
           requires_source_video: false,
           clear_fields: ['frames', 'audio', 'low_memory'],
@@ -128,17 +135,15 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         txt2vid: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
-          supports_reference_image: false,
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'end_image', 'end_image_path', 'end_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: false,
           requires_source_video: false,
-          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
+          clear_fields: ['negative_prompt', 'guidance', 'quantize'],
         },
         img2vid: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
-          supports_reference_image: true,
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'end_image', 'end_image_path', 'end_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: true,
           requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
@@ -147,10 +152,9 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           mode: 'video',
           model_kind: 'video',
           visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
-          supports_reference_image: false,
           requires_reference_image: false,
           requires_source_video: true,
-          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
+          clear_fields: ['negative_prompt', 'guidance', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
         },
       },
       field_precedence: { defaults: [], dimensions: '' },
@@ -201,9 +205,28 @@ describe('draft store', () => {
   });
 
   it('applies URL prefill correctly', () => {
-    draft.loadFromUrl({ workflow: 'img2img', prompt: 'from url', model: 'flux-dev' }, makeContext());
+    draft.loadFromUrl({ workflow: 'img2img', image_path: '/in/a.png', prompt: 'from url', model: 'flux-dev' }, makeContext());
     expect(draft.state.workflow).toBe('img2img');
     expect(draft.state.prompt).toBe('from url');
+  });
+
+  it('loadFromUrl derives the workflow from the images: an image workflow without a start image runs from text', () => {
+    draft.loadFromUrl({ workflow: 'img2img', prompt: 'from url' }, makeContext());
+    expect(draft.state.workflow).toBe('txt2img');
+    draft.loadFromUrl({ workflow: 'img2vid' }, makeContext());
+    expect(draft.state.workflow).toBe('txt2vid');
+    draft.loadFromUrl({ workflow: 'txt2vid', image_path: '/in/first.png' }, makeContext());
+    expect(draft.state.workflow).toBe('img2vid');
+    draft.loadFromUrl({ workflow: 'txt2img', image_path: '/in/start.png' }, makeContext());
+    expect(draft.state.workflow).toBe('img2img');
+    // A full prefill without images empties the slots, so the workflow follows.
+    draft.loadFromUrl({ workflow: 'img2img', prompt: 'p' }, makeContext(), { replaceSlots: true });
+    expect(draft.state.workflow).toBe('txt2img');
+  });
+
+  it('loadFromUrl without a context sets the image but derives nothing', () => {
+    draft.loadFromUrl({ image_path: '/in/a.png' });
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: '/in/a.png' });
   });
 
   it('reuses a JSON caption into the JSON box, laid out, with the text boxes cleared', () => {
@@ -627,24 +650,24 @@ describe('draft store', () => {
     });
   });
 
-  describe('onWorkflowChange', () => {
-    it('switches to video model and defaults when changing to txt2vid', () => {
+  describe('setTab and onTabChange', () => {
+    it('switches to video model and defaults when changing to the Video tab', () => {
       const ctx = makeContext();
       draft.update('workflow', 'txt2img');
       draft.hydrateFromContext(ctx, null);
       // Simulate workflow switch
-      draft.onWorkflowChange('txt2vid', ctx);
+      openTab('txt2vid', ctx);
 
       expect(draft.state.workflow).toBe('txt2vid');
       expect(draft.state.model).toBe('ltx-v-0.9');
       expect(draft.state.ratio).toBe('16:9');
     });
 
-    it('switches back to image model when changing from txt2vid to txt2img', () => {
+    it('switches back to image model when changing from the Video tab to the Image tab', () => {
       const ctx = makeContext();
       draft.update('workflow', 'txt2vid');
       draft.hydrateFromContext(ctx, null);
-      draft.onWorkflowChange('txt2img', ctx);
+      openTab('txt2img', ctx);
 
       expect(draft.state.workflow).toBe('txt2img');
       expect(draft.state.model).toBe('flux-dev');
@@ -776,6 +799,214 @@ describe('draft store – prompt enhancer fields', () => {
     });
   });
 
+  describe('Use as with the Image tab prompt', () => {
+    const image = { prompt: 'my image prompt', enhancedPrompt: 'My enhanced image prompt.', enhancedFrom: { prompt: 'my image prompt', scene: '', mode: 'image' as const } };
+
+    it('first frame from Image sets Scene, leaves Action empty and keeps the Image prompt', () => {
+      const ctx = makeContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(image);
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/a.png', use_as: 'start', scene: 'a red fox' }, ctx);
+      expect(draft.state).toMatchObject({ workflow: 'img2vid', scene: 'a red fox', prompt: '', enhancedScene: '', enhancedPrompt: '', enhancedFrom: null, firstFramePath: '/in/a.png' });
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject({ ...image, scene: '' });
+      expect(isEnhancedStale(draft.state)).toBe(false);
+    });
+
+    it('first frame replaces an earlier scene, Action and Enhanced text of Video', () => {
+      const ctx = makeContext();
+      draft.hydrateFromContext(ctx, null);
+      openTab('txt2vid', ctx);
+      draft.patch({ scene: 'old scene', prompt: 'old action', enhancedScene: 'Old enhanced scene.' });
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/a.png', use_as: 'start', scene: 'a red fox' }, ctx);
+      expect(draft.state).toMatchObject({ scene: 'a red fox', prompt: '', enhancedScene: '' });
+    });
+
+    it('first frame of an asset without a prompt changes no text', () => {
+      const ctx = makeContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(image);
+      openTab('txt2vid', ctx);
+      draft.patch({ scene: 'kept scene', prompt: 'kept action' });
+      openTab('txt2img', ctx);
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/a.png', use_as: 'start' }, ctx);
+      expect(draft.state).toMatchObject({ scene: 'kept scene', prompt: 'kept action' });
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject(image);
+    });
+
+    it('last frame changes no text on either tab', () => {
+      const ctx = makeContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(image);
+      openTab('txt2vid', ctx);
+      draft.patch({ scene: 'a scene', prompt: 'an action' });
+      openTab('txt2img', ctx);
+      draft.loadFromUrl({ workflow: 'img2vid', end_image_path: '/in/b.png', use_as: 'last' }, ctx);
+      expect(draft.state).toMatchObject({ endImagePath: '/in/b.png', scene: 'a scene', prompt: 'an action' });
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject(image);
+    });
+
+    it('Start image from Video keeps the scene and Action of Video', () => {
+      const ctx = makeContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(image);
+      openTab('txt2vid', ctx);
+      draft.patch({ scene: 'a castle', prompt: 'a knight rides in', enhancedScene: 'A castle at dusk.' });
+      draft.loadFromUrl({ workflow: 'img2img', image_path: '/in/a.png', use_as: 'start', prompt: 'a red fox' }, ctx);
+      expect(draft.state).toMatchObject({ workflow: 'img2img', prompt: 'a red fox', enhancedPrompt: '', enhancedFrom: null });
+      openTab('txt2vid', ctx);
+      expect(draft.state).toMatchObject({ scene: 'a castle', prompt: 'a knight rides in', enhancedScene: 'A castle at dusk.' });
+    });
+
+    it('a Use as that carries a prompt of its own for Video still replaces both boxes', () => {
+      const ctx = makeContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(image);
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/a.png', use_as: 'start', scene: 'A castle.', prompt: 'a knight' }, ctx);
+      expect(draft.state).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: '' });
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject(image);
+    });
+
+    it('Start image in the Image tab still replaces the prompt and clears the Enhanced pair', () => {
+      draft.patch(image);
+      draft.loadFromUrl({ workflow: 'img2img', image_path: '/in/a.png', use_as: 'start', prompt: 'a red fox' }, makeContext());
+      expect(draft.state).toMatchObject({ workflow: 'img2img', prompt: 'a red fox', enhancedPrompt: '', enhancedFrom: null });
+    });
+
+    it('a Reuse of a video sets the scene, the prompt and a matching Enhanced pair', () => {
+      draft.patch(image);
+      draft.loadFromUrl({ workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight', enhanced_prompt: 'A knight rides in.' }, makeContext());
+      expect(draft.state).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedScene: '', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+    });
+
+    it('a Reuse of a video with an image start keeps replacing the prompt', () => {
+      draft.patch(image);
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/a.png', scene: 'A castle.', prompt: 'a knight' }, makeContext(), { replaceSlots: true });
+      expect(draft.state).toMatchObject({ workflow: 'img2vid', scene: 'A castle.', prompt: 'a knight', enhancedPrompt: '', enhancedFrom: null });
+    });
+  });
+
+  describe('each tab keeps its own text', () => {
+    /** A context whose image model takes a negative prompt, so the capability gates leave it alone. */
+    const textContext = (): WorkspaceContext => {
+      const defaults = makeImageDefaults({ supports_negative_prompt: true });
+      return makeContext({ defaults, image_model_defaults: { 'flux-dev': defaults } });
+    };
+    const imageText = { prompt: 'a fox in snow', negativePrompt: 'blurry', enhancedPrompt: 'A red fox in deep snow.', enhancedFrom: { prompt: 'a fox in snow', scene: '', mode: 'image' as const } };
+    const videoText = { scene: 'A castle at dusk.', prompt: 'a knight rides in', enhancedScene: 'A grey castle at dusk.', enhancedPrompt: 'A knight rides in slowly.', enhancedFrom: { prompt: 'a knight rides in', scene: 'A castle at dusk.', mode: 'video' as const } };
+
+    it('each tab keeps its own prompt across tab switches and a reload', () => {
+      const ctx = textContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(imageText);
+      openTab('txt2vid', ctx);
+      expect(draft.state).toMatchObject({ prompt: '', scene: '', negativePrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] });
+      draft.patch({ ...videoText, enhancedHistory: [{ prompt: 'A knight rides in slowly.', scene: 'A grey castle at dusk.', from: videoText.enhancedFrom }] });
+
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject({ ...imageText, scene: '', enhancedHistory: [] });
+      expect(isEnhancedStale(draft.state)).toBe(false);
+
+      draft.loadDraft();
+      expect(draft.state).toMatchObject(imageText);
+      openTab('txt2vid', ctx);
+      expect(draft.state).toMatchObject({ ...videoText, negativePrompt: '' });
+      expect(draft.state.enhancedHistory).toHaveLength(1);
+      expect(isEnhancedStale(draft.state)).toBe(false);
+    });
+
+    it('keeps the JSON caption and its toggle with Image', () => {
+      draft.patch({ jsonPromptEnabled: true, jsonPrompt: '{"subject":"fox"}' });
+      draft.setTab('video');
+      expect(draft.state).toMatchObject({ jsonPromptEnabled: false, jsonPrompt: '' });
+      draft.setTab('image');
+      expect(draft.state).toMatchObject({ jsonPromptEnabled: true, jsonPrompt: '{"subject":"fox"}' });
+    });
+
+    it('keeps the prompt source and prompt file shared between the tabs', () => {
+      draft.patch({ promptSource: 'file', promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one'] });
+      draft.setTab('video');
+      expect(draft.state).toMatchObject({ promptSource: 'file', promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one'] });
+    });
+
+    it('an old draft without saved text opens the other tab empty', () => {
+      localStorage.setItem('ziv-workspace-draft-v1', JSON.stringify({ version: 3, prompt: 'old prompt', scene: 'old scene' }));
+      draft.loadDraft();
+      expect(draft.state.savedText).toEqual({});
+      draft.setTab('video');
+      expect(draft.state).toMatchObject({ prompt: '', scene: '' });
+      draft.setTab('image');
+      expect(draft.state).toMatchObject({ prompt: 'old prompt', scene: 'old scene' });
+    });
+
+    it('Extend Video shares the text of Video', () => {
+      const ctx = textContext();
+      ctx.workflow_contract.values.push('extend');
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(imageText);
+      openTab('txt2vid', ctx);
+      draft.patch(videoText);
+      draft.setTab('extend');
+      expect(draft.state).toMatchObject({ workflow: 'extend', scene: videoText.scene, prompt: videoText.prompt, enhancedScene: videoText.enhancedScene });
+      draft.patch({ prompt: 'what happens next' });
+      draft.setTab('video');
+      expect(draft.state).toMatchObject({ scene: videoText.scene, prompt: 'what happens next' });
+      draft.setTab('extend');
+      draft.setTab('image');
+      expect(draft.state).toMatchObject(imageText);
+      expect(draft.state.savedText.video).toMatchObject({ scene: videoText.scene, prompt: 'what happens next' });
+    });
+
+    it('Reuse fills only the opened tab\'s text', () => {
+      const ctx = textContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(imageText);
+      openTab('txt2vid', ctx);
+      draft.patch({ scene: 'my scene', prompt: 'my action' });
+      // A video reused while Image is open lands on Video and leaves Image alone.
+      openTab('txt2img', ctx);
+      draft.loadFromUrl({ workflow: 'txt2vid', scene: 'A reused scene.', prompt: 'a reused action' }, ctx, { replaceSlots: true });
+      expect(draft.state).toMatchObject({ workflow: 'txt2vid', scene: 'A reused scene.', prompt: 'a reused action' });
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject(imageText);
+      // An image reused while Video is open lands on Image and leaves Video alone.
+      openTab('txt2vid', ctx);
+      draft.loadFromUrl({ workflow: 'txt2img', prompt: 'a reused image' }, ctx, { replaceSlots: true });
+      expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'a reused image' });
+      openTab('txt2vid', ctx);
+      expect(draft.state).toMatchObject({ scene: 'A reused scene.', prompt: 'a reused action' });
+    });
+
+    it('survives a reset of the selections on both tabs', () => {
+      const ctx = textContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch(imageText);
+      openTab('txt2vid', ctx);
+      draft.patch({ scene: 'a scene', prompt: 'an action' });
+      draft.resetSelections(ctx);
+      expect(draft.state).toMatchObject({ scene: 'a scene', prompt: 'an action' });
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject(imageText);
+    });
+
+    it('the enhancer\'s state stays with its tab', () => {
+      const ctx = textContext();
+      draft.hydrateFromContext(ctx, null);
+      const imageSettings = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
+      draft.patch({ ...imageText, enhanceSettings: imageSettings });
+      openTab('txt2vid', ctx);
+      expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedFrom: null, enhanceSettings: imageSettings, enhanceSettingsVideo: null });
+      draft.patch({ ...videoText, enhanceSettingsVideo: { ...imageSettings, style: 'dreamy' } });
+      openTab('txt2img', ctx);
+      expect(draft.state).toMatchObject({ enhancedPrompt: imageText.enhancedPrompt, enhancedScene: '', enhancedFrom: imageText.enhancedFrom, enhanceSettings: imageSettings });
+      expect(draft.state.enhanceSettingsVideo?.style).toBe('dreamy');
+      expect(isEnhancedStale(draft.state)).toBe(false);
+    });
+  });
+
   it('keeps the Enhanced box when the URL has no prompt', () => {
     draft.update('enhancedPrompt', 'Kept');
     draft.loadFromUrl({ steps: '12' }, makeContext());
@@ -865,14 +1096,69 @@ describe('draft settings persistence', () => {
     expect(draft.state).toMatchObject({ steps: 2, ratio: '2:3', size: 'm' });
   });
 
-  it('keeps settings when switching between workflows of the same mode', () => {
+  it('keeps settings when a tab opens again for the same model', () => {
     const ctx = makeContext();
     draft.hydrateFromContext(ctx);
     draft.patch({ steps: 3, guidance: 2 });
 
-    draft.onWorkflowChange('img2img', ctx);
+    openTab('txt2img', ctx);
 
-    expect(draft.state).toMatchObject({ workflow: 'img2img', steps: 3, guidance: 2 });
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', steps: 3, guidance: 2 });
+  });
+
+  it('setStartImage switches the workflow within its tab and keeps every setting', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.patch({ steps: 3, guidance: 2, referenceImageStrength: 0.9, ratio: '1:1', size: 's' });
+
+    draft.setStartImage('image', { path: '/in/a.png' }, ctx);
+    expect(draft.state).toMatchObject({ workflow: 'img2img', referenceImagePath: '/in/a.png', referenceImageUpload: null, model: 'flux-dev', steps: 3, guidance: 2, referenceImageStrength: 0.9, ratio: '1:1', size: 's' });
+
+    draft.setStartImage('image', null, ctx);
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: null, steps: 3, guidance: 2, referenceImageStrength: 0.9, ratio: '1:1', size: 's' });
+  });
+
+  it('setStartImage stores an upload as its file name alone, and holds the file', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    const file = new File(['x'], 'start.png', { type: 'image/png' });
+
+    draft.setStartImage('image', { file }, ctx);
+
+    expect(draft.state).toMatchObject({ workflow: 'img2img', referenceImagePath: null, referenceImageUpload: 'start.png' });
+    expect(heldUploads.start('image')).toBe(file);
+    draft.setStartImage('image', { path: '/in/b.png' }, ctx);
+    expect(draft.state).toMatchObject({ referenceImagePath: '/in/b.png', referenceImageUpload: null });
+    expect(heldUploads.start('image')).toBeNull();
+  });
+
+  it('setStartImage drops the missing flag of the path it replaces, unless another slot still holds it', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.patch({ referenceImagePath: '/in/gone.png', referenceImagePaths: ['/in/shared.png'], missingReferencePaths: ['/in/gone.png', '/in/shared.png'] });
+
+    draft.setStartImage('image', { path: '/in/new.png' }, ctx);
+    expect(draft.state.missingReferencePaths).toEqual(['/in/shared.png']);
+
+    draft.setStartImage('image', { path: '/in/shared.png' }, ctx);
+    draft.setStartImage('image', null, ctx);
+    expect(draft.state.missingReferencePaths).toEqual(['/in/shared.png']);
+  });
+
+  it('setLastFrame stores a path or an upload, never both, and keeps the workflow', () => {
+    const ctx = makeContext();
+    draft.update('workflow', 'txt2vid');
+    draft.hydrateFromContext(ctx);
+    const file = new File(['x'], 'end.png', { type: 'image/png' });
+
+    draft.setLastFrame({ path: '/in/end.png' });
+    expect(draft.state).toMatchObject({ workflow: 'txt2vid', endImagePath: '/in/end.png', endImageUpload: null });
+    draft.setLastFrame({ file });
+    expect(draft.state).toMatchObject({ endImagePath: null, endImageUpload: 'end.png' });
+    expect(heldUploads.lastFrame).toBe(file);
+    draft.setLastFrame(null);
+    expect(draft.state).toMatchObject({ endImagePath: null, endImageUpload: null });
+    expect(heldUploads.lastFrame).toBeNull();
   });
 
   it('switches reused assets back to their preset unless their size was custom', () => {
@@ -1105,7 +1391,7 @@ describe('extend', () => {
       draft.applyExtendSource(sourceInfo({ fps: 30 }));
       draft.hydrateFromContext(ctx, null, { keepSettings: true });
       expect(draft.state.fps).toBe(30);
-      draft.onWorkflowChange('txt2vid', ctx);
+      openTab('txt2vid', ctx);
       expect(draft.state.fps).toBe(24);
     });
 
@@ -1205,9 +1491,9 @@ describe('LoRAs remembered per model family', () => {
     const ctx = familyContext();
     draft.hydrateFromContext(ctx, 'zit');
     draft.update('loraString', 'zi-style:0.8');
-    draft.onWorkflowChange('txt2vid', ctx);
+    openTab('txt2vid', ctx);
     expect(draft.state.loraString).toBe('');
-    draft.onWorkflowChange('txt2img', ctx);
+    openTab('txt2img', ctx);
     expect(draft.state).toMatchObject({ model: 'zit', loraString: 'zi-style:0.8' });
   });
 
@@ -1698,21 +1984,17 @@ describe('hydrateFromContext – keepChangedSettings', () => {
 
       describe('the last frame', () => {
         const END_CONTROLS = ['end_image', 'end_image_clear', 'end_image_path'];
-        // LTX hides the last-frame controls, H3 keeps them; the contract clears the image when a workflow without the slot opens.
+        // LTX hides the last-frame controls, H3 keeps them; no model change or tab change drops the image.
         const lastFrameContext = (): WorkspaceContext => {
           const ctx = familyContext();
           ctx.video_model_defaults['ltx-2'] = { ...ctx.video_model_defaults['ltx-2'] as VideoModelDefaults, hidden_controls: END_CONTROLS };
-          const { definitions } = ctx.workflow_contract;
-          definitions.img2vid.visible_controls = [...definitions.img2vid.visible_controls, 'end_image', 'end_image_path', 'end_image_clear'];
-          definitions.txt2vid.clear_fields = [...definitions.txt2vid.clear_fields, 'end_image_path'];
-          definitions.img2img.clear_fields = [...definitions.img2img.clear_fields, 'end_image_path'];
           return ctx;
         };
 
-        beforeEach(() => draft.update('workflow', 'img2vid'));
+        beforeEach(() => draft.update('workflow', 'txt2vid'));
 
         it('starts empty', () => {
-          expect(draft.state.endImagePath).toBeNull();
+          expect([draft.state.endImagePath, draft.state.endImageUpload]).toEqual([null, null]);
         });
 
         it('keeps a chosen last frame on a model that has the slot', () => {
@@ -1725,24 +2007,14 @@ describe('hydrateFromContext – keepChangedSettings', () => {
           expect(draft.state.endImagePath).toBe('/in/end.png');
         });
 
-        it('drops the last frame when the model changes to one without the slot', () => {
+        it('keeps the last frame when another tab opens', () => {
           const ctx = lastFrameContext();
           draft.hydrateFromContext(ctx, 'h3');
-          draft.update('endImagePath', '/in/end.png');
+          draft.setLastFrame({ path: '/in/end.png' });
 
-          switchTo(ctx, 'ltx-2');
+          openTab('txt2img', ctx);
 
-          expect(draft.state.endImagePath).toBeNull();
-        });
-
-        it('drops the last frame when the workflow changes to one that has no slot', () => {
-          const ctx = lastFrameContext();
-          draft.hydrateFromContext(ctx, 'h3');
-          draft.update('endImagePath', '/in/end.png');
-
-          draft.onWorkflowChange('txt2vid', ctx);
-
-          expect(draft.state.endImagePath).toBeNull();
+          expect(draft.state.endImagePath).toBe('/in/end.png');
         });
 
         it('reuses a recorded last frame with the model that made it', () => {
@@ -1751,14 +2023,15 @@ describe('hydrateFromContext – keepChangedSettings', () => {
 
           draft.loadFromUrl({ workflow: 'img2vid', model: 'h3', image_path: '/in/start.png', end_image_path: '/in/end.png' }, ctx);
 
-          expect([draft.state.referenceImagePath, draft.state.endImagePath]).toEqual(['/in/start.png', '/in/end.png']);
+          expect([draft.state.firstFramePath, draft.state.endImagePath]).toEqual(['/in/start.png', '/in/end.png']);
         });
 
-        it('ignores a last frame in a reuse URL for a workflow without the slot', () => {
+        it('ignores a last frame in a reuse URL for the Image tab, which has no such slot', () => {
           const ctx = lastFrameContext();
           draft.hydrateFromContext(ctx, 'h3');
+          draft.update('workflow', 'txt2img');
 
-          draft.loadFromUrl({ workflow: 'txt2vid', end_image_path: '/in/end.png' }, ctx);
+          draft.loadFromUrl({ workflow: 'txt2img', end_image_path: '/in/end.png' }, ctx);
 
           expect(draft.state.endImagePath).toBeNull();
         });
@@ -1808,9 +2081,11 @@ describe('applyPreset', () => {
   const MARKED: Partial<DraftState> = {
     workflow: 'img2img', promptSource: 'file', prompt: 'a prompt', scene: 'a scene', jsonPromptEnabled: true, jsonPrompt: '{"a":1}', negativePrompt: 'blurry',
     promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one', 'two'], promptFileLoaded: { path: '/prompts/set.yaml', count: 2 },
-    seed: 42, referenceImagePath: '/refs/ref.png', referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
+    seed: 42, referenceImagePath: '/refs/ref.png', referenceImageUpload: 'start.png', firstFramePath: '/refs/first.png', firstFrameUpload: 'first.png',
+    referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
+    savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] } },
     enhancedHistory: [{ prompt: 'plain rewrite', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }, { prompt: '{"caption":"x"}', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }],
     enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],
     enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
@@ -1840,6 +2115,38 @@ describe('applyPreset', () => {
     for (const key of Object.keys(MARKED) as (keyof DraftState)[]) expect(after[key], `${key} must be left alone`).toEqual(before[key]);
     expect(after.version).toBe(before.version);
     expect(after.appliedPreset).toBe('look');
+  });
+
+  describe('the workflow follows the start image and the preset\'s model', () => {
+    /** presetContext plus "no-i2i", an image model without image-to-image. */
+    const withoutImg2img = (): WorkspaceContext => {
+      const ctx = presetContext();
+      ctx.image_models = [...ctx.image_models, { id: 'no-i2i', label: 'No img2img', type: 'image' }];
+      ctx.image_model_defaults = { ...ctx.image_model_defaults, 'no-i2i': makeImageDefaults({ family: 'flux1', supports_img2img: false }) };
+      return ctx;
+    };
+
+    it('a preset that brings a model without image-to-image runs from text, keeping the start image', () => {
+      const ctx = withoutImg2img();
+      draft.hydrateFromContext(ctx, 'json-model');
+      draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+      expect(draft.state.workflow).toBe('img2img');
+
+      draft.applyPreset(ctx, { ...IMAGE_PRESET, model: 'no-i2i' });
+
+      expect(draft.state).toMatchObject({ model: 'no-i2i', workflow: 'txt2img', referenceImagePath: '/in/start.png' });
+    });
+
+    it('a preset that brings a model with image-to-image starts from the kept start image', () => {
+      const ctx = withoutImg2img();
+      draft.hydrateFromContext(ctx, 'no-i2i');
+      draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+      expect(draft.state.workflow).toBe('txt2img');
+
+      draft.applyPreset(ctx, IMAGE_PRESET);
+
+      expect(draft.state).toMatchObject({ model: 'twin-model', workflow: 'img2img', referenceImagePath: '/in/start.png' });
+    });
   });
 
   it('clears what a model that cannot use it, but only that, when the preset switches from a JSON model to a plain one', () => {
@@ -2052,18 +2359,22 @@ describe('applyPreset', () => {
     expect(draft.state.appliedPreset).toBe('clip');
   });
 
-  it('forgets the preset on a switch between image and video, not between workflows of one mode, in the order the top nav makes it', () => {
+  it('forgets the preset on a switch between image and video, not when an image changes the workflow within a tab, in the order the top nav makes it', () => {
     const ctx = presetContext();
     draft.hydrateFromContext(ctx, 'json-model');
     draft.setAppliedPreset('look');
 
-    // The top nav updates the workflow first; the workspace's workflow-change handler runs after.
-    draft.update('workflow', 'img2img');
-    draft.onWorkflowChange('img2img', ctx);
-    expect(draft.state.appliedPreset).toBe('look');
-    draft.update('workflow', 'txt2vid');
-    draft.onWorkflowChange('txt2vid', ctx);
+    draft.setStartImage('image', { path: '/in/a.png' }, ctx);
+    expect(draft.state).toMatchObject({ workflow: 'img2img', appliedPreset: 'look' });
+    // The top nav picks the tab first; the workspace's tab-change handler runs after.
+    draft.setTab('video');
     expect(draft.state.appliedPreset).toBeNull();
+    draft.onTabChange(ctx);
+    expect(draft.state.appliedPreset).toBeNull();
+    // Video and Extend Video are one mode.
+    draft.setAppliedPreset('clip');
+    draft.setTab('extend');
+    expect(draft.state.appliedPreset).toBe('clip');
   });
 
   it('keeps the preset when workflow and mode stay put, and when loadFromUrl names anything', () => {
@@ -2108,21 +2419,21 @@ describe('model remembered per mode', () => {
     const ctx = modeContext();
     draft.hydrateFromContext(ctx, 'klein4b');
 
-    draft.onWorkflowChange('img2vid', ctx);
+    openTab('img2vid', ctx);
     expect(draft.state.model).toBe('ltx-a');
-    draft.onWorkflowChange('txt2img', ctx);
+    openTab('txt2img', ctx);
 
     expect(draft.state.model).toBe('klein4b');
   });
 
   it('returns to the video model last used after an image workflow', () => {
     const ctx = modeContext();
-    draft.onWorkflowChange('img2vid', ctx);
+    openTab('img2vid', ctx);
     draft.update('model', 'ltx-b');
 
-    draft.onWorkflowChange('txt2img', ctx);
+    openTab('txt2img', ctx);
     expect(draft.state.model).toBe('krea');
-    draft.onWorkflowChange('txt2vid', ctx);
+    openTab('txt2vid', ctx);
 
     expect(draft.state.model).toBe('ltx-b');
   });
@@ -2132,8 +2443,8 @@ describe('model remembered per mode', () => {
     draft.hydrateFromContext(ctx, 'krea');
     draft.hydrateFromContext(ctx, 'klein4b', { keepChangedSettings: true });
 
-    draft.onWorkflowChange('txt2vid', ctx);
-    draft.onWorkflowChange('txt2img', ctx);
+    openTab('txt2vid', ctx);
+    openTab('txt2img', ctx);
 
     expect(draft.state.model).toBe('klein4b');
   });
@@ -2141,14 +2452,14 @@ describe('model remembered per mode', () => {
   it('keeps both remembered models through Reset', () => {
     const ctx = modeContext();
     draft.hydrateFromContext(ctx, 'klein4b');
-    draft.onWorkflowChange('txt2vid', ctx);
+    openTab('txt2vid', ctx);
     draft.update('model', 'ltx-b');
 
     draft.resetSelections(ctx);
     expect(draft.state.model).toBe('ltx-b');
-    draft.onWorkflowChange('txt2img', ctx);
+    openTab('txt2img', ctx);
     expect(draft.state.model).toBe('klein4b');
-    draft.onWorkflowChange('txt2vid', ctx);
+    openTab('txt2vid', ctx);
 
     expect(draft.state.model).toBe('ltx-b');
   });
@@ -2156,10 +2467,10 @@ describe('model remembered per mode', () => {
   it('survives a reload of the saved draft', () => {
     const ctx = modeContext();
     draft.hydrateFromContext(ctx, 'klein4b');
-    draft.onWorkflowChange('txt2vid', ctx);
+    openTab('txt2vid', ctx);
 
     draft.loadDraft();
-    draft.onWorkflowChange('txt2img', ctx);
+    openTab('txt2img', ctx);
 
     expect(draft.state.model).toBe('klein4b');
   });
@@ -2167,7 +2478,7 @@ describe('model remembered per mode', () => {
   it('lets a model named by the URL win over the remembered one', () => {
     const ctx = modeContext();
     draft.hydrateFromContext(ctx, 'klein4b');
-    draft.onWorkflowChange('txt2vid', ctx);
+    openTab('txt2vid', ctx);
 
     // The page's prefill: workflow first, then the model the URL names, then the rest of the params.
     const params = { workflow: 'txt2img', model: 'krea' };
@@ -2181,13 +2492,13 @@ describe('model remembered per mode', () => {
 
   it('falls back to the default when the remembered model is no longer offered', () => {
     draft.hydrateFromContext(modeContext(), 'klein4b');
-    draft.onWorkflowChange('txt2vid', modeContext());
+    openTab('txt2vid', modeContext());
     const later = modeContext({
       image_models: [{ id: 'krea', label: 'Krea', type: 'image' }],
       image_model_defaults: { krea: makeImageDefaults() },
     });
 
-    draft.onWorkflowChange('txt2img', later);
+    openTab('txt2img', later);
 
     expect(draft.state.model).toBe('krea');
   });
@@ -2235,10 +2546,10 @@ describe('references', () => {
     draft.hydrateFromContext(ctx, 'klein');
     draft.patch({ referenceImagePaths: PATHS, missingReferencePaths: ['/in/c.png'] });
 
-    draft.onWorkflowChange('txt2vid', ctx);
+    openTab('txt2vid', ctx);
     expect(draft.state.referenceImagePaths).toEqual(PATHS);
 
-    draft.onWorkflowChange('txt2img', ctx);
+    openTab('txt2img', ctx);
     expect(draft.state.referenceImagePaths).toEqual(PATHS);
     expect(draft.state.missingReferencePaths).toEqual(['/in/c.png']);
   });
@@ -2291,6 +2602,372 @@ describe('references', () => {
       draft.loadFromUrl({ workflow: 'txt2vid', reference_path: PATHS }, ctx);
 
       expect(draft.state.referenceImagePaths).toEqual([]);
+    });
+  });
+});
+
+describe('image slots', () => {
+  /** Klein takes a start image and 4 references; "ideogram" has no image-to-image; "no-end" is a video model without a last frame. */
+  const slotContext = (): WorkspaceContext => {
+    const ctx = makeContext({
+      image_models: [{ id: 'klein', label: 'Klein', type: 'image' }, { id: 'ideogram', label: 'Ideogram', type: 'image' }],
+      image_model_defaults: { klein: makeImageDefaults({ max_reference_images: 4 }), ideogram: makeIdeogramDefaults() },
+      current_image_model: 'klein',
+      video_models: [{ id: 'ltx-v-0.9', label: 'LTX Video', type: 'video' }, { id: 'no-end', label: 'No end', type: 'video' }],
+      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults(), 'no-end': makeVideoDefaults({ hidden_controls: ['end_image', 'end_image_path', 'end_image_clear'] }) },
+    });
+    ctx.workflow_contract.values = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
+    for (const workflow of ['txt2img', 'img2img'] as const) ctx.workflow_contract.definitions[workflow].visible_controls.push('references', 'references_clear');
+    return ctx;
+  };
+  const file = (name: string): File => new File(['x'], name, { type: 'image/png' });
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('replacing a held file with a path forgets the file in the store', async () => {
+    const ctx = slotContext();
+    const store = memoryUploadStore();
+    heldUploads.useStore(store);
+    await heldUploads.restore();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.setStartImage('image', { file: file('start.png') }, ctx);
+    await heldUploads.persisted();
+    expect(await store.get('image')).not.toBeNull();
+
+    draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+    await heldUploads.persisted();
+
+    expect(heldUploads.start('image')).toBeNull();
+    expect(await store.get('image')).toBeNull();
+  });
+
+  it('replacing a held first frame or last frame with a path forgets each file in the store', async () => {
+    const ctx = slotContext();
+    const store = memoryUploadStore();
+    heldUploads.useStore(store);
+    await heldUploads.restore();
+    draft.setTab('video');
+    draft.onTabChange(ctx);
+    draft.setStartImage('video', { file: file('first.png') }, ctx);
+    draft.setLastFrame({ file: file('last.png') });
+    await heldUploads.persisted();
+    expect(await store.get('video')).toMatchObject({ start: { name: 'first.png' }, end: { name: 'last.png' } });
+
+    draft.setLastFrame({ path: '/in/last.png' });
+    await heldUploads.persisted();
+    expect(await store.get('video')).toMatchObject({ start: { name: 'first.png' }, end: null });
+
+    draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+    await heldUploads.persisted();
+
+    expect(heldUploads.start('video')).toBeNull();
+    expect(heldUploads.lastFrame).toBeNull();
+    expect(await store.get('video')).toBeNull();
+  });
+
+  it('Video with a last frame -> Image -> Video keeps both frames', () => {
+    const ctx = slotContext();
+    draft.setTab('video');
+    draft.onTabChange(ctx);
+    draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+    draft.setLastFrame({ path: '/in/last.png' });
+    expect(draft.state.workflow).toBe('img2vid');
+
+    openTab('txt2img', ctx);
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', firstFramePath: '/in/first.png', endImagePath: '/in/last.png' });
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ workflow: 'img2vid', firstFramePath: '/in/first.png', endImagePath: '/in/last.png' });
+  });
+
+  it('Image -> Extend Video -> Image keeps the start image', () => {
+    const ctx = slotContext();
+    draft.hydrateFromContext(ctx);
+    draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+    draft.patch({ referenceImagePaths: ['/in/ref.png'] });
+
+    openTab('extend', ctx);
+    expect(draft.state).toMatchObject({ workflow: 'extend', referenceImagePath: '/in/start.png' });
+    openTab('txt2img', ctx);
+
+    expect(draft.state).toMatchObject({ workflow: 'img2img', referenceImagePath: '/in/start.png', referenceImagePaths: ['/in/ref.png'] });
+  });
+
+  it('a model change keeps every image: the start image and references, the first and the last frame', () => {
+    const ctx = slotContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+    draft.patch({ referenceImagePaths: ['/in/ref.png'] });
+
+    draft.hydrateFromContext(ctx, 'ideogram', { keepChangedSettings: true });
+
+    expect(draft.state).toMatchObject({ model: 'ideogram', referenceImagePath: '/in/start.png', referenceImagePaths: ['/in/ref.png'] });
+
+    openTab('txt2vid', ctx);
+    draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+    draft.setLastFrame({ path: '/in/end.png' });
+
+    draft.hydrateFromContext(ctx, 'no-end', { keepChangedSettings: true });
+    expect(draft.state).toMatchObject({ model: 'no-end', workflow: 'img2vid', firstFramePath: '/in/first.png', endImagePath: '/in/end.png' });
+
+    draft.hydrateFromContext(ctx, 'ltx-v-0.9', { keepChangedSettings: true });
+    expect(draft.state).toMatchObject({ model: 'ltx-v-0.9', firstFramePath: '/in/first.png', endImagePath: '/in/end.png', referenceImagePath: '/in/start.png' });
+  });
+
+  it('a start image on a model without img2img stays and the workflow is txt2img', () => {
+    const ctx = slotContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+    expect(draft.state.workflow).toBe('img2img');
+
+    draft.hydrateFromContext(ctx, 'ideogram', { keepChangedSettings: true });
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: '/in/start.png' });
+
+    draft.hydrateFromContext(ctx, 'klein', { keepChangedSettings: true });
+    expect(draft.state.workflow).toBe('img2img');
+
+    // Set directly on a model without img2img, it stays too.
+    draft.setStartImage('image', null, ctx);
+    draft.hydrateFromContext(ctx, 'ideogram', { keepChangedSettings: true });
+    draft.setStartImage('image', { path: '/in/other.png' }, ctx);
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: '/in/other.png' });
+  });
+
+  it('a start image set for another tab does not move this tab off its workflow', () => {
+    const ctx = slotContext();
+    draft.hydrateFromContext(ctx);
+    openTab('extend', ctx);
+
+    draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+    draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+
+    expect(draft.state.workflow).toBe('extend');
+  });
+
+  it('keeps Strength while no start image is set, and resets it with the model like Steps', () => {
+    const ctx = slotContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.update('referenceImageStrength', 0.9);
+
+    draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+    draft.setStartImage('image', null, ctx);
+    openTab('txt2img', ctx);
+    expect(draft.state.referenceImageStrength).toBe(0.9);
+
+    draft.hydrateFromContext(ctx, 'ideogram');
+    expect(draft.state.referenceImageStrength).toBe(0.5);
+  });
+
+  it('adding a first frame switches rememberedParts to action', () => {
+    const ctx = slotContext();
+    draft.setTab('video');
+    draft.onTabChange(ctx);
+    expect(rememberedParts(draft.state)).toBe('both');
+
+    draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+    expect(rememberedParts(draft.state)).toBe('action');
+
+    draft.setStartImage('video', null, ctx);
+    expect(rememberedParts(draft.state)).toBe('both');
+  });
+
+  describe('resetSelections and images', () => {
+    /** Both tabs hold every image: Image a start image, a reference and Strength 0.9; Video a first and a last frame. Ends on Image. */
+    function holdImagesOnBothTabs(ctx: WorkspaceContext): void {
+      draft.hydrateFromContext(ctx, 'klein');
+      openTab('txt2vid', ctx);
+      draft.setStartImage('video', { file: file('first.png') }, ctx);
+      draft.setLastFrame({ file: file('last.png') });
+      openTab('txt2img', ctx);
+      draft.setStartImage('image', { file: file('start.png') }, ctx);
+      draft.patch({ referenceImagePaths: ['/in/ref.png'], missingReferencePaths: ['/in/ref.png'], referenceImageStrength: 0.9, prompt: 'kept' });
+      heldUploads.setReferences([file('ref.png')]);
+    }
+
+    const imageSlots = () => ({ referenceImagePath: null, referenceImageUpload: null, referenceImagePaths: [] as string[] });
+    const videoSlots = () => ({ firstFramePath: null, firstFrameUpload: null, endImagePath: null, endImageUpload: null });
+
+    it('on Image clears the start image, references and Strength, and keeps the first and last frame', () => {
+      const ctx = slotContext();
+      holdImagesOnBothTabs(ctx);
+
+      draft.resetSelections(ctx);
+
+      expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'kept', model: 'klein', referenceImageStrength: 0.5, missingReferencePaths: [], ...imageSlots() });
+      expect(draft.state).toMatchObject({ firstFrameUpload: 'first.png', endImageUpload: 'last.png' });
+      expect([heldUploads.startImage, heldUploads.references]).toEqual([null, []]);
+      expect([heldUploads.firstFrame?.name, heldUploads.lastFrame?.name]).toEqual(['first.png', 'last.png']);
+
+      openTab('txt2vid', ctx);
+      expect(draft.state.workflow).toBe('img2vid');
+    });
+
+    it('on Video clears the first and last frame, and keeps the start image, references and Strength', () => {
+      const ctx = slotContext();
+      holdImagesOnBothTabs(ctx);
+      openTab('txt2vid', ctx);
+      expect(draft.state.workflow).toBe('img2vid');
+
+      draft.resetSelections(ctx);
+
+      expect(draft.state).toMatchObject({ workflow: 'txt2vid', referenceImageStrength: 0.9, missingReferencePaths: ['/in/ref.png'], ...videoSlots() });
+      expect(draft.state).toMatchObject({ referenceImageUpload: 'start.png', referenceImagePaths: ['/in/ref.png'] });
+      expect([heldUploads.firstFrame, heldUploads.lastFrame]).toEqual([null, null]);
+      expect([heldUploads.startImage?.name, heldUploads.references.map((held) => held?.name)]).toEqual(['start.png', ['ref.png']]);
+
+      openTab('txt2img', ctx);
+      expect(draft.state.workflow).toBe('img2img');
+    });
+
+    it('on Extend Video clears no images', () => {
+      const ctx = slotContext();
+      holdImagesOnBothTabs(ctx);
+      openTab('extend', ctx);
+      expect(draft.state.workflow).toBe('extend');
+
+      draft.resetSelections(ctx);
+
+      expect(draft.state).toMatchObject({
+        workflow: 'extend', referenceImageUpload: 'start.png', referenceImagePaths: ['/in/ref.png'], referenceImageStrength: 0.9,
+        missingReferencePaths: ['/in/ref.png'], firstFrameUpload: 'first.png', endImageUpload: 'last.png',
+      });
+      expect([heldUploads.startImage?.name, heldUploads.firstFrame?.name, heldUploads.lastFrame?.name]).toEqual(['start.png', 'first.png', 'last.png']);
+      expect(heldUploads.references).toHaveLength(1);
+    });
+
+    it('on Extend Video keeps frames and a start image chosen by path', () => {
+      const ctx = slotContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      openTab('txt2vid', ctx);
+      draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+      draft.setLastFrame({ path: '/in/last.png' });
+      openTab('txt2img', ctx);
+      draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+      openTab('extend', ctx);
+
+      draft.resetSelections(ctx);
+
+      expect(draft.state).toMatchObject({
+        workflow: 'extend', firstFramePath: '/in/first.png', endImagePath: '/in/last.png', referenceImagePath: '/in/start.png',
+      });
+    });
+  });
+
+  it('setStartImage and setLastFrame leave the changed settings alone, and only a tab change re-hydrates them', () => {
+    const ctx = slotContext();
+    draft.hydrateFromContext(ctx, 'klein');
+    draft.update('steps', 23);
+
+    draft.setStartImage('image', { path: '/in/start.png' }, ctx);
+    draft.setStartImage('video', { file: file('first.png') }, ctx);
+    draft.setLastFrame({ path: '/in/last.png' });
+    draft.setStartImage('image', null, ctx);
+    expect(draft.state.steps).toBe(23);
+
+    draft.setTab('video');
+    expect(draft.state.steps).toBe(23);
+    draft.onTabChange(ctx);
+    expect(draft.state.steps).not.toBe(23);
+  });
+
+  it('reset clears the held uploads too', () => {
+    draft.setStartImage('image', { file: file('start.png') }, null);
+    draft.reset();
+    expect(heldUploads.startImage).toBeNull();
+  });
+
+  describe('prefill', () => {
+    it('a full prefill sets every slot of the tab it opens, empty when absent', () => {
+      const ctx = slotContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.setStartImage('image', { file: file('old.png') }, ctx);
+      draft.patch({ referenceImagePaths: ['/in/old-ref.png'], missingReferencePaths: ['/in/old-ref.png'] });
+
+      draft.loadFromUrl({ workflow: 'txt2img', prompt: 'a text-made asset' }, ctx, { replaceSlots: true });
+      expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: null, referenceImageUpload: null, referenceImagePaths: [], missingReferencePaths: [] });
+
+      draft.loadFromUrl({ workflow: 'img2img', image_path: '/in/start.png', reference_path: ['/in/a.png'] }, ctx, { replaceSlots: true });
+      expect(draft.state).toMatchObject({ workflow: 'img2img', referenceImagePath: '/in/start.png', referenceImagePaths: ['/in/a.png'] });
+    });
+
+    it('a full prefill of a tab leaves the other tab\'s images alone', () => {
+      const ctx = slotContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+      draft.setLastFrame({ path: '/in/last.png' });
+      draft.patch({ missingReferencePaths: ['/in/first.png'] });
+
+      draft.loadFromUrl({ workflow: 'txt2img', prompt: 'p' }, ctx, { replaceSlots: true });
+
+      expect(draft.state).toMatchObject({ firstFramePath: '/in/first.png', endImagePath: '/in/last.png', missingReferencePaths: ['/in/first.png'] });
+    });
+
+    it('a full prefill in Video sets the first and the last frame and keeps the references', () => {
+      const ctx = slotContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.patch({ referenceImagePath: '/in/start.png', referenceImagePaths: ['/in/ref.png'] });
+      draft.setStartImage('video', { path: '/in/old-first.png' }, ctx);
+      draft.setLastFrame({ path: '/in/old-last.png' });
+
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/first.png' }, ctx, { replaceSlots: true });
+
+      expect(draft.state).toMatchObject({
+        workflow: 'img2vid', firstFramePath: '/in/first.png', firstFrameUpload: null, endImagePath: null, endImageUpload: null,
+        referenceImagePath: '/in/start.png', referenceImagePaths: ['/in/ref.png'],
+      });
+    });
+
+    it('image_path routes to firstFramePath in Video and to referenceImagePath in Image', () => {
+      const ctx = slotContext();
+      draft.hydrateFromContext(ctx, 'klein');
+
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/a.png' }, ctx);
+      expect(draft.state).toMatchObject({ firstFramePath: '/in/a.png', referenceImagePath: null });
+
+      draft.loadFromUrl({ workflow: 'img2img', image_path: '/in/b.png' }, ctx);
+      expect(draft.state).toMatchObject({ referenceImagePath: '/in/b.png', firstFramePath: '/in/a.png' });
+    });
+
+    it('a path drops the upload marker of its slot', () => {
+      const ctx = slotContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.setStartImage('image', { file: file('start.png') }, ctx);
+
+      draft.loadFromUrl({ workflow: 'img2img', image_path: '/in/b.png', use_as: 'start' }, ctx);
+
+      expect(draft.state).toMatchObject({ referenceImagePath: '/in/b.png', referenceImageUpload: null });
+    });
+
+    it('a use_as prefill sets only its slot', () => {
+      const ctx = slotContext();
+      draft.hydrateFromContext(ctx, 'klein');
+      draft.setStartImage('video', { path: '/in/first.png' }, ctx);
+      draft.setLastFrame({ path: '/in/last.png' });
+      draft.patch({ referenceImagePath: '/in/start.png', referenceImagePaths: ['/in/ref.png'] });
+
+      draft.loadFromUrl({ workflow: 'img2vid', end_image_path: '/in/new-last.png', use_as: 'last' }, ctx, { replaceSlots: true });
+      expect(draft.state).toMatchObject({ firstFramePath: '/in/first.png', endImagePath: '/in/new-last.png', referenceImagePath: '/in/start.png', referenceImagePaths: ['/in/ref.png'] });
+
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/new-first.png', use_as: 'start' }, ctx, { replaceSlots: true });
+      expect(draft.state).toMatchObject({ firstFramePath: '/in/new-first.png', endImagePath: '/in/new-last.png' });
+
+      draft.loadFromUrl({ workflow: 'img2img', image_path: '/in/new-start.png', use_as: 'start' }, ctx, { replaceSlots: true });
+      expect(draft.state).toMatchObject({ referenceImagePath: '/in/new-start.png', referenceImagePaths: ['/in/ref.png'], firstFramePath: '/in/new-first.png' });
+    });
+  });
+
+  describe('setTab', () => {
+    it('picks the workflow its images call for, without a context', () => {
+      draft.setStartImage('video', { path: '/in/first.png' }, null);
+      draft.setTab('video');
+      expect(draft.state.workflow).toBe('img2vid');
+      draft.setTab('extend');
+      expect(draft.state.workflow).toBe('extend');
+      draft.setTab('image');
+      expect(draft.state.workflow).toBe('txt2img');
     });
   });
 });

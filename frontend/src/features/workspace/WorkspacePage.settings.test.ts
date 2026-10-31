@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
 import { draft } from '$lib/state/draft.svelte';
+import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
 import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
@@ -12,8 +13,8 @@ import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from 
 import WorkspacePage from './WorkspacePage.svelte';
 import { placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
-import { makeAsset, makeContext, makeGalleryPage, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
-import { answerConfirm, createHost, fakeDebounceTimers, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, waitDebounce } from '../../test-utils/workspaceHarness';
+import { makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
+import { addFiles, answerConfirm, createHost, dragFiles, fakeDebounceTimers, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, configApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, presetApiMocks, videoMemoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
@@ -616,8 +617,6 @@ describe('WorkspacePage settings presets', () => {
 });
 
 describe('WorkspacePage last frame', () => {
-  const END_CONTROLS = ['end_image', 'end_image_clear', 'end_image_path'];
-
   /** A context with two video models: MiniMax H3 (has a last frame) and LTX (hides the last-frame controls). */
   function lastFrameContext(assets: GalleryAsset[] = [], withEnhancer = false): WorkspaceContext {
     const context = makeContext({
@@ -626,14 +625,11 @@ describe('WorkspacePage last frame', () => {
       current_video_model: 'h3',
       video_model_defaults: {
         h3: makeVideoDefaults({ hidden_controls: ['low_memory'] }),
-        'ltx-8': makeVideoDefaults({ hidden_controls: END_CONTROLS }),
+        'ltx-8': makeVideoDefaults({ hidden_controls: ['end_image', 'end_image_clear', 'end_image_path'] }),
       },
     });
-    const { definitions } = context.workflow_contract;
-    definitions.img2vid.visible_controls = [...definitions.img2vid.visible_controls, 'end_image', 'end_image_path', 'end_image_clear'];
-    for (const workflow of ['txt2img', 'img2img', 'txt2vid'] as const) definitions[workflow].clear_fields = [...definitions[workflow].clear_fields, 'end_image_path'];
     if (withEnhancer) {
-      definitions.img2vid.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
+      context.workflow_contract.definitions.img2vid.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
       context.prompt_enhancer = {
         matrix: {
           axes: [{ key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] }],
@@ -645,11 +641,16 @@ describe('WorkspacePage last frame', () => {
     return context;
   }
 
-  async function mountLastFrame(assets: GalleryAsset[] = [], workflow: 'img2vid' | 'txt2vid' = 'img2vid', withEnhancer = false): Promise<void> {
-    draft.update('workflow', workflow);
+  let lastContext: WorkspaceContext;
+
+  /** Mount the Video tab on MiniMax H3. A first frame, when one is asked for, is a path set before the page loads. */
+  async function mountLastFrame(assets: GalleryAsset[] = [], options: { first?: boolean; enhancer?: boolean } = {}): Promise<void> {
+    lastContext = lastFrameContext(assets, options.enhancer ?? false);
+    draft.update('workflow', 'txt2vid');
     galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage(assets));
-    await mountWorkspace(lastFrameContext(assets, withEnhancer));
+    await mountWorkspace(lastContext);
     draft.update('model', 'h3');
+    if (options.first) draft.setStartImage('video', { path: '/in/start.png' }, lastContext);
     await settle();
   }
 
@@ -661,7 +662,7 @@ describe('WorkspacePage last frame', () => {
     window.location.hash = '#/workspace';
   });
 
-  const endPath = () => target.querySelector('input[name="end_image_path"]') as HTMLInputElement | null;
+  const summary = () => target.querySelector('[data-section="images"] .inspector-summary')?.textContent;
   const submit = async (): Promise<FormData> => {
     (target.querySelector('#ws-prompt') as HTMLTextAreaElement).value = 'a prompt';
     (target.querySelector('#ws-prompt') as HTMLTextAreaElement).dispatchEvent(new Event('input', { bubbles: true }));
@@ -670,38 +671,27 @@ describe('WorkspacePage last frame', () => {
     await settle();
     return workspaceApiMocks.submitGenerate.mock.calls.at(-1)![0];
   };
-  async function upload(inputId: string, name: string): Promise<File> {
-    const input = target.querySelector(`#${inputId}`) as HTMLInputElement;
-    const file = new File(['img'], name, { type: 'image/png' });
-    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-    return file;
-  }
+  const image = (name: string) => new File(['img'], name, { type: 'image/png' });
 
-  it('offers a Last frame slot beside the first frame for a model that has one', async () => {
+  const groups = () => Array.from(target.querySelectorAll('[data-section="images"] .image-group-label')).map((el) => el.textContent);
+
+  it('offers an empty Last frame group beside the First frame, for a model that has one', async () => {
     await mountLastFrame();
+    expect(groups()).toEqual(['First frame', 'Last frame']);
+    expect(target.querySelector('#ws-end-image-label')?.textContent).toContain('Image');
 
-    expect(endPath()).not.toBeNull();
-    expect(target.querySelector('#ws-end-image-file')).not.toBeNull();
-    expect(target.querySelector('#ws-image-label')?.textContent).toContain('First frame');
-    expect(target.querySelector('#ws-end-image-label')?.textContent).toContain('Last frame');
+    draft.setStartImage('video', { path: '/in/start.png' }, lastContext);
+    await settle();
+    expect(summary()).toBe('start.png');
+
+    await addFiles(target, 'last', image('end.png'));
+    expect(summary()).toBe('start.png → end.png');
+    expect(draft.state.endImageUpload).toBe('end.png');
   });
 
-  it('leaves the reference picker alone, and offers no slot, for a model without a last frame', async () => {
-    await mountLastFrame();
-    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ltx-8');
-    await settle();
-
-    expect(endPath()).toBeNull();
-    expect(target.querySelector('#ws-end-image-file')).toBeNull();
-    expect(target.querySelector('#ws-image-label')?.textContent).toContain('Image');
-    expect(target.querySelector('input[name="image_path"]')).not.toBeNull();
-  });
-
-  it('submits a typed last-frame path with the first frame', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+  it('submits a last-frame path with the first frame', async () => {
+    await mountLastFrame([], { first: true });
+    draft.setLastFrame({ path: '/in/end.png' });
     await settle();
 
     const submitted = await submit();
@@ -712,19 +702,23 @@ describe('WorkspacePage last frame', () => {
   });
 
   it('submits an uploaded last frame as end_image_file, apart from the first frame', async () => {
-    await mountLastFrame();
-    const file = await upload('ws-end-image-file', 'end.png');
+    await mountLastFrame([], { first: true });
+    const file = image('end.png');
+    await addFiles(target, 'last', file);
 
     const submitted = await submit();
 
     expect(submitted.get('end_image_file')).toBe(file);
+    expect(submitted.get('image_path')).toBe('/in/start.png');
     expect(submitted.has('image_file')).toBe(false);
   });
 
   it('keeps an uploaded first and last frame when the page is left and comes back', async () => {
     await mountLastFrame();
-    const first = await upload('ws-image-file', 'first.png');
-    const last = await upload('ws-end-image-file', 'last.png');
+    const first = image('first.png');
+    const last = image('last.png');
+    await addFiles(target, 'start', first);
+    await addFiles(target, 'last', last);
     await unmount(app!);
     app = null;
 
@@ -737,8 +731,9 @@ describe('WorkspacePage last frame', () => {
 
   it('shows and submits the paths a Use as chose in the Gallery, not the upload of the slot it set', async () => {
     await mountLastFrame();
-    const last = await upload('ws-end-image-file', 'last.png');
-    await upload('ws-image-file', 'first.png');
+    await addFiles(target, 'start', image('first.png'));
+    const last = image('last.png');
+    await addFiles(target, 'last', last);
     await unmount(app!);
     app = null;
 
@@ -747,7 +742,7 @@ describe('WorkspacePage last frame', () => {
     await mountLastFrame();
     const submitted = await submit();
 
-    expect(draft.state.referenceImagePath).toBe('/in/new-start.png');
+    expect(draft.state.firstFramePath).toBe('/in/new-start.png');
     expect(submitted.get('image_path')).toBe('/in/new-start.png');
     expect(submitted.has('image_file')).toBe(false);
     // The last frame was not the slot it set, so its upload stays.
@@ -756,7 +751,8 @@ describe('WorkspacePage last frame', () => {
 
   it('keeps the first frame uploaded before leaving when a Gallery Use as sets the last frame', async () => {
     await mountLastFrame();
-    const first = await upload('ws-image-file', 'first.png');
+    const first = image('first.png');
+    await addFiles(target, 'start', first);
     await unmount(app!);
     app = null;
 
@@ -771,8 +767,8 @@ describe('WorkspacePage last frame', () => {
 
   it('drops the frames uploaded before leaving when a Gallery Reuse of a clip without a last frame comes back', async () => {
     await mountLastFrame();
-    await upload('ws-image-file', 'first.png');
-    await upload('ws-end-image-file', 'last.png');
+    await addFiles(target, 'start', image('first.png'));
+    await addFiles(target, 'last', image('last.png'));
     await unmount(app!);
     app = null;
 
@@ -782,14 +778,14 @@ describe('WorkspacePage last frame', () => {
 
     expect(submitted.get('image_path')).toBe('/in/clip-start.png');
     expect(submitted.has('image_file')).toBe(false);
-    expect(submitted.get('end_image_path')).toBe('');
+    expect(submitted.has('end_image_path')).toBe(false);
     expect(submitted.has('end_image_file')).toBe(false);
   });
 
   it('drops the uploaded frames with Reset', async () => {
     await mountLastFrame();
-    await upload('ws-image-file', 'first.png');
-    await upload('ws-end-image-file', 'last.png');
+    await addFiles(target, 'start', image('first.png'));
+    await addFiles(target, 'last', image('last.png'));
 
     (target.querySelector('#ws-reset') as HTMLButtonElement).click();
     await settle();
@@ -800,54 +796,44 @@ describe('WorkspacePage last frame', () => {
 
     expect(submitted.has('image_file')).toBe(false);
     expect(submitted.has('end_image_file')).toBe(false);
+    expect(summary()).toBe('None');
   });
 
   it('shows the pair in the section summary', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+    await mountLastFrame([], { first: true });
+    draft.setLastFrame({ path: '/in/end.png' });
     await settle();
 
-    expect(target.querySelector('[data-section="reference"] .inspector-summary')?.textContent).toBe('start.png → end.png');
+    expect(summary()).toBe('start.png → end.png');
   });
 
-  it('clears a chosen path and a pending upload when the model or the workflow leaves the last frame behind', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
-    await upload('ws-end-image-file', 'end.png');
-
-    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ltx-8');
+  it('removing the first frame keeps the last frame and sends no end_image_path', async () => {
+    await mountLastFrame([], { first: true });
+    draft.setLastFrame({ path: '/in/end.png' });
     await settle();
-    let submitted = await submit();
 
-    expect(draft.state.endImagePath).toBeNull();
-    expect(submitted.has('end_image_path')).toBe(false);
-    expect(submitted.has('end_image_file')).toBe(false);
-    expect(submitted.get('image_path')).toBe('/in/start.png');
-
-    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'h3');
+    (target.querySelector('button[aria-label="Clear first frame"]') as HTMLButtonElement).click();
     await settle();
-    draft.update('endImagePath', '/in/end.png');
-    await upload('ws-end-image-file', 'end.png');
+    const submitted = await submit();
 
-    draft.update('workflow', 'txt2vid');
-    await settle();
-    submitted = await submit();
-
-    expect(endPath()).toBeNull();
+    expect(draft.state).toMatchObject({ workflow: 'txt2vid', firstFramePath: null, endImagePath: '/in/end.png' });
+    expect(target.querySelector('#ws-end-image-label')).not.toBeNull();
+    expect(summary()).toBe('None');
+    expect(submitted.get('workflow')).toBe('txt2vid');
     expect(submitted.has('end_image_path')).toBe(false);
     expect(submitted.has('end_image_file')).toBe(false);
   });
 
-  it('clears only the last frame with its Clear button', async () => {
-    await mountLastFrame();
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
+  it('clears only the last frame with its Remove button', async () => {
+    await mountLastFrame([], { first: true });
+    draft.setLastFrame({ path: '/in/end.png' });
     await settle();
 
     (target.querySelector('button[aria-label="Clear last frame"]') as HTMLButtonElement).click();
     await settle();
 
     expect(draft.state.endImagePath).toBeNull();
-    expect(draft.state.referenceImagePath).toBe('/in/start.png');
+    expect(draft.state.firstFramePath).toBe('/in/start.png');
   });
 
   describe('from the history strip', () => {
@@ -860,23 +846,23 @@ describe('WorkspacePage last frame', () => {
     };
 
     it('offers For last frame and sets only the last frame, leaving the text and the first frame', async () => {
-      await mountLastFrame([asset]);
-      draft.patch({ referenceImagePath: '/in/start.png', prompt: 'my action' });
+      await mountLastFrame([asset], { first: true });
+      draft.patch({ prompt: 'my action' });
       await settle();
 
       const actions = Array.from(await menuFor()).map((el) => el.getAttribute('data-action'));
       (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
       await settle();
 
-      expect(actions).toEqual(['reference-image', 'reference-video', 'reference-last-frame']);
-      expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/end.png', referenceImagePath: '/in/start.png', prompt: 'my action', scene: '' });
-      expect(toasts.some((toast) => toast.message === 'end.png is now the last frame')).toBe(true);
-      expect(target.querySelector(`[data-section="reference"] img[src="${asset.url}"]`)).not.toBeNull();
+      expect(actions).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame']);
+      expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/end.png', firstFramePath: '/in/start.png', prompt: 'my action', scene: '' });
+      expect(target.querySelector(`[data-section="images"] img[src="${asset.url}"]`)).not.toBeNull();
     });
 
     it('keeps a first frame uploaded from this device when Use as sets the last frame, and the other way round', async () => {
       await mountLastFrame([asset]);
-      const first = await upload('ws-image-file', 'first.png');
+      const first = image('first.png');
+      await addFiles(target, 'start', first);
 
       await menuFor();
       (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
@@ -887,7 +873,9 @@ describe('WorkspacePage last frame', () => {
       expect(afterLast.get('end_image_path')).toBe('/outputs/out/end.png');
       expect(afterLast.has('end_image_file')).toBe(false);
 
-      const last = await upload('ws-end-image-file', 'last.png');
+      const last = image('last.png');
+      draft.setLastFrame({ file: last });
+      await settle();
       await menuFor();
       (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
       await settle();
@@ -898,14 +886,8 @@ describe('WorkspacePage last frame', () => {
       expect(afterFirst.get('end_image_file')).toBe(last);
     });
 
-    it('does not offer it for a model without a last frame, or outside Image to Video', async () => {
-      await mountLastFrame([asset], 'txt2vid');
-
-      expect(Array.from(await menuFor()).map((el) => el.getAttribute('data-action'))).toEqual(['reference-image', 'reference-video']);
-    });
-
     it('clears the last frame when its asset is deleted', async () => {
-      await mountLastFrame([asset]);
+      await mountLastFrame([asset], { first: true });
       galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
       await menuFor();
       (document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLButtonElement).click();
@@ -940,20 +922,15 @@ describe('WorkspacePage references', () => {
     window.location.hash = '#/workspace';
   });
 
-  const section = () => target.querySelector('[data-section="references"]');
+  const section = () => target.querySelector('[data-section="images"]');
   const summary = () => section()?.querySelector('.inspector-summary')?.textContent;
-  const rowLabels = () => Array.from(section()?.querySelectorAll('.inspector-label-text') ?? []).map((el) => el.textContent);
+  // The numbered rows that hold a reference; the empty row after them is not one.
+  const referenceLabels = () => Array.from(section()?.querySelectorAll('[id^="ws-ref-"][id$="-label"]:not(#ws-ref-add-label)') ?? []).map((el) => el.textContent?.trim());
   const image = (name: string) => new File(['img'], name, { type: 'image/png' });
+  const addReferences = (...files: File[]) => addFiles(target, 'reference', ...files);
 
   async function mountReferences(): Promise<void> {
     await mountWorkspace(referencesContext());
-    await settle();
-  }
-
-  async function addFiles(...files: File[]): Promise<void> {
-    const input = target.querySelector('#ws-ref-add-file') as HTMLInputElement;
-    Object.defineProperty(input, 'files', { configurable: true, value: files });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
   }
 
@@ -966,21 +943,22 @@ describe('WorkspacePage references', () => {
     return workspaceApiMocks.submitGenerate.mock.calls.at(-1)![0];
   }
 
-  it('offers an empty Add reference row on a model that takes references', async () => {
+  it('offers an empty Reference row under References, beside the Start image, on a model that takes references', async () => {
     await mountReferences();
 
-    expect(summary()).not.toMatch(/\d/);
-    expect(rowLabels()).toHaveLength(1);
-    expect(section()?.querySelector('#ws-ref-add-file')).not.toBeNull();
+    expect(summary()).toBe('None');
+    expect(referenceLabels()).toEqual([]);
+    expect(section()?.querySelector('#ws-ref-add-label')?.textContent?.trim()).toBe('Reference 1');
+    expect(Array.from(section()!.querySelectorAll('.image-group-label')).map((el) => el.textContent)).toEqual(['Start image', 'References']);
   });
 
-  it('takes what fits, tells how many did not in one toast, and shows no add row when full', async () => {
+  it('takes what fits, tells how many did not in one toast, and shows no add button when full', async () => {
     await mountReferences();
 
-    await addFiles(image('a.png'), image('b.png'), image('c.png'), image('d.png'));
+    await addReferences(image('a.png'), image('b.png'), image('c.png'), image('d.png'));
 
-    expect(summary()).toMatch(/3.*3/);
-    expect(section()?.querySelector('#ws-ref-add-file')).toBeNull();
+    expect(summary()).toBe('3 references');
+    expect(section()?.querySelector('#ws-ref-add-label')).toBeNull();
     expect(toasts).toHaveLength(1);
     expect(toasts[0]).toMatchObject({ type: 'info', count: 1 });
   });
@@ -990,7 +968,7 @@ describe('WorkspacePage references', () => {
     draft.update('referenceImagePaths', ['/in/a.png']);
     await settle();
     const second = image('second.png');
-    await addFiles(second);
+    await addReferences(second);
     draft.patch({ referenceImagePaths: ['/in/a.png', '', '/in/c.png'] });
     await settle();
 
@@ -1005,7 +983,7 @@ describe('WorkspacePage references', () => {
     await mountWorkspace(withEnhancer(referencesContext()));
     draft.update('referenceImagePaths', ['/in/a.png']);
     await settle();
-    await addFiles(image('b.png'));
+    await addReferences(image('b.png'));
 
     pressKey('e', { ctrlKey: true }, target.querySelector('#ws-prompt') as HTMLTextAreaElement);
     await settle();
@@ -1019,12 +997,23 @@ describe('WorkspacePage references', () => {
     draft.update('referenceImagePaths', ['/in/a.png', '/in/b.png', '/in/c.png']);
     await settle();
 
-    (target.querySelector('button[aria-label="Remove image 2"]') as HTMLButtonElement).click();
+    (target.querySelector('button[aria-label="Remove reference 2"]') as HTMLButtonElement).click();
     await settle();
 
     expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '/in/c.png']);
     expect(document.activeElement?.id).toBe('ws-ref-2-clear');
     expect(section()?.textContent).toContain('c.png');
+  });
+
+  it('adds a reference as the next numbered row and keeps the empty row after it', async () => {
+    await mountReferences();
+    draft.update('referenceImagePaths', ['/in/a.png']);
+    await settle();
+
+    await addReferences(image('b.png'));
+
+    expect(referenceLabels()).toEqual(['Reference 1', 'Reference 2']);
+    expect(section()?.querySelector('#ws-ref-add-label')?.textContent?.trim()).toBe('Reference 3');
   });
 
   it('keeps a row whose file is gone, says so, and blocks Generate until it is removed', async () => {
@@ -1039,8 +1028,10 @@ describe('WorkspacePage references', () => {
     expect(target.querySelector('#ws-ref-1-label')?.closest('[role="group"]')?.getAttribute('aria-describedby')).toBeNull();
     expect(generate.disabled).toBe(true);
     expect(target.querySelector('#ws-generate-reason')?.textContent).toContain('2');
+    expect(summary()).toBe('2 references');
+    expect(section()?.querySelector('.inspector-summary')?.getAttribute('data-tone')).toBe('error');
 
-    (target.querySelector('button[aria-label="Remove image 2"]') as HTMLButtonElement).click();
+    (target.querySelector('button[aria-label="Remove reference 2"]') as HTMLButtonElement).click();
     await settle();
 
     expect(generate.disabled).toBe(false);
@@ -1052,7 +1043,7 @@ describe('WorkspacePage references', () => {
     draft.update('referenceImagePaths', ['/in/a.png']);
     await settle();
     const second = image('second.png');
-    await addFiles(second);
+    await addReferences(second);
     await unmount(app!);
     app = null;
 
@@ -1067,7 +1058,7 @@ describe('WorkspacePage references', () => {
     await mountReferences();
     draft.update('referenceImagePaths', ['/in/a.png']);
     await settle();
-    await addFiles(image('second.png'));
+    await addReferences(image('second.png'));
     await unmount(app!);
     app = null;
 
@@ -1078,13 +1069,22 @@ describe('WorkspacePage references', () => {
     expect((await submit()).getAll('reference')).toEqual(['/in/new.png', '/in/other.png']);
   });
 
+  it('asks the server once which files are gone when a Reuse brings image paths', async () => {
+    workspaceApiMocks.parseUrlPrefill.mockReturnValue({ workflow: 'txt2img', reference_path: ['/in/new.png', '/in/other.png'] } as never);
+    workspaceApiMocks.checkReferencePaths.mockClear();
+    await mountReferences();
+
+    expect(workspaceApiMocks.checkReferencePaths).toHaveBeenCalledTimes(1);
+    expect(workspaceApiMocks.checkReferencePaths).toHaveBeenCalledWith(['/in/new.png', '/in/other.png']);
+  });
+
   it('keeps an upload that lost its file as a missing row in its own place, blocks Generate, and lets an upload replace it', async () => {
     // An upload has no path; leaving the page or reloading drops its file, and the draft that comes back still has the row.
     draft.patch({ referenceImagePaths: ['/in/a.png', '', '/in/c.png'] });
     await mountReferences();
 
     const generate = target.querySelector('#ws-submit') as HTMLButtonElement;
-    expect(rowLabels()).toHaveLength(3);
+    expect(referenceLabels()).toHaveLength(3);
     expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '', '/in/c.png']);
     expect(generate.disabled).toBe(true);
 
@@ -1146,18 +1146,21 @@ describe('WorkspacePage references', () => {
     draft.update('referenceImagePaths', ['/in/a.png']);
     await settle();
     const upload = image('b.png');
-    await addFiles(upload);
+    await addReferences(upload);
 
     pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'flux-lite');
     await settle();
-    expect(section()).toBeNull();
+    expect(referenceLabels()).toEqual([]);
+    expect(target.querySelector('#ws-ref-add-label')).toBeNull();
+    expect(summary()).toBe('None');
     expect((await submit()).has('reference')).toBe(false);
     expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '']);
 
     pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'zit');
     await settle();
 
-    expect(rowLabels()).toContain('Image 2');
+    expect(referenceLabels()).toContain('Reference 2');
+    expect(summary()).toBe('2 references');
     expect((await submit()).getAll('reference')).toEqual(['/in/a.png', upload]);
   });
 
@@ -1166,22 +1169,23 @@ describe('WorkspacePage references', () => {
     draft.patch({ referenceImagePaths: ['/in/a.png', '/in/b.png', '/in/c.png', '/in/gone.png'], missingReferencePaths: ['/in/gone.png'] });
     await settle();
 
-    expect(summary()).toMatch(/3.*3/);
+    expect(summary()).toBe('3 references');
     expect(target.querySelector('#ws-submit')).toHaveProperty('disabled', false);
     expect((await submit()).getAll('reference')).toEqual(['/in/a.png', '/in/b.png', '/in/c.png']);
     expect(draft.state.referenceImagePaths).toHaveLength(4);
   });
 
-  it('keeps the references, uploads included, while a video workflow is open', async () => {
+  it('keeps the references, uploads included, while the Video tab is open', async () => {
     await mountReferences();
     draft.update('referenceImagePaths', ['/in/b.png']);
     await settle();
     const upload = image('a.png');
-    await addFiles(upload);
+    await addReferences(upload);
 
     draft.update('workflow', 'txt2vid');
     await settle();
-    expect(section()).toBeNull();
+    expect(referenceLabels()).toEqual([]);
+    expect(target.querySelector('#ws-ref-add-label')).toBeNull();
     expect((await submit()).has('reference')).toBe(false);
     draft.update('workflow', 'txt2img');
     await settle();
@@ -1192,13 +1196,13 @@ describe('WorkspacePage references', () => {
 
   it('clears the references with Reset', async () => {
     await mountReferences();
-    await addFiles(image('a.png'));
+    await addReferences(image('a.png'));
 
     (target.querySelector('#ws-reset') as HTMLButtonElement).click();
     await settle();
 
     expect(draft.state.referenceImagePaths).toEqual([]);
-    expect(summary()).not.toMatch(/\d/);
+    expect(summary()).toBe('None');
   });
 
   describe('Reuse from the history strip', () => {
@@ -1232,7 +1236,7 @@ describe('WorkspacePage references', () => {
 
     it('clears the references already chosen and their uploads when the reused image had none', async () => {
       await mountWith(assetWith('#/workspace?workflow=txt2img&model=zit'));
-      await addFiles(image('a.png'));
+      await addReferences(image('a.png'));
       draft.update('referenceImagePaths', ['', '/in/b.png']);
 
       await reuse(makeAsset({ filename: 'fox.png' }));
@@ -1242,13 +1246,13 @@ describe('WorkspacePage references', () => {
     });
   });
 
-  it('keeps the reference uploads when a Reuse lands on a video workflow, which has no References section', async () => {
+  it('keeps the reference uploads when a Reuse lands on a video workflow, which has no references', async () => {
     const clip = makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', filename: 'clip.mp4', media_type: 'video', file_path: '/outputs/out/clip.mp4', has_reusable_config: true, reuse_workspace_url: '#/workspace?workflow=txt2vid&prompt=a%20clip' });
     galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([clip]));
     await mountWorkspace({ ...referencesContext(), history_assets: [clip] });
     await settle();
     const upload = image('a.png');
-    await addFiles(upload);
+    await addReferences(upload);
 
     const tile = target.querySelector('#ws-history-shell article[aria-label="clip.mp4"]') as HTMLElement;
     (tile.querySelector('button[aria-label="More actions for clip.mp4"]') as HTMLButtonElement).click();
@@ -1256,6 +1260,7 @@ describe('WorkspacePage references', () => {
     (document.querySelector('[role="menu"] [data-action="reuse"]') as HTMLButtonElement).click();
     await settle();
     expect(draft.state.workflow).toBe('txt2vid');
+    expect(target.querySelector('#ws-ref-add-label')).toBeNull();
 
     draft.update('workflow', 'txt2img');
     await settle();
@@ -1264,26 +1269,18 @@ describe('WorkspacePage references', () => {
   });
 
   describe('dropping files', () => {
-    /** Fire a drag event carrying *files* at *node*. */
-    function drag(node: Element, type: 'dragover' | 'drop' | 'dragleave', files: File[] = []): Event {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files, dropEffect: 'none' } });
-      node.dispatchEvent(event);
-      return event;
-    }
-    const addRow = () => (target.querySelector('#ws-ref-add-label') as HTMLElement).closest('[role="group"]') as HTMLElement;
+    const addRow = () => (target.querySelector('#ws-ref-add-label') as HTMLElement).closest('.reference-drop') as HTMLElement;
 
-    it('appends the images dropped on the add row in order and skips what is not an image', async () => {
+    it('appends the images dropped on the empty row in order and skips what is not an image', async () => {
       await mountReferences();
       const first = image('one.png');
       const second = image('two.png');
 
-      drag(addRow(), 'dragover');
-      const dropped = drag(addRow(), 'drop', [first, new File(['x'], 'notes.txt', { type: 'text/plain' }), second]);
+      const dropped = dragFiles(addRow(), 'drop', [first, new File(['x'], 'notes.txt', { type: 'text/plain' }), second]);
       await settle();
 
       expect(dropped.defaultPrevented).toBe(true);
-      expect(summary()).toMatch(/2.*3/);
+      expect(summary()).toBe('2 references');
       expect((await submit()).getAll('reference')).toEqual([first, second]);
     });
 
@@ -1294,12 +1291,119 @@ describe('WorkspacePage references', () => {
       const row = (target.querySelector('#ws-ref-2-label') as HTMLElement).closest('[role="group"]') as HTMLElement;
       const dropped = image('new.png');
 
-      drag(row, 'dragover');
-      drag(row, 'drop', [dropped, image('other.png')]);
+      dragFiles(row, 'dragover');
+      dragFiles(row, 'drop', [dropped, image('other.png')]);
       await settle();
 
       expect((await submit()).getAll('reference')).toEqual(['/in/a.png', dropped]);
     });
+  });
+});
+
+// The Images section of the Settings pane: where it sits, what it holds, and what Generate sends from it.
+describe('WorkspacePage Images section', () => {
+  beforeEach(() => {
+    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-1' } as JobContext);
+    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('reference_image'));
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test-image') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    window.location.hash = '#/workspace';
+  });
+
+  const png = (name: string) => new File(['img'], name, { type: 'image/png' });
+  const sections = () => Array.from(target.querySelectorAll('.settings-pane [data-section]')).map((el) => (el as HTMLElement).dataset.section);
+  const summary = () => target.querySelector('[data-section="images"] .inspector-summary')?.textContent;
+  const strengthField = () => target.querySelector('#ws-image-strength') as HTMLInputElement | null;
+
+  async function submit(): Promise<FormData> {
+    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).value = 'a prompt';
+    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    return workspaceApiMocks.submitGenerate.mock.calls.at(-1)![0];
+  }
+
+  /** The default context, with Ideogram 4 (no image-to-image) next to the model that has it. */
+  function ideogramContext(): WorkspaceContext {
+    return makeContext({
+      image_models: [{ id: 'zit', label: 'zit', type: 'image' }, { id: 'ideo', label: 'ideo', type: 'image' }],
+      image_model_defaults: { zit: makeImageDefaults(), ideo: makeIdeogramDefaults() },
+    });
+  }
+
+  it('Images is third after Size and Sampling, in Image and Video, not in Extend', async () => {
+    await mountWorkspace(makeContext());
+    expect(sections().slice(0, 3)).toEqual(['size', 'sampling', 'images']);
+    await unmount(app!);
+    app = null;
+
+    draft.update('workflow', 'txt2vid');
+    await mountWorkspace(makeContext());
+    expect(sections().slice(0, 3)).toEqual(['size', 'sampling', 'images']);
+    await unmount(app!);
+    app = null;
+
+    const extendContext = makeContext();
+    extendContext.workflow_contract.values = [...extendContext.workflow_contract.values, 'extend'];
+    draft.update('workflow', 'extend');
+    await mountWorkspace(extendContext);
+    expect(sections()).not.toContain('images');
+    expect(sections()[0]).toBe('source-video');
+  });
+
+  it('Generate sends no start image or strength on a model that can\'t use one', async () => {
+    draft.setStartImage('image', { path: '/in/start.png' }, null);
+    await mountWorkspace(ideogramContext());
+    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'ideo');
+    await settle();
+
+    const submitted = await submit();
+
+    expect(draft.state.referenceImagePath).toBe('/in/start.png');
+    expect(submitted.get('workflow')).toBe('txt2img');
+    for (const name of ['image_path', 'image_file', 'image_strength']) expect(submitted.has(name)).toBe(false);
+    expect(target.querySelector('[data-section="images"]')).toBeNull();
+
+    pickOption(target.querySelector('#ws-model') as HTMLButtonElement, 'zit');
+    await settle();
+    expect(summary()).toBe('start.png');
+    expect((await submit()).get('image_path')).toBe('/in/start.png');
+  });
+
+  it('an uploaded start image goes as image_file and comes back after a reload', async () => {
+    await mountWorkspace(makeContext());
+    await addFiles(target, 'start', png('start.png'));
+
+    // A reload keeps the draft and the store but not what is in memory.
+    await heldUploads.persisted();
+    const store = heldUploads.store;
+    await unmount(app!);
+    app = null;
+    heldUploads.useStore(store);
+    await mountWorkspace(makeContext());
+
+    expect(target.querySelector('[role="group"][aria-label="Image: start.png"]')).not.toBeNull();
+    expect(summary()).toBe('start.png');
+    expect(((await submit()).get('image_file') as File).name).toBe('start.png');
+  });
+
+  it('Reset clears the images and restores Strength', async () => {
+    await mountWorkspace(makeContext());
+    await addFiles(target, 'start', png('start.png'));
+    draft.update('referenceImageStrength', 0.3);
+    await settle();
+    const changed = () => target.querySelector('[data-testid="changed-count"]')?.textContent;
+    expect(changed()).toBe('1');
+
+    (target.querySelector('#ws-reset') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: null, referenceImageUpload: null, referenceImageStrength: 0.5 });
+    expect(heldUploads.start('image')).toBeNull();
+    expect(strengthField()).toBeNull();
+    expect(summary()).toBe('None');
+    expect(changed()).toBeUndefined();
   });
 });
 

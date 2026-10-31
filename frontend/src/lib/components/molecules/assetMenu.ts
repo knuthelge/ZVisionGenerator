@@ -1,4 +1,4 @@
-import { canExtend, canUseAsReference, extendReason, seedvr2Options, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+import { canExtend, canUseAsReference, extendReason, seedvr2Options, upscaleFactors, type AssetActionHandlers, type ReferenceTarget, type UseAsState } from '$lib/state/assetActions';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
@@ -12,8 +12,7 @@ export function assetMenuEntries(
   asset: GalleryAsset,
   handlers: AssetActionHandlers,
   deleting = false,
-  referenceUnavailable: Partial<Record<ReferenceTarget, string>> = {},
-  referenceTargets: readonly ReferenceTarget[] = DEFAULT_REFERENCE_TARGETS
+  useAs: UseAsState = {}
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
   const { onreuse, onreference, onextend, onupscale, ondelete } = handlers;
@@ -27,7 +26,7 @@ export function assetMenuEntries(
   if (onreference && canUseAsReference(asset)) {
     entries.push(
       { kind: 'heading', label: 'Use as' },
-      ...referenceEntries(asset, onreference, referenceUnavailable, referenceTargets),
+      ...referenceEntries(asset, onreference, useAs),
       { kind: 'separator' }
     );
   }
@@ -98,26 +97,29 @@ function plainTitle(option: AssetUpscaleFactor, downloadSizeLabel: string | null
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
-/** The reference targets every surface offers unless it is told the workspace has a last-frame slot too. */
-export const DEFAULT_REFERENCE_TARGETS: readonly ReferenceTarget[] = ['image', 'video'];
+const REFERENCE_TARGETS: readonly ReferenceTarget[] = ['image', 'reference', 'video', 'last'];
+const REFERENCE_LABELS: Record<ReferenceTarget, string> = { image: 'Start image', reference: 'Reference', video: 'First frame', last: 'Last frame' };
 
 /**
- * Build the "Use as" items for *targets*: the start image, a video's first frame and its last frame. A target the
- * current model can't use is disabled with its reason.
+ * Build the "Use as" items: the start image, a reference, a video's first frame and its last frame. A target the model it
+ * opens on can't use is disabled; its hint (or reason) shows beside the label and as the tooltip.
  */
 export function referenceEntries(
   asset: GalleryAsset,
   onreference: NonNullable<AssetActionHandlers['onreference']>,
-  unavailable: Partial<Record<ReferenceTarget, string>> = {},
-  targets: readonly ReferenceTarget[] = DEFAULT_REFERENCE_TARGETS
+  useAs: UseAsState = {}
 ): ActionMenuEntry[] {
-  const labels: Record<ReferenceTarget, string> = { image: 'Start image', video: 'First frame', last: 'Last frame' };
-  return targets.map((target) => ({
-    kind: 'item' as const,
-    id: `reference-${target === 'last' ? 'last-frame' : target}`,
-    label: labels[target],
-    disabled: Boolean(unavailable[target]),
-    title: unavailable[target],
-    onselect: () => onreference(asset, target),
-  }));
+  return REFERENCE_TARGETS.map((target) => {
+    const state = useAs[target];
+    const disabled = state?.disabled === true;
+    return {
+      kind: 'item' as const,
+      id: `reference-${target === 'last' ? 'last-frame' : target}`,
+      label: REFERENCE_LABELS[target],
+      hint: state?.hint,
+      disabled,
+      title: disabled ? state?.hint : undefined,
+      onselect: () => onreference(asset, target),
+    };
+  });
 }

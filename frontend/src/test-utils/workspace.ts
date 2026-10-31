@@ -141,16 +141,16 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           visible_controls: [
             'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+            'reference_image', 'reference_image_path', 'reference_image_clear',
             'references', 'references_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'scheduler',
             'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
             'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
           ],
-          supports_reference_image: false,
           requires_reference_image: false,
           requires_source_video: false,
-          clear_fields: ['image_path', 'image_strength', 'frames', 'audio', 'low_memory'],
+          clear_fields: ['frames', 'audio', 'low_memory'],
         },
         img2img: {
           mode: 'image',
@@ -165,7 +165,6 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
             'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
           ],
-          supports_reference_image: true,
           requires_reference_image: true,
           requires_source_video: false,
           clear_fields: ['frames', 'audio', 'low_memory'],
@@ -176,13 +175,14 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           visible_controls: [
             'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+            'reference_image', 'reference_image_path', 'reference_image_clear',
+            'end_image', 'end_image_path', 'end_image_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
             'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
           ],
-          supports_reference_image: false,
           requires_reference_image: false,
           requires_source_video: false,
-          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
+          clear_fields: ['negative_prompt', 'guidance', 'quantize'],
         },
         img2vid: {
           mode: 'video',
@@ -191,10 +191,10 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
+            'end_image', 'end_image_path', 'end_image_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
             'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
           ],
-          supports_reference_image: true,
           requires_reference_image: true,
           requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
@@ -203,10 +203,9 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           mode: 'video',
           model_kind: 'video',
           visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
-          supports_reference_image: false,
           requires_reference_image: false,
           requires_source_video: true,
-          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
+          clear_fields: ['negative_prompt', 'guidance', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
         },
       },
       field_precedence: {

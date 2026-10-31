@@ -141,6 +141,44 @@ describe('AssetViewer', () => {
     expect(ondelete).toHaveBeenCalledWith(assetB);
   });
 
+  it('lists the four Use as targets with their hints, and disables one with its reason', () => {
+    const onreference = vi.fn();
+    mountViewer({
+      onreference,
+      useAs: {
+        reference: { disabled: true, hint: 'no room' },
+        last: { disabled: true, hint: 'LTX 2.3 has no last frame' },
+      },
+    });
+
+    (document.querySelector('[data-action="reference"]') as HTMLButtonElement).click();
+    flushSync();
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menu"] [data-action^="reference-"]')];
+    expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame']);
+    const reference = items[1];
+    expect(reference.getAttribute('aria-disabled')).toBe('true');
+    expect(reference.getAttribute('title')).toBe('no room');
+    expect(reference.textContent).toContain('no room');
+    expect(items[3].getAttribute('aria-disabled')).toBe('true');
+    expect(items[0].hasAttribute('aria-disabled')).toBe(false);
+
+    reference.click();
+    flushSync();
+    expect(onreference).not.toHaveBeenCalled();
+  });
+
+  it('shows the next image number on an open Reference target and picks it', () => {
+    const onreference = vi.fn();
+    mountViewer({ onreference, useAs: { reference: { disabled: false, hint: 'next slot' } } });
+
+    (document.querySelector('[data-action="reference"]') as HTMLButtonElement).click();
+    flushSync();
+    const reference = document.querySelector<HTMLElement>('[role="menu"] [data-action="reference-reference"]')!;
+    expect(reference.textContent).toContain('next slot');
+    reference.click();
+    expect(onreference).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 'reference');
+  });
+
   it('stays on the nearest asset when the list shrinks and closes when it empties', async () => {
     const onclose = vi.fn();
     mountViewer({ currentIndex: 5, onclose });

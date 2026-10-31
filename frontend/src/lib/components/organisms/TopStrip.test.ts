@@ -33,9 +33,9 @@ describe('TopStrip', () => {
     expect(onmenu).toHaveBeenCalledOnce();
 
     const select = target.querySelector('[role="combobox"][aria-label="Workflow"]') as HTMLButtonElement;
-    expect(optionValues(select)).toEqual(['txt2img', 'img2img', 'img2vid', 'txt2vid', 'extend']);
-    pickOption(select, 'img2vid');
-    expect(draft.state.workflow).toBe('img2vid');
+    expect(optionValues(select)).toEqual(['image', 'video', 'extend']);
+    pickOption(select, 'video');
+    expect(draft.state.workflow).toBe('txt2vid');
 
     expect(target.querySelector('[data-testid="strip-status"]')?.textContent).toContain('Ready');
     expect(target.querySelector('button[aria-label="Gallery"]')).not.toBeNull();
@@ -68,9 +68,16 @@ describe('TopStrip', () => {
     expect(onjoblog).toHaveBeenCalledOnce();
   });
 
-  it('lists four workflows until the contract is known', () => {
+  it('shows the tab of the draft: img2img is the Image tab', () => {
+    draft.update('workflow', 'img2img');
     app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', workflows: null, onmenu: vi.fn() } }));
     const select = target.querySelector('[role="combobox"][aria-label="Workflow"]') as HTMLButtonElement;
-    expect(optionValues(select)).toHaveLength(4);
+    expect(select.textContent).toContain('Image');
+  });
+
+  it('lists Image and Video until the contract is known', () => {
+    app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', workflows: null, onmenu: vi.fn() } }));
+    const select = target.querySelector('[role="combobox"][aria-label="Workflow"]') as HTMLButtonElement;
+    expect(optionValues(select)).toEqual(['image', 'video']);
   });
 });

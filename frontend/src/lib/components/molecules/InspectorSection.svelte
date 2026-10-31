@@ -35,10 +35,12 @@
     summary?: string;
     /** Highlights the summary (e.g. the feature is switched on). */
     active?: boolean;
+    /** Marks the summary as an error (e.g. an image the run needs is gone); it wins over `active`. */
+    error?: boolean;
     children: Snippet;
   }
 
-  let { id, title, summary = '', active = false, children }: Props = $props();
+  let { id, title, summary = '', active = false, error = false, children }: Props = $props();
 
   const open = $derived(openState[id] ?? true);
   const bodyId = $derived(`inspector-${id}`);
@@ -54,7 +56,7 @@
   >
     <Icon name="chevright" size={12} class="inspector-chev" />
     <span>{title}</span>
-    {#if summary}<span class="inspector-summary" class:active>{summary}</span>{/if}
+    {#if summary}<span class="inspector-summary" class:active={active && !error} class:error data-tone={error ? 'error' : active ? 'active' : 'muted'}>{summary}</span>{/if}
   </button>
   <div id={bodyId} class="inspector-body" hidden={!open}>
     {@render children()}
@@ -96,6 +98,7 @@
     text-transform: none;
   }
   .inspector-summary.active { color: var(--color-primary-main); }
+  .inspector-summary.error { color: var(--color-error); }
   .inspector-body { padding-block: 4px 6px; }
   .inspector-body[hidden] { display: none; }
 </style>

@@ -122,8 +122,8 @@ def test_extend_definition_lists_its_controls_and_cleared_fields() -> None:
         "audio",
         "low_memory",
     ]
-    assert (definition["supports_reference_image"], definition["requires_reference_image"], definition["requires_source_video"]) == (False, False, True)
-    assert set(definition["clear_fields"]) >= {"ratio", "size", "width", "height", "frames", "image_path", "upscale", "video_upscale_enabled", "video_upscale_factor", "negative_prompt", "guidance"}
+    assert (definition["requires_reference_image"], definition["requires_source_video"]) == (False, True)
+    assert set(definition["clear_fields"]) >= {"ratio", "size", "width", "height", "frames", "upscale", "video_upscale_enabled", "video_upscale_factor", "negative_prompt", "guidance"}
 
 
 def test_extend_definition_drops_audio_when_video_has_no_audio_track() -> None:

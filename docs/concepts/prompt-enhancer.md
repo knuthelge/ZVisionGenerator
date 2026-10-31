@@ -107,10 +107,10 @@ For video, one rewrite returns two parts, a **scene** and an **action** (see [Sc
 | Scene and action | `both` | A rewritten scene and action. With no scene, your text is split into both. |
 | Action only | `action` | Your scene kept exactly as written, and an action written to fit it. |
 
-The default depends on the workflow:
+The default depends on the workflow, and on whether a first frame is set. The choice is remembered separately for runs with and without a first frame:
 
-- **Text to Video** rewrites both, splitting what you wrote: setting, look and camera setup go to the scene, events in order to the action.
-- **Image to Video** rewrites the action only when you gave a scene (what the image shows), so it isn't restyled. With a blank scene it writes a short scene too.
+- **Video without a first frame** rewrites both, splitting what you wrote: setting, look and camera setup go to the scene, events in order to the action.
+- **Video with a first frame** rewrites the action only when you gave a scene (what the image shows), so it isn't restyled. With a blank scene it writes a short scene too.
 - **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. It uses the previous clip's prompt as context, so it doesn't repeat its actions or lines.
 
 Action only needs a scene; with a blank one, both parts are written. Style, Mood, Theme and Focus on have no effect with Action only, since they shape the scene.
@@ -131,7 +131,7 @@ Action only needs a scene; with a blank one, both parts are written. Style, Mood
 - **Enhance now:** click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. Enhancing again always starts from your text; **Use mine** drops the Enhanced text.
 - **The popover** groups the options as **Look** (Style, Mood, Theme), **Focus on**, **Motion** and **Sound** for video, and **Output** (Rewrite or Write as, and Length), then Direction. **Reset** puts every option back. **Enhancer** (Fast or Smart) sits next to **Enhance prompt**. Images and video remember their own options.
 - **What Generate sends:** for each part, the Enhanced text when it has any, otherwise your text. The line under the prompt box says **Generate uses the Enhanced text**, with **Use mine** to go back to yours. In video, each part that uses its Enhanced text shows **Uses enhanced** with its own **Use mine**.
-- **Out of date:** if you change your text or switch workflows afterwards, the line under the box says **Out of date**, in either tab. The Enhanced text is still used until you choose **Use mine** or **Re-enhance**.
+- **Out of date:** if you change your text or switch tabs afterwards, the line under the box says **Out of date**, in either tab. The Enhanced text is still used until you choose **Use mine** or **Re-enhance**.
 - **The last five rewrites:** each time you enhance the same text, the rewrite is kept, up to five. In the **Enhanced** tab, `‹ 2 of 3 ›` steps back and forward through them, and Generate sends the one shown, recording how it was written. The stepper is hidden while auto-enhance is on, while the text is out of date and after you edit the Enhanced text by hand. Enhancing a different text starts a new list. The rewrites are kept in the browser with the rest of the form, not on the server.
 - **Random choices** are picked before the rewrite, so the Enhanced prompt has none left. Enhance again for a different pick.
 - **Enhance each image when generating** rewrites every image's prompt as part of the job, after its random choices are picked. It works with inline prompts and prompt files. The job card shows *Enhancing prompt N of M*; a prompt that couldn't be enhanced is generated from the original.

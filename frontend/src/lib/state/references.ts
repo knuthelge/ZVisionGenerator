@@ -46,27 +46,3 @@ export function skippedMessage(added: number, skipped: number, cap: number, unsu
   if (reasons.length === 0) return null;
   return `Added ${added} image${added === 1 ? '' : 's'}; ${reasons.join('; ')}.`;
 }
-
-/**
- * Whether a row's image is gone: its path is flagged missing (Reuse, the Workspace's check, or a delete found it), or it
- * is an upload whose file did not survive leaving the Workspace or a reload (an empty path and no file). Either way the
- * row keeps its number.
- */
-export function isMissingRow(row: ReferenceRow, missingPaths: readonly string[]): boolean {
-  if (row.file !== null) return false;
-  return row.path === '' || missingPaths.includes(row.path);
-}
-
-/** What to tell the user about a missing row: an upload lost to a reload is picked again, a moved path may also be removed. */
-export function missingReason(row: ReferenceRow): string {
-  return row.path === '' ? 'Choose this image again.' : 'This image has moved or been deleted. Choose it again or remove it.';
-}
-
-/**
- * Generate's reason when a reference is missing, or null when every row can be read. Dropping the row would renumber
- * the prompt's "image 2", so the row stays and the user chooses the file again or removes it.
- */
-export function referenceGuard(rows: readonly ReferenceRow[], missingPaths: readonly string[]): string | null {
-  const first = rows.findIndex((row) => isMissingRow(row, missingPaths));
-  return first === -1 ? null : `Image ${first + 1} is missing.`;
-}

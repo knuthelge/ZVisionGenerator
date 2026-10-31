@@ -25,11 +25,11 @@ The **Base resolution** on the [Config page](../web-ui/config.md) changes the de
 - **Seed** picks the starting noise. The same model, prompt, settings and seed give the same image. Without a seed every image gets a random one, which is recorded in the file.
 - **Scheduler** decides how the steps are spaced. Z-Image uses `beta` by default; most other models have no choice.
 
-## Start image
+## Start image { #start-image }
 
-A start image is a starting point: the model starts from it and moves toward your prompt, keeping its layout and colours. This is **Image to Image** in the Web UI and `--image` in the CLI.
+A start image is a starting point: the model starts from it and moves toward your prompt, keeping its layout and colours. In the Web UI, add it in the **Images** section of **Image**; in the CLI, use `--image`.
 
-**Img strength** (`--image-strength`, 0–1, default 0.5) sets how far the result may move: low values stay close to the image, high values follow the prompt more.
+**Strength** (`--image-strength`, 0–1, default 0.5) sets how far the result may move: low values stay close to the image, high values follow the prompt more.
 
 ```bash
 ziv-image -m klein9b --image photo.jpg --image-strength 0.4 --prompt "A woman in a red dress"
@@ -38,13 +38,13 @@ ziv-image -m klein9b --image sketch.png --image-strength 0.8 --prompt "Cyberpunk
 
 The image is resized to the target size. Photos are turned upright by their orientation tag, and transparent areas are filled with white. Ideogram 4 doesn't take a start image.
 
-In the Web UI viewer, **Use as** → **Start image** (++e++) opens an image as the start image together with its prompt.
+In the Web UI viewer, **Use as** → **Start image** (++e++) opens an image as the start image together with its prompt. Without a start image, the model makes the image from the prompt alone. The start image stays in the Workspace until you remove it; see [Images](../web-ui/workspace.md#images).
 
 ## References
 
 A start image sets the layout. A **reference** is different: it is an image whose *content* the result reuses, such as a person, an object, a place or a style. You can give up to four, alone or combined, for example a woman from one photo, a backpack from another and a pier from a third.
 
-References work with FLUX.2 Klein 4B and 9B (`klein4b`, `klein9b`). In the Web UI, the **References** section appears in **Text to Image** and **Image to Image** when the selected model takes them; other models don't show it. In the CLI, `--reference` takes a comma-separated list, and other models refuse it.
+References work with FLUX.2 Klein 4B and 9B (`klein4b`, `klein9b`). In the Web UI, the references are listed in the **Images** section of **Image** when the selected model takes them; other models don't show them. In the CLI, `--reference` takes a comma-separated list, and other models refuse it.
 
 ```bash
 ziv-image -m klein9b --reference woman.jpg,backpack.jpg --prompt "the woman from image 1 wearing the backpack from image 2, on a rainy street"
@@ -60,7 +60,7 @@ ziv-image -m klein9b --reference woman.jpg,backpack.jpg --prompt "the woman from
 
 ### References with a start image
 
-You can use both. The start image sets the layout and **Img strength** how much of it stays. On Klein's 4-step models, strength has few useful levels: where the layout stays, there is little room for new content, so a referenced person may not appear, and at a high strength the layout is lost. To put a referenced subject in a new scene, use references without a start image.
+You can use both. The start image sets the layout and **Strength** how much of it stays. On Klein's 4-step models, strength has few useful levels: where the layout stays, there is little room for new content, so a referenced person may not appear, and at a high strength the layout is lost. To put a referenced subject in a new scene, use references without a start image.
 
 ### Upscale and Reuse
 

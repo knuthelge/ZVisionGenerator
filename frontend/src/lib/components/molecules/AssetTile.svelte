@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
-  import type { AssetActionHandlers, ReferenceTarget } from '$lib/state/assetActions';
+  import type { AssetActionHandlers, UseAsState } from '$lib/state/assetActions';
   import type { GalleryAsset } from '$lib/types';
   import { hold } from '$lib/actions/hold';
   import ActionMenu from './ActionMenu.svelte';
@@ -14,10 +14,8 @@
     /** Shows a selection checkbox when provided. */
     onselect?: (asset: GalleryAsset, selected: boolean) => void;
     deleting?: boolean;
-    /** Reference targets the current model can't use, with the reason. */
-    referenceUnavailable?: Partial<Record<ReferenceTarget, string>>;
-    /** The reference targets the menu offers; absent offers an image and a video. */
-    referenceTargets?: readonly ReferenceTarget[];
+    /** What the Use as items show: which targets are disabled, and their hints. */
+    useAs?: UseAsState;
     eager?: boolean;
     onmediaload?: () => void;
     class?: string;
@@ -29,8 +27,7 @@
     selected = false,
     onselect,
     deleting = false,
-    referenceUnavailable = {},
-    referenceTargets = undefined,
+    useAs = {},
     eager = false,
     onmediaload,
     onpreview,
@@ -47,7 +44,7 @@
 
   const isVideo = $derived(asset.media_type === 'video');
   const canReuse = $derived(asset.has_reusable_config === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable, referenceTargets));
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, useAs));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   // The stage shows the full-resolution file; small tiles use the thumbnail.

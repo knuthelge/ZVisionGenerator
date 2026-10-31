@@ -2,7 +2,9 @@ import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { galleryStore } from '$lib/state/gallery.svelte';
-import { galleryMemory } from '$lib/state/pageMemory';
+import { draft } from '$lib/state/draft.svelte';
+import { galleryMemory, workspaceMemory } from '$lib/state/pageMemory';
+import { hasPendingReference, takeReference } from '$lib/state/pendingReference.svelte';
 import type { GalleryAsset, GalleryPage as GalleryPageResponse } from '$lib/types';
 
 const galleryApiMocks = vi.hoisted(() => ({
@@ -59,6 +61,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 import GalleryPage from './GalleryPage.svelte';
 import { mountComponent, settle } from '../../test-utils/mount';
 import { pickOption } from '../../test-utils/select';
+import { makeContext, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 
 class MockIntersectionObserver {
   static instances: MockIntersectionObserver[] = [];
@@ -265,6 +268,125 @@ describe('GalleryPage regressions', () => {
     (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
 
     expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'img2vid', image_path: '/outputs/nested/asset.png', use_as: 'start', scene: asset.prompt });
+  });
+
+  it('queues Use as -> Reference and opens the Workspace without params, which would replace the list', async () => {
+    const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    takeReference();
+
+    mountPage();
+    await settle();
+
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+    (document.querySelector('[role="menu"] [data-action="reference-reference"]') as HTMLButtonElement).click();
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace');
+    expect(hasPendingReference()).toBe(true);
+    expect(takeReference()).toBe('/outputs/nested/asset.png');
+  });
+
+  it('shows the Reference and Last frame hints from the remembered Workspace', async () => {
+    const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    draft.reset();
+    const context = makeContext({
+      image_model_defaults: { zit: makeImageDefaults({ max_reference_images: 3 }), 'flux-lite': makeImageDefaults() },
+      video_model_defaults: { 'ltx-8': makeVideoDefaults({ hidden_controls: ['end_image_path'] }) },
+    });
+    workspaceMemory.set(context);
+
+    mountPage();
+    await settle();
+
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+    const reference = document.querySelector('[role="menu"] [data-action="reference-reference"]') as HTMLElement;
+    const last = document.querySelector('[role="menu"] [data-action="reference-last-frame"]') as HTMLElement;
+    expect(reference.textContent).toContain('as image 1');
+    expect(last.getAttribute('aria-disabled')).toBe('true');
+    expect(last.textContent).toContain('ltx-8 has no last frame');
+    workspaceMemory.forget();
+  });
+
+  it('clears the start image and the last frame of the draft when their asset is deleted', async () => {
+    const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
+    galleryStore.seed([asset]);
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    draft.reset();
+    draft.setStartImage('image', { path: '/outputs/nested/asset.png' }, null);
+    draft.setLastFrame({ path: '/outputs/nested/asset.png' });
+
+    mountPage();
+    await settle();
+    deleteAssetFromCard(target, asset);
+    await settle();
+
+    expect(draft.state).toMatchObject({ referenceImagePath: null, endImagePath: null, workflow: 'txt2img' });
+    draft.reset();
+  });
+
+  it('clears the Video first frame of the draft when its asset is deleted', async () => {
+    const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
+    galleryStore.seed([asset]);
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    draft.reset();
+    draft.setTab('video');
+    draft.setStartImage('video', { path: '/outputs/nested/asset.png' }, null);
+    expect(draft.state).toMatchObject({ firstFramePath: '/outputs/nested/asset.png', workflow: 'img2vid' });
+
+    mountPage();
+    await settle();
+    deleteAssetFromCard(target, asset);
+    await settle();
+
+    expect(draft.state).toMatchObject({ firstFramePath: null, workflow: 'txt2vid' });
+    draft.reset();
+  });
+
+  it('leaves the first frame and the other images of the draft alone when another asset is deleted', async () => {
+    const used = makeAsset({ id: 'used.png', filename: 'used.png', file_path: '/outputs/used.png' });
+    const other = makeAsset({ id: 'other.png', filename: 'other.png', file_path: '/outputs/other.png' });
+    galleryStore.seed([used, other]);
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [used, other], page: 1, total_pages: 1, total_count: 2 });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    draft.reset();
+    draft.setStartImage('image', { path: '/outputs/used.png' }, null);
+    draft.setTab('video');
+    draft.setStartImage('video', { path: '/outputs/used.png' }, null);
+    draft.setLastFrame({ path: '/outputs/used.png' });
+
+    mountPage();
+    await settle();
+    deleteAssetFromCard(target, other);
+    await settle();
+
+    expect(draft.state).toMatchObject({ referenceImagePath: '/outputs/used.png', firstFramePath: '/outputs/used.png', endImagePath: '/outputs/used.png', workflow: 'img2vid' });
+    draft.reset();
+  });
+
+  it('clears the first frame while the Image tab is open, and the Image tab start image stays', async () => {
+    const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
+    galleryStore.seed([asset]);
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    draft.reset();
+    draft.setTab('video');
+    draft.setStartImage('video', { path: '/outputs/nested/asset.png' }, null);
+    draft.setTab('image');
+
+    mountPage();
+    await settle();
+    deleteAssetFromCard(target, asset);
+    await settle();
+
+    expect(draft.state).toMatchObject({ firstFramePath: null, workflow: 'txt2img' });
+    draft.setTab('video');
+    expect(draft.state.workflow).toBe('txt2vid');
+    draft.reset();
   });
 
   it('sends a video to the Extend Video workflow from its menu, with its model, and leaves the text to the source', async () => {

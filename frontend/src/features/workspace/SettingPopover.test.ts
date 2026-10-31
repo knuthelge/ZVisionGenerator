@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
 import { galleryStore } from '$lib/state/gallery.svelte';
+import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { GalleryAsset, ModelOption, WorkspaceContext } from '$lib/types';
+import { makeContext, makeImageDefaults } from '../../test-utils/workspace';
+import { currentImagesView } from './imagesView';
 import SettingPopover from './SettingPopover.svelte';
 
 const models: ModelOption[] = [
@@ -29,6 +33,7 @@ let app: Record<string, unknown> | null = null;
 beforeEach(() => {
   localStorage.clear();
   draft.reset();
+  heldUploads.useStore(memoryUploadStore());
   // jsdom has no Web Animations API, which the popover's enter transition calls.
   Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
   target = document.createElement('div');
@@ -52,8 +57,8 @@ describe('SettingPopover model list', () => {
     app = flushSync(() => mount(SettingPopover, {
       target,
       props: {
-        key: 'model', context, busy: false, models, quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
-        onImageFileChange: vi.fn(), onModelChange, onUseLatestAsReference: vi.fn(), onclose: vi.fn(),
+        key: 'model', context, get images() { return currentImagesView(context); }, busy: false, models, quantizeOptions: null, lastSeed: null,
+        onModelChange, onclose: vi.fn(),
       },
     }));
   }
@@ -83,8 +88,8 @@ describe('SettingPopover model list', () => {
       app = flushSync(() => mount(SettingPopover, {
         target,
         props: {
-          key: 'model', context, busy: false, models: missing, quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
-          onImageFileChange: vi.fn(), onModelChange: vi.fn(), onUseLatestAsReference: vi.fn(), onclose: vi.fn(),
+          key: 'model', context, get images() { return currentImagesView(context); }, busy: false, models: missing, quantizeOptions: null, lastSeed: null,
+          onModelChange: vi.fn(), onclose: vi.fn(),
         },
       }));
     }
@@ -124,8 +129,8 @@ describe('SettingPopover LoRA list', () => {
     app = flushSync(() => mount(SettingPopover, {
       target,
       props: {
-        key: 'loras', context: ctx, busy: false, models, quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
-        onImageFileChange: vi.fn(), onModelChange: vi.fn(), onUseLatestAsReference: vi.fn(), onclose: vi.fn(),
+        key: 'loras', context: ctx, get images() { return currentImagesView(ctx); }, busy: false, models, quantizeOptions: null, lastSeed: null,
+        onModelChange: vi.fn(), onclose: vi.fn(),
       },
     }));
   }
@@ -151,204 +156,216 @@ describe('SettingPopover LoRA list', () => {
   });
 });
 
-describe('SettingPopover last frame', () => {
-  beforeEach(() => draft.patch({ workflow: 'img2vid', model: 'h3' }));
+// The Images popover: the section's groups for the open tab, read from the draft and the held uploads, written through the draft's setters.
+describe('SettingPopover images', () => {
+  const imageContext = (): WorkspaceContext => makeContext({ image_model_defaults: { zit: makeImageDefaults({ max_reference_images: 4 }) } });
 
-  const videoContext = (hidden: string[]): WorkspaceContext => ({
-    workflow_contract: {
-      values: ['img2vid'],
-      definitions: {
-        img2vid: {
-          mode: 'video',
-          visible_controls: ['reference_image', 'reference_image_path', 'end_image', 'end_image_path', 'end_image_clear'],
-          clear_fields: [],
-        },
-      },
-    },
-    image_model_defaults: {},
-    video_model_defaults: { h3: { hidden_controls: hidden } },
-    defaults: null,
-    loras: [],
-    prompt_sources: [],
-    scheduler_options: [],
-  }) as unknown as WorkspaceContext;
-
-  function open(key: 'reference' | 'endReference', hidden: string[] = [], props: Record<string, unknown> = {}): void {
-    app = flushSync(() => mount(SettingPopover, {
-      target,
-      props: {
-        key, context: videoContext(hidden), busy: false, models: [], quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
-        onImageFileChange: vi.fn(), onModelChange: vi.fn(), onUseLatestAsReference: vi.fn(), onclose: vi.fn(), ...props,
-      },
-    }));
-  }
-
-  const popover = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement;
-
-  it('picks the last frame by typing or pasting a path, and submits no field of its own', () => {
-    open('endReference');
-
-    const input = target.querySelector('#ws-pop-end-image-path') as HTMLInputElement;
-    input.value = '/in/end.png';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-
-    expect(draft.state.endImagePath).toBe('/in/end.png');
-    expect(input.getAttribute('name')).toBeNull();
-    expect(popover().getAttribute('data-key')).toBe('endReference');
-  });
-
-  it('shows the chosen last frame by name and clears it without touching the first frame', () => {
-    draft.patch({ referenceImagePath: '/in/start.png', endImagePath: '/in/end.png' });
-    const onEndImageFileChange = vi.fn();
-    open('endReference', [], { onEndImageFileChange });
-
-    expect(popover().textContent).toContain('end.png');
-    (popover().querySelector('button[aria-label="Clear last frame"]') as HTMLButtonElement).click();
-    flushSync();
-
-    expect(draft.state.endImagePath).toBeNull();
-    expect(draft.state.referenceImagePath).toBe('/in/start.png');
-    expect(onEndImageFileChange).toHaveBeenCalledWith(null);
-  });
-
-  it('offers no Clear while the last frame is empty', () => {
-    open('endReference');
-
-    expect(popover().querySelector('button[aria-label="Clear last frame"]')).toBeNull();
-    expect(popover().textContent).toContain('No last frame');
-  });
-
-  it('hands an uploaded image to the last-frame callback, not the first frame', () => {
-    const onImageFileChange = vi.fn();
-    const onEndImageFileChange = vi.fn();
-    open('endReference', [], { onImageFileChange, onEndImageFileChange });
-
-    const input = popover().querySelector('input[type="file"]') as HTMLInputElement;
-    const file = new File(['x'], 'end.png', { type: 'image/png' });
-    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-
-    expect(onEndImageFileChange).toHaveBeenCalledWith(file);
-    expect(onImageFileChange).not.toHaveBeenCalled();
-  });
-
-  it('names the first-frame popover First frame while the model has a last frame', () => {
-    open('reference');
-
-    expect(popover().getAttribute('aria-label')).toBe('First frame');
-  });
-});
-
-describe('SettingPopover references', () => {
-  const imageContext = (cap: number): WorkspaceContext => ({
-    workflow_contract: {
-      values: ['txt2img'],
-      definitions: { txt2img: { mode: 'image', visible_controls: ['references', 'references_clear'], clear_fields: [] } },
-    },
-    image_model_defaults: { klein: { max_reference_images: cap } },
-    video_model_defaults: {},
-    defaults: null,
-    loras: [],
-    prompt_sources: [],
-    scheduler_options: [],
-  }) as unknown as WorkspaceContext;
-
-  beforeEach(() => draft.patch({ workflow: 'txt2img', model: 'klein' }));
-
-  function open(cap = 4, props: Record<string, unknown> = {}): void {
-    URL.createObjectURL = vi.fn(() => 'blob:ref');
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:img');
     URL.revokeObjectURL = vi.fn();
+    draft.update('model', 'zit');
+  });
+
+  function open(props: Record<string, unknown> = {}, context: WorkspaceContext = imageContext()): void {
     app = flushSync(() => mount(SettingPopover, {
       target,
-      props: {
-        key: 'references', context: imageContext(cap), busy: false, models: [], quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
-        onImageFileChange: vi.fn(), onModelChange: vi.fn(), onUseLatestAsReference: vi.fn(), onclose: vi.fn(), ...props,
-      },
+      props: { key: 'images', context, get images() { return currentImagesView(context); }, busy: false, models: [], quantizeOptions: null, lastSeed: null, onModelChange: vi.fn(), onclose: vi.fn(), ...props },
     }));
   }
 
   const popover = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement;
-  const removeButtons = () => Array.from(popover().querySelectorAll('button[aria-label^="Remove image"]'));
+  const groups = () => Array.from(popover().querySelectorAll('.pop-group-label')).map((el) => el.textContent);
+  const button = (name: string) => popover().querySelector(`button[aria-label="${name}"]`) as HTMLButtonElement | null;
+  const buttonWithText = (text: string) => Array.from(popover().querySelectorAll('button')).find((b) => b.textContent?.trim() === text) as HTMLButtonElement | undefined;
+  const sourceButton = (text: string) => Array.from(popover().querySelectorAll('button')).find((b) => b.textContent?.includes(text)) as HTMLButtonElement | undefined;
+  const videoContext = () => makeContext();
 
-  it('offers no way to add once the list is full', () => {
-    draft.update('referenceImagePaths', ['/in/a.png', '/in/b.png']);
-    open(2);
+  describe('in Image', () => {
+    it('holds Start image, References and no Strength while there is no start image', () => {
+      open();
 
-    expect(popover().querySelector('.pop-list')).toBeNull();
-    expect(popover().querySelector('#pop-ref-add-device')).toBeNull();
+      expect(popover().getAttribute('aria-label')).toBe('Images');
+      expect(groups()).toEqual(['Start image', 'References']);
+      expect(popover().textContent).toContain('No start image yet');
+      expect(popover().querySelector('input[aria-label="Strength"]')).toBeNull();
+      expect(popover().textContent).toContain('Add reference 1');
+    });
+
+    it('puts Strength between the Start image and the References, with its line, once a start image is set', () => {
+      draft.setStartImage('image', { path: '/in/pond-sketch.png' }, imageContext());
+      draft.update('referenceImageStrength', 0.8);
+      open();
+
+      expect(groups()).toEqual(['Start image', 'Strength', 'References']);
+      expect(popover().textContent).toContain('pond-sketch.png');
+      expect(popover().querySelector('input[aria-label="Strength"]')).not.toBeNull();
+    });
+
+    it('lists each reference as Reference N over its name, with a way to add the next', () => {
+      draft.patch({ referenceImagePaths: ['/in/jacket.png', '/in/portrait.png'] });
+      open();
+
+      expect(Array.from(popover().querySelectorAll('.ref-num')).map((el) => el.textContent)).toEqual(['Reference 1', 'Reference 2']);
+      expect(popover().querySelector('#pop-ref-add-device')).not.toBeNull();
+    });
+
+    it('sets the start image from the latest output and keeps the popover open', () => {
+      galleryStore.seed([{ id: 'latest', file_path: '/out/latest.png', media_type: 'image' } as GalleryAsset]);
+      const onclose = vi.fn();
+      open({ onclose });
+
+      sourceButton('latest output')!.click();
+      flushSync();
+
+      expect(draft.state).toMatchObject({ workflow: 'img2img', referenceImagePath: '/out/latest.png' });
+      expect(groups()).toContain('Strength');
+      expect(onclose).not.toHaveBeenCalled();
+    });
+
+    it('offers the clear button only while the start image holds an image', () => {
+      open();
+      expect(button('Clear start image')).toBeNull();
+
+      draft.setStartImage('image', { file: new File(['x'], 'mine.png', { type: 'image/png' }) }, imageContext());
+      flushSync();
+      expect(button('Clear start image')).not.toBeNull();
+
+      draft.setStartImage('image', null, imageContext());
+      flushSync();
+      expect(button('Clear start image')).toBeNull();
+    });
+
+    it('clears the start image and keeps the popover open', () => {
+      draft.setStartImage('image', { path: '/in/start.png' }, imageContext());
+      const onclose = vi.fn();
+      open({ onclose });
+
+      button('Clear start image')!.click();
+      flushSync();
+
+      expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: null });
+      expect(groups()).toEqual(['Start image', 'References']);
+      expect(onclose).not.toHaveBeenCalled();
+    });
+
+    it('a missing start image says to choose it again, and its sources stay in reach', () => {
+      draft.setStartImage('image', { path: '/in/gone.png' }, imageContext());
+      draft.patch({ missingReferencePaths: ['/in/gone.png'] });
+      open();
+
+      expect(popover().textContent).toContain('moved or been deleted');
+      expect(sourceButton('Choose from this device')).toBeDefined();
+      expect(sourceButton('Browse the server')).toBeDefined();
+    });
+
+    it('a missing reference offers Replace, and the replacement keeps its number', () => {
+      galleryStore.seed([{ id: 'latest', file_path: '/out/latest.png', media_type: 'image' } as GalleryAsset]);
+      draft.patch({ referenceImagePaths: ['/in/a.png', '/in/gone.png'], missingReferencePaths: ['/in/gone.png'] });
+      open();
+
+      expect(popover().textContent).toContain('moved or been deleted');
+      expect(button('Replace reference 1')).toBeNull();
+      button('Replace reference 2')!.click();
+      flushSync();
+      const add = popover().querySelector('.add') as HTMLElement;
+      expect(add.textContent).toContain('Replace reference 2');
+      (Array.from(add.querySelectorAll('button')).find((b) => b.textContent?.includes('latest output')) as HTMLButtonElement).click();
+      flushSync();
+
+      expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '/out/latest.png']);
+      expect(draft.state.missingReferencePaths).toEqual([]);
+    });
+
+    it('a lost reference upload says to choose it again', async () => {
+      draft.patch({ referenceImagePaths: [''] });
+      await heldUploads.restore();
+      open();
+
+      expect(popover().textContent).toContain('Choose this image again.');
+    });
+
+    it('removing a reference writes the rows and the held uploads together', () => {
+      const upload = new File(['x'], 'mine.png', { type: 'image/png' });
+      draft.update('referenceImagePaths', ['/in/a.png', '']);
+      heldUploads.setReferences([null, upload]);
+      const onclose = vi.fn();
+      open({ onclose });
+
+      button('Remove reference 1')!.click();
+      flushSync();
+
+      expect(draft.state.referenceImagePaths).toEqual(['']);
+      expect(heldUploads.references).toEqual([upload]);
+      expect(onclose).not.toHaveBeenCalled();
+    });
+
+    it('is not offered the References group on a model without references', () => {
+      open({}, makeContext());
+
+      expect(groups()).toEqual(['Start image']);
+    });
+
+    it('closes itself when the model can use no image', () => {
+      const none = makeContext({ image_model_defaults: { zit: makeImageDefaults({ supports_img2img: false, max_reference_images: 0 }) } });
+      const onclose = vi.fn();
+      open({ onclose }, none);
+
+      expect(onclose).toHaveBeenCalled();
+    });
   });
 
-  it('marks a row whose image is gone and keeps its number and its remove button', () => {
-    draft.patch({ referenceImagePaths: ['/in/a.png', '/in/gone.png', ''], missingReferencePaths: ['/in/gone.png'] });
+  describe('in Video', () => {
+    beforeEach(() => draft.patch({ workflow: 'txt2vid', model: 'ltx-8' }));
+
+    it('holds First frame and Last frame, flags a last frame kept without a first frame, and has neither Strength nor References', () => {
+      draft.setLastFrame({ path: '/in/end.png' });
+      open({}, videoContext());
+
+      expect(groups()).toEqual(['First frame', 'Last frame']);
+      expect(draft.state.workflow).toBe('txt2vid');
+      expect(button('Clear first frame')).toBeNull();
+      expect(button('Clear last frame')).not.toBeNull();
+      expect(popover().querySelector('[data-unused="true"]')).not.toBeNull();
+      expect(popover().querySelector('input[aria-label="Strength"]')).toBeNull();
+    });
+
+    it('offers no clear button on an empty Last frame', () => {
+      open({}, videoContext());
+
+      expect(groups()).toEqual(['First frame', 'Last frame']);
+      expect(button('Clear first frame')).toBeNull();
+      expect(button('Clear last frame')).toBeNull();
+    });
+
+    it('clears the first frame, leaving the Image tab\'s start image alone', () => {
+      const video = videoContext();
+      draft.patch({ referenceImagePath: '/in/start.png' });
+      draft.setStartImage('video', { path: '/in/first.png' }, video);
+      open({}, video);
+      expect(draft.state.workflow).toBe('img2vid');
+
+      button('Clear first frame')!.click();
+      flushSync();
+
+      expect(draft.state).toMatchObject({ workflow: 'txt2vid', firstFramePath: null, referenceImagePath: '/in/start.png' });
+    });
+
+    it('clears the last frame without touching the first', () => {
+      const video = videoContext();
+      draft.setStartImage('video', { path: '/in/first.png' }, video);
+      draft.setLastFrame({ path: '/in/end.png' });
+      open({}, video);
+
+      button('Clear last frame')!.click();
+      flushSync();
+
+      expect(draft.state).toMatchObject({ workflow: 'img2vid', firstFramePath: '/in/first.png', endImagePath: null });
+    });
+  });
+
+  it('is titled Images, and has no Reset: Strength resets from its own row', () => {
     open();
 
-    const rows = Array.from(popover().querySelectorAll('.pop-refrow'));
-    expect(rows).toHaveLength(3);
-    // The flagged path and the upload that lost its file are both marked; the readable path is not.
-    expect(rows.map((row) => row.querySelector('.pop-refrow-error') !== null)).toEqual([false, true, true]);
-    expect(removeButtons()).toHaveLength(3);
-  });
-
-  it('replaces a missing row in place with a device image, keeping its number, even when the list is full', () => {
-    draft.patch({ referenceImagePaths: ['/in/a.png', '/in/gone.png'], missingReferencePaths: ['/in/gone.png'] });
-    const onReferenceFilesChange = vi.fn();
-    open(2, { referenceFiles: [null, null], onReferenceFilesChange });
-    expect(popover().querySelector('#pop-ref-1-replace')).toBeNull();
-
-    (popover().querySelector('#pop-ref-2-replace') as HTMLButtonElement).click();
-    flushSync();
-    const file = new File(['x'], 'new.png', { type: 'image/png' });
-    const input = popover().querySelector('input[type="file"]') as HTMLInputElement;
-    expect(input.multiple).toBe(false);
-    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
-
-    expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '']);
-    expect(draft.state.missingReferencePaths).toEqual([]);
-    expect(onReferenceFilesChange).toHaveBeenCalledWith([null, file]);
-  });
-
-  it('replaces a lost upload with the latest output', () => {
-    galleryStore.seed([{ id: 'latest', file_path: '/out/latest.png', media_type: 'image' } as GalleryAsset]);
-    draft.patch({ referenceImagePaths: ['/in/a.png', ''] });
-    open(4, { referenceFiles: [null, null] });
-
-    (popover().querySelector('#pop-ref-2-replace') as HTMLButtonElement).click();
-    flushSync();
-    const latest = Array.from(popover().querySelectorAll('.pop-item')).find((item) => item.textContent?.includes('latest output')) as HTMLButtonElement;
-    latest.click();
-    flushSync();
-
-    expect(draft.state.referenceImagePaths).toEqual(['/in/a.png', '/out/latest.png']);
-  });
-
-  it('removes a row and hands the page the uploads that are left', () => {
-    const upload = new File(['x'], 'mine.png', { type: 'image/png' });
-    draft.update('referenceImagePaths', ['/in/a.png', '']);
-    const onReferenceFilesChange = vi.fn();
-    open(4, { referenceFiles: [null, upload], onReferenceFilesChange });
-
-    (removeButtons()[0] as HTMLButtonElement).click();
-    flushSync();
-
-    expect(draft.state.referenceImagePaths).toEqual(['']);
-    expect(onReferenceFilesChange).toHaveBeenCalledWith([upload]);
-  });
-
-  it('adds every file chosen from the device, up to the cap', () => {
-    draft.update('referenceImagePaths', ['/in/a.png']);
-    const onReferenceFilesChange = vi.fn();
-    open(3, { referenceFiles: [null], onReferenceFilesChange });
-    const files = [new File(['1'], 'one.png', { type: 'image/png' }), new File(['2'], 'two.png', { type: 'image/png' }), new File(['3'], 'three.png', { type: 'image/png' })];
-
-    const input = popover().querySelector('input[type="file"]') as HTMLInputElement;
-    expect(input.multiple).toBe(true);
-    Object.defineProperty(input, 'files', { configurable: true, value: files });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
-
-    expect(draft.state.referenceImagePaths).toHaveLength(3);
-    expect(onReferenceFilesChange).toHaveBeenCalledWith([null, files[0], files[1]]);
+    expect(buttonWithText('Reset')).toBeUndefined();
   });
 });

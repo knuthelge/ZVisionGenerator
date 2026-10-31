@@ -26,7 +26,7 @@ Press **Download**. The model becomes your default image model, and its progress
 
 ## 3. Write a prompt
 
-Check that **Text to Image** is selected in the top bar. Type what you want to see in the **Prompt** box under *Compose*:
+Check that **Image** is selected in the top bar. Type what you want to see in the **Prompt** box under *Compose*:
 
 ```text
 A red fox sitting in fresh snow, early morning light, close-up

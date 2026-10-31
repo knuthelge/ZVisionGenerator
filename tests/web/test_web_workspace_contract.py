@@ -157,17 +157,39 @@ def test_a_model_without_a_family_description_keeps_the_permissive_payload(monke
 # ---------------------------------------------------------------------------
 
 
-def test_only_image_to_video_offers_the_last_frame_controls():
+_START_IMAGE_CONTROLS = {"reference_image", "reference_image_path", "reference_image_clear"}
+
+
+def test_both_video_workflows_offer_the_last_frame_controls():
     offering = [name for name in CANONICAL_WORKFLOW_VALUES if set(END_FRAME_CONTROLS) & set(WORKFLOW_DEFINITIONS[name]["visible_controls"])]
 
-    assert offering == ["img2vid"]
-    assert set(END_FRAME_CONTROLS) <= set(WORKFLOW_DEFINITIONS["img2vid"]["visible_controls"])
+    assert offering == ["txt2vid", "img2vid"]
+    for name in offering:
+        assert set(END_FRAME_CONTROLS) <= set(WORKFLOW_DEFINITIONS[name]["visible_controls"])
 
 
-def test_leaving_image_to_video_clears_the_last_frame():
-    clearing = {name for name in CANONICAL_WORKFLOW_VALUES if "end_image_path" in WORKFLOW_DEFINITIONS[name]["clear_fields"]}
+def test_no_workflow_clears_an_image_or_its_strength():
+    clearing = {name for name in CANONICAL_WORKFLOW_VALUES if {"image_path", "end_image_path", "image_strength"} & set(WORKFLOW_DEFINITIONS[name]["clear_fields"])}
 
-    assert clearing == {"txt2img", "img2img", "txt2vid", "extend"}
+    assert clearing == set()
+
+
+@pytest.mark.parametrize("workflow", ["txt2img", "img2img", "txt2vid", "img2vid"])
+def test_every_image_and_video_workflow_offers_the_start_image_controls(workflow):
+    assert _START_IMAGE_CONTROLS <= set(WORKFLOW_DEFINITIONS[workflow]["visible_controls"])
+
+
+def test_only_image_to_image_offers_the_image_strength():
+    offering = [name for name in CANONICAL_WORKFLOW_VALUES if "image_strength" in WORKFLOW_DEFINITIONS[name]["visible_controls"]]
+
+    assert offering == ["img2img"]
+
+
+@pytest.mark.parametrize("workflows", [("txt2img", "img2img"), ("txt2vid", "img2vid")])
+def test_the_two_workflows_of_a_tab_clear_the_same_fields(workflows):
+    first, second = (WORKFLOW_DEFINITIONS[name]["clear_fields"] for name in workflows)
+
+    assert sorted(first) == sorted(second)
 
 
 @pytest.mark.parametrize("workflow", ["txt2img", "img2img"])

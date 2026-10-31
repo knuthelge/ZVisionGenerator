@@ -1707,6 +1707,80 @@ def test_submit_video_job_refuses_a_last_frame_without_a_first_frame(monkeypatch
         web_server._submit_video_job({"workflow": "txt2vid", "model": "ltx-8", "prompt": "a lake", "end_image_path": str(last)}, web_config)
 
 
+@pytest.mark.parametrize(
+    ("posted", "with_image", "recorded"),
+    [("txt2img", True, "img2img"), ("img2img", True, "img2img"), ("txt2img", False, "txt2img"), (None, True, "img2img"), (None, False, "txt2img")],
+)
+def test_an_image_job_is_recorded_from_its_start_image_whatever_workflow_was_posted(monkeypatch, tmp_path, posted, with_image, recorded):
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=make_resolved_image_defaults(), submitted=submitted)
+    form = {"model": "zit", "prompt": "hello", "steps": "9"}
+    if posted is not None:
+        form["workflow"] = posted
+    if with_image:
+        start = tmp_path / "start.png"
+        write_png(start)
+        form["image_path"] = str(start)
+
+    web_server._submit_image_job(form, web_config)
+
+    context = submitted[0]["context"]
+    assert context["workflow"] == recorded
+    assert context["job_type"] == ("Image to Image" if with_image else "Text to Image")
+
+
+def test_image_to_image_without_a_start_image_is_still_refused(monkeypatch, tmp_path):
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=make_resolved_image_defaults(), submitted=submitted)
+
+    with pytest.raises(ValueError):
+        web_server._submit_image_job({"model": "zit", "prompt": "hello", "workflow": "img2img"}, web_config)
+
+    assert submitted == []
+
+
+@pytest.mark.parametrize(
+    ("posted", "with_image", "recorded"),
+    [("txt2vid", True, "img2vid"), ("img2vid", True, "img2vid"), ("txt2vid", False, "txt2vid"), (None, True, "img2vid"), (None, False, "txt2vid")],
+)
+def test_a_video_job_is_recorded_from_its_first_frame_whatever_workflow_was_posted(monkeypatch, tmp_path, posted, with_image, recorded):
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path / "out")
+    _h3_like_config(web_config)
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
+    form = {"model": "ltx-8", "prompt": "a lake"}
+    if posted is not None:
+        form["workflow"] = posted
+    if with_image:
+        first = tmp_path / "first.png"
+        write_png(first)
+        form["image_path"] = str(first)
+
+    web_server._submit_video_job(form, web_config)
+
+    context = submitted[0]["context"]
+    assert context["workflow"] == recorded
+    assert context["job_type"] == ("Image to Video" if with_image else "Text to Video")
+
+
+def test_image_to_video_without_a_first_frame_is_still_refused(monkeypatch, tmp_path):
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    _h3_like_config(web_config)
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
+
+    with pytest.raises(ValueError):
+        web_server._submit_video_job({"workflow": "img2vid", "model": "ltx-8", "prompt": "a lake"}, web_config)
+
+    assert submitted == []
+
+
 def test_submit_image_job_with_a_custom_size_carries_that_size(monkeypatch, tmp_path):
     """A custom size sets the job's size and label, not the ratio preset the form still holds."""
     web_config = make_web_config()

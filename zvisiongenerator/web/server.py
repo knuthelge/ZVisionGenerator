@@ -160,7 +160,6 @@ from zvisiongenerator.web.workspace_contract import (
     WORKFLOW_DEFINITIONS,
     build_workflow_contract,
     canonicalize_workflow,
-    default_workflow_for_mode,
 )
 
 
@@ -783,8 +782,8 @@ def _job_response(job_id: str, context: dict[str, Any], supported_controls: tupl
 def _public_job_context(
     form: Any,
     *,
-    mode: str,
     job_type: str,
+    workflow: str,
     model: str,
     model_label: str,
     prompt: str,
@@ -797,12 +796,11 @@ def _public_job_context(
 ) -> dict[str, Any]:
     """Build the public context a job carries from submission on (shown in snapshots and the queue).
 
+    ``workflow`` is the one the job runs, decided from the inputs it received rather than from what the form posted.
     ``width`` and ``height`` are the size the job renders at, which gives its preview the output's shape.
     ``uploads`` maps each path setting (``image_path``, ``end_image_path``) to the file the job uses for it, and
     ``reference_path`` to the list of every reference file in order.
     """
-    requested_workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback=_default_workflow_for_mode(mode))
-    workflow = _canonicalize_workflow(job_type, fallback=requested_workflow)
     return {
         "workflow": workflow,
         "job_type": job_type,
@@ -1091,10 +1089,6 @@ def _workflow_from_form(value: str | None, *, fallback: str) -> str:
     return workflow
 
 
-def _default_workflow_for_mode(mode: str) -> str:
-    return default_workflow_for_mode(mode)
-
-
 def _build_workflow_contract() -> dict[str, Any]:
     return build_workflow_contract(video_audio=supports_video_audio(), video_upscale_review=supports_video_upscale_review(), video_extend=supports_video_extend())
 
@@ -1259,8 +1253,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     )
     context = _public_job_context(
         form,
-        mode="image",
         job_type="Image to Image" if args.image_path else "Text to Image",
+        workflow="img2img" if args.image_path else "txt2img",
         model=model_name,
         model_label=model_display_name(app_config, model_name),
         prompt=prompt,
@@ -1418,8 +1412,8 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         job_type, meta = "Image to Video" if image_path else "Text to Video", f"{args.width}x{args.height} · {args.num_frames} frames · {args.steps} steps"
     context = _public_job_context(
         form,
-        mode="video",
         job_type=job_type,
+        workflow="extend" if source is not None else ("img2vid" if image_path else "txt2vid"),
         model=model_name,
         model_label=model_display_name(app_config, model_name),
         prompt=prompt or scene or "",

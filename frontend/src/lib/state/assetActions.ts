@@ -1,9 +1,17 @@
 import { parseQuery } from '$lib/prefillParams';
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
-import type { AssetUpscaleFactor, GalleryAsset, JobWorkflow, PrefillParams, UpscaleFactor, UpscaleMethod, Workflow } from '$lib/types';
+import { imageSupport } from '$lib/state/imageSlots';
+import { workflowMode } from '$lib/state/promptEnhance';
+import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
 
-/** Which generation a start image feeds: an image, a video's first frame, or a video's last frame. */
-export type ReferenceTarget = 'image' | 'video' | 'last';
+/** Where an image goes: an image's start image, one more reference, a video's first frame, or a video's last frame. */
+export type ReferenceTarget = 'image' | 'reference' | 'video' | 'last';
+
+/** The targets that fill a single slot of a tab; a reference joins the list instead. */
+export type SlotTarget = Exclude<ReferenceTarget, 'reference'>;
+
+/** What the Use as menu shows for each target: whether it can be picked, and a hint (or the reason it can't). */
+export type UseAsState = Partial<Record<ReferenceTarget, { disabled: boolean; hint?: string }>>;
 
 /** Callbacks for the actions every asset surface offers; an absent callback hides its action. */
 export interface AssetActionHandlers {
@@ -60,7 +68,7 @@ export interface DeleteOptions {
   confirm?: boolean;
 }
 
-const REFERENCE_WORKFLOWS: Record<ReferenceTarget, Workflow> = {
+const REFERENCE_WORKFLOWS: Record<SlotTarget, Workflow> = {
   image: 'img2img',
   video: 'img2vid',
   last: 'img2vid',
@@ -97,12 +105,49 @@ export function canUseAsReference(asset: GalleryAsset): boolean {
  * `use_as` names the slot the asset fills (`start` or `last`). The Workspace reads it to drop only that slot's held upload,
  * which tells a Use as from a Reuse when both arrive as address params; it is not a draft field.
  */
-export function referenceParams(asset: GalleryAsset, target: ReferenceTarget): Record<string, string> {
+export function referenceParams(asset: GalleryAsset, target: SlotTarget): Record<string, string> {
   const path = asset.file_path ?? '';
   if (target === 'last') return { workflow: REFERENCE_WORKFLOWS[target], end_image_path: path, use_as: 'last' };
   const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: path, use_as: 'start' };
   if (asset.prompt) params[target === 'video' ? 'scene' : 'prompt'] = asset.prompt;
   return params;
+}
+
+function modelLabel(options: readonly { id: string; label: string }[], id: string): string {
+  return options.find((option) => option.id === id)?.label ?? id;
+}
+
+/**
+ * Return what the Use as menu shows for each target, read from the model each tab opens on: the draft's model for the tab
+ * it is in, else the model that mode last ran, else the context's current one. Without a context nothing is known, so the
+ * menu shows no hints and disables nothing.
+ */
+export function useAsState(ctx: WorkspaceContext | null, state: DraftState): UseAsState {
+  if (ctx === null) return {};
+  const ownMode = workflowMode(state.workflow);
+  const imageModel = (ownMode === 'image' ? state.model : state.lastImageModel) || (ctx.current_image_model ?? '');
+  const videoModel = (ownMode === 'video' ? state.model : state.lastVideoModel) || (ctx.current_video_model ?? '');
+  const imageName = modelLabel(ctx.image_models, imageModel);
+  const videoName = modelLabel(ctx.video_models, videoModel);
+  const imageSupports = imageSupport(ctx, imageModel, 'image');
+  const videoSupports = imageSupport(ctx, videoModel, 'video');
+  const result: UseAsState = {};
+
+  result.image = imageSupports.start
+    ? { disabled: false }
+    : { disabled: true, hint: `${imageName} can't use a start image` };
+
+  const max = imageSupports.references;
+  const used = state.referenceImagePaths.length;
+  if (max === 0) result.reference = { disabled: true, hint: `${imageName} takes none` };
+  else if (used >= max) result.reference = { disabled: true, hint: `all ${max} in use` };
+  else result.reference = { disabled: false, hint: `as image ${used + 1}` };
+
+  result.video = videoSupports.start ? { disabled: false } : { disabled: true, hint: `${videoName} can't start from an image` };
+  if (!videoSupports.start) result.last = { disabled: true, hint: `${videoName} can't start from an image` };
+  else if (!videoSupports.last) result.last = { disabled: true, hint: `${videoName} has no last frame` };
+  else result.last = { disabled: false };
+  return result;
 }
 
 /** Return whether a video can be extended right now. */

@@ -32,7 +32,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 |---|---|---|
 | **Details** | Shows the settings the file was made with | ++i++ |
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
-| **Use as** | Opens an image as the start image of Image to Image, or the first or last frame of Image to Video, with its prompt | ++e++ |
+| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video | ++e++ |
 | **Extend** | Opens a video in Extend Video | ++e++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× (Windows and Linux) | ++x++ then ++2++ or ++4++ |
 | **Download** | Saves the file to this device | ++d++ |
@@ -56,11 +56,14 @@ When the prompt was enhanced, Details shows how, as one line such as *Fast · Ci
 
 ### Use as
 
-**Use as** opens an image as an input, together with its prompt:
+**Use as** opens an image in the **Images** section of the Workspace, in the slot you choose:
 
-- **Start image** opens it as the start image of Image to Image and puts the prompt in the Prompt box.
-- **First frame** opens it as the first frame of Image to Video and puts the prompt in Scene, since it describes the first frame, and leaves Action for what happens.
-- **Last frame** makes it the last frame of an image-to-video clip.
+- **Start image** opens **Image** with it as the start image and puts the prompt in the Prompt box. The text of **Video** stays as it was.
+- **Reference** adds it to **Image** as the next reference, and confirms with *Added as image 2*. The prompt and everything else stay as they are. The menu says which number it will get (*as image 2*), and the item is greyed, with the reason (*takes none*, *all 4 in use*), when the image model that **Image** opens on takes no references or has taken as many as it can.
+- **First frame** opens **Video** with it as the first frame and puts the prompt in Scene, since it describes the first frame, and leaves Action empty for what happens. The prompt of **Image** stays as it was.
+- **Last frame** opens **Video** with it as the last frame. The clip uses it once there is a first frame.
+
+A target the model it opens on can't use is greyed, with the reason beside it, such as *can't use a start image* or *has no last frame*. The arrow keys still stop on a greyed item, so you can read why; ++enter++ on it does nothing.
 
 ### Upscale a video
 

@@ -47,13 +47,26 @@ The preview is the screen:
 - **Tap** the preview to open the viewer. Pinch or double-tap to zoom.
 - **Press and hold** any image, in the preview, the Gallery strip, the Gallery or the viewer, for its menu.
 
-Under the preview, a strip shows one chip per setting with its value. Tap a chip to change that setting, or **All** for every setting. The first chip is the [preset](workspace.md#presets). With MiniMax H3, Image to Video has a **Last** chip beside **First**.
+Under the preview, a strip shows one chip per setting with its value. Tap a chip to change that setting, or **All** for every setting. The first chip is the [preset](workspace.md#presets). The **Images** chip holds the images the run uses: see [Images on a phone](#images-on-a-phone).
 
 The prompt sits at the bottom beside **Generate**. Tap it to edit, with the same tabs, enhancer and prompt-file controls as on a computer. Press and hold **Generate**, or tap the arrow beside it, to run with a new seed.
 
 While a job runs, a bar over the preview shows its progress with **Pause**. **⋯** on the bar opens the job's details, with **Skip**, **Repeat** and **Cancel**.
 
 The menu at the top left opens the other pages. Menus, dialogs and sheets close when you pull them down, tap outside them or tap ✕.
+
+### Images on a phone
+
+One **Images** chip in the strip stands for every image the run uses. Its value says what **Generate** will use, such as *pond.png · 2 references* in **Image** or *dawn.png → dusk.png* in **Video**, or *None*. It is not shown on a model that can use no image, or in **Extend Video**.
+
+Tap it to open one popover with the same groups as the Settings pane on a computer:
+
+- **In Image:** *Start image* (the thumbnail and name, × to remove it while one is set, **Choose from this device**, **Browse the server** and **Use the latest output**), then **Strength** while a start image is set, then *References*, each with its number, × to remove it and, when its image is gone, **Replace**.
+- **In Video:** *First frame*, then *Last frame*, each picked the same ways as a start image.
+
+A missing image is marked in red in its group, and the chip shows a warning mark.
+
+**All** has the same **Images** section as a computer, third after **Size** and **Sampling**.
 
 ### The viewer on a phone
 

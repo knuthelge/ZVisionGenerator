@@ -188,7 +188,7 @@ describe('small formatters', () => {
 
 describe('details', () => {
   it('leads a tool with what it does and a style with its description, and says which workflow a tool needs', () => {
-    expect(curatedDetail(entry({ section: 'tool', what_it_does: 'Shatters the shot', workflow: 'img2vid' }), 'LTX-2.3')).toMatchObject({ lead: 'Shatters the shot', tool: true, worksWith: 'Image to Video' });
+    expect(curatedDetail(entry({ section: 'tool', what_it_does: 'Shatters the shot', workflow: 'img2vid' }), 'LTX-2.3')).toMatchObject({ lead: 'Shatters the shot', tool: true, worksWith: 'Video, with a first frame' });
     expect(curatedDetail(entry({ section: 'tool', what_it_does: 'Enhances detail', workflow: null }), 'Z-Image')).toMatchObject({ worksWith: 'Every workflow of Z-Image' });
     expect(curatedDetail(entry(), 'Z-Image')).toMatchObject({ lead: 'A soft look', tool: false, worksWith: null, weight: 0.8, downloads: 1529, licence: 'Apache 2.0', trigger: 'sty1e, soft' });
   });

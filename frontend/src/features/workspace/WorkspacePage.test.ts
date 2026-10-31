@@ -1,6 +1,5 @@
 // @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
 import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
-import { createClassComponent } from 'svelte/legacy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
@@ -8,22 +7,25 @@ import { lastSaveTarget, recentFiles, rememberRecent } from '$lib/state/promptFi
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
 import { galleryStore } from '$lib/state/gallery.svelte';
+import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { mascotHome } from '$lib/state/mascotHome.svelte';
 import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
+import { memoryUploadStore, type UploadStore } from '$lib/state/uploadStore';
 import { toasts } from '$lib/state/toasts.svelte';
 import type { DownloadItem, EnhanceFrame, JobSnapshot, PromptEnhancerContract, RecentPrompt, WorkspaceContext, GalleryAsset } from '$lib/types';
 import { workspaceMemory } from '$lib/state/pageMemory';
 
 import WorkspacePage from './WorkspacePage.svelte';
 import ControlsSidebar from './ControlsSidebar.svelte';
+import { currentImagesView } from './imagesView';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
 import { optionLabels, optionValues, pickOption } from '../../test-utils/select';
-import { jobSnap, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, withEnhancer, withVideoEnhancer } from '../../test-utils/workspace';
-import { answerConfirm, choosePrompts, createHost, expectRenderedLabelsToResolveControls, fakeDebounceTimers, field, mockClipboard, mountWorkspacePage, openEnhanceRun, pressKey, resetWorkspaceTest, settle, submitForm, type, waitDebounce } from '../../test-utils/workspaceHarness';
+import { jobSnap, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer, withVideoEnhancer } from '../../test-utils/workspace';
+import { addFiles, answerConfirm, choosePrompts, chooseSource, createHost, expectRenderedLabelsToResolveControls, fakeDebounceTimers, field, mockClipboard, mountWorkspacePage, openEnhanceRun, pressKey, resetWorkspaceTest, settle, submitForm, type, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, promptFileApiMocks, recentPromptsApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
@@ -964,6 +966,23 @@ describe('WorkspacePage', () => {
       await settle();
 
       expect(draft.state).toMatchObject({ scene: 'A night tram.', prompt: 'She turns to the window.' });
+    });
+
+    it('picking a recent prompt fills only the current tab', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ mode: 'video', scene: 'A night tram.', prompt: 'She turns to the window.' })] });
+      draft.patch({ prompt: 'my image prompt' });
+      draft.setTab('video');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      await openRecents();
+
+      rows()[0].click();
+      await settle();
+      expect(draft.state).toMatchObject({ scene: 'A night tram.', prompt: 'She turns to the window.' });
+
+      draft.setTab('image');
+      await settle();
+      expect(draft.state).toMatchObject({ prompt: 'my image prompt', scene: '' });
+      expect(field('ws-prompt').value).toBe('my image prompt');
     });
 
     it('turns the JSON box on and fills it when a JSON caption is picked on a model that takes one', async () => {
@@ -1959,13 +1978,13 @@ describe('WorkspacePage', () => {
     draft.update('workflow', 'txt2vid');
     draft.update('model', 'ltx-8');
     draft.hydrateFromContext(context, 'ltx-8');
+    await heldUploads.restore();
     app = flushSync(() => mount(ControlsSidebar, {
       target,
       props: {
         context,
+        get images() { return currentImagesView(context); },
         busy: false,
-        imageFile: null,
-        onImageFileChange: vi.fn(),
       },
     }));
     await settle();
@@ -2051,13 +2070,13 @@ describe('WorkspacePage', () => {
     draft.update('workflow', 'txt2vid');
     draft.update('model', 'ltx-8');
     draft.hydrateFromContext(context, 'ltx-8');
+    await heldUploads.restore();
     app = flushSync(() => mount(ControlsSidebar, {
       target,
       props: {
         context,
+        get images() { return currentImagesView(context); },
         busy: false,
-        imageFile: null,
-        onImageFileChange: vi.fn(),
       },
     }));
     await settle();
@@ -2067,15 +2086,14 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('input[name="audio"]')).not.toBeNull();
     expect(target.querySelector('input[name="low_memory"]')).not.toBeNull();
     expect(target.querySelector('select[name="quantize"]')).toBeNull();
-    expect(target.querySelector('#ws-image-file')).toBeNull();
-    expect(target.querySelector('input[name="image_path"]')).toBeNull();
+    // Both video workflows offer the first frame: a video starts from text or from an image.
+    expect(target.querySelector('#ws-image-file')).not.toBeNull();
 
     draft.update('workflow', 'img2img');
     draft.update('model', 'flux-lite');
     await settle();
 
     expect(target.querySelector('#ws-image-file')).not.toBeNull();
-    expect(target.querySelector('input[name="image_path"]')).not.toBeNull();
     expect(target.querySelector('input[name="guidance"]')).not.toBeNull();
     expect(target.querySelector('#ws-negative-prompt')).toBeNull();
     expect(target.querySelector('input[name="audio"]')).toBeNull();
@@ -2121,7 +2139,7 @@ describe('WorkspacePage', () => {
     await mountWorkspace(context);
 
     expect(target.querySelector('#ws-image-file')).toBeNull();
-    expect(target.querySelector('input[name="image_path"]')).toBeNull();
+    expect(target.querySelector('[data-section="images"]')).toBeNull();
     expect(target.querySelector('#ws-upscale-enabled')).toBeNull();
 
     const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement | null;
@@ -2130,7 +2148,6 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(target.querySelector('#ws-image-file')).not.toBeNull();
-    expect(target.querySelector('input[name="image_path"]')).not.toBeNull();
     expect(target.querySelector('#ws-upscale-enabled')).not.toBeNull();
   });
 
@@ -2682,52 +2699,13 @@ describe('WorkspacePage', () => {
     browseApiMocks.listDirectory.mockResolvedValue(listingWith('/pictures/cat.png'));
     await mountWorkspace(makeContext());
 
-    (target.querySelector('#ws-image-browse') as HTMLButtonElement).click();
-    await settle();
+    await chooseSource(target, 'start');
     expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('reference_image', '', expect.anything());
     chooseInBrowser('cat.png');
     await settle();
 
     expect(draft.state.referenceImagePath).toBe('/pictures/cat.png');
-    expect((target.querySelector('#ws-image-path') as HTMLInputElement).value).toBe('/pictures/cat.png');
-  });
-
-  it('does not submit stale reference image fields after switching to a non-reference workflow', async () => {
-    draft.update('workflow', 'img2img');
-    draft.update('referenceImagePath', '/tmp/stale-reference.png');
-
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    const fileInput = target.querySelector('#ws-image-file') as HTMLInputElement | null;
-    expect(fileInput).not.toBeNull();
-
-    const imageFile = new File(['fake-image'], 'reference.png', { type: 'image/png' });
-    Object.defineProperty(fileInput!, 'files', {
-      configurable: true,
-      value: [imageFile],
-    });
-    fileInput!.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-
-    draft.update('workflow', 'txt2img');
-    await settle();
-
-    expect(target.querySelector('#ws-image-file')).toBeNull();
-    expect(target.querySelector('input[name="image_path"]')).toBeNull();
-
-    const form = target.querySelector('form');
-    expect(form).not.toBeNull();
-    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
-
-    expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
-    const [submittedFormData] = workspaceApiMocks.submitGenerate.mock.calls[0] ?? [];
-    expect(submittedFormData).toBeInstanceOf(FormData);
-    expect(submittedFormData.get('workflow')).toBe('txt2img');
-    expect(submittedFormData.get('mode')).toBe('image');
-    expect(submittedFormData.has('image_file')).toBe(false);
-    expect(submittedFormData.has('image_path')).toBe(false);
+    expect(target.querySelector('[role="group"][aria-label="Image: cat.png"]')).not.toBeNull();
   });
 
   it('leaves busy mode when a job started in the current session is cancelled', async () => {
@@ -3270,24 +3248,20 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     draft.update('workflow', 'img2img');
     draft.hydrateFromContext(context, 'zit');
+    await heldUploads.restore();
 
     const firstFile = new File(['first-image'], 'first.png', { type: 'image/png' });
     const secondFile = new File(['second-image'], 'second.png', { type: 'image/png' });
-    const legacyApp = createClassComponent({
-      component: ControlsSidebar,
-      target,
-      props: { context, busy: false, imageFile: firstFile, onImageFileChange: vi.fn() },
-    });
+    draft.setStartImage('image', { file: firstFile }, context);
+    app = flushSync(() => mount(ControlsSidebar, { target, props: { context, get images() { return currentImagesView(context); }, busy: false } }));
     await settle();
 
-    legacyApp.$set({ imageFile: secondFile });
+    draft.setStartImage('image', { file: secondFile }, context);
     await settle();
 
     expect(createObjectURL).toHaveBeenNthCalledWith(1, firstFile);
     expect(createObjectURL).toHaveBeenNthCalledWith(2, secondFile);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:first-image');
-
-    legacyApp.$destroy();
   });
 
   describe('save to prompt file', () => {
@@ -3463,5 +3437,358 @@ describe('WorkspacePage', () => {
       expect(lastSaveTarget()).toBeNull();
       expect(saveButton()!.disabled).toBe(false);
     });
+  });
+});
+
+// The images a tab holds: their derived workflow, their uploads across a reload, and how a Reuse, a delete and a submit treat them.
+describe('WorkspacePage images', () => {
+  beforeEach(() => {
+    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-img', workflow: 'txt2img', prompt: 'p', model: 'zit' } as never);
+  });
+
+  const png = (name: string) => new File(['img'], name, { type: 'image/png' });
+  const submitButton = () => target.querySelector('#ws-submit') as HTMLButtonElement;
+  const generateReason = () => target.querySelector('#ws-generate-reason')?.textContent ?? null;
+
+  /** A store whose reads wait for `release`, to look at the page while the uploads are still being restored. */
+  function gatedStore(): { store: UploadStore; release: () => void } {
+    const inner = memoryUploadStore();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    return { store: { get: async (tab) => { await gate; return inner.get(tab); }, put: (tab, uploads) => inner.put(tab, uploads), delete: (tab) => inner.delete(tab) }, release };
+  }
+
+  async function mountWithHistory(assets: GalleryAsset[]): Promise<void> {
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage(assets));
+    await mountWorkspace(makeContext({ history_assets: assets }));
+  }
+
+  const tile = (asset: GalleryAsset) => target.querySelector(`#ws-history-shell article[aria-label="${asset.filename}"]`) as HTMLElement;
+
+  function openMenu(asset: GalleryAsset): void {
+    (tile(asset).querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+  }
+
+  async function reuse(asset: GalleryAsset): Promise<void> {
+    (tile(asset).querySelector(`button[aria-label="Reuse settings from ${asset.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+  }
+
+  async function submitWithPrompt(): Promise<FormData> {
+    draft.update('prompt', 'a prompt');
+    await settle();
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    return workspaceApiMocks.submitGenerate.mock.calls.at(-1)![0] as FormData;
+  }
+
+  it('the stored workflow follows the start image without re-hydrating', async () => {
+    await mountWorkspace(makeContext());
+    draft.update('steps', 23);
+
+    await addFiles(target, 'start', png('start.png'));
+    expect(draft.state.workflow).toBe('img2img');
+
+    draft.setStartImage('image', null, makeContext());
+    await settle();
+    expect(draft.state.workflow).toBe('txt2img');
+    expect(heldUploads.start('image')).toBeNull();
+    // Settings the user changed stay: nothing re-hydrated the defaults.
+    expect(draft.state.steps).toBe(23);
+
+    // A tab change is what re-hydrates.
+    draft.setTab('video');
+    await settle();
+    expect(draft.state.workflow).toBe('txt2vid');
+    expect(draft.state.steps).not.toBe(23);
+  });
+
+  it('Generate stays off until the held uploads are restored', async () => {
+    const { store, release } = gatedStore();
+    heldUploads.useStore(store);
+    draft.update('prompt', 'a prompt');
+    await mountWorkspace(makeContext());
+
+    expect(heldUploads.restored).toBe(false);
+    expect(submitButton().disabled).toBe(true);
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+
+    release();
+    await settle();
+    expect(heldUploads.restored).toBe(true);
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('a lost upload blocks Generate only after the restore', async () => {
+    // An upload marker in the saved draft, with no file behind it once the page reloads.
+    draft.setStartImage('image', { file: png('gone.png') }, null);
+    const { store, release } = gatedStore();
+    heldUploads.useStore(store);
+    await mountWorkspace(makeContext());
+
+    expect(generateReason()).toBeNull();
+    expect(submitButton().disabled).toBe(true);
+
+    release();
+    await settle();
+    expect(generateReason()).toBe('The start image is missing.');
+    expect(submitButton().disabled).toBe(true);
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+  });
+
+  it('a start image whose file is gone blocks Generate with its reason', async () => {
+    draft.setStartImage('image', { path: '/in/gone.png' }, null);
+    workspaceApiMocks.checkReferencePaths.mockResolvedValue(['/in/gone.png']);
+    await mountWorkspace(makeContext());
+
+    expect(workspaceApiMocks.checkReferencePaths).toHaveBeenCalledWith(['/in/gone.png']);
+    expect(draft.state.workflow).toBe('img2img');
+    expect(generateReason()).toBe('The start image is missing.');
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('a first frame whose file is gone blocks Generate in Video, and the Image tab\'s start image does not', async () => {
+    draft.setStartImage('image', { path: '/in/fine.png' }, null);
+    draft.setStartImage('video', { path: '/in/gone-frame.png' }, null);
+    draft.setTab('video');
+    workspaceApiMocks.checkReferencePaths.mockResolvedValue(['/in/gone-frame.png']);
+    await mountWorkspace(makeContext());
+
+    expect(draft.state.workflow).toBe('img2vid');
+    expect(generateReason()).toBe('The first frame is missing.');
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('Reuse of a text-made image empties Image\'s slots and drops only Image\'s uploads', async () => {
+    const asset = makeAsset({ id: 'out/text.png', filename: 'text.png', has_reusable_config: true, reuse_workspace_url: '#/workspace?workflow=txt2img&prompt=reused+prompt' });
+    await mountWithHistory([asset]);
+    draft.setStartImage('image', { file: png('start.png') }, makeContext());
+    heldUploads.setReferences([png('ref.png')]);
+    draft.patch({ referenceImagePaths: [''] });
+    // Video's uploads belong to another tab.
+    heldUploads.setStart('video', png('first.png'));
+    heldUploads.setLastFrame(png('last.png'));
+    await settle();
+    expect(draft.state.workflow).toBe('img2img');
+
+    await reuse(asset);
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'reused prompt', referenceImagePath: null, referenceImageUpload: null, referenceImagePaths: [] });
+    expect(heldUploads.start('image')).toBeNull();
+    expect(heldUploads.references).toEqual([]);
+    expect(heldUploads.start('video')?.name).toBe('first.png');
+    expect(heldUploads.lastFrame?.name).toBe('last.png');
+
+    // The upload the Reuse dropped does not ride along on the next run.
+    const submitted = await submitWithPrompt();
+    expect(submitted.get('workflow')).toBe('txt2img');
+    for (const name of ['image_file', 'image_path', 'image_strength', 'end_image_file', 'end_image_path']) expect(submitted.has(name)).toBe(false);
+    expect(submitted.getAll('reference')).toEqual([]);
+  });
+
+  it('Reuse of an image-to-video asset fills the first frame, not the start image', async () => {
+    const asset = makeAsset({
+      id: 'out/clip.mp4', filename: 'clip.mp4', media_type: 'video', workflow: 'img2vid', has_reusable_config: true,
+      reuse_workspace_url: '#/workspace?workflow=img2vid&prompt=walk&image_path=%2Fin%2Fframe.png',
+    });
+    await mountWithHistory([asset]);
+    draft.setStartImage('image', { path: '/in/image-tab.png' }, makeContext());
+    heldUploads.setStart('video', png('old-first.png'));
+    heldUploads.setLastFrame(png('old-last.png'));
+    await settle();
+
+    await reuse(asset);
+
+    expect(draft.state).toMatchObject({ workflow: 'img2vid', firstFramePath: '/in/frame.png', firstFrameUpload: null, endImagePath: null, endImageUpload: null, referenceImagePath: '/in/image-tab.png' });
+    expect(heldUploads.start('video')).toBeNull();
+    expect(heldUploads.lastFrame).toBeNull();
+
+    const submitted = await submitWithPrompt();
+    expect(submitted.get('workflow')).toBe('img2vid');
+    expect(submitted.get('image_path')).toBe('/in/frame.png');
+    expect(submitted.has('image_file')).toBe(false);
+    expect(submitted.has('end_image_file')).toBe(false);
+  });
+
+  it('Reuse of an image-to-video asset forgets the first and last frame uploads in the store', async () => {
+    const asset = makeAsset({
+      id: 'out/clip.mp4', filename: 'clip.mp4', media_type: 'video', workflow: 'img2vid', has_reusable_config: true,
+      reuse_workspace_url: '#/workspace?workflow=img2vid&prompt=walk&image_path=%2Fin%2Fframe.png',
+    });
+    const store = memoryUploadStore();
+    heldUploads.useStore(store);
+    await heldUploads.restore();
+    await mountWithHistory([asset]);
+    heldUploads.setStart('video', png('old-first.png'));
+    heldUploads.setLastFrame(png('old-last.png'));
+    await heldUploads.persisted();
+    expect(await store.get('video')).not.toBeNull();
+
+    await reuse(asset);
+    await heldUploads.persisted();
+
+    expect(draft.state).toMatchObject({ firstFramePath: '/in/frame.png', firstFrameUpload: null });
+    expect(await store.get('video')).toBeNull();
+  });
+
+  it('deleting the asset a slot points at empties it and re-derives the workflow', async () => {
+    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    draft.setStartImage('image', { path: '/outputs/out/first.png' }, null);
+    draft.setStartImage('video', { path: '/outputs/out/first.png' }, null);
+    draft.setLastFrame({ path: '/outputs/out/first.png' });
+    await mountWithHistory([asset]);
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    expect(draft.state.workflow).toBe('img2img');
+
+    openMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    await answerConfirm(true);
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', referenceImagePath: null, firstFramePath: null, endImagePath: null });
+    // The Video tab derives its workflow from the emptied first frame too.
+    draft.setTab('video');
+    await settle();
+    expect(draft.state.workflow).toBe('txt2vid');
+  });
+
+  it('a text workflow sends no image fields', async () => {
+    draft.patch({ referenceImageStrength: 0.4 });
+    await mountWorkspace(makeContext());
+    expect(draft.state.workflow).toBe('txt2img');
+
+    const submitted = await submitWithPrompt();
+
+    expect(submitted.get('workflow')).toBe('txt2img');
+    for (const name of ['image_path', 'image_file', 'image_strength', 'end_image_path', 'end_image_file']) expect(submitted.has(name)).toBe(false);
+  });
+
+  it('an image-to-image run sends the start image and its strength, taken from the draft', async () => {
+    draft.setStartImage('image', { path: '/in/start.png' }, null);
+    await mountWorkspace(makeContext());
+    draft.update('referenceImageStrength', 0.4);
+    await settle();
+
+    const submitted = await submitWithPrompt();
+
+    expect(submitted.get('workflow')).toBe('img2img');
+    expect(submitted.getAll('image_path')).toEqual(['/in/start.png']);
+    expect(submitted.getAll('image_strength')).toEqual(['0.4']);
+    expect(submitted.has('end_image_path')).toBe(false);
+    expect(submitted.has('end_image_file')).toBe(false);
+  });
+
+  it('an uploaded start image goes as image_file, not as a path', async () => {
+    const file = png('start.png');
+    draft.setStartImage('image', { file }, null);
+    heldUploads.setStart('image', file);
+    await mountWorkspace(makeContext());
+
+    const submitted = await submitWithPrompt();
+
+    expect(submitted.get('image_file')).toBe(file);
+    expect(submitted.has('image_path')).toBe(false);
+  });
+
+  it('an image-to-video run without a last frame sends the first frame only', async () => {
+    draft.setStartImage('video', { path: '/in/first.png' }, null);
+    draft.setTab('video');
+    await mountWorkspace(makeContext());
+    expect(draft.state.workflow).toBe('img2vid');
+
+    const submitted = await submitWithPrompt();
+
+    expect(submitted.getAll('image_path')).toEqual(['/in/first.png']);
+    for (const name of ['image_file', 'image_strength', 'end_image_path', 'end_image_file']) expect(submitted.has(name)).toBe(false);
+  });
+
+  it('an image-to-video run sends the last frame with the first, as a path or as an upload', async () => {
+    const last = png('last.png');
+    draft.setStartImage('video', { path: '/in/first.png' }, null);
+    draft.setLastFrame({ file: last });
+    heldUploads.setLastFrame(last);
+    draft.setTab('video');
+    await mountWorkspace(makeContext());
+
+    const submitted = await submitWithPrompt();
+
+    expect(submitted.getAll('image_path')).toEqual(['/in/first.png']);
+    expect(submitted.get('end_image_file')).toBe(last);
+    expect(submitted.has('end_image_path')).toBe(false);
+  });
+
+  it('a video model that cannot start from an image has no First frame and sends none', async () => {
+    const context = makeContext({ video_model_defaults: { 'ltx-8': makeVideoDefaults({ supports_i2v: false }) } });
+    draft.setStartImage('video', { path: '/in/first.png' }, null);
+    draft.setTab('video');
+    await mountWorkspace(context);
+
+    expect(draft.state.workflow).toBe('txt2vid');
+    expect(target.querySelector('#ws-image-browse')).toBeNull();
+    expect(target.querySelector('#ws-end-image-browse')).toBeNull();
+    const submitted = await submitWithPrompt();
+    expect(submitted.get('workflow')).toBe('txt2vid');
+    for (const name of ['image_path', 'image_file', 'end_image_path', 'end_image_file']) expect(submitted.has(name)).toBe(false);
+  });
+
+  it('a last frame whose file is gone blocks Generate while it is used', async () => {
+    draft.setStartImage('video', { path: '/in/first.png' }, null);
+    draft.setLastFrame({ path: '/in/gone-last.png' });
+    draft.setTab('video');
+    workspaceApiMocks.checkReferencePaths.mockResolvedValue(['/in/gone-last.png']);
+    await mountWorkspace(makeContext());
+
+    expect(generateReason()).toBe('The last frame is missing.');
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('copies the CLI command from the same image fields the run submits', async () => {
+    const clipboard = mockClipboard();
+    draft.setStartImage('image', { path: '/in/start.png' }, null);
+    await mountWorkspace(makeContext());
+    draft.update('referenceImageStrength', 0.4);
+    draft.update('prompt', 'a prompt');
+    await settle();
+
+    (target.querySelector('button[aria-label="Copy CLI command"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(clipboard).toHaveBeenCalledTimes(1);
+    const command = clipboard.mock.calls[0][0];
+    expect(command).toContain('/in/start.png');
+    expect(command).toContain('--image-strength 0.4');
+  });
+
+  it('copies a CLI command without image flags for a text workflow', async () => {
+    const clipboard = mockClipboard();
+    await mountWorkspace(makeContext());
+    draft.update('prompt', 'a prompt');
+    await settle();
+
+    (target.querySelector('button[aria-label="Copy CLI command"]') as HTMLButtonElement).click();
+    await settle();
+
+    const command = clipboard.mock.calls[0][0];
+    expect(command).not.toContain('--image');
+    expect(command).not.toContain('--end-image');
+  });
+
+  it('queues a prompt sent from the Prompts page only after the held uploads are restored', async () => {
+    const { store, release } = gatedStore();
+    heldUploads.useStore(store);
+    requestPromptRun({ path: '/server/prompts.yaml', optionId: 'portrait:1' });
+    await mountWorkspace(makeContext());
+
+    expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+
+    release();
+    await settle();
+    expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+    expect(workspaceApiMocks.submitGenerate.mock.calls[0][0].getAll('prompt_option_id')).toEqual(['portrait:1']);
   });
 });

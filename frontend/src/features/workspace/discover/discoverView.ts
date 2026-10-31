@@ -98,10 +98,10 @@ export function filterCurated(entries: readonly CuratedEntry[], query: string, s
 }
 
 const WORKFLOW_LABELS: Record<Workflow, string> = {
-  txt2img: 'Text to Image',
-  img2img: 'Image to Image',
-  txt2vid: 'Text to Video',
-  img2vid: 'Image to Video',
+  txt2img: 'Image, without a start image',
+  img2img: 'Image, with a start image',
+  txt2vid: 'Video, without a first frame',
+  img2vid: 'Video, with a first frame',
   extend: 'Extend Video',
 };
 

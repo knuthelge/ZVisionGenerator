@@ -27,14 +27,12 @@ It opens your browser at `http://127.0.0.1:8080/`. If port 8080 is busy it takes
 
 ![The Workspace: the top bar, Compose and Settings on the left, the preview with the Gallery strip below](../assets/screenshots/workspace.webp)
 
-The **top bar** has the pages and, on the Workspace, the five workflows:
+The **top bar** has the pages and, on the Workspace, the three tabs:
 
-| Workflow | Makes |
+| Tab | Makes |
 |---|---|
-| Text to Image | An image from a prompt |
-| Image to Image | An image steered by a start image |
-| Text to Video | A video from a prompt |
-| Image to Video | A video that starts from an image |
+| Image | An image from a prompt, or from a start image you add in **Images** |
+| Video | A video from a prompt, or one that starts on a first frame you add in **Images** |
 | Extend Video | More of a video you already have |
 
 The pages:

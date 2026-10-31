@@ -63,10 +63,13 @@
     return toggled[group.id] ?? group.defaultOpen ?? false;
   }
 
+  // A disabled item stays in the keys' reach so its reason can be read; Enter and click on it do nothing (see `select`).
   function menuItems(): HTMLElement[] {
-    return Array.from(
-      menuEl?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemradio"]:not([aria-disabled="true"])') ?? [],
-    );
+    return Array.from(menuEl?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]') ?? []);
+  }
+
+  function firstEnabledItem(): HTMLElement | undefined {
+    return menuItems().find((item) => item.getAttribute('aria-disabled') !== 'true');
   }
 
   function select(entry: ActionMenuItem): void {
@@ -90,7 +93,7 @@
   $effect(() => {
     if (!open || !menuEl) return;
     if (layout.compact) menuEl.focus();
-    else menuItems()[0]?.focus();
+    else (firstEnabledItem() ?? menuItems()[0])?.focus();
   });
 
 </script>
@@ -206,5 +209,7 @@
   .action-menu-item.danger { color: var(--color-error); }
   .action-menu-item.danger:focus { background: var(--color-error-surface); color: var(--color-error); }
   @media (hover: hover) { .action-menu-item.danger:hover { background: var(--color-error-surface); color: var(--color-error); } }
-  .action-menu-item[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+  .action-menu-item[aria-disabled='true'] { color: var(--color-text-muted); cursor: not-allowed; }
+  /* A disabled item's hint is the reason it is off: it wraps rather than cutting the reason short, which touch screens can't show as a tooltip. */
+  .action-menu-item[aria-disabled='true'] .action-menu-hint { max-width: 62%; overflow: visible; text-align: right; text-overflow: clip; white-space: normal; }
 </style>

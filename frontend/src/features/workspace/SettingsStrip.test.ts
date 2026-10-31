@@ -67,4 +67,17 @@ describe('SettingsStrip', () => {
     expect((target.querySelector('[data-chip="seed"]') as HTMLElement).getAttribute('aria-expanded')).toBe('true');
     expect((target.querySelector('[data-chip="steps"]') as HTMLElement).getAttribute('aria-expanded')).toBe('false');
   });
+
+  it('opens the Images chip, which names itself by its summary and warns when an image is gone', () => {
+    const onopen = vi.fn();
+    const images: SettingChip[] = [{ key: 'images', label: 'Images', value: 'pond.png', changed: false, on: true, warn: true }];
+    app = flushSync(() => mount(SettingsStrip, { target, props: { chips: images, activeKey: 'images', changedCount: 0, onopen, onall: vi.fn() } }));
+
+    const chip = target.querySelector('[data-chip="images"]') as HTMLButtonElement;
+    expect(chip.getAttribute('aria-label')).toBe('Images: pond.png');
+    expect(chip.getAttribute('aria-expanded')).toBe('true');
+    expect(chip.querySelector('.setchip-warn')).not.toBeNull();
+    chip.click();
+    expect(onopen).toHaveBeenCalledWith('images');
+  });
 });
