@@ -531,7 +531,7 @@ def resolve_defaults(
         backend_name: ``"mflux"`` or ``"diffusers"`` — for scheduler default lookup.
 
     Returns:
-        Dict with resolved ``steps``, ``guidance``, ``scheduler``, and
+        Dict with resolved ``steps``, ``guidance``, ``scheduler``, ``upscale_sharpen`` and
         optional ``upscale_steps`` values.
     """
     preset = config.get("model_presets", {}).get(model_info.family, {})
@@ -544,6 +544,7 @@ def resolve_defaults(
         "guidance": config["generation"]["default_guidance"],
         "scheduler": None,
         "upscale_steps": None,
+        "upscale_sharpen": True,
         **model_capabilities(config, model_info.family, variant_key),
     }
 
@@ -552,9 +553,7 @@ def resolve_defaults(
         effective["steps"] = preset["default_steps"]
     if "default_guidance" in preset:
         effective["guidance"] = preset["default_guidance"]
-    preset_upscale = preset.get("upscale", {})
-    if isinstance(preset_upscale, dict) and "default_upscale_steps" in preset_upscale:
-        effective["upscale_steps"] = preset_upscale["default_upscale_steps"]
+    _layer_upscale_defaults(effective, preset.get("upscale", {}))
 
     # Layer variant defaults
     if variant_key and "variants" in preset:
@@ -563,9 +562,7 @@ def resolve_defaults(
             effective["steps"] = variant["default_steps"]
         if "default_guidance" in variant:
             effective["guidance"] = variant["default_guidance"]
-        variant_upscale = variant.get("upscale", {})
-        if isinstance(variant_upscale, dict) and "default_upscale_steps" in variant_upscale:
-            effective["upscale_steps"] = variant_upscale["default_upscale_steps"]
+        _layer_upscale_defaults(effective, variant.get("upscale", {}))
 
     # Layer scheduler default (keyed by backend name, NOT platform)
     sched_defaults = preset.get("default_scheduler", {})
@@ -714,6 +711,16 @@ def resolve_video_defaults(
             effective[key] = value
 
     return effective
+
+
+def _layer_upscale_defaults(effective: dict[str, Any], upscale: Any) -> None:
+    """Copy a preset ``upscale`` block's ``default_upscale_steps`` and ``default_sharpen`` into *effective*."""
+    if not isinstance(upscale, dict):
+        return
+    if "default_upscale_steps" in upscale:
+        effective["upscale_steps"] = upscale["default_upscale_steps"]
+    if "default_sharpen" in upscale:
+        effective["upscale_sharpen"] = bool(upscale["default_sharpen"])
 
 
 def resolve_upscale_steps(defaults: dict[str, Any], steps: int) -> int:

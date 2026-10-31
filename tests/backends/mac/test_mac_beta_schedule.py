@@ -1,4 +1,4 @@
-"""Tests for FLUX.2 Klein's beta sigma schedule on the mflux backend."""
+"""Tests for the beta sigma schedule on the mflux backend: Krea 2's Euler sampler and FLUX.2 Klein's shift."""
 
 from __future__ import annotations
 
@@ -48,6 +48,43 @@ def _backend(image_mac, family: str):
     backend = image_mac.MfluxBackend()
     backend._model_info = ImageModelInfo(family=family, is_distilled=True, size=None)
     return backend
+
+
+class TestKrea2BetaSchedule:
+    def test_beta_gives_comfyui_beta_shifted_by_turbo_mu(self, image_mac):
+        """ComfyUI's beta(0.6, 0.6) grid at Turbo's fixed shift (mu 1.15), as the diffusers backend runs it."""
+        with image_mac._krea2_sigma_schedule(_BETA):
+            sigmas, _ = _sigmas(image_mac._krea2_turbo_config(), image_mac._KREA2_SAMPLER, 8)
+
+        assert sigmas == pytest.approx([1.0, 0.981, 0.937, 0.865, 0.760, 0.608, 0.402, 0.161, 0.0], abs=2e-3)
+
+    @pytest.mark.parametrize("scheduler", [_BETA, None])
+    def test_registry_is_restored_after_the_run(self, image_mac, scheduler):
+        from mflux.models.common.schedulers import SCHEDULER_REGISTRY
+
+        original = SCHEDULER_REGISTRY[image_mac._KREA2_SAMPLER]
+        with image_mac._krea2_sigma_schedule(scheduler):
+            pass
+
+        assert SCHEDULER_REGISTRY[image_mac._KREA2_SAMPLER] is original
+
+    def test_text_to_image_samples_with_euler_over_beta_sigmas(self, image_mac):
+        from zvisiongenerator.schedulers.beta_scheduler import BetaScheduler
+
+        seen: list[tuple[object, object]] = []
+        _backend(image_mac, "krea2").text_to_image(_recording_model(seen), "p", 64, 64, seed=1, steps=8, guidance=1.0, scheduler=_BETA)
+
+        assert seen == [(BetaScheduler, image_mac._KREA2_SAMPLER)]
+
+    def test_image_to_image_keeps_the_evenly_spaced_schedule(self, image_mac):
+        """Krea's refine passes (image to image, upscale) stay evenly spaced; beta only shapes the first pass."""
+        from mflux.models.common.schedulers import SCHEDULER_REGISTRY
+
+        original = SCHEDULER_REGISTRY[image_mac._KREA2_SAMPLER]
+        seen: list[tuple[object, object]] = []
+        _backend(image_mac, "krea2").image_to_image(_recording_model(seen), Image.new("RGB", (64, 64)), "p", strength=0.4, steps=8, seed=1, guidance=1.0, scheduler=_BETA)
+
+        assert seen == [(original, image_mac._KREA2_SAMPLER)]
 
 
 class TestKleinBetaSchedule:

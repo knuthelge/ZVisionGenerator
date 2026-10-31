@@ -83,7 +83,6 @@ _IMAGE_BOOTSTRAP_UPSCALE = {
     "denoise": None,
     "steps": None,
     "guidance": None,
-    "sharpen": True,
     "save_pre": False,
 }
 _VIDEO_BOOTSTRAP_UPSCALE = {
@@ -644,8 +643,9 @@ def _image_bootstrap_postprocess() -> dict[str, Any]:
     return dict(_IMAGE_BOOTSTRAP_POSTPROCESS)
 
 
-def _image_bootstrap_upscale() -> dict[str, Any]:
-    return dict(_IMAGE_BOOTSTRAP_UPSCALE)
+def _image_bootstrap_upscale(sharpen: bool) -> dict[str, Any]:
+    """Return the image upscale bootstrap with the model's default pre-sharpen."""
+    return {**_IMAGE_BOOTSTRAP_UPSCALE, "sharpen": sharpen}
 
 
 def _video_bootstrap_upscale() -> dict[str, Any]:
@@ -716,7 +716,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "quantize": None,
         "image_strength": _IMAGE_BOOTSTRAP_STRENGTH,
         "postprocess": _image_bootstrap_postprocess(),
-        "upscale": _image_bootstrap_upscale(),
+        "upscale": _image_bootstrap_upscale(defaults.get("upscale_sharpen", True)),
         "supports_img2img": bool(defaults.get("supports_img2img", True)),
         "supports_upscale": bool(defaults.get("supports_upscale", True)),
         "supports_json_prompt": bool(defaults.get("supports_json_prompt", False)),

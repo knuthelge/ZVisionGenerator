@@ -21,7 +21,7 @@ from mflux.models.ideogram4.weights import Ideogram4LoRAMapping, Ideogram4Weight
 from mflux.models.common.lora.mapping.lora_loader import LoRALoader
 from mflux.models.krea2 import Krea2
 from mflux.models.common.config.model_config import ModelConfig
-from mflux.models.common.schedulers import FlowMatchEulerDiscreteScheduler, LinearScheduler
+from mflux.models.common.schedulers import SCHEDULER_REGISTRY, FlowMatchEulerDiscreteScheduler, LinearScheduler, try_import_external_scheduler
 from mflux.utils.exceptions import StopImageGenerationException
 import mlx.core as mx
 from mlx import nn
@@ -180,6 +180,24 @@ _KLEIN_BETA_SCHEDULER = "zvisiongenerator.schedulers.beta_scheduler.KleinBetaSch
 def _family_scheduler(family: str, scheduler: str | None) -> str | None:
     """Return the mflux scheduler path for *family*: FLUX.2 Klein's beta keeps Klein's own step-dependent shift."""
     return _KLEIN_BETA_SCHEDULER if family == "flux2_klein" and scheduler == _BETA_SCHEDULER else scheduler
+
+
+@contextlib.contextmanager
+def _krea2_sigma_schedule(scheduler_path: str | None) -> Iterator[None]:
+    """Give Krea 2's Euler sampler the sigmas of the scheduler at *scheduler_path* for one run; ``None`` keeps mflux's own.
+
+    mflux steps Krea 2 with its own Euler stepper and takes the sigmas from the scheduler registered under the sampler's
+    name, so that registry entry is swapped for the run and restored after.
+    """
+    if scheduler_path is None:
+        yield
+        return
+    original = SCHEDULER_REGISTRY[_KREA2_SAMPLER]
+    SCHEDULER_REGISTRY[_KREA2_SAMPLER] = try_import_external_scheduler(scheduler_path)
+    try:
+        yield
+    finally:
+        SCHEDULER_REGISTRY[_KREA2_SAMPLER] = original
 
 
 def _krea2_turbo_config() -> ModelConfig:
@@ -601,7 +619,8 @@ class MfluxBackend:
 
             # Per-run Ideogram 4 first-step sigma override (affects the scheduler shim, not generate_image itself).
             sigma_ctx = _use_initial_sigma(first_sigma) if first_sigma is not None else contextlib.nullcontext()
-            with sigma_ctx:
+            krea2_ctx = _krea2_sigma_schedule(scheduler) if self._model_info.family == "krea2" else contextlib.nullcontext()
+            with sigma_ctx, krea2_ctx:
                 if reference_images:
                     result = generate_with_references(model, reference_images, **gen_kwargs)
                 else:

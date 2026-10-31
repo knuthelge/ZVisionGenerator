@@ -53,6 +53,16 @@ describe('cliCommand', () => {
     expect(command).toBe('ziv image --model zit --prompt \'a lake\'');
   });
 
+  it('writes the upscale pre-sharpen only when it differs from the model default', () => {
+    const krea = (upscaleSharpen: string) => cliCommand(
+      { mode: 'image', model: 'krea2', prompt: 'a', upscale: '2', upscale_sharpen: upscaleSharpen },
+      { upscaleSharpenDefault: false },
+    ).command;
+
+    expect(krea('false')).toBe('ziv image --model krea2 --prompt a --upscale 2');
+    expect(krea('true')).toBe('ziv image --model krea2 --prompt a --upscale 2 --upscale-sharpen');
+  });
+
   it('turns default-on post-processing off and default-off post-processing on', () => {
     const { command } = cliCommand({ mode: 'image', prompt: 'a', sharpen_enabled: 'false', saturation_enabled: 'true' });
 

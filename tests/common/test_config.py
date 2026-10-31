@@ -174,9 +174,10 @@ def test_packaged_config_ships_krea2_alias_and_defaults(packaged_config):
     assert config["model_alias_families"]["krea2"] == "krea2"
     for backend_name in ("mflux", "diffusers"):
         defaults = resolve_defaults(turbo, config, {}, backend_name)
-        assert (defaults["steps"], defaults["guidance"], defaults["scheduler"]) == (8, 1.0, None)
+        assert (defaults["steps"], defaults["guidance"], defaults["scheduler"]) == (8, 1.0, "beta")
         assert defaults["supports_negative_prompt"] is False
-        assert defaults["supports_scheduler"] is False
+        assert defaults["supports_scheduler"] is True
+        assert (defaults["upscale_steps"], defaults["upscale_sharpen"]) == (5, False)
 
 
 def test_packaged_config_klein9b_uses_ungated_mirror(packaged_config):
@@ -529,6 +530,12 @@ class TestSchedulerResolution:
         assert resolved == "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
         assert resolved == packaged_config["schedulers"]["beta"]["mflux_class"]
 
+    @pytest.mark.parametrize("backend", ["mflux", "diffusers"])
+    def test_simple_resolves_to_the_model_own_schedule(self, packaged_config, backend):
+        from zvisiongenerator.utils.config import resolve_scheduler_class
+
+        assert resolve_scheduler_class("simple", packaged_config, backend) is None
+
     def test_resolve_unknown_scheduler_passthrough(self, packaged_config):
         from zvisiongenerator.utils.config import resolve_scheduler_class
 
@@ -552,6 +559,7 @@ class TestSchedulerValidation:
         from zvisiongenerator.utils.config import validate_scheduler
 
         validate_scheduler("beta", packaged_config)  # Should not raise
+        validate_scheduler("simple", packaged_config)
 
     def test_validate_none_scheduler(self):
         from zvisiongenerator.utils.config import validate_scheduler

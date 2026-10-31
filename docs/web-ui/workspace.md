@@ -240,5 +240,4 @@ Finished images and videos appear in the Gallery strip, newest first. It is the 
 Some models change what the Workspace offers:
 
 - **Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no start image or upscale, so the **Images** section is hidden, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../concepts/models.md#ideogram-4-instant).
-- **Krea 2** hides **Scheduler**, because it samples with its own schedule.
 - **Video** adds **Duration (s)**, **Audio** and **Low memory**.

@@ -30,7 +30,7 @@ All built-in models download without a Hugging Face account. Where the original 
 
 ### Krea 2 Turbo
 
-`krea2` defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off. Guidance above 1.0 turns it on, and each step then takes about twice as long. It samples with its own schedule, so it has no scheduler setting, and it doesn't use a negative prompt. Only Krea 2 Turbo and its fine-tunes are supported, not Krea 2 Raw.
+`krea2` defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off. Guidance above 1.0 turns it on, and each step then takes about twice as long. It doesn't use a negative prompt. Only Krea 2 Turbo and its fine-tunes are supported, not Krea 2 Raw.
 
 The weights are large, about 26 GB for the transformer plus a 9 GB text encoder, so run it [quantized](quantization.md) on smaller machines:
 

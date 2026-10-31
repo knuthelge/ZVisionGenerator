@@ -44,7 +44,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `-H`, `--height` | from preset | Exact height |
 | `--steps` | per model | Denoising steps |
 | `--guidance` | per model | Guidance scale |
-| `--scheduler` | per model | Scheduler name, for example `beta` |
+| `--scheduler` | per model | `beta` or `simple` |
 | `--seed` | random | Seed, for repeatable images |
 | `--first-sigma` | `1.004` | Ideogram 4 only: first-step sigma, in `(0.0, 2.0]`. `1.005`–`1.006` more reliably avoid a grey "blocked by safety filter" frame for harmless prompts |
 | `--lora` | none | LoRAs with optional weights: `name:0.8,name2:0.5` (default weight 1.0) |
@@ -55,7 +55,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--upscale-denoise` | from config | Denoise strength of the upscale pass |
 | `--upscale-steps` | per model | Steps of the upscale pass |
 | `--upscale-guidance` | `--guidance` | Guidance of the upscale pass only |
-| `--upscale-sharpen` / `--no-upscale-sharpen` | on | Sharpen before the upscale pass |
+| `--upscale-sharpen` / `--no-upscale-sharpen` | per model: on, off for Krea 2 | Sharpen before the upscale pass |
 | `--upscale-save-pre` / `--no-upscale-save-pre` | off | Also save the image before upscaling, with a `_preupscale` suffix |
 | `--review` | off | Pause after each small render to approve (++y++) or discard (++n++) the upscale. Needs `--upscale` and a terminal |
 | `--sharpen [AMOUNT]` / `--no-sharpen` | on | Sharpen the result. An amount (0–1.5) overrides the config |

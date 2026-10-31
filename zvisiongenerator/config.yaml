@@ -83,6 +83,10 @@ schedulers:
   # ComfyUI's "beta": the beta(0.6, 0.6) grid, then the model's own timestep shift. diffusers gets the grid as custom sigmas.
   beta:
     mflux_class: "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
+  # The model's own evenly spaced schedule, for models that default to beta.
+  simple:
+    mflux_class: null
+    diffusers_class: null
 
 platforms:
   darwin: macOS
@@ -268,6 +272,7 @@ model_presets:
 
   ideogram4:
     supports_negative_prompt: false
+    supports_scheduler: false  # Instant runs its own noise schedule
     supports_img2img: false
     supports_upscale: false
     supports_json_prompt: true
@@ -285,14 +290,15 @@ model_presets:
     # Guidance is the standard CFG scale on both backends (1.0 = off); the diffusers
     # backend converts it to Krea 2's own scale, where 0.0 = off.
     supports_negative_prompt: false
-    supports_scheduler: false  # Krea 2 samples with its own schedule
     default_steps: 8
     default_guidance: 1.0
     upscale:
-      default_upscale_steps: 3  # ranked best against 1, 2, 4 and 8 refinement steps
-    default_scheduler:
-      mflux: null
-      diffusers: null
+      # 5 steps draw more skin texture than 3 without overcooking; pre-sharpening can leave coloured specks in fabric.
+      default_upscale_steps: 5
+      default_sharpen: false
+    default_scheduler:  # beta draws more skin texture than Krea's evenly spaced schedule
+      mflux: beta
+      diffusers: beta
 
   moss:
     # Turbo and SFT are variants of one family, picked from the model folder. A variant may also set capability flags.

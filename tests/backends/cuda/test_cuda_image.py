@@ -1263,6 +1263,19 @@ class TestKrea2:
         assert mock_latents.call_args.args[2] == kwargs["sigmas"]
         sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe.assert_not_called()
 
+    def test_image_to_image_keeps_the_evenly_spaced_grid_under_beta(self, win_backend):
+        """Krea's refine passes (image to image, upscale) stay evenly spaced; beta only shapes the first pass."""
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="krea2")
+        pipe = MagicMock(vae_scale_factor=8, patch_size=2, _interrupt=False)
+        pipe.return_value.images = [Image.new("RGB", (64, 48))]
+
+        with patch.object(mod, "_krea2_img2img_latents", return_value="noised-latents"):
+            backend.image_to_image(model=pipe, image=Image.new("RGB", (64, 48)), prompt="p", strength=0.4, steps=8, seed=1, guidance=1.0, scheduler="beta")
+
+        assert pipe.call_args.kwargs["sigmas"] == pytest.approx(mod._img2img_sigmas(8, 0.4))
+
     def test_image_to_image_returns_none_when_skipped(self, win_backend):
         mod, _, _ = win_backend
         backend = mod.DiffusersBackend()

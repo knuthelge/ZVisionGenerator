@@ -1240,6 +1240,19 @@ def test_submit_image_job_uses_preset_upscale_steps_default(monkeypatch, tmp_pat
     assert submitted[0]["args"].upscale_steps == expected
 
 
+@pytest.mark.parametrize(("form", "expected"), [({}, False), ({"upscale_sharpen": "true"}, True), ({"upscale_sharpen": "false"}, False)])
+def test_submit_image_job_upscale_sharpen_follows_the_model_default_unless_sent(monkeypatch, tmp_path, form, expected):
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    defaults = make_resolved_image_defaults(upscale_sharpen=False)
+    patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="krea2", is_distilled=True, size=None), defaults=defaults, submitted=submitted)
+
+    web_server._submit_image_job({"model": "krea2", "prompt": "hello", "upscale": "2", **form}, web_config)
+
+    assert submitted[0]["args"].upscale_sharpen is expected
+
+
 @pytest.mark.parametrize(
     ("form", "review", "controls"),
     [
