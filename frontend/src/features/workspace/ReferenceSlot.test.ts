@@ -15,7 +15,7 @@ describe('ReferenceSlot', () => {
   function show(props: Record<string, unknown>): void {
     app = flushSync(() => mount(ReferenceSlot, {
       target,
-      props: { idBase: 'ws-image', label: 'Start image', names: NAMES, pathRow: false, emptyText: '', path: null, file: null, previewUrl: null, onfilechange: vi.fn(), onpathchange: vi.fn(), ...props },
+      props: { idBase: 'ws-image', label: 'Start image', names: NAMES, emptyText: '', path: null, file: null, previewUrl: null, onfilechange: vi.fn(), onpathchange: vi.fn(), ...props },
     }));
   }
 

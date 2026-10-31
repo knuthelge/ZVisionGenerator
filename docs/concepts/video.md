@@ -110,7 +110,7 @@ On a Mac, MiniMax H3 text to video cannot stop in the middle of a clip, so **Nex
 
 Extend continues a clip from where it ends: it generates what happens next, with sound, and writes a new file. Your original clip is never changed.
 
-**Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from the **Extend Video** workflow with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
+**Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from the **Extend Video** tab with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
 
 The extension takes the source's size and frame rate, and starts from its model and LoRAs when they're still installed.
 

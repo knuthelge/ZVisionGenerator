@@ -1,6 +1,6 @@
 # Workspace
 
-The Workspace is where you make things. Pick **Image**, **Video** or **Extend Video** in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. Whether a run starts from an image is decided by the images you add in [Images](#images), not by a tab. **Image** and **Video** each keep their own prompt, and **Extend Video** shares the prompt of **Video**, so switching tabs never moves text from one to the other.
+The Workspace is where you make things. Pick **Image**, **Video** or **Extend Video** in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, and **Extend Video** shares the prompt of **Video**, so switching tabs never moves text from one to the other.
 
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
@@ -38,10 +38,10 @@ A **preset** saves your whole setup under a name, so you can bring it back in on
 ![The Preset menu open in the Workspace toolbar](../assets/screenshots/preset-menu.webp){ width="540" }
 
 - **What it keeps:** the model, quant, LoRAs and their weights, size, number of runs, steps, guidance, image strength, scheduler, post-processing and upscale settings including review. For video: the length, audio, low memory and upscale.
-- **What it leaves alone:** the prompt, seed, start image, references and workflow.
+- **What it leaves alone:** the prompt, seed and images.
 - **The menu** has **Update** (write the current settings into the preset), **Save as…**, **Rename…** and **Delete**. A dot on the control shows when the form differs from the applied preset.
 - Image and video have their own presets; only the ones for the current kind are listed.
-- A model or LoRA that is no longer installed is skipped.
+- A model or LoRA that isn't installed is skipped.
 - Switching between image and video, **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards.
 
 Presets are kept as files in `presets` in the [data folder](../concepts/data-folder.md), so they follow you to every browser. The CLI doesn't use them.
@@ -81,9 +81,9 @@ For video, *Compose* has a **Scene** box above the **Action** box. See [Scene an
 
 ### Recent prompts
 
-The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts while you work on an image workflow, video prompts (a scene and an action together) on a video workflow. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
+The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video** and **Extend Video**. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
 
-- **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text is dropped. A JSON caption turns on **{ } JSON** and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and workflow don't change.
+- **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text is dropped. A JSON caption turns on **{ } JSON** and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and tab don't change.
 - **From the keyboard:** press ++alt+up++ in an empty prompt to open the list with the filter ready. ++up++ and ++down++ move, ++enter++ picks and ++esc++ closes and puts the cursor back in the prompt box (or on the button, if you opened the list with it).
 - **Clear recents** at the bottom of the list removes the prompts of the mode you are in, after asking. The other mode's prompts stay.
 
@@ -109,16 +109,16 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 Groups and rows only show when the model and tab use them.
 
 - **Change a number** by typing it, or by dragging its label sideways. On a touch screen, numbers have − and + buttons instead (hold to repeat).
-- **Put one setting back** with the reset mark next to it. **Reset** in the *Settings* header puts all settings back to the model's defaults, and keeps the model, LoRAs, quant and the prompts of both tabs.
+- **Put one setting back** with the reset mark next to it. **Reset** in the *Settings* header puts all settings back to the model's defaults, and keeps the model, LoRAs, quant and the prompts.
 - **Seed** is random for every run unless you type one. The dice button picks a new one.
 
 What each setting does is in [Images](../concepts/images.md), [Video](../concepts/video.md) and [Upscaling](../concepts/upscaling.md).
 
 ### Images
 
-The **Images** section is the third in *Settings*, after **Size** and **Sampling**. It holds every image the run uses, in **Image** and in **Video**. What an image is for, and how it changes the result, is in [Images](../concepts/images.md) and [Video](../concepts/video.md#first-and-last-frame).
+The **Images** section holds every image the run uses, in **Image** and in **Video**. What an image is for, and how it changes the result, is in [Images](../concepts/images.md) and [Video](../concepts/video.md#first-and-last-frame).
 
-With no image, **Generate** makes the picture or clip from the prompt. With a start image or a first frame, it starts from that image. There is no tab to pick for this: adding or removing the image is the choice. The [Gallery](gallery.md) and the [Job log](job-log.md) still say what ran, such as *Image to image* or *Text to video*.
+With no image, **Generate** makes the picture or clip from the prompt. With a start image or a first frame, it starts from that image. The [Gallery](gallery.md) and the [Job log](job-log.md) label each job by what ran, such as *Image to image* or *Text to video*.
 
 Folded, the header's summary says what **Generate** will use: in Image *None*, *pond.png*, *pond.png · 2 references* or *2 references*; in Video *None*, *dawn.png* or *dawn.png → dusk.png*. It turns red when an image the run uses is missing.
 
@@ -126,17 +126,17 @@ Folded, the header's summary says what **Generate** will use: in Image *None*, *
 
 - **Start image:** an *Image* row with a thumbnail, the name, buttons to browse the server and to upload from your device, and × while an image is set. The empty row reads *Browse or drop*: drop an image on it to set it.
 - **Strength** is a row under the start image's, shown only while a start image is set.
-- **[References](#references)** are listed as *Reference 1* to *Reference 4* (FLUX.2 Klein only).
+- **[References](#references)** follow, for models that take them (FLUX.2 Klein only).
 
 **In Video**
 
-- **First frame:** an *Image* row, as for a start image. Video has no strength.
-- **Last frame:** the same row, marked *Optional*, to end the clip on a second image. A video model without a last frame doesn't show it.
+- **First frame:** an *Image* row, as for a start image.
+- **Last frame:** the same row, marked *Optional*, to end the clip on a second image.
 - **Last frame without a first frame:** if you remove the first frame, the last frame stays, greyed, with *Not used without a first frame*. It is used again when you add a first frame.
 
 **Where images stay**
 
-- An image stays until you press its × or **Reset**, including after you reload the page. That includes images uploaded from your device.
+- An image stays until you press its × or **Reset**, including after you reload the page and including images uploaded from your device.
 - **Image** and **Video** each keep their own images. Adding a first frame in Video doesn't put it into Image, and switching between **Image**, **Video** and **Extend Video**, or changing the model, clears none of them.
 - **Reuse settings** and **Load settings** replace the images of the tab they open with the ones the job used. A job made from text leaves that tab's images empty.
 - **Reset** in the *Settings* header clears the open tab's images along with the other settings: in Image the start image, the references and **Strength**, in Video the first and last frame. In **Extend Video** it clears no images. The other tab keeps its images.
@@ -147,18 +147,17 @@ An image the model can't use is hidden: a start image on Ideogram 4, references 
 
 **Missing images**
 
-An image that **Generate** would use but that has moved or been deleted shows a mark in its row, with *Choose this image again* under it, and blocks **Generate**, with the reason above the button, such as *The start image is missing.* Choose the file again or remove it. A last frame blocks only while there is a first frame.
+An image that **Generate** would use but can't find shows a mark in its row and blocks **Generate**, with the reason above the button, such as *The start image is missing.* A file on the server that has moved or been deleted says *This image has moved or been deleted. Choose it again or remove it.* An upload whose file the browser can't read back says *Choose this image again.* Choose the file again or remove the image. A last frame blocks only while there is a first frame.
 
 **On a phone,** one **Images** chip in the strip opens the same groups in a popover. See [Other devices](devices.md#images-on-a-phone).
 
 #### References
 
-When the model takes [references](../concepts/images.md#references), the **Images** section has a **References** group of up to four rows, each with a thumbnail, its name, and buttons to browse the server or upload from your device. The empty row after them, *Add reference*, adds the next one. You can also drop several images on it at once, or drop one on a filled row to replace it. The section's summary shows how many are set. On a phone, the **Images** chip's popover lists them; a row whose image is gone has **Replace**, which swaps the next image you choose into that row and keeps its number.
+When the model takes [references](../concepts/images.md#references), the **Images** section has a **References** group of up to four rows, each like the start image's row. The empty row after them, *Add reference*, adds the next one. You can also drop several images on it at once, or drop one on a filled row to replace it. On a phone, **Replace** on a row whose image is gone swaps the next image you choose into that row and keeps its number.
 
 - **Number:** a row's position is its number in the prompt: *Reference 1* is "image 1". Removing a row renumbers the rest, and a line under the rows reminds you to refer to them that way.
-- **A model without references, or the Video tab,** hides the references and sends none, but keeps the list for when you come back. A model that takes fewer shows and sends the first ones, and the rest come back with a model that takes more.
+- **Fewer references than you set:** the Video tab uses none, and a model that takes fewer shows and sends the first ones. The rest come back with a model that takes more.
 - **With a start image,** both apply. See [References with a start image](../concepts/images.md#references-with-a-start-image) for what to expect.
-- **Reuse settings** brings the references back. A row whose file has moved or been deleted is marked, and **Generate** stays off until you choose the file again or remove the row. Images you uploaded from your device stay until you remove them, also after a reload.
 - **Add one from an image you made:** **Use as** → **Reference** in the [Gallery or viewer](gallery.md#use-as) adds it as the next number and keeps the prompt.
 
 ### Settings are remembered
@@ -185,8 +184,6 @@ Fields that take a path on the server's machine (prompt files, the output folder
 - Click the path bar or press ++slash++ to type a path.
 
 Typing in a path field suggests matching folders and files: ++tab++ takes the first, the arrow keys and ++enter++ pick another, and ++down++ in an empty field suggests recent paths and the usual folders.
-
-The start image, the first and last frames and each reference have no path field: pick one with the folder button, which browses the server, or with the upload button for a picture on the device you're browsing from. A picture you uploaded stays until you remove it, also after a reload.
 
 ## Generate
 
