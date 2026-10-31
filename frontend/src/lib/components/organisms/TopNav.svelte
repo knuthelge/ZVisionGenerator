@@ -4,7 +4,7 @@
   import { jobStore } from '$lib/state/job.svelte';
   import { isReviewing } from '$lib/state/jobView';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
-  import { Badge, Icon, MascotHome } from '$lib/components/atoms';
+  import { Badge, Icon, MascotHome, Wordmark } from '$lib/components/atoms';
   import type { PageId, Workflow } from '$lib/types';
 
   interface Props {
@@ -42,7 +42,8 @@
   <div class="nav-workflows">
     <h1 class="brand flex items-center gap-2 shrink-0">
       <MascotHome placement={mascotHome.placement} size={24} />
-      ziv
+      <Wordmark height={13.4} />
+      <span class="sr-only">Z-Vision</span>
     </h1>
 
     {#if currentPage === 'workspace'}

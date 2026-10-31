@@ -114,7 +114,8 @@
 
   /* The overlay ladder, bottom to top. Every full-screen surface is portalled to <body> (lib/actions/portal.ts),
      so this order is the only one that decides what covers what: the viewer, then sheets and the drawer over it,
-     dialogs over those, menus over anything they open from, toasts over all but a dialog raised on purpose. */
+     dialogs over those, menus over anything they open from, toasts over all but a dialog raised on purpose.
+     The mascot's canvas effects play over the page and its popovers, under the viewer and everything above it. */
   :root {
     --z-viewer: 100;
     --z-sheet: 130;
@@ -123,7 +124,7 @@
     --z-menu: 170;
     --z-toast: 180;
     --z-modal-top: 200;
-    --z-mascot-flight: 210;
+    --z-mascot-effect: 90;
   }
 
   *::-webkit-scrollbar-track {

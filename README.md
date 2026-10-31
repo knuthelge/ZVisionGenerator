@@ -1,6 +1,10 @@
 &nbsp;
 <p align="center">
-    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/ziv-logo.png" alt="Z-Vision Generator logo with the Blob mascot" width="360"/>
+    <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/ziv-logo-dark.png"/>
+        <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/ziv-logo-light.png"/>
+        <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/ziv-logo-light.png" alt="Z-Vision Generator logo with the Blob mascot" width="360"/>
+    </picture>
 </p>
 &nbsp;
 

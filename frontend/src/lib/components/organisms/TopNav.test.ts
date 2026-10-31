@@ -34,6 +34,15 @@ describe('TopNav', () => {
   const workspaceTab = () => Array.from(target.querySelectorAll('.main-tabs .nav-tab')).find((tab) => tab.textContent?.includes('Workspace'))!;
   const source = () => (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
 
+  it('names the app Z-Vision for assistive technology, with only decorative drawings beside the name', () => {
+    const brand = target.querySelector('h1') as HTMLElement;
+
+    expect(brand.textContent?.trim()).toBe('Z-Vision');
+    const drawings = Array.from(brand.querySelectorAll('svg'));
+    expect(drawings.length).toBeGreaterThan(0);
+    expect(drawings.every((drawing) => drawing.getAttribute('aria-hidden') === 'true')).toBe(true);
+  });
+
   it('badges the Workspace while an image or video render waits for review, on any page, and clears it after the decision', () => {
     jobStore.startJob({ job_id: 'job-nav', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
     flushSync();

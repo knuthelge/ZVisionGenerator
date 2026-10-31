@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Icon } from '$lib/components/atoms';
+  import { Icon, Wordmark } from '$lib/components/atoms';
   import { portal } from '$lib/actions/portal';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { pan, rubberBand, type PanEnd } from '$lib/actions/pan';
@@ -89,7 +89,7 @@
       aria-label="Menu"
       tabindex="-1"
     >
-      <h1 class="drawer-brand"><img src={logoSrc} alt="" class="h-6 w-6">ziv</h1>
+      <h1 class="drawer-brand"><img src={logoSrc} alt="" class="h-6 w-6"><Wordmark height={13.4} /><span class="sr-only">Z-Vision</span></h1>
       <nav class="drawer-pages" aria-label="Pages">
         {#each PAGES as page (page.id)}
           <button type="button" class="drawer-item" class:active={page.id === currentPage} aria-current={page.id === currentPage ? 'page' : undefined} onclick={() => go(page.id)}>
@@ -108,7 +108,7 @@
   .drawer { position: absolute; top: 0; bottom: 0; left: 0; display: flex; width: min(300px, 82vw); flex-direction: column; gap: 2px; padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); background: var(--color-bg-surface); outline: none; translate: -100% 0; transition: translate 240ms cubic-bezier(0.32, 0.72, 0, 1); }
   .drawer-root[data-shown='true'] .drawer { translate: 0 0; }
   .drawer.dragging { transition: none; }
-  .drawer-brand { display: flex; align-items: center; gap: 8px; margin: 4px 8px 16px; font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; }
+  .drawer-brand { display: flex; align-items: center; gap: 8px; margin: 4px 8px 16px; }
   .drawer-pages { display: flex; flex-direction: column; gap: 2px; }
   .drawer-item { display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 15px; font-weight: 600; text-align: left; color: var(--color-text-secondary); }
   .drawer-item:active { background: var(--color-bg-surface-hover); }
