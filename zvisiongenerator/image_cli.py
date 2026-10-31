@@ -58,7 +58,7 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("--lora", type=str, default=None, help="Comma-separated LoRAs with optional weights: name1:0.8,name2:0.5. Bare names resolve from ~/.ziv/loras/.")
     parser.add_argument("--steps", type=int, default=None, help="Number of steps for image generation (e.g., 10, 20).")
     parser.add_argument("--guidance", type=float, default=None, help="Guidance scale for image generation (float).")
-    parser.add_argument("--scheduler", type=str, default=None, help="Scheduler to use (e.g., 'beta').")
+    parser.add_argument("--scheduler", type=str, default=None, help="Scheduler: 'beta' or 'simple' (evenly spaced). Default: per model.")
     parser.add_argument(
         "--first-sigma",
         dest="first_sigma",
@@ -72,7 +72,9 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("--upscale-steps", type=int, default=None, help="Number of steps for upscaling (integer).")
     parser.add_argument("--upscale-save-pre", action=argparse.BooleanOptionalAction, default=False, help="Save the image before upscaling (with '_pre' suffix).")
     parser.add_argument("--upscale-guidance", type=float, default=None, help="Override guidance scale for the upscale refinement step (float). Falls back to --guidance when not set.")
-    parser.add_argument("--upscale-sharpen", action=argparse.BooleanOptionalAction, default=True, help="Apply contrast-adaptive sharpening before upscale refinement.")
+    parser.add_argument(
+        "--upscale-sharpen", action=argparse.BooleanOptionalAction, default=None, help="Apply contrast-adaptive sharpening before upscale refinement. Default: per model (on, except Krea 2)."
+    )
     parser.add_argument(
         "--review",
         action="store_true",
@@ -269,6 +271,8 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error(str(e))
     if args.upscale and args.upscale_steps is None:
         args.upscale_steps = resolve_upscale_steps(defaults, args.steps)
+    if args.upscale_sharpen is None:
+        args.upscale_sharpen = defaults.get("upscale_sharpen", True)
     if args.image_path is not None and not os.path.isfile(args.image_path):
         parser.error(f"Start image not found: {args.image_path}")
     if not (0.0 <= args.image_strength <= 1.0):

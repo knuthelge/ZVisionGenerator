@@ -26,6 +26,8 @@ export interface CliCommandOptions {
    * and a missing `--prompt` from a legacy source's prompt, so a blank Scene or Prompt is then sent as an empty flag.
    */
   extendSource?: Pick<ExtendSourceInfo, 'scene' | 'legacy'> | null;
+  /** The model's default for pre-sharpening before an upscale's refine pass; the CLI applies it when no flag is given. */
+  upscaleSharpenDefault?: boolean;
 }
 
 const SAFE_ARG = /^[A-Za-z0-9_\-+=.,:/@%]+$/;
@@ -208,7 +210,10 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
       flag('--upscale-denoise', text(settings, 'upscale_denoise'));
       flag('--upscale-steps', text(settings, 'upscale_steps'));
       flag('--upscale-guidance', text(settings, 'upscale_guidance'));
-      if (first(settings, 'upscale_sharpen') === 'false') args.push('--no-upscale-sharpen');
+      const sharpen = first(settings, 'upscale_sharpen');
+      const sharpenDefault = options.upscaleSharpenDefault ?? true;
+      if (sharpen === 'false' && sharpenDefault) args.push('--no-upscale-sharpen');
+      if (sharpen === 'true' && !sharpenDefault) args.push('--upscale-sharpen');
       if (checked(settings, 'review')) args.push('--review');
     }
   }

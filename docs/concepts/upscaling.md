@@ -23,7 +23,7 @@ With **Upscale** at 2× or 4× (`--upscale 2` or `4`), the image keeps the size 
 | **Denoise** | `--upscale-denoise` | 0.4 | How much the refine pass may change. See [configuration](configuration.md#upscale) |
 | Steps | `--upscale-steps` | per model | Steps of the refine pass |
 | Guidance | `--upscale-guidance` | the main guidance | Guidance of the refine pass |
-| Pre-sharpen | `--no-upscale-sharpen` | on | Sharpen before refining |
+| Sharpen | `--upscale-sharpen` / `--no-upscale-sharpen` | on, off for Krea 2 | Sharpen before refining |
 | Save the small image | `--upscale-save-pre` | off | Also keep the image before upscaling, with a `_preupscale` suffix |
 
 Models that can't refine images, such as Ideogram 4, can't upscale while generating.

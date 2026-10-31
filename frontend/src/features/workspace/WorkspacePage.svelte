@@ -1261,7 +1261,8 @@
     let built: CliCommand;
     try {
       const extendSource = draft.extendSource ? { scene: draft.extendSource.scene, legacy: draft.extendSource.legacy } : null;
-      built = cliCommand(settings, { outputDir: context?.output_dir, promptFileOptionCount, extendSource });
+      const upscaleSharpenDefault = context ? settingDefaultsFor(context, draft.state).upscaleSharpen : undefined;
+      built = cliCommand(settings, { outputDir: context?.output_dir, promptFileOptionCount, extendSource, upscaleSharpenDefault });
     } catch (err) {
       addToast(errorText(err, 'Could not build the CLI command'), 'error');
       return;

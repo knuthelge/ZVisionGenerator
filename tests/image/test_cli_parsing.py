@@ -134,6 +134,16 @@ class TestCLIValidation:
             self._run_main_with_overrides(["--review", "--upscale", "2", "-m", "fake"], run_batch=run_batch)
         assert run_batch.call_args.args[4].review is True
 
+    @pytest.mark.parametrize(("flags", "expected"), [([], False), (["--upscale-sharpen"], True)])
+    def test_upscale_sharpen_follows_the_model_default_unless_given(self, flags, expected):
+        run_batch = MagicMock()
+        self._run_main_with_overrides(
+            ["--upscale", "2", "-m", "fake", *flags],
+            resolve_defaults=lambda *a, **kw: {"steps": 8, "guidance": 1.0, "scheduler": "beta", "upscale_sharpen": False},
+            run_batch=run_batch,
+        )
+        assert run_batch.call_args.args[4].upscale_sharpen is expected
+
     @pytest.mark.parametrize("width", [240, 3072])
     def test_ideogram4_dimension_bounds_error_on_in_grid_out_of_range_widths(self, width, capsys):
         mock_backend = _backend("ideogram4")

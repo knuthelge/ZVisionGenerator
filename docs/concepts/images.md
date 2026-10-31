@@ -23,7 +23,7 @@ The **Base resolution** on the [Config page](../web-ui/config.md) changes the de
 - **Steps** is how many denoising steps the model takes. Each model has a default that suits it, such as 4 for FLUX.2 Klein and MOSS-Image Turbo, 8 for Krea 2 and Ideogram 4, and 50 for MOSS-Image SFT. More steps aren't always better with these distilled models.
 - **Guidance** is how strictly the model follows the prompt. The defaults suit each model; Ideogram 4 and MOSS-Image Turbo ignore it, and for Krea 2 and MOSS-Image SFT anything above 1.0 makes each step take about twice as long.
 - **Seed** picks the starting noise. The same model, prompt, settings and seed give the same image. Without a seed every image gets a random one, which is recorded in the file.
-- **Scheduler** decides how the steps are spaced. Z-Image uses `beta` by default; most other models have no choice.
+- **Scheduler** decides how the steps are spaced. Z-Image and Krea 2 use `beta` by default, and `simple` spaces the steps evenly; most other models have no choice.
 
 ## Start image { #start-image }
 

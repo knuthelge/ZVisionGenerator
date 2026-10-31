@@ -150,6 +150,25 @@ def test_workspace_bootstrap_defaults_include_scheduler_capability(monkeypatch):
     assert workspace_api_module._build_image_bootstrap_defaults("zit", web_config)["supports_scheduler"] is True
 
 
+def test_workspace_bootstrap_defaults_carry_the_model_upscale_pre_sharpen(monkeypatch):
+    web_config = make_web_config()
+    web_config.app_config["model_aliases"] = {"krea2": "unsloth/Krea-2-Turbo", "zit": "Tongyi-MAI/Z-Image-Turbo"}
+    web_config.image_model_options = ("krea2", "zit")
+    families = {"unsloth/Krea-2-Turbo": "krea2", "Tongyi-MAI/Z-Image-Turbo": "zimage"}
+
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: web_config.app_config["model_aliases"].get(model, model))
+    monkeypatch.setattr(workspace_api_module, "detect_image_model", lambda value: ImageModelInfo(family=families[str(value)], is_distilled=True, size=None))
+    monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "mflux")
+    monkeypatch.setattr(
+        workspace_api_module,
+        "resolve_defaults",
+        lambda model_info, *_: make_resolved_image_defaults(upscale_sharpen=model_info.family != "krea2"),
+    )
+
+    assert workspace_api_module._build_image_bootstrap_defaults("krea2", web_config)["upscale"]["sharpen"] is False
+    assert workspace_api_module._build_image_bootstrap_defaults("zit", web_config)["upscale"]["sharpen"] is True
+
+
 def test_workspace_bootstrap_defaults_fall_back_to_supported_ideogram_preset(monkeypatch):
     web_config = make_web_config()
     web_config.app_config["generation"] = {

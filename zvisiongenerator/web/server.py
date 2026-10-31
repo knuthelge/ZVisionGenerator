@@ -1119,7 +1119,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         upscale_denoise=_optional_float(form, "upscale_denoise"),
         upscale_steps=_optional_int(form, "upscale_steps"),
         upscale_guidance=_optional_float(form, "upscale_guidance"),
-        upscale_sharpen=_checkbox(form, "upscale_sharpen", default=True),
+        # Left unset when the form omits it, so the model's default applies.
+        upscale_sharpen=_checkbox(form, "upscale_sharpen") if "upscale_sharpen" in form else None,
         upscale_save_pre=_checkbox(form, "upscale_save_pre"),
         review=bool(upscale) and _checkbox(form, "review"),
         image_path=_resolve_reference_image(form, output_dir),
@@ -1200,6 +1201,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     validate_scheduler(args.scheduler, app_config)
     if args.upscale and args.upscale_steps is None:
         args.upscale_steps = resolve_upscale_steps(defaults, args.steps)
+    if args.upscale_sharpen is None:
+        args.upscale_sharpen = defaults.get("upscale_sharpen", True)
 
     if not defaults.get("supports_negative_prompt", False):
         negative_prompt = None

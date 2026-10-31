@@ -522,19 +522,19 @@ describe('draft store', () => {
     });
 
     it('clears a kept scheduler on a model that uses its own sampler', () => {
-      const kreaDefaults = makeImageDefaults({ steps: 8, guidance: 1, supports_scheduler: false });
+      const mossDefaults = makeImageDefaults({ steps: 4, guidance: 1, supports_scheduler: false });
       const ctx = makeContext({
-        image_models: [{ id: 'krea2', label: 'Krea 2', type: 'image' }],
-        current_image_model: 'krea2',
-        defaults: kreaDefaults,
-        image_model_defaults: { krea2: kreaDefaults },
+        image_models: [{ id: 'moss', label: 'MOSS-Image Turbo', type: 'image' }],
+        current_image_model: 'moss',
+        defaults: mossDefaults,
+        image_model_defaults: { moss: mossDefaults },
       });
 
       draft.update('workflow', 'txt2img');
-      draft.hydrateFromContext(ctx, 'krea2');
+      draft.hydrateFromContext(ctx, 'moss');
       draft.update('scheduler', 'beta');
 
-      draft.hydrateFromContext(ctx, 'krea2', { keepSettings: true });
+      draft.hydrateFromContext(ctx, 'moss', { keepSettings: true });
 
       expect(draft.state.scheduler).toBeNull();
     });

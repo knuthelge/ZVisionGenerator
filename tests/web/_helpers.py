@@ -75,6 +75,7 @@ def make_resolved_image_defaults(
     dimension_min: int = 16,
     dimension_max: int | None = None,
     dimension_step: int = 16,
+    upscale_sharpen: bool = True,
 ) -> dict[str, object]:
     return {
         "steps": 10,
@@ -91,6 +92,7 @@ def make_resolved_image_defaults(
         "dimension_min": dimension_min,
         "dimension_max": dimension_max,
         "dimension_step": dimension_step,
+        "upscale_sharpen": upscale_sharpen,
     }
 
 
