@@ -51,3 +51,6 @@ bench/enhance/runs/
 
 # Transparent-background bench renders and mattes
 bench/transparent/runs/
+
+# Video-upscale bench renders and upscales
+bench/video_upscale/runs/

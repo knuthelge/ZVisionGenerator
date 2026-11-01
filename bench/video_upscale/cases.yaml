@@ -1,0 +1,33 @@
+# Source clips for the video-upscale bench, rendered with the app's video CLI.
+# `frames` is the first render (8k+1 at the model's 24 fps). Each entry of `extends` continues the clip by that many
+# frames (a multiple of 8) with its own action, so `walk10` ends at 121 + 64 + 64 = 249 frames, about 10 s.
+
+model: ltx-4
+seed: 51207733
+
+clips:
+  walk5:
+    size: s
+    frames: 121
+    scene: A narrow cobblestone street in an old European town at golden hour, warm low sunlight, shop signs and flower boxes, handheld camera at eye level.
+    prompt: A woman in a red coat walks towards the camera, past a cafe where people sit at small tables, pigeons scatter in front of her.
+  walk10:
+    size: s
+    frames: 121
+    scene: A busy harbour promenade on a clear morning, sailboats and fishing boats moored along the quay, gulls overhead, steady camera at eye level.
+    prompt: A man with a bicycle walks along the quay, looking at the boats.
+    extends:
+      - frames: 64
+        prompt: He stops, leans the bicycle against a railing and points at a sailboat leaving the harbour.
+      - frames: 64
+        prompt: He takes a photo of the boat with his phone, then gets back on the bicycle and rides away.
+  face:
+    size: s
+    frames: 121
+    scene: Close-up portrait of an elderly fisherman with a weathered face, grey stubble and a knitted wool cap, soft overcast daylight, shallow depth of field.
+    prompt: He looks out to sea, then turns to the camera, smiles slightly and says "The weather is turning."
+  medium5:
+    size: m
+    frames: 121
+    scene: A sunlit forest clearing with tall pine trees, ferns and drifting pollen in the light beams, slow dolly shot.
+    prompt: A red fox trots across the clearing, stops, sniffs the ground and looks up at the camera.

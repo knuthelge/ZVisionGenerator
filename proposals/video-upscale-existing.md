@@ -1,6 +1,6 @@
 # Upscale existing videos 2×
 
-**Status:** In progress (2026-10-24). Windows and Linux ship in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is not started: it uses LTX's own upsampler and refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
+**Status:** In progress (2026-10-24). Windows and Linux ship in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS: the spike and its blind review ran on 2026-11-01 (see [macOS spike results](#macos-spike-results)): 2 refine steps, 512 px × 48-frame encoder tiles, the recorded prompt or an empty one, no tiling up to 10 s at `s`; step 1 is next. macOS uses LTX's own upsampler and refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
 
 ## Problem
 
@@ -82,6 +82,37 @@ A web survey on 2026-10-22 of upscaler repos, model cards, the ComfyUI community
 | SeedVR2 on a 32 GB Mac only fits in tiles. mlx-seedvr2-swift measured 11.78 GiB for one 256×256 tile stream at 9 frames, plus about 784 MiB per extra tile position. It needs macOS 26 and a Pro-class chip, and is an early project (v0.10). Topaz's Starlight Mini refuses Macs with less than 36 GB | [mlx-seedvr2-swift](https://github.com/xocialize/mlx-seedvr2-swift), [Topaz forum](https://community.topazlabs.com/t/starlight-mini-not-running-on-m-chip-mac-with-less-than-36gb-of-ram-any-workaround/100086) |
 | FlashVSR is designed for 4× only, its sparse attention is tuned for A100-class GPUs, and users report grid patterns and shimmer. FlashVSR+ (2026-10) targets a 24 GB RTX 4090 | [FlashVSR](https://github.com/OpenImagingLab/FlashVSR), [FlashVSR+ paper](https://huggingface.co/papers/2610.17552) |
 | Fast options without diffusion: NVIDIA RTX Video Super Resolution (`nvidia-vfx` on PyPI, RTX GPUs only) and Apple's `VTSuperResolutionScalerConfiguration` (VideoToolbox, macOS 26+, model downloaded by the OS, Swift/Objective-C API; scale factors and limits are only reported at run time). Real-ESRGAN works per frame and shimmers on fine detail | [NVIDIA RTX VSR node](https://github.com/tritant/ComfyUI_NVIDIA_RTX_VSR_Long_Video), [Apple docs](https://developer.apple.com/documentation/videotoolbox/vtsuperresolutionscalerconfiguration), [Real-ESRGAN video models](https://mintlify.com/xinntao/Real-ESRGAN/models/video-models) |
+
+### macOS spike results
+
+Measured on 2026-11-01 on a 32 GB M5 MacBook Air (25 GiB MLX budget) with `ltx-4`, `--low-memory`, seed 51207733, by `bench/video_upscale` (`render`, `run`, `encode-check`, and a blind-review site, `review`). The refine builds a `Stage1Result` from the encoded video through the pipeline's own resume path (`generate_two_stage(stage1=...)`), holds the source's encoded sound frozen in stage 2 (`A2VidDistilledPipeline._source_audio_tokens`) and muxes the source's own audio stream onto the result; no vendored code changes. Four app renders: `walk5` (`s`, 121 frames), `walk10` (`s`, 121 frames plus two 64-frame extends, 249 frames), `face` (`s` close-up, 121 frames), `medium5` (`m`, 121 frames).
+
+Time and MLX peak per upscale (encode, refine including the prompt encode, decode):
+
+| Clip, output | Method | Total | Per output second | Peak | Encode / refine / decode peak (GiB) |
+|---|---|---|---|---|---|
+| walk5, 1536×896 | 1 step | 258 s | 51 s | 18.3 GiB | 18.3 / 14.2 / 15.0 |
+| | 2 steps | 417 s | 83 s | 18.3 GiB | |
+| | 3 steps | 569 s | 113 s | 18.3 GiB | |
+| | IC-LoRA 2×, strength 1.0 | 1972 s | 391 s | 15.0 GiB | one 8-step pass at the output size |
+| face, 1536×896 | 1 / 2 / 3 steps | 271 / 428 / 585 s | 54 / 85 / 116 s | 18.3 GiB | 18.3 / 14.2 / 15.0 |
+| walk10, 1536×896 | 1 step | 690 s | 66 s | 19.2 GiB | 19.2 / 17.9 / 15.5 |
+| | 2 / 3 steps | 1129 / 1564 s | 109 / 151 s | 19.2 GiB | |
+| medium5, 2048×1152 | 1 step | 539 s | 107 s | 23.4 GiB | 23.4 / 16.8 / 18.5 |
+| | 2 / 3 steps | 882 / 1231 s | 175 / 244 s | 23.4 GiB | |
+
+| Gate | Result |
+|---|---|
+| Fit | Passes. The 10 s extended clip refines in one piece, untiled, at 17.9 GiB. `VideoModalityTiler` isn't needed up to 10 s at `s`; longer clips and `l` are unmeasured |
+| Time | One refine step costs about 155 s at `s` for 5 s, 440 s for the 10 s clip and 340 s at `m`; the decode adds 95 s, 200 s and 150 s. Loading and the prompt encode add a few seconds |
+| Strength | 3 steps re-renders the shot: on `walk5` a different woman, other people at the tables and a flock of pigeons that isn't in the source; on `face` different eyebrows, eyes, mouth and teeth. The blind review marked it as changing the content on every clip it covered. Out. The review picked 2 steps on `face` and `medium5`, over 1 step and bicubic. On `walk10` it picked bicubic: the frames after the extend joins are soft and motion-blurred, and both 1 and 2 steps rebuilt the cyclist (his head turned, the handlebars changed) instead of sharpening him. `walk5` was left out as too soft a source to judge. Default: 2 steps. A soft or blurred source gains invented detail at any step count |
+| IC-LoRA | Faithful to the source's layout and the sharpest result, but 33 minutes for a 5 s `s` clip, about 8× the 1-step refine, and its weights are gated (a Hugging Face login and Lightricks' terms; no ungated mirror found). Not chosen as the default |
+| Extend joins | The frames either side of each join of the upscaled `walk10` are continuous, with no jump in detail or colour |
+| Prompt | Passes. The blind review couldn't tell the 1-step refine with an empty prompt from the one with the recorded prompt on `face`. The recorded scene and prompt are used when there are any; a video without them is refined with an empty prompt |
+| Encode | Fits, but sets the peak with the encoder's default tiles (768 px, 80 frames): 18.3 GiB at `s`, 23.4 GiB at `m`, within 2 GiB of the budget. 512 px × 48-frame tiles bring the encode to 9.6 GiB at `m` and 8.7 GiB for the 10 s clip, for 10–16 s more; the whole `m` upscale then peaks at 18.5 GiB, in the decode. The blind review couldn't tell the two apart after the refine. Rule: encode in 512 px × 48-frame tiles |
+| Estimate | With 512 px × 48-frame encoder tiles the peak is the refine or the decode (14.2–18.5 GiB), at or below `clip_memory_fit(upscale=True)` in every case (17.1 GiB at `s` for 5 s, 20.0 GiB for the 10 s clip, 18.8 GiB at `m`); the margin at `m` is 0.3 GiB. With the default tiles the encode would exceed it |
+
+Every output keeps the source's frame count and lines up with it frame for frame.
 
 ## Proposed change
 
