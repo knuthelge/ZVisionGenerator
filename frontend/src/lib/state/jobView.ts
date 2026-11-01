@@ -76,7 +76,7 @@ const STEPPED_STAGES: Record<string, string> = {
 };
 
 /** What an item shows after its last step, for stages that name their work; others read "Finishing up…". */
-const FINISHING_LABELS: Record<string, string> = { join_clips: 'Joining clips…' };
+const FINISHING_LABELS: Record<string, string> = { join_clips: 'Joining clips…', matte: 'Removing background…' };
 
 /** The label for the stretch after the last step: what the current stage is doing, or "Finishing up…". */
 export function finishingLabel(job: ActiveJobState): string {
@@ -236,6 +236,12 @@ export function downloadFraction(download: Pick<JobDownload, 'bytes_done' | 'byt
   return Math.min(1, Math.max(0, download.bytes_done / download.bytes_total));
 }
 
+/** The name of a download's progress bar and phase row, by what it fetches. */
+export function downloadLabel(role: JobDownload['role']): string {
+  if (role === 'enhancer') return 'Enhancer download';
+  return role === 'matte' ? 'Background removal download' : 'Model download';
+}
+
 /** The text, percentage and accessible values of a download block. */
 export function downloadView(download: JobDownload): DownloadView {
   const line = downloadLine(download).split(' · ');
@@ -245,11 +251,11 @@ export function downloadView(download: JobDownload): DownloadView {
   const valuetext = fraction === null ? `${amount} downloaded, size unknown` : `${amount.replace(' / ', ' of ')}${part ? `, ${part}` : ''}`;
   let help = 'Only the first time; later jobs load the saved files.';
   if (download.shared) help = 'Already downloading. Cancel stops this job; the download keeps going.';
-  else if (download.role === 'enhancer') help = `Downloading ${download.repo}. Only the first time.`;
+  else if (download.role === 'enhancer' || download.role === 'matte') help = `Downloading ${download.repo}. Only the first time.`;
   return {
     segments: part ? [part.charAt(0).toUpperCase() + part.slice(1), ...line] : line,
     percent: fraction === null ? null : Math.round(fraction * 100),
-    label: download.role === 'enhancer' ? 'Enhancer download' : 'Model download',
+    label: downloadLabel(download.role),
     valuetext,
     help,
   };
@@ -302,7 +308,10 @@ export function headline(job: ActiveJobState): string {
   }
   if (tone === 'stopped') {
     if (phase === 'queue' && job.message.startsWith('Removed')) return 'Removed from the queue';
-    if (job.downloadStop) return phase === 'enhance' ? 'Stopped while downloading the prompt enhancer' : 'Stopped while downloading the model';
+    if (job.downloadStop) {
+      if (phase === 'enhance') return 'Stopped while downloading the prompt enhancer';
+      return job.download?.role === 'matte' ? 'Stopped while downloading background removal' : 'Stopped while downloading the model';
+    }
     if (!generating) return `Stopped ${ENDED_PHASE_WORDS[phase]}`;
     return total > 1 ? `Stopped after ${done} of ${total} ${noun}s` : 'Stopped';
   }
@@ -322,6 +331,7 @@ export function headline(job: ActiveJobState): string {
     return rewrite ? `Enhancing prompt ${rewrite.current} of ${rewrite.total}` : 'Loading the prompt enhancer';
   }
   if (phase === 'load') {
+    if (job.download?.role === 'matte') return 'Downloading background removal';
     if (job.download?.role === 'model' || job.loadPhase === 'downloading') return `Downloading ${job.model_label || job.model}`;
     if (job.loadPhase === 'building') return `Building ${job.model_label || job.model}`;
     return job.loadQuant ? 'Preparing the model' : 'Loading the model';
@@ -471,6 +481,7 @@ export function loadBody(job: ActiveJobState): string {
 }
 
 function loadLabel(job: ActiveJobState): string {
+  if (job.download?.role === 'matte') return downloadLabel('matte');
   if (job.loadPhase === 'downloading' || job.download?.role === 'model') return 'Download model';
   if (job.loadPhase === 'building') return 'Build model';
   return job.loadQuant ? 'Prepare model' : 'Load model';
@@ -485,6 +496,7 @@ function rowDetail(job: ActiveJobState, key: JobPhase, status: PhaseRowStatus, t
     return job.enhanceTotal ? `${job.enhanceTotal} prompt${job.enhanceTotal === 1 ? '' : 's'}` : '';
   }
   if (key === 'load') {
+    if (job.download?.role === 'matte') return '';
     if (job.loadPhase === 'building') return 'first use only';
     return job.loadQuant ? `q${job.loadQuant} copy · first use only` : job.model_label || job.model;
   }

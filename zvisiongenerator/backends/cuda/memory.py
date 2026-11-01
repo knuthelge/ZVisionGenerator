@@ -12,7 +12,7 @@ _ALLOCATOR_CONFIG = "expandable_segments:True,garbage_collection_threshold:0.8"
 PIN_ROUND_SETTING = "pinned_max_round_threshold_mb:1"
 """Allocator setting that stops PyTorch rounding pinned host allocations up to a power of two."""
 
-__all__ = ["PIN_ROUND_SETTING", "configure_allocator", "memory_sizes", "merged_alloc_conf", "release_memory"]
+__all__ = ["PIN_ROUND_SETTING", "configure_allocator", "free_bytes", "memory_sizes", "merged_alloc_conf", "release_memory"]
 
 
 def merged_alloc_conf(cuda_conf: str | None, alloc_conf: str | None, add: str) -> str:
@@ -101,6 +101,20 @@ def _trim_heap() -> None:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except OSError, AttributeError:  # not glibc
         pass
+
+
+def free_bytes() -> int | None:
+    """Return the GPU memory the driver reports free, in bytes, or ``None`` when there is no CUDA device or the query fails.
+
+    This is the driver's view (``torch.cuda.mem_get_info``), so it counts memory PyTorch has reserved but not used as
+    taken. Memory the allocator holds for reuse is not free for another model.
+    """
+    import torch
+
+    try:
+        return int(torch.cuda.mem_get_info()[0])
+    except Exception:  # noqa: BLE001 - no CUDA, a driver error or a broken install all mean "unknown"
+        return None
 
 
 def memory_sizes() -> tuple[int, int] | None:

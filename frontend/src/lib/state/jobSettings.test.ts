@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { hasJobSettings, jobSettingsPrefill } from './jobSettings';
+import { hasJobSettings, jobSettingsPrefill, outputSettingsPatch } from './jobSettings';
 
 describe('jobSettingsPrefill', () => {
   it('splits an inline image job into prefill params and the remaining settings', () => {
@@ -60,6 +60,13 @@ describe('jobSettingsPrefill', () => {
 
     expect(patch.postprocessSharpenEnabled).toBe(false);
     expect(patch).not.toHaveProperty('postprocessSharpenAmount');
+  });
+
+  it('turns Transparent on for a job that sent it, and off for one that did not', () => {
+    expect(jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a', transparent: 'true' }).patch.postprocessTransparent).toBe(true);
+    expect(jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a', transparent: 'false' }).patch.postprocessTransparent).toBe(false);
+    expect(jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a' }).patch.postprocessTransparent).toBe(false);
+    expect(jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', prompt: 'a' }).patch).not.toHaveProperty('postprocessTransparent');
   });
 
   it('restores a prompt-file job with several selected prompts and a custom size', () => {
@@ -206,5 +213,32 @@ describe('hasJobSettings', () => {
     expect(hasJobSettings(undefined)).toBe(false);
     expect(hasJobSettings(null)).toBe(false);
     expect(hasJobSettings({ model: 'zit' })).toBe(true);
+  });
+});
+
+describe('outputSettingsPatch', () => {
+  const FINISHING = {
+    transparent: 'true', sharpen_enabled: 'true', sharpen_amount: '0.6', contrast_enabled: 'true', contrast_amount: '1.1', saturation_enabled: 'false',
+    upscale: '2', upscale_denoise: '0.3', upscale_steps: '12', upscale_guidance: '1.5', upscale_sharpen: 'false', image_strength: '0.7',
+  };
+
+  it('maps every finishing setting of an image to its draft key', () => {
+    expect(outputSettingsPatch(FINISHING, false)).toEqual({
+      postprocessTransparent: true, postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.6, postprocessContrastEnabled: true, postprocessContrastAmount: 1.1,
+      postprocessSaturationEnabled: false, upscaleEnabled: true, upscaleFactor: 2, upscaleDenoise: 0.3, upscaleSteps: 12, upscaleGuidance: 1.5, upscaleSharpen: false,
+      referenceImageStrength: 0.7,
+    });
+  });
+
+  it('reads a missing upscale as off, and never touches the Review choice', () => {
+    const patch = outputSettingsPatch({ sharpen_enabled: 'true' }, false);
+    expect(patch).toMatchObject({ upscaleEnabled: false, postprocessTransparent: false });
+    expect(patch).not.toHaveProperty('upscaleReview');
+  });
+
+  it('maps only the post-processing of a video', () => {
+    expect(outputSettingsPatch({ ...FINISHING }, true)).toEqual({
+      postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.6, postprocessContrastEnabled: true, postprocessContrastAmount: 1.1, postprocessSaturationEnabled: false,
+    });
   });
 });

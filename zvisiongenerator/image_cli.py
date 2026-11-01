@@ -9,6 +9,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
+from typing import Any
 
 from zvisiongenerator.backends import get_backend, release_accelerator_memory
 from zvisiongenerator.built_models import ensure_built_model
@@ -18,6 +19,9 @@ from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.built_model import BUILDING_PHASE
 from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, load_image_model
 from zvisiongenerator.image_runner import run_batch
+from zvisiongenerator.utils.hf_snapshot import snapshot_download, snapshot_with
+from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
+from zvisiongenerator.utils.model_files import cached_snapshot_dirs
 from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, model_display_name, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
@@ -87,6 +91,12 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("--no-contrast", dest="contrast", action="store_const", const=False, help="Disable contrast adjustment.")
     parser.add_argument("--saturation", nargs="?", const=True, type=float, default=False, help="Apply saturation adjustment. Optional amount (1.0 = no change). Default: disabled.")
     parser.add_argument("--no-saturation", dest="saturation", action="store_const", const=False, help="Disable saturation adjustment.")
+    parser.add_argument(
+        "--transparent",
+        action="store_true",
+        default=False,
+        help="Cut the subject out and save a PNG with transparency. Non-commercial: the cut-out models were trained on research datasets that don't allow commercial use.",
+    )
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="Path to a start image for img2img.")
     parser.add_argument("--image-strength", dest="image_strength", type=float, default=0.5, help="Denoising strength for the start image (0.0–1.0). Default: 0.5.")
     parser.add_argument(
@@ -100,6 +110,20 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=None, help="Seed for reproducible image generation. If not set, a random seed is used each run.")
     add_enhance_arguments(parser, mode="image")
     return parser
+
+
+def _fetch_matte_models() -> None:
+    """Download the pinned background removal files that are missing, so a failed download never costs a render.
+
+    Raises:
+        OSError: When the Hub cannot be reached or a download fails.
+    """
+    pins = (BIREFNET, VITMATTE)
+    missing = any(not any(all((snapshot / name).is_file() for name in pin.files) for snapshot in cached_snapshot_dirs(pin.repo_id, pin.revision)) for pin in pins)
+    if missing:
+        print("Downloading the background removal models (first use only)...", flush=True)
+    for pin in pins:
+        snapshot_with(pin, snapshot_download)
 
 
 def main(*, prog: str = "ziv-image") -> None:
@@ -340,8 +364,15 @@ def main(*, prog: str = "ziv-image") -> None:
             parser.error(f"Failed to prepare {label}: {e}")
         if not built:
             return
-        try:
-            loaded_model, loaded_model_info = load_image_model(
+        if args.transparent:
+            try:
+                _fetch_matte_models()
+            except Exception as e:  # noqa: BLE001 - the Hub client raises its own error types; any failure stops the run before a model loads
+                logger.exception("Failed to download the background removal models")
+                parser.error(f"Failed to download the background removal models: {e}")
+
+        def load_model() -> tuple[Any, Any]:
+            return load_image_model(
                 backend,
                 args.model,
                 quantize=args.quantize,
@@ -353,9 +384,12 @@ def main(*, prog: str = "ziv-image") -> None:
                 cancelled=lambda: skip.pending() == "quit",
                 release_memory=release_accelerator_memory,
             )
+
+        try:
+            loaded_model, loaded_model_info = load_model()
         except (RuntimeError, ImportError, OSError, ValueError) as e:
             logger.exception("Failed to load model %s", args.model)
             parser.error(f"Failed to load model: {describe_refusal(e) or e}")
-        run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info, plan=plan, skip_signal=skip)
+        run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info, plan=plan, skip_signal=skip, reload_model=lambda: load_model()[0])
     finally:
         skip.stop()

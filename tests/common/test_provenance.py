@@ -56,6 +56,15 @@ def _make_image_request(**overrides):
 
 
 class TestBuildImageConfigPayload:
+    def test_transparent_is_recorded_only_when_on(self):
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (512, 384)))
+
+        on = build_image_config_payload(_make_image_request(transparent=True), artifacts)
+        off = build_image_config_payload(_make_image_request(), artifacts)
+
+        assert on["generation"]["transparent"] is True
+        assert "transparent" not in off.get("generation", {})
+
     def test_a_plain_payload_holds_exactly_the_reusable_fields(self):
         request = _make_image_request(
             lora_paths=["/models/style.safetensors"],
@@ -720,6 +729,16 @@ class TestRecordedSettings:
         settings = recorded_settings({"lora": [{"name": "style", "weight": 0.8}, "detail"]})
 
         assert settings.lora == "style:0.8,detail"
+
+    def test_keeps_transparent_and_drops_a_non_bool_value(self):
+        assert recorded_settings({"generation": {"transparent": True}}).generation == {"transparent": True}
+        assert recorded_settings({"generation": {"transparent": "yes"}}).generation == {}
+        assert recorded_settings({"generation": {"transparent": False}}).generation == {}
+
+    def test_a_transparent_payload_round_trips(self):
+        payload = build_image_config_payload(_make_image_request(transparent=True), ImageWorkingArtifacts(image=Image.new("RGB", (512, 384))))
+
+        assert recorded_settings(payload).generation["transparent"] is True
 
     def test_drops_malformed_blocks(self):
         settings = recorded_settings({"generation": "oops", "source": {"width": 3}})

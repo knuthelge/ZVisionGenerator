@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
@@ -12,10 +13,41 @@ BUFFER_CACHE_LIMIT_BYTES = 4 * 1024**3
 
 
 def release_memory() -> None:
-    """Drop unreachable model references and return MLX's buffer cache to the system."""
+    """Drop unreachable model references and return MLX's buffer cache and, when torch is loaded, the MPS cache to the system.
+
+    Torch is never imported here: the MPS cache only exists when something else already loaded torch.
+    """
     from ltx_core_mlx.utils.memory import aggressive_cleanup
 
     aggressive_cleanup()
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        torch.mps.empty_cache()
+
+
+def free_bytes() -> int | None:
+    """Return the unified memory still available to the GPU, in bytes, or ``None`` when the budget is unknown.
+
+    The budget (Apple's recommended working set) minus what MLX has active, what MLX keeps cached for reuse and what
+    the torch MPS allocator holds. MLX's cache counts as taken because the MPS allocator cannot reuse it. The result
+    never goes below 0.
+    """
+    import mlx.core as mx
+
+    budget = memory_budget_bytes()
+    if budget is None:
+        return None
+    return max(0, budget - mx.get_active_memory() - mx.get_cache_memory() - _mps_allocated_bytes())
+
+
+def _mps_allocated_bytes() -> int:
+    """Return the memory torch's MPS allocator has handed out to tensors, or 0 when torch is not loaded.
+
+    This is the allocator's own figure, not the Metal driver's: the driver counts the whole process, MLX's buffers
+    included, which the MLX terms of :func:`free_bytes` already cover.
+    """
+    torch = sys.modules.get("torch")
+    return int(torch.mps.current_allocated_memory()) if torch is not None else 0
 
 
 def memory_budget_bytes() -> int | None:

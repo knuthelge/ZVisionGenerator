@@ -128,3 +128,80 @@ class TestLoadResident:
             load_resident(order.build)
 
         assert order.mock_calls == [call.enter(0), call.build(), call.materialize(order.build.return_value), call.exit()]
+
+
+@pytest.fixture
+def torch_absent(monkeypatch):
+    """Make ``sys.modules`` hold no torch, as in a process that never imported it."""
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+
+
+@pytest.fixture
+def fake_torch(monkeypatch):
+    """Put a fake ``torch`` with an ``mps`` namespace into ``sys.modules``."""
+    torch = MagicMock(name="torch")
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    return torch
+
+
+class TestFreeBytes:
+    @pytest.fixture
+    def budget(self, mx, monkeypatch):
+        mx.get_active_memory.return_value = 5
+        mx.get_cache_memory.return_value = 3
+        monkeypatch.setattr(memory, "memory_budget_bytes", lambda: 20)
+        return mx
+
+    def test_subtracts_active_cached_and_mps_allocated_memory(self, budget, fake_torch):
+        fake_torch.mps.current_allocated_memory.return_value = 4
+
+        assert memory.free_bytes() == 8
+
+    def test_without_torch_loaded_the_mps_part_is_zero(self, budget, torch_absent):
+        assert memory.free_bytes() == 12
+
+    def test_a_negative_result_clamps_to_zero(self, budget, fake_torch):
+        fake_torch.mps.current_allocated_memory.return_value = 100
+
+        assert memory.free_bytes() == 0
+
+    def test_an_unknown_budget_gives_none(self, budget, monkeypatch, torch_absent):
+        monkeypatch.setattr(memory, "memory_budget_bytes", lambda: None)
+
+        assert memory.free_bytes() is None
+
+
+class TestReleaseMemory:
+    @pytest.fixture
+    def cleanup(self, monkeypatch):
+        aggressive_cleanup = MagicMock(name="aggressive_cleanup")
+        monkeypatch.setitem(sys.modules, "ltx_core_mlx", MagicMock())
+        monkeypatch.setitem(sys.modules, "ltx_core_mlx.utils", MagicMock())
+        monkeypatch.setitem(sys.modules, "ltx_core_mlx.utils.memory", MagicMock(aggressive_cleanup=aggressive_cleanup))
+        return aggressive_cleanup
+
+    def test_empties_the_mps_cache_once_after_the_mlx_cleanup_when_torch_is_loaded(self, cleanup, fake_torch):
+        order = MagicMock()
+        order.attach_mock(cleanup, "cleanup")
+        order.attach_mock(fake_torch.mps.empty_cache, "empty_cache")
+
+        memory.release_memory()
+
+        assert [c[0] for c in order.mock_calls] == ["cleanup", "empty_cache"]
+
+    def test_never_imports_torch_itself(self, cleanup, torch_absent, monkeypatch):
+        monkeypatch.setattr("builtins.__import__", _refuse_torch_import(__import__))
+
+        memory.release_memory()
+
+        cleanup.assert_called_once_with()
+        assert "torch" not in sys.modules
+
+
+def _refuse_torch_import(real_import):
+    def guarded(name, *args, **kwargs):
+        if name == "torch" or name.startswith("torch."):
+            raise AssertionError("release_memory imported torch")
+        return real_import(name, *args, **kwargs)
+
+    return guarded

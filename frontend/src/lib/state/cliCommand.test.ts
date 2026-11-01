@@ -69,6 +69,18 @@ describe('cliCommand', () => {
     expect(command).toBe('ziv image --prompt a --no-sharpen --saturation');
   });
 
+  it('adds --transparent for an image submitted with Transparent on', () => {
+    const { command } = cliCommand({ mode: 'image', prompt: 'a', transparent: 'true', saturation_enabled: 'true', upscale: '2' });
+
+    expect(command).toBe('ziv image --prompt a --saturation --transparent --upscale 2');
+  });
+
+  it('leaves out --transparent when it is off, absent, or the job is a video', () => {
+    expect(cliCommand({ mode: 'image', prompt: 'a', transparent: 'false' }).command).not.toContain('--transparent');
+    expect(cliCommand({ mode: 'image', prompt: 'a' }).command).not.toContain('--transparent');
+    expect(cliCommand({ mode: 'video', workflow: 'txt2vid', prompt: 'a', transparent: 'true' }).command).not.toContain('--transparent');
+  });
+
   it('uses a custom width and height instead of the ratio preset', () => {
     const { command } = cliCommand({ mode: 'image', prompt: 'a', ratio: '2:3', size: 'm', width: '1024', height: '768' });
 

@@ -288,6 +288,93 @@ describe('draft store', () => {
     });
   });
 
+  describe('loadFromUrl – reused finishing settings', () => {
+    /** The params a Reuse of an image asset sends (the server's `reuse_params`). */
+    /** A context whose image workflows show every finishing control, and whose video ones clear Transparent. */
+    const finishingContext = (): WorkspaceContext => {
+      const ctx = makeContext();
+      for (const id of ['txt2img', 'img2img'] as const) {
+        ctx.workflow_contract.definitions[id].visible_controls.push(
+          'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation', 'postprocess_transparent',
+          'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps', 'image_upscale_guidance', 'image_upscale_sharpen',
+        );
+      }
+      ctx.workflow_contract.definitions.img2img.visible_controls.push('image_strength');
+      for (const id of ['txt2vid', 'img2vid'] as const) ctx.workflow_contract.definitions[id].clear_fields.push('transparent');
+      return ctx;
+    };
+    const REUSE = {
+      workflow: 'img2img', image_path: '/in/a.png', transparent: 'true', sharpen_enabled: 'true', sharpen_amount: '0.6', contrast_enabled: 'true', contrast_amount: '1.1',
+      saturation_enabled: 'true', saturation_amount: '1.3', upscale: '4', upscale_denoise: '0.3', upscale_steps: '12', upscale_guidance: '1.5', upscale_sharpen: 'false', image_strength: '0.7',
+    };
+
+    it('sets sharpen, contrast, saturation, upscale, strength and Transparent', () => {
+      draft.loadFromUrl(REUSE, finishingContext());
+
+      expect(draft.state).toMatchObject({
+        workflow: 'img2img', postprocessTransparent: true, postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.6, postprocessContrastEnabled: true, postprocessContrastAmount: 1.1,
+        postprocessSaturationEnabled: true, postprocessSaturationAmount: 1.3, upscaleEnabled: true, upscaleFactor: 4, upscaleDenoise: 0.3, upscaleSteps: 12, upscaleGuidance: 1.5,
+        upscaleSharpen: false, referenceImageStrength: 0.7,
+      });
+    });
+
+    it('clears an "on" Transparent when the asset was opaque', () => {
+      draft.update('postprocessTransparent', true);
+      draft.loadFromUrl({ workflow: 'txt2img', transparent: 'false', sharpen_enabled: 'true', contrast_enabled: 'false', saturation_enabled: 'false' }, finishingContext());
+
+      expect(draft.state.postprocessTransparent).toBe(false);
+    });
+
+    it('turns Upscale off when the asset was made without one', () => {
+      draft.update('upscaleEnabled', true);
+      draft.loadFromUrl({ workflow: 'txt2img', transparent: 'false', sharpen_enabled: 'true', contrast_enabled: 'false', saturation_enabled: 'false' }, finishingContext());
+
+      expect(draft.state.upscaleEnabled).toBe(false);
+    });
+
+    it('sets only Transparent for a viewer-upscaled asset, leaving post-processing and Upscale as they were', () => {
+      draft.patch({ postprocessSharpenEnabled: false, postprocessContrastEnabled: true, postprocessContrastAmount: 1.4, upscaleEnabled: true, upscaleFactor: 4, referenceImageStrength: 0.3 });
+      draft.loadFromUrl({ workflow: 'txt2img', transparent: 'true' }, finishingContext());
+
+      expect(draft.state).toMatchObject({
+        postprocessTransparent: true, postprocessSharpenEnabled: false, postprocessContrastEnabled: true, postprocessContrastAmount: 1.4, upscaleEnabled: true, upscaleFactor: 4, referenceImageStrength: 0.3,
+      });
+    });
+
+    it('leaves Transparent alone when the URL does not name it', () => {
+      draft.update('postprocessTransparent', true);
+      draft.loadFromUrl({ workflow: 'txt2img', prompt: 'from a link' }, finishingContext());
+
+      expect(draft.state.postprocessTransparent).toBe(true);
+    });
+
+    it('skips the settings of controls the workflow does not show', () => {
+      draft.loadFromUrl({ ...REUSE, workflow: 'txt2img' }, finishingContext());
+      expect(draft.state.referenceImageStrength).not.toBe(0.7);
+
+      const ctx = finishingContext();
+      ctx.workflow_contract.definitions.txt2img.visible_controls = ctx.workflow_contract.definitions.txt2img.visible_controls.filter((id) => id !== 'postprocess_transparent');
+      draft.update('postprocessTransparent', false);
+      draft.loadFromUrl({ ...REUSE, workflow: 'txt2img' }, ctx);
+      expect(draft.state.postprocessTransparent).toBe(false);
+    });
+
+    it('does not set finishing settings for a video workflow', () => {
+      draft.loadFromUrl({ workflow: 'txt2vid', transparent: 'true', sharpen_enabled: 'false' }, finishingContext());
+
+      expect(draft.state.postprocessTransparent).toBe(false);
+      expect(draft.state.postprocessSharpenEnabled).toBe(true);
+    });
+
+    it('clears Transparent when a video workflow is opened', () => {
+      draft.update('postprocessTransparent', true);
+      draft.update('workflow', 'txt2vid');
+      draft.hydrateFromContext(finishingContext());
+
+      expect(draft.state.postprocessTransparent).toBe(false);
+    });
+  });
+
   it('ignores invalid workflow in URL prefill', () => {
     draft.loadFromUrl({ workflow: 'invalid-workflow' }, makeContext());
     expect(draft.state.workflow).toBe('txt2img'); // unchanged
@@ -2065,7 +2152,7 @@ describe('applyPreset', () => {
     slug: 'look', name: 'Look', mode: 'image', model: 'twin-model',
     settings: {
       quantize: 8, lora: 'style-a:0.8', ratio: '16:9', size: 'l', width: null, height: null, runs: 4, steps: 17, guidance: 2.5, image_strength: 0.7, scheduler: 'dpm', first_sigma: 0.4,
-      sharpen_enabled: true, sharpen_amount: 0.6, contrast_enabled: true, contrast_amount: 1.3, saturation_enabled: false, saturation_amount: null,
+      sharpen_enabled: true, sharpen_amount: 0.6, contrast_enabled: true, contrast_amount: 1.3, saturation_enabled: false, saturation_amount: null, transparent: true,
       upscale: 4, upscale_denoise: 0.3, upscale_steps: 12, upscale_guidance: 1.5, upscale_sharpen: false, review: true,
     },
   };
@@ -2074,7 +2161,7 @@ describe('applyPreset', () => {
   const IMAGE_PRESET_DRAFT: Partial<DraftState> = {
     model: 'twin-model', quantize: 8, loraString: 'style-a:0.8', ratio: '16:9', size: 'l', dimensionMode: 'ratio', runs: 4, steps: 17, guidance: 2.5, referenceImageStrength: 0.7, scheduler: 'dpm', firstSigma: 0.4,
     postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.6, postprocessContrastEnabled: true, postprocessContrastAmount: 1.3,
-    postprocessSaturationEnabled: false, postprocessSaturationAmount: 1, upscaleEnabled: true, upscaleFactor: 4, upscaleDenoise: 0.3, upscaleSteps: 12, upscaleGuidance: 1.5, upscaleSharpen: false, upscaleReview: true,
+    postprocessSaturationEnabled: false, postprocessSaturationAmount: 1, postprocessTransparent: true, upscaleEnabled: true, upscaleFactor: 4, upscaleDenoise: 0.3, upscaleSteps: 12, upscaleGuidance: 1.5, upscaleSharpen: false, upscaleReview: true,
   };
 
   /** A distinctive value for each draft key that is not a preset key. */

@@ -15,10 +15,20 @@ from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSess
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.built_model import write_record
 from zvisiongenerator.utils.config import enhancer_tier_models
+from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
-from zvisiongenerator.web.model_delete import delete_lora, delete_model, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import (
+    delete_lora,
+    delete_model,
+    delete_scope,
+    enhancer_delete_target,
+    installed_models_linking_to,
+    matte_delete_target,
+    model_delete_target,
+    seedvr2_delete_target,
+)
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
 
@@ -614,6 +624,38 @@ def test_enhancer_delete_target_needs_a_cached_hub_repo(layout, tmp_path):
     assert enhancer_delete_target(str(tmp_path)) is None
 
 
+def test_matte_delete_target_removes_both_background_removal_repos_together(layout):
+    _touch(layout.hub / "models--ZhengPeng7--BiRefNet" / "snapshots" / "abc" / "model.safetensors")
+    _touch(layout.hub / "models--hustvl--vitmatte-small-composition-1k" / "snapshots" / "def" / "model.safetensors")
+
+    target = matte_delete_target()
+
+    assert (target.kind, target.path, target.repo_id) == ("huggingface", layout.hub / "models--ZhengPeng7--BiRefNet", BIREFNET.repo_id)
+    assert target.companion_repos == (VITMATTE.repo_id,)
+    assert target.repo_ids == (BIREFNET.repo_id, VITMATTE.repo_id)
+
+    delete_model(target)
+
+    assert not (layout.hub / "models--ZhengPeng7--BiRefNet").exists()
+    assert not (layout.hub / "models--hustvl--vitmatte-small-composition-1k").exists()
+    assert (layout.hub / "models--org--base").is_dir()
+
+
+def test_matte_delete_target_is_none_when_neither_repo_is_cached(layout):
+    assert matte_delete_target() is None
+
+
+def test_matte_delete_target_stays_deletable_when_only_the_companion_is_cached(layout):
+    _touch(layout.hub / "models--hustvl--vitmatte-small-composition-1k" / "snapshots" / "def" / "model.safetensors")
+
+    target = matte_delete_target()
+
+    assert target.companion_repos == (VITMATTE.repo_id,)
+    assert target.on_disk
+    delete_model(target)
+    assert not (layout.hub / "models--hustvl--vitmatte-small-composition-1k").exists()
+
+
 def test_models_payload_lists_enhancer_tiers(layout):
     from zvisiongenerator.web.workspace_api import _enhancer_model_rows
 
@@ -674,6 +716,47 @@ class TestEnhancerDeleteRoute:
 
         assert client.delete("/api/enhancer-models/fast").status_code == 409
         assert (layout.hub / "models--org--fast").is_dir()
+
+
+class TestMatteDeleteRoute:
+    @pytest.fixture
+    def client(self, layout):
+        with TestClient(web_server.app) as client:
+            yield client
+
+    @staticmethod
+    def _cache_both(layout) -> None:
+        _touch(layout.hub / "models--ZhengPeng7--BiRefNet" / "snapshots" / "abc" / "model.safetensors")
+        _touch(layout.hub / "models--hustvl--vitmatte-small-composition-1k" / "snapshots" / "def" / "model.safetensors")
+
+    def test_deletes_both_matte_repos(self, client, layout):
+        self._cache_both(layout)
+
+        response = client.delete("/api/background-removal")
+
+        assert response.status_code == 200
+        assert not (layout.hub / "models--ZhengPeng7--BiRefNet").exists()
+        assert not (layout.hub / "models--hustvl--vitmatte-small-composition-1k").exists()
+        assert (layout.hub / "models--org--base").is_dir()
+
+    def test_is_404_when_nothing_is_cached(self, client):
+        assert client.delete("/api/background-removal").status_code == 404
+
+    def test_refused_while_a_job_runs(self, client, layout, monkeypatch):
+        self._cache_both(layout)
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: {"job_id": "job-1"})
+
+        assert client.delete("/api/background-removal").status_code == 409
+        assert (layout.hub / "models--ZhengPeng7--BiRefNet").is_dir()
+
+    @pytest.mark.parametrize("repo_id", [BIREFNET.repo_id, VITMATTE.repo_id])
+    def test_refused_while_either_matte_repo_downloads(self, client, layout, downloading, repo_id):
+        self._cache_both(layout)
+        downloading(DownloadTarget(repo_id))
+
+        assert client.delete("/api/background-removal").status_code == 409
+        assert (layout.hub / "models--ZhengPeng7--BiRefNet").is_dir()
+        assert (layout.hub / "models--hustvl--vitmatte-small-composition-1k").is_dir()
 
 
 class TestBuiltModelDelete:

@@ -87,6 +87,14 @@ class TestLoadModel:
             module.TorchSeedVR2Upscaler().save_model(_model(), tmp_path)
 
 
+class TestReleaseModel:
+    def test_it_does_nothing_because_the_models_are_freed_per_run(self):
+        model = _model()
+
+        assert module.TorchSeedVR2Upscaler().release_model(model) is None
+        assert model == _model()
+
+
 class TestUpscaleImage:
     def test_the_core_gets_the_image_prepared_at_the_target_size(self, monkeypatch, tmp_path):
         source = tmp_path / "in.png"

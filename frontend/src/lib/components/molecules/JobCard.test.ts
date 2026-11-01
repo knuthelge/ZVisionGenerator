@@ -255,6 +255,21 @@ describe('JobCard', () => {
       expect(target.querySelector('img')?.getAttribute('src')).toBe('/media/thumb/last.png');
     });
 
+    it('puts the checkerboard on a finished transparent output, never on the live preview', () => {
+      const cutOut = { ...makeAsset('cut.png'), transparent: true };
+      render({ status: 'paused', paused: true, runs: 3, itemFinished: true, outputs: [cutOut] });
+      expect(target.querySelector('img')?.classList.contains('ui-checkerboard')).toBe(true);
+      expect(target.querySelector('img')?.dataset.transparent).toBe('true');
+      flushSync(() => void component!.unmount());
+
+      render({ status: 'paused', paused: true, runs: 3, itemFinished: true, outputs: [makeAsset('plain.png')] });
+      expect(target.querySelector('.ui-checkerboard')).toBeNull();
+      flushSync(() => void component!.unmount());
+
+      render({ previewUrl: '/jobs/job-card/preview?v=2', outputs: [cutOut] });
+      expect(target.querySelector('img')?.dataset.transparent).toBe('false');
+    });
+
     it('reads the joining stretch of an extension to assistive technology without the ellipsis', () => {
       const joining: Partial<ActiveJobState> = { workflow: 'extend', stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8 };
       render({ ...joining, runs: 3 });

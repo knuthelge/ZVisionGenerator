@@ -102,7 +102,7 @@ class DownloadLane:
         """Queue the download of the row *name* of *kind*, or return its queued or running item.
 
         Args:
-            kind: ``"model"``, ``"enhancer"`` or ``"lora"``.
+            kind: ``"model"``, ``"enhancer"``, ``"matte"`` or ``"lora"``.
             name: The row's name or tier; for a LoRA, the name it installs as.
             label: How the row reads in messages.
             plan: Returns the targets to fetch (called on the lane thread when the item starts), or ``None`` when

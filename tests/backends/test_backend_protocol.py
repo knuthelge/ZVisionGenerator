@@ -122,6 +122,33 @@ class TestBackendRegistryLookup:
 
         assert released == [True]
 
+    @pytest.mark.parametrize(("platform", "module", "expected"), [("linux", "cuda", 111), ("win32", "cuda", 111), ("darwin", "mac", 222), ("freebsd", None, None)])
+    def test_free_accelerator_memory_comes_from_the_platform_module(self, monkeypatch, platform, module, expected):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.mac import memory as memory_mac
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "free_bytes", lambda: 111)
+        monkeypatch.setattr(memory_mac, "free_bytes", lambda: 222)
+
+        assert backends.accelerator_free_bytes() == expected
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    def test_a_failing_free_memory_query_gives_none(self, monkeypatch, platform):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.backends.mac import memory as memory_mac
+
+        def fail() -> int:
+            raise ImportError("no mlx")
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "free_bytes", fail)
+        monkeypatch.setattr(memory_mac, "free_bytes", fail)
+
+        assert backends.accelerator_free_bytes() is None
+
     def test_gpu_memory_comes_from_nvidia_smi_without_starting_cuda(self, monkeypatch):
         import shutil
         import subprocess

@@ -9,6 +9,7 @@ from typing import Any
 
 from PIL import Image
 
+from zvisiongenerator.backends import create_matte_chain, release_accelerator_memory
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts, JobPrompt
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
@@ -19,7 +20,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import RecordedSettings, image_prompt_text, read_png_config, recorded_settings
-from zvisiongenerator.workflows import generation_negative, generation_prompt
+from zvisiongenerator.workflows import conditioning_prompt, generation_negative, generation_prompt
 
 _UPSCALE_FAILURE_MESSAGE = "Upscale failed."
 
@@ -62,9 +63,15 @@ def read_upscale_source(path: str | Path) -> UpscaleSource:
 
 def upscale_prompts(request: ImageGenerationRequest) -> tuple[JobPrompt, ...]:
     """Return the one prompt the upscale's refine pass conditions on."""
-    prompt = generation_prompt(request.prompt, request.resolved_prompt)
+    prompt = conditioning_prompt(generation_prompt(request.prompt, request.resolved_prompt), transparent=request.transparent)
     negative_prompt = generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt)
     return (JobPrompt(prompt=prompt, negative_prompt=negative_prompt),)
+
+
+def _release_upscaler(backend: Any, model: Any) -> None:
+    """Free the upscaler's weights and return the memory to the system."""
+    backend.release_model(model)
+    release_accelerator_memory()
 
 
 def run_upscale(
@@ -110,8 +117,16 @@ def run_upscale(
         step_callback=_make_step_progress_callback(progress_callback, **context),
     )
     artifacts = ImageWorkingArtifacts()
+    chain = create_matte_chain() if request.transparent else None
+    if chain is not None:
+        # One image and nothing reloads, so the upscaler always makes room for the cut-out.
+        request = replace(request, matte=chain, make_room=lambda: _release_upscaler(backend, model))
     started = time.time()
-    outcome = _run_workflow_with_progress(workflow, request, artifacts, progress_callback=progress_callback, event_context=event_context)
+    try:
+        outcome = _run_workflow_with_progress(workflow, request, artifacts, progress_callback=progress_callback, event_context=event_context)
+    finally:
+        if chain is not None:
+            chain.close()
     status = {StageOutcome.success: "success", StageOutcome.skipped: "skipped"}.get(outcome, "failed")
     _emit_generation_finished(
         progress_callback,

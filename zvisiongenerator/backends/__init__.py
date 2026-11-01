@@ -13,6 +13,7 @@ from zvisiongenerator.core.video_family import VideoCapabilities
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from zvisiongenerator.core.matte import MatteChain
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint
     from zvisiongenerator.converters.h3_checkpoint import H3Checkpoint
@@ -25,7 +26,9 @@ if TYPE_CHECKING:
     from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
 
 __all__ = [
+    "accelerator_free_bytes",
     "convert_ltx_checkpoint",
+    "create_matte_chain",
     "create_prompt_enhancer",
     "accelerator_memory_budget_or_none",
     "enhancer_download_plan",
@@ -268,6 +271,47 @@ def release_accelerator_memory() -> None:
     from zvisiongenerator.backends.mac.memory import release_memory
 
     release_memory()
+
+
+def accelerator_free_bytes() -> int | None:
+    """Return the accelerator memory free right now, in bytes, or ``None`` when unknown (other platforms, or a failed query)."""
+    try:
+        if sys.platform in ("win32", "linux"):
+            from zvisiongenerator.backends.cuda.memory import free_bytes as free_cuda_bytes
+
+            return free_cuda_bytes()
+        if sys.platform == "darwin":
+            from zvisiongenerator.backends.mac.memory import free_bytes as free_mac_bytes
+
+            return free_mac_bytes()
+    except Exception:  # noqa: BLE001 - a missing or broken MLX or CUDA install means "unknown", never a failed run
+        return None
+    return None
+
+
+def _no_release() -> None:
+    """Do nothing (CUDA keeps its reserved memory between cut-outs so the next one reuses it)."""
+
+
+def create_matte_chain() -> "MatteChain":
+    """Return the background removal chain for this platform: the torch models on CUDA, or on MPS on macOS.
+
+    Raises:
+        RuntimeError: On a platform with neither.
+    """
+    from zvisiongenerator.utils.hf_snapshot import snapshot_download
+
+    if sys.platform in ("win32", "linux"):
+        device, after_cut_out = "cuda", _no_release
+    elif sys.platform == "darwin":
+        from zvisiongenerator.backends.mac.memory import release_memory as release_mac_memory
+
+        device, after_cut_out = "mps", release_mac_memory
+    else:
+        raise RuntimeError(f"Background removal needs CUDA or Apple MPS; platform '{sys.platform}' has neither.")
+    from zvisiongenerator.backends.matte.chain import TorchMatteChain
+
+    return TorchMatteChain(device, download=snapshot_download, release_memory=release_accelerator_memory, after_cut_out=after_cut_out)
 
 
 def get_accelerator_memory_budget() -> MemoryBudget | None:

@@ -23,7 +23,7 @@ def open_image_upright(path: str | Path) -> Image.Image:
     The photo's EXIF orientation is applied, so a phone photo is not sideways. The size is kept: the caller fits it.
     """
     with Image.open(path) as opened:
-        return _flatten_alpha(ImageOps.exif_transpose(opened))
+        return flatten_alpha(ImageOps.exif_transpose(opened))
 
 
 @contextmanager
@@ -51,11 +51,11 @@ def _needs_upright(path: str) -> bool:
         return image.getexif().get(_EXIF_ORIENTATION, 1) != 1 or image.has_transparency_data
 
 
-def _flatten_alpha(image: Image.Image) -> Image.Image:
-    """Return *image* as RGB, with any transparency composited over white."""
+def flatten_alpha(image: Image.Image, background: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
+    """Return *image* as RGB, with any transparency composited over *background* (white by default)."""
     if image.has_transparency_data:
         # Pillow cannot convert premultiplied "La" to RGBA directly.
         rgba = (image.convert("LA") if image.mode == "La" else image).convert("RGBA")
-        white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-        return Image.alpha_composite(white, rgba).convert("RGB")
+        backdrop = Image.new("RGBA", rgba.size, (*background, 255))
+        return Image.alpha_composite(backdrop, rgba).convert("RGB")
     return image.convert("RGB")

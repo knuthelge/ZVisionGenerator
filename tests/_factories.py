@@ -49,6 +49,7 @@ def _make_args(**overrides):
         sharpen=True,
         contrast=False,
         saturation=False,
+        transparent=False,
         lora_paths=None,
         lora_weights=None,
     )

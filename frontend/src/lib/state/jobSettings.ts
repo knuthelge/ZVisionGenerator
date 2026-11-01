@@ -48,6 +48,43 @@ function enhanceRecord(value: string | undefined, workflow: Workflow): Pick<Enha
 }
 
 /**
+ * Turn the finishing settings a job (or a Reuse URL) names back into draft state: strength, Sharpen, Contrast, Saturation,
+ * Transparent and the creative Upscale. A setting the job did not name is left out, except the Upscale, which reads a missing
+ * `upscale` as off. A video job has none of the image-only settings, so only the shared post-processing applies.
+ */
+export function outputSettingsPatch(settings: JobSettings, isVideo: boolean): Partial<DraftState> {
+  const patch: Partial<DraftState> = {};
+  for (const [name, enabledKey, amountKey] of [
+    ['sharpen', 'postprocessSharpenEnabled', 'postprocessSharpenAmount'],
+    ['contrast', 'postprocessContrastEnabled', 'postprocessContrastAmount'],
+    ['saturation', 'postprocessSaturationEnabled', 'postprocessSaturationAmount'],
+  ] as const) {
+    if (settings[`${name}_enabled`] === undefined) continue;
+    patch[enabledKey] = first(settings, `${name}_enabled`) === 'true';
+    const amount = numberOrNull(first(settings, `${name}_amount`));
+    if (amount !== null) patch[amountKey] = amount;
+    // Sharpen on with no amount means it followed the config (auto); restore that instead of keeping a typed amount.
+    else if (amountKey === 'postprocessSharpenAmount' && patch[enabledKey]) patch.postprocessSharpenAmount = null;
+  }
+  if (isVideo) return patch;
+
+  const strength = numberOrNull(first(settings, 'image_strength'));
+  if (strength !== null) patch.referenceImageStrength = strength;
+  // An image job that did not name the field ran without it, like any other unchecked box.
+  patch.postprocessTransparent = checked(settings, 'transparent');
+  patch.upscaleEnabled = settings.upscale !== undefined;
+  const factor = numberOrNull(first(settings, 'upscale'));
+  if (factor !== null) patch.upscaleFactor = factor;
+  if (patch.upscaleEnabled) {
+    patch.upscaleDenoise = numberOrNull(first(settings, 'upscale_denoise'));
+    patch.upscaleSteps = numberOrNull(first(settings, 'upscale_steps'));
+    patch.upscaleGuidance = numberOrNull(first(settings, 'upscale_guidance'));
+    patch.upscaleSharpen = first(settings, 'upscale_sharpen') !== 'false';
+  }
+  return patch;
+}
+
+/**
  * Turn the form fields a job was submitted with back into workspace state, so the form can be refilled from it.
  *
  * @param rememberedParts The Rewrite choice the draft remembers for each video workflow; the job's own workflow takes the job's.
@@ -111,8 +148,6 @@ export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: Enha
   }
   const runs = numberOrNull(first(settings, 'runs'));
   if (runs !== null) patch.runs = runs;
-  const strength = numberOrNull(first(settings, 'image_strength'));
-  if (strength !== null) patch.referenceImageStrength = strength;
   if (settings.scheduler !== undefined) patch.scheduler = first(settings, 'scheduler') || null;
   if (settings.first_sigma !== undefined) patch.firstSigma = numberOrNull(first(settings, 'first_sigma'));
   if (settings.quantize !== undefined) patch.quantize = numberOrNull(first(settings, 'quantize'));
@@ -122,18 +157,7 @@ export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: Enha
     patch[key] = key === 'enhanceSettingsVideo' && rememberedParts ? { ...enhance, partsByWorkflow: { ...rememberedParts, ...enhance.partsByWorkflow } } : enhance;
   }
 
-  for (const [name, enabledKey, amountKey] of [
-    ['sharpen', 'postprocessSharpenEnabled', 'postprocessSharpenAmount'],
-    ['contrast', 'postprocessContrastEnabled', 'postprocessContrastAmount'],
-    ['saturation', 'postprocessSaturationEnabled', 'postprocessSaturationAmount'],
-  ] as const) {
-    if (settings[`${name}_enabled`] === undefined) continue;
-    patch[enabledKey] = first(settings, `${name}_enabled`) === 'true';
-    const amount = numberOrNull(first(settings, `${name}_amount`));
-    if (amount !== null) patch[amountKey] = amount;
-    // Sharpen on with no amount means it followed the config (auto); restore that instead of keeping a typed amount.
-    else if (amountKey === 'postprocessSharpenAmount' && patch[enabledKey]) patch.postprocessSharpenAmount = null;
-  }
+  Object.assign(patch, outputSettingsPatch(settings, isVideo));
 
   if (isVideo) {
     patch.audio = checked(settings, 'audio');
@@ -143,16 +167,7 @@ export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: Enha
     if (factor !== null) patch.videoUpscaleFactor = factor;
     patch.videoUpscaleReview = patch.videoUpscaleEnabled && checked(settings, 'review');
   } else {
-    patch.upscaleEnabled = settings.upscale !== undefined;
-    const factor = numberOrNull(first(settings, 'upscale'));
-    if (factor !== null) patch.upscaleFactor = factor;
-    patch.upscaleReview = patch.upscaleEnabled && checked(settings, 'review');
-    if (patch.upscaleEnabled) {
-      patch.upscaleDenoise = numberOrNull(first(settings, 'upscale_denoise'));
-      patch.upscaleSteps = numberOrNull(first(settings, 'upscale_steps'));
-      patch.upscaleGuidance = numberOrNull(first(settings, 'upscale_guidance'));
-      patch.upscaleSharpen = first(settings, 'upscale_sharpen') !== 'false';
-    }
+    patch.upscaleReview = patch.upscaleEnabled === true && checked(settings, 'review');
   }
   return { params, patch };
 }

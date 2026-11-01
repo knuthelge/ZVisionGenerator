@@ -105,6 +105,82 @@ describe('WorkspacePage on a phone', () => {
     expect(draft.state.prompt).toBe('A red fox');
   });
 
+  describe('the Transparent chip', () => {
+    const chip = () => target.querySelector('[data-chip="transparent"]') as HTMLButtonElement | null;
+    const popover = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement | null;
+    const popoverSwitch = () => popover()?.querySelector('[role="switch"]') as HTMLInputElement | null;
+
+    beforeEach(() => {
+      Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    });
+
+    afterEach(() => {
+      delete (Element.prototype as Partial<Element>).animate;
+    });
+
+    async function mountPhone(context: WorkspaceContext = makeContext()): Promise<void> {
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+    }
+
+    it('is absent while the switch is off', async () => {
+      await mountPhone();
+
+      expect(chip()).toBeNull();
+    });
+
+    it('appears once the switch is on, reading on, and opens a popover with the switch and the badge', async () => {
+      draft.update('postprocessTransparent', true);
+      await mountPhone();
+
+      expect(chip()).not.toBeNull();
+      expect(chip()!.getAttribute('aria-label')).toBe('Transparent: on');
+
+      chip()!.click();
+      await settle();
+      expect(popover()).not.toBeNull();
+      expect(popoverSwitch()!.checked).toBe(true);
+      expect(popover()!.querySelector('[data-testid="transparent-reason"] .ui-badge')).not.toBeNull();
+    });
+
+    it('stays, reading off, while its popover is open after the switch is turned off, and goes when it closes', async () => {
+      draft.update('postprocessTransparent', true);
+      await mountPhone();
+      chip()!.click();
+      await settle();
+
+      popoverSwitch()!.click();
+      await settle();
+      expect(draft.state.postprocessTransparent).toBe(false);
+      expect(chip()).not.toBeNull();
+      expect(chip()!.getAttribute('aria-label')).toBe('Transparent: off');
+
+      chip()!.click();
+      await settle();
+      expect(popover()).toBeNull();
+      expect(chip()).toBeNull();
+    });
+
+    it('is not offered for a video workflow', async () => {
+      draft.patch({ workflow: 'txt2vid', model: 'ltx-8', postprocessTransparent: true });
+      await mountPhone();
+
+      expect(chip()).toBeNull();
+    });
+
+    it('shows the row and the badge in the All settings sheet', async () => {
+      await mountPhone();
+
+      (target.querySelector('[aria-label="All settings"]') as HTMLButtonElement).click();
+      await settle();
+
+      const sheet = document.querySelector('[data-testid="sheet"]')!;
+      expect(sheet.querySelector('#ws-pp-transparent')).not.toBeNull();
+      expect(sheet.querySelector('[data-testid="transparent-terms"] .ui-badge')).not.toBeNull();
+    });
+  });
+
   describe('the Images chip', () => {
     const png = (name: string) => new File(['img'], name, { type: 'image/png' });
     const kleinContext = (): WorkspaceContext => makeContext({ image_model_defaults: { zit: makeImageDefaults({ max_reference_images: 4 }), 'flux-lite': makeImageDefaults() } });

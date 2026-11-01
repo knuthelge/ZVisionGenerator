@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from zvisiongenerator.image_cli import _build_parser, main
+from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
 
@@ -580,6 +581,70 @@ class TestPostProcessingFlags:
             TestCLIValidation()._run_main(["-m", "fake", *argv])
 
         assert excinfo.value.code == 2
+
+
+class TestTransparentFlag:
+    """--transparent parses to a flag and, once set, fetches both pinned cut-out snapshots before the image model loads."""
+
+    def _run(self, argv, *, snapshot_with, order):
+        loaded = (MagicMock(name="model"), MagicMock(family="zimage"))
+
+        def _load(*_a, **_kw):
+            order.append("load")
+            return loaded
+
+        with patch("zvisiongenerator.image_cli.cached_snapshot_dirs", return_value=[]):
+            TestCLIValidation()._run_main_with_overrides(["-m", "fake", *argv], snapshot_with=snapshot_with, load_image_model=_load)
+
+    def test_the_flag_defaults_to_false_and_parses_to_true(self):
+        assert _build_parser().parse_args(["-m", "fake"]).transparent is False
+        assert _build_parser().parse_args(["-m", "fake", "--transparent"]).transparent is True
+
+    def test_both_pinned_snapshots_are_fetched_once_before_the_model_loads(self):
+        order: list[str] = []
+        fetch = MagicMock(side_effect=lambda files, _download: order.append(files))
+
+        self._run(["--transparent"], snapshot_with=fetch, order=order)
+
+        assert order == [BIREFNET, VITMATTE, "load"]
+
+    def test_a_failed_fetch_stops_the_run_before_any_load(self):
+        order: list[str] = []
+        fetch = MagicMock(side_effect=OSError("offline"))
+
+        with pytest.raises(SystemExit) as excinfo:
+            self._run(["--transparent"], snapshot_with=fetch, order=order)
+
+        assert excinfo.value.code == 2
+        assert order == []
+
+    def test_without_the_flag_nothing_is_fetched(self):
+        order: list[str] = []
+        fetch = MagicMock()
+
+        self._run([], snapshot_with=fetch, order=order)
+
+        fetch.assert_not_called()
+        assert order == ["load"]
+
+    def test_the_run_gets_a_reloader_that_loads_the_model_again(self):
+        loads: list[str] = []
+        captured = {}
+
+        def _load(*_a, **_kw):
+            loads.append("load")
+            return (MagicMock(name="model"), MagicMock(family="zimage"))
+
+        def _capture(*_a, reload_model=None, **_kw):
+            captured["loads_before"] = list(loads)
+            captured["reloaded"] = reload_model()
+
+        with patch("zvisiongenerator.image_cli.cached_snapshot_dirs", return_value=[]):
+            TestCLIValidation()._run_main_with_overrides(["-m", "fake", "--transparent"], snapshot_with=MagicMock(), load_image_model=_load, run_batch=_capture)
+
+        assert captured["loads_before"] == ["load"]
+        assert captured["reloaded"] is not None
+        assert loads == ["load", "load"]
 
 
 class TestReferenceFlag:

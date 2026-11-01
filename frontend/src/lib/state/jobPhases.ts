@@ -42,7 +42,7 @@ export function downloadFromEvent(event: EventData): JobDownload | null {
   const done = numberField(event, 'bytes_done');
   if (done === undefined) return null;
   return {
-    role: event?.role === 'enhancer' ? 'enhancer' : 'model',
+    role: event?.role === 'enhancer' || event?.role === 'matte' ? event.role : 'model',
     model: stringField(event, 'model'),
     repo: stringField(event, 'repo'),
     part: numberField(event, 'part') ?? 1,

@@ -23,6 +23,7 @@ class SeedVR2Upscaler(Protocol):
     - load_model(): load a SeedVR2 model from a path with optional quantization
     - save_model(): write a loaded (quantized) model's weights for reuse
     - upscale_image(): enlarge one image file to a target size
+    - release_model(): free a loaded model's weights in place
     """
 
     weights: SeedVR2Weights
@@ -37,6 +38,10 @@ class SeedVR2Upscaler(Protocol):
 
     def upscale_image(self, model: Any, image_path: str, *, width: int, height: int, seed: int, softness: float) -> Image.Image:
         """Return *image_path* enlarged to *width* × *height*, pre-blurred by *softness* (0-1)."""
+        ...
+
+    def release_model(self, model: Any) -> None:
+        """Free *model*'s weights from accelerator memory in place; the handle must not be used again. Idempotent."""
         ...
 
 

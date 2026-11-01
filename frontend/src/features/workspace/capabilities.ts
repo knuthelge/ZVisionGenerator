@@ -41,6 +41,7 @@ export interface WorkspaceCapabilities {
   showPostprocessSharpen: boolean;
   showPostprocessContrast: boolean;
   showPostprocessSaturation: boolean;
+  showPostprocessTransparent: boolean;
   showImageUpscale: boolean;
   showUpscaleDenoise: boolean;
   showUpscaleSteps: boolean;
@@ -112,6 +113,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showPostprocessSharpen: isImageMode && visible.has('postprocess_sharpen'),
     showPostprocessContrast: isImageMode && visible.has('postprocess_contrast'),
     showPostprocessSaturation: isImageMode && visible.has('postprocess_saturation'),
+    showPostprocessTransparent: isImageMode && visible.has('postprocess_transparent'),
     showImageUpscale,
     showUpscaleDenoise: showImageUpscale && visible.has('image_upscale_denoise'),
     showUpscaleSteps: showImageUpscale && visible.has('image_upscale_steps'),

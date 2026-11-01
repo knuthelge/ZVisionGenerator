@@ -17,6 +17,7 @@ from zvisiongenerator.backends.cuda import download_plan as cuda_plan
 from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 from zvisiongenerator.utils.ideogram4_instant import instant_source, write_build_record
+from zvisiongenerator.utils.matte_models import BIREFNET, MATTE_DOWNLOAD_SIZE_LABEL, MATTE_LABEL, MATTE_ROW_NAME, VITMATTE
 from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import model_download_plan as plan_module
@@ -109,6 +110,20 @@ class TestRowPlan:
         mock.assert_called_once()
         assert {key: mock.call_args.kwargs[key] for key in expected_kwargs} == expected_kwargs
 
+    def test_the_background_removal_row_plans_both_pinned_repos(self, env):
+        plan = row_plan("matte", MATTE_ROW_NAME, _web_config(env))
+
+        assert (plan.kind, plan.name, plan.label) == ("matte", "background-removal", MATTE_LABEL)
+        assert plan.targets == (
+            DownloadTarget(BIREFNET.repo_id, BIREFNET.revision, BIREFNET.files),
+            DownloadTarget(VITMATTE.repo_id, VITMATTE.revision, VITMATTE.files),
+        )
+
+    def test_a_background_removal_plan_that_cannot_be_made_has_no_targets(self, env, monkeypatch):
+        monkeypatch.setattr(plan_module, "matte_plan", lambda: None)
+
+        assert row_plan("matte", MATTE_ROW_NAME, _web_config(env)).targets is None
+
     def test_a_plan_that_cannot_be_made_has_no_targets(self, env, monkeypatch):
         monkeypatch.setattr(plan_module, "image_plan", lambda *a, **k: None)
 
@@ -126,7 +141,7 @@ class TestRowPlan:
         assert (image.name, image.label, video.name, video.label) == ("zit", "Z-Image Turbo", "ltx-8", "LTX-2.3 8-bit")
         assert (summary["name"], summary["label"]) == ("zit", "Z-Image Turbo")
 
-    @pytest.mark.parametrize(("kind", "name"), [("model", "nope"), ("enhancer", "nope"), ("enhancer", "smart"), ("lora", "zit")])
+    @pytest.mark.parametrize(("kind", "name"), [("model", "nope"), ("enhancer", "nope"), ("enhancer", "smart"), ("matte", "nope"), ("lora", "zit")])
     def test_an_unknown_row_or_kind_is_a_value_error(self, env, kind, name):
         with pytest.raises(ValueError):
             row_plan(kind, name, _web_config(env, image=[_image("zit", "owner/zit")]))
@@ -218,9 +233,30 @@ class TestDownloadNeeded:
         assert row_download_needed("enhancer", "fast", web_config, downloaded=True, present=_present) is False
         assert row_download_needed("enhancer", "fast", web_config, downloaded=False, unavailable="too big", present=lambda t: False) is False
 
+    def test_the_background_removal_row_needs_a_download_until_both_repos_are_present(self, env):
+        web_config = _web_config(env)
+        present = {BIREFNET.repo_id}
+
+        def _present(target: DownloadTarget) -> bool:
+            return target.repo_id in present
+
+        assert row_download_needed("matte", MATTE_ROW_NAME, web_config, downloaded=None, present=lambda t: False) is True
+        assert row_download_needed("matte", MATTE_ROW_NAME, web_config, downloaded=None, present=_present) is True
+        present.add(VITMATTE.repo_id)
+        assert row_download_needed("matte", MATTE_ROW_NAME, web_config, downloaded=None, present=_present) is False
+
+    def test_a_background_removal_plan_that_cannot_be_made_needs_nothing(self, env, monkeypatch):
+        monkeypatch.setattr(plan_module, "matte_plan", lambda: None)
+
+        assert row_download_needed("matte", MATTE_ROW_NAME, _web_config(env), downloaded=None, present=lambda t: False) is False
+
     def test_an_unknown_row_is_a_value_error(self, env):
         with pytest.raises(ValueError):
             row_download_needed("model", "nope", _web_config(env), downloaded=False)
+
+    def test_an_unknown_background_removal_row_is_a_value_error(self, env):
+        with pytest.raises(ValueError):
+            row_download_needed("matte", "nope", _web_config(env), downloaded=None)
 
 
 class TestModelsResponse:
@@ -273,6 +309,36 @@ class TestModelsResponse:
         assert payload["video_models"][0]["download_needed"] is False
         assert payload["image_models"][0]["download_needed"] is True
 
+    def test_the_background_removal_row_has_the_fields_the_page_reads(self, web_config):
+        payload = build_models_response(web_config, token_source=None)
+
+        row = payload["background_removal"]
+        assert set(row) == {"name", "label", "downloaded", "disk_size_label", "download_size_label", "deletable", "download_needed"}
+        assert (row["name"], row["label"], row["download_size_label"]) == (MATTE_ROW_NAME, MATTE_LABEL, MATTE_DOWNLOAD_SIZE_LABEL)
+        assert (row["downloaded"], row["deletable"], row["download_needed"], row["disk_size_label"]) == (False, False, True, None)
+
+    def test_the_background_removal_row_reads_downloaded_and_deletable_once_both_repos_are_cached(self, env):
+        for pin in (BIREFNET, VITMATTE):
+            blob = env.hub / f"models--{pin.repo_id.replace('/', '--')}" / "blobs" / "weights"
+            blob.parent.mkdir(parents=True)
+            blob.write_bytes(b"x" * 2048)
+
+        row = workspace_api_module._background_removal_row(present=lambda target: True)
+
+        assert (row["downloaded"], row["deletable"], row["download_needed"]) == (True, True, False)
+        assert row["disk_size_label"]
+
+    def test_a_background_removal_row_that_cannot_be_planned_warns_and_reads_unknown(self, monkeypatch):
+        def _boom(**_kwargs):
+            raise ValueError("bad pins")
+
+        monkeypatch.setattr(workspace_api_module, "matte_download_needed", _boom)
+
+        with pytest.warns(UserWarning, match="background removal"):
+            row = workspace_api_module._background_removal_row()
+
+        assert (row["downloaded"], row["download_needed"]) == (None, False)
+
     def test_an_unavailable_enhancer_tier_needs_no_download(self, env, monkeypatch):
         rows = workspace_api_module._enhancer_model_rows(
             {"prompt_enhancer": {"model": "owner/enhancer", "smart": {"model": "owner/smart"}}},
@@ -306,6 +372,15 @@ class TestPlanSummary:
             "total_bytes": 1_500,
             "space": {"path": str(tmp_path), "needed_bytes": 1_500, "free_bytes": 1_000, "enough": False},
         }
+
+    def test_a_background_removal_plan_sums_both_repos_under_its_kind_and_label(self, env, tmp_path):
+        plan = row_plan("matte", MATTE_ROW_NAME, _web_config(env))
+        checks = {target: TargetCheck(1, 100) for target in plan.targets}
+
+        summary = plan_summary(plan, check=checks.get, present=lambda t: False, space=MagicMock(return_value=SpaceNeed(path=tmp_path, needed_bytes=200, free_bytes=1_000)), cache_dir=lambda: tmp_path)
+
+        assert (summary["kind"], summary["name"], summary["label"], summary["total_bytes"]) == ("matte", MATTE_ROW_NAME, MATTE_LABEL, 200)
+        assert [part["repo"] for part in summary["parts"]] == [BIREFNET.repo_id, VITMATTE.repo_id]
 
     def test_targets_on_disk_are_skipped_and_never_checked(self, tmp_path):
         present, missing = DownloadTarget("owner/a"), DownloadTarget("owner/b")

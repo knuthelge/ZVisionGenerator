@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
   import { errorText } from '$lib/api/client';
-  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
+  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteBackgroundRemoval, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
   import { downloadLine, partLabel } from '$lib/state/downloadProgress';
   import { draft } from '$lib/state/draft.svelte';
   import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
@@ -9,12 +9,13 @@
   import { router } from '$lib/state/router.svelte';
   import { downloadStore, type PlannedKind } from '$lib/state/downloads.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
+  import type { BackgroundRemovalEntry, ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
   import { Alert, ConfirmDialog, EmptyState, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
   import { inventoryMemory } from '$lib/state/pageMemory';
+  import { TRANSPARENT_TERMS } from '../workspace/transparent';
 
   let inventory = $state<ModelInventory | null>(null);
   let loading = $state(true);
@@ -25,7 +26,7 @@
   let localLoraPath = $state('');
   let checkpointPathReset = $state(0);
   let localLoraPathReset = $state(0);
-  let pendingDelete = $state<{ type: 'model'; name: string; label: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'download'; name: string; sizeLabel: string } | { type: 'stranded'; name: string; count: number; sizeLabel: string } | { type: 'lora'; name: string } | null>(null);
+  let pendingDelete = $state<{ type: 'model'; name: string; label: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'matte'; model: BackgroundRemovalEntry } | { type: 'download'; name: string; sizeLabel: string } | { type: 'stranded'; name: string; count: number; sizeLabel: string } | { type: 'lora'; name: string } | null>(null);
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
@@ -49,6 +50,8 @@
   const isH3 = $derived(convertType === H3_TYPE);
   const converting = $derived(conversion?.state === 'running');
 
+  /** The row name the Models-page download API knows the background removal models by. */
+  const MATTE_NAME = 'background-removal';
   const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
 
   type DownloadKind = DownloadItem['kind'];
@@ -96,12 +99,14 @@
   /** The row's name as a noun phrase without an article: "FLUX.2 Klein 9B", "Smart enhancer model". */
   function rowName(kind: DownloadKind, name: string): string {
     if (kind === 'lora') return name;
+    if (kind === 'matte') return 'Background removal models';
     return kind === 'enhancer' ? `${ENHANCER_TIER_LABELS[name as EnhancerModelEntry['tier']] ?? name} enhancer model` : modelLabelFor(name);
   }
 
   /** The row's name for a sentence: enhancer models read "the Smart enhancer model". */
   function rowPhrase(kind: DownloadKind, name: string): string {
     if (kind === 'lora') return name;
+    if (kind === 'matte') return 'the background removal models';
     return kind === 'enhancer' ? `the ${rowName(kind, name)}` : modelLabelFor(name);
   }
 
@@ -316,6 +321,7 @@
       if (m.family === 'ideogram4' || m.family === 'moss') return PREPARED_INSTANT_TOOLTIP;
     }
     const ahead = m.download_needed ? 'Download fetches it now, or ' : '';
+    if (m.source === 'matte') return `Not downloaded: ${ahead}it downloads the first time you make a transparent image.`;
     if (m.source === 'enhancer') return `Not downloaded: ${ahead}it downloads the first time you enhance a prompt with it.`;
     if (m.source === 'seedvr2' && m.download_size_label) return `Not downloaded: ${ahead}the first plain upscale downloads it (${m.download_size_label}).`;
     return m.download_needed ? DOWNLOADABLE_TOOLTIP : NOT_DOWNLOADED_FIRST_USE_TOOLTIP;
@@ -323,6 +329,7 @@
 
   function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
     if (target.type === 'lora') return `Delete ${target.name}.safetensors from the LoRAs folder?`;
+    if (target.type === 'matte') return 'Delete the background removal models?';
     if (target.type === 'enhancer') return `Delete the ${target.name} enhancer model ${target.model.repo}?`;
     if (target.type === 'download') return `Delete the Hugging Face download of ${target.name}?`;
     if (target.type === 'stranded') return `Delete ${target.count} unused Hugging Face cache files?`;
@@ -339,6 +346,7 @@
     switch (target.type) {
       case 'model': return deleteModel(target.name);
       case 'enhancer': return deleteEnhancerModel(target.model.tier);
+      case 'matte': return deleteBackgroundRemoval();
       case 'download': return deleteOtherDownload(target.name);
       case 'stranded': return freeStrandedCacheFiles();
       case 'lora': return deleteLora(target.name);
@@ -699,6 +707,52 @@
             </Panel>
           {/if}
 
+          {#if inventory.background_removal}
+            {@const matte = inventory.background_removal}
+            <Panel title="Background removal" icon="cube" flush>
+              <div class="@container overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable sticky-actions">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Size</th>
+                      <th class="w-8"><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr data-testid="matte-row" class:dl-main={downloadStore.active('matte', MATTE_NAME) !== null}>
+                      <td>
+                        <span class="matte-name">
+                          {@render modelName({ name: matte.label, label: matte.label, downloaded: matte.downloaded, source: 'matte', download_needed: matte.download_needed })}
+                          <Tooltip text={TRANSPARENT_TERMS} placement="bottom" testId="matte-terms"><Badge variant="warning">Non-commercial</Badge></Tooltip>
+                        </span>
+                      </td>
+                      <td class="whitespace-nowrap font-mono">
+                        {#if matte.disk_size_label}
+                          {matte.disk_size_label}
+                        {:else if matte.download_size_label}
+                          <span class="text-text-muted" title="Size of the first-use download">≈{matte.download_size_label}</span>
+                        {:else}
+                          <span class="text-text-muted">—</span>
+                        {/if}
+                      </td>
+                      {#snippet remove()}
+                        <span class="dl-actions">
+                          {#if matte.download_needed}{@render downloadButton('matte', MATTE_NAME, matte.downloaded === true)}{/if}
+                          {#if matte.deletable}
+                            {@render deleteButton('Delete the background removal models', () => requestDelete({ type: 'matte', model: matte }))}
+                          {/if}
+                        </span>
+                      {/snippet}
+                      {@render downloadControl('matte', MATTE_NAME, remove)}
+                    </tr>
+                    {@render downloadSubRow('matte', MATTE_NAME, 3)}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          {/if}
+
           {#if inventory.other_downloads && (inventory.other_downloads.repos.length || inventory.other_downloads.stranded)}
             {@const other = inventory.other_downloads}
             <Panel title="Other downloads" icon="download" flush>
@@ -986,6 +1040,11 @@
       {:else if pendingDelete.type === 'stranded'}
         <p data-testid="delete-stranded">Frees {pendingDelete.sizeLabel}. No downloaded model uses these files.</p>
       {/if}
+      {#if pendingDelete.type === 'matte'}
+        <p data-testid="delete-matte">
+          Frees {pendingDelete.model.disk_size_label ?? 'their download'}. They download again the next time you make a transparent image.
+        </p>
+      {/if}
       {#if pendingDelete.type === 'enhancer'}
         <p data-testid="delete-enhancer">
           Frees {pendingDelete.model.disk_size_label ?? 'its download'}. It downloads again the next time you use {pendingDelete.name} to enhance a prompt.
@@ -1034,6 +1093,7 @@
   .dl-line { min-width: 0; }
   .dl-pct { flex: none; color: var(--color-text-primary); }
   .dl-muted { flex: none; color: var(--color-text-muted); }
+  .matte-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .dl-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; white-space: nowrap; }
   .dl-queued { display: flex; align-items: center; gap: 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
   /* The table scrolls sideways on a phone: the block stays inside the visible width (the scroll box is a size container), so the percentage and the Queued note never scroll out of view. */

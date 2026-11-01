@@ -48,6 +48,7 @@ export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
       generation.sharpen != null ? { label: 'Sharpen', value: String(generation.sharpen) } : null,
       generation.contrast != null ? { label: 'Contrast', value: String(generation.contrast) } : null,
       generation.saturation != null ? { label: 'Saturation', value: String(generation.saturation) } : null,
+      generation.transparent ? { label: 'Transparent background', value: 'On' } : null,
       generation.audio != null ? { label: 'Audio', value: generation.audio ? 'On' : 'Off' } : null,
       generation.output_format ? { label: 'Format', value: generation.output_format.toUpperCase() } : null,
     ]),

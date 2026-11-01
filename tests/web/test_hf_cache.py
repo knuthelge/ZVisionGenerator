@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.hf_cache import cached_model_repos, free_stranded_shared_files, stranded_shared_files
+from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, installed_models_linking_to, used_repo_ids
 from zvisiongenerator.downloads.built_sources import built_model_sources
@@ -20,6 +21,7 @@ from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInven
 from zvisiongenerator.web.workspace_api import _other_downloads_payload, find_other_downloads
 
 _SNAPSHOT = "a" * 40
+_MATTE_REPOS = frozenset({BIREFNET.repo_id.casefold(), VITMATTE.repo_id.casefold()})
 
 
 def _touch(path: Path, size: int = 1) -> Path:
@@ -121,7 +123,11 @@ def test_used_repo_ids_cover_aliases_companions_enhancers_and_extras():
 
     used = used_repo_ids(inventory, config, platform_key="linux", extra=["org/SeedVR2"])
 
-    assert used == {"org/klein", "org/ltx", "org/ltx-single", "org/fast", "org/seedvr2"}
+    assert used - _MATTE_REPOS == {"org/klein", "org/ltx", "org/ltx-single", "org/fast", "org/seedvr2"}
+
+
+def test_used_repo_ids_always_include_both_background_removal_repos():
+    assert used_repo_ids([], {}, platform_key="linux") == _MATTE_REPOS
 
 
 _BUILT_ON_FIRST_USE_CONFIG = {
@@ -146,9 +152,9 @@ def test_used_repo_ids_cover_the_sources_of_models_built_on_first_use():
     linux = used_repo_ids([], _BUILT_ON_FIRST_USE_CONFIG, platform_key="linux")
     darwin = used_repo_ids([], _BUILT_ON_FIRST_USE_CONFIG, platform_key="darwin")
 
-    assert linux == {"org/ideo-nf4", "org/moss-sft", "org/moss-turbo"}
+    assert linux - _MATTE_REPOS == {"org/ideo-nf4", "org/moss-sft", "org/moss-turbo"}
     # MOSS has no alias on macOS, so only the Instant components of that platform count.
-    assert darwin == {"org/ideo-fp8"}
+    assert darwin - _MATTE_REPOS == {"org/ideo-fp8"}
 
 
 def test_each_built_model_names_its_own_source_repos():
@@ -160,7 +166,7 @@ def test_each_built_model_names_its_own_source_repos():
 def test_moss_sft_alone_does_not_use_the_turbo_lora_repo():
     config = {**_BUILT_ON_FIRST_USE_CONFIG, "model_aliases": {"moss-sft": "moss-sft"}}
 
-    assert used_repo_ids([], config, platform_key="linux") == {"org/moss-sft"}
+    assert used_repo_ids([], config, platform_key="linux") - _MATTE_REPOS == {"org/moss-sft"}
 
 
 def test_an_invalid_built_model_source_block_warns_and_counts_nothing():
@@ -169,7 +175,7 @@ def test_an_invalid_built_model_source_block_warns_and_counts_nothing():
     with pytest.warns(UserWarning, match="built on first use"):
         used = used_repo_ids([], config, platform_key="linux")
 
-    assert used == {"org/ideo-nf4"}
+    assert used - _MATTE_REPOS == {"org/ideo-nf4"}
 
 
 def test_cache_repos_linked_from_installed_models(hub, tmp_path):
@@ -214,6 +220,13 @@ def web_config(hub, tmp_path):
 
 
 def test_other_downloads_are_the_repos_nothing_uses(web_config, hub):
+    assert [repo.repo_id for repo in find_other_downloads(web_config, cache_dir=hub)] == ["org/old"]
+
+
+def test_the_background_removal_repos_are_not_other_downloads(web_config, hub):
+    _repo(hub, BIREFNET.repo_id, local=25_000)
+    _repo(hub, VITMATTE.repo_id, local=25_000)
+
     assert [repo.repo_id for repo in find_other_downloads(web_config, cache_dir=hub)] == ["org/old"]
 
 

@@ -42,6 +42,33 @@ describe('AssetTile', () => {
     flushSync();
   }
 
+  it('puts the checkerboard on the image of a transparent asset only', () => {
+    mountTile({ asset: makeAsset({ transparent: true }) });
+    const img = target.querySelector('img') as HTMLImageElement;
+    expect(img.classList.contains('ui-checkerboard')).toBe(true);
+    expect(img.dataset.transparent).toBe('true');
+    expect(target.querySelector('article')?.getAttribute('data-transparent')).toBe('true');
+  });
+
+  it.each([{ transparent: false }, {}])('leaves an opaque asset (%j) without the checkerboard', (overrides) => {
+    mountTile({ asset: makeAsset(overrides) });
+    const img = target.querySelector('img') as HTMLImageElement;
+    expect(img.classList.contains('ui-checkerboard')).toBe(false);
+    expect(img.dataset.transparent).toBe('false');
+  });
+
+  it('keeps the checkerboard in every density', () => {
+    for (const density of ['card', 'compact', 'stage']) {
+      mountTile({ asset: makeAsset({ transparent: true }), density });
+      expect(target.querySelector('img')?.classList.contains('ui-checkerboard')).toBe(true);
+    }
+  });
+
+  it('never puts the checkerboard on a video', () => {
+    mountTile({ asset: makeAsset({ transparent: true, media_type: 'video' }) });
+    expect(target.querySelector('.ui-checkerboard')).toBeNull();
+  });
+
   it('previews from the media and the expand action with the clicked trigger', () => {
     const asset = makeAsset();
     const onpreview = vi.fn();

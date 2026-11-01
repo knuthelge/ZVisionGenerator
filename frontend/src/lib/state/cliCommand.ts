@@ -204,6 +204,7 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
     amountToggle(args, settings, 'sharpen', true);
     amountToggle(args, settings, 'contrast', false);
     amountToggle(args, settings, 'saturation', false);
+    if (checked(settings, 'transparent')) args.push('--transparent');
     const upscale = text(settings, 'upscale');
     if (upscale !== undefined) {
       args.push('--upscale', upscale);

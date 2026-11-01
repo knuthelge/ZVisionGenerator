@@ -17,6 +17,7 @@ const modelApiMocks = vi.hoisted(() => ({
   importLoraHF: vi.fn(),
   deleteModel: vi.fn(),
   deleteEnhancerModel: vi.fn(),
+  deleteBackgroundRemoval: vi.fn(),
   deleteOtherDownload: vi.fn(),
   freeStrandedCacheFiles: vi.fn(),
   deleteLora: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 
 import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
+import { TRANSPARENT_TERMS } from '../workspace/transparent';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { mountComponent, settle } from '../../test-utils/mount';
 import { pickOption } from '../../test-utils/select';
@@ -874,6 +876,77 @@ describe('ModelsPage downloads', () => {
 
     expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('enhancer', 'smart');
     expect(modelApiMocks.startDownload).toHaveBeenCalledWith('enhancer', 'smart');
+  });
+
+  describe('background removal row', () => {
+    const matte = { name: 'background-removal', label: 'Background removal', downloaded: false, disk_size_label: null, download_size_label: '548 MB', deletable: false, download_needed: true };
+    const matteRow = (): HTMLElement | null => target.querySelector('[data-testid="matte-row"]');
+    const matteDownloadButton = (): HTMLButtonElement | null => target.querySelector('[data-testid="matte-row"] [data-testid="download-button"]');
+
+    it('is hidden when the response has no background removal block', async () => {
+      await mountPage();
+      expect(matteRow()).toBeNull();
+    });
+
+    it('shows the label, the first-use size, the Non-commercial badge and Download', async () => {
+      await mountPage(inventoryWith({ background_removal: matte }));
+
+      const row = matteRow()!;
+      expect(row.querySelector('[data-testid="model-name"]')!.textContent).toBe('Background removal');
+      expect(row.querySelector('[data-testid="model-id"]')).toBeNull();
+      expect(row.textContent).toContain('≈548 MB');
+      expect(row.querySelector('[data-testid="matte-terms"]')!.textContent).toContain('Non-commercial');
+      expect(row.querySelector('[data-testid="matte-terms"] [role="tooltip"]')!.textContent).toBe(TRANSPARENT_TERMS);
+      expect(matteDownloadButton()!.getAttribute('aria-label')).toBe('Download the background removal models');
+      expect(row.querySelector('[data-testid="delete-button"]')).toBeNull();
+    });
+
+    it('downloads by kind matte and name background-removal', async () => {
+      modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ kind: 'matte', name: 'background-removal', label: 'Background removal' }));
+      modelApiMocks.startDownload.mockResolvedValue(item({ kind: 'matte', name: 'background-removal', label: 'Background removal' }));
+      await mountPage(inventoryWith({ background_removal: matte }));
+
+      matteDownloadButton()!.click();
+      await tickFor();
+      confirmButton().click();
+      await tickFor();
+
+      expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('matte', 'background-removal');
+      expect(modelApiMocks.startDownload).toHaveBeenCalledWith('matte', 'background-removal');
+    });
+
+    it('shows progress and Cancel while the download runs', async () => {
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [running({ kind: 'matte', name: 'background-removal', label: 'Background removal' })] });
+      await mountPage(inventoryWith({ background_removal: matte }));
+
+      expect(matteDownloadButton()).toBeNull();
+      expect(target.querySelector('[data-testid="download-subrow"]')).not.toBeNull();
+      expect(target.querySelector('[data-testid="download-cancel"]')!.getAttribute('aria-label')).toBe('Cancel the download of the background removal models');
+    });
+
+    it('hides Download when nothing is left to fetch', async () => {
+      await mountPage(inventoryWith({ background_removal: { ...matte, downloaded: true, disk_size_label: '982 MB', deletable: true, download_needed: false } }));
+
+      expect(matteDownloadButton()).toBeNull();
+      expect(matteRow()!.textContent).toContain('982 MB');
+    });
+
+    it('deletes after confirming, through the background removal route', async () => {
+      modelApiMocks.deleteBackgroundRemoval.mockResolvedValue({ status: 'ok', tone: 'success', message: 'Deleted the background removal models.' });
+      await mountPage(inventoryWith({ background_removal: { ...matte, downloaded: true, disk_size_label: '982 MB', deletable: true, download_needed: false } }));
+
+      const remove = matteRow()!.querySelector<HTMLButtonElement>('[data-testid="delete-button"]')!;
+      expect(remove.getAttribute('aria-label')).toBe('Delete the background removal models');
+      remove.click();
+      await tickFor();
+      expect(confirmDialog()!.textContent).toContain('Delete the background removal models?');
+      expect(document.querySelector('[data-testid="delete-matte"]')!.textContent).toContain('Frees 982 MB');
+      expect(modelApiMocks.deleteBackgroundRemoval).not.toHaveBeenCalled();
+
+      confirmButton().click();
+      await tickFor();
+      expect(modelApiMocks.deleteBackgroundRemoval).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shows a queued item with Cancel in place of Download, and no progress bar', async () => {

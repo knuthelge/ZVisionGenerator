@@ -7,7 +7,7 @@ import argparse
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.workflows import seedvr2_stages
-from zvisiongenerator.workflows.generation_prompt import generation_negative, generation_prompt
+from zvisiongenerator.workflows.generation_prompt import conditioning_prompt, generation_negative, generation_prompt
 from zvisiongenerator.workflows.image_stages import (
     enhance_prompt_stage,
     resolve_prompt_stage,
@@ -15,6 +15,7 @@ from zvisiongenerator.workflows.image_stages import (
     load_reference_stage,
     load_references_stage,
     load_source_stage,
+    matte_stage,
     review_stage,
     text_to_image_stage,
     upscale_stage,
@@ -24,7 +25,7 @@ from zvisiongenerator.workflows.image_stages import (
     save_image_stage,
 )
 
-__all__ = ["generation_negative", "generation_prompt", "build_workflow", "build_upscale_workflow", "build_seedvr2_upscale_workflow", "build_video_workflow"]
+__all__ = ["conditioning_prompt", "generation_negative", "generation_prompt", "build_workflow", "build_upscale_workflow", "build_seedvr2_upscale_workflow", "build_video_workflow"]
 
 
 def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:
@@ -43,28 +44,39 @@ def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> Genera
         stages.append(saturation_stage)
     if args.sharpen is not False:
         stages.append(sharpen_stage)
+    if getattr(args, "transparent", False):
+        stages.append(matte_stage)
     stages.append(save_image_stage)
     return GenerationWorkflow(name="dynamic", stages=stages)
 
 
-def build_upscale_workflow(*, sharpen: bool = True) -> GenerationWorkflow:
-    """Build the workflow that upscales an existing image: load it, upscale and refine, sharpen, save.
+def build_upscale_workflow(*, sharpen: bool = True, transparent: bool = False) -> GenerationWorkflow:
+    """Build the workflow that upscales an existing image: load it, upscale and refine, sharpen, cut out, save.
+
+    With *transparent*, the cut-out stage runs last, just before the save.
 
     Contrast and saturation are left out: the source already had them applied, and the refinement keeps its colours.
     """
     stages = [resolve_prompt_stage, suppress_negative_stage, load_source_stage, upscale_stage]
     if sharpen:
         stages.append(sharpen_stage)
+    if transparent:
+        stages.append(matte_stage)
     stages.append(save_image_stage)
     return GenerationWorkflow(name="upscale", stages=stages)
 
 
-def build_seedvr2_upscale_workflow() -> GenerationWorkflow:
+def build_seedvr2_upscale_workflow(*, transparent: bool = False) -> GenerationWorkflow:
     """Build the workflow that upscales an existing image with SeedVR2: resolve the prompt, load, upscale, save.
 
     The prompt stage puts the rendered prompt into the saved file. There is no sharpen stage: SeedVR2 output is saved as is.
+    With *transparent*, the cut-out stage runs just before the save.
     """
-    return GenerationWorkflow(name="upscale", stages=[resolve_prompt_stage, load_source_stage, seedvr2_stages.upscale_stage, save_image_stage])
+    stages = [resolve_prompt_stage, load_source_stage, seedvr2_stages.upscale_stage]
+    if transparent:
+        stages.append(matte_stage)
+    stages.append(save_image_stage)
+    return GenerationWorkflow(name="upscale", stages=stages)
 
 
 def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:

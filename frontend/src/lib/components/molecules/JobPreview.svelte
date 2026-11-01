@@ -16,6 +16,8 @@
   // Paused between images: the image that just finished, sharp. Otherwise the transient live preview.
   const pausedBetween = $derived(isPaused(job) && phase === 'generate' && !!job.itemFinished);
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);
+  // A finished cut-out sits on a checkerboard; the live preview is the opaque render and never does.
+  const transparent = $derived(pausedBetween && lastOutput?.transparent === true);
   let failedUrl = $state<string | null>(null);
   const src = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? lastOutput?.url ?? null) : job.previewUrl);
   const shown = $derived(src !== null && failedUrl !== src);
@@ -36,6 +38,8 @@
     <img
       {src}
       alt={pausedBetween ? 'The last finished image' : 'Live preview of the generation in progress'}
+      class:ui-checkerboard={transparent}
+      data-transparent={transparent}
       onerror={(event) => { failedUrl = event.currentTarget.getAttribute('src'); }}
     >
     <figcaption class="job-preview-tag">{tag}</figcaption>

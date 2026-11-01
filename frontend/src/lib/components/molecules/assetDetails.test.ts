@@ -43,6 +43,14 @@ describe('assetDetailSections', () => {
     expect(labels(clip({ media_type: 'image' }))).not.toContain('References');
   });
 
+  it('lists a transparent background in the post-processing facts, and only when the image has one', () => {
+    const image = (generation: object) => clip({ media_type: 'image', details: { generation } } as Partial<GalleryAsset>);
+    const facts = (asset: GalleryAsset) => assetDetailSections(asset).postProcessing;
+    expect(facts(image({ transparent: true }))).toContainEqual({ label: 'Transparent background', value: 'On' });
+    expect(facts(image({ sharpen: 0.5 })).map((fact) => fact.label)).not.toContain('Transparent background');
+    expect(facts(clip()).map((fact) => fact.label)).not.toContain('Transparent background');
+  });
+
   it('leaves the last frame out of a clip without one', () => {
     expect(labels(clip({ image_path: '/in/start.png', end_image_path: null }))).not.toContain('Last frame');
   });

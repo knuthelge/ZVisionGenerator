@@ -44,6 +44,21 @@ describe('JobPreview', () => {
     expect(figure.style.aspectRatio.startsWith('1.77')).toBe(true);
   });
 
+  it('puts the checkerboard on a finished transparent output shown between images, never on the live preview', () => {
+    const output = { id: 'o.png', url: '/media/o.png', thumbnail_url: '/media/o-thumb.png', transparent: true } as ActiveJobState['outputs'][number];
+    const paused = { status: 'paused', paused: true, itemFinished: true, outputs: [output] } as Partial<ActiveJobState>;
+    const finished = mountComponent(JobPreview, { job: makeJob(paused) });
+    expect(finished.target.querySelector('img')?.dataset.transparent).toBe('true');
+    expect(finished.target.querySelector('img')?.classList.contains('ui-checkerboard')).toBe(true);
+
+    const opaque = mountComponent(JobPreview, { job: makeJob({ ...paused, outputs: [{ ...output, transparent: false }] }) });
+    expect(opaque.target.querySelector('.ui-checkerboard')).toBeNull();
+
+    const live = mountComponent(JobPreview, { job: makeJob({ previewUrl: '/jobs/job-1/preview?v=1', outputs: [output] }) });
+    expect(live.target.querySelector('img')?.dataset.transparent).toBe('false');
+    expect(live.target.querySelector('.ui-checkerboard')).toBeNull();
+  });
+
   it('shows the live preview once it arrives, with how far along it is', () => {
     const { target } = mountComponent(JobPreview, { job: makeJob({ previewUrl: '/jobs/job-1/preview?v=1', currentStep: 16 }) });
     const img = target.querySelector('img') as HTMLImageElement;

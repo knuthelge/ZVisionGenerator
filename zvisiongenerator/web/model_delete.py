@@ -22,6 +22,7 @@ from typing import Any
 from zvisiongenerator.downloads.built_sources import BUILT_MODEL_NAMES, built_model_downloads, built_model_source_repos, built_model_sources
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.config import enhancer_tier_models, video_companion_repos
+from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
@@ -180,6 +181,18 @@ def enhancer_delete_target(repo: str) -> DeleteTarget | None:
     return DeleteTarget("huggingface", path, repo_id=reference.repo_id) if path.is_dir() else None
 
 
+def matte_delete_target() -> DeleteTarget | None:
+    """Return what deleting the background removal models removes: the BiRefNet repo and, with it, the ViTMatte repo.
+
+    ``None`` when neither repo is in the cache. A partial download counts, so an interrupted first use can be cleared too.
+    """
+    path = huggingface_cache_repo_dir(BIREFNET.repo_id)
+    companions = (VITMATTE.repo_id,) if huggingface_cache_repo_dir(VITMATTE.repo_id).is_dir() else ()
+    if not path.is_dir() and not companions:
+        return None
+    return DeleteTarget("huggingface", path, repo_id=BIREFNET.repo_id, companion_repos=companions)
+
+
 def used_repo_ids(
     inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry],
     app_config: dict[str, Any],
@@ -187,13 +200,14 @@ def used_repo_ids(
     platform_key: str,
     extra: Iterable[str] = (),
 ) -> frozenset[str]:
-    """Return the HuggingFace repos the app loads, case-folded: aliases, their LTX companions, enhancer tiers, the sources of models built on first use and *extra*."""
+    """Return the HuggingFace repos the app loads, case-folded: aliases, their LTX companions, enhancer tiers, the background removal models, the sources of models built on first use and *extra*."""
     entries = [entry for entry in inventory if entry.source != "installed"]
     references = [entry.resolved_path for entry in entries]
     references += [model[0] for model in enhancer_tier_models(app_config, platform_key=platform_key).values()]
     ids = {repo.repo_id for reference in references if (repo := parse_huggingface_repo_reference(reference)) is not None}
     ids.update(repo_id for entry in entries for repo_id in video_companion_repos(entry.family, app_config, entry.resolved_path))
     ids.update(built_model_source_repos(app_config, platform_key=platform_key))
+    ids.update((BIREFNET.repo_id, VITMATTE.repo_id))
     ids.update(extra)
     return frozenset(repo_id.casefold() for repo_id in ids)
 

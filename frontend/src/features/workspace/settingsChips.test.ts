@@ -12,7 +12,7 @@ const imageCaps = {
 
 const state = {
   steps: 32, guidance: 4, referenceImageStrength: 0.75, seed: null, runs: 1, audio: true, lowMemory: false, videoUpscaleEnabled: false,
-  upscaleEnabled: false, upscaleFactor: 2, missingSourceVideo: false,
+  upscaleEnabled: false, upscaleFactor: 2, missingSourceVideo: false, postprocessTransparent: false,
 } as DraftState;
 
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
@@ -109,6 +109,33 @@ describe('settingsChips', () => {
     expect(byKey.loras).toMatchObject({ value: 'detail-tweaker', on: true });
     expect(byKey.size.value).toBe('1024×1024');
     expect(byKey.runs.value).toBe('×1');
+  });
+
+  describe('the Transparent chip', () => {
+    const caps = { ...imageCaps, showPostprocessTransparent: true } as WorkspaceCapabilities;
+    const transparent = (f: Partial<ChipFacts>) => settingsChips(facts({ caps, ...f })).find((chip) => chip.key === 'transparent');
+
+    it('shows only while the switch is on, between Upscale and Model', () => {
+      expect(transparent({})).toBeUndefined();
+      const on = { ...state, postprocessTransparent: true } as DraftState;
+      expect(transparent({ state: on })).toMatchObject({ label: 'Transparent', value: 'on', on: true });
+      expect(settingsChips(facts({ caps, state: on })).map((chip) => chip.key).slice(-3)).toEqual(['upscale', 'transparent', 'model']);
+    });
+
+    it('stays, reading off, while its popover is open', () => {
+      expect(transparent({ openKey: 'transparent' })).toMatchObject({ value: 'off', on: false });
+      expect(transparent({ openKey: 'steps' })).toBeUndefined();
+    });
+
+    it('carries the changed flag', () => {
+      const on = { ...state, postprocessTransparent: true } as DraftState;
+      expect(transparent({ state: on, changed: (...keys) => keys.includes('postprocessTransparent') })?.changed).toBe(true);
+    });
+
+    it('is never offered where the workflow has no Transparent control, even when the draft has it on', () => {
+      const on = { ...state, postprocessTransparent: true } as DraftState;
+      expect(settingsChips(facts({ state: on, openKey: 'transparent' })).map((chip) => chip.key)).not.toContain('transparent');
+    });
   });
 
   it('puts the preset first with its name, or none, and the changed flag', () => {

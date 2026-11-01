@@ -12,12 +12,15 @@ from PIL import Image
 from tests._images import is_bluish, is_reddish, write_sideways_photo
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.workflows import build_workflow
+from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow, build_workflow
+from zvisiongenerator.workflows import seedvr2_stages
 from zvisiongenerator.workflows.image_stages import (
     resolve_prompt_stage,
     suppress_negative_stage,
     load_reference_stage,
     load_references_stage,
+    load_source_stage,
+    matte_stage,
     text_to_image_stage,
     upscale_stage,
     contrast_stage,
@@ -77,6 +80,37 @@ class TestBuildWorkflow:
     )
     def test_stage_list(self, args, post_stages):
         assert build_workflow(_default_args(**args)).stages == [*self._HEAD, *post_stages, save_image_stage]
+
+
+class TestTransparentWorkflows:
+    """The matte stage runs last, just before the save, in all three image builders."""
+
+    def test_build_workflow_cuts_out_after_every_post_processing_stage(self):
+        args = _default_args(sharpen=True, contrast=True, saturation=True, upscale=2, transparent=True)
+
+        stages = build_workflow(args).stages
+
+        assert stages[-2:] == [matte_stage, save_image_stage]
+        assert stages[-3] is sharpen_stage
+
+    def test_build_workflow_without_the_flag_has_no_matte_stage(self):
+        assert matte_stage not in build_workflow(_default_args(transparent=False)).stages
+        assert matte_stage not in build_workflow(_default_args()).stages
+
+    @pytest.mark.parametrize("sharpen", [True, False])
+    def test_creative_upscale_workflow(self, sharpen):
+        plain = build_upscale_workflow(sharpen=sharpen).stages
+
+        assert build_upscale_workflow(sharpen=sharpen, transparent=True).stages == [*plain[:-1], matte_stage, save_image_stage]
+        assert matte_stage not in plain
+
+    def test_seedvr2_upscale_workflow(self):
+        plain = build_seedvr2_upscale_workflow().stages
+
+        assert build_seedvr2_upscale_workflow(transparent=True).stages == [*plain[:-1], matte_stage, save_image_stage]
+        assert matte_stage not in plain
+        assert seedvr2_stages.upscale_stage in plain
+        assert load_source_stage in plain
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +249,34 @@ class TestE2EWorkflow:
             exif = saved_image.getexif()
             assert saved_image.info.get("Description") == "a glowing forest"
             assert exif.get(0x010E) == "a glowing forest"
+
+    def test_transparent_sends_the_background_phrase_but_saves_the_written_prompt(self, tmp_path):
+        mock_backend = _make_mock_backend()
+        request = ImageGenerationRequest(
+            backend=mock_backend,
+            model="fake",
+            model_family="zimage",
+            supports_negative_prompt=True,
+            prompt="a glowing forest",
+            seed=42,
+            width=64,
+            height=64,
+            steps=10,
+            guidance=3.5,
+            transparent=True,
+            output_dir=str(tmp_path),
+            filename_base="test",
+        )
+        artifacts = ImageWorkingArtifacts(filename="test")
+
+        build_workflow(_default_args()).run(request, artifacts)
+
+        assert mock_backend.text_to_image.call_args.kwargs["prompt"] == "a glowing forest, isolated on a plain light grey studio background"
+        with Image.open(artifacts.filepath) as saved_image:
+            assert saved_image.info.get("Description") == "a glowing forest"
+            assert saved_image.getexif().get(0x010E) == "a glowing forest"
+        assert read_png_config(artifacts.filepath)["prompt"] == "a glowing forest"
+        assert read_png_config(artifacts.filepath)["generation"]["transparent"] is True
 
     def test_default_workflow_with_upscale(self, tmp_path):
         mock_backend = _make_mock_backend()
@@ -476,6 +538,35 @@ class TestReferences:
         upscale_stage(request, artifacts)
 
         assert backend.image_to_image.call_args.kwargs["reference_images"] == refs
+
+
+class TestTransparentPrompt:
+    _SUFFIXED = "a cat, isolated on a plain light grey studio background"
+
+    def test_the_start_image_generation_sends_the_background_phrase(self):
+        backend = _make_mock_backend()
+        artifacts = ImageWorkingArtifacts(resolved_prompt="a cat", image=Image.new("RGB", (64, 64)))
+
+        text_to_image_stage(_reference_request([], backend=backend, image_path="start.png", transparent=True), artifacts)
+
+        assert backend.image_to_image.call_args.kwargs["prompt"] == self._SUFFIXED
+
+    def test_the_upscale_refine_sends_the_background_phrase(self):
+        backend = _make_mock_backend()
+        artifacts = ImageWorkingArtifacts(resolved_prompt="a cat", image=Image.new("RGB", (64, 64)))
+        request = _reference_request([], backend=backend, upscale_factor=2, upscale_denoise=0.3, upscale_sharpen=False, transparent=True)
+
+        upscale_stage(request, artifacts)
+
+        assert backend.image_to_image.call_args.kwargs["prompt"] == self._SUFFIXED
+
+    def test_without_transparent_the_prompt_is_sent_as_written(self):
+        backend = _make_mock_backend()
+        artifacts = ImageWorkingArtifacts(resolved_prompt="a cat")
+
+        text_to_image_stage(_reference_request([], backend=backend), artifacts)
+
+        assert backend.text_to_image.call_args.kwargs["prompt"] == "a cat"
 
 
 # ---------------------------------------------------------------------------

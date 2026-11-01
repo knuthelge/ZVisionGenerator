@@ -44,6 +44,7 @@ _IMAGE_KEYS: dict[str, type] = {
     "contrast_amount": float,
     "saturation_enabled": bool,
     "saturation_amount": float,
+    "transparent": bool,
     "upscale": int,
     "upscale_denoise": float,
     "upscale_steps": int,

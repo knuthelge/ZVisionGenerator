@@ -27,7 +27,7 @@ from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.input_images import open_image_upright
 from zvisiongenerator.utils.references import check_reference_count, load_reference_image
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
-from zvisiongenerator.workflows.generation_prompt import generation_negative, generation_prompt
+from zvisiongenerator.workflows.generation_prompt import conditioning_prompt, generation_negative, generation_prompt
 
 
 def emit_step_progress(
@@ -130,6 +130,9 @@ def load_references_stage(request: ImageGenerationRequest, artifacts: ImageWorki
 def load_source_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Load the image an upscale job refines, at its native size, and name the output after it.
 
+    With ``request.transparent`` the source is composited onto the grey matte backdrop, because the upscalers take
+    opaque input; the matte stage cuts the result out again.
+
     The output is ``{source stem}_{factor}x.png`` in ``request.output_dir``, with a counter when taken.
     No-op if request.upscale_source is None.
     """
@@ -142,7 +145,12 @@ def load_source_stage(request: ImageGenerationRequest, artifacts: ImageWorkingAr
         raise FileNotFoundError(f"Image to upscale not found: {source}")
 
     with Image.open(source) as source_image:
-        artifacts.image = source_image.convert("RGB")
+        if request.transparent:
+            from zvisiongenerator.processing.matte import on_backdrop
+
+            artifacts.image = on_backdrop(source_image)
+        else:
+            artifacts.image = source_image.convert("RGB")
     artifacts.metadata["upscale_source"] = {"path": str(source), "width": artifacts.image.width, "height": artifacts.image.height}
 
     os.makedirs(request.output_dir, exist_ok=True)
@@ -164,6 +172,7 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
 
     prompt_one_line = " ".join(prompt.split())
     print(f"Prompt: \n{prompt_one_line}\n")
+    prompt = conditioning_prompt(prompt, transparent=request.transparent)
 
     reference_images = artifacts.reference_images or None
     if reference_images:
@@ -287,6 +296,7 @@ def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifa
         effective_steps = request.steps
 
     prompt = generation_prompt(request.prompt, artifacts.resolved_prompt)
+    prompt = conditioning_prompt(prompt, transparent=request.transparent)
     neg = generation_negative(request.negative_prompt, supports_negative=request.supports_negative_prompt)
 
     start = time.perf_counter()
@@ -349,6 +359,24 @@ def saturation_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArt
     from zvisiongenerator.processing.saturation import adjust_saturation
 
     artifacts.image = adjust_saturation(artifacts.image, amount=request.saturation_amount)
+    return StageOutcome.success
+
+
+def matte_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
+    """Cut the subject out of the image, leaving the background transparent.
+
+    Runs last, after every post-processing stage, because sharpening drops the alpha channel and contrast and
+    saturation would recolour the pixels under it. The chain loads on its first cut-out; ``make_room`` is asked to
+    free memory for it only while it is not loaded.
+    """
+    if artifacts.image is None or request.matte is None:
+        return StageOutcome.success
+    if not request.matte.loaded and request.make_room is not None:
+        request.make_room()
+    artifacts.image = request.matte.cut_out(artifacts.image.convert("RGB"))
+    callback = emit_step_progress(request.step_callback, phase="image_matte", total_steps=1)
+    if callback is not None:
+        callback({"current_step": 1})
     return StageOutcome.success
 
 

@@ -8,7 +8,7 @@ import type { DraftState, PresetMode, PresetSettings, PresetValue, SettingsPrese
 
 const IMAGE_KEYS = [
   'quantize', 'lora', 'ratio', 'size', 'width', 'height', 'runs', 'steps', 'guidance', 'image_strength', 'scheduler', 'first_sigma',
-  'sharpen_enabled', 'sharpen_amount', 'contrast_enabled', 'contrast_amount', 'saturation_enabled', 'saturation_amount',
+  'sharpen_enabled', 'sharpen_amount', 'contrast_enabled', 'contrast_amount', 'saturation_enabled', 'saturation_amount', 'transparent',
   'upscale', 'upscale_denoise', 'upscale_steps', 'upscale_guidance', 'upscale_sharpen', 'review',
 ] as const;
 const VIDEO_KEYS = ['lora', 'ratio', 'size', 'width', 'height', 'runs', 'steps', 'frames', 'audio', 'low_memory', 'video_upscale_factor', 'review'] as const;
@@ -30,6 +30,7 @@ const IMAGE_DRAFT_KEYS: Record<string, DraftKey[]> = {
   sharpen_enabled: ['postprocessSharpenEnabled'], sharpen_amount: ['postprocessSharpenAmount'],
   contrast_enabled: ['postprocessContrastEnabled'], contrast_amount: ['postprocessContrastAmount'],
   saturation_enabled: ['postprocessSaturationEnabled'], saturation_amount: ['postprocessSaturationAmount'],
+  transparent: ['postprocessTransparent'],
   upscale: ['upscaleEnabled', 'upscaleFactor'], upscale_denoise: ['upscaleDenoise'], upscale_steps: ['upscaleSteps'],
   upscale_guidance: ['upscaleGuidance'], upscale_sharpen: ['upscaleSharpen'], review: ['upscaleReview'],
 };
@@ -90,6 +91,7 @@ export function presetSettingsFromDraft(state: DraftState, ctx: WorkspaceContext
       contrast_amount: _whenOn(state.postprocessContrastEnabled, state.postprocessContrastAmount),
       saturation_enabled: state.postprocessSaturationEnabled,
       saturation_amount: _whenOn(state.postprocessSaturationEnabled, state.postprocessSaturationAmount),
+      transparent: state.postprocessTransparent,
       upscale: state.upscaleEnabled ? state.upscaleFactor : null,
       upscale_denoise: _whenOn(state.upscaleEnabled, state.upscaleDenoise),
       upscale_steps: _whenOn(state.upscaleEnabled, state.upscaleSteps),
@@ -118,6 +120,7 @@ function _comparable(settings: PresetSettings, mode: PresetMode, ctx: WorkspaceC
     if (key === 'lora') result.lora = formatLoraString(parseLoraString(String(settings.lora ?? ''), ctx.loras));
     else if (key === 'size') result.size = _sizeUnit(settings);
     else if (key === 'review') result.review = settings.review === true;
+    else if (key === 'transparent') result.transparent = settings.transparent === true;
     else if (!(SIZE_KEYS as readonly string[]).includes(key)) result[key] = _plain(settings[key]);
   }
   return result;
@@ -185,6 +188,8 @@ export function presetPrefill(preset: SettingsPreset, state: DraftState, ctx: Wo
     patch.firstSigma = s.first_sigma as number | null;
     // A null sharpen amount means "follow the config", which is a choice too.
     patch.postprocessSharpenAmount = s.sharpen_amount as number | null;
+    // A preset without the setting holds Transparent off: applying it must not keep an earlier choice.
+    patch.postprocessTransparent = s.transparent === true;
     _assign(patch, [
       ['referenceImageStrength', s.image_strength], ['postprocessSharpenEnabled', s.sharpen_enabled],
       ['postprocessContrastEnabled', s.contrast_enabled], ['postprocessContrastAmount', s.contrast_amount],

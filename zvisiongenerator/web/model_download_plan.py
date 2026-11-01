@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.downloads.check import check_target
-from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.space import space_need
 from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name
+from zvisiongenerator.utils.matte_models import MATTE_LABEL, MATTE_ROW_NAME
 from zvisiongenerator.utils.model_files import huggingface_cache_dir
 from zvisiongenerator.utils.seedvr2 import seedvr2_row_name
 
@@ -24,10 +25,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "KIND_ENHANCER",
+    "KIND_MATTE",
     "KIND_MODEL",
     "PlanUnchecked",
     "RowPlan",
     "enhancer_download_needed",
+    "matte_download_needed",
     "plan_summary",
     "row_download_needed",
     "row_plan",
@@ -35,6 +38,7 @@ __all__ = [
 
 KIND_MODEL = "model"
 KIND_ENHANCER = "enhancer"
+KIND_MATTE = "matte"
 
 
 class PlanUnchecked(Exception):  # noqa: N818 - a state, not an error class; callers map it to HTTP 503
@@ -46,7 +50,7 @@ class RowPlan:
     """The downloads a Models-page row needs.
 
     Attributes:
-        kind: ``"model"`` (image, video and SeedVR2 rows, by name) or ``"enhancer"`` (by tier).
+        kind: ``"model"`` (image, video and SeedVR2 rows, by name), ``"enhancer"`` (by tier) or ``"matte"`` (the one Background removal row).
         name: The row's name or tier.
         label: How the row reads in messages.
         targets: The targets to fetch, or ``None`` when the plan cannot be made now (no connection to read the model's file list).
@@ -69,6 +73,9 @@ def row_plan(kind: str, name: str, web_config: WebUiConfig) -> RowPlan:
     if kind == KIND_ENHANCER:
         repo, revision = _enhancer_model(name, web_config.app_config)
         return RowPlan(kind, name, _enhancer_label(name), enhancer_plan(repo, revision))
+    if kind == KIND_MATTE:
+        _require_matte_row(name)
+        return RowPlan(kind, name, MATTE_LABEL, matte_plan())
     raise ValueError(f"Unknown download kind '{kind}'.")
 
 
@@ -86,10 +93,11 @@ def row_download_needed(
     A model built on first use (Ideogram 4 Instant, MOSS-Image) needs its sources; any other image row needs a download when it is not
     *downloaded* (no planner runs, so no file list is read); video, SeedVR2 and enhancer rows need one when a
     target of their plan is not present. A video plan that cannot be made falls back to *downloaded*. Rows of
-    unknown status (``downloaded`` is ``None``) and enhancer rows that are *unavailable* need none.
+    unknown status (``downloaded`` is ``None``) and enhancer rows that are *unavailable* need none. The Background
+    removal row needs a download when either of its two repos is not present.
 
     Args:
-        kind: ``"model"`` or ``"enhancer"``.
+        kind: ``"model"``, ``"enhancer"`` or ``"matte"``.
         name: The row's name or tier.
         web_config: The Web UI config with its model inventory.
         downloaded: The row's ``downloaded`` status, ``None`` when unknown.
@@ -102,6 +110,9 @@ def row_download_needed(
     if kind == KIND_ENHANCER:
         repo, revision = _enhancer_model(name, web_config.app_config)
         return enhancer_download_needed(repo, revision, unavailable=unavailable, present=present)
+    if kind == KIND_MATTE:
+        _require_matte_row(name)
+        return matte_download_needed(present=present)
     image = _image_entry(name, web_config)
     if image is not None:
         built_plan = built_model_plan(image.resolved_path, config=web_config.app_config, platform_key=sys.platform)
@@ -127,6 +138,11 @@ def enhancer_download_needed(
     if unavailable:
         return False
     return _any_missing(enhancer_plan(repo, revision), present)
+
+
+def matte_download_needed(*, present: Callable[[DownloadTarget], bool] = target_present_offline) -> bool:
+    """Return whether the background removal models still have files to download; a plan that cannot be made needs none."""
+    return _any_missing(matte_plan(), present)
 
 
 def plan_summary(
@@ -202,6 +218,12 @@ def _enhancer_model(tier: str, app_config: dict[str, Any]) -> tuple[str, str | N
     if model is None:
         raise ValueError(f"No enhancer model for '{tier}' to download.")
     return model
+
+
+def _require_matte_row(name: str) -> None:
+    """Raise ``ValueError`` unless *name* is the one Background removal row."""
+    if name != MATTE_ROW_NAME:
+        raise ValueError(f"No background removal row '{name}' to download.")
 
 
 def _enhancer_label(tier: str) -> str:

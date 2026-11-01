@@ -5,7 +5,7 @@ import type { DraftState, Workflow } from '$lib/types';
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
   | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'seed' | 'runs'
-  | 'source' | 'images' | 'size' | 'audio' | 'loras' | 'upscale' | 'model';
+  | 'source' | 'images' | 'size' | 'audio' | 'loras' | 'upscale' | 'transparent' | 'model';
 
 export interface SettingChip {
   key: ChipKey;
@@ -14,7 +14,7 @@ export interface SettingChip {
   value: string;
   /** Differs from the model's default. */
   changed: boolean;
-  /** The value is "on" (a locked seed, LoRAs present, upscale on): shown in the accent colour. */
+  /** The value is "on" (a locked seed, LoRAs present, upscale on, transparent on): shown in the accent colour. */
   on?: boolean;
   /** Something to look at: a clip that may not fit, a model not downloaded. */
   warn?: boolean;
@@ -55,13 +55,15 @@ export interface ChipFacts {
   presetSlug: string | null;
   /** The form differs from the applied preset. */
   presetChanged: boolean;
+  /** The chip whose popover is open; Transparent stays while its popover is, so switching it off there does not pull the chip away. */
+  openKey?: ChipKey | null;
 }
 
 const fmt = (value: number): string => (Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2))));
 
 /**
  * Chips in the order their settings change in the loop: every run (length, steps, guidance, seed, batch),
- * per series (images or source, size, audio, LoRAs), at the end (upscale), at the start (model). The preset, which
+ * per series (images or source, size, audio, LoRAs), at the end (upscale, then Transparent, which only shows while on), at the start (model). The preset, which
  * sets many of them at once, comes before all.
  */
 export function settingsChips(f: ChipFacts): SettingChip[] {
@@ -83,6 +85,9 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
       : null,
     { key: 'loras', label: 'LoRA', value: f.loraNames.length ? f.loraNames.join(', ') : 'none', changed: false, on: f.loraNames.length > 0, download: f.loraDownload },
     caps.showImageUpscale ? { key: 'upscale', label: 'Upscale', value: s.upscaleEnabled ? `${s.upscaleFactor}×` : 'off', changed: f.changed('upscaleEnabled', 'upscaleFactor'), on: s.upscaleEnabled } : null,
+    caps.showPostprocessTransparent && (s.postprocessTransparent || f.openKey === 'transparent')
+      ? { key: 'transparent', label: 'Transparent', value: s.postprocessTransparent ? 'on' : 'off', changed: f.changed('postprocessTransparent'), on: s.postprocessTransparent }
+      : null,
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
   ];
   return chips.filter((chip): chip is SettingChip => chip !== null);

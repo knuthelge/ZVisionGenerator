@@ -21,6 +21,7 @@ describe('jobPhases', () => {
     ['model_loading', {}, 'load'],
     ['model_downloading', { role: 'model' }, 'load'],
     ['model_downloading', { role: 'enhancer' }, 'enhance'],
+    ['model_downloading', { role: 'matte' }, 'load'],
     ['batch_started', {}, 'generate'],
     ['step_progress', {}, 'generate'],
     ['control_queued', {}, null],
@@ -121,7 +122,7 @@ describe('jobPhases', () => {
 
   describe('model downloads', () => {
     const progress = { bytes_done: 5, bytes_total: 10, bytes_per_sec: 2, download_eta_secs: 3, repo: 'org/repo', part: 1, parts: 2, shared: false };
-    const dlEvent = (role: 'model' | 'enhancer') => ({ ...progress, role, model: 'klein9b' });
+    const dlEvent = (role: 'model' | 'enhancer' | 'matte') => ({ ...progress, role, model: 'klein9b' });
 
     it('reads the byte progress and role of a model_downloading event', () => {
       expect(downloadFromEvent(dlEvent('enhancer'))).toEqual({ ...progress, role: 'enhancer', model: 'klein9b' });
@@ -135,6 +136,13 @@ describe('jobPhases', () => {
 
       const enhancer = trackJobEvent(job({ phase: 'enhance', enhanceTotal: 2 }), 'model_downloading', dlEvent('enhancer'), 0);
       expect(enhancer).toMatchObject({ phase: 'enhance', download: { role: 'enhancer' } });
+    });
+
+    it('keeps a matte download in the load row and ends it when the model loads', () => {
+      const state = trackJobEvent(job({ phase: 'load' }), 'model_downloading', { ...dlEvent('matte'), model: 'Background removal' }, 0);
+      expect(state).toMatchObject({ phase: 'load', download: { role: 'matte', model: 'Background removal' } });
+      expect(trackJobEvent(state, 'model_loading', { phase: 'loading' }, 0).download).toBeNull();
+      expect(trackJobEvent(state, 'enhancer_loading', {}, 0).download).not.toBeNull();
     });
 
     it('replaces the download with each newer event', () => {
@@ -176,6 +184,11 @@ describe('jobPhases', () => {
       state = trackJobEvent(state, 'model_loading', { timestamp: 160 }, 0);
       state = trackJobEvent(state, 'batch_started', { timestamp: 170 }, 0);
       expect(phaseSeconds(state.phaseMarks, 'load')).toBe(60);
+    });
+
+    it('opens the load step for a matte download, as for a model download', () => {
+      const state = trackJobEvent(job({ phase: 'load' }), 'model_downloading', { ...dlEvent('matte'), timestamp: 100 }, 0);
+      expect(state.phaseMarks?.load?.start).toBe(100);
     });
 
     it('does not open the load step for an enhancer download', () => {

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zvisiongenerator.workflows.generation_prompt import generation_negative, generation_prompt
+from zvisiongenerator.workflows.generation_prompt import BACKGROUND_SUFFIX, conditioning_prompt, generation_negative, generation_prompt
 
 
 @pytest.mark.parametrize(
@@ -33,3 +33,18 @@ def test_the_rewrite_beats_the_resolved_prompt_and_both_beat_the_template(templa
 )
 def test_the_negative_is_sent_only_when_the_model_takes_negative_prompts(negative, supports, expected):
     assert generation_negative(negative, supports_negative=supports) == expected
+
+
+def test_the_background_phrase_is_added_only_when_transparent():
+    assert conditioning_prompt("a cat", transparent=True) == "a cat, isolated on a plain light grey studio background"
+    assert conditioning_prompt("a cat", transparent=False) == "a cat"
+
+
+def test_a_json_caption_is_never_given_the_background_phrase():
+    caption = '{"summary": "a cat"}'
+
+    assert conditioning_prompt(caption, transparent=True) == caption
+
+
+def test_the_background_phrase_is_not_deduplicated():
+    assert conditioning_prompt("a cat" + BACKGROUND_SUFFIX, transparent=True) == "a cat" + BACKGROUND_SUFFIX * 2

@@ -212,6 +212,8 @@ def _source_request_fields(source: UpscaleSource, recorded: RecordedSettings) ->
         "reference_paths": recorded.reference_images,
         "output_dir": str(Path(source.path).parent),
         "upscale_source": source.path,
+        # A cut-out source stays a cut-out: the upscale works on a grey backdrop and cuts the result out again.
+        "transparent": recorded.generation.get("transparent") is True,
         # An enhanced source keeps the user's own prompt and how it was enhanced, so the upscale still shows and reuses them.
         "prompt_input": recorded.prompt_input,
         "enhance_record": recorded.enhance,

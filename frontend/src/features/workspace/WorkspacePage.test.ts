@@ -2502,6 +2502,32 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.get('saturation_amount')).toBe('1.2');
   });
 
+  it('submits the transparent field as true when the switch is on and false when it is off', async () => {
+    await mountWorkspace(makeContext());
+    const submit = async (): Promise<FormData> => {
+      workspaceApiMocks.submitGenerate.mockClear();
+      target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle();
+      return workspaceApiMocks.submitGenerate.mock.calls[0]?.[0] as FormData;
+    };
+
+    expect((await submit()).get('transparent')).toBe('false');
+
+    draft.update('postprocessTransparent', true);
+    await settle();
+    expect((await submit()).get('transparent')).toBe('true');
+  });
+
+  it('sends no transparent field for a video workflow', async () => {
+    await mountWorkspace(makeContext());
+    draft.update('postprocessTransparent', true);
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    await settle();
+
+    expect(new FormData(target.querySelector('form')!).has('transparent')).toBe(false);
+  });
+
   it('sends no sharpen amount when it is left on auto, so the backend uses the config', async () => {
     const context = makeContext();
     await mountWorkspace(context);

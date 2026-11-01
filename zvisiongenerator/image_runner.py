@@ -11,12 +11,15 @@ import argparse
 import random
 import time
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.backends import accelerator_free_bytes, create_matte_chain, release_accelerator_memory
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts, JobPrompt
 from zvisiongenerator.core.job_plan import JobPlan
+from zvisiongenerator.core.matte import MatteChain
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
@@ -26,6 +29,7 @@ from zvisiongenerator.core.progress_events import run_workflow_with_progress as 
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.image_review import make_image_review
 from zvisiongenerator.job_controls import announce_repeat, pause_until_resumed, seed_range
+from zvisiongenerator.matte_room import MatteRoom
 from zvisiongenerator.review import ReviewOutcome, review_enabled
 from zvisiongenerator.utils import generate_filename, format_generation_info
 from zvisiongenerator.utils.alignment import round_to_alignment
@@ -33,7 +37,7 @@ from zvisiongenerator.utils.config import get_variant_key, model_capabilities, m
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import default_upscale_denoise
-from zvisiongenerator.workflows import build_workflow, generation_negative, generation_prompt
+from zvisiongenerator.workflows import build_workflow, conditioning_prompt, generation_negative, generation_prompt
 from zvisiongenerator.utils.enhance_record import planned_enhance_record
 
 
@@ -68,10 +72,12 @@ def _job_prompts(
     prompts_data: dict[str, list[tuple[str, str | None]]],
     *,
     supports_negative: bool,
+    transparent: bool = False,
 ) -> tuple[JobPrompt, ...]:
     """Return every prompt the job's generations can condition on, once each and in first-use order.
 
-    The text is the one the generation stage sends (:func:`~zvisiongenerator.workflows.generation_prompt.generation_prompt`).
+    The text is the one the generation stage sends (:func:`~zvisiongenerator.workflows.generation_prompt.conditioning_prompt`
+    of :func:`~zvisiongenerator.workflows.generation_prompt.generation_prompt`).
     Retries, repeats and the upscale refine reuse it. The negative is the prompt file's when *supports_negative*, else
     ``None``.
 
@@ -79,13 +85,14 @@ def _job_prompts(
         plan: The job's planned iterations.
         prompts_data: Prompt set name to ``(prompt, negative_prompt)`` entries.
         supports_negative: Whether the model takes negative prompts.
+        transparent: Whether the images are cut out, which adds the plain-background phrase to the text.
 
     Returns:
         The distinct prompts; an iteration whose entry *prompts_data* lacks is left out.
     """
     job_prompts: dict[JobPrompt, None] = {}
     for it in plan.iterations:
-        text = generation_prompt(it.prompt, it.resolved_prompt, it.enhanced_prompt)
+        text = conditioning_prompt(generation_prompt(it.prompt, it.resolved_prompt, it.enhanced_prompt), transparent=transparent)
         try:
             negative = generation_negative(prompts_data[it.set_name][it.prompt_index][1], supports_negative=supports_negative)
         except KeyError, IndexError:
@@ -105,6 +112,8 @@ def run_batch(
     plan: JobPlan,
     progress_callback: ProgressCallback | None = None,
     skip_signal: SkipSignal | None = None,
+    reload_model: Callable[[], Any] | None = None,
+    matte_factory: Callable[[], MatteChain] | None = None,
 ) -> None:
     """Run the batch generation loop.
 
@@ -118,6 +127,9 @@ def run_batch(
         plan: Preflight plan with one iteration per run × prompt (seeds, resolved and enhanced prompts).
         progress_callback: Receives structured progress events.
         skip_signal: The job's control signal; the caller owns its key listener (``start``/``stop``).
+        reload_model: Loads the image model again. A transparent job whose cut-out models do not fit beside the image
+            model releases it before each cut-out and calls this before the next render. Without it, nothing is released.
+        matte_factory: Creates the job's background removal chain; defaults to the platform's.
 
     Raises:
         ValueError: When *plan* was cancelled or does not match the batch size, or a review is requested without
@@ -184,14 +196,21 @@ def run_batch(
         print("No active prompt sets found. Exiting.")
         _emit_progress(progress_callback, "batch_completed", mode="image", total_iterations=0, completed_iterations=0)
         return
-    if model is not None:
+    transparent = getattr(args, "transparent", False)
+    cancelled = (lambda: skip_signal.pending() == "quit") if skip_signal is not None else None
+
+    def prepare(loaded: Any) -> None:
+        """Encode the job's prompts for *loaded*, the model every generation of this batch uses."""
         backend.prepare_prompts(
-            model,
-            _job_prompts(plan, prompts_data, supports_negative=supports_neg),
+            loaded,
+            _job_prompts(plan, prompts_data, supports_negative=supports_neg, transparent=transparent),
             width=gen_width,
             height=gen_height,
-            cancelled=(lambda: skip_signal.pending() == "quit") if skip_signal is not None else None,
+            cancelled=cancelled,
         )
+
+    if model is not None:
+        prepare(model)
     reference_paths = tuple(getattr(args, "reference_paths", None) or ())
     ran_iterations = 0
     print(f"Total iterations to run: {total_iterations}\n")
@@ -224,6 +243,8 @@ def run_batch(
         saturation_amount = saturation_cfg.get("default_amount", 1.0)
 
     workflow = build_workflow(args, enhance=plan.has_rewrites)
+    chain = (matte_factory or create_matte_chain)() if transparent else None
+    room = MatteRoom(backend, model, reload_model, accelerator_free_bytes, release_accelerator_memory) if chain is not None else None
 
     try:
         for run_idx in range(args.runs):
@@ -320,6 +341,8 @@ def run_batch(
                             raise _QuitBatch()
                         attempt += 1
                         _img_start = time.time()
+                        if chain is not None and room is not None:
+                            model = room.model_for_render(chain, prepare)
                         review_outcome = ReviewOutcome()
                         _emit_progress(
                             progress_callback,
@@ -415,6 +438,9 @@ def run_batch(
                             contrast_amount=contrast_amount,
                             saturation=args.saturation is not False,
                             saturation_amount=saturation_amount,
+                            transparent=transparent,
+                            matte=chain,
+                            make_room=room.make_room if room is not None else None,
                             output_dir=args.output,
                             filename_base=gen_filename,
                             resolved_prompt=planned.resolved_prompt,
@@ -588,3 +614,6 @@ def run_batch(
         )
     except _QuitBatch:
         pass
+    finally:
+        if chain is not None:
+            chain.close()

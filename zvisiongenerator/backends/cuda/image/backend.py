@@ -376,6 +376,17 @@ class DiffusersBackend:
     def prepare_prompts(self, model: Any, prompts: Sequence[JobPrompt], *, width: int, height: int, cancelled: Callable[[], bool] | None = None) -> None:
         """Do nothing: diffusers moves its text encoders off the GPU itself."""
 
+    def release_model(self, model: Any) -> None:
+        """Remove *model*'s offload hooks and clear every component of the pipeline, so its modules are unreferenced.
+
+        The backend keeps no other reference to them. Calling it again does nothing.
+        """
+        remove_hooks = getattr(model, "remove_all_hooks", None)
+        if remove_hooks is not None:
+            remove_hooks()
+        for name in list(model.components):
+            setattr(model, name, None)
+
     def load_model(
         self,
         model_path: str,

@@ -70,7 +70,7 @@ def _submit_image(monkeypatch, runner, *, request=None, config=None, run_batch=N
     return runner.submit_image_request_job(request=request or _image_request(model_name="atlas"), prompts_data=_PROMPTS, config=config or {}, args=_make_args(), model_ref="owner/atlas")
 
 
-def _batch_that_completes(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+def _batch_that_completes(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
     progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
 
 
@@ -608,6 +608,172 @@ class TestPlannerArguments:
 
         assert last["type"] == "job_cancelled"
         assert (last["total_iterations"], last["download"]) == (1, "stopped")
+
+
+class TestMatteDownloads:
+    _MATTE_TARGET = DownloadTarget("owner/matte", allow_patterns=("*.safetensors",))
+
+    @staticmethod
+    def _roles(events) -> list[tuple[str, str]]:
+        return [(event["role"], event["model"]) for event in events if event["type"] == DOWNLOADING_EVENT]
+
+    @staticmethod
+    def _record_published(runner) -> list[dict]:
+        """Return a list that collects every published event; the job history keeps only the latest download event."""
+        published: list[dict] = []
+        publish = runner._publish_event
+        runner._publish_event = lambda job_id, event: (published.append(dict(event)), publish(job_id, event))[1]
+        return published
+
+    def _upscale(self, monkeypatch, tmp_path, request, *, planned=True):
+        matte = MagicMock(return_value=(self._MATTE_TARGET,) if planned else None)
+        monkeypatch.setattr(web_runner_module, "matte_plan", matte)
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(web_runner_module, "seedvr2_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=FP8_WEIGHTS))
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        _fake_ensure(monkeypatch, run=_child_that_reports(1))
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
+        monkeypatch.setattr(web_runner_module, "load_seedvr2", lambda _engine, _name, *, on_phase, **_kw: (on_phase("loading"), MagicMock())[1])
+        monkeypatch.setattr(
+            web_runner_module, "run_upscale", lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+        )
+        runner = _runner()
+        events = self._record_published(runner)
+        try:
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/atlas", config={}, context={"output_dir": str(tmp_path)})
+            wait_for_status(runner, job_id, "completed")
+            return events, matte
+        finally:
+            runner.shutdown()
+
+    def test_a_transparent_image_job_downloads_the_matte_models_after_the_model(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: (self._MATTE_TARGET,))
+        _fake_ensure(monkeypatch, run=_child_that_reports(1))
+        runner = _runner()
+        events = self._record_published(runner)
+        try:
+            job_id = _submit_image(monkeypatch, runner, request=_image_request(model_name="atlas", transparent=True))
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert self._roles(events)[0] == ("model", "atlas")
+        assert self._roles(events)[-1] == ("matte", "Background removal")
+        matte_event = next(event for event in events if event.get("role") == "matte")
+        assert (matte_event["mode"], matte_event["repo"]) == ("image", "owner/matte")
+
+    def test_an_image_job_without_transparent_plans_no_matte_download(self, monkeypatch):
+        matte = MagicMock(side_effect=AssertionError("no matte plan without transparent"))
+        monkeypatch.setattr(web_runner_module, "matte_plan", matte)
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        _fake_ensure(monkeypatch, run=_child_that_reports(1))
+        runner = _runner()
+        try:
+            job_id = _submit_image(monkeypatch, runner)
+            wait_for_status(runner, job_id, "completed")
+            events = _history(runner, job_id)
+        finally:
+            runner.shutdown()
+
+        assert {role for role, _ in self._roles(events)} == {"model"}
+
+    def test_a_transparent_image_job_with_the_models_present_publishes_no_matte_event(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: (self._MATTE_TARGET,))
+        _fake_ensure(monkeypatch, run=_child_that_reports(1), present=lambda _t: True)
+        runner = _runner()
+        try:
+            job_id = _submit_image(monkeypatch, runner, request=_image_request(model_name="atlas", transparent=True))
+            wait_for_status(runner, job_id, "completed")
+            events = _history(runner, job_id)
+        finally:
+            runner.shutdown()
+
+        assert self._roles(events) == []
+
+    def test_a_transparent_image_job_goes_on_when_the_matte_plan_is_unavailable_offline(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: None)
+        runner = _runner()
+        try:
+            job_id = _submit_image(monkeypatch, runner, request=_image_request(model_name="atlas", transparent=True))
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+    @pytest.mark.parametrize("method", ["creative", "seedvr2"])
+    def test_a_transparent_upscale_downloads_the_matte_models_after_the_model(self, monkeypatch, tmp_path, method):
+        extra = {"upscale_method": "seedvr2", "upscale_model": "seedvr2-7b"} if method == "seedvr2" else {}
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="zimage", model_name="atlas", upscale_factor=2, upscale_source="/out/a.png", transparent=True, **extra)
+        events, _ = self._upscale(monkeypatch, tmp_path, request)
+
+        roles = [role for role, _ in self._roles(events)]
+        assert roles[0] == "model"
+        assert roles[-1] == "matte"
+        assert ("matte", "Background removal") in self._roles(events)
+
+    @pytest.mark.parametrize("method", ["creative", "seedvr2"])
+    def test_an_opaque_upscale_downloads_no_matte_models(self, monkeypatch, tmp_path, method):
+        extra = {"upscale_method": "seedvr2", "upscale_model": "seedvr2-7b"} if method == "seedvr2" else {}
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_family="zimage", model_name="atlas", upscale_factor=2, upscale_source="/out/a.png", **extra)
+        events, matte = self._upscale(monkeypatch, tmp_path, request)
+
+        assert {role for role, _ in self._roles(events)} == {"model"}
+        matte.assert_not_called()
+
+    def test_a_stop_during_the_matte_download_ends_the_job_with_download_stopped(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: (self._MATTE_TARGET,))
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: STOPPED)
+        run_batch = MagicMock(side_effect=AssertionError("no batch after a stopped download"))
+        runner = _runner()
+        try:
+            job_id = _submit_image(monkeypatch, runner, request=_image_request(model_name="atlas", transparent=True), run_batch=run_batch)
+            wait_for_status(runner, job_id, "cancelled")
+            last = _history(runner, job_id)[-1]
+        finally:
+            runner.shutdown()
+
+        assert last["type"] == "job_cancelled"
+        assert last["download"] == "stopped"
+
+    def test_a_transparent_image_job_hands_the_batch_a_reload_that_loads_the_same_model_again(self, monkeypatch):
+        """The matte room frees the model before matting and reloads it afterwards; without ``reload_model`` that guard is silently off."""
+        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: None)
+        first, reloaded = MagicMock(name="first model"), MagicMock(name="reloaded model")
+        load = MagicMock(side_effect=[(MagicMock(name="backend"), first, MagicMock(name="info")), (MagicMock(name="backend"), reloaded, MagicMock(name="info"))])
+        monkeypatch.setattr(web_runner_module, "_load_image_model_with_progress", load)
+        seen: dict = {}
+
+        def run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **kwargs):
+            seen.update(kwargs)
+            progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+
+        request = _image_request(model_name="atlas", transparent=True, lora_paths=["owner/style"], lora_weights=[0.5])
+        config = {"marker": "config"}
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "run_batch", run_batch)
+        runner = _runner()
+        try:
+            job_id = runner.submit_image_request_job(request=request, prompts_data=_PROMPTS, config=config, args=_make_args(), model_ref="owner/atlas", quantize=8)
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        reload_model = seen.get("reload_model")
+        assert callable(reload_model)
+        assert load.call_count == 1
+        assert reload_model() is reloaded
+        assert load.call_count == 2
+        first_call, reload_call = load.call_args_list
+        assert reload_call == first_call
+        assert reload_call.args[:3] == (request, "owner/atlas", 8)
+        assert (reload_call.args[0].lora_paths, reload_call.args[0].lora_weights) == (["owner/style"], [0.5])
+        assert reload_call.kwargs == {"config": config}
 
 
 class TestHistoryReplacement:
