@@ -16,6 +16,8 @@ _CHROMA_WEIGHT = 2.0
 # come from the xkcd colour survey, with its swatches: the names people most often gave those colours.
 # Every name carries a colour word: a bare object name ("eggplant", "wine") makes the image model draw the object.
 # Hue and chroma count double against lightness: a dark blue-green is "petrol blue", not "charcoal grey".
+# The basic presets of the system colour pickers (pure yellow, navy) need an anchor of their own, or they drift to a
+# vivid neighbour ("chartreuse", "ultramarine").
 COLOR_NAMES: dict[str, str] = {
     "black": "#111111",
     "charcoal grey": "#36454F",
@@ -52,6 +54,7 @@ COLOR_NAMES: dict[str, str] = {
     "mustard yellow": "#D6A520",
     "gold": "#D4AF37",
     "yellow": "#FFD92F",
+    "bright yellow": "#FFFF14",
     "pale yellow": "#FCEFA1",
     "khaki": "#AAA662",
     "olive green": "#6B7032",
@@ -82,6 +85,7 @@ COLOR_NAMES: dict[str, str] = {
     "electric blue": "#0652FF",
     "ultramarine": "#2000B1",
     "navy blue": "#1B2A4A",
+    "deep navy blue": "#000080",
     "midnight blue": "#020035",
     "lavender": "#B9A6E0",
     "periwinkle": "#8E82FE",

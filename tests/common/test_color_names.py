@@ -24,7 +24,19 @@ class TestColorName:
 
     @pytest.mark.parametrize(
         ("hex_color", "name"),
-        [("#FF0000", "red"), ("#000000", "black"), ("#FFFFFF", "white"), ("#0A1F44", "navy blue"), ("#CB6D51", "terracotta"), ("#FFA500", "amber"), ("#2A9D8F", "teal"), ("#1B3A4B", "petrol blue")],
+        [
+            ("#FF0000", "red"),
+            ("#000000", "black"),
+            ("#FFFFFF", "white"),
+            ("#0A1F44", "navy blue"),
+            ("#CB6D51", "terracotta"),
+            ("#FFA500", "amber"),
+            ("#2A9D8F", "teal"),
+            ("#1B3A4B", "petrol blue"),
+            ("#FFFF00", "bright yellow"),
+            ("#000080", "deep navy blue"),
+            ("#00008B", "deep navy blue"),
+        ],
     )
     def test_nearby_colours_get_the_fitting_name(self, hex_color: str, name: str) -> None:
         assert color_name(hex_color) == name
