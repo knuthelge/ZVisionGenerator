@@ -23,6 +23,10 @@ def _use_bfloat16_precision() -> None:
     ModelConfig.precision = mx.bfloat16
 
 
+# The mflux SeedVR2 attributes that hold weights.
+_WEIGHT_ATTRIBUTES = ("transformer", "vae")
+
+
 class MfluxSeedVR2Upscaler:
     """mflux/MLX upscaler for macOS — implements the SeedVR2Upscaler Protocol."""
 
@@ -62,3 +66,9 @@ class MfluxSeedVR2Upscaler:
         """
         _use_bfloat16_precision()
         return model.generate_image(seed=seed, image_path=image_path, resolution=min(width, height), softness=softness).image
+
+    def release_model(self, model: Any) -> None:
+        """Drop *model*'s transformer and VAE so the MLX arrays are unreferenced; calling it again does nothing."""
+        for name in _WEIGHT_ATTRIBUTES:
+            if getattr(model, name, None) is not None:
+                setattr(model, name, None)

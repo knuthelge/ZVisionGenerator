@@ -11,6 +11,7 @@ import { toasts } from '$lib/state/toasts.svelte';
 import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from '$lib/types';
 
 import WorkspacePage from './WorkspacePage.svelte';
+import { TRANSPARENT_TERMS } from './transparent';
 import { placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
 import { makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
@@ -302,6 +303,76 @@ describe('WorkspacePage clip memory note', () => {
   });
 });
 
+describe('WorkspacePage Transparent background', () => {
+  const row = () => target.querySelector('#ws-pp-transparent')?.closest('.inspector-row') as HTMLElement | null;
+  const toggle = () => target.querySelector('#ws-pp-transparent') as HTMLInputElement;
+  const badge = () => target.querySelector('[data-testid="transparent-terms"]') as HTMLElement | null;
+
+  it('renders a labelled switch and the Non-commercial badge in the Post-processing section', async () => {
+    await mountWorkspace(makeContext());
+
+    expect(row()).not.toBeNull();
+    expect(row()!.closest('[data-section="postprocess"]')).not.toBeNull();
+    expect(toggle().getAttribute('aria-label')).toBe('Transparent background');
+    expect(toggle().checked).toBe(false);
+    expect(badge()).not.toBeNull();
+    expect(badge()!.querySelector('.ui-badge')).not.toBeNull();
+    // The badge sits outside the switch's label, so tapping it never flips the switch.
+    expect(badge()!.closest('label')).toBeNull();
+  });
+
+  it('makes the reason reachable by focus: the badge is a tab stop that describes itself with the tooltip', async () => {
+    await mountWorkspace(makeContext());
+
+    const trigger = badge()!;
+    expect(trigger.tabIndex).toBe(0);
+    const tooltip = trigger.querySelector('[role="tooltip"]') as HTMLElement;
+    expect(trigger.getAttribute('aria-describedby')).toBe(tooltip.id);
+    expect(tooltip.dataset.open).toBe('false');
+
+    flushSync(() => trigger.dispatchEvent(new FocusEvent('focus')));
+    expect(tooltip.dataset.open).toBe('true');
+    expect(tooltip.textContent).toBe(TRANSPARENT_TERMS);
+
+    flushSync(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(tooltip.dataset.open).toBe('false');
+  });
+
+  it('turns the draft on and marks the row changed, with a Reset that puts it back', async () => {
+    await mountWorkspace(makeContext());
+
+    flushSync(() => toggle().click());
+    await settle();
+    expect(draft.state.postprocessTransparent).toBe(true);
+    expect(row()!.dataset.changed).toBe('true');
+
+    flushSync(() => (row()!.querySelector('.inspector-reset') as HTMLButtonElement).click());
+    await settle();
+    expect(draft.state.postprocessTransparent).toBe(false);
+    expect(row()!.dataset.changed).toBe('false');
+  });
+
+  it('counts the switch in the Post-processing summary', async () => {
+    await mountWorkspace(makeContext());
+    const summary = () => target.querySelector('[data-section="postprocess"]')?.textContent ?? '';
+    const before = summary();
+
+    draft.update('postprocessTransparent', true);
+    await settle();
+
+    expect(summary()).not.toBe(before);
+  });
+
+  it('is not offered for a video workflow', async () => {
+    await mountWorkspace(makeContext());
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    await settle();
+
+    expect(toggle()).toBeNull();
+  });
+});
+
 describe('WorkspacePage settings presets', () => {
   const IMAGE_SETTINGS: SettingsPreset['settings'] = {
     quantize: null, lora: 'style-a:0.8', ratio: '16:9', size: 'l', width: null, height: null, runs: 2, steps: 12, guidance: 3.5, image_strength: 0.4, scheduler: 'beta', first_sigma: null,
@@ -489,7 +560,7 @@ describe('WorkspacePage settings presets', () => {
       expect(presetApiMocks.createPreset).toHaveBeenCalledTimes(1);
       const [body] = presetApiMocks.createPreset.mock.calls[0] as [SettingsPreset];
       expect(body).toMatchObject({ name: 'My new look', mode: 'image', model: 'zit', settings: { steps: 14 } });
-      expect(Object.keys(body.settings)).toHaveLength(24);
+      expect(Object.keys(body.settings)).toHaveLength(25);
       expect(draft.state.appliedPreset).toBe('my-new-look');
       expect(document.querySelector('[role="dialog"]')).toBeNull();
       expect(presetButton().dataset.applied).toBe('my-new-look');

@@ -108,6 +108,18 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.enhancedPrompt).toBeUndefined();
   });
 
+  it('names the background removal download and its stage in the status messages', () => {
+    jobStore.startJob({ job_id: 'matte', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
+    const source = lastEventSource();
+    source.emit('model_downloading', { type: 'model_downloading', mode: 'image', role: 'matte', model: 'Background removal', repo: 'org/birefnet', part: 1, parts: 2, bytes_done: 5, bytes_total: 10 });
+    expect(jobStore.current?.message).toContain('Downloading background removal');
+    expect(jobStore.current?.message).not.toContain('Background removal (');
+    source.emit('workflow_stage_started', { type: 'workflow_stage_started', stage_name: 'matte' });
+    expect(jobStore.current?.message).toBe('Removing background.');
+    source.emit('workflow_stage_started', { type: 'workflow_stage_started', stage_name: 'save_image' });
+    expect(jobStore.current?.message).toBe('Running save image.');
+  });
+
   it('shows preflight rewrite progress as a stage bar and resets it before generation', () => {
     jobStore.startJob({ job_id: 'pre', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
     const source = lastEventSource();

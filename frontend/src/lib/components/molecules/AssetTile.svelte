@@ -43,6 +43,7 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
 
   const isVideo = $derived(asset.media_type === 'video');
+  const transparent = $derived(asset.transparent === true && !isVideo);
   const canReuse = $derived(asset.has_reusable_config === true);
   const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, useAs));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
@@ -75,6 +76,7 @@
   data-density={density}
   data-asset-id={asset.id}
   data-video={isVideo}
+  data-transparent={transparent}
   data-selected={selected}
   data-menu-open={menuOpen}
   aria-busy={deleting}
@@ -95,6 +97,8 @@
         {src}
         alt={asset.prompt || asset.filename}
         class="asset-tile-img"
+        class:ui-checkerboard={transparent}
+        data-transparent={transparent}
         loading={eager ? 'eager' : 'lazy'}
         onload={onmediaload}
         onerror={onmediaload}
@@ -200,6 +204,10 @@
   .asset-tile[data-density='card'] .asset-tile-media { flex: none; aspect-ratio: 1; }
   /* Never enlarge: small outputs stay at their own size, large ones shrink to fit. */
   .asset-tile[data-density='stage'] .asset-tile-img { object-fit: scale-down; }
+  /* A transparent image carries its checkerboard on the <img>, so the <img> is sized to the picture: the same look as
+     scale-down (at most its own size, centred) without painting the letterbox. */
+  .asset-tile[data-density='stage'][data-transparent='true'] .asset-tile-media { display: flex; align-items: center; justify-content: center; }
+  .asset-tile[data-density='stage'][data-transparent='true'] .asset-tile-img { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: fill; }
 
   /* Top gradient keeps the actions legible on bright images. */
   .asset-tile::after {

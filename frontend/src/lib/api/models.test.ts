@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./client', () => ({ api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }));
 
 import { api } from './client';
-import { cancelDownload, getDownloadPlan, getDownloads, startDownload } from './models';
+import { cancelDownload, deleteBackgroundRemoval, getDownloadPlan, getDownloads, startDownload } from './models';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -20,6 +20,21 @@ describe('download API', () => {
     vi.mocked(api.post).mockResolvedValue({ id: 'd1' });
     await expect(startDownload('enhancer', 'fast')).resolves.toEqual({ id: 'd1' });
     expect(api.post).toHaveBeenCalledWith('/api/models/download', { kind: 'enhancer', name: 'fast' });
+  });
+
+  it('plans and starts the background removal download as kind matte', async () => {
+    vi.mocked(api.get).mockResolvedValue({ parts: [] });
+    await getDownloadPlan('matte', 'background-removal');
+    expect(api.get).toHaveBeenCalledWith('/api/models/download/plan?kind=matte&name=background-removal');
+    vi.mocked(api.post).mockResolvedValue({ id: 'd2' });
+    await startDownload('matte', 'background-removal');
+    expect(api.post).toHaveBeenCalledWith('/api/models/download', { kind: 'matte', name: 'background-removal' });
+  });
+
+  it('deletes the background removal models through their own route', async () => {
+    vi.mocked(api.delete).mockResolvedValue({ status: 'ok' });
+    await deleteBackgroundRemoval();
+    expect(api.delete).toHaveBeenCalledWith('/api/background-removal');
   });
 
   it('lists the downloads lane', async () => {

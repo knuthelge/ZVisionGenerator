@@ -144,7 +144,7 @@ from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.presets import create_preset, delete_preset, list_presets, rename_preset, update_preset
-from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, enhancer_delete_target, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, enhancer_delete_target, matte_delete_target, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, generation_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
@@ -914,7 +914,9 @@ def _upscale_from_body(body: Any) -> JSONResponse:
     try:
         job_id = web_runner.submit_upscale_job(
             request=plan.request,
-            workflow=build_seedvr2_upscale_workflow() if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen),
+            workflow=(
+                build_seedvr2_upscale_workflow(transparent=plan.request.transparent) if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen, transparent=plan.request.transparent)
+            ),
             model_ref=plan.model_ref,
             config=web_config.app_config,
             admission_check=_reject_while_busy,
@@ -1132,6 +1134,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         sharpen=_resolve_numeric_toggle(form, "sharpen_enabled", "sharpen_amount", default_enabled=True),
         contrast=_resolve_numeric_toggle(form, "contrast_enabled", "contrast_amount", default_enabled=False),
         saturation=_resolve_numeric_toggle(form, "saturation_enabled", "saturation_amount", default_enabled=False),
+        transparent=_checkbox(form, "transparent"),
         lora_paths=None,
         lora_weights=None,
         first_sigma=None,
@@ -1252,6 +1255,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         contrast_amount=args.contrast if isinstance(args.contrast, float) else app_config.get("contrast", {}).get("default_amount", 1.0),
         saturation=args.saturation is not False,
         saturation_amount=args.saturation if isinstance(args.saturation, float) else app_config.get("saturation", {}).get("default_amount", 1.0),
+        transparent=args.transparent,
         output_dir=args.output,
     )
     context = _public_job_context(
@@ -2353,6 +2357,23 @@ def api_delete_enhancer_model(tier: str) -> dict[str, Any]:
     finally:
         session.cancel_reservation(reservation[0])
     return {"status": "ok", "tone": "success", "message": f"Deleted the HuggingFace download of '{target.repo_id}'."}
+
+
+@app.delete("/api/background-removal")
+def api_delete_background_removal() -> dict[str, Any]:
+    """Delete the HuggingFace downloads of the background removal models (BiRefNet and ViTMatte)."""
+    _ensure_no_active_job()
+    target = matte_delete_target()
+    if target is None:
+        raise HTTPException(status_code=404, detail="No downloaded background removal models.")
+    _ensure_not_downloading(repo_ids=target.repo_ids)
+    try:
+        delete_model(target)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="No downloaded background removal models.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete the background removal models: {exc}") from exc
+    return {"status": "ok", "tone": "success", "message": "Deleted the background removal models."}
 
 
 # Declared before /api/hf-cache/{repo_id:path}, which would otherwise match it.

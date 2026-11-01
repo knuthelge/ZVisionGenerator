@@ -115,7 +115,7 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
   if (type === 'model_downloading') {
     const download = downloadFromEvent(event);
     if (!download) return '';
-    const subject = download.role === 'enhancer' ? 'the prompt enhancer' : download.model || 'the model';
+    const subject = download.role === 'enhancer' ? 'the prompt enhancer' : download.role === 'matte' ? 'background removal' : download.model || 'the model';
     const part = partLabel(download);
     return `Downloading ${subject}${part ? ` (${part})` : ''}: ${downloadLine(download)}`;
   }
@@ -142,6 +142,7 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
   }
   if (type === 'workflow_stage_started') {
     const name = eventFieldString(event, 'stage_name');
+    if (name === 'matte') return 'Removing background.';
     return name ? `Running ${name.replaceAll('_', ' ')}.` : 'Running workflow.';
   }
   if (type === 'workflow_stage_completed') {

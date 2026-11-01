@@ -3,6 +3,7 @@ import { downloadStore } from './downloads.svelte';
 import { heldUploads } from './heldUploads.svelte';
 import { imageSupport, lastSlotPatch, startSlotPatch, type SlotValue, type ImageTab } from './imageSlots';
 import { keepInstalledLoras, modelLoraFamily, withoutLora } from './loras';
+import { outputSettingsPatch } from './jobSettings';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
@@ -73,6 +74,7 @@ const DEFAULT_DRAFT: DraftState = {
   postprocessContrastAmount: 1.0,
   postprocessSaturationEnabled: false,
   postprocessSaturationAmount: 1.0,
+  postprocessTransparent: false,
   upscaleDenoise: null,
   upscaleSteps: null,
   upscaleGuidance: null,
@@ -121,6 +123,37 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   reference_path: 'references',
   negative_prompt: 'negative_prompt',
   scheduler: 'scheduler',
+  image_strength: 'image_strength',
+  transparent: 'postprocess_transparent',
+  sharpen_enabled: 'postprocess_sharpen',
+  sharpen_amount: 'postprocess_sharpen',
+  contrast_enabled: 'postprocess_contrast',
+  contrast_amount: 'postprocess_contrast',
+  saturation_enabled: 'postprocess_saturation',
+  saturation_amount: 'postprocess_saturation',
+  upscale: 'image_upscale_enabled',
+  upscale_denoise: 'image_upscale_denoise',
+  upscale_steps: 'image_upscale_steps',
+  upscale_guidance: 'image_upscale_guidance',
+  upscale_sharpen: 'image_upscale_sharpen',
+};
+
+/** The Reuse URL param each finishing-setting draft key comes from, so a hidden control's value is skipped. */
+const _OUTPUT_KEY_PARAMS: Partial<Record<keyof DraftState, string>> = {
+  referenceImageStrength: 'image_strength',
+  postprocessTransparent: 'transparent',
+  postprocessSharpenEnabled: 'sharpen_enabled',
+  postprocessSharpenAmount: 'sharpen_amount',
+  postprocessContrastEnabled: 'contrast_enabled',
+  postprocessContrastAmount: 'contrast_amount',
+  postprocessSaturationEnabled: 'saturation_enabled',
+  postprocessSaturationAmount: 'saturation_amount',
+  upscaleEnabled: 'upscale',
+  upscaleFactor: 'upscale',
+  upscaleDenoise: 'upscale_denoise',
+  upscaleSteps: 'upscale_steps',
+  upscaleGuidance: 'upscale_guidance',
+  upscaleSharpen: 'upscale_sharpen',
 };
 
 const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> = {
@@ -142,6 +175,7 @@ const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> =
   upscale_guidance: { upscaleGuidance: null },
   upscale_sharpen: { upscaleSharpen: true },
   upscale_save_pre: {},
+  transparent: { postprocessTransparent: false },
 };
 
 /**
@@ -284,7 +318,7 @@ export const SETTING_KEYS = [
   'ratio', 'dimensionMode', 'size', 'width', 'height', 'runs', 'frameCount', 'steps', 'guidance', 'referenceImageStrength',
   'seed', 'scheduler', 'firstSigma',
   'postprocessSharpenEnabled', 'postprocessSharpenAmount', 'postprocessContrastEnabled', 'postprocessContrastAmount',
-  'postprocessSaturationEnabled', 'postprocessSaturationAmount',
+  'postprocessSaturationEnabled', 'postprocessSaturationAmount', 'postprocessTransparent',
   'upscaleEnabled', 'upscaleFactor', 'upscaleDenoise', 'upscaleSteps', 'upscaleGuidance', 'upscaleSharpen', 'upscaleReview',
   'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor', 'videoUpscaleReview',
 ] as const satisfies readonly (keyof DraftState)[];
@@ -692,6 +726,16 @@ export const draft = {
     else if (replacing && slotTab === 'image') prefill.referenceImagePaths = [];
     // Flags from the slots the prefill replaced are dropped, those of the other slots stay; the Workspace checks the new paths.
     if (SLOT_KEYS.some((key) => key in prefill)) prefill.missingReferencePaths = _flagsOfUntouchedSlots(_draft, prefill);
+    // An image Reuse names the finishing settings the asset was made with; Transparent is named on its own too (a viewer-upscaled
+    // asset sends only it), and without Sharpen the rest stay as they were, or Upscale would read the missing `upscale` as off.
+    if (workflowMode(workflow) === 'image') {
+      const finishing: Partial<DraftState> = params.sharpen_enabled !== undefined ? outputSettingsPatch(input, false) : {};
+      if (params.transparent !== undefined) finishing.postprocessTransparent = params.transparent !== 'false';
+      for (const [key, value] of Object.entries(finishing)) {
+        const param = _OUTPUT_KEY_PARAMS[key as keyof DraftState];
+        if (param === undefined || canApply(param)) Object.assign(prefill, { [key]: value });
+      }
+    }
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
     if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;
     // A reused preset the current model does not offer keeps the current preset size instead.

@@ -11,6 +11,8 @@ from PIL.PngImagePlugin import PngInfo
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts, JobPrompt
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
+from zvisiongenerator import upscale_runner
+from zvisiongenerator.processing.matte import MATTE_BACKDROP
 from zvisiongenerator.upscale_runner import read_upscale_source, run_upscale, upscale_prompts
 from zvisiongenerator.utils.provenance import embed_png_config, read_png_config
 from zvisiongenerator.utils.seedvr2 import SeedVR2Tier, estimate_seedvr2_bytes, seedvr2_over_budget
@@ -389,6 +391,33 @@ def test_upscaling_an_upscale_appends_another_factor(tmp_path):
     assert artifacts.filepath == str(tmp_path / "portrait_42_2x_2x.png")
 
 
+def test_load_source_composites_a_transparent_source_onto_grey(tmp_path):
+    source = tmp_path / "cutout.png"
+    image = Image.new("RGBA", (8, 8), (200, 0, 0, 255))
+    image.putpixel((0, 0), (0, 0, 0, 0))
+    image.save(source)
+    artifacts = ImageWorkingArtifacts()
+
+    load_source_stage(_request(tmp_path, source, transparent=True), artifacts)
+
+    assert artifacts.image.mode == "RGB"
+    assert artifacts.image.getpixel((0, 0)) == MATTE_BACKDROP
+    assert artifacts.image.getpixel((4, 4)) == (200, 0, 0)
+
+
+def test_load_source_without_transparent_flattens_on_white_as_before(tmp_path):
+    source = tmp_path / "cutout.png"
+    image = Image.new("RGBA", (8, 8), (200, 0, 0, 255))
+    image.putpixel((0, 0), (0, 0, 0, 0))
+    image.save(source)
+    artifacts = ImageWorkingArtifacts()
+
+    load_source_stage(_request(tmp_path, source), artifacts)
+
+    assert artifacts.image.mode == "RGB"
+    assert artifacts.image.getpixel((0, 0)) != MATTE_BACKDROP
+
+
 def test_load_source_is_noop_without_source(tmp_path):
     artifacts = ImageWorkingArtifacts()
 
@@ -446,6 +475,23 @@ def test_upscale_prompts_use_the_rendered_prompt():
     request = ImageGenerationRequest(backend=None, model=None, prompt="{a|b} cat", resolved_prompt="a cat", negative_prompt="blurry", supports_negative_prompt=True, width=1664, height=2432)
 
     assert upscale_prompts(request) == (JobPrompt(prompt="a cat", negative_prompt="blurry"),)
+
+
+def test_upscale_prompts_of_a_transparent_request_carry_the_background_phrase_once():
+    request = ImageGenerationRequest(backend=None, model=None, prompt="{a|b} cat", resolved_prompt="a cat", transparent=True)
+
+    assert upscale_prompts(request)[0].prompt == "a cat, isolated on a plain light grey studio background"
+
+
+def test_upscale_stage_sends_the_background_phrase_of_a_transparent_request(tmp_path):
+    source = _write_png(tmp_path / "portrait.png", size=(32, 16))
+    backend = MagicMock()
+    backend.image_to_image.side_effect = lambda **kwargs: kwargs["image"]
+    request = _request(tmp_path, source, backend=backend, resolved_prompt="a red barn", sharpen=False, transparent=True)
+
+    build_upscale_workflow(sharpen=False).run(request, ImageWorkingArtifacts())
+
+    assert backend.image_to_image.call_args.kwargs["prompt"] == "a red barn, isolated on a plain light grey studio background"
 
 
 def test_upscale_prompts_use_the_prompt_when_the_rendered_one_is_empty():
@@ -510,6 +556,61 @@ def test_run_upscale_emits_one_image_batch(tmp_path):
     assert finished["status"] == "success"
     assert finished["output_path"] == str(output)
     assert "message" not in finished
+
+
+def _transparent_upscale(tmp_path, monkeypatch, *, cut_out):
+    """Run the real SeedVR2 workflow with mocks; return the outcome (or the error), the call order, the backend and the output path."""
+    from zvisiongenerator.workflows import build_seedvr2_upscale_workflow
+
+    source = _write_png(tmp_path / "cutout.png", size=(16, 16))
+    order = MagicMock()
+    backend = MagicMock()
+    backend.upscale_image.side_effect = lambda model, path, *, width, height, **_kw: Image.new("RGB", (width, height), color="grey")
+    chain = MagicMock()
+    chain.loaded = False
+    chain.cut_out.side_effect = cut_out
+    order.attach_mock(backend.release_model, "release_model")
+    order.attach_mock(chain.cut_out, "cut_out")
+    order.attach_mock(chain.close, "close")
+    monkeypatch.setattr(upscale_runner, "create_matte_chain", lambda: chain)
+    monkeypatch.setattr(upscale_runner, "release_accelerator_memory", lambda: order.release_memory())
+    request = _request(tmp_path, source, backend=None, model=None, upscale_method="seedvr2", upscale_model="seedvr2-7b", transparent=True)
+    try:
+        result = run_upscale(backend, backend.model, request, build_seedvr2_upscale_workflow(transparent=True), progress_callback=MagicMock())
+    except RuntimeError as exc:
+        result = exc
+    return result, order, backend, tmp_path / "cutout_2x.png"
+
+
+def test_run_upscale_with_transparent_frees_the_upscaler_then_cuts_out_and_closes_the_chain(tmp_path, monkeypatch):
+    outcome, order, backend, output = _transparent_upscale(tmp_path, monkeypatch, cut_out=lambda image: Image.new("RGBA", image.size, (1, 2, 3, 0)))
+
+    assert outcome is StageOutcome.success
+    assert [call[0] for call in order.mock_calls] == ["release_model", "release_memory", "cut_out", "close"]
+    backend.release_model.assert_called_once_with(backend.model)
+    with Image.open(output) as saved:
+        assert saved.mode == "RGBA"
+        assert saved.size == (32, 32)
+    assert read_png_config(output)["generation"]["transparent"] is True
+
+
+def test_run_upscale_with_transparent_closes_the_chain_when_the_cut_out_fails(tmp_path, monkeypatch):
+    def _boom(_image):
+        raise RuntimeError("no memory")
+
+    outcome, order, _backend, _output = _transparent_upscale(tmp_path, monkeypatch, cut_out=_boom)
+
+    assert isinstance(outcome, RuntimeError)
+    assert [call[0] for call in order.mock_calls][-1] == "close"
+
+
+def test_run_upscale_without_transparent_creates_no_chain(tmp_path, monkeypatch):
+    monkeypatch.setattr(upscale_runner, "create_matte_chain", MagicMock(side_effect=AssertionError("no chain without transparent")))
+    request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_source=str(tmp_path / "x.png"))
+
+    outcome = run_upscale(MagicMock(), MagicMock(), request, GenerationWorkflow(name="t", stages=[lambda _r, _a: StageOutcome.success]), progress_callback=MagicMock())
+
+    assert outcome is StageOutcome.success
 
 
 def test_run_upscale_reports_stop_as_cancelled():

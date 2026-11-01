@@ -54,6 +54,10 @@ export function deleteEnhancerModel(tier: string): Promise<ModelOperationResult>
   return api.delete<ModelOperationResult>(`/api/enhancer-models/${encodeURIComponent(tier)}`);
 }
 
+export function deleteBackgroundRemoval(): Promise<ModelOperationResult> {
+  return api.delete<ModelOperationResult>('/api/background-removal');
+}
+
 export function deleteOtherDownload(repoId: string): Promise<ModelOperationResult> {
   return api.delete<ModelOperationResult>(`/api/hf-cache/${repoId.split('/').map(encodeURIComponent).join('/')}`);
 }
@@ -67,12 +71,12 @@ export function deleteLora(name: string): Promise<ModelOperationResult> {
 }
 
 /** What downloading a model or enhancer would fetch: parts, sizes and free space. */
-export function getDownloadPlan(kind: 'model' | 'enhancer', name: string): Promise<DownloadPlan> {
+export function getDownloadPlan(kind: 'model' | 'enhancer' | 'matte', name: string): Promise<DownloadPlan> {
   return api.get<DownloadPlan>(`/api/models/download/plan?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`);
 }
 
 /** Queue a Models-page download; an already queued or running one for the same row is returned. */
-export function startDownload(kind: 'model' | 'enhancer', name: string): Promise<DownloadItem> {
+export function startDownload(kind: 'model' | 'enhancer' | 'matte', name: string): Promise<DownloadItem> {
   return api.post<DownloadItem>('/api/models/download', { kind, name });
 }
 

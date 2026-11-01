@@ -11,6 +11,7 @@ The **Gallery** (++g++ ++g++) shows every image and video in your output folder,
 - Click a tile, or press ++enter++ on it, to open the viewer.
 - Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu.
 - When you come back to the Gallery, it shows what it had, scrolled to the same place, and fetches anything new.
+- Transparent images show over a checkerboard. It is only a display aid; the file holds real transparency.
 
 ## Select and delete
 
@@ -43,13 +44,15 @@ Zoom into an image to see its real pixels: click it on a computer, or pinch or d
 
 ### Details
 
-**Details** lists what the file records: prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, references, quant, upscale and post-processing. See [Output files](../concepts/data-folder.md#output-files).
+**Details** lists what the file records: prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, references, quant, upscale and post-processing. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
 
 When the prompt was enhanced, Details shows how, as one line such as *Fast · Cinematic, Melancholic, Longer*, with **Your prompt** under it.
 
 ### Reuse settings
 
 **Reuse settings** loads the file's settings into the Workspace: model, LoRAs, quant, size, seed, references and the rest.
+
+- Post-processing (**Sharpen**, **Contrast**, **Saturation**, **Transparent**), the upscale settings and **Strength** come back too. For an image upscaled in the viewer, only **Transparent** does.
 
 - For an enhanced prompt, **Your text** gets what you typed, **Enhanced** gets the rewrite, and the enhance options come back too.
 - For a video, Scene and Action are filled. A video that was itself an extension comes back with its source.

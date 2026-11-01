@@ -61,6 +61,10 @@
   --color-primary-border: rgb(45 212 191 / 0.4);
   /* Backdrop behind dialogs. */
   --color-scrim: rgb(0 0 0 / 0.6);
+  /* The two cells of the checkerboard behind a transparent image. Light enough to read as a pattern on the dark UI,
+     grey enough that a near-black and a near-white subject both stand out from it. */
+  --color-checker-light: #7a7d83;
+  --color-checker-dark: #5f6268;
 
   /* Typography: Nunito from Google Fonts (linked in index.html, not bundled) for titles, area
      names and the main action only; everything else uses the system font.
@@ -183,6 +187,8 @@
     --toggle-track-h: 15px;
     --toggle-knob: 11px;
     --toggle-inset: 2px;
+    /* One cell of the checkerboard behind a transparent image. */
+    --checker-cell: 8px;
   }
 
   /* Touch is a layer, not a breakpoint: a coarse pointer (a finger) gets taller targets at every width, including an
@@ -551,6 +557,13 @@
   .ui-badge-warning { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
   .ui-badge-error { background: color-mix(in srgb, var(--color-error) 14%, transparent); color: var(--color-error); }
   .ui-badge-info { background: color-mix(in srgb, var(--color-primary-main) 14%, transparent); color: var(--color-primary-main); }
+  /* Behind a transparent image: always on the <img> itself, whose box must be the picture (cover, or sized to its own
+     box), never the letterbox around a contained image. */
+  .ui-checkerboard {
+    background-color: var(--color-checker-dark);
+    background-image: repeating-conic-gradient(var(--color-checker-light) 0 25%, var(--color-checker-dark) 0 50%);
+    background-size: calc(var(--checker-cell) * 2) calc(var(--checker-cell) * 2);
+  }
   /* A badge in a row of controls takes their height, so the row lines up. */
   .ui-badge-control { height: var(--spacing-control); padding: 0 8px; border-radius: var(--radius-sm); font-size: var(--text-ui); }
 

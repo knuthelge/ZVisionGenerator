@@ -162,7 +162,7 @@
   // The image grows out of the tile that opened it and shrinks back into it: a copy of its thumbnail flies, fixed over
   // everything, between the tile's box and the image's box while the viewer itself fades. Until the full image has
   // loaded, the flown thumbnail stands in for it.
-  type Flight = { rect: Rect; src: string };
+  type Flight = { rect: Rect; src: string; transparent: boolean };
   const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   let flight = $state<Flight | null>(null);
   let flightEl = $state<HTMLImageElement | null>(null);
@@ -218,8 +218,8 @@
   }
 
   /** Fly the thumbnail from one box to another, then call `done` (at once where the browser cannot animate). */
-  function fly(from: Rect, to: Rect, src: string, done: () => void): void {
-    flight = { rect: to, src };
+  function fly(from: Rect, to: Rect, shown: GalleryAsset, done: () => void): void {
+    flight = { rect: to, src: shown.thumbnail_url || shown.url, transparent: isTransparent(shown) };
     void tick().then(() => {
       const el = flightEl;
       if (!el || typeof el.animate !== 'function') { done(); return; }
@@ -243,7 +243,7 @@
       const stage = from ? stageContentRect() : null;
       if (!shown || !from || !stage) { phase = 'open'; return; }
       phase = 'opening';
-      fly(from, fitRect(stage, mediaAspect()), shown.thumbnail_url || shown.url, () => {
+      fly(from, fitRect(stage, mediaAspect()), shown, () => {
         phase = 'open';
         flight = null;
       });
@@ -268,7 +268,7 @@
     const from = to && asset ? mediaRect() : null;
     if (!to || !from || !asset) { onclose(); return; }
     phase = 'closing';
-    fly(from, to, asset.thumbnail_url || asset.url, onclose);
+    fly(from, to, asset, onclose);
   }
 
   function measureActual(): void {
@@ -324,6 +324,8 @@
   let chromeHidden = $state(false);
   const paneWidth = () => (trackEl?.clientWidth || stageEl?.clientWidth || window.innerWidth) + paneGap;
   const thumbOf = (item: GalleryAsset) => item.thumbnail_url || item.url;
+  /** Whether an image asset has a cut-out background, so its picture sits on a checkerboard. */
+  const isTransparent = (item: GalleryAsset) => item.transparent === true && item.media_type !== 'video';
 
   /** Animate an element's transform, then call `done` (at once where the browser cannot animate). */
   function slide(el: HTMLElement | null, from: string, to: string, done: () => void): void {
@@ -784,7 +786,7 @@
           <div bind:this={paneEl} class="viewer-pane viewer-pane-current" style:transform={drag?.axis === 'y' ? pullTransform(drag.offset) : undefined}>
             {#if !mediaLoaded && asset.media_type !== 'video'}
               <!-- The thumbnail stands in until the image has loaded. -->
-              <img class="viewer-standin" src={thumbOf(asset)} alt="" aria-hidden="true">
+              <img class="viewer-standin" class:ui-checkerboard={isTransparent(asset)} data-transparent={isTransparent(asset)} src={thumbOf(asset)} alt="" aria-hidden="true">
             {/if}
             {#if asset.media_type === 'video'}
               <!-- svelte-ignore a11y_media_has_caption because generated videos have no caption tracks -->
@@ -796,6 +798,8 @@
                 src={asset.url}
                 alt={asset.prompt || asset.filename}
                 class="viewer-media"
+                class:ui-checkerboard={isTransparent(asset)}
+                data-transparent={isTransparent(asset)}
                 class:zoomable={actualScale !== null}
                 class:zoomed
                 class:animated={zoomAnimated}
@@ -915,7 +919,7 @@
             {:else if item.media_type === 'video'}
               <video src={item.thumbnail_url || item.url} muted preload="metadata"></video>
             {:else}
-              <img src={item.thumbnail_url || item.url} alt="" loading="lazy">
+              <img src={item.thumbnail_url || item.url} alt="" loading="lazy" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)}>
             {/if}
           </button>
         {/each}
@@ -958,6 +962,8 @@
     src={flight.src}
     alt=""
     aria-hidden="true"
+    class:ui-checkerboard={flight.transparent}
+    data-transparent={flight.transparent}
     data-testid="viewer-flight"
     style:left="{flight.rect.left}px"
     style:top="{flight.rect.top}px"
@@ -971,7 +977,7 @@
   {#if item.media_type === 'video'}
     <video class="viewer-neighbour" src={thumbOf(item)} muted preload="metadata"></video>
   {:else}
-    <img class="viewer-neighbour" src={thumbOf(item)} alt="">
+    <img class="viewer-neighbour" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)} src={thumbOf(item)} alt="">
   {/if}
 {/snippet}
 
@@ -1078,6 +1084,9 @@
   .viewer-pane-prev { left: calc(-100% - var(--pane-gap, 0px)); }
   .viewer-pane-next { left: calc(100% + var(--pane-gap, 0px)); }
   .viewer-neighbour { width: 100%; height: 100%; object-fit: contain; border-radius: var(--radius-xs); }
+  /* A transparent image carries its checkerboard on the <img>, so the <img> is sized to the picture, not the pane. */
+  .viewer-neighbour[data-transparent='true'] { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: fill; }
+  .viewer-standin[data-transparent='true'] { width: auto; height: auto; max-width: 100%; max-height: 100%; margin: auto; object-fit: fill; }
   .viewer-standin { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: var(--radius-xs); pointer-events: none; }
   .viewer-context-anchor { position: fixed; width: 1px; height: 1px; pointer-events: none; }
   /* The flight: the thumbnail fixed over everything, moved by transform alone; the viewer fades in or out under it. */

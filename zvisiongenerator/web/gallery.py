@@ -22,6 +22,7 @@ from zvisiongenerator.utils.enhance_record import enhance_record_summary
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
 from zvisiongenerator.utils.paths import is_existing_file
 from zvisiongenerator.utils.provenance import (
+    UPSCALE_METHOD_CREATIVE,
     UPSCALE_WORKFLOW,
     RecordedSettings,
     image_prompt_text,
@@ -269,6 +270,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             # recorded with (a stored-quant ``<name>@q<bits>`` id is such a case), so the level is not carried over.
             level = asset.generation.get("quantize")
             reuse_params["quantize"] = str(level) if level is not None and model_available else ""
+            reuse_params.update(_reuse_image_finishing_params(asset, img2img=resolved_workflow == "img2img"))
         if asset.steps is not None:
             reuse_params["steps"] = str(asset.steps)
         if asset.guidance is not None and workflow_mode(resolved_workflow) == "image":
@@ -335,6 +337,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "steps": asset.steps,
         "guidance": asset.guidance,
         "lora": asset.lora,
+        "transparent": asset.generation.get("transparent") is True,
         "media_type": asset.kind,
         "has_reusable_config": asset.has_reusable_config,
         "reuse_state": {
@@ -396,6 +399,35 @@ def output_media_url(root: Path, path: Path) -> str | None:
     if normalize_asset_id(asset_id) is None or path.suffix.lower() not in GALLERY_MEDIA_EXTENSIONS:
         return None
     return f"/media/{quote(asset_id, safe='/')}"
+
+
+def _reuse_image_finishing_params(asset: GalleryAsset, *, img2img: bool) -> dict[str, str]:
+    """Return the Reuse query params for an image's cut-out, post-processing, in-run upscale and image strength.
+
+    ``transparent`` is always named, so reusing an asset without a cut-out turns it off. An asset upscaled in the
+    viewer sends nothing else: its recorded post-processing and upscale describe the viewer upscale, not the render,
+    and ``upscale`` with the source's size would render at a fraction of it. The draft keeps its own settings then.
+    """
+    generation = asset.generation
+    params = {"transparent": "true" if generation.get("transparent") is True else "false"}
+    if asset.source is not None:
+        return params
+    for name in ("sharpen", "contrast", "saturation"):
+        amount = generation.get(name)
+        params[f"{name}_enabled"] = "true" if amount is not None else "false"
+        if amount is not None:
+            params[f"{name}_amount"] = f"{amount:g}"
+    upscale = generation.get("upscale")
+    # A SeedVR2 record can't come from an in-run upscale, so it sends nothing and in-run Upscale stays off.
+    if isinstance(upscale, dict) and upscale.get("method") == UPSCALE_METHOD_CREATIVE and upscale.get("factor") is not None:
+        params["upscale"] = str(upscale["factor"])
+        for key, name in (("denoise", "upscale_denoise"), ("steps", "upscale_steps"), ("guidance", "upscale_guidance")):
+            if upscale.get(key) is not None:
+                params[name] = f"{upscale[key]:g}"
+        params["upscale_sharpen"] = "true" if upscale.get("pre_sharpen") is not None else "false"
+    if img2img and asset.image_strength is not None:
+        params["image_strength"] = f"{asset.image_strength:g}"
+    return params
 
 
 def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:

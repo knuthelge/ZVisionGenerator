@@ -1039,3 +1039,114 @@ def test_an_image_without_references_names_none(tmp_path, monkeypatch):
 
     assert payload["reference_images"] == []
     assert "reference_path" not in params
+
+
+# ---------------------------------------------------------------------------
+# The cut-out flag, post-processing, upscale and image strength in Reuse
+# ---------------------------------------------------------------------------
+
+_FINISHING_KEYS = {
+    "transparent",
+    "sharpen_enabled",
+    "sharpen_amount",
+    "contrast_enabled",
+    "contrast_amount",
+    "saturation_enabled",
+    "saturation_amount",
+    "upscale",
+    "upscale_denoise",
+    "upscale_steps",
+    "upscale_guidance",
+    "upscale_sharpen",
+    "image_strength",
+}
+
+
+def _finishing(params: dict[str, str]) -> dict[str, str]:
+    return {key: value for key, value in params.items() if key in _FINISHING_KEYS}
+
+
+def _reuse_without_upscale_json(tmp_path, monkeypatch, overrides: dict) -> tuple[dict, dict[str, str]]:
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    return _image_reuse(tmp_path, overrides)
+
+
+def test_transparent_reuse_carries_the_cut_out_post_processing_and_creative_upscale(tmp_path, monkeypatch):
+    generation = {
+        "transparent": True,
+        "sharpen": 0.6,
+        "contrast": 1.1,
+        "upscale": {"method": "creative", "factor": 2, "denoise": 0.3, "steps": 12, "guidance": 1.5, "pre_sharpen": 0.4},
+    }
+    payload, params = _reuse_without_upscale_json(tmp_path, monkeypatch, {"generation": generation})
+
+    assert payload["transparent"] is True
+    assert _finishing(params) == {
+        "transparent": "true",
+        "sharpen_enabled": "true",
+        "sharpen_amount": "0.6",
+        "contrast_enabled": "true",
+        "contrast_amount": "1.1",
+        "saturation_enabled": "false",
+        "upscale": "2",
+        "upscale_denoise": "0.3",
+        "upscale_steps": "12",
+        "upscale_guidance": "1.5",
+        "upscale_sharpen": "true",
+    }
+
+
+def test_reuse_of_an_asset_without_any_of_them_turns_them_off(tmp_path, monkeypatch):
+    payload, params = _reuse_without_upscale_json(tmp_path, monkeypatch, {})
+
+    assert payload["transparent"] is False
+    assert _finishing(params) == {"transparent": "false", "sharpen_enabled": "false", "contrast_enabled": "false", "saturation_enabled": "false"}
+
+
+def test_a_creative_upscale_without_a_pre_sharpen_reuses_with_the_sharpen_off(tmp_path, monkeypatch):
+    _payload, params = _reuse_without_upscale_json(tmp_path, monkeypatch, {"generation": {"upscale": {"method": "creative", "factor": 3}}})
+
+    assert (params["upscale"], params["upscale_sharpen"]) == ("3", "false")
+    assert not {"upscale_denoise", "upscale_steps", "upscale_guidance"} & set(params)
+
+
+def test_a_seedvr2_upscale_record_reuses_with_no_upscale_keys(tmp_path, monkeypatch):
+    seedvr2 = {"method": "seedvr2", "factor": 2, "model": "seedvr2-7b", "quantize": 8, "softness": 0.0, "seed": 1}
+    _payload, params = _reuse_without_upscale_json(tmp_path, monkeypatch, {"generation": {"upscale": seedvr2}})
+
+    assert not {"upscale", "upscale_denoise", "upscale_steps", "upscale_guidance", "upscale_sharpen"} & set(params)
+
+
+def test_an_img2img_asset_reuses_its_image_strength_and_a_txt2img_one_does_not(tmp_path, monkeypatch):
+    start = tmp_path / "start.png"
+    _make_png_with_config(start, {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "model": "zit", "prompt": "start", "seed": 1})
+    _payload, img2img = _reuse_without_upscale_json(tmp_path, monkeypatch, {"workflow": "img2img", "image_path": str(start), "image_strength": 0.65})
+    _payload, txt2img = _reuse_without_upscale_json(tmp_path, monkeypatch, {"image_strength": 0.65})
+
+    assert img2img["image_strength"] == "0.65"
+    assert "image_strength" not in txt2img
+
+
+def test_a_viewer_upscaled_asset_reuses_only_transparent_and_the_source_size(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    source = tmp_path / "src.png"
+    _make_png_with_config(source, {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "model": "zit", "prompt": "fox", "seed": 1})
+    overrides = {
+        "workflow": "img2img",
+        "image_strength": 0.65,
+        "source": {"path": str(source), "width": 512, "height": 768, "workflow": "txt2img"},
+        "generation": {"transparent": True, "sharpen": 0.6, "upscale": {"method": "creative", "factor": 2, "denoise": 0.3, "pre_sharpen": 0.4}},
+    }
+    config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "model": "zit", "seed": 1, "steps": 8, "prompt": "fox", **overrides}
+    _make_png_with_config(tmp_path / "up.png", config)
+    payload = gallery_asset_to_json(_find_asset(list_gallery_assets(str(tmp_path)), "up.png"), _reuse_web_config())
+    params = _reuse_params(payload)
+
+    assert _finishing(params) == {"transparent": "true"}
+    assert (params["width"], params["height"]) == ("512", "768")
+
+
+def test_a_video_reuse_has_none_of_the_image_finishing_keys(tmp_path):
+    _payload, params = _video_reuse(tmp_path, {"generation": {"transparent": True, "sharpen": 0.6}})
+
+    assert _finishing(params) == {}

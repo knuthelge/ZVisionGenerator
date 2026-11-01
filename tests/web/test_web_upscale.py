@@ -131,6 +131,38 @@ def test_plan_carries_recorded_settings(monkeypatch, tmp_path):
     assert (plan.option.width, plan.option.height) == (1664, 2432)
 
 
+@pytest.mark.parametrize(
+    ("generation", "expected"),
+    [({"time": 1.0, "transparent": True}, True), ({"time": 1.0}, False), ({"time": 1.0, "transparent": False}, False)],
+)
+def test_plan_inherits_transparency_from_the_recorded_generation(monkeypatch, tmp_path, generation, expected):
+    _patch_model_resolution(monkeypatch)
+
+    plan = upscale_api.plan_upscale(_source(generation=generation), 2, _web_config(tmp_path), backend_name="mflux")
+
+    assert plan.request.transparent is expected
+
+
+@pytest.mark.parametrize(
+    ("generation", "expected"),
+    [({"time": 1.0, "transparent": True}, True), ({"time": 1.0}, False)],
+)
+def test_seedvr2_plan_inherits_transparency_from_the_recorded_generation(monkeypatch, generation, expected):
+    _forbid_image_model_detection(monkeypatch)
+
+    plan = upscale_api.plan_seedvr2_upscale(_source(generation=generation), 2, setup=_seedvr2_setup())
+
+    assert plan.request.transparent is expected
+
+
+def test_plan_without_settings_is_not_transparent(monkeypatch, tmp_path):
+    _patch_model_resolution(monkeypatch)
+    source = UpscaleSource(path="/out/imported.png", width=512, height=512)
+
+    assert upscale_api.plan_upscale(source, 2, _web_config(tmp_path), backend_name="mflux").request.transparent is False
+    assert upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup()).request.transparent is False
+
+
 def test_plan_picks_denoise_by_output_size_not_the_in_run_default(monkeypatch, tmp_path):
     _patch_model_resolution(monkeypatch)
     web_config = _web_config(tmp_path)
@@ -492,6 +524,23 @@ def test_upscale_route_queues_a_seedvr2_job(upscale_client):
     assert submitted["context"]["model"] == "SeedVR2 7B q8"
     assert submitted["context"]["meta"] == "2× → 1664×2432"
     assert submitted["context"]["settings"] == {}
+
+
+@pytest.mark.parametrize("method", ["creative", "seedvr2"])
+def test_upscale_route_cuts_out_the_result_of_a_transparent_source(upscale_client, method):
+    upscale_client.web_config.seedvr2 = _seedvr2_setup()
+    _write_png(upscale_client.root / "cut.png", config={"prompt": "a barn", "model": "zit", "seed": 3, "generation": {"transparent": True}})
+    _write_png(upscale_client.root / "plain.png", config={"prompt": "a barn", "model": "zit", "seed": 3})
+
+    for name in ("cut.png", "plain.png"):
+        response = upscale_client.client.post("/api/upscale", json={"asset_id": name, "factor": 2, "method": method})
+        assert response.status_code == 200
+
+    transparent, opaque = upscale_client.submitted
+    assert transparent["request"].transparent is True
+    assert [stage.__name__ for stage in transparent["workflow"].stages][-2] == "matte_stage"
+    assert opaque["request"].transparent is False
+    assert "matte_stage" not in [stage.__name__ for stage in opaque["workflow"].stages]
 
 
 def test_upscale_route_queues_a_seedvr2_job_for_a_model_that_cannot_upscale(upscale_client):

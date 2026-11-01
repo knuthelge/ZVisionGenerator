@@ -510,7 +510,7 @@ class TestWebPreflight:
         monkeypatch.setattr(web_runner_module, "get_video_backend", lambda _family: backend)
         monkeypatch.setattr(web_runner_module, "build_video_workflow", lambda _args, **_kw: MagicMock())
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             order.append("run_batch")
             iteration = plan.iterations[0]
             progress_callback({"type": "prompt_started", "mode": "image", "prompt": iteration.prompt, "enhance_status": iteration.enhance_status.value, "run_index": 0})

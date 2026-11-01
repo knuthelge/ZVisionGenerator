@@ -6,7 +6,7 @@
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
   import {
-    etaLabel, finishingText, formatClock, headline, isActive, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
+    downloadLabel, etaLabel, finishingText, formatClock, headline, isActive, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
     stageBars, type JobTone
   } from '$lib/state/jobView';
   import { trackStepTiming, type StepTiming } from '$lib/state/stepTiming';
@@ -269,7 +269,7 @@
         class="job-bar"
         value={bar.fraction ?? 0}
         max={1}
-        label={bar.role === 'enhancer' ? 'Enhancer download' : 'Model download'}
+        label={downloadLabel(bar.role)}
         live={headerLive && bar.fraction !== null}
         busy={headerLive && bar.fraction === null}
         indeterminate={bar.fraction === null}

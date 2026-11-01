@@ -405,6 +405,7 @@
       presetName: activePreset?.name ?? null,
       presetSlug: activePreset?.slug ?? null,
       presetChanged,
+      openKey: activeChip,
     });
   });
   // The preset chip is left out: it says where the settings started, and counts none of them.

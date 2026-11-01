@@ -9,14 +9,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - **Use as → Reference** in the viewer and Gallery menus adds an image as the next reference on Image
 - **MOSS-Image on macOS:** `moss` (Turbo) and `moss-sft` now run on a Mac too, with the same features as on Windows and Linux
+- **Transparent background** cuts the subject out and saves a PNG with transparency: `--transparent`, or **Transparent** in Post-processing. It downloads 548 MB of cut-out models on first use and is for non-commercial use only
 
 ### Changed
 - **Blob is redrawn and works like a sampler.** He is a teal paint dollop with two big eyes, a tilted beret and little feet, in all thirteen moods and at 24 px in the logo. He appears as noise that resolves in eight steps and snaps sharp, and travels between his spots as a stream of pixels. While creating, a small canvas beside him denoises with your job's real steps; it snaps to sharp when he finishes. Confetti, the Zs and the thought bubble are drawn in pixels too. With reduced motion he appears at once, and each effect shows a still frame. The top bar and the phone menu show a new Z-Vision wordmark in place of "ziv", the app is named Z-Vision Generator on a home screen and in the browser tab, and the README logo is redrawn
 - **The Workspace has one Image and one Video tab**, beside Extend Video. A start image or first frame in the new **Images** section of Settings decides whether a run starts from an image; references and the last frame sit there too. Each tab keeps its own prompt and images, uploaded images stay after a reload, and **Reset** clears the open tab's images. On a phone, one **Images** chip opens them
 - **Images are picked with Browse the server or uploaded**; the Path field is gone. "Img strength" is now **Strength**
+- **Reuse settings also restores post-processing, upscale settings and strength**
 - **Krea 2 uses the `beta` scheduler by default**, so the same seed gives a different image; the new `simple` choice gives the old evenly spaced steps. Its upscale while generating refines for 5 steps and no longer sharpens first
 
 ### Fixed
+- **Tooltips in the phone's All sheet appeared in the wrong place**
 - **The `beta` scheduler works on FLUX.2 Klein.** On macOS it failed with an error; on Windows/Linux it spaced the steps differently from ComfyUI's `beta`
 
 ## [0.14.0b2] - 2026-10-30

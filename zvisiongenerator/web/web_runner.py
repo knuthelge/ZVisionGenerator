@@ -31,7 +31,20 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.progress_events import exception_message
 from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
-from zvisiongenerator.downloads import DETACHED, STOPPED, DownloadFlights, DownloadReport, DownloadTarget, describe_refusal, enhancer_plan, ensure_downloaded, image_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads import (
+    DETACHED,
+    STOPPED,
+    DownloadFlights,
+    DownloadReport,
+    DownloadTarget,
+    describe_refusal,
+    enhancer_plan,
+    ensure_downloaded,
+    image_plan,
+    matte_plan,
+    seedvr2_plan,
+    video_plan,
+)
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
@@ -43,6 +56,7 @@ from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.matte_models import MATTE_LABEL
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
@@ -777,6 +791,8 @@ class WebRunner:
             control_signal=control_signal,
         ):
             return
+        if not self._ensure_matte_downloads(request, total_iterations=len(plan.iterations), progress_callback=progress_callback, control_signal=control_signal):
+            return
         backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, config=config)
         run_batch(
             backend,
@@ -788,6 +804,7 @@ class WebRunner:
             plan=plan,
             progress_callback=progress_callback,
             skip_signal=control_signal,
+            reload_model=lambda: _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, config=config)[1],
         )
 
     def _run_upscale_request(
@@ -813,6 +830,8 @@ class WebRunner:
             progress_callback=progress_callback,
             control_signal=control_signal,
         ):
+            return
+        if not self._ensure_matte_downloads(request, total_iterations=1, progress_callback=progress_callback, control_signal=control_signal):
             return
         if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
             backend, model = _load_seedvr2_with_progress(request.upscale_model, progress_callback, mode="image")
@@ -943,6 +962,31 @@ class WebRunner:
         """Return the name of SeedVR2 tier *model_name* that a download event shows."""
         upscaler = get_seedvr2_upscaler()
         return seedvr2_tier_label(model_name, upscaler.weights) if upscaler is not None else str(model_name)
+
+    def _ensure_matte_downloads(
+        self,
+        request: ImageGenerationRequest,
+        *,
+        total_iterations: int,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> bool:
+        """Download the background removal models a transparent *request* needs, with ``role: "matte"`` events.
+
+        Returns True without downloading when the request is not transparent, and False when the job was cancelled
+        while it downloaded; the cancellation event is already published by then.
+        """
+        if not request.transparent:
+            return True
+        return self._ensure_downloads(
+            matte_plan(),
+            mode="image",
+            role="matte",
+            model=MATTE_LABEL,
+            total_iterations=total_iterations,
+            progress_callback=progress_callback,
+            control_signal=control_signal,
+        )
 
     def _enhancer_download_hook(
         self,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
+  import { Badge, Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
   import { ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
@@ -17,6 +17,7 @@
   import type { ModelOption, WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
+  import { TRANSPARENT_TERMS } from './transparent';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
@@ -51,14 +52,14 @@
   const defaults = $derived(settingDefaultsFor(context, { workflow: s.workflow, model: s.model }));
   const TITLES: Record<ChipKey, string> = {
     seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', seed: 'Seed', runs: 'Batch size',
-    source: 'Source video', images: 'Images', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', model: 'Model',
+    source: 'Source video', images: 'Images', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', transparent: 'Transparent background', model: 'Model',
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
   /** The settings a popover's Reset puts back; none for the ones that have no default (model, LoRAs, files). */
   const RESET_KEYS: Partial<Record<ChipKey, SettingKey[]>> = {
     seconds: ['frameCount'], steps: ['steps'], guidance: ['guidance'], seed: ['seed'], runs: ['runs'],
-    size: ['ratio', 'size', 'dimensionMode'], audio: ['audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleReview'], upscale: ['upscaleEnabled', 'upscaleFactor', 'upscaleReview'],
+    size: ['ratio', 'size', 'dimensionMode'], audio: ['audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleReview'], upscale: ['upscaleEnabled', 'upscaleFactor', 'upscaleReview'], transparent: ['postprocessTransparent'],
   };
   const resetKeys = $derived(RESET_KEYS[key] ?? []);
   const canReset = $derived(resetKeys.some((k) => s[k] !== defaults[k]));
@@ -333,6 +334,9 @@
         <label class="pop-row">Review the small render first<Toggle ariaLabel="Review before upscaling" checked={s.upscaleReview} disabled={busy || !s.upscaleEnabled} onchange={(e) => draft.update('upscaleReview', (e.currentTarget as HTMLInputElement).checked)} /></label>
       {/if}
       <p class="ui-help">Denoise, steps, guidance and sharpen for the upscale are under All.</p>
+    {:else if key === 'transparent'}
+      <label class="pop-row">Transparent background<Toggle ariaLabel="Transparent background" checked={s.postprocessTransparent} disabled={busy} onchange={(e) => draft.update('postprocessTransparent', (e.currentTarget as HTMLInputElement).checked)} /></label>
+      <p class="pop-terms" data-testid="transparent-reason"><Badge variant="warning">Non-commercial</Badge><span>{TRANSPARENT_TERMS}.</span></p>
     {:else if key === 'audio'}
       {#if caps.showAudio}
         <label class="pop-row">Audio<Toggle ariaLabel="Audio" checked={s.audio} onchange={(e) => draft.update('audio', (e.currentTarget as HTMLInputElement).checked)} /></label>
@@ -398,6 +402,7 @@
   .pop-ref { display: flex; align-items: center; gap: 12px; min-height: 56px; font-size: 15px; }
   .pop-thumb { display: grid; flex: none; place-items: center; width: 56px; height: 56px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
   .pop-thumb video { width: 100%; height: 100%; object-fit: cover; }
+  .pop-terms { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; line-height: 1.45; color: var(--color-text-muted); }
   .pop-facts { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .pop-item:disabled { opacity: 0.5; }
   .pop-fold { color: var(--color-text-muted); }

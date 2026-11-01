@@ -144,7 +144,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'references', 'references_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'scheduler',
-            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
+            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation', 'postprocess_transparent',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
             'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
           ],
@@ -161,7 +161,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'references', 'references_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed', 'scheduler',
-            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
+            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation', 'postprocess_transparent',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
             'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
           ],
@@ -182,7 +182,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           ],
           requires_reference_image: false,
           requires_source_video: false,
-          clear_fields: ['negative_prompt', 'guidance', 'quantize'],
+          clear_fields: ['negative_prompt', 'guidance', 'quantize', 'transparent'],
         },
         img2vid: {
           mode: 'video',
@@ -197,7 +197,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           ],
           requires_reference_image: true,
           requires_source_video: false,
-          clear_fields: ['negative_prompt', 'guidance', 'quantize'],
+          clear_fields: ['negative_prompt', 'guidance', 'quantize', 'transparent'],
         },
         extend: {
           mode: 'video',
@@ -205,7 +205,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
           visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: false,
           requires_source_video: true,
-          clear_fields: ['negative_prompt', 'guidance', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
+          clear_fields: ['negative_prompt', 'guidance', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor', 'transparent'],
         },
       },
       field_precedence: {

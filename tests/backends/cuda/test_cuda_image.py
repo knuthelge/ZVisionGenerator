@@ -215,6 +215,63 @@ class TestPreparePrompts:
         assert cancelled.mock_calls == []
 
 
+class _FakePipeline:
+    """A diffusers-like pipeline: ``components`` lists every registered attribute, and hooks can be removed."""
+
+    def __init__(self, **components):
+        self.__dict__.update(components)
+        self._names = tuple(components)
+        self.remove_all_hooks = MagicMock(name="remove_all_hooks")
+
+    @property
+    def components(self):
+        return {name: getattr(self, name) for name in self._names}
+
+
+class TestReleaseModel:
+    """``release_model`` leaves the pipeline holding none of its modules."""
+
+    def test_removes_the_hooks_then_clears_every_component(self, win_backend):
+        mod, _, _ = win_backend
+        pipeline = _FakePipeline(transformer=MagicMock(), text_encoder=MagicMock(), vae=MagicMock(), tokenizer=MagicMock(), scheduler=MagicMock())
+        hooks_removed_with = []
+        pipeline.remove_all_hooks.side_effect = lambda: hooks_removed_with.append(dict(pipeline.components))
+
+        mod.DiffusersBackend().release_model(pipeline)
+
+        pipeline.remove_all_hooks.assert_called_once_with()
+        assert all(component is not None for component in hooks_removed_with[0].values())
+        assert pipeline.components == dict.fromkeys(("transformer", "text_encoder", "vae", "tokenizer", "scheduler"))
+
+    def test_a_second_release_does_not_raise(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        pipeline = _FakePipeline(transformer=MagicMock(), vae=MagicMock())
+
+        backend.release_model(pipeline)
+        backend.release_model(pipeline)
+
+        assert pipeline.components == {"transformer": None, "vae": None}
+
+    def test_a_pipeline_without_offload_hooks_is_cleared(self, win_backend):
+        mod, _, _ = win_backend
+        pipeline = _FakePipeline(transformer=MagicMock())
+        del pipeline.remove_all_hooks
+
+        mod.DiffusersBackend().release_model(pipeline)
+
+        assert pipeline.components == {"transformer": None}
+
+    def test_the_backend_keeps_no_reference_to_the_pipeline(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        pipeline = _FakePipeline(transformer=MagicMock())
+
+        backend.release_model(pipeline)
+
+        assert all(value is not pipeline for value in vars(backend).values())
+
+
 class TestIdeogram4:
     """Ideogram 4 Instant loads through its own loader at the selected level and runs with its built-in guidance."""
 

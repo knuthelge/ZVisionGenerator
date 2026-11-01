@@ -113,7 +113,7 @@ class TestWebRunner:
         worker_thread_ids: list[int] = []
         captured_control_signal = {}
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             worker_thread_ids.append(threading.get_ident())
             captured_control_signal["signal"] = skip_signal
             assert sys.stdout.isatty() is False
@@ -164,7 +164,7 @@ class TestWebRunner:
             loader_calls["cancelled_after"] = cancelled()
             return MagicMock(name="model"), MagicMock(name="model_info")
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             skip_signal.consume()
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
 
@@ -621,7 +621,7 @@ class TestWebRunner:
         """Successful generated output paths should become gallery-shaped job outputs."""
         output_path = tmp_path / "result.png"
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             Image.new("RGB", (16, 12), color="teal").save(output_path)
             progress_callback({"type": "generation_finished", "mode": "image", "status": "success", "filename": output_path.name, "output_path": str(output_path)})
             progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
@@ -848,7 +848,7 @@ class TestWebRunner:
         started = threading.Event()
         release = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             started.set()
             release.wait(timeout=1.0)
@@ -973,7 +973,7 @@ class TestWebRunner:
         started = threading.Event()
         release = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             started.set()
             release.wait(timeout=1.0)
@@ -1000,7 +1000,7 @@ class TestWebRunner:
         """A paused job should wake and publish cancellation when quit is queued."""
         paused = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             paused.set()
@@ -1031,7 +1031,7 @@ class TestWebRunner:
         proceed = threading.Event()
         actions: list[str | None] = []
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             started.set()
             assert proceed.wait(timeout=2.0)
@@ -1060,7 +1060,7 @@ class TestWebRunner:
     def _review_batch(reached: threading.Event, decisions: list[str], *, rounds: int = 1):
         """Return a fake run_batch that waits for the review decision as the image runner does."""
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": rounds, "total_runs": 1})
             for iteration in range(1, rounds + 1):
                 progress_callback({"type": "prompt_started", "mode": "image", "ran_iterations": iteration, "total_iterations": rounds, "prompt": "p"})
@@ -1091,7 +1091,7 @@ class TestWebRunner:
         started = threading.Event()
         release = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             started.set()
             release.wait(timeout=1.0)
@@ -1256,7 +1256,7 @@ class TestWebRunner:
         reached = threading.Event()
         proceed = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             skip_signal.begin_review()
             progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1, "attempt": 1}, "preview": Image.new("RGB", (8, 8))})
@@ -1333,7 +1333,7 @@ class TestWebRunner:
         started = threading.Event()
         release = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal, **_kw):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             progress_callback(
                 {

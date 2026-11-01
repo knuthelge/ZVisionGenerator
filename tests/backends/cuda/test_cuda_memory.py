@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import sys
+from unittest.mock import MagicMock
 
 import pytest
 
-from zvisiongenerator.backends.cuda.memory import PIN_ROUND_SETTING, configure_allocator, merged_alloc_conf
+from zvisiongenerator.backends.cuda.memory import PIN_ROUND_SETTING, configure_allocator, free_bytes, merged_alloc_conf
 
 _DEFAULTS = "expandable_segments:True,garbage_collection_threshold:0.8"
 
@@ -102,3 +104,19 @@ class TestConfigureAllocator:
         result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=120, check=True)
 
         assert "pinned_max_round_threshold_mb" in result.stdout
+
+
+class TestFreeBytes:
+    def test_returns_the_first_value_of_the_driver_query(self, monkeypatch):
+        torch = MagicMock()
+        torch.cuda.mem_get_info.return_value = (3 * 1024**3, 10 * 1024**3)
+        monkeypatch.setitem(sys.modules, "torch", torch)
+
+        assert free_bytes() == 3 * 1024**3
+
+    def test_a_failing_query_gives_none(self, monkeypatch):
+        torch = MagicMock()
+        torch.cuda.mem_get_info.side_effect = RuntimeError("no CUDA")
+        monkeypatch.setitem(sys.modules, "torch", torch)
+
+        assert free_bytes() is None

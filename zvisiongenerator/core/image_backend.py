@@ -1,7 +1,7 @@
 """ImageBackend Protocol — explicit contract for platform-specific image inference engines.
 
 Protocol requires name, load_model, text_to_image, image_to_image, stored_quant_format, quantizes_from_files,
-save_quantized, write_quantized_files, prepare_prompts.
+save_quantized, write_quantized_files, prepare_prompts, release_model.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ class ImageBackend(Protocol):
     - save_quantized(): write a loaded quantized model's weights for reuse
     - write_quantized_files(): write a stored quant straight from the source files
     - prepare_prompts(): encode a job's prompts before its first generation
+    - release_model(): free a loaded model's weights in place
     """
 
     name: str  # "mflux" or "diffusers"
@@ -142,5 +143,12 @@ class ImageBackend(Protocol):
         *prompts*, at *width* by *height*; only size-keyed encoders such as Ideogram 4 use the size. Returns early,
         with the real text encoder back on *model*, once *cancelled* returns true; prompt-cache entries already made stay.
         A backend with nothing to prepare does nothing.
+        """
+        ...
+
+    def release_model(self, model: Any) -> None:
+        """Free *model*'s weights from accelerator memory in place; the handle must not be used again. Idempotent.
+
+        The caller drops its own references and empties the accelerator cache afterwards.
         """
         ...

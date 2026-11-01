@@ -18,17 +18,23 @@ zvisiongenerator/
 ├── video_file_upscale_runner.py   Upscale one existing video: check it, stream its frames through SeedVR2, keep its sound and settings
 ├── review.py                      Shared wait for a review decision
 ├── job_controls.py                Shared pause and repeat steps of the image and video runners
+├── matte_room.py                  Memory guard for the background removal chain: swaps the image model out and back in when free memory is short
 ├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
+│   ├── matte/                     Background removal on a torch device (CUDA or MPS), one code path for both platforms
+│   │   ├── birefnet.py            Load BiRefNet from the vendored code and a pinned snapshot, with the deformable convolutions swapped
+│   │   ├── chain.py               The chain: BiRefNet mask, ViTMatte edge, foreground colours; loaded on the first cut-out, closed when the job ends
+│   │   ├── deform_conv.py         Modulated deformable convolution built from `grid_sample`, and the swap into BiRefNet
+│   │   └── vitmatte.py            Load ViTMatte and its image processor from a pinned snapshot
 │   ├── cuda/                      Windows and Linux (diffusers/CUDA); what image and video share sits here
 │   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
 │   │   ├── download_plan.py       Hugging Face downloads the diffusers image, LTX video and transformers enhancer backends need (no torch import)
 │   │   ├── driver.py              NVIDIA driver hint when a CUDA build of PyTorch cannot start
 │   │   ├── lora_peft.py           Detect and report LoRA files that match no module (peft)
-│   │   ├── memory.py              CUDA memory release after a job, and GPU and system memory sizes
+│   │   ├── memory.py              CUDA memory release after a job, free GPU memory, and GPU and system memory sizes
 │   │   ├── prompt_enhancer.py     Prompt-enhancer LLM (transformers)
 │   │   ├── quant.py               NF4 (q4) and FP8 (q8) weights, at load and as stored quants, and the NF4 pre-pack of a model's block linears
 │   │   ├── seedvr2.py             SeedVR2 upscaler (vendored PyTorch core, FP8 streamed from system memory)
@@ -78,7 +84,7 @@ zvisiongenerator/
 │       ├── image_preview.py       Cheap latent → RGB live previews for the mflux backend
 │       ├── klein_references.py    FLUX.2 Klein references (mflux): an edit view over the loaded model, and the start-image hook for references with img2img
 │       ├── ltx_converted.py       Write a converted LTX-2.3 MLX folder from a single-file checkpoint
-│       ├── memory.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
+│       ├── memory.py              MLX and MPS memory release, free memory, recommended GPU memory budget, machine memory size and scoped cache limit
 │       ├── moss.py                MOSS-Image (mflux parts): the text encoder and denoiser loaded one after the other, the denoising loop and the stored copies
 │       ├── moss_lora.py           The LoRA mapping MOSS-Image's MLX transformer loads every trainer's naming through, unmerged
 │       ├── prompt_enhancer.py     Prompt-enhancer LLM (mlx-lm)
@@ -104,6 +110,7 @@ zvisiongenerator/
 │   ├── image_types.py             Image request and artifacts
 │   ├── video_types.py             Video request and artifacts, and the extend source, spec and segment
 │   ├── image_backend.py           Image backend protocol
+│   ├── matte.py                   Background removal chain protocol
 │   ├── video_backend.py           Video backend protocol and the optional VideoExtender protocol
 │   ├── video_family.py            Video family value types (frame rule, capabilities, steps) and the step settling
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
@@ -124,6 +131,7 @@ zvisiongenerator/
 │   └── worker.py                  Child entry point: snapshot_download one target, print byte counts
 ├── processing/
 │   ├── contrast.py                Contrast adjustment
+│   ├── matte.py                   Pure helpers for the cut-out: trimap, working size, alpha merge, foreground colours, RGBA
 │   ├── saturation.py              Saturation adjustment
 │   └── sharpen.py                 AMD CAS post-processing
 ├── schedulers/
@@ -151,7 +159,7 @@ zvisiongenerator/
 │   ├── hf_snapshot.py             Find or download the files of one pinned Hugging Face revision (shared by the CUDA and macOS H3 backends)
 │   ├── ideogram4_instant.py       Ideogram 4 Instant's pinned build sources, model folder and build record
 │   ├── image_model_detect.py      Image model type detection
-│   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`) and the accepted extensions
+│   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`), `flatten_alpha` for another backdrop, and the accepted extensions
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
@@ -163,6 +171,7 @@ zvisiongenerator/
 │   ├── lora_trigger.py            Read a LoRA's trigger text from a model card's instance prompt or a header's single caption
 │   ├── ltx_converted.py           The manifest of a converted LTX model folder (LTX-2.3 or LTX-2.5)
 │   ├── ltx_version.py             The LTX version (2.3 or 2.5) of a video model: its alias, known repo, converted manifest, or a local folder's config files
+│   ├── matte_models.py            The pinned BiRefNet and ViTMatte repositories and the Models-page row of the background removal models
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
 │   ├── moss_build.py              MOSS-Image's pinned sources, model folders, build records and shared stored copies
@@ -246,7 +255,7 @@ zvisiongenerator/
 | `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed |
 | `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`) and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
-| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX and MOSS-Image code |
+| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image and BiRefNet code |
 | `docs/` | These docs, built with Zensical from `zensical.toml` |
 | `proposals/` | Write-ups of future work. See [Proposals](index.md#proposals) |
 | `prompts.yaml` | Default prompt definitions |

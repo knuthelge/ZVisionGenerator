@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,7 @@ from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.types import StageOutcome
+from zvisiongenerator.processing.matte import MATTE_BACKDROP
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.provenance import embed_png_config, read_png_config
 from zvisiongenerator.utils.seedvr2 import MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
@@ -95,6 +97,53 @@ def test_stage_quit_after_the_call_is_skipped_and_keeps_the_source(tmp_path):
     assert artifacts.image is source_image
     assert artifacts.was_upscaled is False
     assert events == []
+
+
+def test_transparent_stage_hands_the_engine_a_temporary_png_of_the_grey_composite(tmp_path):
+    seen: dict = {}
+
+    def upscale_image(model, path, *, width, height, **_kw):
+        with Image.open(path) as handed:
+            seen.update(path=path, size=handed.size, mode=handed.mode, pixel=handed.getpixel((0, 0)))
+        return Image.new("RGB", (width, height))
+
+    source = _source(tmp_path)
+    request = _request(tmp_path, source, transparent=True)
+    request.backend.upscale_image.side_effect = upscale_image
+    artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (32, 16), MATTE_BACKDROP))
+
+    outcome = upscale_stage(request, artifacts)
+
+    assert outcome is StageOutcome.success
+    assert seen["path"] != str(source)
+    assert (seen["size"], seen["mode"], seen["pixel"]) == ((32, 16), "RGB", MATTE_BACKDROP)
+    assert not Path(seen["path"]).exists()
+    assert request.backend.upscale_image.call_args.kwargs["width"] == 64
+
+
+def test_transparent_stage_removes_the_temporary_png_when_the_engine_fails(tmp_path):
+    handed: list[str] = []
+
+    def upscale_image(model, path, **_kw):
+        handed.append(path)
+        raise RuntimeError("engine failed")
+
+    request = _request(tmp_path, _source(tmp_path), transparent=True)
+    request.backend.upscale_image.side_effect = upscale_image
+
+    with pytest.raises(RuntimeError, match="engine failed"):
+        upscale_stage(request, _artifacts())
+
+    assert handed
+    assert not Path(handed[0]).exists()
+
+
+def test_opaque_stage_still_passes_the_source_path(tmp_path):
+    request = _request(tmp_path, _source(tmp_path))
+
+    upscale_stage(request, _artifacts())
+
+    assert request.backend.upscale_image.call_args.args[1] == request.upscale_source
 
 
 @pytest.mark.parametrize("missing", ["upscale_source", "upscale_factor"])

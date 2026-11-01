@@ -49,6 +49,8 @@ From the viewer or a tile's **⋯** menu in the [Gallery](../web-ui/gallery.md#u
 
 The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`.
 
+An image with a [transparent background](images.md#transparent-background) stays transparent in either kind.
+
 ### Plain upscale
 
 Works for any image: files without recorded settings, imported files, and images from models that can't refine images, such as Ideogram 4. The result is saved as is, without the sharpen, contrast and saturation passes. In the viewer, ++x++ then ++2++ or ++4++ runs it; where the plain upscale isn't offered, the keys run a creative upscale instead.

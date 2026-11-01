@@ -10,6 +10,13 @@ import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { requestConfirm } from './confirm.svelte';
 
+// The touch layer (neighbour panes) follows the pointer; a test switches it on without a real media query.
+const touch = vi.hoisted(() => ({ coarse: false }));
+vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
+  return { ...actual, layout: new Proxy(actual.layout, { get: (target, key) => (key === 'coarse' && touch.coarse ? true : Reflect.get(target, key)) }) };
+});
+
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
     id: 'out/asset-a.png',
@@ -571,5 +578,83 @@ describe('AssetViewer', () => {
       ['LoRA 3', 'legacy'],
     ]);
     expect(loraRows[0].querySelector('dd')?.getAttribute('title')).toBe('/Users/me/.ziv/loras/style.safetensors:0.8');
+  });
+
+  describe('checkerboard', () => {
+    const cutOut = (id: string) => makeAsset({ id: `out/${id}.png`, url: `/media/out/${id}.png`, thumbnail_url: `/media/out/${id}-thumb.png`, filename: `${id}.png`, transparent: true });
+    const opaque = makeAsset({ id: 'out/plain.png', url: '/media/out/plain.png', thumbnail_url: '/media/out/plain-thumb.png', filename: 'plain.png' });
+    const checkered = (selector: string) => document.querySelector(selector)?.classList.contains('ui-checkerboard');
+
+    it('sits behind the main image and the stand-in of a transparent asset, on the images themselves', () => {
+      mountViewer({ assets: [cutOut('a'), opaque], currentIndex: 0 });
+      expect(document.querySelector<HTMLElement>('.viewer-media')?.dataset.transparent).toBe('true');
+      expect(checkered('.viewer-media')).toBe(true);
+      expect(document.querySelector<HTMLElement>('.viewer-standin')?.dataset.transparent).toBe('true');
+      expect(checkered('.viewer-standin')).toBe(true);
+    });
+
+    it('leaves an opaque asset without it', () => {
+      mountViewer({ assets: [cutOut('a'), opaque], currentIndex: 1 });
+      expect(document.querySelector<HTMLElement>('.viewer-media')?.dataset.transparent).toBe('false');
+      expect(checkered('.viewer-media')).toBe(false);
+      expect(checkered('.viewer-standin')).toBe(false);
+    });
+
+    it('marks only the transparent thumbnails in the filmstrip', () => {
+      mountViewer({ assets: [cutOut('a'), opaque, cutOut('b')], currentIndex: 1 });
+      const states = Array.from(document.querySelectorAll<HTMLImageElement>('.viewer-film img')).map((img) => img.classList.contains('ui-checkerboard'));
+      expect(states).toEqual([true, false, true]);
+    });
+
+    it('marks the neighbours waiting beside the shown asset in the touch layer', () => {
+      touch.coarse = true;
+      try {
+        mountViewer({ assets: [cutOut('a'), opaque, cutOut('b')], currentIndex: 1 });
+        const prev = document.querySelector('.viewer-pane-prev .viewer-neighbour');
+        const next = document.querySelector('.viewer-pane-next .viewer-neighbour');
+        expect(prev?.classList.contains('ui-checkerboard')).toBe(true);
+        expect(next?.classList.contains('ui-checkerboard')).toBe(true);
+      } finally {
+        touch.coarse = false;
+      }
+    });
+
+    it('rides along on the opening flight of a transparent asset', () => {
+      const rect = { left: 10, top: 10, width: 200, height: 200, right: 210, bottom: 210, x: 10, y: 10, toJSON: () => ({}) } as DOMRect;
+      const box = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(rect);
+      const animate = vi.fn(() => ({}) as Animation);
+      Element.prototype.animate = animate;
+      const origin = document.createElement('button');
+      document.body.appendChild(origin);
+      try {
+        mountViewer({ assets: [cutOut('a'), opaque], currentIndex: 0, origin });
+        const flight = document.querySelector<HTMLElement>('[data-testid="viewer-flight"]');
+        expect(flight?.dataset.transparent).toBe('true');
+        expect(flight?.classList.contains('ui-checkerboard')).toBe(true);
+      } finally {
+        box.mockRestore();
+        Reflect.deleteProperty(Element.prototype, 'animate');
+        origin.remove();
+      }
+    });
+
+    it('leaves the flight of an opaque asset plain', () => {
+      const rect = { left: 10, top: 10, width: 200, height: 200, right: 210, bottom: 210, x: 10, y: 10, toJSON: () => ({}) } as DOMRect;
+      const box = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(rect);
+      Element.prototype.animate = vi.fn(() => ({}) as Animation);
+      const origin = document.createElement('button');
+      document.body.appendChild(origin);
+      try {
+        mountViewer({ assets: [opaque, cutOut('a')], currentIndex: 0, origin });
+        const flight = document.querySelector<HTMLElement>('[data-testid="viewer-flight"]');
+        expect(flight).not.toBeNull();
+        expect(flight?.dataset.transparent).toBe('false');
+        expect(flight?.classList.contains('ui-checkerboard')).toBe(false);
+      } finally {
+        box.mockRestore();
+        Reflect.deleteProperty(Element.prototype, 'animate');
+        origin.remove();
+      }
+    });
   });
 });

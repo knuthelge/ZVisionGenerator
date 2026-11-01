@@ -2,7 +2,7 @@
   import { errorText } from '$lib/api/client';
   import { Badge, Icon, StepProgress } from '$lib/components/atoms';
   import { workflowLabel } from '$lib/state/assetActions';
-  import { etaLabel, headline, isActive, isPaused, itemNoun, iterations, jobBar, jobControls, jobPhase, stageBars } from '$lib/state/jobView';
+  import { downloadLabel, etaLabel, headline, isActive, isPaused, itemNoun, iterations, jobBar, jobControls, jobPhase, stageBars } from '$lib/state/jobView';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ActiveJobState, JobControlAction } from '$lib/types';
 
@@ -79,7 +79,7 @@
       class="jb-download"
       value={bar.fraction ?? 0}
       max={1}
-      label={bar.role === 'enhancer' ? 'Enhancer download' : 'Model download'}
+      label={downloadLabel(bar.role)}
       live={active && !paused && !offline && bar.fraction !== null}
       busy={active && !paused && !offline && bar.fraction === null}
       indeterminate={bar.fraction === null}

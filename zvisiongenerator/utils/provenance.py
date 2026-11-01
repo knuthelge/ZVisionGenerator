@@ -436,6 +436,8 @@ def _generation_block(value: Any, *, is_video: bool = False) -> dict[str, Any]:
         generation["quantize"] = quantize
     if isinstance(value.get("audio"), bool):
         generation["audio"] = value["audio"]
+    if value.get("transparent") is True:
+        generation["transparent"] = True
     output_format = optional_text(value.get("output_format"))
     if output_format is not None:
         generation["output_format"] = output_format
@@ -565,6 +567,7 @@ def _image_generation_details(request: ImageGenerationRequest, artifacts: ImageW
             "sharpen": _sharpen_amount(request, artifacts) if request.sharpen else None,
             "contrast": request.contrast_amount if request.contrast else None,
             "saturation": request.saturation_amount if request.saturation else None,
+            "transparent": True if request.transparent else None,
         }
     )
 

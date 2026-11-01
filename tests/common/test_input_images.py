@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from tests._images import SIDEWAYS_UPRIGHT_SIZE, is_bluish, is_reddish, write_cutout, write_sideways_photo
-from zvisiongenerator.utils.input_images import open_image_upright, upright_image_copies
+from zvisiongenerator.utils.input_images import flatten_alpha, open_image_upright, upright_image_copies
 
 
 def test_an_input_image_is_opened_upright_and_keeps_its_size(tmp_path):
@@ -54,3 +54,18 @@ def test_upright_copies_replace_only_the_images_that_need_it(tmp_path):
 
     assert not Path(turned).exists() and not Path(flattened).exists()
     assert Path(sideways).exists() and Path(cutout).exists()
+
+
+def test_flatten_alpha_composites_over_the_given_colour():
+    image = Image.new("RGBA", (2, 1), (255, 0, 0, 0))
+    image.putpixel((1, 0), (255, 0, 0, 255))
+
+    flattened = flatten_alpha(image, (10, 20, 30))
+
+    assert flattened.mode == "RGB"
+    assert flattened.getpixel((0, 0)) == (10, 20, 30)
+    assert flattened.getpixel((1, 0)) == (255, 0, 0)
+
+
+def test_flatten_alpha_defaults_to_white():
+    assert flatten_alpha(Image.new("RGBA", (1, 1), (0, 0, 0, 0))).getpixel((0, 0)) == (255, 255, 255)

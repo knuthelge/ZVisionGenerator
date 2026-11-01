@@ -103,7 +103,7 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 | **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
 | **Images** | In Image, the **Start image** with its **Strength**, and [references](#references) (FLUX.2 Klein). In Video, a **First frame** and an optional **Last frame**. See [Images](#images) |
 | **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
-| **Post-processing** | **Sharpen**, **Contrast** and **Saturation** (images) |
+| **Post-processing** | **Sharpen**, **Contrast**, **Saturation** and **Transparent** (images) |
 | **Video** | **Audio**, **Low memory** |
 
 Groups and rows only show when the model and tab use them.
@@ -113,6 +113,14 @@ Groups and rows only show when the model and tab use them.
 - **Seed** is random for every run unless you type one. The dice button picks a new one.
 
 What each setting does is in [Images](../concepts/images.md), [Video](../concepts/video.md) and [Upscaling](../concepts/upscaling.md).
+
+### Transparent background
+
+**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). A **Non-commercial** badge sits beside it; hover it for the reason. The job card shows **Downloading background removal** while the cut-out models download and **Removing background…** while the cut-out runs.
+
+![The Transparent switch in Post-processing, with its Non-commercial badge](../assets/screenshots/placeholder.svg "transparent-background")
+
+On a phone, the switch is in the **Post-processing** section of **All**. While it is on, a **Transparent** chip joins the settings strip; its popover, **Transparent background**, holds the switch.
 
 ### Images
 

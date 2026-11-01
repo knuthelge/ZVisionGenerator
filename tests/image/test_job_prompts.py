@@ -19,6 +19,7 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.workflows import build_workflow
+from zvisiongenerator.workflows.generation_prompt import BACKGROUND_SUFFIX
 
 _MODEL_INFO = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 
@@ -86,6 +87,28 @@ class TestJobPrompts:
 
     def test_no_prompts_gives_no_entries(self):
         assert _job_prompts(JobPlan(iterations=()), {}, supports_negative=True) == ()
+
+    def test_a_transparent_job_ends_every_plain_prompt_with_the_background_phrase(self):
+        prompts = {"s": [("a cat", "blurry"), ("a dog", None)]}
+        result = _job_prompts(_plan(prompts), prompts, supports_negative=True, transparent=True)
+        assert [p.prompt for p in result] == [f"a cat{BACKGROUND_SUFFIX}", f"a dog{BACKGROUND_SUFFIX}"]
+        assert [p.negative_prompt for p in result] == ["blurry", None]
+
+    def test_a_transparent_job_leaves_json_captions_alone(self):
+        caption = '{"summary": "a cat"}'
+        prompts = {"s": [(caption, None)]}
+        plan = _enhance(_plan(prompts), 0, resolved=caption, enhanced=None)
+        assert [p.prompt for p in _job_prompts(plan, prompts, supports_negative=True, transparent=True)] == [caption]
+
+    def test_a_job_without_transparent_adds_nothing(self):
+        prompts = {"s": [("a cat", None)]}
+        assert [p.prompt for p in _job_prompts(_plan(prompts), prompts, supports_negative=True)] == ["a cat"]
+
+    def test_run_batch_pre_encodes_the_conditioned_prompts_for_a_transparent_job(self):
+        prompts = {"s": [("a cat", None)]}
+        backend, model = MagicMock(), MagicMock()
+        _run(backend, model, prompts, _make_args(transparent=True), workflow=_noop_workflow())
+        assert backend.prepare_prompts.call_args.args[1] == (JobPrompt(f"a cat{BACKGROUND_SUFFIX}", None),)
 
 
 def _run(backend, model, prompts, args, *, plan=None, skip_signal=None, config=None, workflow=None):

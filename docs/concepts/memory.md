@@ -1,6 +1,6 @@
 # Memory
 
-Image and video models are large, and memory is usually what limits what you can run. The app estimates what fits before it starts, and only ever has one model loaded at a time.
+Image and video models are large, and memory is usually what limits what you can run. The app estimates what fits before it starts, and only ever has one model loaded at a time, apart from the [cut-out models](#background-removal) of a transparent background.
 
 ## How memory works on each platform
 
@@ -78,6 +78,12 @@ The estimate doesn't count memory used by other apps, or by an image model that 
 ## One model at a time
 
 The [prompt enhancer](prompt-enhancer.md#memory) and the image or video model are never loaded together, so peak memory is the larger of the two, not their sum. Actions that need the model memory to themselves, such as enhancing a prompt by hand or deleting a model, wait until no job is running or queued.
+
+## Background removal
+
+[Transparent background](images.md#transparent-background) loads its cut-out models beside the image model, and they stay loaded for the rest of the job. The estimate doesn't count them.
+
+When less than 2 GB of GPU memory (unified memory on a Mac) is free after a render, the app releases the image model before the cut-out and loads it again before the next image of a batch. This keeps a small GPU from running out, at the cost of a model load for every image. When the free memory can't be read, the image model stays loaded.
 
 ## Linux: the terminal closes while a model loads
 

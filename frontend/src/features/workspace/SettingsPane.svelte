@@ -1,7 +1,7 @@
 <script lang="ts">
   import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
-  import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
+  import { Badge, Icon, InspectorNumber, Toggle, Tooltip } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection, Select } from '$lib/components/molecules';
   import { extendGuard, extendModelSupport } from '$lib/state/extend';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
@@ -14,6 +14,7 @@
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
+  import { TRANSPARENT_TERMS } from './transparent';
   import ImagesSection from './ImagesSection.svelte';
   import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
@@ -139,6 +140,7 @@
       caps.showPostprocessSharpen && changed('postprocessSharpenEnabled', 'postprocessSharpenAmount'),
       caps.showPostprocessContrast && changed('postprocessContrastEnabled', 'postprocessContrastAmount'),
       caps.showPostprocessSaturation && changed('postprocessSaturationEnabled', 'postprocessSaturationAmount'),
+      caps.showPostprocessTransparent && changed('postprocessTransparent'),
       caps.showImageUpscale && changed('upscaleEnabled', 'upscaleFactor'),
       caps.showUpscaleReview && s.upscaleEnabled && changed('upscaleReview'),
       caps.showUpscaleDenoise && s.upscaleEnabled && changed('upscaleDenoise'),
@@ -163,9 +165,9 @@
     ].filter(Boolean).join(' · ')
   );
   const postprocessOn = $derived(
-    [s.postprocessSharpenEnabled, s.postprocessContrastEnabled, s.postprocessSaturationEnabled].filter(Boolean).length
+    [s.postprocessSharpenEnabled, s.postprocessContrastEnabled, s.postprocessSaturationEnabled, s.postprocessTransparent].filter(Boolean).length
   );
-  const showPostprocess = $derived(caps.showPostprocessSharpen || caps.showPostprocessContrast || caps.showPostprocessSaturation);
+  const showPostprocess = $derived(caps.showPostprocessSharpen || caps.showPostprocessContrast || caps.showPostprocessSaturation || caps.showPostprocessTransparent);
   const upscaleReviewOn = $derived(caps.showUpscaleReview && s.upscaleEnabled && s.upscaleReview);
   const upscaleSummary = $derived(
     s.upscaleEnabled ? [`${s.upscaleFactor}×`, upscaleReviewOn ? 'Review' : null].filter(Boolean).join(' · ') : 'Off'
@@ -412,6 +414,14 @@
             <input type="hidden" name="saturation_amount" value={String(s.postprocessSaturationAmount)}>
           {/if}
         {/if}
+        {#if caps.showPostprocessTransparent}
+          <!-- The row says "Transparent" because the label column is narrow; the switch keeps the full name. -->
+          <InspectorRow label="Transparent" forId="ws-pp-transparent" changed={changed('postprocessTransparent')} onreset={() => reset('postprocessTransparent')}>
+            <Toggle id="ws-pp-transparent" ariaLabel="Transparent background" checked={s.postprocessTransparent} disabled={busy} onchange={(e) => draft.update('postprocessTransparent', (e.currentTarget as HTMLInputElement).checked)} />
+            <Tooltip text={TRANSPARENT_TERMS} class="terms-badge" testId="transparent-terms"><Badge variant="warning">Non-commercial</Badge></Tooltip>
+          </InspectorRow>
+          <input type="hidden" name="transparent" value={s.postprocessTransparent ? 'true' : 'false'}>
+        {/if}
       </InspectorSection>
     {/if}
 
@@ -605,6 +615,10 @@
     .mini-range { width: 72px; }
   }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+  /* The Non-commercial badge sits after the switch: 8px from it, and a 32px tap target in a touch row. */
+  .settings-pane :global(.terms-badge) { margin-left: 4px; }
+  @media (pointer: coarse) { .settings-pane :global(.terms-badge) { padding-block: 7px; } }
 
   /* Presets fill the value column; each option takes an equal share. */
   .mini-seg { display: flex; flex: 1; }

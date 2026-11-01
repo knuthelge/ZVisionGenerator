@@ -92,6 +92,9 @@ class TorchSeedVR2Upscaler:
             source = seedvr2_input_image(opened, width, height, softness)
         return _run(model, source, seed=_core_seed(seed))
 
+    def release_model(self, model: Any) -> None:
+        """Do nothing: the models are built per run and freed in the run, so *model* holds only file names."""
+
     def upscale_video(
         self,
         model: TorchSeedVR2Model,

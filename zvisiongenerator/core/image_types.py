@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from PIL import Image
 
 from zvisiongenerator.core.types import StageOutcome
+
+if TYPE_CHECKING:
+    from zvisiongenerator.core.matte import MatteChain
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,10 @@ class ImageGenerationRequest:
     contrast_amount: float = 1.0
     saturation: bool = False
     saturation_amount: float = 1.0
+    transparent: bool = False
+    # The job's background removal chain, and the hook the matte stage calls before the chain loads to free memory for it
+    matte: MatteChain | None = None
+    make_room: Callable[[], None] | None = None
 
     # Output
     output_dir: str = "."

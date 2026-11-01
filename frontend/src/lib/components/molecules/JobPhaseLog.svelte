@@ -53,6 +53,8 @@
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);
   let failedPreviewUrl = $state<string | null>(null);
   const previewSrc = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? null) : job.previewUrl);
+  // A finished cut-out sits on a checkerboard; the live preview is the opaque render and never does.
+  const previewTransparent = $derived(pausedBetween && lastOutput?.transparent === true);
   const showMedia = $derived(preview && active && generating && !isVideo(job) && !job.review);
   // Some models render no live preview; once past the first one, say so instead of promising it.
   const previewNote = $derived(livePreviewNote(job));
@@ -196,6 +198,8 @@
                   <img
                     src={previewSrc}
                     alt={pausedBetween ? 'The last finished image' : 'Live preview of the generation in progress'}
+                    class:ui-checkerboard={previewTransparent}
+                    data-transparent={previewTransparent}
                     onerror={(event) => { failedPreviewUrl = event.currentTarget.getAttribute('src'); }}
                   />
                 {:else}

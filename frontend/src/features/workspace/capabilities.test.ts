@@ -152,6 +152,29 @@ describe('workspaceCapabilities for references', () => {
   });
 });
 
+describe('workspaceCapabilities for Transparent', () => {
+  const contextWith = (workflow: 'txt2img' | 'txt2vid', visible: string[]): WorkspaceContext => ({
+    video_model_defaults: {},
+    prompt_sources: ['inline'],
+    scheduler_options: [],
+    workflow_contract: {
+      values: [workflow],
+      definitions: { [workflow]: { mode: workflow === 'txt2img' ? 'image' : 'video', model_kind: workflow === 'txt2img' ? 'image' : 'video', visible_controls: visible, requires_reference_image: false, requires_source_video: false, clear_fields: [] } },
+      field_precedence: { defaults: [], dimensions: '' },
+    },
+  }) as unknown as WorkspaceContext;
+  const stateOf = (workflow: string): DraftState => ({ workflow, model: 'm', referenceImagePaths: [] }) as unknown as DraftState;
+
+  it('shows in an image workflow that lists the control', () => {
+    expect(workspaceCapabilities(contextWith('txt2img', ['postprocess_transparent']), stateOf('txt2img')).showPostprocessTransparent).toBe(true);
+  });
+
+  it('is hidden where the workflow does not list it, and in a video workflow', () => {
+    expect(workspaceCapabilities(contextWith('txt2img', ['postprocess_sharpen']), stateOf('txt2img')).showPostprocessTransparent).toBe(false);
+    expect(workspaceCapabilities(contextWith('txt2vid', ['postprocess_transparent']), stateOf('txt2vid')).showPostprocessTransparent).toBe(false);
+  });
+});
+
 describe('stepsSpec', () => {
   it('steps between the offered counts', () => {
     expect(stepsSpec([4, 8])).toEqual({ step: 4, min: 4, max: 8 });

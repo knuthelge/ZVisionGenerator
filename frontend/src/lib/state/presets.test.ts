@@ -78,6 +78,12 @@ describe('presetSettingsFromDraft', () => {
     expect(video).toMatchObject({ video_upscale_factor: null, review: null });
   });
 
+  it('reads Transparent off the draft', () => {
+    expect(presetSettingsFromDraft(imageState({ postprocessTransparent: true }), ctx).settings.transparent).toBe(true);
+    expect(presetSettingsFromDraft(imageState(), ctx).settings.transparent).toBe(false);
+    expect(PRESET_KEYS.video).not.toContain('transparent');
+  });
+
   it('writes a custom size as custom with its width and height, and a preset size with neither', () => {
     expect(presetSettingsFromDraft(imageState({ dimensionMode: 'custom', width: 640, height: 960 }), ctx).settings).toMatchObject({ size: 'custom', width: 640, height: 960 });
     expect(presetSettingsFromDraft(imageState(), ctx).settings).toMatchObject({ ratio: '2:3', size: 'm', width: null, height: null });
@@ -113,6 +119,15 @@ describe('presetDiffers', () => {
     expect(presetDiffers(preset, { ...imageState(), ...patch }, ctx)).toBe(false);
     expect(presetDiffers(preset, { ...imageState(), ...patch, upscaleDenoise: 0.5 }, ctx)).toBe(false);
     expect(presetDiffers(preset, { ...imageState(), ...patch, upscaleEnabled: true }, ctx)).toBe(true);
+  });
+
+  it('compares Transparent, and reads a preset saved without it as off', () => {
+    const state = imageState({ postprocessTransparent: true });
+    const preset = presetOf(state);
+    expect(presetDiffers(preset, state, ctx)).toBe(false);
+    expect(presetDiffers(preset, { ...state, postprocessTransparent: false }, ctx)).toBe(true);
+    const older = presetOf(imageState(), {}, { transparent: null });
+    expect(presetDiffers(older, imageState(), ctx)).toBe(false);
   });
 
   it('ignores the model of a preset that names none', () => {
@@ -178,7 +193,7 @@ describe('presetPrefill', () => {
   it('gives the model, the reuse params and the patch for every key', () => {
     const preset = presetOf(imageState(), { model: 'flux-lite' }, {
       quantize: 4, lora: 'style-a:0.8,detail-b:0.5', ratio: '16:9', size: 'l', runs: 3, steps: 17, guidance: 2.5, image_strength: 0.6, scheduler: 'dpm', first_sigma: 0.4,
-      sharpen_enabled: true, sharpen_amount: 0.6, contrast_enabled: true, contrast_amount: 1.3, saturation_enabled: false,
+      sharpen_enabled: true, sharpen_amount: 0.6, contrast_enabled: true, contrast_amount: 1.3, saturation_enabled: false, transparent: true,
       upscale: 4, upscale_denoise: 0.3, upscale_steps: 12, upscale_guidance: 1.5, upscale_sharpen: false, review: true,
     });
     const result = presetPrefill(preset, imageState(), ctx);
@@ -187,9 +202,14 @@ describe('presetPrefill', () => {
     expect(result.params).toEqual({ lora: 'style-a:0.8,detail-b:0.5', ratio: '16:9', size: 'l', steps: '17', quantize: '4', guidance: '2.5' });
     expect(result.patch).toEqual({
       runs: 3, referenceImageStrength: 0.6, scheduler: 'dpm', firstSigma: 0.4,
-      postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.6, postprocessContrastEnabled: true, postprocessContrastAmount: 1.3, postprocessSaturationEnabled: false,
+      postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.6, postprocessContrastEnabled: true, postprocessContrastAmount: 1.3, postprocessSaturationEnabled: false, postprocessTransparent: true,
       upscaleEnabled: true, upscaleFactor: 4, upscaleReview: true, upscaleDenoise: 0.3, upscaleSteps: 12, upscaleGuidance: 1.5, upscaleSharpen: false,
     });
+  });
+
+  it('turns Transparent on from the preset, and off when the preset holds none', () => {
+    expect(presetPrefill(presetOf(imageState({ postprocessTransparent: true })), imageState(), ctx).patch.postprocessTransparent).toBe(true);
+    expect(presetPrefill(presetOf(imageState(), {}, { transparent: null }), imageState({ postprocessTransparent: true }), ctx).patch.postprocessTransparent).toBe(false);
   });
 
   it('sends a blank LoRA list and quantize when the preset has none, so remembered ones do not come back', () => {

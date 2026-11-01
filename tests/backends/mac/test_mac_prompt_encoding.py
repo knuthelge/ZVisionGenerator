@@ -9,6 +9,7 @@ import weakref
 import pytest
 
 from zvisiongenerator.backends.mac import prompt_encoding as pe
+from zvisiongenerator.workflows.generation_prompt import conditioning_prompt
 from zvisiongenerator.core import JobPrompt
 
 
@@ -128,6 +129,16 @@ class TestMac:
         _prepare(model, "flux2_klein", [_prompt("b"), _prompt("a"), _prompt("b", "ignored")])
 
         assert texts == ["b", "a", " "]
+
+    def test_a_transparent_jobs_conditioned_text_is_the_text_that_gets_encoded(self, fakes, events):
+        model = fakes.FakeKlein(fakes.FakeEncoder())
+        texts = self._encoded_texts(model, "_encode_prompt_pair")
+        conditioned = conditioning_prompt("a cat", transparent=True)
+
+        _prepare(model, "flux2_klein", [_prompt(conditioned)])
+
+        assert conditioned in texts
+        assert "a cat" not in texts
 
     @pytest.mark.parametrize(("family", "make"), [("zimage", "FakeZImage"), ("krea2", "FakeKrea")])
     def test_negatives_are_encoded_as_written_and_blank_ones_are_left_to_the_blank(self, fakes, events, family, make):

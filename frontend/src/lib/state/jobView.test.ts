@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
-import { downloadFromEvent } from './jobPhases';
+import { downloadFromEvent, trackJobEvent } from './jobPhases';
 import {
-  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, formatClock, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, isVideoUpscale, itemActivity, itemFraction, iterations, itemNoun,
+  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, finishingText, formatClock, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, isVideoUpscale, itemActivity, itemFraction, iterations, itemNoun,
   jobBar, jobControls, jobTone, livePreviewNote, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
   reviewVideoUrl, stageBars, stepUnit, timeLeft
 } from './jobView';
@@ -306,6 +306,16 @@ describe('jobView', () => {
       expect(finishingLabel(joining)).toBe('Joining clips…');
     });
 
+    it('labels the matte stage after the steps as removing the background, and keeps it finishing on its progress event', () => {
+      const generating = job({ stageNames: ['text_to_image', 'matte', 'save'], stageName: 'text_to_image', currentStep: 8, totalSteps: 8, stageSteps: { text_to_image: 8 } });
+      const matting = trackJobEvent({ ...generating, stageName: 'matte' }, 'step_progress', { workflow_stage_name: 'matte', phase: 'image_matte', current_step: 1, total_steps: 1 }, 0);
+      const stepped = { ...matting, currentStep: 1, totalSteps: 1 };
+      expect(itemActivity(stepped)).toBe('finishing');
+      expect(finishingLabel(stepped)).toBe('Removing background…');
+      expect(finishingText(stepped)).toBe('Removing background');
+      expect(livePreviewNote(stepped)).toBe('Removing background…');
+    });
+
     it('labels the finishing stretch of other stages as finishing up', () => {
       expect(finishingLabel(job({ stageName: 'save' }))).toBe('Finishing up…');
       expect(finishingLabel(extending())).toBe('Finishing up…');
@@ -448,6 +458,20 @@ describe('review before upscaling', () => {
       expect(new Set([own.help, shared.help, enhancer.help]).size).toBe(3);
       expect(enhancer.help).toContain('org/repo');
       expect(own.label).not.toBe(enhancer.label);
+    });
+
+    it('puts a background removal download on the load row and names it in the headline, row, bar and help', () => {
+      const matte = { role: 'matte', model: 'Background removal', repo: 'org/birefnet' };
+      expect(downloadRowKey(download(matte))).toBe('load');
+      expect(jobBar(downloading({}, matte))).toMatchObject({ kind: 'download', role: 'matte' });
+
+      const view = downloadView(download(matte));
+      expect(view.label).toBe('Background removal download');
+      expect(view.help).toContain('org/birefnet');
+
+      expect(headline(downloading({}, matte))).toBe('Downloading background removal');
+      expect(phaseRows(downloading({}, matte)).find((row) => row.key === 'load')!.label).toBe('Background removal download');
+      expect(headline(downloading({ status: 'cancelled', downloadStop: 'stopped' }, matte))).toBe('Stopped while downloading background removal');
     });
 
     it('names the download in the headline, the row and the way a stop ended', () => {

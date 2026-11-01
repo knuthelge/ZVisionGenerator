@@ -342,6 +342,11 @@ class _ProgressChecker:
             return None
 
 
+# The mflux model attributes that hold weights. ``transformer`` is mflux's own attribute and is not referenced
+# elsewhere in this repo, so the release only touches the ones a model has.
+_WEIGHT_ATTRIBUTES = ("transformer", "vae", "text_encoder")
+
+
 @contextlib.contextmanager
 def _reporting(model: Any, steps: int, family: str, skip_signal: Any | None, step_callback: Any | None) -> Iterator[None]:
     """Report one generation's steps from *model*'s mflux callbacks: honour a skip and send progress and previews.
@@ -527,6 +532,18 @@ class MfluxBackend:
                 _moss.ensure_denoiser(model)
             return
         _prepare_prompts(model, self._model_info.family, prompts, width=width, height=height, cancelled=cancelled)
+
+    def release_model(self, model: Any) -> None:
+        """Drop *model*'s transformer, VAE and text encoder and clear its prompt cache, so the MLX arrays are unreferenced.
+
+        Calling it again does nothing.
+        """
+        for name in _WEIGHT_ATTRIBUTES:
+            if getattr(model, name, None) is not None:
+                setattr(model, name, None)
+        prompt_cache = getattr(model, "prompt_cache", None)
+        if prompt_cache is not None:
+            prompt_cache.clear()
 
     def image_to_image(
         self,

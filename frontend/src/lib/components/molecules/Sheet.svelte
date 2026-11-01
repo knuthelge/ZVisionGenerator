@@ -144,7 +144,8 @@
     position: absolute; left: 0; right: 0; bottom: 0; display: flex; max-height: calc(100% - 44px - env(safe-area-inset-top, 0px) - 8px); flex-direction: column; outline: none;
     translate: 0 100%; transition: translate 280ms cubic-bezier(0.32, 0.72, 0, 1);
   }
-  .sheet-root[data-shown='true'] .sheet { translate: 0 0; }
+  /* `none`, not `0 0`: any translate makes the sheet the containing block of its fixed descendants, so a tooltip inside it would land offset by the sheet's top. */
+  .sheet-root[data-shown='true'] .sheet { translate: none; }
   .sheet.fill { height: calc(100% - 44px - env(safe-area-inset-top, 0px) - 8px); }
   .sheet-head { border-bottom: 1px solid var(--color-border-subtle); }
   .sheet-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

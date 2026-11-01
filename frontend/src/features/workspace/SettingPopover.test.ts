@@ -11,6 +11,7 @@ import type { GalleryAsset, ModelOption, WorkspaceContext } from '$lib/types';
 import { makeContext, makeImageDefaults } from '../../test-utils/workspace';
 import { currentImagesView } from './imagesView';
 import SettingPopover from './SettingPopover.svelte';
+import { TRANSPARENT_TERMS } from './transparent';
 
 const models: ModelOption[] = [
   { id: 'zit', label: 'Z-Image Turbo', type: 'image' },
@@ -108,6 +109,64 @@ describe('SettingPopover model list', () => {
 
       expect(target.querySelector('[data-testid="model-not-downloaded"]')).toBeNull();
     });
+  });
+});
+
+describe('SettingPopover Transparent background', () => {
+  const imageContext = {
+    ...context,
+    workflow_contract: { values: ['txt2img'], definitions: { txt2img: { mode: 'image', visible_controls: ['postprocess_transparent'], clear_fields: [] } } },
+  } as unknown as WorkspaceContext;
+  const onclose = vi.fn();
+
+  function mountTransparent(busy = false): void {
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: {
+        key: 'transparent', context: imageContext, get images() { return currentImagesView(imageContext); }, busy, models, quantizeOptions: null, lastSeed: null,
+        onModelChange: vi.fn(), onclose,
+      },
+    }));
+  }
+
+  const toggle = () => target.querySelector('[role="switch"][aria-label="Transparent background"]') as HTMLInputElement | null;
+
+  it('holds the switch, the Non-commercial badge and the reason as visible text', () => {
+    mountTransparent();
+
+    expect(toggle()).not.toBeNull();
+    const reason = target.querySelector('[data-testid="transparent-reason"]') as HTMLElement;
+    expect(reason.querySelector('.ui-badge')).not.toBeNull();
+    expect(reason.textContent).toContain(TRANSPARENT_TERMS);
+    // The reason is on screen already, so the badge needs no tooltip and no tab stop.
+    expect(reason.querySelector('[role="tooltip"]')).toBeNull();
+    expect(reason.closest('label')).toBeNull();
+  });
+
+  it('turns the draft setting on and off', () => {
+    mountTransparent();
+
+    flushSync(() => toggle()!.click());
+    expect(draft.state.postprocessTransparent).toBe(true);
+    flushSync(() => toggle()!.click());
+    expect(draft.state.postprocessTransparent).toBe(false);
+  });
+
+  it('disables the switch while a submit is in flight', () => {
+    mountTransparent(true);
+
+    expect(toggle()!.disabled).toBe(true);
+  });
+
+  it('offers Reset only while the switch is on', () => {
+    draft.update('postprocessTransparent', true);
+    mountTransparent();
+
+    const reset = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Reset') ?? null;
+    expect(reset).not.toBeNull();
+    expect(reset!.disabled).toBe(false);
+    flushSync(() => reset!.click());
+    expect(draft.state.postprocessTransparent).toBe(false);
   });
 });
 

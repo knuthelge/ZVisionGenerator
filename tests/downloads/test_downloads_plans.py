@@ -10,8 +10,9 @@ from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
 from tests._factories import load_packaged_config
 
-from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, seedvr2_plan, video_model_downloaded, video_plan
+from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_model_downloaded, video_plan
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.utils.paths import split_huggingface_revision
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, write_build_record
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SEEDVR2_MIXED_REPO, SEEDVR2_REPO
@@ -265,6 +266,25 @@ class TestEnhancerPlan:
         _patch_backend(monkeypatch, "enhancer_download_plan", ())
 
         assert enhancer_plan(str(tmp_path), None) == ()
+
+
+class TestMattePlan:
+    def test_two_pinned_targets_with_exact_files(self):
+        assert matte_plan() == (
+            DownloadTarget("ZhengPeng7/BiRefNet", BIREFNET.revision, ("model.safetensors",)),
+            DownloadTarget("hustvl/vitmatte-small-composition-1k", VITMATTE.revision, ("config.json", "model.safetensors", "preprocessor_config.json")),
+        )
+
+    def test_the_revisions_are_full_commit_hashes(self):
+        for pin in (BIREFNET, VITMATTE):
+            assert len(pin.revision) == 40
+            assert set(pin.revision) <= set("0123456789abcdef")
+
+    @pytest.mark.parametrize("error", [httpx.ConnectError("down"), OfflineModeIsEnabled("offline"), LocalEntryNotFoundError("not cached")])
+    def test_offline_leaves_the_plan_unmade(self, monkeypatch, error):
+        monkeypatch.setattr("zvisiongenerator.downloads.plans.DownloadTarget", MagicMock(side_effect=error))
+
+        assert matte_plan() is None
 
 
 class TestThroughTheRealDispatch:

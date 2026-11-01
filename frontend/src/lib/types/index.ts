@@ -58,6 +58,8 @@ export interface GalleryAsset {
   reuse_workspace_url: string; // hash URL: '#/workspace?workflow=...&prompt=...'
   has_reusable_config?: boolean;
   reuse_state?: ReuseState;
+  /** The image was cut out and has a transparent background; absent or false for opaque assets. */
+  transparent?: boolean;
   media_type: 'image' | 'video';
   /** Recorded settings beyond the reuse fields, shown in the asset viewer. */
   details?: AssetDetails;
@@ -184,6 +186,8 @@ export interface AssetGeneration {
   sharpen?: number;
   contrast?: number;
   saturation?: number;
+  /** The subject was cut out onto a transparent background. */
+  transparent?: boolean;
   audio?: boolean;
   output_format?: string;
 }
@@ -899,6 +903,8 @@ export interface DraftState {
   postprocessContrastAmount: number;
   postprocessSaturationEnabled: boolean;
   postprocessSaturationAmount: number;
+  /** Cut the subject out and save a PNG with a transparent background. */
+  postprocessTransparent: boolean;
   upscaleDenoise: number | null;
   upscaleSteps: number | null;
   upscaleGuidance: number | null;
@@ -1226,13 +1232,13 @@ export interface DownloadProgressFields {
 export interface ModelDownloadingEvent extends DownloadProgressFields {
   type: 'model_downloading';
   mode: 'image' | 'video';
-  role: 'model' | 'enhancer';
+  role: 'model' | 'enhancer' | 'matte';
   model: string;
 }
 
 /** The download a job is waiting on, taken from its newest `model_downloading` event. */
 export interface JobDownload extends DownloadProgressFields {
-  role: 'model' | 'enhancer';
+  role: 'model' | 'enhancer' | 'matte';
   model: string;
 }
 
@@ -1376,7 +1382,7 @@ export interface ModelDeleteInfo {
 /** One Models-page download in the downloads lane. */
 export type DownloadItem = {
   id: string;
-  kind: 'model' | 'enhancer' | 'lora';
+  kind: 'model' | 'enhancer' | 'matte' | 'lora';
   name: string;
   label: string;
   state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
@@ -1399,7 +1405,7 @@ export interface DownloadList {
 
 /** What a Models-page download would fetch, from `GET /api/models/download/plan`. */
 export interface DownloadPlan {
-  kind: 'model' | 'enhancer';
+  kind: 'model' | 'enhancer' | 'matte';
   name: string;
   label: string;
   parts: { repo: string; files: number; bytes: number | null }[];
@@ -1466,6 +1472,22 @@ export interface EnhancerModelEntry {
   download_needed: boolean;
 }
 
+/** The background removal models (the cut-out behind Transparent background): two repositories shown as one row. */
+export interface BackgroundRemovalEntry {
+  name: string;
+  label: string;
+  /** Whether both repositories are on disk; null when that could not be checked. */
+  downloaded: boolean | null;
+  /** Disk use of the downloads, when any. */
+  disk_size_label: string | null;
+  /** Size of the first-use download. */
+  download_size_label: string | null;
+  /** Whether a download is on disk to delete. */
+  deletable: boolean;
+  /** Files are missing, so the Models page offers Download. */
+  download_needed: boolean;
+}
+
 /** Hugging Face cache content nothing on the Models page uses. */
 export interface OtherDownloads {
   cache_dir: string;
@@ -1487,6 +1509,7 @@ export interface ModelInventory {
   image_models: ModelEntry[];
   video_models: VideoModelEntry[];
   enhancer_models?: EnhancerModelEntry[];
+  background_removal?: BackgroundRemovalEntry;
   other_downloads?: OtherDownloads;
   loras: LoraEntry[];
   /** Whether this platform can save quantized copies of models (macOS). */

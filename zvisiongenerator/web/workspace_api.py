@@ -31,6 +31,7 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_ima
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.ltx_version import ltx_model_version
+from zvisiongenerator.utils.matte_models import MATTE_DOWNLOAD_SIZE_LABEL, MATTE_LABEL, MATTE_ROW_NAME
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
 from zvisiongenerator.utils.model_files import (
     directory_bytes,
@@ -46,7 +47,7 @@ from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_d
 from zvisiongenerator.utils.video_extend import extend_step
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
-from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, row_download_needed
+from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, matte_download_needed, row_download_needed
 from zvisiongenerator.web.first_run import first_run_payload
 from zvisiongenerator.web.lora_details import installed_details
 from zvisiongenerator.web.lora_index import lookup as lookup_lora_families
@@ -58,6 +59,7 @@ from zvisiongenerator.web.model_delete import (
     delete_scope,
     enhancer_delete_target,
     installed_models_linking_to,
+    matte_delete_target,
     model_delete_target,
     seedvr2_delete_target,
     used_repo_ids,
@@ -315,6 +317,7 @@ def build_models_response(
         "image_models": image_rows,
         "video_models": video_rows,
         "enhancer_models": _enhancer_model_rows(web_config.app_config),
+        "background_removal": _background_removal_row(),
         "other_downloads": _other_downloads_payload(web_config),
         "loras": loras,
         "stored_quants_supported": supports_stored_quants(),
@@ -410,6 +413,35 @@ def _enhancer_download_needed(tier: str, repo: str, revision: str | None, unavai
     except Exception as exc:  # noqa: BLE001 - one unreadable row must not break the whole listing
         warnings.warn(f"Could not determine whether the '{tier}' enhancer model needs a download: {exc}", stacklevel=2)
         return False
+
+
+def _background_removal_row(*, present: Callable[[DownloadTarget], bool] = target_present_offline) -> dict[str, Any]:
+    """Return the Models-page row of the background removal models (BiRefNet and ViTMatte), which are downloaded, listed and deleted together.
+
+    Args:
+        present: Tells whether a download target is fully on disk without using the network.
+    """
+    target = matte_delete_target()
+    disk_bytes = sum(repo_disk_bytes(huggingface_cache_repo_dir(repo_id)) for repo_id in target.repo_ids) if target is not None else 0
+    needed = _matte_download_needed(present)
+    return {
+        "name": MATTE_ROW_NAME,
+        "label": MATTE_LABEL,
+        "downloaded": None if needed is None else not needed,
+        "disk_size_label": disk_size_label(disk_bytes) if disk_bytes else None,
+        "download_size_label": MATTE_DOWNLOAD_SIZE_LABEL,
+        "deletable": target is not None,
+        "download_needed": bool(needed),
+    }
+
+
+def _matte_download_needed(present: Callable[[DownloadTarget], bool]) -> bool | None:
+    """Return whether the background removal models need a download; a plan that cannot be made warns and returns ``None`` (status unknown)."""
+    try:
+        return matte_download_needed(present=present)
+    except Exception as exc:  # noqa: BLE001 - one unreadable row must not break the whole listing
+        warnings.warn(f"Could not determine whether the background removal models need a download: {exc}", stacklevel=2)
+        return None
 
 
 def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = None) -> tuple[CachedRepo, ...]:
