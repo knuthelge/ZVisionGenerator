@@ -12,7 +12,7 @@ from tests._factories import make_extend_source
 
 from zvisiongenerator.core.progress_events import _stage_label
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.workflows import build_video_workflow
 from zvisiongenerator.workflows.video_stages import (
@@ -158,9 +158,36 @@ class TestBuildExtendWorkflow:
             "log_video",
         ]
 
+    def test_a_track_adds_the_sound_stage_between_the_segment_and_the_join(self, tmp_path):
+        workflow = build_video_workflow(self._args(tmp_path, audio_track=AudioTrack("song.mp3", 0.0)), enhance=True)
+        assert _stage_names(workflow) == ["resolve_prompt", "enhance_prompt", "generate_filename", "extend_video", "extend_audio_track", "join_clips", "log_video"]
+
     def test_a_source_of_none_is_not_an_extension(self):
         workflow = build_video_workflow(Namespace(image_path=None, extend_source=None, extend_frames=None))
         assert text_to_video_stage in workflow.stages
+
+
+class TestBuildTrackWorkflow:
+    """Verify text and image to video put a track on the clip in place of the audio-stripping stage."""
+
+    _TRACK = AudioTrack("song.mp3", 1.5)
+
+    @pytest.mark.parametrize(
+        ("image_path", "generation"),
+        [(None, "text_to_video"), ("/tmp/a.png", "image_to_video")],
+    )
+    @pytest.mark.parametrize("no_audio", [False, True])
+    def test_the_track_stage_replaces_the_strip_stage_whatever_audio_says(self, image_path, generation, no_audio):
+        workflow = build_video_workflow(Namespace(image_path=image_path, no_audio=no_audio, audio_track=self._TRACK))
+
+        assert _stage_names(workflow) == ["resolve_prompt", "generate_filename", generation, "audio_track", "log_video"]
+        assert strip_audio_stage not in workflow.stages
+
+    @pytest.mark.parametrize("track", [None, "missing"])
+    def test_without_a_track_the_stages_are_the_same_as_before(self, track):
+        args = Namespace(image_path=None, no_audio=True) if track == "missing" else Namespace(image_path=None, no_audio=True, audio_track=None)
+
+        assert _stage_names(build_video_workflow(args)) == ["resolve_prompt", "generate_filename", "text_to_video", "strip_audio", "log_video"]
 
 
 class TestExtendThroughTheWorkflow:

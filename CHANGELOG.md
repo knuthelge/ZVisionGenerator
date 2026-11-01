@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - **Enhance options for the shot, the camera angle and a colour palette**, from thirteen presets or up to five colours you pick. They sit under **Framing** and **Color** in the Enhance popover, which now scrolls with **Enhance prompt** pinned at the bottom; the CLI and prompt files take `shot`, `angle`, `palette` and `colors`
+- **Give a video your own audio track.** The clip follows it, from any point in the track, and Extend carries on with it. The clip keeps the Duration you set; where the track runs out the sound is silence
 - **Use as → Reference** in the viewer and Gallery menus adds an image as the next reference on Image
 - **MOSS-Image on macOS:** `moss` (Turbo) and `moss-sft` now run on a Mac too, with the same features as on Windows and Linux
 - **Transparent background** cuts the subject out and saves a PNG with transparency: `--transparent`, or **Transparent** in Post-processing. It downloads 548 MB of cut-out models on first use and is for non-commercial use only

@@ -91,6 +91,8 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--upscale` | off | `2` only: render at half size, upsample 2×, refine at full size. The first use on Windows and Linux downloads the upsampler (about 1 GB; 0.69 GB for `h3`). `h3` has no upscale on macOS |
 | `--review` | off | Pause after each small render to approve (++y++) or discard (++n++) the upscale. Needs `--upscale` and a terminal |
 | `--audio` / `--no-audio` | on | Keep or remove the sound |
+| `--audio-file PATH` | none | An audio file the clip follows; its sound is exactly this track. LTX and MiniMax H3, with `--extend` too. See [Audio track](../concepts/video.md#audio-track) |
+| `--audio-start SECONDS` | `0` | Where in the track the clip's sound starts. Needs `--audio-file`. With `--extend` and the same file the source followed, the default is where the source's sound ended |
 | `--low-memory` / `--no-low-memory` | on | LTX: free each part of the model once it has run. On Macs with 24 GB or less it also streams the transformer from disk. MiniMax H3 always streams its blocks |
 | `--extend SRC` | none | Continue the video `SRC` and write a new file. See [Extending a video](../concepts/video.md#extending-a-video) |
 | `--extend-seconds S` | `2` | Length to add with `--extend`, at the source's frame rate, rounded to a multiple of the model's step: 8 frames for LTX, 17 for MiniMax H3 |

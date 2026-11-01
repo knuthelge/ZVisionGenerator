@@ -146,7 +146,18 @@ def _h3_block() -> dict:
         "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
         "extend_frame_step": 17,
         "carry_frames": 22,
-        "capabilities": {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": False},
+        "capabilities": {
+            "i2v": True,
+            "end_frame": True,
+            "extend": True,
+            "upscale": True,
+            "upscale_review": True,
+            "lora": True,
+            "audio": True,
+            "low_memory": False,
+            "audio_track": False,
+            "audio_track_upscale": False,
+        },
         "platform_capabilities": {"darwin": {"upscale": False, "upscale_review": False}},
     }
 
@@ -160,7 +171,7 @@ def test_the_packaged_ltx_family_is_described_literally():
         name="ltx",
         label="LTX distilled model",
         frame_rule=FrameRule(8, 1, "nearest"),
-        capabilities=VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=True),
+        capabilities=VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=True, audio_track=True, audio_track_upscale=True),
         platform_capabilities={},
         default_steps=8,
         max_steps=8,
@@ -172,6 +183,13 @@ def test_the_packaged_ltx_family_is_described_literally():
         extend_fps=None,
         platform_carry_frames={},
     )
+
+
+@pytest.mark.parametrize(("family", "track", "track_upscale"), [("ltx", True, True), ("h3", True, False)])
+def test_the_packaged_families_offer_an_audio_track(family, track, track_upscale):
+    capabilities = video_family(load_config(), family).capabilities
+
+    assert (capabilities.audio_track, capabilities.audio_track_upscale) == (track, track_upscale)
 
 
 def test_a_family_without_a_preset_block_is_none():
@@ -193,7 +211,7 @@ def test_a_full_family_block_parses():
         name="h3",
         label="MiniMax H3",
         frame_rule=FrameRule(17, 5, "up"),
-        capabilities=VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=False),
+        capabilities=VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=False, audio_track=False, audio_track_upscale=False),
         platform_capabilities={"darwin": {"upscale": False, "upscale_review": False}},
         default_steps=8,
         max_steps=8,
@@ -228,6 +246,12 @@ def _with(path: str, value):
     return block
 
 
+def _without_capability(name: str):
+    block = _h3_block()
+    del block["capabilities"][name]
+    return block
+
+
 @pytest.mark.parametrize(
     ("block", "path"),
     [
@@ -240,6 +264,9 @@ def _with(path: str, value):
         (_with("frame_rule.alignment", 0), "frame_rule.alignment"),
         (_with("frame_rule.extra", 1), "frame_rule.extra"),  # an unknown key
         (_with("capabilities", {"i2v": True}), "capabilities.end_frame"),
+        (_without_capability("audio_track"), "capabilities.audio_track"),
+        (_without_capability("audio_track_upscale"), "capabilities.audio_track_upscale"),
+        (_with("capabilities.audio_track", "yes"), "capabilities.audio_track"),
         (_with("platform_capabilities", {"darwin": {"upscale": 0}}), "platform_capabilities.darwin.upscale"),
         (_with("step_options", [8, 4]), "step_options"),  # out of order
         (_with("default_frames", 121), "default_frames"),  # off the frame rule

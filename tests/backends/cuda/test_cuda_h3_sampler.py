@@ -53,6 +53,7 @@ _WINDOW = geometry(64, 64, 39)  # 12 latent frames, 65 audio latents per channel
 _CELLS = (_PLAIN.latent_height // 2) * (_PLAIN.latent_width // 2)  # video rows per latent frame
 _TEXT_TAGS = [TEXT_TAG] * 4
 _TEXT_DIM = 48
+KEYFRAME_T_FLOAT = float(torch.tensor(KEYFRAME_T))
 
 
 # --- stand-ins -------------------------------------------------------------------------------------------------------
@@ -227,16 +228,39 @@ def test_extend_with_a_keyframe_holds_both_in_front():
     ("conditioning", "match"),
     [
         (lambda: Conditioning(keyframes=(_latents(1, 1),), anchors=()), "one anchor"),
-        (lambda: Conditioning(tail_audio=torch.zeros(10, 32)), "tail audio"),
+        (lambda: Conditioning(tail_audio=torch.zeros(9, 32)), "held audio"),
+        (lambda: Conditioning(tail_audio=torch.zeros(10, 31)), "held audio"),
+        (lambda: Conditioning(tail_audio=torch.zeros(0, 32)), "held audio"),
+        (lambda: Conditioning(tail_audio=torch.zeros(2 * (_PLAIN.audio_latents + 1), 32)), "audio tail"),
         (lambda: Conditioning(keyframes=(torch.zeros(1, 24, 1, 2, 2),), anchors=("first",)), "Keyframe 0"),
         (lambda: Conditioning(tail_latents=torch.zeros(1, 24, 3, 2, 2)), "tail must be shaped"),
         (lambda: Conditioning(tail_latents=_latents(7, 1)), "must leave frames"),
     ],
-    ids=["anchors", "audio-shape", "keyframe-canvas", "tail-canvas", "tail-fills-window"],
+    ids=["anchors", "audio-odd-rows", "audio-channels", "audio-empty", "audio-longer-than-clip", "keyframe-canvas", "tail-canvas", "tail-fills-window"],
 )
 def test_bad_conditioning_is_refused(conditioning, match):
     with pytest.raises(ValueError, match=match):
         build_layout(_TEXT_TAGS, _PLAIN, _CPU, conditioning())
+
+
+def test_the_held_audio_length_is_a_parameter_of_the_conditioning():
+    for latents in (1, 20, TAIL_AUDIO_LATENTS):
+        conditioning = Conditioning(tail_audio=torch.zeros(2 * latents, 32))
+        layout = build_layout(_TEXT_TAGS, _PLAIN, _CPU, conditioning)
+        assert conditioning.held_audio_latents == latents
+        assert layout.condition_audio_rows == 2 * latents
+        assert layout.held_audio.tolist() == [*range(latents), *range(_PLAIN.audio_latents, _PLAIN.audio_latents + latents)]
+    assert Conditioning().held_audio_latents == 0
+
+
+def test_a_track_holds_every_audio_row_and_generates_none():
+    conditioning = Conditioning(tail_audio=torch.zeros(2 * _PLAIN.audio_latents, 32))
+    layout = build_layout(_TEXT_TAGS, _PLAIN, _CPU, conditioning)
+    assert layout.condition_audio_rows == _PLAIN.audio_rows
+    assert layout.held_audio.tolist() == list(range(_PLAIN.audio_rows))
+    assert not layout.audio_generated.any()
+    assert sorted(layout.timestep_audio_idx.tolist()) == layout.kwargs["audio_indices"].tolist()
+    assert layout.condition_video_rows == 0 and layout.video_generated.all()  # the picture is still all generated
 
 
 # --- plain runs ------------------------------------------------------------------------------------------------------
@@ -439,6 +463,46 @@ def test_extend_matches_a_reference_loop_with_the_held_rows_moved_to_the_front()
     restored[order] = front_audio
     assert torch.equal(sampler_module._patchify(video), rows_video)
     assert torch.equal(audio.permute(0, 2, 1).reshape(-1, 32), restored)
+
+
+# --- a track: every audio row held ----------------------------------------------------------------------------------------
+
+
+def _track(geo=_PLAIN, seed: int = 9) -> Conditioning:
+    return Conditioning(tail_audio=torch.randn(2 * geo.audio_latents, 32, generator=torch.Generator().manual_seed(seed)))
+
+
+def test_a_track_run_steps_the_picture_and_never_moves_the_sound():
+    conditioning = _track()
+    transformer, (video, audio) = _run(conditioning=conditioning, seed=4)
+    generator = torch.Generator().manual_seed(4)
+    expected = prenoise(_schedulers()[0], conditioning.tail_audio, AUDIO_COND_T, generator)
+    assert len(transformer.calls) == 8  # an empty audio selection is skipped, not stepped
+    for step, call in enumerate(transformer.calls):
+        assert torch.equal(call["audio"][0], expected), step
+    assert torch.equal(audio.permute(0, 2, 1).reshape(-1, 32), expected)
+    assert not torch.equal(transformer.calls[0]["video"], transformer.calls[-1]["video"])
+    assert video.shape == (1, 24, 7, 4, 4)
+
+
+def test_a_track_run_gives_the_audio_rows_the_clean_level_at_every_step():
+    transformer, _ = _run(conditioning=_track())
+    video_scheduler = _schedulers()[0]
+    for call, t in zip(transformer.calls, video_scheduler.timesteps, strict=True):
+        per_row = call["timestep"][call["timestep_indices"]]
+        assert torch.all(per_row[call["audio_indices"]] == 1.0)
+        assert torch.all(per_row[call["video_indices"]] == torch.tensor(float(t), dtype=torch.float32))
+        assert set(call["timestep"].tolist()) == {1.0, float(torch.tensor(float(t)))}
+
+
+def test_a_track_run_with_an_extend_tail_keeps_the_tail_and_the_track_apart():
+    conditioning = Conditioning(tail_latents=_latents(TAIL_LATENT_FRAMES, 3, _WINDOW), tail_audio=torch.randn(2 * _WINDOW.audio_latents, 32, generator=torch.Generator().manual_seed(2)))
+    transformer, (video, audio) = _run(_WINDOW, conditioning=conditioning)
+    layout = build_layout(_TEXT_TAGS, _WINDOW, _CPU, conditioning)
+    assert not layout.audio_generated.any() and layout.video_generated.sum() == (_WINDOW.latent_frames - TAIL_LATENT_FRAMES) * _CELLS
+    for call, t in zip(transformer.calls, _schedulers()[0].timesteps, strict=True):
+        assert set(call["timestep"].tolist()) == {1.0, KEYFRAME_T_FLOAT, float(torch.tensor(float(t)))}
+    assert audio.shape == (2, 32, _WINDOW.audio_latents)
 
 
 # --- the reference loop on a tiny transformer --------------------------------------------------------------------------

@@ -88,12 +88,17 @@ def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> 
 
     Returns:
         GenerationWorkflow with stages for T2V, I2V or extending a clip. Extending ends with the joined clip, which
-        already has the right audio, so it has no audio-stripping stage.
+        already has the right audio, so it has no audio-stripping stage. An ``audio_track`` in *args* is an effective
+        track (the entry points refuse one on a model that cannot follow it): T2V and I2V put it on the clip in place of
+        the audio-stripping stage, whatever ``no_audio`` says, and an extension writes the segment's sound from it before
+        the join.
     """
     from zvisiongenerator.workflows.video_stages import (
         enhance_prompt_stage as video_enhance_prompt,
         resolve_prompt_stage as video_resolve_prompt,
         generate_filename_stage,
+        audio_track_stage,
+        extend_audio_track_stage,
         extend_video_stage,
         join_clips_stage,
         text_to_video_stage,
@@ -106,11 +111,17 @@ def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> 
     if enhance:
         stages.append(video_enhance_prompt)
     stages.append(generate_filename_stage)
+    track = getattr(args, "audio_track", None) is not None
     if getattr(args, "extend_source", None) is not None:
-        stages += [extend_video_stage, join_clips_stage]
+        stages.append(extend_video_stage)
+        if track:
+            stages.append(extend_audio_track_stage)
+        stages.append(join_clips_stage)
     else:
         stages.append(image_to_video_stage if args.image_path else text_to_video_stage)
-        if getattr(args, "no_audio", False):
+        if track:
+            stages.append(audio_track_stage)
+        elif getattr(args, "no_audio", False):
             stages.append(strip_audio_stage)
     stages.append(log_video_stage)
     return GenerationWorkflow(name="video", stages=stages)

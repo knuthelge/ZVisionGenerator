@@ -8,7 +8,7 @@ import zvisiongenerator.backends as backends_module
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.video_support import unsupported_video_request
 
-_ALL_ON = {"i2v": True, "end_frame": False, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True}
+_ALL_ON = {"i2v": True, "end_frame": False, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True, "audio_track": True, "audio_track_upscale": True}
 
 
 def _config(**capabilities: bool) -> dict:
@@ -80,3 +80,22 @@ def test_h3_on_cuda_and_ltx_on_macos_can_upscale(monkeypatch):
     monkeypatch.setattr(backends_module.sys, "platform", "darwin")
 
     assert unsupported_video_request(load_config(), "ltx", **_h3_request(upscale=True)) is None
+
+
+def test_a_track_on_a_family_without_the_capability_is_refused():
+    config = _config(audio_track=False)
+
+    assert "can't follow an audio track" in unsupported_video_request(config, "ltx", **_h3_request(audio_track=True))
+    assert unsupported_video_request(config, "ltx", **_h3_request()) is None
+
+
+def test_a_track_on_a_family_with_the_capability_is_not_refused():
+    assert unsupported_video_request(_config(), "ltx", **_h3_request(audio_track=True)) is None
+
+
+def test_an_upscale_with_a_track_is_refused_when_the_family_cannot_upscale_one():
+    config = _config(audio_track_upscale=False)
+
+    assert "can't upscale a clip made from your track" in unsupported_video_request(config, "ltx", **_h3_request(upscale=True, audio_track=True))
+    assert unsupported_video_request(config, "ltx", **_h3_request(upscale=True)) is None
+    assert unsupported_video_request(config, "ltx", **_h3_request(audio_track=True)) is None

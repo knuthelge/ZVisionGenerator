@@ -15,11 +15,14 @@ if TYPE_CHECKING:
 
     from zvisiongenerator.utils.h3_preset import H3Schedule
 
-__all__ = ["AUDIO_COND_T", "KEYFRAME_T", "ROW_SETS", "build_schedulers", "row_timesteps"]
+__all__ = ["AUDIO_COND_T", "KEYFRAME_T", "ROW_SETS", "TRACK_ROW_SETS", "build_schedulers", "row_timesteps"]
 
 KEYFRAME_T = 0.999  # timestep of the video conditioning rows: a nearly clean keyframe or tail
 AUDIO_COND_T = 1.0  # timestep of the audio conditioning rows: fully clean
 ROW_SETS = ("plain", "keyframe", "extend")  # which conditioning rows a clip has: none, a keyframe, or a video and audio tail
+# Clips whose audio rows are all held (a user's track): without and with a video keyframe or tail. They are not in ROW_SETS: a
+# stored copy has no tables for their keys, and adding them there would change every stored copy. read_tables assembles them.
+TRACK_ROW_SETS = ("track", "track_keyframe")
 
 
 def _set_schedule(scheduler: MiniMaxH3Scheduler, shift: float, num_inference_steps: int) -> None:

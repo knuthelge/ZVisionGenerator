@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 import warnings
 from collections.abc import Callable
@@ -265,6 +266,7 @@ def run_video_batch(
                         width=args.width,
                         height=args.height,
                         num_frames=args.num_frames,
+                        fps=getattr(args, "fps", None),
                         seed=seed,
                         steps=args.steps,
                         step_callback=_interruptible_step_callback(
@@ -298,6 +300,7 @@ def run_video_batch(
                             else None
                         ),
                         no_audio=getattr(args, "no_audio", False),
+                        audio_track=getattr(args, "audio_track", None),
                         output_dir=args.output,
                         output_format=getattr(args, "format", "mp4"),
                         resolved_prompt=planned.resolved_prompt,
@@ -365,6 +368,8 @@ def run_video_batch(
                     if outcome is StageOutcome.success:
                         successful_generations += 1
                         gen_times.append(artifacts.generation_time)
+                        if request.audio_track is not None:
+                            print(f"  Audio track: {os.path.basename(request.audio_track.path)} {_track_range(request)}")
                         _emit_generation_finished(
                             progress_callback,
                             event_context=event_context,
@@ -424,6 +429,20 @@ def run_video_batch(
         total_time=total_time,
         **terminal_extra,
     )
+
+
+def _clock(seconds: float) -> str:
+    """Return *seconds* as ``m:ss.s``."""
+    minutes, tenths = divmod(round(seconds * 10), 600)
+    return f"{minutes}:{tenths / 10:04.1f}"
+
+
+def _track_range(request: VideoGenerationRequest) -> str:
+    """Return the stretch of the track a finished clip used, such as ``1:30.0-1:34.0``; only the start when the end is unknown."""
+    assert request.audio_track is not None
+    end = request.audio_track_end
+    start = _clock(request.audio_track.start)
+    return start if end is None else f"{start}\u2013{_clock(end)}"
 
 
 def _extend_spec(args: argparse.Namespace) -> ExtendSpec | None:

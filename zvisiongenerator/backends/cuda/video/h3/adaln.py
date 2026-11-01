@@ -9,6 +9,9 @@ need to be loaded at run time.
 A key is the sorted tuple of a forward's distinct row timesteps. Which values occur depends on the conditioning rows of
 the clip (:data:`~zvisiongenerator.backends.cuda.video.h3.schedule.ROW_SETS`) and on the schedule, so the tables cover
 every key of every row set of the longest schedule; shorter schedules reuse a subset of them.
+
+A clip whose audio rows are all held (a user's track) has keys no stored table has. Each row of a table depends on its own
+timestep only, so :func:`read_tables` assembles such a key from rows of stored keys that contain the same timesteps.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from zvisiongenerator.backends.cuda.video.h3.schedule import (
     AUDIO_COND_T,
     KEYFRAME_T,
     ROW_SETS,
+    TRACK_ROW_SETS,
     build_schedulers,
     row_timesteps,
 )
@@ -41,6 +45,7 @@ __all__ = [
     "FoldState",
     "FoldedAdaLN",
     "Key",
+    "assemble_tables",
     "build_tables",
     "compute_temb",
     "fold_keys",
@@ -50,6 +55,7 @@ __all__ = [
     "read_tables",
     "step_keys",
     "table_keys",
+    "table_sources",
     "unique_keys",
     "write_tables",
 ]
@@ -62,6 +68,8 @@ _DUMMY_LAYOUTS = {
     "plain": (1, 1, 0, 0),
     "keyframe": (2, 1, 1, 0),
     "extend": (2, 3, 1, 2),
+    "track": (1, 1, 0, 1),
+    "track_keyframe": (2, 1, 1, 1),
 }
 
 
@@ -70,13 +78,15 @@ def step_keys(video: MiniMaxH3Scheduler, audio: MiniMaxH3Scheduler, row_set: str
 
     The keys come from the same row-timestep function the sampler uses, run on a dummy layout with the conditioning
     rows first: ``plain`` has none, ``keyframe`` has one video row at the keyframe level, ``extend`` has one video row
-    at the keyframe level and two audio rows at the fully clean level. The result does not depend on the canvas.
+    at the keyframe level and two audio rows at the fully clean level. ``track`` and ``track_keyframe`` are those of a
+    clip whose audio rows are all held clean: no generated audio row, so the keys are ``(t, 1.0)`` and ``(t, 0.999, 1.0)``.
+    The result does not depend on the canvas.
 
     Raises:
-        ValueError: If *row_set* is not one of ``ROW_SETS`` or the two schedulers differ in length.
+        ValueError: If *row_set* is not one of ``ROW_SETS`` or ``TRACK_ROW_SETS``, or the two schedulers differ in length.
     """
     if row_set not in _DUMMY_LAYOUTS:
-        raise ValueError(f"Unknown row set {row_set!r}; expected one of {ROW_SETS}.")
+        raise ValueError(f"Unknown row set {row_set!r}; expected one of {(*ROW_SETS, *TRACK_ROW_SETS)}.")
     if len(video.timesteps) != len(audio.timesteps):
         raise ValueError(f"The video and audio schedules differ in length ({len(video.timesteps)} and {len(audio.timesteps)}).")
     video_rows, audio_rows, condition_video, condition_audio = _DUMMY_LAYOUTS[row_set]
@@ -302,11 +312,62 @@ def table_keys(path: Path) -> list[Key]:
     return [tuple(float(value) for value in key) for key in json.loads(read_metadata(path)["keys"])]
 
 
+def table_sources(stored: Sequence[Key], wanted: Sequence[Key]) -> dict[Key, tuple[Key, ...]]:
+    """Return, for each *wanted* key, the stored key every one of its rows is read from (one per timestep).
+
+    A row of a table depends on its own timestep only (``temb`` is computed per row and the projection is linear in it), so
+    a key that is not stored is assembled from rows of stored keys that contain the same timestep. A stored key is its own
+    source. For any other timestep the first stored key (in the order of *stored*) that contains it is the source.
+
+    Raises:
+        KeyError: If no stored key contains a timestep of a wanted key (the message names the key and the timestep).
+    """
+    holders: dict[float, Key] = {}
+    for key in stored:
+        for value in key:
+            holders.setdefault(value, key)
+    available = set(stored)
+    sources: dict[Key, tuple[Key, ...]] = {}
+    for key in wanted:
+        if key in available:
+            sources[key] = (key,) * len(key)
+            continue
+        missing = [value for value in key if value not in holders]
+        if missing:
+            raise KeyError(f"no stored table has the timestep {missing[0]} of key {key}")
+        sources[key] = tuple(holders[value] for value in key)
+    return sources
+
+
+def assemble_tables(tables: Mapping[Key, torch.Tensor], sources: Mapping[Key, Sequence[Key]]) -> dict[Key, torch.Tensor]:
+    """Return one block's tables for the keys of *sources*, assembled row by row from the stored *tables*.
+
+    Row *i* of a key's table is the row of the source key's table at the position of that timestep. A key that is its own
+    source is returned as it is. The result is in the order of *sources*; the inputs are not modified.
+
+    Args:
+        tables: The block's stored tables ``(k, 6 * 3 * hidden)`` by key; at least every source key.
+        sources: The result of :func:`table_sources`.
+    """
+    import torch
+
+    assembled: dict[Key, torch.Tensor] = {}
+    for key, rows in sources.items():
+        if all(source == key for source in rows):
+            assembled[key] = tables[key]
+        else:
+            assembled[key] = torch.stack([tables[source][source.index(value)] for value, source in zip(key, rows, strict=True)])
+    return assembled
+
+
 def read_tables(path: Path, wanted: Sequence[Key], blocks: int) -> list[dict[Key, torch.Tensor]]:
     """Read the tables of the *wanted* keys for each of *blocks* blocks from *path*, and nothing else.
 
+    A wanted key the file does not hold is assembled from the rows of stored keys that contain the same timestep (see
+    :func:`table_sources`); only those stored keys are read. Each block's mapping is in the order of *wanted*.
+
     Raises:
-        KeyError: If a wanted key was not built into the file (rebuild the H3 copy).
+        KeyError: If a timestep of a wanted key is in no stored key (rebuild the H3 copy).
         ValueError: If the file holds a different number of blocks.
     """
     from zvisiongenerator.utils.safetensors_stream import TensorFile, read_metadata
@@ -314,13 +375,16 @@ def read_tables(path: Path, wanted: Sequence[Key], blocks: int) -> list[dict[Key
     stored_blocks = int(read_metadata(path)["blocks"])
     if stored_blocks != blocks:
         raise ValueError(f"{path.name} holds tables for {stored_blocks} blocks, the transformer has {blocks}.")
-    ids = {key: index for index, key in enumerate(table_keys(path))}
-    missing = [key for key in wanted if key not in ids]
-    if missing:
-        raise KeyError(f"{path.name} has no table for {len(missing)} timestep keys, e.g. {missing[0]}; rebuild the H3 copy for this schedule.")
-    per_block: list[dict[Key, torch.Tensor]] = [{} for _ in range(blocks)]
+    stored = table_keys(path)
+    ids = {key: index for index, key in enumerate(stored)}
+    try:
+        sources = table_sources(stored, wanted)
+    except KeyError as exc:
+        raise KeyError(f"{path.name} has {exc.args[0]}; rebuild the H3 copy for this schedule.") from exc
+    to_read = unique_keys(source for rows in sources.values() for source in rows)
+    per_block: list[dict[Key, torch.Tensor]] = []
     with TensorFile(path) as handle:
         for block in range(blocks):
-            for key in wanted:
-                per_block[block][key] = handle.read(f"k{ids[key]:04d}.b{block:02d}")
+            read = {key: handle.read(f"k{ids[key]:04d}.b{block:02d}") for key in to_read}
+            per_block.append(assemble_tables(read, sources))
     return per_block

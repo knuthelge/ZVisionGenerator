@@ -50,6 +50,10 @@ class VideoCapabilities:
     lora: bool
     audio: bool
     low_memory: bool
+    # The clip can follow an audio track the user supplies (``VideoGenerationRequest.audio_track``).
+    audio_track: bool
+    # The clip can be upscaled while it follows an audio track.
+    audio_track_upscale: bool
 
 
 @dataclass(frozen=True)

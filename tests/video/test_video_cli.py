@@ -11,6 +11,7 @@ import pytest
 from huggingface_hub.errors import GatedRepoError
 
 from tests._factories import make_extend_source
+from tests._media import HAS_FFMPEG
 from tests.video._helpers import make_ltx_info, patch_video_cli_for_preflight
 
 from zvisiongenerator import video_cli
@@ -334,6 +335,7 @@ def _run_cli(
     fit=None,
     resolve=None,
     detect=None,
+    default_frames=49,
 ):
     """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
     import zvisiongenerator.video_cli as video_cli
@@ -351,7 +353,7 @@ def _run_cli(
     monkeypatch.setattr(video_cli, "supports_video_extend", lambda: extend_supported)
     monkeypatch.setattr(video_cli, "supports_video_audio", lambda: True)
     monkeypatch.setattr(video_cli, "detect_video_model", detect or (lambda _model: model_info))
-    monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
+    monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": default_frames})
     monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
     monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(16 * 1024**3))
     monkeypatch.setattr(video_cli, "clip_memory_fit", memory)
@@ -1109,6 +1111,147 @@ class TestVideoCliH3:
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "h3", "--extend-frames", "40"])
 
         assert captured["args"].extend_frames == 34
+
+
+class TestVideoCliAudioTrack:
+    """``--audio-file`` and ``--audio-start``: refusals at parse time, the sound rule and the length rule applied once before the model loads."""
+
+    _H3 = make_ltx_info(family="h3", backend="h3", frame_alignment=17)
+
+    @pytest.fixture(autouse=True)
+    def _linux(self, monkeypatch):
+        import zvisiongenerator.backends as backends_module
+
+        monkeypatch.setattr(backends_module.sys, "platform", "linux")
+
+    @staticmethod
+    def _track(tmp_path, seconds=3.6, monkeypatch=None):
+        """Return the path of a stand-in audio file whose probed length is *seconds*."""
+        import zvisiongenerator.utils.audio_track as audio_track_module
+
+        path = tmp_path / "voice.mp3"
+        path.write_bytes(b"x")
+        monkeypatch.setattr(audio_track_module, "probe_track_seconds", lambda _path: seconds)
+        return str(path)
+
+    def _main(self, monkeypatch, tmp_path, argv, *, family="ltx", **options):
+        info = self._H3 if family == "h3" else make_ltx_info()
+        options.setdefault("config", load_config())
+        return _run_cli(monkeypatch, tmp_path, argv, backend=options.pop("backend", None) or MagicMock(), detect=lambda _model: info, **options)
+
+    def test_the_main_flow_sets_the_track_the_runner_builds_the_request_from(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, monkeypatch=monkeypatch)
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--audio-file", track, "--audio-start", "1.0"])
+
+        assert (captured["args"].audio_track.path, captured["args"].audio_track.start) == (track, 1.0)
+
+    def test_the_start_defaults_to_the_beginning(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, monkeypatch=monkeypatch)
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--audio-file", track])
+
+        assert captured["args"].audio_track.start == 0.0
+
+    @pytest.mark.parametrize(
+        ("extra", "message"),
+        [
+            (["--audio-start", "2"], "--audio-start needs --audio-file"),
+            (["--audio-file", "voice.mp3", "--audio-start", "-1"], "--audio-start must be"),
+            (["--audio-file", "voice.mp3", "--audio-start", "nan"], "--audio-start must be"),
+            (["--audio-file", " "], "--audio-file needs a path"),
+        ],
+    )
+    def test_a_bad_option_is_refused_at_parse_time(self, monkeypatch, tmp_path, capsys, extra, message):
+        backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", *extra], backend=backend)
+
+        assert message in capsys.readouterr().err
+        backend.load_model.assert_not_called()
+
+    def test_a_missing_track_file_is_refused_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
+        backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--audio-file", str(tmp_path / "gone.mp3")], backend=backend)
+
+        assert "Audio track not found" in capsys.readouterr().err
+        backend.load_model.assert_not_called()
+
+    @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg and ffprobe are needed")
+    def test_a_file_that_is_not_audio_says_it_cannot_be_read(self, monkeypatch, tmp_path, capsys):
+        notes = tmp_path / "notes.mp3"
+        notes.write_text("hello")
+        backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--audio-file", str(notes)], backend=backend)
+
+        assert "Can't read the audio track" in capsys.readouterr().err
+        backend.load_model.assert_not_called()
+
+    def test_a_family_without_the_capability_refuses_a_track(self, monkeypatch, tmp_path, capsys):
+        track = self._track(tmp_path, monkeypatch=monkeypatch)
+        config = load_config()
+        config["video_model_presets"]["ltx"]["capabilities"]["audio_track"] = False
+        backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--audio-file", track], config=config, backend=backend)
+
+        assert "can't follow an audio track" in capsys.readouterr().err
+        backend.load_model.assert_not_called()
+
+    def test_h3_refuses_an_upscale_with_a_track(self, monkeypatch, tmp_path, capsys):
+        track = self._track(tmp_path, monkeypatch=monkeypatch)
+        backend = MagicMock()
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "h3", "--prompt", "a lake", "--upscale", "2", "--audio-file", track], family="h3", backend=backend)
+
+        assert "can't upscale a clip made from your track" in capsys.readouterr().err
+        backend.load_model.assert_not_called()
+
+    def test_ltx_upscales_a_clip_made_from_a_track(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, monkeypatch=monkeypatch)
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--upscale", "2", "--audio-file", track])
+
+        assert (captured["args"].upscale, captured["args"].audio_track is not None) == (2, True)
+
+    def test_the_track_overrides_no_audio(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, monkeypatch=monkeypatch)
+
+        with_track = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--no-audio", "--audio-file", track])
+        without = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--no-audio"])
+
+        assert with_track["args"].no_audio is False
+        assert without["args"].no_audio is True
+
+    def test_a_clip_keeps_the_requested_frames_when_the_track_runs_out_first(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, 3.6, monkeypatch)
+
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a lake", "--audio-file", track], default_frames=121)
+
+        assert captured["args"].num_frames == 121
+
+    def test_an_extension_continues_the_track_its_source_followed_from_where_it_ended(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, 60.0, monkeypatch)
+        source = _cli_source(audio_track_path=track, audio_track_end=12.5)
+
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "ltx-8", "--audio-file", track], source=source)
+
+        assert captured["args"].audio_track.start == 12.5
+
+    def test_an_explicit_start_wins_over_where_the_source_ended(self, monkeypatch, tmp_path):
+        track = self._track(tmp_path, 60.0, monkeypatch)
+        source = _cli_source(audio_track_path=track, audio_track_end=12.5)
+
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "ltx-8", "--audio-file", track, "--audio-start", "0"], source=source)
+
+        assert captured["args"].audio_track.start == 0.0
 
 
 class TestEstimatedTimeLine:

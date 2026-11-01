@@ -152,6 +152,21 @@ def build_audio_graph(*, source_input: int, wav_input: int, head_samples: int, o
     return f"{head};[{wav_input}:a:0]aresample={AUDIO_SAMPLE_RATE},{layout}[a1];[a0][a1]concat=n=2:v=0:a=1[a]"
 
 
+def build_wav_only_audio_graph(*, wav_input: int) -> str:
+    """Build the filter graph for a join whose whole audio is one WAV: the WAV, resampled and set to stereo.
+
+    Used when the source has no sound, so the graph reads no source audio stream.
+
+    Args:
+        wav_input: Index of the ffmpeg input holding the audio (the join WAV from ``_prepare_silent_join_audio``).
+
+    Returns:
+        A graph whose output is labelled ``[a]``.
+    """
+    layout = f"aformat=sample_fmts=fltp:sample_rates={AUDIO_SAMPLE_RATE}:channel_layouts=stereo"
+    return f"[{wav_input}:a:0]aresample={AUDIO_SAMPLE_RATE},{layout}[a]"
+
+
 def build_join_audio(tail: np.ndarray, source_length: int, window: np.ndarray, *, lead: int, samples: int, fade: int = AUDIO_FADE_SAMPLES) -> tuple[int, np.ndarray]:
     """Return how much of the source's audio to keep and the audio that follows it, filling a track that ends short.
 
@@ -350,14 +365,15 @@ def splice_clips(source: ExtendSource, segment: ExtendSegment, output: str | Pat
     The source's video is stream-copied when the segment matches it, otherwise both are decoded and encoded
     again in one pass (crf 12). A rotated source always takes the second path and comes out upright. With
     audio, the source's audio is fitted to its video length (a track that ends short is filled from the segment's
-    lead-in sound) and the new audio follows it, in one AAC encode.
+    lead-in sound) and the new audio follows it, in one AAC encode. A silent source whose segment has a WAV gets
+    silence for its length followed by the new audio, and the graph maps only the WAV.
 
     Args:
         source: The clip to continue.
         segment: The generated segment: its video, and its WAV when it has audio.
         output: The joined file; written to a temporary file beside it first.
         extend_frames: Frames in the segment, which are added to the source's.
-        include_audio: Whether the result has audio. It needs the segment's WAV and a source with audio: a silent source stays silent.
+        include_audio: Whether the result has audio. It needs the segment's WAV; a silent source gets silence in front of it.
 
     Returns:
         The output path.
@@ -366,13 +382,13 @@ def splice_clips(source: ExtendSource, segment: ExtendSegment, output: str | Pat
         RuntimeError: If ffmpeg fails, or the result does not have the expected frames, size, rotation and audio.
     """
     output = Path(output)
-    wav = segment.audio_path if include_audio and source.has_audio else None
+    wav = segment.audio_path if include_audio else None
     work = Path(tempfile.mkdtemp(dir=output.parent, prefix=SPLICE_DIR_PREFIX))
     try:
         joined = work / f"joined{output.suffix or '.mp4'}"
         head_samples = 0
         if wav is not None:
-            head_samples, wav = _prepare_join_audio(source, segment, work)
+            head_samples, wav = (_prepare_join_audio if source.has_audio else _prepare_silent_join_audio)(source, segment, work)
         if can_stream_copy(source.probe or probe_video(source.path), probe_video(segment.video_path)):
             video_only = work / "source-video.mp4"
             run_ffmpeg(build_video_only_command(source.path, video_only))
@@ -408,9 +424,11 @@ def _source_samples(source: ExtendSource) -> int:
 
 
 def _audio_graph(source: ExtendSource, wav: Path | None, head_samples: int, *, source_input: int, wav_input: int) -> str | None:
-    """Return the audio graph for a join, or ``None`` when the result has no audio."""
+    """Return the audio graph for a join, or ``None`` when the result has no audio; a silent source's graph maps only the WAV."""
     if wav is None:
         return None
+    if not source.has_audio:
+        return build_wav_only_audio_graph(wav_input=wav_input)
     return build_audio_graph(source_input=source_input, wav_input=wav_input, head_samples=head_samples, offset=source.video_start)
 
 
@@ -426,6 +444,21 @@ def _prepare_join_audio(source: ExtendSource, segment: ExtendSegment, work: Path
     join_wav = work / "join.wav"
     write_pcm16_wav(join, join_wav)
     return head_samples, join_wav
+
+
+def _prepare_silent_join_audio(source: ExtendSource, segment: ExtendSegment, work: Path) -> tuple[int, Path]:
+    """Write the join audio of a silent source: silence for its video length, then the new part; return ``(0, that WAV)``.
+
+    The segment's lead-in is the window's stand-in for the source's last sound, which a silent source does not have, so
+    only the new part after it is used.
+    """
+    import numpy as np
+
+    new_part = _read_wav(segment.audio_path)[:, segment.lead_samples :]
+    join = np.concatenate([np.zeros((new_part.shape[0], _source_samples(source)), dtype=np.float32), new_part], axis=1)
+    join_wav = work / "join.wav"
+    write_pcm16_wav(join, join_wav)
+    return 0, join_wav
 
 
 def silent_end_length(audio: np.ndarray) -> int:

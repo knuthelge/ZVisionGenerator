@@ -1,4 +1,6 @@
+import { trackOf, trackSet } from '$lib/state/audioTrack';
 import { imageSupport } from '$lib/state/imageSlots';
+import { workspaceTab } from '$lib/state/workspaceTab';
 import type { DraftState, ImageModelDefaults, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 
 /** Which workspace controls apply to the current workflow and model. */
@@ -49,7 +51,12 @@ export interface WorkspaceCapabilities {
   showUpscaleSharpen: boolean;
   showUpscaleReview: boolean;
   showVideoUpscaleReview: boolean;
+  /** The Audio switch and the enhancer's Sound options: off while an audio track is in effect, which is the clip's sound. */
   showAudio: boolean;
+  /** The Audio track section: a video workflow on a model that follows a track. */
+  showAudioTrack: boolean;
+  /** An audio track is set on a model that follows one: the clip's sound is exactly that track. */
+  audioTrackInEffect: boolean;
   showLowMemory: boolean;
   showVideoUpscale: boolean;
   showVideoUpscaleFactor: boolean;
@@ -77,6 +84,12 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   const maxReferences = visible.has('references') ? images.references : 0;
   const showImageUpscale = isImageMode && visible.has('image_upscale_enabled') && supportsUpscale;
   const takesLastFrame = (visible.has('end_image') || visible.has('end_image_path')) && images.last;
+  // A track set on a model without the capability stays in the draft but is hidden, not sent and not counted.
+  const showAudioTrack = !isImageMode && visible.has('audio_track') && visible.has('audio_track_path');
+  const tab = workspaceTab(state.workflow);
+  const audioTrackInEffect = showAudioTrack && tab !== 'image' && trackSet(trackOf(state, tab));
+  // A model that cannot upscale a clip made from a track (H3) loses the Upscale controls while one is in effect.
+  const upscaleWithTrack = !audioTrackInEffect || videoDefaults?.supports_audio_track_upscale !== false;
 
   return {
     isImageMode,
@@ -120,10 +133,12 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showUpscaleGuidance: showImageUpscale && visible.has('image_upscale_guidance'),
     showUpscaleSharpen: showImageUpscale && visible.has('image_upscale_sharpen'),
     showUpscaleReview: showImageUpscale && visible.has('image_upscale_review'),
-    showAudio: visible.has('audio'),
+    showAudio: visible.has('audio') && !audioTrackInEffect,
+    showAudioTrack,
+    audioTrackInEffect,
     showLowMemory: visible.has('low_memory'),
-    showVideoUpscale: visible.has('video_upscale_enabled'),
-    showVideoUpscaleFactor: visible.has('video_upscale_factor'),
-    showVideoUpscaleReview: visible.has('video_upscale_enabled') && visible.has('video_upscale_review'),
+    showVideoUpscale: visible.has('video_upscale_enabled') && upscaleWithTrack,
+    showVideoUpscaleFactor: visible.has('video_upscale_factor') && upscaleWithTrack,
+    showVideoUpscaleReview: visible.has('video_upscale_enabled') && visible.has('video_upscale_review') && upscaleWithTrack,
   };
 }

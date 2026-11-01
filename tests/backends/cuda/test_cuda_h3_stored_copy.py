@@ -415,6 +415,62 @@ def test_the_loaded_copy_runs_like_the_stock_model_with_the_turbo_merged(sources
     assert not loaded.training
 
 
+@pytest.mark.parametrize(("row_set", "video_held"), [("track", 0), ("track_keyframe", 1)])
+def test_the_keys_of_a_track_clip_are_assembled_and_run_like_the_stock_model(sources: _Sources, copy_dir: Path, recorder: _Recorder, row_set: str, video_held: int) -> None:
+    from zvisiongenerator.backends.cuda.video.h3.schedule import row_timesteps
+
+    video, audio = build_schedulers(_SCHEDULE_8)
+    keys = adaln_module.unique_keys(adaln_module.step_keys(video, audio, row_set))
+    stored = adaln_module.table_keys(copy_dir / "adaln_tables.safetensors")
+    assert set(keys) - set(stored)  # most of the keys are in no stored copy
+    reference = _reference_with_turbo(sources)
+    loaded = load_copy(copy_dir, keys, "cpu")
+    layout = tiny_layout()
+    inputs = layout_inputs(layout)
+    with torch.no_grad():
+        for t, audio_t in zip(video.timesteps, audio.timesteps, strict=True):
+            unique, indices = row_timesteps(
+                layout.video_indices, layout.audio_indices, layout.text_tokens, float(t), float(audio_t), condition_video_rows=video_held, condition_audio_rows=len(layout.audio_indices)
+            )
+            call = {**inputs, "timestep": unique, "timestep_indices": indices, "return_dict": False, **layout.kwargs}
+            want, got = reference(**call), loaded(**call)
+            # An assembled row is the row of another batch; it may differ from the stock one by bf16 rounding.
+            for a, b in zip(got, want, strict=True):
+                torch.testing.assert_close(a, b, rtol=5e-2, atol=5e-2)
+
+
+def test_a_user_lora_on_assembled_keys_gets_the_delta_each_key_would_have_stored(sources: _Sources, copy_dir: Path, recorder: _Recorder, ordered, tmp_path: Path) -> None:
+    user = _user_lora(tmp_path / "user.safetensors", 11)
+    video, audio = build_schedulers(_SCHEDULE_8)
+    keys = adaln_module.unique_keys(adaln_module.step_keys(video, audio, "track_keyframe"))[1:4]  # three keys that are not stored
+    assert not set(keys) & set(adaln_module.table_keys(copy_dir / "adaln_tables.safetensors"))
+    plain = load_copy(copy_dir, keys, "cpu")
+    loaded = load_copy(copy_dir, keys, "cpu", loras=[(user, 0.5)])
+
+    file = h3_lora.load_lora(user)
+    parts = h3_lora.split_user_lora(file.state, 0.5, scales=file.scales)
+    assert parts.adaln
+    temb = {key: adaln_module.compute_temb(plain.time_proj, plain.time_embedder, key, "cpu") for key in keys}
+    for block, (down, up, scale) in parts.adaln.items():
+        base = {key: getattr(plain.transformer_blocks[block].adaln_proj, f"table{position}") for position, key in enumerate(keys)}
+        want = adaln_module.lora_table_delta(base, temb, down, up, scale)
+        for position, key in enumerate(keys):
+            got = getattr(loaded.transformer_blocks[block].adaln_proj, f"table{position}")
+            assert torch.equal(got, want[key])
+            assert not torch.equal(got, base[key])
+
+    # A row's delta depends on its timestep only: it is the delta the stored key that row is assembled from gets.
+    sources_of = adaln_module.table_sources(adaln_module.table_keys(copy_dir / "adaln_tables.safetensors"), keys)
+    donors = adaln_module.unique_keys(source for rows in sources_of.values() for source in rows)
+    donor_model = load_copy(copy_dir, donors, "cpu", loras=[(user, 0.5)])
+    for block in parts.adaln:
+        for key in keys:
+            got = getattr(loaded.transformer_blocks[block].adaln_proj, f"table{keys.index(key)}")
+            for row, (value, donor) in enumerate(zip(key, sources_of[key], strict=True)):
+                donor_table = getattr(donor_model.transformer_blocks[block].adaln_proj, f"table{donors.index(donor)}")
+                torch.testing.assert_close(got[row].float(), donor_table[donor.index(value)].float(), rtol=2e-2, atol=2e-2)
+
+
 def test_a_subset_of_keys_installs_only_those_tables(sources: _Sources, copy_dir: Path, recorder: _Recorder) -> None:
     model = load_copy(copy_dir, _ALL_KEYS[3:6], "cpu")
 

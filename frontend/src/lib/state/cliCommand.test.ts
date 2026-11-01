@@ -157,6 +157,35 @@ describe('cliCommand', () => {
     expect(both.caveats).toEqual(['uploaded_image']);
   });
 
+  it('names the audio track and where it starts, for a clip and for an extension', () => {
+    const clip = { mode: 'video', workflow: 'img2vid', prompt: 'a', image_path: '/in/start.png', audio_track_path: '/in/song.mp3', audio_track_start: '90' };
+    expect(cliCommand(clip)).toEqual({ command: 'ziv video --prompt a --image /in/start.png --audio-file /in/song.mp3 --audio-start 90', caveats: [] });
+
+    const extension = { mode: 'video', workflow: 'extend', source_video: '/in/c.mp4', scene: 's', audio_track_path: '/in/song.mp3', audio_track_start: '6.65' };
+    expect(cliCommand(extension).command).toBe('ziv video --extend /in/c.mp4 --scene s --audio-file /in/song.mp3 --audio-start 6.65');
+  });
+
+  it('names Start at 0 on an extension, where a missing --audio-start continues the source track', () => {
+    const extension = { mode: 'video', workflow: 'extend', source_video: '/in/c.mp4', scene: 's', audio_track_path: '/in/song.mp3', audio_track_start: '0' };
+    expect(cliCommand(extension).command).toBe('ziv video --extend /in/c.mp4 --scene s --audio-file /in/song.mp3 --audio-start 0');
+  });
+
+  it('leaves out Start at 0, which is the default, and the track of an image job', () => {
+    expect(cliCommand({ mode: 'video', prompt: 'a', audio_track_path: '/in/song.mp3', audio_track_start: '0' }).command).toBe('ziv video --prompt a --audio-file /in/song.mp3');
+    expect(cliCommand({ mode: 'image', prompt: 'a', audio_track_path: '/in/song.mp3', audio_track_start: '9' }).command).not.toContain('--audio');
+  });
+
+  it('names an uploaded track by file name over a typed path, and reports it', () => {
+    const form = new FormData();
+    form.append('mode', 'video');
+    form.append('prompt', 'a');
+    form.append('audio_track_file', new File(['x'], 'my memo.m4a', { type: 'audio/mp4' }));
+    form.append('audio_track_path', '/in/old.mp3');
+    form.append('audio_track_start', '2');
+
+    expect(cliCommand(formSettings(form))).toEqual({ command: "ziv video --prompt a --audio-file 'my memo.m4a' --audio-start 2", caveats: ['uploaded_audio'] });
+  });
+
   it('serializes auto-enhance options to the SPEC grammar, with motion only for video', () => {
     const settings = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting', 'camera'], length: 'longer', motion: ['action'] };
 

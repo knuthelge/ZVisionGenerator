@@ -14,10 +14,11 @@ from zvisiongenerator.core.video_family import VideoCapabilities
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.workspace_api import _build_video_bootstrap_defaults
-from zvisiongenerator.web.workspace_contract import CANONICAL_WORKFLOW_VALUES, END_FRAME_CONTROLS, WORKFLOW_DEFINITIONS, hidden_video_controls
+from zvisiongenerator.web.workspace_contract import AUDIO_TRACK_CONTROLS, CANONICAL_WORKFLOW_VALUES, END_FRAME_CONTROLS, WORKFLOW_DEFINITIONS, hidden_video_controls
 
 _UPSCALE_CONTROLS = ["video_upscale_enabled", "video_upscale_factor", "video_upscale_review"]
 _END_CONTROLS = ["end_image", "end_image_clear", "end_image_path"]
+_TRACK_CONTROLS = ["audio_track", "audio_track_path", "audio_track_start"]
 
 
 def _web_config(config: dict | None = None) -> SimpleNamespace:
@@ -40,22 +41,23 @@ def _web_config(config: dict | None = None) -> SimpleNamespace:
         ("low_memory", ["low_memory"]),
         ("audio", ["audio"]),
         ("end_frame", _END_CONTROLS),
+        ("audio_track", _TRACK_CONTROLS),
     ],
 )
 def test_hidden_controls_follow_the_missing_capability(missing, hidden):
-    flags = {name: name != missing for name in ("i2v", "end_frame", "extend", "upscale", "upscale_review", "lora", "audio", "low_memory")}
+    flags = {name: name != missing for name in ("i2v", "end_frame", "extend", "upscale", "upscale_review", "lora", "audio", "low_memory", "audio_track", "audio_track_upscale")}
 
     assert hidden_video_controls(VideoCapabilities(**flags)) == hidden
 
 
 def test_several_missing_capabilities_hide_each_control_once():
-    caps = VideoCapabilities(i2v=True, end_frame=False, extend=True, upscale=False, upscale_review=False, lora=True, audio=True, low_memory=False)
+    caps = VideoCapabilities(i2v=True, end_frame=False, extend=True, upscale=False, upscale_review=False, lora=True, audio=True, low_memory=False, audio_track=False, audio_track_upscale=False)
 
-    assert hidden_video_controls(caps) == [*_END_CONTROLS, "low_memory", *_UPSCALE_CONTROLS]
+    assert hidden_video_controls(caps) == sorted([*_END_CONTROLS, *_TRACK_CONTROLS, "low_memory", *_UPSCALE_CONTROLS])
 
 
 def test_extend_and_the_other_workflow_flags_hide_no_control():
-    caps = VideoCapabilities(i2v=False, end_frame=True, extend=False, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=True)
+    caps = VideoCapabilities(i2v=False, end_frame=True, extend=False, upscale=True, upscale_review=True, lora=True, audio=True, low_memory=True, audio_track=True, audio_track_upscale=False)
 
     assert hidden_video_controls(caps) == []
 
@@ -86,6 +88,7 @@ _LTX_FAMILY_KEYS = {
     "frame_rule": {"alignment": 8, "offset": 1, "round": "nearest"},
     "hidden_controls": [],
     "supports_extend": True,
+    "supports_audio_track_upscale": True,
     "step_options": None,
     "extend_frame_step": 8,
 }
@@ -120,6 +123,12 @@ def test_an_h3_payload_carries_the_rule_the_options_and_the_hidden_controls(monk
     assert (payload["steps"], payload["max_steps"], payload["frame_count"], payload["frame_rule"]["alignment"], payload["supports_i2v"]) == (8, 8, 124, 17, True)
     assert "frame_alignment" not in payload
     assert payload["family"] == "h3"
+    # H3 follows a track but can't upscale a clip made from one.
+    assert payload["supports_audio_track_upscale"] is False
+
+
+def test_an_ltx_payload_can_upscale_a_clip_made_from_a_track():
+    assert _build_video_bootstrap_defaults("ltx-4", _web_config())["supports_audio_track_upscale"] is True
 
 
 def test_an_h3_payload_on_macos_also_hides_the_upscale_controls(monkeypatch):
@@ -148,8 +157,8 @@ def test_a_model_without_a_family_description_keeps_the_permissive_payload(monke
     payload = _build_video_bootstrap_defaults("wan", _web_config())
 
     assert payload["frame_rule"] == {"alignment": 4, "offset": 1, "round": "nearest"}
-    # Every capability is permissive for an undescribed family except the opt-in last frame.
-    assert (payload["hidden_controls"], payload["supports_extend"], payload["step_options"], payload["extend_frame_step"]) == (_END_CONTROLS, True, None, 8)
+    # Every capability is permissive for an undescribed family except the opt-in last frame and audio track.
+    assert (payload["hidden_controls"], payload["supports_extend"], payload["step_options"], payload["extend_frame_step"]) == (sorted([*_END_CONTROLS, *_TRACK_CONTROLS]), True, None, 8)
 
 
 # ---------------------------------------------------------------------------
@@ -196,3 +205,13 @@ def test_the_two_workflows_of_a_tab_clear_the_same_fields(workflows):
 def test_image_workflows_show_the_quantize_control_the_reuse_param_is_gated_on(workflow):
     """The Workspace applies a reused ``quantize`` only where this control is visible, so the real contract must list it."""
     assert "quantize" in WORKFLOW_DEFINITIONS[workflow]["visible_controls"]
+
+
+@pytest.mark.parametrize("workflow", ["txt2vid", "img2vid", "extend"])
+def test_every_video_workflow_offers_the_audio_track_controls(workflow):
+    assert set(AUDIO_TRACK_CONTROLS) <= set(WORKFLOW_DEFINITIONS[workflow]["visible_controls"])
+
+
+@pytest.mark.parametrize("workflow", ["txt2img", "img2img"])
+def test_the_image_workflows_offer_no_audio_track_controls(workflow):
+    assert not set(AUDIO_TRACK_CONTROLS) & set(WORKFLOW_DEFINITIONS[workflow]["visible_controls"])

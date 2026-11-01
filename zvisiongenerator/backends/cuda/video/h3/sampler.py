@@ -2,7 +2,7 @@
 
 The sequence is ``[text | keyframe rows | audio | video]``. Keyframes sit in front of the video block; an Extend tail is
 the first latent frames of the video block and the first latents of *each* audio channel (audio rows are channel-major,
-so the held audio rows are two separate runs). Held rows are mixed with noise once, up front, and then never written:
+so the held audio rows are two separate runs). With a user's track every audio row is held. Held rows are mixed with noise once, up front, and then never written:
 each step applies the schedulers to the *generated* rows only, selected by a boolean mask.
 
 One forward serves every row, each at its own timestep: generated video and audio rows step down their schedules, the
@@ -22,7 +22,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.video.h3.conditioning import (
-    TAIL_AUDIO_LATENTS,
     prenoise,
     tail_audio_rows,
     tail_first_audio_order,
@@ -54,7 +53,8 @@ class Conditioning:
         anchors: One of ``"first"`` / ``"last"`` per keyframe: which end of the clip it is anchored to.
         tail_latents: Clean latents of an Extend tail ``(1, 24, T, latent_height, latent_width)``: the first *T*
             latent frames of the window.
-        tail_audio: Clean tail audio rows ``(2 * 37, 32)``, channel-major: channel 0's 37 latents, then channel 1's.
+        tail_audio: Clean held audio rows ``(2 * N, 32)``, channel-major: channel 0's *N* latents, then channel 1's. *N* is
+            37 for an Extend tail, and the clip's audio latents when a track holds every row.
     """
 
     keyframes: tuple[torch.Tensor, ...] = ()
@@ -65,8 +65,14 @@ class Conditioning:
     def __post_init__(self) -> None:
         if len(self.keyframes) != len(self.anchors):
             raise ValueError(f"Each keyframe needs one anchor, got {len(self.keyframes)} keyframes and {len(self.anchors)} anchors.")
-        if self.tail_audio is not None and tuple(self.tail_audio.shape) != (H3_AUDIO_CHANNELS * TAIL_AUDIO_LATENTS, _AUDIO_CHANNELS):
-            raise ValueError(f"The tail audio must be {(H3_AUDIO_CHANNELS * TAIL_AUDIO_LATENTS, _AUDIO_CHANNELS)} rows, got {tuple(self.tail_audio.shape)}.")
+        audio = self.tail_audio
+        if audio is not None and (audio.ndim != 2 or audio.shape[1] != _AUDIO_CHANNELS or audio.shape[0] == 0 or audio.shape[0] % H3_AUDIO_CHANNELS):
+            raise ValueError(f"The held audio must be (2 * latents, {_AUDIO_CHANNELS}) rows, one run per stereo channel, got {tuple(audio.shape)}.")
+
+    @property
+    def held_audio_latents(self) -> int:
+        """The audio latents held per channel (0 without held audio)."""
+        return 0 if self.tail_audio is None else int(self.tail_audio.shape[0]) // H3_AUDIO_CHANNELS
 
 
 @dataclass(frozen=True)
@@ -83,7 +89,7 @@ class Layout:
         keyframe_rows: Number of leading video rows that hold keyframes.
         tail_rows: Number of video rows, right after the keyframes, that hold the Extend tail.
         condition_video_rows: ``keyframe_rows + tail_rows``: the leading video rows that stay pinned.
-        condition_audio_rows: Number of held audio rows (two tails, or 0).
+        condition_audio_rows: Number of held audio rows (two runs, one per channel, or 0); all of them with a track.
         held_audio: Positions of the held rows inside the audio block, ascending (CPU).
         video_generated: Boolean mask of the video rows the schedulers step (device).
         audio_generated: Boolean mask of the audio rows the schedulers step (device).
@@ -123,8 +129,8 @@ def build_layout(text_token_tags: Sequence[int] | torch.Tensor, geo: Geometry, d
 
     The structure comes from diffusers' ``build_packed_sequence`` called with the keyframe anchors. An Extend tail needs
     no extra rows: it is the leading part of the video block, so with the keyframes in front it makes the leading
-    video rows the conditioning ones. The audio tail is two runs of the channel-major block, so the timestep order
-    puts them first explicitly.
+    video rows the conditioning ones. The held audio is two runs of the channel-major block (all of it with a track), so the
+    timestep order puts them first explicitly.
 
     Args:
         text_token_tags: The modality tag of every text row (``TEXT_TAG``, or ``VIDEO_TAG`` inside a keyframe's vision block).
@@ -158,8 +164,8 @@ def build_layout(text_token_tags: Sequence[int] | torch.Tensor, geo: Geometry, d
     held_audio = torch.empty(0, dtype=torch.long)
     timestep_audio_idx = audio_idx
     if conditioning.tail_audio is not None:
-        held_audio = tail_audio_rows(geo.audio_latents, TAIL_AUDIO_LATENTS)
-        timestep_audio_idx = audio_idx[tail_first_audio_order(geo.audio_latents, TAIL_AUDIO_LATENTS)]
+        held_audio = tail_audio_rows(geo.audio_latents, conditioning.held_audio_latents)
+        timestep_audio_idx = audio_idx[tail_first_audio_order(geo.audio_latents, conditioning.held_audio_latents)]
         condition_audio_rows = int(held_audio.numel())
     condition_video_rows = keyframe_rows + tail_rows
     video_generated = torch.arange(video_idx.numel()) >= condition_video_rows
@@ -234,7 +240,12 @@ def _initial_rows(geo: Geometry, layout: Layout, conditioning: Conditioning, sch
 
 
 def _step_generated(scheduler: MiniMaxH3Scheduler, velocity: torch.Tensor, timestep: torch.Tensor, rows: torch.Tensor, generated: torch.Tensor) -> None:
-    """Step the *generated* rows of *rows* in place with the scheduler; the other rows are not read or written."""
+    """Step the *generated* rows of *rows* in place with the scheduler; the other rows are not read or written.
+
+    Nothing is stepped when no row is generated (a track holds every audio row).
+    """
+    if not bool(generated.any()):
+        return
     rows[generated] = scheduler.step(velocity[generated].float(), timestep, rows[generated], return_dict=False)[0]
 
 

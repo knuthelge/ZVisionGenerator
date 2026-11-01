@@ -8,10 +8,14 @@ import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { GalleryAsset, ModelOption, WorkspaceContext } from '$lib/types';
-import { makeContext, makeImageDefaults } from '../../test-utils/workspace';
+import { makeContext, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
+import { currentAudioTrackView } from './audioTrackView';
 import { currentImagesView } from './imagesView';
 import SettingPopover from './SettingPopover.svelte';
 import { TRANSPARENT_TERMS } from './transparent';
+
+const trackApi = vi.hoisted(() => ({ inspectAudioTrack: vi.fn() }));
+vi.mock('$lib/api/audioTrack', () => ({ inspectAudioTrack: trackApi.inspectAudioTrack }));
 
 const models: ModelOption[] = [
   { id: 'zit', label: 'Z-Image Turbo', type: 'image' },
@@ -58,7 +62,7 @@ describe('SettingPopover model list', () => {
     app = flushSync(() => mount(SettingPopover, {
       target,
       props: {
-        key: 'model', context, get images() { return currentImagesView(context); }, busy: false, models, quantizeOptions: null, lastSeed: null,
+        key: 'model', context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false, models, quantizeOptions: null, lastSeed: null,
         onModelChange, onclose: vi.fn(),
       },
     }));
@@ -89,7 +93,7 @@ describe('SettingPopover model list', () => {
       app = flushSync(() => mount(SettingPopover, {
         target,
         props: {
-          key: 'model', context, get images() { return currentImagesView(context); }, busy: false, models: missing, quantizeOptions: null, lastSeed: null,
+          key: 'model', context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false, models: missing, quantizeOptions: null, lastSeed: null,
           onModelChange: vi.fn(), onclose: vi.fn(),
         },
       }));
@@ -188,7 +192,7 @@ describe('SettingPopover LoRA list', () => {
     app = flushSync(() => mount(SettingPopover, {
       target,
       props: {
-        key: 'loras', context: ctx, get images() { return currentImagesView(ctx); }, busy: false, models, quantizeOptions: null, lastSeed: null,
+        key: 'loras', context: ctx, get images() { return currentImagesView(ctx); }, get audioTrack() { return currentAudioTrackView(ctx); }, busy: false, models, quantizeOptions: null, lastSeed: null,
         onModelChange: vi.fn(), onclose: vi.fn(),
       },
     }));
@@ -228,7 +232,7 @@ describe('SettingPopover images', () => {
   function open(props: Record<string, unknown> = {}, context: WorkspaceContext = imageContext()): void {
     app = flushSync(() => mount(SettingPopover, {
       target,
-      props: { key: 'images', context, get images() { return currentImagesView(context); }, busy: false, models: [], quantizeOptions: null, lastSeed: null, onModelChange: vi.fn(), onclose: vi.fn(), ...props },
+      props: { key: 'images', context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false, models: [], quantizeOptions: null, lastSeed: null, onModelChange: vi.fn(), onclose: vi.fn(), ...props },
     }));
   }
 
@@ -427,4 +431,43 @@ describe('SettingPopover images', () => {
 
     expect(buttonWithText('Reset')).toBeUndefined();
   });
+});
+
+describe('SettingPopover audio track', () => {
+  function mountTrack(ctx: WorkspaceContext, onclose = vi.fn()): ReturnType<typeof vi.fn> {
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: { key: 'track', context: ctx, get images() { return currentImagesView(ctx); }, get audioTrack() { return currentAudioTrackView(ctx); }, busy: false, models: [], quantizeOptions: null, lastSeed: null, onModelChange: vi.fn(), onclose },
+    }));
+    return onclose;
+  }
+
+  it('closes itself in Image and on a model that follows no track', () => {
+    draft.patch({ workflow: 'txt2img', model: 'zit' });
+    const inImage = mountTrack(makeContext());
+    flushSync();
+    expect(inImage).toHaveBeenCalled();
+
+    unmount(app!);
+    app = null;
+    const ctx = makeContext({ video_model_defaults: { 'ltx-8': makeVideoDefaults({ hidden_controls: ['audio_track', 'audio_track_path', 'audio_track_start'] }) } });
+    draft.patch({ workflow: 'txt2vid', model: 'ltx-8' });
+    const onModel = mountTrack(ctx);
+    flushSync();
+    expect(onModel).toHaveBeenCalled();
+  });
+
+  it('stays open on a model that follows a track, with Start at only once a track is set', () => {
+    draft.patch({ workflow: 'txt2vid', model: 'ltx-8' });
+
+    const onclose = mountTrack(makeContext());
+    flushSync();
+
+    expect(onclose).not.toHaveBeenCalled();
+    expect(target.querySelector('input[aria-label="Start at, in seconds"]')).toBeNull();
+    draft.setAudioTrack('video', { path: '/audio/song.mp3' });
+    flushSync();
+    expect(target.querySelector('input[aria-label="Start at, in seconds"]')).not.toBeNull();
+  });
+
 });

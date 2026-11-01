@@ -169,6 +169,8 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Pa
     if inspection.source is not None and extend_frames is not None:
         memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, extend_frames, low_memory is not False, steps, lora, web_config, downloading_loras)
     frame_count = probe.frame_count if probe is not None else None
+    track_path = inspection.recorded.audio_track_path if inspection.recorded is not None else None
+    track_end = inspection.recorded.audio_track_end if inspection.recorded is not None else None
     return {
         "path": str(path),
         "filename": path.name,
@@ -185,6 +187,8 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Pa
         "legacy": scene is None and prompt is not None,
         "model": recorded_model if recorded_model in web_config.video_model_options else None,
         "lora": (inspection.recorded.lora or "") if inspection.recorded is not None else None,
+        "audio_track_path": track_path,
+        "audio_track_end": track_end,
         "problems": [{"code": problem.code, "message": problem.message} for problem in inspection.problems],
         "extend_frames": extend_frames,
         "window_frames": window,
@@ -270,4 +274,4 @@ def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext
     family = _model_family(model)
     require_extend_family(source, family)
     frames = requested_extend_frames(extend_frames, None if seconds is None else float(seconds), source.fps, step=extend_step(family))
-    return extend_enhance_context(source, frames, no_audio=not (raw.get("audio") is True and supports_video_audio()), prompt=prompt, family=family)
+    return extend_enhance_context(source, frames, no_audio=not (raw.get("audio") is True and supports_video_audio()), prompt=prompt, family=family, track=raw.get("audio_track") is True)

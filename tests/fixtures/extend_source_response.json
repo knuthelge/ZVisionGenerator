@@ -14,6 +14,8 @@
   "legacy": false,
   "model": "ltx-8",
   "lora": "",
+  "audio_track_path": null,
+  "audio_track_end": null,
   "problems": [],
   "extend_frames": 48,
   "window_frames": 73,

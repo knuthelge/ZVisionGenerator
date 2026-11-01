@@ -3,6 +3,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import { InspectorRow, PathBrowser } from '$lib/components/molecules';
   import ReferenceThumbContent from './ReferenceThumbContent.svelte';
+  import { AUDIO_ACCEPT, takeAudioFiles } from '$lib/state/audioTrack';
   import { IMAGE_ACCEPT, splitImageFiles, unsupportedMessage } from '$lib/state/references';
   import { addToast } from '$lib/state/toasts.svelte';
 
@@ -46,14 +47,21 @@
     error?: string;
     /** The image's name; empty while the slot holds none. */
     name?: string;
+    /** A short fact shown after the name that stays whole when the name is cut short (an audio track's length). */
+    detail?: string;
     /** The image is kept but not used: the thumbnail fades to grey and the label and name turn muted. */
     unused?: boolean;
+    /** What the slot holds: an image (with a thumbnail) or an audio track (a waveform icon in the thumbnail's place). */
+    kind?: 'image' | 'audio';
   }
 
   let {
     idBase, label, names, emptyText, emptyMuted = false, path, file, previewUrl, onfilechange, onpathchange,
-    emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error, name = '', unused = false,
+    emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error, name = '', detail = '', unused = false, kind = 'image',
   }: Props = $props();
+
+  const audio = $derived(kind === 'audio');
+  const noun = $derived(audio ? 'an audio file' : 'an image');
 
   let dragOver = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
@@ -84,6 +92,10 @@
       if (dropped.length > 0) onfileschange([...dropped]);
       return;
     }
+    if (audio) {
+      takeAudioFiles(dropped, onfilechange);
+      return;
+    }
     const { supported, unsupported } = splitImageFiles(dropped);
     if (supported[0]) onfilechange(supported[0]);
     else if (unsupported > 0) addToast(unsupportedMessage(unsupported), 'info');
@@ -105,6 +117,7 @@
   class="reference-drop"
   class:unused
   data-unused={unused}
+  data-kind={kind}
   role="group"
   aria-label={name ? `${label}: ${name}` : label}
   aria-describedby={error ? `${idBase}-error` : undefined}
@@ -117,6 +130,8 @@
     <div class="reference-thumb" class:missing>
       {#if missing}
         <Icon name="alert" size={16} />
+      {:else if audio}
+        <Icon name="waveform" size={18} />
       {:else}
         <ReferenceThumbContent {file} url={previewUrl} alt={names.preview} {emptyIcon} />
       {/if}
@@ -125,18 +140,19 @@
       <span class="reference-name drop">{dropText}</span>
     {:else}
       <span class="reference-name" class:empty={!name && emptyMuted} class:missing title={name}>{name || emptyText}</span>
+      {#if detail}<span class="reference-detail" data-testid="{idBase}-detail">{detail}</span>{/if}
     {/if}
-    <button id="{idBase}-browse" type="button" class="ui-btn ui-btn-row" title="Browse for an image" aria-label={names.browse} onclick={() => { browsing = true; }}><Icon name="folder" size={14} /></button>
+    <button id="{idBase}-browse" type="button" class="ui-btn ui-btn-row" title="Browse for {noun}" aria-label={names.browse} onclick={() => { browsing = true; }}><Icon name="folder" size={14} /></button>
     <!-- No name: the chosen file is attached on submit only while it is the slot's image (see WorkspacePage). -->
-    <input id="{idBase}-file" bind:this={fileInput} type="file" accept={IMAGE_ACCEPT} multiple={onfileschange !== undefined} class="hidden" onchange={(e) => handleFiles(e.currentTarget)}>
-    <label for="{idBase}-file" class="ui-btn ui-btn-row" title="Upload an image from this device" aria-label={names.upload}><Icon name="upload" size={14} /></label>
+    <input id="{idBase}-file" bind:this={fileInput} type="file" accept={audio ? AUDIO_ACCEPT : IMAGE_ACCEPT} multiple={onfileschange !== undefined} class="hidden" onchange={(e) => handleFiles(e.currentTarget)}>
+    <label for="{idBase}-file" class="ui-btn ui-btn-row" title="Upload {noun} from this device" aria-label={names.upload}><Icon name="upload" size={14} /></label>
     {#if clearable}
       <button id="{idBase}-clear" type="button" class="ui-btn ui-btn-row" aria-label={names.clear} title="Clear" onclick={clear}><Icon name="close" size={14} /></button>
     {/if}
   </InspectorRow>
   {#if error}<p id="{idBase}-error" class="row-hint ui-help-error">{error}</p>{/if}
 </div>
-<PathBrowser bind:open={browsing} purpose="reference_image" initialPath={path} onchoose={choosePath} />
+<PathBrowser bind:open={browsing} purpose={audio ? 'audio_track' : 'reference_image'} initialPath={path} onchoose={choosePath} />
 
 <style>
   .reference-drop { border-radius: var(--radius-sm); }
@@ -144,6 +160,7 @@
   .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
   .reference-thumb :global(img) { width: 100%; height: 100%; object-fit: cover; }
   .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
+  .reference-detail { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
   /* A slot that is kept but not used: the picture fades to grey, the words stay readable. */
   .reference-drop.unused .reference-thumb :global(img) { opacity: 0.4; filter: grayscale(1); }
   .reference-drop.unused :global(.inspector-label), .reference-drop.unused .reference-name { color: var(--color-text-muted); }
@@ -152,4 +169,8 @@
   /* A file that is gone: the thumbnail takes the error surface and the name the error colour. */
   .reference-thumb.missing { background: var(--color-error-surface); color: var(--color-error); }
   .reference-name.missing { color: var(--color-error); }
+  /* A finger gets 44px targets on the track row. */
+  @media (pointer: coarse) {
+    .reference-drop[data-kind='audio'] :global(.ui-btn-row) { width: 44px; height: 44px; }
+  }
 </style>

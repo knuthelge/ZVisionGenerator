@@ -157,37 +157,40 @@ def encode_tail(encoder: Any, frames: np.ndarray) -> torch.Tensor:
     return _encode_condition(encoder, pixels)
 
 
-def encode_tail_audio(audio_vae: Any, waveform: torch.Tensor) -> torch.Tensor:
-    """Encode the audio of the source tail as :data:`TAIL_AUDIO_LATENTS` normalised latents per stereo channel.
+def encode_tail_audio(audio_vae: Any, waveform: torch.Tensor, latents: int = TAIL_AUDIO_LATENTS) -> torch.Tensor:
+    """Encode held sound as *latents* normalised latents per stereo channel: the source tail's, or a whole clip's with a track.
 
     The mono audio VAE codes each channel as a batch item and its posterior mean is used. The latents of each channel
-    are trimmed, or padded by repeating the last one, to :data:`TAIL_AUDIO_LATENTS`.
+    are trimmed, or padded by repeating the last one, to *latents*.
 
     Args:
         audio_vae: The audio VAE from ``load_audio_vae``.
         waveform: Stereo float samples ``(2, samples)`` at the audio VAE's sample rate (32 kHz).
+        latents: The latents to hold per channel; :data:`TAIL_AUDIO_LATENTS` for an Extend tail.
 
     Returns:
-        Float32 CPU rows ``(2 * 37, latent_channels)`` in channel-major order: channel 0's 37 latents, then channel 1's.
+        Float32 CPU rows ``(2 * latents, latent_channels)`` in channel-major order: channel 0's latents, then channel 1's.
 
     Raises:
-        ValueError: If *waveform* is not ``(2, samples)``.
+        ValueError: If *waveform* is not ``(2, samples)`` or *latents* is not positive.
     """
     import torch
 
     if waveform.ndim != 2 or waveform.shape[0] != H3_AUDIO_CHANNELS:
         raise ValueError(f"Expected a stereo waveform shaped (2, samples); got {tuple(waveform.shape)}.")
+    if latents < 1:
+        raise ValueError(f"The held audio must be at least one latent per channel, got {latents}.")
     device = next(audio_vae.parameters()).device
     mean = torch.tensor(audio_vae.config.latents_mean).view(1, 1, -1)
     std = torch.tensor(audio_vae.config.latents_std).view(1, 1, -1)
     with torch.no_grad():
         posterior = audio_vae.encode(waveform.to(device)[:, None], return_dict=False)[0]
-        latents = posterior.mode().float().cpu().transpose(1, 2)  # (2, frames, channels)
-    normalised = (latents - mean) / std
-    if normalised.shape[1] < TAIL_AUDIO_LATENTS:
-        padding = normalised[:, -1:].expand(-1, TAIL_AUDIO_LATENTS - normalised.shape[1], -1)
+        encoded = posterior.mode().float().cpu().transpose(1, 2)  # (2, frames, channels)
+    normalised = (encoded - mean) / std
+    if normalised.shape[1] < latents:
+        padding = normalised[:, -1:].expand(-1, latents - normalised.shape[1], -1)
         normalised = torch.cat([normalised, padding], dim=1)
-    return normalised[:, :TAIL_AUDIO_LATENTS].reshape(H3_AUDIO_CHANNELS * TAIL_AUDIO_LATENTS, -1).contiguous()
+    return normalised[:, :latents].reshape(H3_AUDIO_CHANNELS * latents, -1).contiguous()
 
 
 def tail_audio_rows(audio_latents: int, tail: int = TAIL_AUDIO_LATENTS) -> torch.Tensor:

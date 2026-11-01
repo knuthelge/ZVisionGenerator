@@ -14,6 +14,19 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class AudioTrack:
+    """An audio file a clip follows, and where in it the clip's sound starts.
+
+    Attributes:
+        path: The audio file.
+        start: Seconds into the file where the clip's sound starts (0 or more).
+    """
+
+    path: str
+    start: float
+
+
+@dataclass(frozen=True)
 class ExtendSource:
     """A checked clip to continue: its displayed geometry, timing, colour tags and the settings recorded in it."""
 
@@ -36,6 +49,9 @@ class ExtendSource:
     prompt: str | None = None
     model: str | None = None
     lora: str | None = None
+    # The audio file the source followed and where in it the source's sound ended, when it was made from a track.
+    audio_track_path: str | None = None
+    audio_track_end: float | None = None
     # The probe this value was built from. The source file is never modified, so it stays valid for the whole job;
     # it is not part of the value's identity.
     probe: VideoProbe | None = field(default=None, compare=False, repr=False)
@@ -106,6 +122,8 @@ class VideoGenerationRequest:
     width: int = 704
     height: int = 448
     num_frames: int = 121
+    # The clip's frame rate, when the caller knows it; an extension uses its source's. A track clip's recorded end needs it.
+    fps: float | None = None
     seed: int = 0
     steps: int = 8
     step_callback: Callable[[dict[str, Any]], None] | None = None
@@ -122,6 +140,8 @@ class VideoGenerationRequest:
 
     # Audio
     no_audio: bool = False
+    # A track the clip follows; its sound is exactly the track from ``start``. ``None`` for generated sound.
+    audio_track: AudioTrack | None = None
 
     # Output
     output_dir: str = "."
@@ -145,6 +165,19 @@ class VideoGenerationRequest:
 
     # Extend: the clip to continue and the new frames to add; ``None`` for a plain generation
     extend: ExtendSpec | None = None
+
+    @property
+    def audio_track_end(self) -> float | None:
+        """Where in the track the clip's sound ends, or ``None`` without a track or a frame rate.
+
+        That is the track's start plus the clip's frames over the frame rate; for an extension, its new frames over the source's
+        frame rate.
+        """
+        track = self.audio_track
+        if track is None:
+            return None
+        frames, fps = (self.extend.frames, self.extend.source.fps) if self.extend is not None else (self.num_frames, self.fps)
+        return round(track.start + frames / fps, 6) if fps and fps > 0 else None
 
 
 @dataclass

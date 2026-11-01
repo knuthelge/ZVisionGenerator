@@ -83,6 +83,7 @@ function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoMo
     fps: 24,
     frame_rule: { alignment: 1, offset: 1, round: 'nearest' },
     supports_extend: true,
+    supports_audio_track_upscale: true,
     extend_frame_step: 8,
     upscale: { enabled: false, factor: 2, steps: null },
     ...overrides,
@@ -2169,7 +2170,8 @@ describe('applyPreset', () => {
     workflow: 'img2img', promptSource: 'file', prompt: 'a prompt', scene: 'a scene', jsonPromptEnabled: true, jsonPrompt: '{"a":1}', negativePrompt: 'blurry',
     promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one', 'two'], promptFileLoaded: { path: '/prompts/set.yaml', count: 2 },
     seed: 42, referenceImagePath: '/refs/ref.png', referenceImageUpload: 'start.png', firstFramePath: '/refs/first.png', firstFrameUpload: 'first.png',
-    referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
+    referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png', audioTrackPath: '/audio/song.mp3', audioTrackUpload: 'memo.m4a', audioTrackStart: 90,
+    extendAudioTrackPath: '/audio/other.mp3', extendAudioTrackUpload: 'extend.m4a', extendAudioTrackStart: 12, frameCount: 33, fps: 30, audio: true, lowMemory: true,
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
     savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] } },
@@ -3055,6 +3057,233 @@ describe('image slots', () => {
       expect(draft.state.workflow).toBe('extend');
       draft.setTab('image');
       expect(draft.state.workflow).toBe('txt2img');
+    });
+  });
+});
+
+describe('audio track', () => {
+  /** A video model that follows a track, and one that does not (its audio controls are hidden). */
+  const trackContext = (): WorkspaceContext => {
+    const ctx = makeContext({
+      image_models: [{ id: 'klein', label: 'Klein', type: 'image' }],
+      image_model_defaults: { klein: makeImageDefaults() },
+      current_image_model: 'klein',
+      video_models: [{ id: 'ltx-2', label: 'LTX 2', type: 'video' }, { id: 'plain', label: 'Plain', type: 'video' }],
+      video_model_defaults: { 'ltx-2': makeVideoDefaults(), plain: makeVideoDefaults({ hidden_controls: ['audio_track', 'audio_track_path', 'audio_track_start'] }) },
+    });
+    ctx.workflow_contract.values = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
+    for (const workflow of ['txt2vid', 'img2vid', 'extend'] as const) ctx.workflow_contract.definitions[workflow].visible_controls.push('audio_track', 'audio_track_path', 'audio_track_start');
+    return ctx;
+  };
+  const memo = (name: string): File => new File(['x'], name, { type: 'audio/mp4' });
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+    heldUploads.useStore(memoryUploadStore());
+  });
+
+  describe('per tab', () => {
+    it('holds a path or an upload marker, never both, and starts at 0', () => {
+      draft.setAudioTrack('video', { path: '/audio/song.mp3' });
+      draft.setAudioTrackStart('video', 90);
+      expect(draft.state).toMatchObject({ audioTrackPath: '/audio/song.mp3', audioTrackUpload: null, audioTrackStart: 90 });
+
+      draft.setAudioTrack('video', { file: memo('memo.m4a') });
+      expect(draft.state).toMatchObject({ audioTrackPath: null, audioTrackUpload: 'memo.m4a', audioTrackStart: 0 });
+      expect(heldUploads.audioTrack?.name).toBe('memo.m4a');
+    });
+
+    it('keeps Video and Extend Video apart', () => {
+      draft.setAudioTrack('video', { file: memo('video.m4a') });
+      draft.setAudioTrack('extend', { path: '/audio/extend.mp3' });
+      draft.setAudioTrackStart('extend', 12);
+
+      expect(draft.state).toMatchObject({ audioTrackUpload: 'video.m4a', audioTrackStart: 0, extendAudioTrackPath: '/audio/extend.mp3', extendAudioTrackStart: 12 });
+      expect([heldUploads.audioTrack?.name, heldUploads.extendAudioTrack]).toEqual(['video.m4a', null]);
+    });
+
+    it('clearing puts Start at back to 0 and forgets the held file', () => {
+      draft.setAudioTrack('video', { file: memo('memo.m4a') });
+      draft.setAudioTrackStart('video', 30);
+
+      draft.setAudioTrack('video', null);
+
+      expect(draft.state).toMatchObject({ audioTrackPath: null, audioTrackUpload: null, audioTrackStart: 0 });
+      expect(heldUploads.audioTrack).toBeNull();
+    });
+
+    it('keeps the track when the model cannot follow it, and the model that can brings it back', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+      draft.update('workflow', 'txt2vid');
+      draft.setAudioTrack('video', { path: '/audio/song.mp3' });
+
+      draft.hydrateFromContext(ctx, 'plain', { keepSettings: true });
+      expect(draft.state).toMatchObject({ model: 'plain', audioTrackPath: '/audio/song.mp3' });
+      draft.hydrateFromContext(ctx, 'ltx-2', { keepSettings: true });
+      expect(draft.state.audioTrackPath).toBe('/audio/song.mp3');
+    });
+
+    it('is left alone by a preset', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+      draft.update('workflow', 'txt2vid');
+      draft.setAudioTrack('video', { path: '/audio/song.mp3' });
+      draft.setAudioTrackStart('video', 90);
+
+      draft.applyPreset(ctx, { slug: 'video-look', name: 'Video look', mode: 'video', model: 'ltx-2', settings: { steps: 6 } } as SettingsPreset);
+
+      expect(draft.state).toMatchObject({ audioTrackPath: '/audio/song.mp3', audioTrackStart: 90 });
+    });
+  });
+
+  describe('Reset', () => {
+    it('on Video clears the Video track and its held file, and keeps the Extend Video track', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+      openTab('txt2vid', ctx);
+      draft.setAudioTrack('video', { file: memo('video.m4a') });
+      draft.setAudioTrackStart('video', 5);
+      draft.setAudioTrack('extend', { path: '/audio/extend.mp3' });
+      draft.setAudioTrackStart('extend', 12);
+
+      draft.resetSelections(ctx);
+
+      expect(draft.state).toMatchObject({ audioTrackPath: null, audioTrackUpload: null, audioTrackStart: 0, extendAudioTrackPath: '/audio/extend.mp3', extendAudioTrackStart: 12 });
+      expect(heldUploads.audioTrack).toBeNull();
+    });
+
+    it('on Extend Video clears the Extend Video track and keeps the Video track', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+      openTab('txt2vid', ctx);
+      draft.setAudioTrack('video', { file: memo('video.m4a') });
+      draft.setAudioTrack('extend', { file: memo('extend.m4a') });
+      openTab('extend', ctx);
+
+      draft.resetSelections(ctx);
+
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: null, extendAudioTrackUpload: null, extendAudioTrackStart: 0, audioTrackUpload: 'video.m4a' });
+      expect([heldUploads.audioTrack?.name, heldUploads.extendAudioTrack]).toEqual(['video.m4a', null]);
+    });
+
+  });
+
+  describe('Reuse and Load settings', () => {
+    it('put the track and Start at in Video for a text or image job', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+
+      draft.loadFromUrl({ workflow: 'txt2vid', prompt: 'a singer', audio_track_path: '/audio/song.mp3', audio_track_start: '90' }, ctx, { replaceSlots: true });
+
+      expect(draft.state).toMatchObject({ audioTrackPath: '/audio/song.mp3', audioTrackUpload: null, audioTrackStart: 90, extendAudioTrackPath: null });
+    });
+
+    it('put the track and Start at in Extend Video for an extension', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+      draft.setAudioTrack('video', { path: '/audio/video.mp3' });
+
+      draft.loadFromUrl({ workflow: 'extend', source_video: '/clips/a.mp4', scene: 's', audio_track_path: '/audio/song.mp3', audio_track_start: '6.65' }, ctx, { replaceSlots: true });
+
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackStart: 6.65, audioTrackPath: '/audio/video.mp3' });
+    });
+
+    it('clear the opened tab\'s track for a job without one, and leave the other tab\'s', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+      draft.setAudioTrack('video', { file: memo('video.m4a') });
+      draft.setAudioTrackStart('video', 5);
+      draft.setAudioTrack('extend', { path: '/audio/extend.mp3' });
+
+      draft.loadFromUrl({ workflow: 'txt2vid', prompt: 'no track' }, ctx, { replaceSlots: true });
+
+      expect(draft.state).toMatchObject({ audioTrackPath: null, audioTrackUpload: null, audioTrackStart: 0, extendAudioTrackPath: '/audio/extend.mp3' });
+    });
+
+    it('leave the track alone for a Use as', () => {
+      const ctx = trackContext();
+      draft.hydrateFromContext(ctx, 'ltx-2');
+      draft.setAudioTrack('video', { path: '/audio/song.mp3' });
+
+      draft.loadFromUrl({ workflow: 'img2vid', image_path: '/in/first.png', use_as: 'start' }, ctx, { replaceSlots: true });
+
+      expect(draft.state.audioTrackPath).toBe('/audio/song.mp3');
+    });
+
+  });
+
+  describe('Extend prefill', () => {
+    const SOURCE = '/clips/song-clip.mp4';
+
+    beforeEach(() => {
+      draft.update('workflow', 'extend');
+      draft.setExtendSourcePath(SOURCE);
+    });
+
+    it('fills the track from a source that followed one, starting where its sound ended', () => {
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
+
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackUpload: null, extendAudioTrackStart: 6.65 });
+    });
+
+    it('brings the source\'s track back on Reset, from where its sound ended', () => {
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
+      draft.setAudioTrackStart('extend', 2);
+
+      draft.resetSelections(trackContext());
+
+      expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackUpload: null, extendAudioTrackStart: 6.65 });
+    });
+
+    it('clears a track filled in from another source when the new source has none', () => {
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
+      draft.setExtendSourcePath('/clips/plain.mp4');
+
+      draft.applyExtendSource(sceneSource({ path: '/clips/plain.mp4' }));
+
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: null, extendAudioTrackUpload: null, extendAudioTrackStart: 0 });
+    });
+
+    it('keeps a track the user uploaded when the source changes', () => {
+      draft.setAudioTrack('extend', { file: memo('memo.m4a') });
+
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 3 }));
+
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: null, extendAudioTrackUpload: 'memo.m4a' });
+      expect(heldUploads.extendAudioTrack?.name).toBe('memo.m4a');
+    });
+
+    it('keeps a track the user chose by path, and one whose Start at they changed, when the source changes', () => {
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
+      draft.setAudioTrackStart('extend', 10);
+      draft.setExtendSourcePath('/clips/other.mp4');
+
+      draft.applyExtendSource(sceneSource({ path: '/clips/other.mp4', audio_track_path: '/audio/other.mp3', audio_track_end: 2 }));
+
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackStart: 10 });
+    });
+
+    it('replaces a track an earlier source prefilled, and drops it for a source without one', () => {
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
+      draft.setExtendSourcePath('/clips/other.mp4');
+      draft.applyExtendSource(sceneSource({ path: '/clips/other.mp4', audio_track_path: '/audio/other.mp3', audio_track_end: 2 }));
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/other.mp3', extendAudioTrackStart: 2 });
+
+      draft.setExtendSourcePath('/clips/plain.mp4');
+      draft.applyExtendSource(sceneSource({ path: '/clips/plain.mp4' }), null, { replaceText: true });
+
+      expect(draft.state).toMatchObject({ extendAudioTrackPath: null, extendAudioTrackUpload: null, extendAudioTrackStart: 0 });
+    });
+
+    it('does not touch the track on a later answer for the same source', () => {
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 3 }));
+      draft.setAudioTrack('extend', { path: '/audio/mine.mp3' });
+
+      draft.applyExtendSource(sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 3 }));
+
+      expect(draft.state.extendAudioTrackPath).toBe('/audio/mine.mp3');
     });
   });
 });

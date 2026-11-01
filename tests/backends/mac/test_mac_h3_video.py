@@ -38,7 +38,7 @@ from zvisiongenerator.backends.mac.h3_video import (  # noqa: E402
 )
 from zvisiongenerator.core.video_backend import VideoBackend  # noqa: E402
 from zvisiongenerator.core.video_family import FrameRule  # noqa: E402
-from zvisiongenerator.core.video_types import ExtendSegment  # noqa: E402
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment  # noqa: E402
 from zvisiongenerator.utils import hf_snapshot  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3MlxFiles, H3MlxPreset, H3Schedule, HubFiles  # noqa: E402
 from zvisiongenerator.utils.video_extend import build_extend_source  # noqa: E402
@@ -723,7 +723,7 @@ class TestImageToVideo:
 # ---- Extend ----------------------------------------------------------------------------------------------------------
 
 
-def _extend(env, tmp_path, written, monkeypatch, *, extend_frames=51, audio_output=True, source=None, mode="extend", callback=None):
+def _extend(env, tmp_path, written, monkeypatch, *, extend_frames=51, audio_output=None, source=None, mode="extend", callback=None, audio_track=None):
     source = source or make_extend_source(path=tmp_path / "clip.mp4", width=64, height=32, frame_count=49)
     tail = np.zeros((25, 32, 64, 3), dtype=np.uint8)
     tail[-1] = (10, 120, 230)
@@ -731,7 +731,17 @@ def _extend(env, tmp_path, written, monkeypatch, *, extend_frames=51, audio_outp
     segment_dir = tmp_path / "segment"
     segment_dir.mkdir(exist_ok=True)
     segment = H3MlxVideoBackend().extend_video(
-        _load(env, mode=mode), source, "the fox stops", extend_frames=extend_frames, seed=3, steps=8, segment_dir=segment_dir, audio_output=audio_output, step_callback=callback
+        _load(env, mode=mode),
+        source,
+        "the fox stops",
+        extend_frames=extend_frames,
+        seed=3,
+        steps=8,
+        segment_dir=segment_dir,
+        # The workflow asks for no sound of the model's own when a track is the clip's sound.
+        audio_output=audio_track is None if audio_output is None else audio_output,
+        step_callback=callback,
+        audio_track=audio_track,
     )
     return segment, segment_dir, tail
 
@@ -809,6 +819,74 @@ class TestExtend:
         monkeypatch.setattr(h3_video, "align_frames", lambda _count, _rule: 22)
         with pytest.raises(RuntimeError, match="expected at least 52"):
             _extend(env, tmp_path, written, monkeypatch, extend_frames=51)
+
+
+class TestAudioTrack:
+    """A track is held on the staged path as the clip's whole sound; the clip is written with silence for the remux stage to replace."""
+
+    TRACK = AudioTrack("voice.wav", 1.5)
+
+    @pytest.fixture
+    def window(self, monkeypatch):
+        """Replace the ffmpeg track reader: record what is asked and return a constant stereo window of that length."""
+        reads = []
+
+        def read(track, rate, seconds):
+            reads.append((track.path, rate, track.start, seconds))
+            return np.full((2, round(seconds * rate)), 0.25, dtype=np.float32)
+
+        monkeypatch.setattr(h3_video, "read_track", read)
+        return reads
+
+    def test_text_to_video_with_a_track_takes_the_staged_path_without_images(self, env, written, window, tmp_path):
+        H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), audio_track=self.TRACK)
+
+        assert env.loads == [] and env.calls == []
+        call = env.staged[0]
+        assert (list(call["images"]), list(call["anchors"])) == ([], [])
+        assert (call["prompt"], call["width"], call["height"], call["frames"], call["seed"]) == ("a fox", 64, 32, 22, 7)
+        assert call["track_audio"].shape == (2, round(22 / 24 * 32000))
+        assert window == [("voice.wav", 32000, 1.5, pytest.approx(22 / 24))]
+
+    def test_text_to_video_without_a_track_keeps_the_low_memory_pipeline(self, env, written, window, tmp_path):
+        H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"))
+
+        assert env.staged == [] and len(env.calls) == 1 and window == []
+
+    def test_text_to_video_with_a_track_reports_every_denoise_step(self, env, written, window, tmp_path):
+        events = []
+        H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), audio_track=self.TRACK, step_callback=events.append)
+
+        assert [(event["current_step"], event["total_steps"]) for event in events] == [(step, 8) for step in range(9)]
+
+    def test_image_to_video_passes_the_track_with_the_keyframes(self, env, written, window, tmp_path):
+        H3MlxVideoBackend().image_to_video(_load(env, mode="i2v"), _image(tmp_path / "a.png", (64, 32)), "a fox", 64, 32, 22, 7, 8, str(tmp_path / "out.mp4"), audio_track=self.TRACK)
+
+        call = env.staged[0]
+        assert (len(call["images"]), list(call["anchors"])) == (1, ["first"])
+        assert call["track_audio"].shape == (2, round(22 / 24 * 32000))
+
+    def test_extend_holds_the_last_frames_sound_then_the_track_and_writes_no_wav(self, env, written, tmp_path, monkeypatch):
+        asked = []
+
+        def waveform(source, track, *, carry_frames, extend_frames, rate):
+            asked.append((track, carry_frames, extend_frames, rate))
+            return np.full((2, round((carry_frames + extend_frames) / 24 * rate)), 0.5, dtype=np.float32)
+
+        monkeypatch.setattr(h3_video, "window_waveform", waveform)
+        segment, segment_dir, _ = _extend(env, tmp_path, written, monkeypatch, extend_frames=51, audio_track=self.TRACK)
+
+        assert asked == [(self.TRACK, 1, 51, 32000)]
+        assert env.staged[0]["track_audio"].shape == (2, round(52 / 24 * 32000))
+        assert (segment.audio_path, segment.lead_samples) == (None, 0)
+        assert not (segment_dir / "segment.wav").exists()
+        assert written.frames.shape == (51, 32, 64, 3)
+
+    def test_extend_without_a_track_still_writes_the_models_sound(self, env, written, tmp_path, monkeypatch):
+        segment, segment_dir, _ = _extend(env, tmp_path, written, monkeypatch)
+
+        assert env.staged[0]["track_audio"] is None
+        assert segment.audio_path == segment_dir / "segment.wav"
 
 
 def _make_real_source(path: Path, frames: int = 33) -> Any:

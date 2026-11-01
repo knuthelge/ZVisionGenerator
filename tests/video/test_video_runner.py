@@ -17,7 +17,7 @@ from tests.video._helpers import make_ltx_info
 
 from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import ExtendSpec
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSpec
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.video_runner import run_video_batch
@@ -742,6 +742,35 @@ class TestEndImageBatch:
 
         (request,) = requests
         assert (request.image_path, request.end_image_path) == ("/tmp/first.png", expected)
+
+
+class TestAudioTrackBatch:
+    """A track in the arguments reaches every run's request."""
+
+    def test_every_run_follows_the_same_track(self):
+        requests = []
+        workflow = MagicMock()
+        workflow.run.side_effect = lambda request, artifacts: requests.append(request) or StageOutcome.success
+        track = AudioTrack("/in/voice.mp3", 1.5)
+        args = _make_video_args(runs=3, audio_track=track, fps=24.0)
+        prompts = {"default": [("a dog", None)]}
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 10**9}}
+
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+
+        assert [request.audio_track for request in requests] == [track, track, track]
+        assert {request.fps for request in requests} == {24.0}
+
+    def test_each_finished_clip_prints_the_stretch_of_the_track_it_used(self, capsys):
+        workflow = MagicMock()
+        workflow.run.return_value = StageOutcome.success
+        args = _make_video_args(audio_track=AudioTrack("/in/music/song.mp3", 90.0), fps=24.0, num_frames=97)
+        prompts = {"default": [("a dog", None)]}
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 10**9}}
+
+        run_video_batch(_make_mock_video_backend(), MagicMock(), make_ltx_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
+
+        assert "Audio track: song.mp3 1:30.0\u20131:34.0" in capsys.readouterr().out
 
 
 class TestExtendBatch:

@@ -92,6 +92,8 @@ def ltx_memory(monkeypatch):
         monkeypatch.setitem(sys.modules, name, MagicMock())
     monkeypatch.setitem(sys.modules, "ltx_core_mlx.utils.memory", memory)
     monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.scheduler", SimpleNamespace(STAGE_2_SIGMAS=[0.9, 0.7, 0.4, 0.0]))
+    # The backend calls ``DistilledPipeline.generate_and_save`` itself, whatever pipeline class the handle holds.
+    monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.distilled", SimpleNamespace(DistilledPipeline=_FakeDistilledPipeline))
     monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.utils", MagicMock())
     monkeypatch.setitem(
         sys.modules,

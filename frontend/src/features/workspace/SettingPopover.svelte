@@ -23,6 +23,8 @@
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { sheetDrag } from '$lib/actions/sheetDrag';
   import { fly } from 'svelte/transition';
+  import AudioTrackPopover from './AudioTrackPopover.svelte';
+  import type { AudioTrackView } from './audioTrackView';
   import ImagesPopover from './ImagesPopover.svelte';
   import type { ImagesView } from './imagesView';
   import type { ChipKey } from './settingsChips';
@@ -33,6 +35,8 @@
     busy: boolean;
     /** The images view of the open tab, computed once by the Workspace. */
     images: ImagesView;
+    /** The audio track view of the open tab, computed once by the Workspace. */
+    audioTrack: AudioTrackView;
     /** The models the workflow can use, with their status. */
     models: ModelOption[];
     /** Quantization choices for the model, or null when it has none. */
@@ -45,14 +49,14 @@
     ondiscover?: () => void;
   }
 
-  let { key, context, busy, images, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
+  let { key, context, busy, images, audioTrack, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
   const defaults = $derived(settingDefaultsFor(context, { workflow: s.workflow, model: s.model }));
   const TITLES: Record<ChipKey, string> = {
     seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', seed: 'Seed', runs: 'Batch size',
-    source: 'Source video', images: 'Images', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', transparent: 'Transparent background', model: 'Model',
+    source: 'Source video', images: 'Images', track: 'Audio track', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', transparent: 'Transparent background', model: 'Model',
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
@@ -159,6 +163,11 @@
   $effect(() => {
     if (key === 'images' && !imagesVisible) onclose();
   });
+  // --- Audio track ---
+  // The popover holds the section's rows; on a model that follows no track (or in Image) it has nothing to show.
+  $effect(() => {
+    if (key === 'track' && !audioTrack.visible) onclose();
+  });
   const title = $derived(TITLES[key]);
 
   // --- Source video ---
@@ -212,7 +221,7 @@
   }
 </script>
 
-<div class="setting-popover ui-sheet" class:image-pop={key === 'images'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
+<div class="setting-popover ui-sheet" class:image-pop={key === 'images' || key === 'track'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
   <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
   <div class="ui-sheet-head" data-sheet-handle>
     <h3 class="ui-area-label">{title}</h3>
@@ -352,6 +361,8 @@
       {/if}
     {:else if key === 'images'}
       <ImagesPopover {context} {images} />
+    {:else if key === 'track'}
+      <AudioTrackPopover track={audioTrack} />
     {:else if key === 'source'}
       <div class="pop-ref">
         <span class="pop-thumb">{#if sourceThumbUrl}<video src={sourceThumbUrl} muted preload="metadata" aria-hidden="true"></video>{:else}<Icon name="film" size={20} />{/if}</span>

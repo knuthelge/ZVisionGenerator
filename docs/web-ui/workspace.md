@@ -104,6 +104,7 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 | **Size** | **Ratio**, **Resolution**, or a custom **W × H**; **Duration (s)** for video |
 | **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
 | **Images** | In Image, the **Start image** with its **Strength**, and [references](#references) (FLUX.2 Klein). In Video, a **First frame** and an optional **Last frame**. See [Images](#images) |
+| **Audio track** | In Video and Extend Video, an audio file the clip follows, with **Start at**. See [Audio track](#audio-track) |
 | **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
 | **Post-processing** | **Sharpen**, **Contrast**, **Saturation** and **Transparent** (images) |
 | **Video** | **Audio**, **Low memory** |
@@ -169,6 +170,14 @@ When the model takes [references](../concepts/images.md#references), the **Image
 - **Fewer references than you set:** the Video tab uses none, and a model that takes fewer shows and sends the first ones. The rest come back with a model that takes more.
 - **With a start image,** both apply. See [References with a start image](../concepts/images.md#references-with-a-start-image) for what to expect.
 - **Add one from an image you made:** **Use as** → **Reference** in the [Gallery or viewer](gallery.md#use-as) adds it as the next number and keeps the prompt.
+
+### Audio track
+
+The **Audio track** section comes after **Images** in **Video**, and after **Source video** in **Extend Video**. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
+
+In **Extend Video**, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. **Reset** clears the track, except one the source filled in.
+
+A server file that can't be read is refused at **Generate** with *Can't read the audio track*. An upload lost on reload blocks **Generate** with *Choose the audio track again.* On a phone, the **Track** chip opens the same rows in a popover.
 
 ### Settings are remembered
 
@@ -250,4 +259,4 @@ Finished images and videos appear in the Gallery strip, newest first. It is the 
 Some models change what the Workspace offers:
 
 - **Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no start image or upscale, so the **Images** section is hidden, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../concepts/models.md#ideogram-4-instant).
-- **Video** adds **Duration (s)**, **Audio** and **Low memory**.
+- **Video** adds **Duration (s)**, **Audio**, **Low memory** and, on models that follow one, an [**Audio track**](#audio-track).

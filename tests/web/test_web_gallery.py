@@ -629,6 +629,45 @@ def test_a_clip_without_a_last_frame_reuses_none(tmp_path):
     assert "end_image_path" not in params
 
 
+def test_a_clip_made_from_a_track_reuses_the_track_and_its_start(tmp_path):
+    payload, params = _video_reuse(tmp_path, {"workflow": "img2vid", "image_path": "/in/start.png", "audio_track_path": "/in/voice.mp3", "audio_track_start": 1.6, "audio_track_end": 6.65})
+
+    assert (params["audio_track_path"], params["audio_track_start"]) == ("/in/voice.mp3", "1.6")
+    assert (payload["audio_track_path"], payload["audio_track_start"], payload["audio_track_end"]) == ("/in/voice.mp3", 1.6, 6.65)
+
+
+def test_the_track_is_reused_without_checking_that_the_file_exists(tmp_path):
+    _payload, params = _video_reuse(tmp_path, {"audio_track_path": str(tmp_path / "gone.mp3"), "audio_track_start": 90.0})
+
+    assert (params["audio_track_path"], params["audio_track_start"]) == (str(tmp_path / "gone.mp3"), "90")
+
+
+def test_a_track_is_reused_from_the_first_frame_clip_that_falls_back_to_text(tmp_path):
+    _payload, params = _video_reuse(tmp_path, {"workflow": "img2vid", "audio_track_path": "/in/voice.mp3"})
+
+    assert params["workflow"] == "txt2vid"
+    assert (params["audio_track_path"], params["audio_track_start"]) == ("/in/voice.mp3", "0")
+
+
+def test_an_extension_reuses_the_track_it_followed(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+
+    payload, params = _video_reuse(tmp_path, _extend_config(source, audio_track_path="/in/voice.mp3", audio_track_start=5.0, audio_track_end=7.0))
+
+    assert params["workflow"] == "extend"
+    assert (params["audio_track_path"], params["audio_track_start"]) == ("/in/voice.mp3", "5")
+    assert payload["audio_track_end"] == 7.0
+
+
+def test_a_clip_without_a_track_reuses_none(tmp_path):
+    payload, params = _video_reuse(tmp_path, {"prompt": "A knight rides in."})
+
+    assert (payload["audio_track_path"], payload["audio_track_start"], payload["audio_track_end"]) == (None, None, None)
+    assert not {"audio_track_path", "audio_track_start"} & set(params)
+
+
 def test_reuse_of_a_video_leaves_quantize_to_the_model_alias(tmp_path):
     _payload, params = _video_reuse(tmp_path, {"prompt": "A knight rides in.", "generation": {"quantize": 8}})
 

@@ -3,7 +3,7 @@ import type { DraftState, EnhancedSource, EnhanceParts, EnhanceSettings, JobSett
 import { EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
-const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'end_image_path', 'source_video', 'extend_frames'] as const;
+const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'end_image_path', 'audio_track_path', 'audio_track_start', 'source_video', 'extend_frames'] as const;
 
 export interface JobSettingsPrefill {
   /** Applied like a reuse URL: workflow and model first, so their defaults load before the values. */
@@ -160,7 +160,8 @@ export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: Enha
   Object.assign(patch, outputSettingsPatch(settings, isVideo));
 
   if (isVideo) {
-    patch.audio = checked(settings, 'audio');
+    // A job that followed an audio track sent no Audio switch (the track is its sound); the switch keeps its value.
+    if (settings.audio !== undefined || settings.audio_track_path === undefined) patch.audio = checked(settings, 'audio');
     patch.lowMemory = checked(settings, 'low_memory');
     patch.videoUpscaleEnabled = settings.video_upscale_factor !== undefined;
     const factor = numberOrNull(first(settings, 'video_upscale_factor'));

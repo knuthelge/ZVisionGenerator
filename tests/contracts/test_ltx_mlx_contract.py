@@ -30,7 +30,7 @@ from ltx_core_mlx.model.video_vae.video_vae import (  # noqa: E402
 )
 from ltx_core_mlx.utils.audio import AudioData, load_audio  # noqa: E402
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions  # noqa: E402
-from ltx_pipelines_mlx import BasePipeline, DistilledPipeline  # noqa: E402
+from ltx_pipelines_mlx import A2VidDistilledPipeline, BasePipeline, DistilledPipeline  # noqa: E402
 from ltx_pipelines_mlx.distilled import ANCESTRAL_ETA, ANCESTRAL_NOISE_SEED_OFFSET, ANCESTRAL_S_NOISE, Stage1Result  # noqa: E402
 from ltx_pipelines_mlx.extend_distilled import carry_audio_tokens, fit_audio_latent  # noqa: E402
 from ltx_pipelines_mlx.retake import encode_video_tensor  # noqa: E402
@@ -41,7 +41,7 @@ from ltx_pipelines_mlx.utils.blocks import AudioConditioner, AudioDecoder, Image
 from ltx_pipelines_mlx.utils.generation import is_ltx25_pack  # noqa: E402
 from ltx_pipelines_mlx.utils.helpers import create_noised_state  # noqa: E402
 from ltx_pipelines_mlx.utils.media_io import video_preprocess  # noqa: E402
-from ltx_pipelines_mlx.utils.samplers import denoise_loop, euler_ancestral_denoising_loop  # noqa: E402
+from ltx_pipelines_mlx.utils.samplers import _ancestral_euler_denoising_loop, denoise_loop, euler_ancestral_denoising_loop  # noqa: E402
 from ltx_pipelines_mlx.utils.stepwise import StepwisePreview  # noqa: E402
 
 
@@ -72,11 +72,12 @@ def _assert_keyword_only(fn, *names: str) -> None:
 ACCEPTED_PARAMS = [
     (BasePipeline.__init__, ("model_dir", "low_memory", "low_ram_streaming", "gemma_model_id")),
     (DistilledPipeline.__init__, ("model_dir", "low_memory", "low_ram_streaming", "gemma_model_id")),
-    (DistilledPipeline.generate_and_save, ("prompt", "output_path", "height", "width", "num_frames", "stage1_steps", "image", "images")),
+    (DistilledPipeline.generate_and_save, ("prompt", "output_path", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image", "images")),
+    (A2VidDistilledPipeline.__init__, ("model_dir", "low_memory", "low_ram_streaming", "gemma_model_id")),
     (DistilledPipeline._stage1, ("prompt", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image")),
     (ImageConditioner.resolve_crf, ("images",)),
     (denoise_loop, ("model", "video_state", "audio_state", "video_text_embeds", "audio_text_embeds", "sigmas", "on_step")),
-    (create_noised_state, ("base_shape", "conditionings", "spatial_dims", "positions", "seed", "sigma", "initial_latent", "legacy_scalar_blend")),
+    (create_noised_state, ("base_shape", "conditionings", "spatial_dims", "positions", "seed", "sigma", "initial_latent", "legacy_scalar_blend", "frozen")),
     (euler_ancestral_denoising_loop, ("sigmas", "video_state", "audio_state", "stepper", "transformer", "video_text_embeds", "audio_text_embeds")),
     (compute_video_latent_shape, ("num_frames", "height", "width")),
     (compute_video_positions, ("num_frames", "height", "width", "frame_rate")),
@@ -277,6 +278,73 @@ class TestExtendShapes:
 
         assert tokens.shape == (1, 4 * 14 * 22, 128)
         assert dims == (4, 14, 22)
+
+
+class TestAudioTrackContract:
+    """Internals the macOS backend uses to follow an audio track: the audio-to-video pipeline and a frozen audio state."""
+
+    def test_the_audio_to_video_pipeline_keeps_the_stage_one_call_the_review_shim_wraps(self):
+        assert A2VidDistilledPipeline._stage1 is DistilledPipeline._stage1
+        assert A2VidDistilledPipeline.generate_two_stage is DistilledPipeline.generate_two_stage
+        assert "self._stage1(" in inspect.getsource(DistilledPipeline.generate_two_stage)
+
+    def test_the_audio_to_video_pipeline_replaces_the_audio_state_of_both_stages(self):
+        for name in ("_stage1_audio_state", "_stage2_audio_state"):
+            assert getattr(A2VidDistilledPipeline, name) is not getattr(DistilledPipeline, name)
+
+    def test_the_audio_to_video_pipeline_holds_the_track_as_source_audio_tokens_set_by_the_caller(self):
+        # The backend sets ``_source_audio_tokens`` itself and calls the parent ``generate_and_save``, which the audio-to-video one overrides.
+        assert "_source_audio_tokens" in vars(A2VidDistilledPipeline)
+        assert A2VidDistilledPipeline._source_audio_tokens is None
+        assert DistilledPipeline.generate_and_save is TI2VidTwoStagesPipeline.generate_and_save
+        assert A2VidDistilledPipeline.generate_and_save is not DistilledPipeline.generate_and_save
+
+    def test_both_stages_fall_back_to_the_generated_audio_without_source_tokens(self):
+        # ``ziv`` builds this pipeline for every upscale, so without a track it must behave as the distilled pipeline does.
+        for name in ("_stage1_audio_state", "_stage2_audio_state"):
+            source = inspect.getsource(getattr(A2VidDistilledPipeline, name))
+            assert "self._source_audio_tokens is None" in source
+            assert f"super().{name}(" in source
+
+    def test_the_frozen_state_takes_the_tokens_as_they_are_fitted_to_the_clips_audio_shape(self):
+        source = inspect.getsource(A2VidDistilledPipeline._frozen_audio_state)
+        assert "tuple(tokens.shape) != tuple(shape)" in source
+
+    def test_both_loops_condition_the_model_on_a_frozen_stream(self):
+        # The public ancestral loop hands its states to ``_ancestral_euler_denoising_loop``.
+        assert "_ancestral_euler_denoising_loop(" in inspect.getsource(euler_ancestral_denoising_loop)
+        for loop in (denoise_loop, _ancestral_euler_denoising_loop):
+            assert "_frozen_sigma_kwargs" in inspect.getsource(loop)
+
+    def test_a_frozen_audio_state_holds_its_tokens_and_denoises_nothing(self):
+        import mlx.core as mx
+
+        count = compute_audio_token_count(49, frame_rate=24.0)
+        tokens = mx.random.normal((1, count, 128))
+
+        state = create_noised_state(
+            base_shape=tokens.shape,
+            conditionings=[],
+            spatial_dims=(count, 1, 1),
+            positions=compute_audio_positions(count),
+            seed=43,
+            initial_latent=tokens,
+            frozen=True,
+        )
+
+        assert state.frozen is True
+        assert state.latent.shape == (1, count, 128)
+        assert mx.allclose(state.latent, tokens).item()
+        assert mx.allclose(state.clean_latent, tokens).item()
+        assert mx.max(mx.abs(state.denoise_mask)).item() == 0.0
+
+    def test_a_window_waveform_becomes_one_token_per_audio_step(self):
+        import mlx.core as mx
+
+        count = compute_audio_token_count(73, frame_rate=24.0)
+        for have in (count - 3, count, count + 4):
+            fitted = fit_audio_latent(mx.zeros((1, 8, have, 16)), count)
+            assert AudioPatchifier().patchify(fitted)[0].shape == (1, count, 128)
 
 
 class TestPinnedPackFilesContract:

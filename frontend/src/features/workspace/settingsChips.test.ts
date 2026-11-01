@@ -18,7 +18,7 @@ const state = {
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
   return {
     caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null, extendChanged: false,
-    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, memoryWarn: false,
+    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
     presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
   };
@@ -29,7 +29,7 @@ describe('settingsChips', () => {
     const image = pendingChips('txt2img');
     expect(image.map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
     expect(image.every((chip) => chip.value === '—' && !chip.changed)).toBe(true);
-    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'size', 'audio', 'loras', 'model']);
+    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
     expect(pendingChips('extend')[1]?.key).toBe('extendSeconds');
     expect(pendingChips('extend').map((chip) => chip.key)).not.toContain('images');
   });
@@ -48,6 +48,31 @@ describe('settingsChips', () => {
   it('puts the clip length first and audio after size for video, without the image upscale', () => {
     const caps = { ...imageCaps, isImageMode: false, showFrameCount: true, showGuidance: false, showImageUpscale: false, showAudio: true, showLowMemory: true, showVideoUpscale: true } as WorkspaceCapabilities;
     expect(settingsChips(facts({ caps, seconds: 5 })).map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'seed', 'runs', 'size', 'audio', 'loras', 'model']);
+  });
+
+  describe('the Track chip', () => {
+    const track = (f: Partial<ChipFacts>) => settingsChips(facts(f)).find((chip) => chip.key === 'track');
+    const videoCaps = { ...imageCaps, isImageMode: false, showFrameCount: true, showImageUpscale: false, showSourceVideo: false } as WorkspaceCapabilities;
+
+    it('comes right after Images, and after Source in Extend Video', () => {
+      const images: ImagesSummary = { text: 'None', tone: 'muted' };
+      const keys = (f: Partial<ChipFacts>) => settingsChips(facts({ caps: videoCaps, seconds: 5, ...f })).map((chip) => chip.key);
+
+      expect(keys({ images, track: { set: false, start: 0, gone: false } })).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'runs', 'images', 'track', 'size', 'loras', 'model']);
+      const extend = { ...videoCaps, showSourceVideo: true, showFrameCount: false } as WorkspaceCapabilities;
+      expect(settingsChips(facts({ caps: extend, track: { set: false, start: 0, gone: false } })).map((chip) => chip.key).slice(-5)).toEqual(['source', 'track', 'size', 'loras', 'model']);
+    });
+
+    it('is left out where the section is not offered', () => {
+      expect(track({ track: null })).toBeUndefined();
+    });
+
+    it('reads none unlit, on at 0, or where the clip starts, and warns when an uploaded track did not come back', () => {
+      expect(track({ track: { set: false, start: 0, gone: false } })).toMatchObject({ label: 'Track', value: 'none', on: false, warn: false });
+      expect(track({ track: { set: true, start: 0, gone: false } })).toMatchObject({ value: 'on', on: true, warn: false });
+      expect(track({ track: { set: true, start: 90, gone: false } })).toMatchObject({ value: '1:30', on: true });
+      expect(track({ track: { set: true, start: 0, gone: true } })).toMatchObject({ warn: true });
+    });
   });
 
   describe('the Images chip', () => {

@@ -222,6 +222,22 @@ def test_inspect_route_handles_a_source_without_embedded_settings(clip):
     assert payload["extend_frames"] == 48
 
 
+def test_inspect_route_reports_the_track_the_source_followed_and_where_its_sound_ended(clip):
+    clip.config = {**clip.config, "audio_track_path": "/in/voice.mp3", "audio_track_start": 1.6, "audio_track_end": 5.6}
+
+    payload = _inspect({"path": str(clip.path)}).json()
+
+    assert (payload["audio_track_path"], payload["audio_track_end"]) == ("/in/voice.mp3", 5.6)
+
+
+def test_inspect_route_reports_no_track_for_a_source_with_generated_sound(clip):
+    with_settings = _inspect({"path": str(clip.path)}).json()
+    clip.config = None
+    without_settings = _inspect({"path": str(clip.path)}).json()
+
+    assert [(payload["audio_track_path"], payload["audio_track_end"]) for payload in (with_settings, without_settings)] == [(None, None), (None, None)]
+
+
 def test_inspect_route_resolves_the_recorded_model_against_the_video_models(clip):
     clip.config = {**clip.config, "model": "some-removed-model", "lora": "/loras/style.safetensors:0.8"}
 

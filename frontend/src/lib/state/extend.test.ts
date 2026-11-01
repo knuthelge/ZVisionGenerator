@@ -11,15 +11,25 @@ import { memoryFitNote } from './memoryFit';
 
 describe('extendPrefillFor', () => {
   it('copies a recorded scene and leaves the prompt for what happens next', () => {
-    expect(extendPrefillFor(sceneSource())).toEqual({ scene: 'A woman on a rainy street.', prompt: '' });
+    expect(extendPrefillFor(sceneSource())).toEqual({ scene: 'A woman on a rainy street.', prompt: '', audioTrack: null });
   });
 
   it('puts the single prompt of a legacy source into the prompt and leaves the scene empty', () => {
-    expect(extendPrefillFor(legacySource())).toEqual({ scene: '', prompt: 'A woman stands in the rain and says "Hello".' });
+    expect(extendPrefillFor(legacySource())).toEqual({ scene: '', prompt: 'A woman stands in the rain and says "Hello".', audioTrack: null });
   });
 
   it('leaves both empty when nothing is recorded', () => {
-    expect(extendPrefillFor(sourceInfo())).toEqual({ scene: '', prompt: '' });
+    expect(extendPrefillFor(sourceInfo())).toEqual({ scene: '', prompt: '', audioTrack: null });
+  });
+
+  it('fills the audio track the source followed, starting where its sound ended', () => {
+    const source = sceneSource({ audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 });
+
+    expect(extendPrefillFor(source).audioTrack).toEqual({ path: '/audio/song.mp3', start: 6.65 });
+  });
+
+  it('has no track for a source made from generated sound', () => {
+    expect(extendPrefillFor(sceneSource({ audio_track_path: null, audio_track_end: null })).audioTrack).toBeNull();
   });
 });
 
@@ -210,7 +220,7 @@ describe('the inspect route response', () => {
 
   it('is read by the helpers that consume it', () => {
     expect(extendSourceUsable(info)).toBe(true);
-    expect(extendPrefillFor(info)).toEqual({ scene: 'A woman in a red raincoat on a rainy street at night.', prompt: '' });
+    expect(extendPrefillFor(info)).toEqual({ scene: 'A woman in a red raincoat on a rainy street at night.', prompt: '', audioTrack: null });
     expect(extendSourceFacts(info).map((fact) => fact.text)).toEqual(['512 × 256', '24 fps', '4.04 s', '97 frames', 'Audio']);
     expect(memoryFitNote(info.memory_fit, 'extension')).toBeNull();
     expect(isOriginalLegacyPrompt({ prompt: info.prompt ?? '' }, info)).toBe(false);

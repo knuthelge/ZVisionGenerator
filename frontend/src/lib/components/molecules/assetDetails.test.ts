@@ -54,4 +54,15 @@ describe('assetDetailSections', () => {
   it('leaves the last frame out of a clip without one', () => {
     expect(labels(clip({ image_path: '/in/start.png', end_image_path: null }))).not.toContain('Last frame');
   });
+
+  it('lists the audio track of a clip that followed one, with the span of the track it used', () => {
+    const generation = assetDetailSections(clip({ audio_track_path: '/music/song.mp3', audio_track_start: 90, audio_track_end: 94.2 })).generation;
+    expect(generation.find((fact) => fact.label === 'Audio track')?.value).toBe('song.mp3 · 1:30–1:34.2');
+  });
+
+  it('names only where the span starts when the track end was not recorded, and leaves the row out of other clips', () => {
+    const generation = assetDetailSections(clip({ audio_track_path: '/music/song.mp3', audio_track_start: 12, audio_track_end: null })).generation;
+    expect(generation.find((fact) => fact.label === 'Audio track')?.value).toBe('song.mp3 · from 0:12');
+    expect(labels(clip())).not.toContain('Audio track');
+  });
 });

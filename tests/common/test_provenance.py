@@ -15,7 +15,7 @@ from PIL.PngImagePlugin import PngInfo
 from tests._factories import make_extend_source
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
-from zvisiongenerator.core.video_types import ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, staging_path
 from zvisiongenerator.utils.provenance import (
     IMAGE_CONFIG_SCHEMA,
@@ -410,6 +410,31 @@ class TestBuildVideoConfigPayload:
         assert recorded_settings(both).end_image_path == "/tmp/end.png"
         assert recorded_settings(plain).end_image_path is None
 
+    def test_an_audio_track_is_recorded_with_where_its_sound_ends_and_read_back(self):
+        request = _make_video_request(num_frames=81, fps=24.0, no_audio=True, audio_track=AudioTrack("/in/voice.mp3", 1.5))
+
+        payload = build_video_config_payload(request, VideoWorkingArtifacts())
+
+        assert (payload["audio_track_path"], payload["audio_track_start"]) == ("/in/voice.mp3", 1.5)
+        assert payload["audio_track_end"] == pytest.approx(1.5 + 81 / 24)
+        assert payload["generation"]["audio"] is True
+        settings = recorded_settings(payload)
+        assert (settings.audio_track_path, settings.audio_track_start) == ("/in/voice.mp3", 1.5)
+        assert settings.audio_track_end == pytest.approx(1.5 + 81 / 24)
+
+    def test_a_clip_without_a_track_records_none_of_it(self):
+        payload = build_video_config_payload(_make_video_request(fps=24.0), VideoWorkingArtifacts())
+
+        assert not {key for key in payload if key.startswith("audio_track")}
+        settings = recorded_settings(payload)
+        assert (settings.audio_track_path, settings.audio_track_start, settings.audio_track_end) == (None, None, None)
+
+    def test_a_track_clip_with_an_unknown_frame_rate_leaves_the_end_out(self):
+        payload = build_video_config_payload(_make_video_request(audio_track=AudioTrack("/in/voice.mp3", 0.0)), VideoWorkingArtifacts())
+
+        assert "audio_track_end" not in payload
+        assert payload["audio_track_start"] == 0.0
+
     def test_enhanced_pair_payload_records_inputs_and_the_scene_apart_from_the_prompt(self):
         """Changed on purpose: an enhanced video records the user's input beside the enhanced scene so Reuse can offer both."""
         request = _make_video_request(prompt="a knight rides in", scene="A castle.")
@@ -789,6 +814,15 @@ class TestHomePathsArePortable:
         assert "/home/me" not in json.dumps(payload)
         assert payload["end_image_path"] == "~/end.png"
 
+    def test_the_audio_track_path_is_recorded_with_tilde_and_read_back_expanded(self, monkeypatch):
+        self._home(monkeypatch)
+        request = _make_video_request(audio_track=AudioTrack("/home/me/voice.mp3", 0.0))
+
+        payload = build_video_config_payload(request, VideoWorkingArtifacts())
+
+        assert payload["audio_track_path"] == "~/voice.mp3"
+        assert recorded_settings(payload).audio_track_path == str(Path("/home/me")) + "/voice.mp3"
+
     def test_recorded_settings_expand_tilde_paths(self, monkeypatch):
         self._home(monkeypatch)
         settings = recorded_settings(
@@ -845,6 +879,24 @@ class TestBuildExtendConfigPayload:
             "source_video": "/videos/clip.mp4",
             "extend_frames": 48,
         }
+
+    def test_an_extension_records_where_in_the_track_its_new_part_ends(self):
+        request = _make_extend_request(frames=48, audio_track=AudioTrack("/in/voice.mp3", 2.0))
+
+        payload = build_video_config_payload(request, VideoWorkingArtifacts())
+
+        assert (payload["audio_track_path"], payload["audio_track_start"]) == ("/in/voice.mp3", 2.0)
+        assert payload["audio_track_end"] == pytest.approx(2.0 + 48 / 24)
+        assert payload["generation"]["audio"] is True
+
+    def test_a_silent_source_with_a_track_has_sound_and_one_without_stays_silent(self):
+        silent = _make_extend_source(has_audio=False)
+
+        with_track = build_video_config_payload(_make_extend_request(silent, audio_track=AudioTrack("/in/voice.mp3", 0.0)), VideoWorkingArtifacts())
+        without = build_video_config_payload(_make_extend_request(silent), VideoWorkingArtifacts())
+
+        assert with_track["generation"]["audio"] is True
+        assert without["generation"]["audio"] is False
 
     def test_frame_count_is_the_whole_clip_not_the_window(self):
         request = _make_extend_request(frames=16)

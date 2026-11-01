@@ -106,6 +106,10 @@ class GalleryAsset:
     upscaled: bool = False
     # The image a first-and-last-frame clip ends on.
     end_image_path: str | None = None
+    # The audio file a clip followed, where in it the clip's sound started and where it ended.
+    audio_track_path: str | None = None
+    audio_track_start: float | None = None
+    audio_track_end: float | None = None
     # The references an image was made with, in prompt order.
     reference_images: tuple[str, ...] = ()
 
@@ -294,6 +298,10 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
                 reuse_params["height"] = str(asset.height)
             if asset.frame_count is not None and workflow_mode(resolved_workflow) == "video":
                 reuse_params["frames"] = str(asset.frame_count)
+        if asset.audio_track_path is not None and workflow_mode(resolved_workflow) == "video":
+            # The track of a clip or of an extension, in the tab the Reuse opens. Not checked for existence: a track that moved fails the job with its own message.
+            reuse_params["audio_track_path"] = asset.audio_track_path
+            reuse_params["audio_track_start"] = _seconds_param(asset.audio_track_start or 0.0)
         if WORKFLOW_DEFINITIONS[resolved_workflow]["requires_reference_image"] and asset.reference_image_path is not None:
             reuse_params["image_path"] = asset.reference_image_path
             # The last frame travels with its first frame, so a Reuse that falls back to text-to-video drops both.
@@ -331,6 +339,9 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "extend_frames": asset.extend_frames,
         "image_path": asset.reference_image_path,
         "end_image_path": asset.end_image_path,
+        "audio_track_path": asset.audio_track_path,
+        "audio_track_start": asset.audio_track_start,
+        "audio_track_end": asset.audio_track_end,
         "reference_images": list(asset.reference_images),
         "file_path": asset.filesystem_path,
         "seed": asset.seed,
@@ -383,6 +394,11 @@ def _extend_reuse_params(asset: GalleryAsset, *, source_missing: bool) -> dict[s
     if source_missing:
         params["missing_source_video"] = "true"
     return params
+
+
+def _seconds_param(seconds: float) -> str:
+    """Return *seconds* as a query value without trailing zeros (``1.6``, ``90``)."""
+    return f"{seconds:.6f}".rstrip("0").rstrip(".") or "0"
 
 
 def _source_video_exists(path: str | None) -> bool:
@@ -541,6 +557,9 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -
         frame_count=metadata["frame_count"],
         reference_image_path=metadata["reference_image_path"],
         end_image_path=metadata["end_image_path"],
+        audio_track_path=metadata["audio_track_path"],
+        audio_track_start=metadata["audio_track_start"],
+        audio_track_end=metadata["audio_track_end"],
         reference_images=metadata["reference_images"],
         lora=metadata["lora"],
         has_reusable_config=metadata["has_reusable_config"],
@@ -597,6 +616,9 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "frame_count": recorded.frame_count,
         "reference_image_path": recorded.image_path,
         "end_image_path": recorded.end_image_path,
+        "audio_track_path": recorded.audio_track_path,
+        "audio_track_start": recorded.audio_track_start,
+        "audio_track_end": recorded.audio_track_end,
         "reference_images": recorded.reference_images,
         "lora": recorded.lora,
         "has_reusable_config": bool(config) and not (kind == "video" and _is_orphan_upscale(recorded)),

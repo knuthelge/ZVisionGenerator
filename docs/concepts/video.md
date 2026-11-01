@@ -89,6 +89,23 @@ Sound is made together with the picture. Turn **Audio** off (`--no-audio`) for a
 
 With the [prompt enhancer](prompt-enhancer.md#sound), the **Sound** options add ambience, effects, dialogue or music, and sounds you wrote are always kept.
 
+To use a sound of your own instead, give the video an [audio track](#audio-track).
+
+## Audio track
+
+Give a video an audio file and the clip follows it: the picture is made to match the sound, and the clip's sound is exactly that track. It works for text to video, image to video and [Extend](#extending-a-video), on LTX-2.3 (`ltx-4`, `ltx-8`), LTX-2.5 (`ltx25-4`) and MiniMax H3 (`h3`). MiniMax H3 can't upscale a clip made from a track.
+
+- **Start at** is where in the track the clip's sound starts, in seconds.
+- **The clip keeps its length.** Where the track runs out, the sound is silence.
+- **The track is the sound,** so the **Audio** switch and the [enhancer's](prompt-enhancer.md#sound) **Sound** options don't apply while one is set.
+- **A clear voice syncs best,** and it should fit the face: a man's face with a woman's voice may not sync. Songs work too.
+
+### Extend with a track
+
+For a clip made from a track, Extend fills in the same file with **Start at** where that clip's sound ended, so the track carries on. This is how you cover a track longer than one clip. Clear the track for generated sound.
+
+In the [Web UI](../web-ui/workspace.md#audio-track) the track has its own section; in the [CLI](../cli/video.md#audio-track) it is `--audio-file` and `--audio-start`.
+
 ## Low memory
 
 **Low memory** (`--low-memory`) is on by default for LTX; MiniMax H3 always streams its blocks. It frees each part of the model once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk while generating, which cuts the memory held; steps are slightly slower, and about twice as slow with a LoRA. Turn it off to keep every part loaded.
@@ -143,7 +160,7 @@ Clips made by the app pass. Phone clips stored sideways with a rotation flag are
 
 ### Sound and the join
 
-Sound continues across the join: the new sound is generated from the end of the source's sound, and the join is smoothed. A silent source stays silent.
+Sound continues across the join: the new sound is generated from the end of the source's sound, and the join is smoothed. A silent source stays silent, unless the extension follows an [audio track](#extend-with-a-track).
 
 The original part is kept untouched when the new part can be attached as is, which is the case for clips the app made. Rotated clips, and clips from other tools encoded differently, are re-encoded once at high quality.
 

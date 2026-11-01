@@ -8,6 +8,7 @@
   import { heldUploads } from '$lib/state/heldUploads.svelte';
   import type { WorkspaceContext } from '$lib/types';
   import ComposePane from './ComposePane.svelte';
+  import type { AudioTrackView } from './audioTrackView';
   import type { ImagesView } from './imagesView';
   import SettingsPane from './SettingsPane.svelte';
 
@@ -24,6 +25,8 @@
     lastSeed?: number | null;
     /** The images view of the open tab, computed once by the Workspace; null before the context answers. */
     images: ImagesView | null;
+    /** The audio track view of the open tab, computed once by the Workspace; null before the context answers. */
+    audioTrack: AudioTrackView | null;
     /** Copy the CLI command for the current settings. */
     oncopycli?: () => void;
     /** Portrait tablet: Compose and Settings sit side by side under the stage, and the sidebar never collapses. */
@@ -35,7 +38,7 @@
     onsettingsdone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, lastSeed = null, images, oncopycli, tall = false, panes = 'both', settingsSubmit = true, onsettingsdone }: Props = $props();
+  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, lastSeed = null, images, audioTrack, oncopycli, tall = false, panes = 'both', settingsSubmit = true, onsettingsdone }: Props = $props();
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   // The panes wait for the held uploads to be read back, as the page does: a lost upload cannot be told from one still coming.
   const authorityReady = $derived(context !== null && draft.authorityReady && heldUploads.restored);
@@ -44,7 +47,8 @@
   // An extension waits for a source it can read; the strip's Generate follows the same rule as the footer's.
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendModelSupport(context, draft.state.model)));
   const imageBlock = $derived(images?.block ?? null);
-  const blockNote = $derived(sourceGuard.note ?? imageBlock);
+  const trackBlock = $derived(audioTrack?.block ?? null);
+  const blockNote = $derived(sourceGuard.note ?? imageBlock ?? trackBlock);
   const stripTitle = $derived(block.waiting ? `Waiting for ${block.waiting.name}` : block.failures[0] ? `${generateLabel}: ${block.failures[0].name} didn't download` : blockNote ? `${generateLabel}: ${blockNote.charAt(0).toLowerCase()}${blockNote.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
 
   function setCollapsed(value: boolean): void {
@@ -56,11 +60,11 @@
      in the DOM (hidden) because their fields belong to the generate form; a narrow strip takes their place. -->
 <aside id="ws-controls-sidebar" class="workspace-left ui-pane ui-pane-left" class:collapsed class:tall aria-label="Compose and settings">
   <div class="sidebar-panes">
-    {#if authorityReady && context && images}
+    {#if authorityReady && context && images && audioTrack}
       {#if panes === 'both'}
         <ComposePane {context} {busy} {images} {jobsActive} oncollapse={tall ? undefined : () => setCollapsed(true)} />
       {/if}
-      <SettingsPane {context} {busy} {jobsActive} {submitError} {lastSeed} {images} {oncopycli} submit={settingsSubmit} ondone={onsettingsdone} />
+      <SettingsPane {context} {busy} {jobsActive} {submitError} {lastSeed} {images} {audioTrack} {oncopycli} submit={settingsSubmit} ondone={onsettingsdone} />
     {:else}
       <div class="flex-1 overflow-y-auto p-3">
         <p class="flex items-center gap-2 text-ui text-text-muted" role="status"><Spinner size="sm" />Loading settings…</p>
@@ -94,7 +98,7 @@
           class="strip-generate"
           aria-label={generateLabel}
           title={stripTitle}
-          disabled={busy || !authorityReady || sourceGuard.blocked || imageBlock !== null || block.blocked}
+          disabled={busy || !authorityReady || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked}
         >
           <Icon name="bolt" size={18} />
         </button>

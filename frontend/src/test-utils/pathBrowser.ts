@@ -9,6 +9,7 @@ const PURPOSES: Record<BrowsePurposeName, Omit<BrowsePurpose, 'name'>> = {
   lora_file: { kind: 'existing_file', label: 'LoRA file', accepted_extensions: ['.safetensors'] },
   source_video: { kind: 'existing_file', label: 'Source video', accepted_extensions: ['.mp4'] },
   reference_image: { kind: 'existing_file', label: 'Reference image', accepted_extensions: ['.png', '.jpg', '.jpeg', '.webp'] },
+  audio_track: { kind: 'existing_file', label: 'Audio track', accepted_extensions: ['.wav', '.mp3', '.m4a', '.flac', '.ogg'] },
 };
 
 /** Return what `/api/browse/places` answers for *purpose*, with no places. */

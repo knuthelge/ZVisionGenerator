@@ -20,6 +20,7 @@ import { workspaceMemory } from '$lib/state/pageMemory';
 
 import WorkspacePage from './WorkspacePage.svelte';
 import ControlsSidebar from './ControlsSidebar.svelte';
+import { currentAudioTrackView } from './audioTrackView';
 import { currentImagesView } from './imagesView';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
@@ -2046,7 +2047,7 @@ describe('WorkspacePage', () => {
       target,
       props: {
         context,
-        get images() { return currentImagesView(context); },
+        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); },
         busy: false,
       },
     }));
@@ -2138,7 +2139,7 @@ describe('WorkspacePage', () => {
       target,
       props: {
         context,
-        get images() { return currentImagesView(context); },
+        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); },
         busy: false,
       },
     }));
@@ -3342,7 +3343,7 @@ describe('WorkspacePage', () => {
     const firstFile = new File(['first-image'], 'first.png', { type: 'image/png' });
     const secondFile = new File(['second-image'], 'second.png', { type: 'image/png' });
     draft.setStartImage('image', { file: firstFile }, context);
-    app = flushSync(() => mount(ControlsSidebar, { target, props: { context, get images() { return currentImagesView(context); }, busy: false } }));
+    app = flushSync(() => mount(ControlsSidebar, { target, props: { context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false } }));
     await settle();
 
     draft.setStartImage('image', { file: secondFile }, context);

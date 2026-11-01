@@ -39,6 +39,9 @@ PROMPT_FILE_CONTRACT = {
 # The controls of the last-frame slot. Only a family that declares ``end_frame`` offers them.
 END_FRAME_CONTROLS = ("end_image", "end_image_path", "end_image_clear")
 
+# The controls of the Audio track section. Only a family that declares ``audio_track`` offers them.
+AUDIO_TRACK_CONTROLS = ("audio_track", "audio_track_path", "audio_track_start")
+
 WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     "txt2img": {
         "mode": "image",
@@ -153,6 +156,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "reference_image_path",
             "reference_image_clear",
             *END_FRAME_CONTROLS,
+            *AUDIO_TRACK_CONTROLS,
             "ratio",
             "size",
             "custom_dimensions",
@@ -207,6 +211,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "reference_image_path",
             "reference_image_clear",
             *END_FRAME_CONTROLS,
+            *AUDIO_TRACK_CONTROLS,
             "ratio",
             "size",
             "custom_dimensions",
@@ -261,6 +266,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "source_video_path",
             "source_video_clear",
             "extend_length",
+            *AUDIO_TRACK_CONTROLS,
             "runs",
             "steps",
             "seed",
@@ -305,6 +311,7 @@ _CONTROLS_WITHOUT_CAPABILITY = {
     "low_memory": ("low_memory",),
     "audio": ("audio",),
     "end_frame": END_FRAME_CONTROLS,
+    "audio_track": AUDIO_TRACK_CONTROLS,
 }
 
 

@@ -9,7 +9,7 @@ import { jobStore } from '$lib/state/job.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { JobSnapshot, RecentPrompt, WorkflowMode, WorkspaceContext } from '$lib/types';
-import { makeContext, makeIdeogramDefaults, makeImageDefaults } from '../../test-utils/workspace';
+import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 
 vi.mock('$lib/state/layoutMode.svelte', () => ({
   layout: { compact: true, mode: 'compact', coarse: true },
@@ -77,7 +77,7 @@ describe('WorkspacePage on a phone', () => {
     expect(strip).not.toBeNull();
     expect(strip!.getAttribute('aria-busy')).toBe('true');
     const chips = Array.from(strip!.querySelectorAll<HTMLButtonElement>('[data-chip]'));
-    expect(chips.map((chip) => chip.dataset.chip)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'size', 'audio', 'loras', 'model']);
+    expect(chips.map((chip) => chip.dataset.chip)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
     expect(chips.every((chip) => chip.disabled)).toBe(true);
     expect((strip!.querySelector('[aria-label="All settings"]') as HTMLButtonElement).disabled).toBe(true);
 
@@ -178,6 +178,88 @@ describe('WorkspacePage on a phone', () => {
       const sheet = document.querySelector('[data-testid="sheet"]')!;
       expect(sheet.querySelector('#ws-pp-transparent')).not.toBeNull();
       expect(sheet.querySelector('[data-testid="transparent-terms"] .ui-badge')).not.toBeNull();
+    });
+  });
+
+  describe('the Track chip', () => {
+    const chip = () => target.querySelector('[data-chip="track"]') as HTMLButtonElement | null;
+    const chipKeys = () => Array.from(target.querySelectorAll<HTMLElement>('[data-chip]')).map((el) => el.dataset.chip);
+    const popover = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement | null;
+
+    beforeEach(() => {
+      Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    });
+
+    afterEach(() => {
+      delete (Element.prototype as Partial<Element>).animate;
+    });
+
+    async function mountVideo(workflow: 'txt2vid' | 'extend' = 'txt2vid'): Promise<WorkspaceContext> {
+      const context = makeContext();
+      draft.patch({ workflow, model: 'ltx-8' });
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+      return context;
+    }
+
+    it('drops the Audio chip while a track is set, when nothing else is left in it', async () => {
+      const context = makeContext();
+      context.video_model_defaults = { 'ltx-8': makeVideoDefaults({ hidden_controls: ['low_memory', 'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'] }) };
+      draft.patch({ workflow: 'txt2vid', model: 'ltx-8' });
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+      expect(chipKeys()).toContain('audio');
+
+      draft.setAudioTrack('video', { path: '/audio/song.mp3' });
+      await settle();
+
+      expect(chipKeys()).not.toContain('audio');
+    });
+
+    it('opens a popover with the file row, the sources, the path field and Start at', async () => {
+      await mountVideo();
+      draft.setAudioTrack('video', { path: '/audio/song.mp3' });
+      await settle();
+
+      chip()!.click();
+      await settle();
+
+      expect(popover()!.getAttribute('data-key')).toBe('track');
+      expect(popover()!.getAttribute('aria-label')).toBe('Audio track');
+      expect((popover()!.querySelector('#ws-pop-track-path') as HTMLInputElement).value).toBe('/audio/song.mp3');
+
+      const start = popover()!.querySelector('input[aria-label="Start at, in seconds"]') as HTMLInputElement;
+      start.value = '90';
+      start.dispatchEvent(new Event('input', { bubbles: true }));
+      await settle();
+      expect(draft.state.audioTrackStart).toBe(90);
+      expect(popover()!.textContent).toContain('90 → 1:30');
+    });
+
+    it('takes a device file and a typed path through the popover, and clears with ×', async () => {
+      await mountVideo();
+      chip()!.click();
+      await settle();
+
+      const input = popover()!.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = new File(['audio'], 'memo.m4a', { type: 'audio/mp4' });
+      Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await settle();
+      expect(draft.state).toMatchObject({ audioTrackUpload: 'memo.m4a', audioTrackPath: null });
+
+      const path = popover()!.querySelector('#ws-pop-track-path') as HTMLInputElement;
+      path.value = '/audio/typed.mp3';
+      path.dispatchEvent(new Event('input', { bubbles: true }));
+      path.dispatchEvent(new Event('change', { bubbles: true }));
+      await settle();
+      expect(draft.state).toMatchObject({ audioTrackUpload: null, audioTrackPath: '/audio/typed.mp3' });
+
+      (popover()!.querySelector('button[aria-label="Clear audio track"]') as HTMLButtonElement).click();
+      await settle();
+      expect(draft.state).toMatchObject({ audioTrackUpload: null, audioTrackPath: null });
     });
   });
 

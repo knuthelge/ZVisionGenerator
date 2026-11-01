@@ -8,7 +8,7 @@ describe('uploadStore', () => {
 
   it('memoryUploadStore round-trips and deletes a tab record', async () => {
     const store = memoryUploadStore();
-    const record: TabUploads = { start: file('start.png'), end: null, references: [file('ref.png'), null] };
+    const record: TabUploads = { start: file('start.png'), end: null, references: [file('ref.png'), null], track: null };
 
     expect(await store.get('image')).toBeNull();
     await store.put('image', record);
@@ -22,7 +22,7 @@ describe('uploadStore', () => {
   it('defaultUploadStore falls back to memory without indexedDB', async () => {
     vi.stubGlobal('indexedDB', undefined);
     const store = defaultUploadStore();
-    const record: TabUploads = { start: file('first.png'), end: file('last.png'), references: [] };
+    const record: TabUploads = { start: file('first.png'), end: file('last.png'), references: [], track: null };
 
     await store.put('video', record);
     expect(await store.get('video')).toEqual(record);
@@ -39,7 +39,7 @@ describe('uploadStore', () => {
     const store = indexedDbUploadStore(factory);
 
     expect(await store.get('image')).toBeNull();
-    await expect(store.put('image', { start: file('a.png'), end: null, references: [] })).resolves.toBeUndefined();
+    await expect(store.put('image', { start: file('a.png'), end: null, references: [], track: null })).resolves.toBeUndefined();
     await expect(store.delete('image')).resolves.toBeUndefined();
   });
 
@@ -98,7 +98,7 @@ describe('uploadStore', () => {
   it('indexedDbUploadStore round-trips and deletes a tab record through the database', async () => {
     const records = new Map<string, unknown>();
     const store = indexedDbUploadStore(fakeFactory(records));
-    const record: TabUploads = { start: file('first.png'), end: file('last.png'), references: [] };
+    const record: TabUploads = { start: file('first.png'), end: file('last.png'), references: [], track: null };
 
     expect(await store.get('video')).toBeNull();
     await store.put('video', record);
@@ -115,14 +115,14 @@ describe('uploadStore', () => {
     const records = new Map<string, unknown>([['image', { start: 'not a file', end: 3, references: [file('ref.png'), 'x', null] }]]);
     const stored = await indexedDbUploadStore(fakeFactory(records)).get('image');
 
-    expect(stored).toEqual({ start: null, end: null, references: [file('ref.png'), null, null] });
+    expect(stored).toEqual({ start: null, end: null, references: [file('ref.png'), null, null], track: null });
   });
 
   it('an aborted transaction resolves get to null and lets put and delete settle', async () => {
     const store = indexedDbUploadStore(fakeFactory(new Map(), { failTransaction: true }));
 
     expect(await store.get('image')).toBeNull();
-    await expect(store.put('image', { start: file('a.png'), end: null, references: [] })).resolves.toBeUndefined();
+    await expect(store.put('image', { start: file('a.png'), end: null, references: [], track: null })).resolves.toBeUndefined();
     await expect(store.delete('image')).resolves.toBeUndefined();
   });
 });

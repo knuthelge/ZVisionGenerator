@@ -47,7 +47,7 @@ zvisiongenerator/
 │   │   │   ├── moss_sampler.py    MOSS-Image denoising loop, prompt encoding and latent helpers (mirrors the vendored pipeline)
 │   │   │   └── preview.py         Cheap latent → RGB live previews
 │   │   └── video/
-│   │       ├── audio_carry.py     Pin a clip's last sound at the start of an extension window
+│   │       ├── audio_carry.py     Pin a clip's last sound at the start of an extension window, or hold a whole audio track
 │   │       ├── backend.py         LTX video backend
 │   │       ├── converted.py       Write a converted LTX-2.3 or LTX-2.5 folder from a single-file checkpoint
 │   │       ├── encode.py          Write frames and audio to MP4 with PyAV (H.264 CRF 18, AAC)
@@ -143,6 +143,7 @@ zvisiongenerator/
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
 │   ├── audio_resample.py          Polyphase resampling of multi-channel audio
+│   ├── audio_track.py             Read a user's audio track and build the window sound of an extension
 │   ├── color_names.py             Plain colour names for hex codes (nearest by OKLab), for Palette Custom
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting

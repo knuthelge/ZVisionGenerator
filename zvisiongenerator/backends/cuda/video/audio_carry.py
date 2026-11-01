@@ -5,6 +5,9 @@ cannot be held. :func:`pin_audio_prefix` does it around the pipeline call, as LT
 the transformer sees the carried audio tokens clean, at timestep 0, on every step, and :func:`restore_audio_prefix`
 puts the clean tokens back into the result before it is decoded.
 
+:func:`pin_audio_track` holds a whole user track instead: every audio token is clean at timestep 0 and audio sigma 0 on
+every step, so the video is generated against that sound and the model's own audio is left to follow it.
+
 The carried sound is encoded the way the MLX pipeline encodes it: a log-mel spectrogram of the stereo waveform
 at the audio VAE's sample rate (torchaudio ``MelSpectrogram`` settings: Hann window, centred reflect padding,
 magnitude, Slaney mel scale and norm), through the audio VAE encoder's mean.
@@ -21,7 +24,7 @@ if TYPE_CHECKING:
     import numpy as np
     import torch
 
-__all__ = ["AudioCarry", "encode_audio_carry", "log_mel", "pin_audio_prefix", "restore_audio_prefix", "slaney_mel_basis"]
+__all__ = ["AudioCarry", "encode_audio_carry", "log_mel", "pin_audio_prefix", "pin_audio_track", "restore_audio_prefix", "slaney_mel_basis"]
 
 _N_FFT = 1024
 _LOG_FLOOR = 1e-5
@@ -118,6 +121,52 @@ def pin_audio_prefix(transformer: Any, carry: AudioCarry) -> Iterator[None]:
         per_token = timestep.reshape(-1, 1).expand(audio.shape[0], audio.shape[1]).clone() if timestep.ndim < 2 else timestep.clone()
         per_token[:, :count] = 0
         return args, {**kwargs, "audio_hidden_states": audio, "audio_timestep": per_token}
+
+    handle = transformer.register_forward_pre_hook(_hook, with_kwargs=True)
+    try:
+        yield
+    finally:
+        handle.remove()
+
+
+@contextmanager
+def pin_audio_track(transformer: Any, tokens: torch.Tensor) -> Iterator[None]:
+    """Make every forward pass of *transformer* see a whole audio track clean: its tokens, a per-token timestep of 0 and an audio sigma of 0.
+
+    Unlike :func:`pin_audio_prefix` the hold does not depend on what the pipeline passes. ``LTX2Pipeline`` passes no
+    ``audio_timestep`` and the others pass one per sample, so the per-token timestep is always set; every pipeline passes
+    ``sigma``, which the transformer uses for the audio sigma when none is given, so the audio sigma is set from it.
+
+    Args:
+        transformer: The transformer to hook.
+        tokens: The track packed and normalized as the denoiser sees it, shape ``(1, tokens, channels)``.
+
+    Raises:
+        RuntimeError: From a forward pass whose audio has another token count than *tokens*.
+    """
+    import torch
+
+    def _hook(_module: Any, args: Any, kwargs: dict[str, Any]) -> Any:
+        audio = kwargs.get("audio_hidden_states")
+        if audio is None:
+            return None
+        batch, count = audio.shape[0], audio.shape[1]
+        if tokens.shape[1] != count:
+            raise RuntimeError(f"The audio track holds {tokens.shape[1]} tokens but the clip's sound has {count}.")
+        reference = kwargs.get("audio_timestep")
+        if reference is None:
+            reference = kwargs["timestep"]
+        updated = {
+            **kwargs,
+            "audio_hidden_states": tokens.to(device=audio.device, dtype=audio.dtype).expand(batch, -1, -1).clone(),
+            "audio_timestep": torch.zeros((batch, count), device=audio.device, dtype=reference.dtype),
+        }
+        sigma = kwargs.get("audio_sigma")
+        if sigma is None:
+            sigma = kwargs.get("sigma")
+        if sigma is not None:
+            updated["audio_sigma"] = torch.zeros_like(sigma)
+        return args, updated
 
     handle = transformer.register_forward_pre_hook(_hook, with_kwargs=True)
     try:

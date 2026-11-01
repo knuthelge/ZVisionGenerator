@@ -15,6 +15,8 @@
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
   import { TRANSPARENT_TERMS } from './transparent';
+  import AudioTrackSection from './AudioTrackSection.svelte';
+  import type { AudioTrackView } from './audioTrackView';
   import ImagesSection from './ImagesSection.svelte';
   import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
@@ -33,6 +35,8 @@
     lastSeed: number | null;
     /** The images view of the open tab, computed once by the Workspace: Generate waits while an image the run uses is gone. */
     images: ImagesView;
+    /** The audio track view of the open tab, computed once by the Workspace: Generate waits while an uploaded track is gone. */
+    audioTrack: AudioTrackView;
     /** Copy the CLI command for the current settings; the button is hidden without it. */
     oncopycli?: () => void;
     /** Off: the footer closes the pane (`ondone`) instead of generating, where another button owns Generate. */
@@ -40,7 +44,7 @@
     ondone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, submitError = null, lastSeed, images, oncopycli, submit = true, ondone }: Props = $props();
+  let { context, busy, jobsActive = false, submitError = null, lastSeed, images, audioTrack, oncopycli, submit = true, ondone }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -176,7 +180,7 @@
   const videoUpscaleReviewOn = $derived(caps.showVideoUpscaleReview && s.videoUpscaleEnabled && s.videoUpscaleReview);
   const videoSummary = $derived(
     [
-      s.audio && !silentSource ? 'Audio' : null,
+      s.audio && !silentSource && !caps.audioTrackInEffect ? 'Audio' : null,
       caps.showLowMemory && s.lowMemory ? 'Low memory' : null,
       caps.showVideoUpscale && s.videoUpscaleEnabled ? `${s.videoUpscaleFactor}× upscale` : null,
       videoUpscaleReviewOn ? 'Review' : null,
@@ -197,9 +201,10 @@
   const block = $derived(generateBlock(s.loraString, context.loras));
   const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : null);
   const imageBlock = $derived(images.block);
-  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || block.blocked);
-  // One reason at a time, linked to Generate: the source comes first, then the images, then the prompt file.
-  const generateReason = $derived(sourceGuard.note ?? imageBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
+  const trackBlock = $derived(audioTrack.block);
+  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked);
+  // One reason at a time, linked to Generate: the source comes first, then the images, the audio track, then the prompt file.
+  const generateReason = $derived(sourceGuard.note ?? imageBlock ?? trackBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
 
   function resetAll(): void {
     draft.resetSelections(context);
@@ -241,6 +246,11 @@
   <div class="settings-scroll">
     {#if caps.showSourceVideo}
       <SourceVideoSection {context} {busy} guard={sourceGuard} />
+    {/if}
+
+    <!-- Extend Video has no Images section: its track follows the source, as the phone's chips do. In Video it follows Images. -->
+    {#if audioTrack.tab === 'extend'}
+      <AudioTrackSection track={audioTrack} />
     {/if}
 
     {#if caps.showDimensions}
@@ -363,6 +373,10 @@
     </InspectorSection>
 
     <ImagesSection {context} {images} {busy} />
+
+    {#if audioTrack.tab !== 'extend'}
+      <AudioTrackSection track={audioTrack} />
+    {/if}
 
     {#if showPostprocess}
       <InspectorSection id="postprocess" title="Post-processing" summary={postprocessOn ? `${postprocessOn} on` : 'Off'} active={postprocessOn > 0}>
