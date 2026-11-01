@@ -1,6 +1,6 @@
 # Vendored packages
 
-Four upstream projects are copied into `packages/` because they are not on PyPI in a form we can depend on. Never edit them by hand; update them with the make targets below.
+Five upstream projects are copied into `packages/` because they are not on PyPI in a form we can depend on. Never edit them by hand; update them with the make targets below.
 
 ## LTX (MLX)
 
@@ -56,3 +56,12 @@ Four upstream projects are copied into `packages/` because they are not on PyPI 
 - **Layout.** `make update-moss` downloads `pipeline_moss_image.py` and `LICENSE` from that revision, unchanged, and writes its own `__init__.py` naming the repository and revision. The folder is imported as the top-level package `moss_image`.
 - **Update.** It does not carry dependencies: the pipeline needs only `torch`, `diffusers` and `transformers`, which are already ours. Check that those versions still import it.
 - **Internals we rely on.** `tests/contracts/test_moss_contract.py` reads the source as a syntax tree and pins the classes `MOSSImageTransformer`, `MOSSImageScheduler`, `MOSSImagePipeline` and `_Block`; the transformer's constructor parameters and defaults and its `forward` signature; the `_Block.proj` keys; `MOSSImageScheduler.set_timesteps(num_inference_steps, device)`; the pipeline's constructor, the `__call__` keywords the backend passes, and `encode_prompt(prompt, max_sequence_length)` together with the `self` attributes it reads (`tokenizer`, `text_encoder` and `_execution_device`), because the backend runs it on a namespace that supplies only those. Several Linears (`layers.*.proj.q`, `text_embedder.proj`, `video_embedder`, `time_embedding.0`, `shared_block_modulation`, `video_head_modulation` and `final_linear_video`) read `weight.dtype` to choose the dtype of the activations, so quantized storage there corrupts them and they stay in the compute dtype. One import check proves the file loads against the installed `diffusers` and `transformers`.
+
+## BiRefNet
+
+`packages/birefnet` holds the model code of [`ZhengPeng7/BiRefNet`](https://huggingface.co/ZhengPeng7/BiRefNet) (MIT), which the background removal chain builds its mask network from. Upstream ships it as files in a model repository, not as a package, so it lives in the repository. Never edit it by hand.
+
+- **Pin.** `BIREFNET_REVISION` in the `Makefile` names the vendored revision and the comment above it names the branch and date. `BIREFNET` in `utils/matte_models.py` pins the weights to the same commit, so the weights are the ones the code was written for. `tests/contracts/test_birefnet_contract.py` checks the `Makefile` revision against the generated `__init__.py` and against `utils/matte_models.BIREFNET`.
+- **Layout.** `make update-birefnet` downloads `birefnet.py` and `BiRefNet_config.py` from that revision, unchanged, and writes its own `__init__.py` naming the repository and revision. Upstream ships no license file, so none is copied; `THIRD_PARTY_LICENSES.md` cites the model card. The folder is imported as the top-level package `birefnet`.
+- **Update.** It does not carry dependencies: the code imports `timm`, `kornia`, `einops` and `torchvision` besides `torch` and `transformers`, which are listed for every platform in `pyproject.toml`. Check that those versions still import it.
+- **Internals we rely on.** `tests/contracts/test_birefnet_contract.py` reads the source as a syntax tree and pins the classes `BiRefNet` (a `PreTrainedModel`, defined once), `BiRefNetConfig` (which takes `bb_pretrained`, and whose `model_type` is `SegformerForSemanticSegmentation`, so it is never resolved through `AutoConfig`) and `DeformableConv2d`; the constructor parameters of `DeformableConv2d`, its `offset_conv`, `modulator_conv` and `regular_conv` layers, the integer `padding` it stores and the `2 * sigmoid` modulator in its `forward`, all of which the `grid_sample` replacement of `deform_conv2d` relies on; and that `Decoder` is defined twice, with the later definition the one in use. One import check proves the file loads against the installed packages.

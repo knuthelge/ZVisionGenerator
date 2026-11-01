@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.built_model import is_foreign_folder
 from zvisiongenerator.utils.ideogram4_instant import COMPONENT_PATTERNS, instant_downloads_dir, instant_source, is_built, is_instant_dir
+from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.utils.moss_build import SFT_IGNORE, SFT_PATTERNS, is_moss_dir, is_turbo_dir, moss_source
 from zvisiongenerator.utils.moss_build import is_built as is_moss_built
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
@@ -22,7 +23,7 @@ from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 if TYPE_CHECKING:
     from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
 
-__all__ = ["built_model_plan", "enhancer_plan", "image_plan", "seedvr2_plan", "video_model_downloaded", "video_plan"]
+__all__ = ["built_model_plan", "enhancer_plan", "image_plan", "matte_plan", "seedvr2_plan", "video_model_downloaded", "video_plan"]
 
 
 def image_plan(model_ref: str, *, family: str, config: dict[str, Any] | None, platform_key: str) -> tuple[DownloadTarget, ...] | None:
@@ -186,6 +187,11 @@ def enhancer_plan(repo: str, revision: str | None) -> tuple[DownloadTarget, ...]
     from zvisiongenerator import backends
 
     return backends.enhancer_download_plan(repo, revision)
+
+
+def matte_plan() -> tuple[DownloadTarget, ...] | None:
+    """Return the two pinned targets the background removal chain needs (BiRefNet, then ViTMatte), or ``None`` when offline."""
+    return _offline_as_none(lambda: tuple(DownloadTarget(pin.repo_id, pin.revision, pin.files) for pin in (BIREFNET, VITMATTE)))
 
 
 def _offline_as_none(plan: Callable[[], tuple[DownloadTarget, ...]]) -> tuple[DownloadTarget, ...] | None:

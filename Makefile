@@ -124,6 +124,20 @@ update-moss: ## Update vendored moss_image pipeline (MOSS-Image on Windows/Linux
 	printf '"""MOSS-Image pipeline vendored from OpenMOSS-Team/MOSS-Image-SFT at revision %s."""\n' $(MOSS_REVISION) > packages/moss_image/__init__.py
 	@echo "✓ Vendored moss_image updated to $(MOSS_REVISION)"
 
+BIREFNET_REPO     ?= https://huggingface.co/ZhengPeng7/BiRefNet
+# main (2026-02-04)
+BIREFNET_REVISION ?= e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4
+
+.PHONY: update-birefnet
+
+update-birefnet: ## Update vendored birefnet model code (background removal)
+	rm -rf packages/birefnet
+	mkdir -p packages/birefnet
+	curl -fsSL -o packages/birefnet/birefnet.py $(BIREFNET_REPO)/resolve/$(BIREFNET_REVISION)/birefnet.py
+	curl -fsSL -o packages/birefnet/BiRefNet_config.py $(BIREFNET_REPO)/resolve/$(BIREFNET_REVISION)/BiRefNet_config.py
+	printf '"""BiRefNet model code vendored from ZhengPeng7/BiRefNet at revision %s."""\n' $(BIREFNET_REVISION) > packages/birefnet/__init__.py
+	@echo "✓ Vendored birefnet updated to $(BIREFNET_REVISION)"
+
 # ——— Frontend ————————————————————————————————————————————
 
 .PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-hover-check frontend-test frontend-dev

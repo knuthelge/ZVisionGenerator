@@ -46,6 +46,12 @@ The MOSS-Image pipeline (`packages/moss_image`, used on Windows and Linux) is ve
 
 Licensed under the Apache License, Version 2.0. The full license text ships with the vendored code as `packages/moss_image/LICENSE`, and at http://www.apache.org/licenses/LICENSE-2.0.
 
+## birefnet
+
+The BiRefNet model code (`packages/birefnet`, used for background removal) is vendored unchanged from [ZhengPeng7/BiRefNet](https://huggingface.co/ZhengPeng7/BiRefNet) at revision e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4.
+
+Licensed under the MIT License, which the model card of the upstream repository declares. The repository ships no license file, so none is vendored.
+
 ## MiniMax H3 latent upscaler (network code)
 
 The network code of the MiniMax H3 upscale (`zvisiongenerator/backends/cuda/video/h3/latent_upsampler.py`, used on Windows and Linux) is ported from [LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) (`nodes/minimax_h3_latent_upscaler_3d.py`), matching upstream commit 98934c0b5f4a213323c4d1d0e47eb3d2f27cb743, without its ComfyUI node code.
