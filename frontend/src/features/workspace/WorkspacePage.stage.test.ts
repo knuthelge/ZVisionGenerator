@@ -765,7 +765,7 @@ describe('WorkspacePage extend', () => {
         { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] },
         { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action', description: '', group: null }], default: ['action'] },
       ],
-      defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: ['action'], sound: [], note: '' },
+      defaults: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: ['action'], sound: [], note: '' },
     },
     model: 'owner/llm',
     revision: null,

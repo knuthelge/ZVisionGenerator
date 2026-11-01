@@ -1379,6 +1379,40 @@ describe('WorkspacePage', () => {
       expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ enhance_model: 'smart' });
     });
 
+    it('pins the Enhancer choice and the first-use hint with the run button in the popover footer', async () => {
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceModel', 'smart');
+      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      const run = await openEnhanceRun();
+      const foot = document.querySelector('#ws-enhance-panel .enhance-popover-foot');
+      expect(foot?.contains(run)).toBe(true);
+      expect(foot?.querySelector('[data-choice="smart"]')).not.toBeNull();
+      expect(foot?.textContent).toContain('First use downloads ≈19 GB.');
+      expect(document.querySelector('#ws-enhance-panel .enhance-body')?.querySelector('[data-choice="smart"]')).toBeNull();
+    });
+
+    it('keeps the Enhancer choice in a footer without a run button when auto-enhance is on', async () => {
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceAuto', true);
+      await mountWorkspace(ideoEnhancerContext({ download_size_label: null, unavailable: null }));
+      await openEnhanceRun();
+      const foot = document.querySelector('#ws-enhance-panel .enhance-popover-foot');
+      expect(foot?.querySelector('[data-choice="smart"]')).not.toBeNull();
+      expect(foot?.querySelector('#ws-enhance-run')).toBeNull();
+    });
+
+    it('puts the Enhancer choice and the hint in the sheet footer on a phone', async () => {
+      layoutProbe.compact = true;
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceModel', 'smart');
+      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      await openEnhanceRun();
+      const foot = document.querySelector('.sheet-foot');
+      expect(foot?.querySelector('[data-choice="smart"]')).not.toBeNull();
+      expect(foot?.textContent).toContain('First use downloads ≈19 GB.');
+      expect(document.querySelector('#ws-enhance-panel [data-choice="smart"]')).toBeNull();
+    });
+
     it('sends the enhancer and format with an auto-enhance job', async () => {
       draft.update('prompt', 'a fox');
       draft.update('enhanceAuto', true);
@@ -1431,14 +1465,14 @@ describe('WorkspacePage', () => {
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'Ignored while auto-enhancing.');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: ['action'], sound: [], note: '' });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: ['action'], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
 
     expect((target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement).disabled).toBe(true);
     const submitted = await submitForm(target);
     expect(submitted.get('prompt')).toBe('a fox');
     expect(submitted.get('enhance_auto')).toBe('true');
-    expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', mood: 'keep', theme: 'keep', details: [], length: 'longer' });
+    expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], details: [], length: 'longer' });
   });
 
   it('copies the CLI command for what Generate would submit, without submitting', async () => {
@@ -1461,7 +1495,7 @@ describe('WorkspacePage', () => {
   });
 
   it('resets the options of the current mode only, and offers Reset only when something is picked', async () => {
-    const video = { style: 'cinematic', mood: 'keep', theme: 'keep', camera: 'orbit', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+    const video = { style: 'cinematic', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'orbit', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
     draft.patch({ prompt: 'a fox', enhanceSettings: { ...video, style: 'photo', camera: 'keep' }, enhanceSettingsVideo: video });
     await mountWorkspace(withEnhancer(makeContext()));
     await openEnhanceRun();
@@ -1478,11 +1512,40 @@ describe('WorkspacePage', () => {
   it('never warns that auto-enhance would change nothing: nothing picked is a general rewrite', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
+    draft.update('enhanceSettings', { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
     await openEnhanceRun();
     // The enhancer popover is moved to <body>.
     expect(document.querySelector('#ws-enhance-panel [role="alert"]')).toBeNull();
+  });
+
+  describe('pinned run row', () => {
+    it('puts Enhance prompt in the sheet footer on a phone', async () => {
+      layoutProbe.compact = true;
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      const run = await openEnhanceRun();
+      expect(run.closest('.sheet-foot')).not.toBeNull();
+      expect(document.querySelector('#ws-enhance-panel')?.contains(run)).toBe(false);
+    });
+
+    it('keeps Enhance prompt outside the scrolling options in the popover', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      const run = await openEnhanceRun();
+      expect(run.closest('#ws-enhance-panel .enhance-popover-foot')).not.toBeNull();
+      expect(run.closest('.enhance-body')).toBeNull();
+      expect(document.querySelector('#ws-enhance-panel .enhance-body')).not.toBeNull();
+    });
+
+    it('draws no footer when auto-enhance is on and there is no Smart choice', async () => {
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceAuto', true);
+      await mountWorkspace(withEnhancer(makeContext()));
+      await openEnhanceRun();
+      expect(document.querySelector('#ws-enhance-panel')).not.toBeNull();
+      expect(document.querySelector('.enhance-popover-foot')).toBeNull();
+    });
   });
 
   describe('scene and prompt pair (video)', () => {
@@ -1563,7 +1626,7 @@ describe('WorkspacePage', () => {
 
     it('enhances a video with nothing picked, with or without a scene: a general rewrite', async () => {
       draft.update('workflow', 'txt2vid');
-      draft.patch({ prompt: 'a knight rides in', enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
+      draft.patch({ prompt: 'a knight rides in', enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
       await mountWorkspace(withVideoEnhancer(makeContext()));
       expect((await openEnhanceRun()).disabled).toBe(false);
 
@@ -1708,7 +1771,7 @@ describe('WorkspacePage', () => {
       it('disables Action only with the reason while the Scene is blank, and the run uses both', async () => {
         enhanceApiMocks.enhancePrompt.mockResolvedValue();
         draft.update('workflow', 'txt2vid');
-        draft.patch({ prompt: 'a knight rides in', enhanceSettingsVideo: { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ prompt: 'a knight rides in', enhanceSettingsVideo: { style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await mountWorkspace(withVideoEnhancer(makeContext()));
         await openEnhanceRun();
 
@@ -1736,7 +1799,7 @@ describe('WorkspacePage', () => {
         await mountWorkspace(withVideoEnhancer(makeContext()));
         expect(JSON.parse(String((await submitForm(target)).get('enhance_settings'))).parts).toBe('both');
 
-        draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await settle();
         expect(JSON.parse(String((await submitForm(target)).get('enhance_settings'))).parts).toBe('action');
       });
@@ -1879,7 +1942,7 @@ describe('WorkspacePage', () => {
         expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
         expect(field('ws-enhanced-scene').disabled).toBe(true);
 
-        draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await settle();
         expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
         expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');

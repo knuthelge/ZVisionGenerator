@@ -1,4 +1,5 @@
 import type { ExtendSourceInfo, JobSettings } from '$lib/types';
+import { CUSTOM_PALETTE } from './promptEnhance';
 import { checked, first, numberOrNull, values } from './jobSettings';
 
 /** A submitted setting the CLI cannot express exactly; the copied command differs from the Web job there. */
@@ -60,12 +61,12 @@ function text(settings: JobSettings, key: string): string | undefined {
 }
 
 // The `--enhance` SPEC keys in the server's order; the video-only ones are written for video jobs only.
-const ENHANCE_SPEC_KEYS = ['style', 'mood', 'theme', 'details', 'length'];
+const ENHANCE_SPEC_KEYS = ['style', 'mood', 'theme', 'shot', 'angle', 'palette', 'details', 'length'];
 const VIDEO_ENHANCE_SPEC_KEYS = ['camera', 'pace', 'motion', 'sound'];
 
 /**
  * Serialize submitted enhancement options to the `--enhance` SPEC grammar (`parts`, `camera`, `pace`, `motion` and
- * `sound` only for video), with the direction apart: the SPEC cannot hold it, `--enhance-note` does.
+ * `sound` only for video, `colors` only with the Custom palette), with the direction apart: the SPEC cannot hold it, `--enhance-note` does.
  */
 function enhanceSpec(raw: string | undefined, isVideo: boolean, isExtend: boolean): { spec: string; note: string } {
   if (!raw) return { spec: '', note: '' };
@@ -82,6 +83,10 @@ function enhanceSpec(raw: string | undefined, isVideo: boolean, isExtend: boolea
     const value = parsed[key];
     if (value === undefined || value === null) continue;
     parts.push(`${key}=${Array.isArray(value) ? value.join('+') : String(value)}`);
+  }
+  // The Custom palette's own colours are written without '#', which the SPEC grammar does not take.
+  if (parsed.palette === CUSTOM_PALETTE && Array.isArray(parsed.colors) && parsed.colors.length > 0) {
+    parts.push(`colors=${parsed.colors.map((color) => String(color).replace(/^#/, '')).join('+')}`);
   }
   return { spec: parts.join(','), note: typeof parsed.note === 'string' ? parsed.note.trim() : '' };
 }

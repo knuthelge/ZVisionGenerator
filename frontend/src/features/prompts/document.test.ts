@@ -33,7 +33,8 @@ const AXES: EnhanceAxis[] = [
   { key: 'length', label: 'Length', multi: false, video_only: false, audio_only: false, options: [{ slug: 'same', label: 'Same', description: '', group: null }, { slug: 'longer', label: 'Longer', description: '', group: null }], default: ['same'] },
   { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action / sequence', description: '', group: null }], default: ['action'] },
 ];
-const DEFAULTS = { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' };
+const PALETTE_AXIS: EnhanceAxis = { key: 'palette', label: 'Palette', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'earth', label: 'Earth tones', description: '', group: null }, { slug: 'custom', label: 'Custom', description: '', group: null }], default: ['keep'] };
+const DEFAULTS = { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' };
 
 describe('tokenizePrompt', () => {
   it('splits text, snippet references and choices', () => {
@@ -197,7 +198,7 @@ describe('prompt ids', () => {
 describe('enhance', () => {
   it('fills the picker from an entry mapping, ignoring unknown values', () => {
     expect(enhanceSettingsFor({ style: 'cinematic', details: ['camera', 'nope'], mood: 'nope' }, AXES, DEFAULTS)).toEqual({
-      style: 'cinematic', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['camera'], length: 'same', motion: ['action'], sound: [], note: '',
+      style: 'cinematic', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: ['camera'], length: 'same', motion: ['action'], sound: [], note: '',
     });
     expect(enhanceSettingsFor(true, AXES, DEFAULTS)).toEqual(DEFAULTS);
   });
@@ -209,6 +210,30 @@ describe('enhance', () => {
     expect('parts' in enhanceSettingsFor({ style: 'cinematic' }, AXES, backend)).toBe(false);
     expect('parts' in enhanceSettingsFor({ parts: 'scene' }, AXES, backend)).toBe(false);
     expect('parts' in enhanceSettingsFor(true, AXES, backend)).toBe(false);
+  });
+
+  it('reads an entry palette: only the Custom palette keeps colours', () => {
+    const axes = [...AXES, PALETTE_AXIS];
+    const own = enhanceSettingsFor({ palette: 'custom', colors: ['1B3A4B', '#E07A5F', 'nope'] }, axes, DEFAULTS);
+    expect(own.palette).toBe('custom');
+    expect(own.colors).toEqual(['#1B3A4B', '#E07A5F']);
+    const named = enhanceSettingsFor({ palette: 'earth', colors: ['#111111'] }, axes, DEFAULTS);
+    expect(named.palette).toBe('earth');
+    expect(named.colors).toEqual([]);
+    const bare = enhanceSettingsFor({ colors: ['#111111'] }, axes, DEFAULTS);
+    expect(bare.palette).toBe('keep');
+    expect(bare.colors).toEqual([]);
+    expect(enhanceSettingsFor({ style: 'cinematic' }, axes, DEFAULTS).colors).not.toBe(DEFAULTS.colors);
+    expect(enhanceSettingsFor(true, axes, DEFAULTS).colors).not.toBe(DEFAULTS.colors);
+    expect(enhanceSettingsFor(true, axes, DEFAULTS)).toEqual(DEFAULTS);
+  });
+
+  it('names the Custom palette in the summary', () => {
+    const axes = [...AXES, PALETTE_AXIS];
+    expect(enhanceSummary({ palette: 'custom', colors: ['#111111'] }, axes)).toContain('Custom');
+    expect(enhanceSummary({ palette: 'earth', colors: ['#111111'] }, axes)).toBe('Earth tones');
+    expect(enhanceShortLabel({ palette: 'custom', colors: ['#111111'] }, axes)).toBe('Custom');
+    expect(enhanceShortLabel({ palette: 'earth' }, axes)).toBe('Earth tones');
   });
 
   it('reads an entry direction', () => {

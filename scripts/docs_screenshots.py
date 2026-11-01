@@ -129,6 +129,26 @@ async def shot_workspace(browser: Browser, url: str) -> None:
     _save(await page.screenshot(), "workspace")
 
 
+async def shot_enhance_popover(browser: Browser, url: str) -> None:
+    """Capture the Enhance popover with a Shot, an Angle and a Palette chosen. No enhancement runs."""
+    page = await _page(browser, url)
+    await page.locator(f'[aria-label^="Reuse settings from {_HERO}"]').first.click(force=True)
+    await page.wait_for_timeout(1200)
+    await _dismiss_toasts(page)
+    await page.locator("#ws-prompt").fill("A lone astronaut standing among glowing flowers on an alien planet")
+    await page.locator("#ws-enhance-toggle").click()
+    await page.wait_for_timeout(700)
+    for key, slug in (("shot", "wide"), ("angle", "low"), ("palette", "earth")):
+        await page.locator(f"#ws-enhance-inline-{key}").click()
+        await page.locator(f'[data-slug="{slug}"]').first.click()
+        await page.wait_for_timeout(300)
+    await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+    await page.wait_for_timeout(700)
+    panel = await page.locator("#ws-enhance-panel").bounding_box()
+    assert panel is not None
+    _save(await page.screenshot(clip=panel), "enhance-popover")
+
+
 async def shot_gallery_page(browser: Browser, url: str) -> None:
     page = await _page(browser, f"{url}/#/gallery")
     await page.wait_for_timeout(1500)
@@ -190,6 +210,7 @@ async def shot_first_run_dialog(browser: Browser, url: str) -> None:
 
 SHOTS: dict[str, Callable[[Browser, str], Awaitable[None]]] = {
     "workspace": shot_workspace,
+    "enhance-popover": shot_enhance_popover,
     "gallery-page": shot_gallery_page,
     "viewer-details": shot_viewer_details,
     "models-page": shot_models_page,

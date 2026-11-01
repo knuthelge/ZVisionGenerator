@@ -1,4 +1,5 @@
 import type { DocumentEntry, DocumentSet, DocumentSnippet, EnhanceAxis, EnhanceSettings, EntryEnhance, PromptDocument, PromptField, PromptValue } from '$lib/types';
+import { CUSTOM_PALETTE } from '$lib/state/promptEnhance';
 
 /** Matches a `$name` snippet reference or an innermost `{a|b|c}` choice (same patterns as `utils/prompt_compose.py`). */
 const TOKEN_RE = /\$([A-Za-z_][A-Za-z0-9_]*)|\{([^{}]+)\}/g;
@@ -227,7 +228,7 @@ export function remapOptionIds(ids: string[], map: Record<string, string>): stri
 
 /** Full settings for the enhance picker: an entry's mapping over the defaults, ignoring unknown values; `parts` is set only when the entry names it. */
 export function enhanceSettingsFor(enhance: EntryEnhance, axes: EnhanceAxis[], defaults: EnhanceSettings): EnhanceSettings {
-  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...(defaults.sound ?? [])], note: defaults.note ?? '' };
+  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...(defaults.sound ?? [])], colors: [...(defaults.colors ?? [])], note: defaults.note ?? '' };
   // The backend defaults carry `parts: null`; an entry's own value is the only source here.
   delete settings.parts;
   if (enhance === null || enhance === true) return settings;
@@ -238,8 +239,16 @@ export function enhanceSettingsFor(enhance: EntryEnhance, axes: EnhanceAxis[], d
     if (axis.multi && Array.isArray(raw)) (settings[axis.key] as string[]) = raw.filter((slug) => slugs.includes(slug));
     else if (!axis.multi && typeof raw === 'string' && slugs.includes(raw)) (settings[axis.key] as string) = raw;
   }
+  const own = ownColors(enhance);
+  settings.colors = settings.palette === CUSTOM_PALETTE ? own : [];
   if (typeof enhance.note === 'string') settings.note = enhance.note;
   return settings;
+}
+
+/** The valid `#RRGGBB` colours of an entry's own palette, normalised to a leading `#`; other values are dropped. */
+function ownColors(enhance: Exclude<EntryEnhance, null | true>): string[] {
+  if (!Array.isArray(enhance.colors)) return [];
+  return enhance.colors.filter((hex): hex is string => typeof hex === 'string' && /^#?[0-9a-f]{6}$/i.test(hex)).map((hex) => (hex.startsWith('#') ? hex : `#${hex}`));
 }
 
 /** Every chosen enhance option in words, e.g. "Cinematic · Mysterious · +2 details". */
@@ -262,7 +271,7 @@ function enhanceParts(enhance: Exclude<EntryEnhance, null | true>, axes: Enhance
     axes.find((axis) => axis.key === key)?.options.find((option) => option.slug === slug)?.label ?? String(slug);
   const parts: string[] = [];
   if (enhance.parts === 'action') parts.push('Action only');
-  // Every one-choice option that is not its default, in the matrix order (style, mood, theme, camera, pace, length).
+  // Every one-choice option that is not its default, in axis order.
   for (const axis of axes) {
     const value = enhance[axis.key];
     if (!axis.multi && typeof value === 'string' && value && value !== (axis.default[0] ?? 'keep')) parts.push(label(axis.key, value));

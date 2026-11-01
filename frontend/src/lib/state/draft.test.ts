@@ -792,7 +792,7 @@ describe('draft store – prompt enhancer fields', () => {
     draft.update('enhancedPrompt', 'A fox in snow.');
     draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' });
     draft.loadDraft();
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
     expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', scene: '', mode: 'image' });
@@ -831,7 +831,7 @@ describe('draft store – prompt enhancer fields', () => {
 
     it('restores how the reused rewrite was made: the options, the enhancer and the record kept with it', () => {
       const enhance = JSON.stringify({ settings: { style: 'cinematic', camera: 'orbit', parts: 'action' }, model: 'org/smart', tier: 'smart', format: 'text' });
-      draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
+      draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
       draft.loadFromUrl({ workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight', enhanced_prompt: 'A knight rides in.', enhance }, makeContext());
       expect(draft.state.enhanceSettingsVideo).toMatchObject({ style: 'cinematic', camera: 'orbit', partsByWorkflow: { txt2vid: 'action' } });
       expect(draft.state.enhanceSettings?.style).toBe('photo');
@@ -1082,7 +1082,7 @@ describe('draft store – prompt enhancer fields', () => {
     it('the enhancer\'s state stays with its tab', () => {
       const ctx = textContext();
       draft.hydrateFromContext(ctx, null);
-      const imageSettings = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
+      const imageSettings = { style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
       draft.patch({ ...imageText, enhanceSettings: imageSettings });
       openTab('txt2vid', ctx);
       expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedFrom: null, enhanceSettings: imageSettings, enhanceSettingsVideo: null });
@@ -1106,7 +1106,7 @@ describe('draft store – prompt enhancer fields', () => {
     draft.update('enhancedPrompt', 'A fox in snow.');
     draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' });
     draft.resetSelections(ctx);
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
     expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', scene: '', mode: 'image' });

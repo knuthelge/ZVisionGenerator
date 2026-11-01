@@ -177,6 +177,21 @@ describe('cliCommand', () => {
     expect(image).not.toMatch(/camera=|pace=|motion=|sound=/);
   });
 
+  it('writes the shot, angle and palette after the theme', () => {
+    const settings = { style: 'photo', theme: 'noir', shot: 'wide', angle: 'low', palette: 'earth', details: [], length: 'same' };
+    expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_settings: JSON.stringify(settings) }).command)
+      .toBe('ziv image --prompt a --enhance style=photo,theme=noir,shot=wide,angle=low,palette=earth,details=,length=same');
+  });
+
+  it('writes the Custom palette colors last, without the #, and only for Custom', () => {
+    const base = { style: 'photo', shot: 'keep', angle: 'keep', details: [], length: 'same' };
+    const run = (extra: object, mode = 'image') => cliCommand({ mode, prompt: 'a', enhance_auto: 'true', enhance_settings: JSON.stringify({ ...base, ...extra }) }).command;
+    expect(run({ palette: 'custom', colors: ['#1B3A4B', '#e07a5f'] })).toBe('ziv image --prompt a --enhance style=photo,shot=keep,angle=keep,palette=custom,details=,length=same,colors=1B3A4B+e07a5f');
+    expect(run({ palette: 'custom', colors: ['#1B3A4B'], camera: 'orbit' }, 'video')).toMatch(/camera=orbit,colors=1B3A4B$/);
+    expect(run({ palette: 'earth', colors: ['#1B3A4B'] })).not.toContain('colors=');
+    expect(run({ palette: 'custom', colors: [] })).not.toContain('colors=');
+  });
+
   it('names the Smart enhancer and JSON captions', () => {
     expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_model: 'smart', enhance_format: 'json' }).command)
       .toBe('ziv image --prompt a --enhance --enhance-model smart --enhance-format json');
