@@ -1,6 +1,6 @@
 # Transparent background for every image model
 
-**Status:** Done (2026-11-01, unreleased; branch feat/transparent-background; the Mac check is still to run): ships non-commercial, with a badge
+**Status:** Done (2026-11-01, unreleased; branch feat/transparent-background; the Mac check passed the same day): ships non-commercial, with a badge
 
 ## Problem
 
@@ -107,6 +107,23 @@ Rule, as a guard for smaller cards and for macOS: when the free accelerator memo
 Done on the 10 GB card: the PyTorch masks match the bench's ONNX ones; the chain fits beside every model measured, streamed, at `q8` and at `q4` ([Memory](#3-memory)); and the `grid_sample` replacement matches torchvision's `deform_conv2d` ([The matte chain](#1-the-matte-chain)). `klein9b` at `q4` is unmeasured.
 
 The Mac check comes last, after the feature is built: BiRefNet with the replacement and ViTMatte on MPS, the memory beside a resident mflux model, and the time per image.
+
+### Results on macOS (2026-11-01, Apple silicon, 32 GB)
+
+BiRefNet with the `grid_sample` replacement and ViTMatte run on MPS without warnings. Two images per model at 832×1216, the same seed with and without Transparent:
+
+| Model | Added per image | Added peak memory |
+|---|---|---|
+| `zit` | 5.2 s | 0.3 GB |
+| `klein4b` | 3.1 s | 0.9 GB |
+| `klein9b` at `q8` | 4.7 s | 0.9 GB |
+| `moss` | 3.5 s | 2.3 GB |
+
+- Every result is RGBA with a clean edge and no grey halo over magenta, black or white; the saved prompt has no background phrase, and `generation.transparent` is recorded.
+- Beside `klein9b` at `q8` the guard sees 15.65 GiB free, so the 2 GB rule doesn't trip on 32 GB. Forced to trip (`klein9b` at `q8` and `zit`, three images each), the model is released before every cut-out and reloaded before the next image in 5–9 s, and the images are bit-identical to the run without the swap.
+- Rechecked after the guard moved to the image's final size and the Mac release to every MLX module: `moss` at 832×1216 needs 2.24 GiB and sees 14.15 GiB free, so it doesn't trip; forced, it releases and reloads in 7.5 s with bit-identical images, and the peak with the swap is 1.5 GB below the peak without it.
+- A creative upscale keeps the transparency at the final size, with the pre-upscale image opaque; a transparent start image is filled with white.
+- Not run on the Mac: `krea2`, `ideo` and the SeedVR2 plain upscale.
 
 ## Done when
 

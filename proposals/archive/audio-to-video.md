@@ -1,6 +1,6 @@
 # Make a video follow your own sound
 
-**Status:** Done (2026-11-01, unreleased; branch docs/higgsfield-ideas; macOS not yet verified on a Mac)
+**Status:** Done (2026-11-01, unreleased; branch docs/higgsfield-ideas; verified on a 32 GB Mac the same day)
 
 ## Problem
 
@@ -10,7 +10,7 @@ LTX can do it with the weights we already ship: its audio-to-video mode holds an
 
 ## What the user sees
 
-The **Video** and **Extend Video** tabs get an optional **Audio track**, with or without a first frame: an audio file. Setting one is the whole decision: the clip is made to follow it, and its sound is exactly that track, from **Start at**. Every video model that passes the spike on both platforms offers it: LTX-2.3 (`ltx-4`, and `ltx-8`, the same weights at 8-bit), LTX-2.5 (`ltx25-4`) and MiniMax H3 (`h3`, with Upscale off) have passed on Windows/Linux; macOS is still to test. A model that doesn't pass doesn't show it.
+The **Video** and **Extend Video** tabs get an optional **Audio track**, with or without a first frame: an audio file. Setting one is the whole decision: the clip is made to follow it, and its sound is exactly that track, from **Start at**. Every video model that passes the spike on both platforms offers it: LTX-2.3 (`ltx-4`, and `ltx-8`, the same weights at 8-bit), LTX-2.5 (`ltx25-4`) and MiniMax H3 (`h3`, with Upscale off) have passed on Windows/Linux and on macOS. A model that doesn't pass doesn't show it.
 
 - **Choosing a track** works like the start and last frame: a file from the device, a path, or Browse on the server. No recording in the app, and no video files as a source.
 - **Start at** is a seconds field under the track (default 0) with the timestamp beside it ("90 → 1:30"). A Start at past the end of the track is allowed and gives a silent clip.
@@ -95,7 +95,23 @@ The sync result for upscale off against on on `ltx-4` rests on the synthetic voi
 | H3 text to video, image to video, Extend and a user LoRA | Held the track, at the same time and memory as the same clip without one |
 | CLI smoke test | Passed |
 
-macOS runs only mocked tests and contract pins here; the real run on a Mac is still to do, and a family that fails there gets `platform_capabilities.darwin.audio_track: false`.
+#### Results on macOS (2026-11-01, Apple silicon, 32 GB)
+
+`make check` passed on the Mac, including the MLX contract pins. The runs used a real male voice (a public-domain LibriVox reading) under a photo of a man made with `zit`, at 768×448 and 121 frames (73 for `h3`), each paired with a run of the same settings without the track. The sound was compared with the track sample by sample. Sync was measured as the correlation of the mouth's opening (MediaPipe face landmarks) with the track's loudness, best within ±5 frames, against 300 circular shifts of the track; every clip made without the track came out unsynced against it (p 0.43–0.78).
+
+| Path | Sound | Sync | Time and peak memory against no track |
+|---|---|---|---|
+| `ltx25-4` one stage | The track from Start at | r 0.49, p < 0.001 | +2.4 %, the same |
+| `ltx25-4` two stages (`A2VidDistilledPipeline`) | The track | r 0.34, p < 0.001 | −2 % over two alternating pairs, the same |
+| `ltx-4` one stage | The track | r 0.45, p < 0.001 | +0.8 %, +0.8 % |
+| `h3`, Upscale off | The track | r 0.58, p < 0.001 | Not slower (692 s against 803 s), 15.2 GB both |
+| A 3 s track under a 5 s clip, two stages | The track, then 2.3 s of silence; 121 frames kept, no "Audio is too short" | r 0.66, p < 0.001 | – |
+| `ltx25-4` Extend with the same file, Start at filled in | The new 2 s are the track's 5.0–7.0 s | Whole clip r 0.39, p < 0.001 | −1 %, 25.6 GB both |
+| Extend of a clip made with `--no-audio` | The source's 5 s silent, then the track from 0 s | – | 25.6 GB |
+| `h3` Extend with the same file | The new part is the track's 3.0–5.2 s | Whole clip r 0.42, p < 0.001; the 2 s new part alone r 0.21, just above chance | 15.3 GB |
+| Web UI, two stages with Review | The review clip and the result both carry the track | r 0.42, p < 0.001 | – |
+
+Every family passes, so `platform_capabilities.darwin.audio_track` stays unset. `ltx-8` wasn't run: it is `ltx-4`'s weights at 8 bits. On `h3` the track is encoded in its own phase at a 1.7 GiB MLX peak, below the keyframe (14.1 GiB) and prompt (13.7 GiB) phases.
 
 ### 1. Backends
 
