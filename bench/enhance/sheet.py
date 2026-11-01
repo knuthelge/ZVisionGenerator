@@ -71,10 +71,11 @@ def find_image(out_dir: Path, name: str) -> Path | None:
     return matches[0] if matches else None
 
 
-def render_command(prompts: Path, out_dir: Path, *, model: str, seed: int, ratio: str, size: str) -> list[str]:
-    """Return the image-CLI command that renders every cell with one model, seed and size, enhancement off."""
+def render_command(prompts: Path, out_dir: Path, *, model: str, seed: int, ratio: str, size: str, quantize: int | None = None) -> list[str]:
+    """Return the image-CLI command that renders every cell with one model, seed and size, enhancement off; *quantize* sets ``-q``."""
     cli = Path(sys.executable).with_name("ziv-image")
-    return [str(cli), "-m", model, "-p", str(prompts), "--seed", str(seed), "--ratio", ratio, "-s", size, "-o", str(out_dir), "--no-enhance"]
+    command = [str(cli), "-m", model, "-p", str(prompts), "--seed", str(seed), "--ratio", ratio, "-s", size, "-o", str(out_dir), "--no-enhance"]
+    return command if quantize is None else [*command, "-q", str(quantize)]
 
 
 def sheet_html(rows: tuple[SheetRow, ...], out_dir: Path, *, title: str) -> str:
@@ -97,7 +98,7 @@ def sheet_html(rows: tuple[SheetRow, ...], out_dir: Path, *, title: str) -> str:
     return f"<!doctype html><meta charset=utf-8><title>{html.escape(title)}</title><style>{style}</style><h1>{html.escape(title)}</h1><table><tr><th>Case</th>{head}</tr>{''.join(body)}</table>\n"
 
 
-def build_sheet(runs: tuple[Run, ...], cases: tuple[str, ...], out_dir: Path, *, model: str, seed: int, ratio: str, size: str, echo=print) -> Path:
+def build_sheet(runs: tuple[Run, ...], cases: tuple[str, ...], out_dir: Path, *, model: str, seed: int, ratio: str, size: str, quantize: int | None = None, echo=print) -> Path:
     """Render every cell with the image CLI into *out_dir* and write the HTML sheet; return its path.
 
     Raises:
@@ -110,7 +111,7 @@ def build_sheet(runs: tuple[Run, ...], cases: tuple[str, ...], out_dir: Path, *,
     out_dir.mkdir(parents=True, exist_ok=True)
     prompts = out_dir / PROMPTS_FILE
     prompts.write_text(prompts_file_text(rows), encoding="utf-8")
-    command = render_command(prompts, out_dir, model=model, seed=seed, ratio=ratio, size=size)
+    command = render_command(prompts, out_dir, model=model, seed=seed, ratio=ratio, size=size, quantize=quantize)
     echo(f"Rendering {sum(len(row.cells) for row in rows)} images with {model}…")
     subprocess.run(command, check=True)
     sheet = out_dir / SHEET_FILE

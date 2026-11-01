@@ -36,6 +36,7 @@ def _parser() -> argparse.ArgumentParser:
     sheet.add_argument("--seed", type=int, default=73914826, help="Seed for every image (default 73914826).")
     sheet.add_argument("--ratio", default="2:3", help="Aspect ratio (default 2:3).")
     sheet.add_argument("--size", default="s", help="Size preset (default s).")
+    sheet.add_argument("--quantize", type=int, default=None, help="Quantize the image model to 4 or 8 bits (default: the model's own).")
     sheet.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help=argparse.SUPPRESS)
     compare = commands.add_parser("compare", help="Write a Markdown report comparing two runs.")
     compare.add_argument("base", help="Label (or folder) of the baseline run.")
@@ -108,7 +109,7 @@ def _cmd_sheet(args: argparse.Namespace) -> int:
         raise SystemExit(f"Invalid --label '{args.label}'.")
     runs = tuple(load_run(_run_dir(args.runs_dir, name)) for name in args.runs)
     cases = tuple(case.id for case in select_cases(load_cases(), tags=_split(args.tags), ids=_split(args.cases)))
-    sheet = build_sheet(runs, cases, args.runs_dir / args.label, model=args.model, seed=args.seed, ratio=args.ratio, size=args.size)
+    sheet = build_sheet(runs, cases, args.runs_dir / args.label, model=args.model, seed=args.seed, ratio=args.ratio, size=args.size, quantize=args.quantize)
     print(f"Wrote {sheet}")
     return 0
 
