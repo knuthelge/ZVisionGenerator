@@ -107,9 +107,10 @@ class ImageGenerationRequest:
     saturation: bool = False
     saturation_amount: float = 1.0
     transparent: bool = False
-    # The job's background removal chain, and the hook the matte stage calls before the chain loads to free memory for it
+    # The job's background removal chain, and the hook the matte stage calls before the chain loads to free memory for
+    # it; the hook gets the pixel count of the image about to be cut out
     matte: MatteChain | None = None
-    make_room: Callable[[], None] | None = None
+    make_room: Callable[[int], None] | None = None
 
     # Output
     output_dir: str = "."

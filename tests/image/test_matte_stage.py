@@ -38,8 +38,8 @@ class TestMatteStage:
     def test_room_is_made_only_while_the_chain_is_not_loaded(self):
         make_room = MagicMock()
 
-        matte_stage(_request(matte=_chain(loaded=False), make_room=make_room), ImageWorkingArtifacts(image=Image.new("RGB", (8, 8))))
-        make_room.assert_called_once_with()
+        matte_stage(_request(matte=_chain(loaded=False), make_room=make_room), ImageWorkingArtifacts(image=Image.new("RGB", (8, 6))))
+        make_room.assert_called_once_with(48)
 
         make_room.reset_mock()
         matte_stage(_request(matte=_chain(loaded=True), make_room=make_room), ImageWorkingArtifacts(image=Image.new("RGB", (8, 8))))

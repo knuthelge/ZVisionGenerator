@@ -83,7 +83,7 @@ The [prompt enhancer](prompt-enhancer.md#memory) and the image or video model ar
 
 [Transparent background](images.md#transparent-background) loads its cut-out models beside the image model, and they stay loaded for the rest of the job. The estimate doesn't count them.
 
-When less than 2 GB of GPU memory (unified memory on a Mac) is free after a render, the app releases the image model before the cut-out and loads it again before the next image of a batch. This keeps a small GPU from running out, at the cost of a model load for every image. When the free memory can't be read, the image model stays loaded.
+When too little GPU memory (unified memory on a Mac) is free after a render, the app releases the image model before the cut-out and loads it again before the next image of a batch. "Too little" is 2 GB plus room for the cut-out at the image's final size: about 2.25 GB for a 1024×1024 image, and about 6 GB after a 4× upscale to 4096×4096. This keeps a small GPU from running out, at the cost of a model load for every image. When the free memory can't be read, the image model stays loaded.
 
 ## Linux: the terminal closes while a model loads
 

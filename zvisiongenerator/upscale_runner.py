@@ -120,7 +120,7 @@ def run_upscale(
     chain = create_matte_chain() if request.transparent else None
     if chain is not None:
         # One image and nothing reloads, so the upscaler always makes room for the cut-out.
-        request = replace(request, matte=chain, make_room=lambda: _release_upscaler(backend, model))
+        request = replace(request, matte=chain, make_room=lambda _pixels: _release_upscaler(backend, model))
     started = time.time()
     try:
         outcome = _run_workflow_with_progress(workflow, request, artifacts, progress_callback=progress_callback, event_context=event_context)
