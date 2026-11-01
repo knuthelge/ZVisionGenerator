@@ -80,6 +80,31 @@ Sharpening is CAS (contrast-adaptive sharpening). The configured amounts are `sh
 
 Post-processing is for images only.
 
+## Transparent background
+
+**Transparent background** (`--transparent`) cuts the subject out of the finished image and saves a PNG with a transparent background. It works with every image model. Use it for stickers, product shots, game sprites and anything you want to place on another picture.
+
+Switch it on with **Transparent** in the Web UI's [Settings](../web-ui/workspace.md#transparent-background), or with `--transparent` on [`ziv-image`](../cli/reference.md#ziv-image).
+
+!!! warning "Non-commercial use only"
+    The cut-out models carry permissive licences, but they were trained on research datasets that don't allow commercial use. Treat the result as for non-commercial use. The Web UI marks the switch with a **Non-commercial** badge.
+
+### How it works
+
+- **The prompt gets a background phrase.** The model receives your prompt with `, isolated on a plain light grey studio background` appended, so the subject sits on an even backdrop. The prompt saved in the file, shown in **Details** and loaded by **Reuse settings** is the one you wrote. A JSON caption gets no phrase.
+- **The cut-out runs last**, after upscaling, sharpen, contrast and saturation, at the final size. It finds the subject, refines its edge and removes the backdrop colour from the edge pixels, so the result shows no grey halo on another picture.
+- **The cut-out models are 548 MB.** They download once, before the first image, and can be deleted from the [Models page](../web-ui/models.md).
+
+It cuts out the main subject, so a scene without one (a landscape, a pattern) has nothing clear to keep. Smoke, fog, fine hair, glass and sheer fabric can come out rough or mostly opaque, and a cast shadow is removed with the background.
+
+### Start images, references and upscales
+
+- **Start images and references** are used as usual: a transparent area is filled with white before the model sees it.
+- **Upscaling a transparent image** later, with either [upscale](upscaling.md#upscaling-an-existing-image), gives a transparent result.
+- **`--upscale-save-pre`** saves the small image as an ordinary opaque image, before the cut-out.
+
+The cut-out models load beside the image model for the rest of the job. See [Memory](memory.md#background-removal).
+
 ## Live preview
 
 While an image is made, the Web UI shows it taking shape after every step, so you can skip a bad one early. The preview is never saved. It works for every built-in image model.

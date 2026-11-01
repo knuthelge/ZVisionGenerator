@@ -61,7 +61,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--sharpen [AMOUNT]` / `--no-sharpen` | on | Sharpen the result. An amount (0–1.5) overrides the config |
 | `--contrast [AMOUNT]` / `--no-contrast` | off | Adjust contrast (1.0 = no change) |
 | `--saturation [AMOUNT]` / `--no-saturation` | off | Adjust saturation (1.0 = no change) |
-| `--transparent` | off | Cut the subject out and save a PNG with a transparent background. The cut-out models download before the first image. Non-commercial use only |
+| `--transparent` | off | Cut the subject out and save a PNG with a transparent background. Non-commercial use only. See [Transparent background](../concepts/images.md#transparent-background) |
 | `-o`, `--output` | `.` | Output folder |
 | `--enhance [SPEC]` | off | Rewrite each prompt before the model loads. See [the spec](enhance.md#the-spec). Overrides prompt-file `enhance:` entries. Ignored with `--json-prompt` |
 | `--enhance-note TEXT` | none | A direction for the enhancer, up to 300 characters. Implies `--enhance` |

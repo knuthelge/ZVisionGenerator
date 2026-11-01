@@ -34,10 +34,10 @@ graph TD
 2. **Preflight** plans every iteration (seed, `{a|b}` choices, enhancement), and, if asked, loads the prompt enhancer, rewrites the prompts and unloads it. It returns a frozen `JobPlan`. See [Jobs and workflows](workflows.md#job-phases-preflight-and-generation).
 3. **Downloads** fetch any model files that are missing, as their own step with progress. See [Model downloads](downloads.md).
 4. **The runner** loads the model through the backend, lets the backend prepare the job's prompts (`prepare_prompts`; on macOS this encodes them all and frees the text encoder), then runs the workflow once per iteration of the plan.
-5. **The workflow** is a list of stage functions built for the job: resolve the prompt, generate, review, upscale, sharpen, save. See [Workflow stages](workflows.md#workflow-stages).
+5. **The workflow** is a list of stage functions built for the job: resolve the prompt, generate, review, upscale, sharpen, cut out the background, save. See [Workflow stages](workflows.md#workflow-stages).
 6. **Saving** embeds the settings in the PNG or MP4 (`utils/provenance.py`), which is what the Gallery reads back and **Reuse settings** loads.
 
-Only one model is resident at a time: the enhancer is gone before the generation model loads; on macOS an image model's text encoder is freed before the first image.
+Only one model is resident at a time: the enhancer is gone before the generation model loads; on macOS an image model's text encoder is freed before the first image. The exception is the [background removal](workflows.md#background-removal) chain, which loads beside the image model.
 
 ## Layers
 

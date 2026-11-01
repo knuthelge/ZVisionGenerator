@@ -12,6 +12,7 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 | **Video models** | `ltx-4`, `ltx-8` and converted LTX fine-tunes |
 | **LoRAs** | The files in `~/.ziv/loras/` |
 | **Prompt enhancer** | **Fast**, **Smart** and, when set on the Config page, **Custom** |
+| **Background removal** | The cut-out models of [Transparent background](../concepts/images.md#transparent-background), as one row (548 MB), with a **Non-commercial** badge |
 | **Other downloads** | Hugging Face downloads that nothing uses any more |
 
 A built-in model shows its name with its alias under it, for example FLUX.2 Klein 9B and `klein9b`. The alias is what you use in the CLI and in prompt files.
@@ -51,6 +52,7 @@ Each row has a delete button, which appears as soon as any of the model's files 
 | Prompt enhancer model | Its download, including a partly finished one. A custom model in a local folder is never deleted. |
 | Quantized copy | The stored `q8` or `q4` copy. See [Stored quants](../concepts/quantization.md#stored-quants). |
 | SeedVR2 | Its folder. The next plain upscale downloads it again. |
+| Background removal | Both cut-out models' downloads. The next job with **Transparent** on downloads them again. |
 
 **Other downloads** lists models in the Hugging Face cache that no model, enhancer or converted model uses, for example a model another tool downloaded, or one left behind by a model you deleted. The size is what deleting it frees. The cache is shared with other apps on your computer, so another app may download a deleted repo again.
 

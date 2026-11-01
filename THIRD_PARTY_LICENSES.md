@@ -90,6 +90,39 @@ The upscaler weights are downloaded from Hugging Face on the first upscale and a
 
 The SeedVR2 upscale models are downloaded from Hugging Face on first use and are not distributed with this package: [`numz/SeedVR2_comfyUI`](https://huggingface.co/numz/SeedVR2_comfyUI) and [`AInVFX/SeedVR2_comfyUI`](https://huggingface.co/AInVFX/SeedVR2_comfyUI), both derived from [`ByteDance-Seed/SeedVR2-3B`](https://huggingface.co/ByteDance-Seed/SeedVR2-3B) and [`ByteDance-Seed/SeedVR2-7B`](https://huggingface.co/ByteDance-Seed/SeedVR2-7B) and licensed under the Apache License 2.0.
 
+## Background removal models (downloaded at runtime, not bundled)
+
+The models behind Transparent background are downloaded from Hugging Face on first use and are not distributed with this package. Both carry permissive licence labels, but both were trained on datasets whose terms do not allow commercial use, so the feature is offered for non-commercial use only and is marked that way in the app.
+
+- [`ZhengPeng7/BiRefNet`](https://huggingface.co/ZhengPeng7/BiRefNet), which finds the subject. The weights are licensed under the MIT License. They were trained on DIS-TR from DIS5K, whose terms of use state that the dataset is available for non-commercial use in research or educational purposes and that commercial use is prohibited, also after copying, editing or processing it.
+- [`hustvl/vitmatte-small-composition-1k`](https://huggingface.co/hustvl/vitmatte-small-composition-1k) (ViTMatte-S), which refines the edge. The model card tags the weights Apache-2.0. They were trained on Composition-1k, which is built from Adobe's Deep Image Matting dataset, so they are treated as non-commercial.
+
+## pymatting
+
+The foreground colour estimation of Transparent background (`zvisiongenerator/processing/matte.py`) is reimplemented in PyTorch from the multilevel foreground estimation of [pymatting](https://github.com/pymatting/pymatting) (PyMatting), which is licensed under the MIT License. pymatting itself is not a dependency.
+
+MIT License
+
+Copyright (c) 2020 PyMatting
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## Prompt enhancer models (downloaded at runtime, not bundled)
 
 The default prompt-enhancer models are downloaded from Hugging Face on first use and are not distributed with this package: [`McG-221/Qwen3.5-4B-heretic-mlx-4Bit`](https://huggingface.co/McG-221/Qwen3.5-4B-heretic-mlx-4Bit) (macOS) and [`coder3101/Qwen3.5-4B-heretic`](https://huggingface.co/coder3101/Qwen3.5-4B-heretic) (Windows/Linux), both derived from [`Qwen/Qwen3.5-4B`](https://huggingface.co/Qwen/Qwen3.5-4B) and licensed under the Apache License 2.0.

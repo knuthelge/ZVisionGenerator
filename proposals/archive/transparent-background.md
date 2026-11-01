@@ -1,6 +1,6 @@
 # Transparent background for every image model
 
-**Status:** Accepted (2026-10-31): ships non-commercial, with a badge
+**Status:** Done (2026-11-01, unreleased; branch feat/transparent-background; the Mac check is still to run): ships non-commercial, with a badge
 
 ## Problem
 
@@ -9,7 +9,7 @@ There is no way to get an image with a transparent background. Stickers, product
 ## What the user sees
 
 - **Web UI, every layout.** A **Transparent background** switch in the Settings inspector's **Post-processing** section, under Saturation, for image jobs only. The section summary counts it like the others ("2 on"). A tablet shows the same inspector. A phone's settings strip has no Post-processing chip, so the switch lives in the Post-processing section of **All**, and a **Transparent** chip joins the strip while it is on, so a phone user can see it is on and tap the chip to open it.
-- **Non-commercial label.** The switch carries a **Non-commercial** badge, the one Discover LoRAs uses (`ui-badge ui-badge-warning`), in the inspector, the phone's **All** sheet and the **Transparent** chip's popover. Its tooltip: "The cut-out models were trained on research datasets that don't allow commercial use". The CLI help for `--transparent` and the docs say the same. This is the first badge on a feature: `klein9b` and `ideo` are non-commercial too, but only the docs say so today.
+- **Non-commercial label.** The switch carries a **Non-commercial** badge, the one Discover LoRAs uses (`ui-badge ui-badge-warning`), in the inspector, the phone's **All** sheet and the **Transparent** chip's popover. Its tooltip: "The cut-out models were trained on research datasets that don't allow commercial use". The CLI help for `--transparent` and the docs say the same. This is the first badge on a feature: `ideo` is non-commercial too, and the docs say so; `klein9b`'s upstream licence is non-commercial as well, but the docs only point to its model page.
 - **CLI.** `--transparent` on `ziv image`. Copy as a command includes it.
 - **Result.** A PNG with an alpha channel: the subject kept, the background gone. Everywhere a transparent image is shown, a checkerboard sits behind the image itself (not the letterbox around it), so it doesn't vanish into the dark surfaces: Gallery tiles, the stage's last result (the whole screen on a phone), the viewer with its neighbour and filmstrip images, and the job log, on desktop, tablet and phone. The viewer details say "Transparent background".
 - **Progress.** The job card shows **Removing background** while the cut-out runs, so the first image, which also loads the cut-out models, doesn't look stuck at 100%.
@@ -140,7 +140,7 @@ Both models carry permissive labels but were trained on non-commercial data (che
 - ViTMatte-S's weights are tagged Apache-2.0 but trained on Composition-1k, which is built from Adobe's Deep Image Matting dataset. Every port found (LibreYOLO's, FBA Matting's) treats models trained on it as non-commercial; Adobe's own licence text wasn't read.
 - No permissively licensed alternative turned up: withoutBG's open weights route hard subjects to BiRefNet-general and ship under their own licence.
 
-The badge doesn't change those terms: like `klein9b` and `ideo`, the feature is for non-commercial use. If the DIS5K authors grant commercial permission (their terms invite a request) and ViTMatte is replaced with training-free matting, the badge can go.
+The badge doesn't change those terms: like `ideo` (and `klein9b` upstream), the feature is for non-commercial use. If the DIS5K authors grant commercial permission (their terms invite a request) and ViTMatte is replaced with training-free matting, the badge can go.
 
 ## Open questions
 
