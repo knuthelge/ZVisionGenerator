@@ -123,14 +123,10 @@ model_aliases:
   krea2: "unsloth/Krea-2-Turbo"
   # Ideogram 4 Instant: the models-folder entry of the same name, built on first use from ideogram4_instant below.
   ideo: "ideo"
-  # MOSS-Image: models-folder entries built on first use from moss_image below. Windows/Linux only.
+  # MOSS-Image: models-folder entries built on first use from moss_image below.
   # moss is Turbo (the SFT model with a 4-step LoRA); moss-sft is the SFT model as released.
-  moss:
-    win32: "moss"
-    linux: "moss"
-  moss-sft:
-    win32: "moss-sft"
-    linux: "moss-sft"
+  moss: "moss"
+  moss-sft: "moss-sft"
 
 # Ideogram 4 Instant, fal's 8-step distilled Ideogram 4 (one transformer, guidance built in), under Ideogram's
 # non-commercial license. fal's own repo (fal/ideogram-v4-instant) is gated, so the transformer comes from an ungated
@@ -205,11 +201,13 @@ model_labels:
   moss:
     name: "MOSS-Image Turbo"
     download_size_label:
+      darwin: 28 GB
       win32: 28 GB
       linux: 28 GB
   moss-sft:
     name: "MOSS-Image SFT"
     download_size_label:
+      darwin: 27 GB
       win32: 27 GB
       linux: 27 GB
   ltx-8:

@@ -76,10 +76,10 @@ class TestFamily:
         assert (entry.size_variant in sizes) if sizes else entry.size_variant is None
         assert (entry.version in versions) if versions else entry.version is None
 
-    def test_moss_is_tested_on_windows_and_linux_only(self):
+    def test_moss_is_tested_on_every_platform(self):
         moss = [entry for entry in _ENTRIES if entry.family == "moss"]
         assert moss
-        assert all(set(entry.platforms) == {"win32", "linux"} for entry in moss)
+        assert all(set(entry.platforms) == {"darwin", "win32", "linux"} for entry in moss)
 
     @pytest.mark.parametrize("entry", _ENTRIES, ids=_ids(_ENTRIES))
     def test_platforms_are_known(self, entry: CuratedLora):

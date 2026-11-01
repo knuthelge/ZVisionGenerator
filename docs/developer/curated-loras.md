@@ -14,7 +14,7 @@ No hub offers safe-only results, so safety comes from someone looking at what is
 
 **A licence that was read.** The licence is one of the ids in `LICENCES`. A non-commercial licence is listed, with `non_commercial` set, so the UI can badge it. A licence not in the table is read first, then added to `LICENCES`.
 
-**Tested platforms.** Content is looked at once. The file format (kohya, PEFT, ai-toolkit, LoKr, ComfyUI) is loaded on both macOS and Windows or Linux. MOSS-Image runs only on Windows and Linux, so its entries list `win32` and `linux` and nothing else in `platforms`.
+**Tested platforms.** Content is looked at once. The file format (kohya, PEFT, ai-toolkit, LoKr, ComfyUI) is loaded on both macOS and Windows or Linux.
 
 **One per series.** Per-step uploads, snapshots of one training run, near-identical sets and templated series keep their best entry. A repository with several files lists the one the author marks as final, or the one without a step number.
 

@@ -8,6 +8,7 @@ import importlib.metadata
 import sys
 import threading
 import warnings
+from pathlib import Path
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
@@ -25,18 +26,20 @@ from mflux.models.common.schedulers import SCHEDULER_REGISTRY, FlowMatchEulerDis
 from mflux.utils.exceptions import StopImageGenerationException
 import mlx.core as mx
 from mlx import nn
-from mlx.utils import tree_map
 
+from zvisiongenerator.backends.mac import moss as _moss
 from zvisiongenerator.backends.mac._temp_images import remove_file, save_temp_png
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
 from zvisiongenerator.backends.mac.klein_references import generate_with_references
-from zvisiongenerator.backends.mac.memory import load_resident
+from zvisiongenerator.backends.mac.memory import load_resident, upcast_weights
 from zvisiongenerator.backends.mac.prompt_encoding import prepare_prompts as _prepare_prompts
 from zvisiongenerator.core import JobPrompt
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
+from zvisiongenerator.core.moss import lora_stack as moss_lora_stack, run_size as moss_run_size, sampler_settings as moss_sampler_settings
 from zvisiongenerator.core.progress_events import preview_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import readable_lora_files
+from zvisiongenerator.utils.moss_build import is_moss_dir, require_built, shared_quant_source, turbo_lora_for
 
 # Per-run override slot, distinct from the always-on default constant (IDEOGRAM4_INITIAL_SIGMA).
 # The sentinel distinguishes "no override" (use the default) from "override to
@@ -239,6 +242,10 @@ def _is_euler_scheduler(scheduler: Any) -> bool:
     """
     if isinstance(scheduler, (LinearScheduler, FlowMatchEulerDiscreteScheduler)):
         return True
+    # Never import a scheduler here that the run did not: an unloaded module's scheduler cannot be this one.
+    moss_module = sys.modules.get("mflux.models.moss_image.model.moss_image_scheduler.moss_image_scheduler")
+    if moss_module is not None and isinstance(scheduler, moss_module.MOSSImageScheduler):
+        return True
     # Never import the beta scheduler here (it pulls in SciPy mid-loop): if its module is not loaded yet,
     # this scheduler cannot be one.
     beta_module = sys.modules.get("zvisiongenerator.schedulers.beta_scheduler")
@@ -335,18 +342,28 @@ class _ProgressChecker:
             return None
 
 
-def _upcast_model_weights(model, components):
-    """Cast model component weights to float32."""
+@contextlib.contextmanager
+def _reporting(model: Any, steps: int, family: str, skip_signal: Any | None, step_callback: Any | None) -> Iterator[None]:
+    """Report one generation's steps from *model*'s mflux callbacks: honour a skip and send progress and previews.
 
-    def to_float32(p):
-        if isinstance(p, mx.array) and p.dtype in (mx.bfloat16, mx.float16):
-            return p.astype(mx.float32)
-        return p
-
-    for name in components:
-        component = getattr(model, name, None)
-        if component is not None:
-            component.update(tree_map(to_float32, component.parameters()))
+    A skip ends the block quietly, so the caller's code after it runs; the callbacks are removed and MLX's buffer cache
+    cleared however the block ends.
+    """
+    callbacks = []
+    if skip_signal is not None:
+        callbacks.append(_SkipChecker(skip_signal))
+    if step_callback is not None:
+        callbacks.append(_ProgressChecker(steps, step_callback, model=model, family=family))
+    for callback in callbacks:
+        model.callbacks.register(callback)
+    try:
+        yield
+    except StopImageGenerationException:
+        pass
+    finally:
+        for callback in callbacks:
+            _unregister_callback(model, callback)
+        mx.clear_cache()
 
 
 class MfluxBackend:
@@ -377,6 +394,10 @@ class MfluxBackend:
         model_info = detect_image_model(model_path)
 
         ModelConfig.precision = mx.float32 if precision == "float32" else mx.bfloat16
+        if model_info.family == "moss":
+            model = _load_moss(model_path, model_info, quantize, precision, lora_paths, lora_weights)
+            self._model_info = model_info
+            return model, model_info
 
         lora_kwargs = {}
         if lora_paths:
@@ -422,13 +443,13 @@ class MfluxBackend:
                     **lora_kwargs,
                 )
             else:
-                raise ValueError(f"Model family '{model_info.family}' is not supported by the mflux backend. Supported families: zimage, flux2_klein, ideogram4, krea2")
+                raise ValueError(f"Model family '{model_info.family}' is not supported by the mflux backend. Supported families: zimage, flux2_klein, ideogram4, krea2, moss")
 
             if precision == "float32":
-                _upcast_model_weights(model, ["transformer", "text_encoder", "vae"])
+                upcast_weights(model, ["transformer", "text_encoder", "vae"])
             else:
                 # Even in bfloat16 mode, upcast VAE for better color gradients
-                _upcast_model_weights(model, ["vae"])
+                upcast_weights(model, ["vae"])
             return model
 
         # mflux reads LoRAs only from files, so a file with names it cannot match is handed over as a renamed copy. mflux
@@ -447,12 +468,22 @@ class MfluxBackend:
         return f"mflux-{importlib.metadata.version('mflux')}"
 
     def quantizes_from_files(self, bits: int, source: str | None = None) -> bool:
-        """Return ``False``: mflux saves every level from a model loaded at that level; *source* is ignored."""
-        return False
+        """Return whether the stored quant at *bits* is linked from files: only a MOSS-Image copy the other alias shares.
+
+        mflux saves every other level from a model loaded at that level (see :meth:`save_quantized`).
+        """
+        return source is not None and is_moss_dir(Path(source)) and shared_quant_source(Path(source), bits, self.stored_quant_format(bits)) is not None
 
     def write_quantized_files(self, source: str, path: str, bits: int, cancelled: Callable[[], bool] | None = None) -> None:
-        """Raise: mflux saves stored quants from a loaded model (see :meth:`save_quantized`)."""
-        raise NotImplementedError("mflux saves stored quants from a loaded model.")
+        """Hard-link the other MOSS-Image alias's stored copy at *bits* into *path*: Turbo and SFT hold the same weights.
+
+        Raises:
+            RuntimeError: If *source* has no shared copy at *bits* (see :meth:`quantizes_from_files`).
+        """
+        shared = shared_quant_source(Path(source), bits, self.stored_quant_format(bits))
+        if shared is None:
+            raise RuntimeError(f"No stored copy at q{bits} to share for '{source}'; mflux saves it from a loaded model.")
+        _moss.link_saved_copy(shared, Path(path))
 
     def save_quantized(self, model: Any, path: str) -> None:
         """Write a loaded, quantized model's weights to *path* in mflux's own format.
@@ -466,7 +497,14 @@ class MfluxBackend:
             with _instant_ideogram4():
                 model.save_model(path)
             return
+        if self._model_info is not None and self._model_info.family == "moss":
+            _moss.save(model, path)
+            return
         model.save_model(path)
+
+    def runs_after_save(self, model: Any) -> bool:
+        """Return ``False`` for MOSS-Image, whose staged save leaves nothing loaded; other families stay as loaded."""
+        return self._model_info is None or self._model_info.family != "moss"
 
     def prepare_prompts(self, model: Any, prompts: Sequence[JobPrompt], *, width: int, height: int, cancelled: Callable[[], bool] | None = None) -> None:
         """Encode the job's prompts and free *model*'s text encoder, so its memory is available for generation.
@@ -483,6 +521,11 @@ class MfluxBackend:
         """
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
+        if self._model_info.family == "moss":
+            # The text encoder is freed once the prompts are encoded, and only then does the denoiser load.
+            if prompts and _moss.encode_prompts(model, _moss.job_texts(prompts, turbo=self._model_info.is_distilled), cancelled) and not (cancelled is not None and cancelled()):
+                _moss.ensure_denoiser(model)
+            return
         _prepare_prompts(model, self._model_info.family, prompts, width=width, height=height, cancelled=cancelled)
 
     def image_to_image(
@@ -505,59 +548,48 @@ class MfluxBackend:
             raise RuntimeError("load_model() must be called before generation")
         if self._model_info.family == "ideogram4":
             raise ValueError("img2img is not supported for Ideogram 4.")
+        if self._model_info.family == "moss":
+            width, height = moss_run_size(image.width, image.height)
+            return self._moss_generate(model, prompt, width, height, seed, steps, guidance, negative_prompt, skip_signal, step_callback, image=image, strength=strength)
         # mflux requires a file path, not a PIL Image
         temp_path = save_temp_png(image)
-
-        checker = None
-        progress_checker = None
-        if skip_signal is not None:
-            checker = _SkipChecker(skip_signal)
-            model.callbacks.register(checker)
-        if step_callback is not None:
-            progress_checker = _ProgressChecker(steps, step_callback, model=model, family=self._model_info.family)
-            model.callbacks.register(progress_checker)
-
         try:
-            image_strength = 1.0 - strength  # invert: mflux convention
+            with _reporting(model, steps, self._model_info.family, skip_signal, step_callback):
+                image_strength = 1.0 - strength  # invert: mflux convention
 
-            if seed is not None:
-                mx.random.seed(seed)
+                if seed is not None:
+                    mx.random.seed(seed)
 
-            _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
+                _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
 
-            gen_kwargs = dict(
-                prompt=prompt,
-                width=image.width,
-                height=image.height,
-                seed=seed,
-                num_inference_steps=steps,
-                image_path=temp_path,
-                image_strength=image_strength,
-                guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
-            )
-            # As on Windows/Linux, Klein's refine passes (image to image, upscale) keep Klein's own schedule.
-            if scheduler is not None and self._model_info.family != "flux2_klein":
-                gen_kwargs["scheduler"] = scheduler
-            if self._model_info.family == "krea2":
-                gen_kwargs["scheduler"] = _KREA2_SAMPLER
-            if not _is_flux and negative_prompt is not None:
-                gen_kwargs["negative_prompt"] = negative_prompt
+                gen_kwargs = dict(
+                    prompt=prompt,
+                    width=image.width,
+                    height=image.height,
+                    seed=seed,
+                    num_inference_steps=steps,
+                    image_path=temp_path,
+                    image_strength=image_strength,
+                    guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
+                )
+                # As on Windows/Linux, Klein's refine passes (image to image, upscale) keep Klein's own schedule.
+                if scheduler is not None and self._model_info.family != "flux2_klein":
+                    gen_kwargs["scheduler"] = scheduler
+                if self._model_info.family == "krea2":
+                    gen_kwargs["scheduler"] = _KREA2_SAMPLER
+                if not _is_flux and negative_prompt is not None:
+                    gen_kwargs["negative_prompt"] = negative_prompt
 
-            if reference_images:
-                # The start image is the img2img source; the references ride along as edit conditioning.
-                start_kwargs = {key: value for key, value in gen_kwargs.items() if key not in ("image_path", "image_strength")}
-                result = generate_with_references(model, reference_images, start_path=temp_path, image_strength=image_strength, **start_kwargs)
-            else:
-                result = model.generate_image(**gen_kwargs)
-            return result.image
-        except StopImageGenerationException:
+                if reference_images:
+                    # The start image is the img2img source; the references ride along as edit conditioning.
+                    start_kwargs = {key: value for key, value in gen_kwargs.items() if key not in ("image_path", "image_strength")}
+                    result = generate_with_references(model, reference_images, start_path=temp_path, image_strength=image_strength, **start_kwargs)
+                else:
+                    result = model.generate_image(**gen_kwargs)
+                return result.image
             return None
         finally:
-            for callback in (checker, progress_checker):
-                if callback is not None:
-                    _unregister_callback(model, callback)
             remove_file(temp_path)
-            mx.clear_cache()
 
     def text_to_image(
         self,
@@ -580,58 +612,89 @@ class MfluxBackend:
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
+        if self._model_info.family == "moss":
+            return self._moss_generate(model, prompt, width, height, seed, steps, guidance, negative_prompt, skip_signal, step_callback)
         # Seed the global MLX RNG so that ancestral scheduler noise injection
         # is deterministic per seed (mflux only seeds the initial latent noise
         # with an explicit key, not the global state).
         mx.random.seed(seed)
-
-        checker = None
-        progress_checker = None
-        if skip_signal is not None:
-            checker = _SkipChecker(skip_signal)
-            model.callbacks.register(checker)
-        if step_callback is not None:
-            progress_checker = _ProgressChecker(steps, step_callback, model=model, family=self._model_info.family)
-            model.callbacks.register(progress_checker)
-
         try:
-            if self._model_info.family == "ideogram4":
-                # Ideogram 4 has no scheduler/negative_prompt params. Instant runs mflux's default preset's noise schedule
-                # (mean 0.0, standard deviation 1.75) over the given steps, at its built-in guidance, which skips the unconditional pass.
-                sampler = sampler_settings(steps, guidance)
-                gen_kwargs = dict(prompt=_wrap_ideogram4_prompt(prompt), width=width, height=height, seed=seed, num_inference_steps=sampler.steps, guidance=INSTANT_GUIDANCE)
-            else:
-                _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
-                gen_kwargs = dict(
-                    prompt=prompt,
-                    width=width,
-                    height=height,
-                    seed=seed,
-                    num_inference_steps=steps,
-                    guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
-                )
-                if scheduler is not None:
-                    gen_kwargs["scheduler"] = _family_scheduler(self._model_info.family, scheduler)
-                if self._model_info.family == "krea2":
-                    gen_kwargs["scheduler"] = _KREA2_SAMPLER
-                if not _is_flux and negative_prompt is not None:
-                    gen_kwargs["negative_prompt"] = negative_prompt
-
-            # Per-run Ideogram 4 first-step sigma override (affects the scheduler shim, not generate_image itself).
-            sigma_ctx = _use_initial_sigma(first_sigma) if first_sigma is not None else contextlib.nullcontext()
-            krea2_ctx = _krea2_sigma_schedule(scheduler) if self._model_info.family == "krea2" else contextlib.nullcontext()
-            with sigma_ctx, krea2_ctx:
-                if reference_images:
-                    result = generate_with_references(model, reference_images, **gen_kwargs)
+            with _reporting(model, steps, self._model_info.family, skip_signal, step_callback):
+                if self._model_info.family == "ideogram4":
+                    # Ideogram 4 has no scheduler/negative_prompt params. Instant runs mflux's default preset's noise schedule
+                    # (mean 0.0, standard deviation 1.75) over the given steps, at its built-in guidance, which skips the unconditional pass.
+                    sampler = sampler_settings(steps, guidance)
+                    gen_kwargs = dict(prompt=_wrap_ideogram4_prompt(prompt), width=width, height=height, seed=seed, num_inference_steps=sampler.steps, guidance=INSTANT_GUIDANCE)
                 else:
-                    result = model.generate_image(**gen_kwargs)
-            return result.image
-        except StopImageGenerationException:
+                    _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
+                    gen_kwargs = dict(
+                        prompt=prompt,
+                        width=width,
+                        height=height,
+                        seed=seed,
+                        num_inference_steps=steps,
+                        guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
+                    )
+                    if scheduler is not None:
+                        gen_kwargs["scheduler"] = _family_scheduler(self._model_info.family, scheduler)
+                    if self._model_info.family == "krea2":
+                        gen_kwargs["scheduler"] = _KREA2_SAMPLER
+                    if not _is_flux and negative_prompt is not None:
+                        gen_kwargs["negative_prompt"] = negative_prompt
+
+                # Per-run Ideogram 4 first-step sigma override (affects the scheduler shim, not generate_image itself).
+                sigma_ctx = _use_initial_sigma(first_sigma) if first_sigma is not None else contextlib.nullcontext()
+                krea2_ctx = _krea2_sigma_schedule(scheduler) if self._model_info.family == "krea2" else contextlib.nullcontext()
+                with sigma_ctx, krea2_ctx:
+                    if reference_images:
+                        result = generate_with_references(model, reference_images, **gen_kwargs)
+                    else:
+                        result = model.generate_image(**gen_kwargs)
+                return result.image
             return None
         finally:
             # The recorded Ideogram 4 schedule belongs to this run only; never let a later run read it.
             _ideogram4_timesteps.value = None
-            for callback in (checker, progress_checker):
-                if callback is not None:
-                    _unregister_callback(model, callback)
-            mx.clear_cache()
+
+    def _moss_generate(
+        self,
+        model: Any,
+        prompt: str,
+        width: int,
+        height: int,
+        seed: int,
+        steps: int,
+        guidance: float | None,
+        negative_prompt: str | None,
+        skip_signal: Any | None,
+        step_callback: Any | None,
+        *,
+        image: Image.Image | None = None,
+        strength: float = 1.0,
+    ) -> Image.Image | None:
+        """Run MOSS-Image for *steps* (from *image* at *strength* when given), reporting progress and honouring a skip."""
+        sampler = moss_sampler_settings(turbo=self._model_info.is_distilled, steps=steps, guidance=guidance if guidance is not None else 1.0, negative_prompt=negative_prompt)
+        with _reporting(model, steps, "moss", skip_signal, step_callback):
+            return _moss.generate(model, prompt, width=width, height=height, seed=seed, sampler=sampler, image=image, strength=strength)
+        return None
+
+
+def _load_moss(model_path: str, model_info: ImageModelInfo, quantize: int | None, precision: str, lora_paths: list[str] | None, lora_weights: list[float] | None) -> Any:
+    """Load MOSS-Image's text encoder stage, with the Turbo LoRA (for Turbo) and the user LoRAs set for its denoiser.
+
+    mflux keeps every LoRA as a separate layer. The VAE (and, in float32 mode, every component) is upcast as each stage
+    loads.
+
+    Raises:
+        RuntimeError: If *model_path* is not a built ``moss`` / ``moss-sft`` folder or a stored copy of one.
+    """
+    require_built(model_path)
+    turbo_lora = turbo_lora_for(model_path, turbo=model_info.is_distilled)
+    stack = moss_lora_stack(str(turbo_lora) if turbo_lora is not None else None, lora_paths, lora_weights)
+    return _moss.load(
+        model_path,
+        quantize,
+        lora_paths=[lora.path for lora in stack],
+        lora_scales=[lora.strength for lora in stack],
+        upcast=("transformer", "text_encoder", "vae") if precision == "float32" else ("vae",),
+    )

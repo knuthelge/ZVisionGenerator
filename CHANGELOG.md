@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - **Use as → Reference** in the viewer and Gallery menus adds an image as the next reference on Image
+- **MOSS-Image on macOS:** `moss` (Turbo) and `moss-sft` now run on a Mac too, with the same features as on Windows and Linux
 
 ### Changed
 - **Blob is redrawn and works like a sampler.** He is a teal paint dollop with two big eyes, a tilted beret and little feet, in all thirteen moods and at 24 px in the logo. He appears as noise that resolves in eight steps and snaps sharp, and travels between his spots as a stream of pixels. While creating, a small canvas beside him denoises with your job's real steps; it snaps to sharp when he finishes. Confetti, the Zs and the thought bubble are drawn in pixels too. With reduced motion he appears at once, and each effect shows a still frame. The top bar and the phone menu show a new Z-Vision wordmark in place of "ziv", the app is named Z-Vision Generator on a home screen and in the browser tab, and the README logo is redrawn

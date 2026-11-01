@@ -121,6 +121,13 @@ class ImageBackend(Protocol):
         """Write a loaded, quantized, LoRA-free model's weights to directory *path*."""
         ...
 
+    def runs_after_save(self, model: Any) -> bool:
+        """Return whether *model* can still run the job once :meth:`save_quantized` has written it.
+
+        ``False`` makes the loader load the job's model from the copy just written.
+        """
+        ...
+
     def write_quantized_files(self, source: str, path: str, bits: int, cancelled: Callable[[], bool] | None = None) -> None:
         """Write the stored quant of the local model *source* at *bits* into directory *path*, without loading it.
 

@@ -30,8 +30,10 @@ class _FakeBackend:
         save_gate: threading.Event | None = None,
         files_levels: tuple[int, ...] = (),
         files_sources: tuple[str, ...] | None = None,
+        runs_after_save: bool = True,
     ):
         self._format = backend_format
+        self._runs_after_save = runs_after_save
         self._save_error = save_error
         self._save_gate = save_gate
         self._files_levels = files_levels
@@ -61,6 +63,9 @@ class _FakeBackend:
     def load_model(self, model_path, quantize=None, precision="bfloat16", lora_paths=None, lora_weights=None):
         self.loads.append({"path": model_path, "quantize": quantize, "lora_paths": lora_paths})
         return MagicMock(name=f"model-{len(self.loads)}"), "info"
+
+    def runs_after_save(self, model) -> bool:
+        return self._runs_after_save
 
     def save_quantized(self, model, path):
         try:
@@ -200,6 +205,17 @@ class TestLoad:
         assert (stored / "model_index.json").is_file()
         assert _partials(models_dir) == []
         assert info == "info"
+
+    def test_a_model_the_save_freed_runs_from_the_copy(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(runs_after_save=False)
+        phases: list[str] = []
+
+        load_image_model(backend, str(source), quantize=8, models_dir=models_dir, on_phase=phases.append)
+
+        stored = models_dir / "atlas@q8"
+        assert backend.loads == [{"path": str(source), "quantize": 8, "lora_paths": None}, {"path": str(stored), "quantize": None, "lora_paths": None}]
+        assert phases == [SAVING_QUANT_PHASE, LOADING_PHASE]
 
     def test_first_use_with_loras_saves_lora_free_weights_then_loads_loras_on_the_copy(self, models_dir):
         source = _make_source(models_dir)

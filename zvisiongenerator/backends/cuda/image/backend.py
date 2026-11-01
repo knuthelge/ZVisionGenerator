@@ -354,6 +354,10 @@ class DiffusersBackend:
             return
         model.save_pretrained(path)
 
+    def runs_after_save(self, model: Any) -> bool:
+        """Return ``True``: saving leaves the pipeline as loaded."""
+        return True
+
     def write_quantized_files(self, source: str, path: str, bits: int, cancelled: Callable[[], bool] | None = None) -> None:
         """Write the stored copy at *bits* of the model at *source* into *path*, one component at a time.
 

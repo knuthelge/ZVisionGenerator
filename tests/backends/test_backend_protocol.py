@@ -235,7 +235,7 @@ class TestIdeogram4MfluxBackend:
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
-            monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
+            monkeypatch.setattr(image_mac_module, "upcast_weights", MagicMock())
             monkeypatch.setattr(image_mac_module, "load_resident", lambda build: build())
             monkeypatch.setattr(image_mac_module.ModelConfig, "ideogram4_fp8", MagicMock(return_value="ideogram4-config"))
             ideogram_ctor = MagicMock(return_value=MagicMock())
@@ -442,7 +442,7 @@ class TestIdeogram4MfluxBackend:
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
-            monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
+            monkeypatch.setattr(image_mac_module, "upcast_weights", MagicMock())
             monkeypatch.setattr(image_mac_module, "load_resident", lambda build: build())
             monkeypatch.setattr(image_mac_module.ModelConfig, "z_image", MagicMock(return_value="zimage-config"))
             zimage_ctor = MagicMock(return_value=generate_model)
@@ -487,7 +487,7 @@ class TestKrea2MfluxBackend:
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
-            monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
+            monkeypatch.setattr(image_mac_module, "upcast_weights", MagicMock())
             monkeypatch.setattr(image_mac_module, "load_resident", lambda build: build())
             krea2_ctor = MagicMock(return_value=MagicMock())
             monkeypatch.setattr(image_mac_module, "Krea2", krea2_ctor)
@@ -541,10 +541,10 @@ class TestKrea2MfluxBackend:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Selective MLX upcast only runs on macOS")
 class TestSelectiveMacWeightUpcast:
-    def test_upcast_model_weights_preserves_uint32_quantized_weights(self):
+    def test_upcast_weights_preserves_uint32_quantized_weights(self):
         mx = pytest.importorskip("mlx.core")
 
-        from zvisiongenerator.backends.mac.image import _upcast_model_weights
+        from zvisiongenerator.backends.mac.memory import upcast_weights
 
         uint_weights = mx.array([1, 2, 3], dtype=mx.uint32)
         fp16_weights = mx.array([1.5, 2.5], dtype=mx.float16)
@@ -562,7 +562,7 @@ class TestSelectiveMacWeightUpcast:
         )
         model = MagicMock(transformer=component)
 
-        _upcast_model_weights(model, ["transformer"])
+        upcast_weights(model, ["transformer"])
 
         assert component.updated is not None
         assert component.updated["quantized"] is uint_weights

@@ -270,8 +270,10 @@ def load_image_model(
         if on_phase is not None:
             on_phase(SAVING_QUANT_PHASE)
         saved = save_stored_quant(backend, model, source=source, target=plan.create, bits=plan.quantize, backend_format=backend_format, cancelled=cancelled)
-    if not lora_paths or (not saved and cancelled is not None and cancelled()):
-        # A stopped job quits before its first generation, so it never needs the LoRA load.
+    # Without LoRAs the model that was saved runs the job, unless the backend's save left it unable to (MOSS-Image's staged
+    # save on macOS frees it): then the job runs from the copy. A stopped job quits before its first generation, so it
+    # never needs another load.
+    if (not lora_paths and (not saved or backend.runs_after_save(model))) or (not saved and cancelled is not None and cancelled()):
         return model, info
     del model
     if release_memory is not None:

@@ -44,7 +44,7 @@ After each job the Web UI gives the model's memory back to the system.
 
 ## MOSS-Image
 
-MOSS-Image (`moss` and `moss-sft`, see [Models](models.md#moss-image)) runs on Windows and Linux and fits a 10 GB card at every level.
+MOSS-Image (`moss` and `moss-sft`, see [Models](models.md#moss-image)) fits a 10 GB card at every level on Windows and Linux, and a 32 GB Mac at every level.
 
 | Level | GPU memory | System memory |
 |---|---|---|

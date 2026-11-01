@@ -644,6 +644,11 @@ class TestStoredQuants:
         assert backend.quantizes_from_files(8) is True
         assert backend.quantizes_from_files(4) is False
 
+    def test_a_saved_pipeline_still_runs(self, win_backend):
+        mod, _, _ = win_backend
+
+        assert mod.DiffusersBackend().runs_after_save(MagicMock())
+
     def test_save_quantized_saves_the_pipeline(self, win_backend):
         mod, _, _ = win_backend
         pipeline = MagicMock()

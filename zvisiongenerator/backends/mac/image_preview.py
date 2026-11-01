@@ -46,8 +46,8 @@ def render_latent_preview(model: Any, family: str, latents: mx.array, height: in
     """Project one family's in-loop latents to an RGB preview at 1/8 of the output resolution.
 
     Args:
-        model: The loaded mflux model (FLUX.2 Klein needs its VAE batch-norm statistics).
-        family: Image model family (``zimage``, ``flux2_klein``, ``ideogram4`` or ``krea2``).
+        model: The loaded mflux model (FLUX.2 Klein and MOSS-Image need its VAE batch-norm statistics).
+        family: Image model family (``zimage``, ``flux2_klein``, ``ideogram4``, ``krea2`` or ``moss``).
         latents: Latents exactly as the denoising loop passes them to in-loop callbacks.
         height: Output image height in pixels.
         width: Output image width in pixels.
@@ -59,7 +59,11 @@ def render_latent_preview(model: Any, family: str, latents: mx.array, height: in
         spatial = ZImageLatentCreator.unpack_latents(latents, height, width)[0]
         return _project_to_image(spatial, _ZIMAGE_PROJECTION)
     if family == "flux2_klein":
-        return _project_to_image(_flux2_klein_spatial(model, latents, height, width), _FLUX2_PROJECTION)
+        packed = Flux2LatentCreator.unpack_latents(latents, height, width)[0]
+        return _project_to_image(_flux2_spatial(model, packed), _FLUX2_PROJECTION)
+    if family == "moss":
+        # MOSS-Image denoises FLUX.2's patchified, normalised latents in their spatial (1, 128, h, w) layout.
+        return _project_to_image(_flux2_spatial(model, latents[0]), _FLUX2_PROJECTION)
     if family == "ideogram4":
         spatial = Ideogram4LatentCreator.unpack_latents(latents, height, width)[0]
         return _project_to_image(spatial, _FLUX2_PROJECTION)
@@ -69,9 +73,8 @@ def render_latent_preview(model: Any, family: str, latents: mx.array, height: in
     return None
 
 
-def _flux2_klein_spatial(model: Any, latents: mx.array, height: int, width: int) -> mx.array:
-    """Undo FLUX.2 Klein's batch-norm and 2x2 patchify to recover ``(32, h, w)`` VAE latents."""
-    packed = Flux2LatentCreator.unpack_latents(latents, height, width)[0]
+def _flux2_spatial(model: Any, packed: mx.array) -> mx.array:
+    """Undo the FLUX.2 VAE's batch-norm and 2x2 patchify of ``(128, h, w)`` latents to recover ``(32, 2h, 2w)`` VAE latents."""
     bn = model.vae.bn
     packed = packed * mx.sqrt(bn.running_var.reshape(-1, 1, 1) + bn.eps) + bn.running_mean.reshape(-1, 1, 1)
     channels, patch_h, patch_w = packed.shape

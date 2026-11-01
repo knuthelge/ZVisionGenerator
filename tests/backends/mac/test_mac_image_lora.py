@@ -20,7 +20,7 @@ def image_mac(monkeypatch):
     monkeypatch.setattr(module.ModelConfig, "precision", module.ModelConfig.precision)
     monkeypatch.setattr(module, "mx", MagicMock(name="mx"))
     monkeypatch.setattr(module, "load_resident", MagicMock(name="load_resident", side_effect=lambda build: build()))
-    monkeypatch.setattr(module, "_upcast_model_weights", MagicMock())
+    monkeypatch.setattr(module, "upcast_weights", MagicMock())
     return module
 
 

@@ -104,6 +104,11 @@ _FLOAT_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
 _QUANT_GROUP_OVERHEAD_BYTES = 4 / 64
 # Diffusion pipelines read text-encoder hidden states, never logits, so mflux does not load the LM head.
 _TEXT_ENCODER_SKIPPED_PREFIXES = ("lm_head.",)
+# MOSS-Image on MLX, above the denoiser stage's weights: the loop and the strip VAE decode at 1024x1024 peaked 1.9 GiB
+# above them at q4 and q8 (32 GB Mac); the text encoder stage takes the fixed margin, which covers a 2,000-token prompt.
+_MOSS_MLX_DENOISE_WORKING_BYTES = 2 * GIB
+# mflux loads only MOSS-Image's language model; the Qwen3.5 vision tower (``visual.``) stays on disk, and a stored copy has none.
+_MOSS_MLX_TEXT_ENCODER_SKIPPED_PREFIXES = (*_TEXT_ENCODER_SKIPPED_PREFIXES, "visual.")
 _LTX_MLX_CONNECTOR_FILE = "connector.safetensors"
 # The audio decoders loaded for a decode next to the video VAE decoder: the VAE tiler's budget limits only activations, not these weights.
 _LTX_MLX_AUDIO_DECODER_FILES = ("audio_vae.safetensors", "vocoder.safetensors")
@@ -227,6 +232,8 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     and headers are read once for all levels. Ideogram 4 adds its measured working memory at 1024x1024, whose VAE
     decode peaks far above the weights; other families add the fixed margin. The estimate covers the weights
     resident at load, including the text encoder; it does not count the per-prompt encodings kept for the job.
+    MOSS-Image loads its text encoder and its denoiser one after the other, so its peak is the larger stage (see
+    :func:`_mlx_moss_estimate`).
 
     Args:
         model_dir: Directory holding the model's safetensors files.
@@ -235,6 +242,11 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     Returns:
         Estimated peak bytes per level, or ``None`` when weights are missing or unreadable.
     """
+    if is_moss_model(model_dir):
+        moss_components = _image_components(model_dir, _MOSS_MLX_TEXT_ENCODER_SKIPPED_PREFIXES)
+        if moss_components is None:
+            return None
+        return {level: _mlx_moss_estimate(moss_components, level, _turbo_lora_bytes(model_dir)) for level in quantize_levels}
     components = _image_components(model_dir)
     if components is None:
         return None
@@ -680,6 +692,18 @@ def _cuda_ideogram4_estimate(components: dict[str, WeightTotals], quantize: int 
     return CudaMemoryEstimate(int(gpu), int(transformer + text_encoder + rest + _CUDA_SYSTEM_WORKING_BYTES))
 
 
+def _mlx_moss_estimate(components: dict[str, WeightTotals], quantize: int | None, lora_bytes: int) -> int:
+    """Estimate MOSS-Image on MLX: the larger of its two stages, each with its working memory.
+
+    The text encoder stage holds the text encoder alone; it is freed before the denoiser stage loads the transformer,
+    the float32 VAE and the LoRAs, which mflux keeps as separate layers in the file's dtype (the Turbo LoRA is
+    float32, so its file size is its footprint).
+    """
+    text_encoder = _image_component_bytes("text_encoder", components["text_encoder"], quantize) if "text_encoder" in components else 0
+    denoiser = sum(_image_component_bytes(name, totals, quantize) for name, totals in components.items() if name != "text_encoder") + lora_bytes
+    return int(max(text_encoder + _IMAGE_WORKING_BYTES, denoiser + _MOSS_MLX_DENOISE_WORKING_BYTES))
+
+
 def _cuda_moss_estimate(components: dict[str, WeightTotals], quantize: int | None, lora_bytes: int) -> CudaMemoryEstimate:
     """Estimate MOSS-Image on CUDA, mirroring its placement.
 
@@ -706,11 +730,11 @@ def _moss_text_encoder_bytes(totals: WeightTotals) -> float:
 
 
 def _turbo_lora_bytes(model_dir: Path) -> int:
-    """Return the bytes the Turbo LoRA occupies on the GPU; zero when the model has none."""
+    """Return the bytes the Turbo LoRA occupies in memory; zero when the model has none."""
     lora = turbo_lora_file(moss_base_dir(model_dir))
     if lora is None:
         return 0
-    # The LoRA is float32 on disk and on the GPU, so the file size is its footprint.
+    # The LoRA is float32 on disk and in memory, so the file size is its footprint.
     return lora.stat().st_size
 
 
@@ -719,11 +743,11 @@ def _cuda_component_bytes(totals: WeightTotals, bytes_per_weight: float) -> floa
     return totals.float_matrix_elements * bytes_per_weight + totals.float_other_elements * 2 + totals.fp8_matrix_elements + totals.packed_bytes
 
 
-def _image_components(model_dir: Path) -> dict[str, WeightTotals] | None:
+def _image_components(model_dir: Path, text_encoder_skipped: tuple[str, ...] = _TEXT_ENCODER_SKIPPED_PREFIXES) -> dict[str, WeightTotals] | None:
     components: dict[str, WeightTotals] = {}
     for path in model_weight_files(model_dir):
         component = component_of(model_dir, path)
-        skipped = _TEXT_ENCODER_SKIPPED_PREFIXES if component == "text_encoder" else ()
+        skipped = text_encoder_skipped if component == "text_encoder" else ()
         try:
             components[component] = components.get(component, WeightTotals()) + read_safetensors_totals(path, skipped)
         except OSError, ValueError, KeyError, TypeError:

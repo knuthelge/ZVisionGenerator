@@ -565,6 +565,40 @@ class TestEstimateCudaImageMemory:
         assert estimate_cuda_image_memory(tmp_path) is None
 
 
+class TestEstimateMlxMossMemory:
+    """MOSS-Image on MLX: the text encoder stage and the denoiser stage are never resident together."""
+
+    def _model(self, root: Path, *, lora: int = 0, encoder_rows: int = 1024, transformer_rows: int = 4096) -> Path:
+        model_dir = root / "moss"
+        index = {"_class_name": "MOSSImagePipeline", "transformer": ["x", "T"], "text_encoder": ["x", "E"], "vae": ["x", "V"]}
+        model_dir.mkdir(parents=True)
+        (model_dir / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
+        _write_safetensors(
+            model_dir / "text_encoder" / "model.safetensors",
+            # The names of the pinned checkpoint's text encoder: the language model and the vision tower mflux skips.
+            {"language_model.layers.0.mlp.weight": ("BF16", [encoder_rows, 1024]), "visual.blocks.0.mlp.weight": ("BF16", [8192, 1024])},
+        )
+        _write_safetensors(model_dir / "transformer" / "model.safetensors", {"linear": ("BF16", [transformer_rows, 1024])})
+        _write_safetensors(model_dir / "vae" / "model.safetensors", {"conv": ("F32", [64, 64, 3, 3])})
+        if lora:
+            (model_dir / "turbo_lora.safetensors").write_bytes(b"\0" * lora)
+        return model_dir
+
+    def test_the_peak_is_the_larger_stage_with_the_vision_tower_left_out(self, tmp_path):
+        estimates = estimate_image_memory(self._model(tmp_path, lora=4000), (None, 4))
+
+        denoiser = 4096 * 1024 * 2 + 64 * 64 * 9 * 4 + 4000
+        assert estimates[None] == denoiser + model_memory._MOSS_MLX_DENOISE_WORKING_BYTES
+        q4 = 4096 * 1024 * (4 / 8 + model_memory._QUANT_GROUP_OVERHEAD_BYTES) + 64 * 64 * 9 * 4 + 4000
+        assert estimates[4] == int(q4 + model_memory._MOSS_MLX_DENOISE_WORKING_BYTES)
+
+    def test_a_larger_text_encoder_stage_sets_the_peak(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(model_memory, "_MOSS_MLX_DENOISE_WORKING_BYTES", 0)
+        estimates = estimate_image_memory(self._model(tmp_path, encoder_rows=8192, transformer_rows=1024))
+
+        assert estimates[None] == 8192 * 1024 * 2 + model_memory._IMAGE_WORKING_BYTES
+
+
 class TestEstimateCudaMossMemory:
     """MOSS-Image: NF4 text encoder (bf16 embeddings) at every level, resident transformer at q4, streamed otherwise, plus the Turbo LoRA."""
 

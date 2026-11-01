@@ -79,6 +79,8 @@ zvisiongenerator/
 │       ├── klein_references.py    FLUX.2 Klein references (mflux): an edit view over the loaded model, and the start-image hook for references with img2img
 │       ├── ltx_converted.py       Write a converted LTX-2.3 MLX folder from a single-file checkpoint
 │       ├── memory.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
+│       ├── moss.py                MOSS-Image (mflux parts): the text encoder and denoiser loaded one after the other, the denoising loop and the stored copies
+│       ├── moss_lora.py           The LoRA mapping MOSS-Image's MLX transformer loads every trainer's naming through, unmerged
 │       ├── prompt_enhancer.py     Prompt-enhancer LLM (mlx-lm)
 │       ├── seedvr2.py             SeedVR2 upscaler (mflux)
 │       └── video.py               LTX video backend (MLX)

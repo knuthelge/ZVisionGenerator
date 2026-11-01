@@ -16,8 +16,6 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 
 A built-in model shows its name with its alias under it, for example FLUX.2 Klein 9B and `klein9b`. The alias is what you use in the CLI and in prompt files.
 
-On Windows and Linux the table also lists **MOSS-Image Turbo** (`moss`) and **MOSS-Image SFT** (`moss-sft`). They aren't listed on macOS.
-
 **Size** is the disk the model uses. For a built-in model that's its Hugging Face download; for a converted model it's its own folder, without the base-model files it links to. Quantized copies count with their model.
 
 **Memory** shows whether the model fits this machine. See [Memory](../concepts/memory.md).
@@ -34,7 +32,7 @@ A job that needs a model being downloaded waits for it and shows its progress. C
 
 !!! note "Three special rows"
     - **Ideogram 4 Instant** (`ideo`): Download fetches its source files. The first job then builds the model folder from them. See [Ideogram 4 Instant](../concepts/models.md#ideogram-4-instant).
-    - **MOSS-Image Turbo** (`moss`) and **MOSS-Image SFT** (`moss-sft`), on Windows and Linux: Download fetches the model files, and the first image builds the model folder from them. Until then the row says *Downloaded. The first image builds it.* The two share the download. See [MOSS-Image](../concepts/models.md#moss-image).
+    - **MOSS-Image Turbo** (`moss`) and **MOSS-Image SFT** (`moss-sft`): Download fetches the model files, and the first image builds the model folder from them. Until then the row says *Downloaded. The first image builds it.* The two share the download. See [MOSS-Image](../concepts/models.md#moss-image).
     - **SeedVR2**, the model behind the plain image upscale and, on Windows and Linux, the video upscale: on a Mac, the first plain upscale makes an 8-bit copy and removes the download. See [Upscaling](../concepts/upscaling.md#plain-upscale).
 
 If Hugging Face can't be reached, the size can't be read and the download can't start. A model that needs a license or a login shows one line saying what to do. See [Hugging Face token](../concepts/data-folder.md#hugging-face-token).

@@ -27,7 +27,7 @@ def image_mac(monkeypatch):
 def _load_zimage(module, monkeypatch, *, quantize=None):
     info = module.ImageModelInfo(family="zimage", is_distilled=False, size=None)
     monkeypatch.setattr(module, "detect_image_model", lambda _path: info)
-    monkeypatch.setattr(module, "_upcast_model_weights", MagicMock())
+    monkeypatch.setattr(module, "upcast_weights", MagicMock())
     monkeypatch.setattr(module.ModelConfig, "z_image", MagicMock(return_value="cfg"))
     model = MagicMock(name="model")
     monkeypatch.setattr(module, "ZImageTurbo", MagicMock(return_value=model))
@@ -53,7 +53,7 @@ def test_load_model_builds_and_upcasts_the_vae_inside_load_resident(image_mac, m
         return loaded
 
     monkeypatch.setattr(module, "load_resident", load_resident)
-    monkeypatch.setattr(module, "_upcast_model_weights", upcast)
+    monkeypatch.setattr(module, "upcast_weights", upcast)
     monkeypatch.setattr(module.ModelConfig, "z_image", MagicMock(return_value="cfg"))
     monkeypatch.setattr(module, "ZImageTurbo", constructor)
 

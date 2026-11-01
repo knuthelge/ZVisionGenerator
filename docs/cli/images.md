@@ -10,7 +10,7 @@ ziv-image -m klein4b --prompt "a portrait"                 # FLUX.2 Klein 4B
 ziv-image -m klein9b --prompt "a portrait"                 # FLUX.2 Klein 9B
 ziv-image -m krea2 -q 4 --prompt "a portrait"              # Krea 2 Turbo, 4-bit
 ziv-image -m ideo --prompt "a travel poster for Lisbon"    # Ideogram 4 Instant
-ziv-image -m moss -q 4 --prompt 'a cafe sign that reads "Open"'    # MOSS-Image Turbo (Windows, Linux)
+ziv-image -m moss -q 4 --prompt 'a cafe sign that reads "Open"'    # MOSS-Image Turbo
 ```
 
 `-m` also takes a model you converted, a folder path or a Hugging Face repo. See [Models](../concepts/models.md) for what each model is good at and how names are resolved.

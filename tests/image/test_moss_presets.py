@@ -40,11 +40,11 @@ def test_packaged_source_parses_and_matches_the_vendored_revision(config):
     assert source.sft_revision == makefile_revision.group(1)
 
 
-def test_aliases_exist_on_windows_and_linux_only_and_are_not_declared_families(config):
+def test_aliases_name_their_folder_on_every_platform_and_are_not_declared_families(config):
     for alias in ("moss", "moss-sft"):
-        assert set(config["model_aliases"][alias]) == {"win32", "linux"}
+        assert config["model_aliases"][alias] == alias
         assert alias not in config["model_alias_families"]
-        assert set(config["model_labels"][alias]["download_size_label"]) == {"win32", "linux"}
+        assert set(config["model_labels"][alias]["download_size_label"]) == {"darwin", "win32", "linux"}
 
 
 @pytest.mark.parametrize(("info", "variant"), [(_TURBO, "turbo"), (_SFT, "sft")])

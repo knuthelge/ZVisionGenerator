@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 # Freed buffers MLX may keep for reuse. Its default (the whole memory limit) let the cache grow to 16-29 GB
@@ -69,6 +69,22 @@ def materialize_weights(model: Any) -> None:
 
     for _, parameter in tree_flatten(model.parameters()):
         mx.eval(parameter)
+
+
+def upcast_weights(model: Any, components: Sequence[str]) -> None:
+    """Cast the bfloat16 and float16 parameters of *model*'s named *components* to float32; quantized weights stay."""
+    import mlx.core as mx
+    from mlx.utils import tree_map
+
+    def to_float32(parameter: Any) -> Any:
+        if isinstance(parameter, mx.array) and parameter.dtype in (mx.bfloat16, mx.float16):
+            return parameter.astype(mx.float32)
+        return parameter
+
+    for name in components:
+        component = getattr(model, name, None)
+        if component is not None:
+            component.update(tree_map(to_float32, component.parameters()))
 
 
 def evaluate[T](value: T) -> T:

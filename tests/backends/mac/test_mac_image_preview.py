@@ -51,11 +51,22 @@ class TestRenderLatentPreview:
         height, width = 128, 64
         latents = mx.random.normal((1, (height // 16) * (width // 16), 128))
 
-        spatial = preview_module._flux2_klein_spatial(_klein_model(mx), latents, height, width)
+        spatial = preview_module._flux2_spatial(_klein_model(mx), Flux2LatentCreator.unpack_latents(latents, height, width)[0])
         reference = Flux2VAE._unpatchify_latents(Flux2LatentCreator.unpack_latents(latents, height, width))[0]
 
         assert spatial.shape == (32, height // 8, width // 8)
         assert np.allclose(np.array(spatial), np.array(reference))
+
+    def test_moss_previews_its_spatial_latents_like_the_vae_unpacks_them(self, mx, preview_module):
+        from mflux.models.flux2.model.flux2_vae.vae import Flux2VAE
+
+        latents = mx.random.normal((1, 128, 8, 4))
+
+        image = preview_module.render_latent_preview(_klein_model(mx), "moss", latents, height=128, width=64)
+        spatial = preview_module._flux2_spatial(_klein_model(mx), latents[0])
+
+        assert image.size == (8, 16)
+        assert np.allclose(np.array(spatial), np.array(Flux2VAE._unpatchify_latents(latents)[0]))
 
     def test_flux2_klein_and_ideogram4_previews_are_one_eighth_resolution(self, mx, preview_module):
         latents = mx.random.normal((1, 8 * 4, 128))

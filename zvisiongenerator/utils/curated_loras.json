@@ -8358,6 +8358,7 @@
    "non_commercial": false,
    "downloads": 2918,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8393,6 +8394,7 @@
    "non_commercial": false,
    "downloads": 947,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8428,6 +8430,7 @@
    "non_commercial": false,
    "downloads": 694,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8463,6 +8466,7 @@
    "non_commercial": false,
    "downloads": 387,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8498,6 +8502,7 @@
    "non_commercial": false,
    "downloads": 0,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8533,6 +8538,7 @@
    "non_commercial": false,
    "downloads": 38372,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8566,6 +8572,7 @@
    "non_commercial": false,
    "downloads": 77,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8601,6 +8608,7 @@
    "non_commercial": false,
    "downloads": 100,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],
@@ -8636,6 +8644,7 @@
    "non_commercial": false,
    "downloads": 0,
    "platforms": [
+    "darwin",
     "win32",
     "linux"
    ],

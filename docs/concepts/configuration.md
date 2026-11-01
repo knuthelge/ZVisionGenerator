@@ -172,7 +172,7 @@ The pinned sources Ideogram 4 Instant is built from: the transformer, the base c
 
 ## `moss_image`
 
-The pinned sources MOSS-Image is built from, on Windows and Linux only: `sft`, the SFT repository as `owner/repo@revision`, and `turbo_lora`, the repository, revision and file name of the 4-step LoRA that makes the `moss` (Turbo) model. The `moss` and `moss-sft` model folders are built from them on first use. Changing a pin rebuilds the affected folder and, for a new LoRA, leaves the SFT folder alone. The packaged SFT revision is the one the bundled pipeline code was written for, so change it only together with that code.
+The pinned sources MOSS-Image is built from: `sft`, the SFT repository as `owner/repo@revision`, and `turbo_lora`, the repository, revision and file name of the 4-step LoRA that makes the `moss` (Turbo) model. The `moss` and `moss-sft` model folders are built from them on first use. Changing a pin rebuilds the affected folder and, for a new LoRA, leaves the SFT folder alone. The packaged SFT revision is the one the bundled pipeline code was written for, so change it only together with that code.
 
 ## Other sections
 

@@ -11,8 +11,8 @@ A model is what turns a prompt into an image or video. The app has built-in mode
 | Z-Image Turbo | `zit` | 33 GB | 10 | Yes | See its [model page](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) |
 | Krea 2 Turbo | `krea2` | 36 GB | 8 | No | [Krea 2 Community License](https://huggingface.co/krea/Krea-2-Turbo) |
 | Ideogram 4 Instant | `ideo` | 28 GB (macOS), 24 GB (Windows, Linux) | 8 | No | Ideogram's non-commercial license |
-| MOSS-Image Turbo | `moss` | 28 GB (Windows, Linux) | 4 | No | Apache-2.0 |
-| MOSS-Image SFT | `moss-sft` | 27 GB (Windows, Linux) | 50 | Yes | Apache-2.0 |
+| MOSS-Image Turbo | `moss` | 28 GB | 4 | No | Apache-2.0 |
+| MOSS-Image SFT | `moss-sft` | 27 GB | 50 | Yes | Apache-2.0 |
 
 Klein 4B is the lightest and the first-run pick on machines with less than 32 GB of memory; Klein 9B is the pick from 32 GB.
 
@@ -69,23 +69,24 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
 
 `moss` and `moss-sft` are MOSS-Image from OpenMOSS, an image model with a 5-billion-parameter transformer and a Qwen3.5-based text encoder, released under the Apache-2.0 license. It renders text well, in English and in Chinese, and follows long, detailed prompts.
 
+Two models share one set of weights:
+
+| | `moss` (Turbo) | `moss-sft` |
+|---|---|---|
+| What it is | MOSS-Image SFT with a community Turbo LoRA distilled from it | MOSS-Image SFT as released |
+| Steps | 4 by default | 50 |
+| Guidance | Built in; a guidance setting is ignored with a warning | 3.0 |
+| Negative prompt | No | Yes |
+
+Start with `moss`. Pick `moss-sft` when you want a negative prompt or the model as released.
+
 === "Windows and Linux"
 
-    Two models share one set of weights:
-
-    | | `moss` (Turbo) | `moss-sft` |
-    |---|---|---|
-    | What it is | MOSS-Image SFT with a community Turbo LoRA distilled from it | MOSS-Image SFT as released |
-    | Steps | 4 by default | 50 |
-    | Guidance | Built in; a guidance setting is ignored with a warning | 3.0 |
-    | Negative prompt | No | Yes |
-    | Speed | About 13 s per image at 1024×1024 on a 10 GB GPU, quantized | About 2 minutes at 50 steps |
-
-    Start with `moss`. Pick `moss-sft` when you want a negative prompt or the model as released. Both run on a 10 GB card at every level; run them [quantized](quantization.md), as unquantized Turbo takes about a minute per image. The figures are in [Memory](memory.md#moss-image).
+    `moss` takes about 13 s per image at 1024×1024 on a 10 GB GPU, quantized; `moss-sft` about 2 minutes at 50 steps. Both run on a 10 GB card at every level; run them [quantized](quantization.md), as unquantized Turbo takes about a minute per image. The figures are in [Memory](memory.md#moss-image).
 
 === "macOS"
 
-    MOSS-Image isn't available on macOS yet.
+    `moss` takes about 30 s per image at 1024×1024 on a 32 GB Mac, quantized; `moss-sft` about 15 minutes at 50 steps. Both fit a 32 GB Mac at every level.
 
 - **Sizes** are multiples of 16, from about 0.25 to 4 megapixels. The model is made for about 1–2 megapixels; above that, Turbo's 4 steps look softer, so use 6–8 steps.
 - **Text.** Put the words you want in the image in quotes in the prompt.
