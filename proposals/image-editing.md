@@ -93,6 +93,7 @@ Each step is a commit in one worktree.
 - **Inpaint-trained checkpoints (e.g. FLUX.1 Fill in mflux).** Rejected: a separate large download of a model family we don't otherwise ship, and it would ignore the source's model and LoRAs.
 - **Z-Image Fun ControlNet's inpaint mode.** mflux 0.20 doesn't expose it, and it adds a ControlNet download and a softer, less distilled result.
 - **Mask editing inside the Workspace's reference image box.** Rejected: too small to paint in, and it mixes the generate and edit flows. The editor gets the full screen.
+- **FLUX 3 Image Klein for Edit (researched 2026-10-31).** Released 2026-10-15 with open weights: instruction edits and 1–10 references in one 5.6B model, supported by our pinned mflux (0.23+, `Flux3KleinEdit`) and diffusers 0.42 (modular pipeline only, with no step callback, so preview and Stop need our own loop). Not taken for now: the repos are gated (FLUX Kommunity licence, outputs free under US$5M revenue), BFL requires an 18.8 GB Qwen3.5-9B prompt upsampler (our Smart enhancer might stand in, untested), early testers are split on whether it beats Klein 9B, and FLUX.2 Klein LoRAs don't apply. Revisit for Phase 2 if an independent comparison shows clearly better edits than Klein 9B.
 - **A separate Edit page in the top nav.** Rejected: you edit a specific image, so the action belongs where the images are (viewer and tiles), like Upscale.
 
 ## Risks
