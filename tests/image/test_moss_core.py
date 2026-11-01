@@ -82,3 +82,29 @@ def cuda_image_backend():
 def test_img2img_run_steps_matches_the_cuda_backends_sigma_tail(cuda_image_backend, total, strength):
     """The count equals what the diffusers backend's img2img grid runs, as the docstring promises."""
     assert img2img_run_steps(total, strength) == len(cuda_image_backend._img2img_sigmas(total, strength))
+
+
+def test_lora_stack_puts_turbo_first_at_full_strength():
+    from zvisiongenerator.core.moss import MossLora, lora_stack
+
+    assert lora_stack("turbo.safetensors", ["a.safetensors", "b.safetensors"], [0.5, 0.7]) == (
+        MossLora("turbo.safetensors", 1.0, turbo=True),
+        MossLora("a.safetensors", 0.5, turbo=False),
+        MossLora("b.safetensors", 0.7, turbo=False),
+    )
+    assert lora_stack(None, ["a.safetensors"], None) == (MossLora("a.safetensors", 1.0, turbo=False),)
+    assert lora_stack(None, None, None) == ()
+
+
+def test_lora_stack_needs_one_weight_per_lora():
+    from zvisiongenerator.core.moss import lora_stack
+
+    with pytest.raises(ValueError):
+        lora_stack(None, ["a.safetensors"], [])
+
+
+def test_run_size_rounds_down_to_the_latent_cell():
+    from zvisiongenerator.core.moss import run_size
+
+    assert run_size(70, 50) == (64, 48)
+    assert run_size(8, 1024) == (16, 1024)

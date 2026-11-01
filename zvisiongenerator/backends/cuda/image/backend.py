@@ -27,11 +27,12 @@ from zvisiongenerator.backends.cuda.quant import load_fp8_components, load_nf4_c
 from zvisiongenerator.core.ideogram4 import sampler_settings
 from zvisiongenerator.core.image_types import JobPrompt
 from zvisiongenerator.core.moss import img2img_run_steps
+from zvisiongenerator.core.moss import run_size as moss_run_size
 from zvisiongenerator.core.moss import sampler_settings as moss_sampler_settings
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.lora_files import normalised_lora_state
 from zvisiongenerator.utils.model_files import is_moss_model
-from zvisiongenerator.utils.moss_build import built_moss_base, turbo_lora_file
+from zvisiongenerator.utils.moss_build import turbo_lora_for
 from zvisiongenerator.utils.stored_quant import STORED_QUANT_BITS, stored_quant_bits
 
 # CUDA allocation and kernel tuning hints for the diffusers image backend.
@@ -144,23 +145,6 @@ def _klein_img2img_latents(pipe: Any, image: Image.Image, sigmas: list[float], w
     noise = torch.randn(clean.shape, generator=generator, dtype=torch.float32).to(device=clean.device, dtype=clean.dtype)
     sigma = _klein_start_sigma(pipe, sigmas, width, height)
     return (1.0 - sigma) * clean + sigma * noise
-
-
-def _moss_turbo_lora(model_path: str, model_info: ImageModelInfo) -> Path | None:
-    """Return the Turbo LoRA file a MOSS-Image Turbo model runs with, or ``None`` for SFT.
-
-    A path that is not a built MOSS-Image folder also gives ``None``: the loader refuses it with its own message.
-
-    Raises:
-        FileNotFoundError: If a built Turbo folder (or a stored copy of it) has lost its LoRA file.
-    """
-    base = built_moss_base(model_path)
-    if not model_info.is_distilled or base is None:
-        return None
-    lora = turbo_lora_file(base)
-    if lora is None:
-        raise FileNotFoundError(f"MOSS-Image Turbo's LoRA is missing from '{base}'; run a job with -m moss to rebuild it.")
-    return lora
 
 
 def _supported_bits(bits: int | None) -> int | None:
@@ -416,7 +400,7 @@ class DiffusersBackend:
         elif model_info.family == "moss":
             stored_bits = stored_quant_bits(Path(model_path))
             bits = _supported_bits(stored_bits if stored_bits is not None else quantize)
-            turbo_lora = _moss_turbo_lora(model_path, model_info)
+            turbo_lora = turbo_lora_for(model_path, turbo=model_info.is_distilled)
             # The adapters (Turbo's and the user's) are installed unmerged, before the transformer is placed.
             pipeline = load_moss_pipeline(model_path, torch_dtype, bits, prequantized=stored_bits is not None, turbo_lora=turbo_lora, lora_paths=lora_paths, lora_weights=lora_weights)
         else:
@@ -490,7 +474,7 @@ class DiffusersBackend:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
         if self._model_info.family == "moss":
-            width, height = max(image.width // 16, 1) * 16, max(image.height // 16, 1) * 16
+            width, height = moss_run_size(image.width, image.height)
             return self._moss_generate(model, prompt, width, height, seed, steps, guidance, negative_prompt, skip_signal, step_callback, image=image, strength=strength)
         if self._model_info.family == "krea2":
             width, height = _krea2_size(model, image)

@@ -201,23 +201,6 @@ class TestRefusal:
 
         assert "pipeline" in log
 
-    def test_a_turbo_stored_copy_runs_with_the_lora_of_its_base_folder(self, models):
-        from zvisiongenerator.backends.cuda.image.backend import _moss_turbo_lora
-        from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-
-        base = _built(models, "moss")
-        (base / "turbo_lora.safetensors").write_bytes(b"lora")
-        copy = models / "moss@q4"
-        copy.mkdir()
-        turbo = ImageModelInfo(family="moss", is_distilled=True, size=None)
-
-        assert _moss_turbo_lora(str(copy), turbo) == base / "turbo_lora.safetensors"
-        assert _moss_turbo_lora(str(base), turbo) == base / "turbo_lora.safetensors"
-        assert _moss_turbo_lora(str(copy), ImageModelInfo(family="moss", is_distilled=False, size=None)) is None
-        (base / "turbo_lora.safetensors").unlink()
-        with pytest.raises(FileNotFoundError, match="LoRA is missing"):
-            _moss_turbo_lora(str(copy), turbo)
-
     def test_the_stored_copy_writer_refuses_a_folder_that_is_not_built(self, tmp_path, writers):
         source = tmp_path / "elsewhere" / "moss"
         source.mkdir(parents=True)

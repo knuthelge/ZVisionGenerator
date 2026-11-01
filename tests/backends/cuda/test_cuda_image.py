@@ -18,6 +18,7 @@ from PIL import Image
 
 import zvisiongenerator.schedulers.beta_sigmas  # noqa: F401  (import scipy for real here; its first import under the fake ``torch`` fails and corrupts numpy)
 from zvisiongenerator.core.image_types import JobPrompt
+from zvisiongenerator.utils import moss_build
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
 
@@ -326,8 +327,8 @@ class TestMoss:
         pipeline = MagicMock()
         with (
             patch.object(mod, "detect_image_model", return_value=self._info(turbo=turbo)),
-            patch.object(mod, "built_moss_base", return_value=base),
-            patch.object(mod, "turbo_lora_file", return_value=lora),
+            patch.object(moss_build, "built_moss_base", return_value=base),
+            patch.object(moss_build, "turbo_lora_file", return_value=lora),
             patch.object(mod, "load_moss_pipeline", return_value=pipeline) as mock_load,
             patch.object(mod, "_load_loras") as mock_loras,
         ):

@@ -23,6 +23,8 @@ from zvisiongenerator.utils.moss_build import (
     moss_source,
     shared_quant_source,
     turbo_lora_file,
+    turbo_lora_for,
+    require_built,
     write_build_record,
 )
 from zvisiongenerator.utils.stored_quant import build_manifest, write_manifest
@@ -197,6 +199,29 @@ class TestTurboLora:
         assert turbo_lora_file(base) is None
         assert turbo_lora_file(moss_base_dir(models / "moss@q8")) is None
         assert turbo_lora_file(sft) is None
+
+    def test_a_turbo_model_and_its_stored_copy_run_with_the_base_folders_lora(self, models):
+        base = _built(models, "moss", _source())
+        (base / TURBO_LORA_NAME).write_bytes(b"lora")
+        copy = _stored_copy(models, base)
+
+        assert turbo_lora_for(copy, turbo=True) == base / TURBO_LORA_NAME
+        assert turbo_lora_for(str(base), turbo=True) == base / TURBO_LORA_NAME
+        assert turbo_lora_for(copy, turbo=False) is None
+        assert turbo_lora_for("OpenMOSS-Team/MOSS-Image-SFT", turbo=True) is None
+
+    def test_only_built_folders_and_their_copies_are_required_builds(self, models, tmp_path):
+        base = _built(models, "moss", _source())
+
+        assert require_built(_stored_copy(models, base)) == base
+        with pytest.raises(RuntimeError, match="folders built on first use"):
+            require_built(tmp_path / "elsewhere" / "moss")
+
+    def test_a_turbo_folder_that_lost_its_lora_is_refused(self, models):
+        base = _built(models, "moss", _source())
+
+        with pytest.raises(FileNotFoundError, match="LoRA is missing"):
+            turbo_lora_for(base, turbo=True)
 
 
 class TestMossBaseDir:

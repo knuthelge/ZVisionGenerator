@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.block_streaming import group_offload
 from zvisiongenerator.backends.cuda.quant import load_fp8_transformer, load_nf4_text_encoder, load_nf4_transformer, save_components
-from zvisiongenerator.core.moss import MAX_SEQUENCE_LENGTH, MossSampler
+from zvisiongenerator.core.moss import MAX_SEQUENCE_LENGTH, MossSampler, lora_stack
 from zvisiongenerator.utils.file_links import link_tree
-from zvisiongenerator.utils.moss_build import built_moss_base, shared_quant_source
+from zvisiongenerator.utils.moss_build import require_built, shared_quant_source
 
 if TYPE_CHECKING:
     import torch
@@ -80,7 +80,7 @@ def load_pipeline(
 
     from zvisiongenerator.backends.cuda.image.moss_lora import install_loras
 
-    _require_built(model_path)
+    require_built(model_path)
     device = torch.device(_DEVICE)
     tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer")
     scheduler = MOSSImageScheduler.from_pretrained(model_path, subfolder="scheduler")
@@ -184,7 +184,7 @@ def write_stored_copy(source: Path, target: Path, bits: int, torch_dtype: torch.
     Raises:
         RuntimeError: If *source* is not a built MOSS-Image folder.
     """
-    _require_built(str(source))
+    require_built(str(source))
     target.mkdir(parents=True, exist_ok=True)
     shared = shared_quant_source(source, bits, backend_format)
     if shared is not None:
@@ -250,24 +250,16 @@ def fp8_keep_patterns() -> tuple[str, ...]:
 
 
 def _lora_files(turbo_lora: Path | None, lora_paths: list[str] | None, lora_weights: list[float] | None) -> list[Any]:
-    """Return the adapters to install: the Turbo LoRA at full strength in float32, then the user's at theirs in bfloat16."""
+    """Return the adapters to install (:func:`~zvisiongenerator.core.moss.lora_stack`): the Turbo LoRA in float32, the user's in bfloat16."""
     import torch
 
     from zvisiongenerator.backends.cuda.image.moss_lora import LoraFile
 
-    paths = lora_paths or []
-    weights = lora_weights if lora_weights is not None else [1.0] * len(paths)
-    files = [LoraFile(str(turbo_lora), 1.0, torch.float32)] if turbo_lora is not None else []
-    return files + [LoraFile(path, weight, torch.bfloat16) for path, weight in zip(paths, weights, strict=True)]
+    stack = lora_stack(str(turbo_lora) if turbo_lora is not None else None, lora_paths, lora_weights)
+    return [LoraFile(lora.path, lora.strength, torch.float32 if lora.turbo else torch.bfloat16) for lora in stack]
 
 
 def _layer_count(model_dir: Path) -> int:
     """Return the number of transformer layers in the model at *model_dir*, from the transformer's config."""
     config = json.loads((model_dir.expanduser() / "transformer" / "config.json").read_text(encoding="utf-8"))
     return int(config["num_layers"])
-
-
-def _require_built(model_path: str) -> None:
-    """Raise unless *model_path* is a built MOSS-Image folder (``moss``, ``moss-sft``) or a stored copy of one."""
-    if built_moss_base(Path(model_path)) is None:
-        raise RuntimeError(f"MOSS-Image runs from the folders built on first use; use -m moss (Turbo) or -m moss-sft instead of '{model_path}'.")

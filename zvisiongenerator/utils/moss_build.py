@@ -31,8 +31,10 @@ __all__ = [
     "is_turbo_dir",
     "moss_base_dir",
     "moss_source",
+    "require_built",
     "shared_quant_source",
     "turbo_lora_file",
+    "turbo_lora_for",
     "write_build_record",
 ]
 
@@ -149,6 +151,40 @@ def built_moss_base(path: str | Path) -> Path | None:
     """Return the ``moss`` / ``moss-sft`` folder in the models directory that *path* is, or is a stored copy of; else ``None``."""
     base = moss_base_dir(path)
     return base if is_moss_dir(base) else None
+
+
+def require_built(model_path: str | Path) -> Path:
+    """Return the built MOSS-Image folder *model_path* is, or is a stored copy of.
+
+    Raises:
+        RuntimeError: If it is neither: MOSS-Image runs only from the folders built on first use.
+    """
+    base = built_moss_base(model_path)
+    if base is None:
+        raise RuntimeError(f"MOSS-Image runs from the folders built on first use; use -m moss (Turbo) or -m moss-sft instead of '{model_path}'.")
+    return base
+
+
+def turbo_lora_for(model_path: str | Path, *, turbo: bool) -> Path | None:
+    """Return the Turbo LoRA file a MOSS-Image model at *model_path* runs with, or ``None`` for SFT.
+
+    A path that is not a built MOSS-Image folder (or a stored copy of one) also gives ``None``: the loader refuses it
+    with its own message.
+
+    Args:
+        model_path: The model folder or its stored quant copy.
+        turbo: Whether the model is the distilled Turbo variant.
+
+    Raises:
+        FileNotFoundError: If a built Turbo folder (or a stored copy of it) has lost its LoRA file.
+    """
+    base = built_moss_base(model_path)
+    if not turbo or base is None:
+        return None
+    lora = turbo_lora_file(base)
+    if lora is None:
+        raise FileNotFoundError(f"MOSS-Image Turbo's LoRA is missing from '{base}'; run a job with -m moss to rebuild it.")
+    return lora
 
 
 def shared_quant_source(source: Path, bits: int, backend_format: str) -> Path | None:
