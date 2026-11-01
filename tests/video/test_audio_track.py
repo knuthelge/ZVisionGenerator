@@ -111,6 +111,7 @@ class TestProbeTrackSeconds:
 
 
 class TestRequireReadableTrack:
+    @REAL
     def test_a_file_that_cannot_be_read_is_refused(self, tmp_path):
         with pytest.raises(ValueError, match=TRACK_UNREADABLE):
             require_readable_track(AudioTrack(str(tmp_path / "missing.mp3"), 0.0))
