@@ -8,9 +8,12 @@ What this module adds around the fork's pipeline:
   (:func:`ensure_text_encoder_copy`).
 * LoRAs. The fork takes one adapter of one rank, so user LoRAs are combined with the turbo LoRA into one rank-concatenated
   adapter (:func:`combine_loras`); with none, the turbo file is passed straight through.
-* The image modes (image-to-video, first and last frame, Extend) run through :mod:`~zvisiongenerator.backends.mac.h3_staged`,
-  which holds one component in memory at a time; text-to-video runs the fork's low-memory pipeline.
+* The image modes (image-to-video, first and last frame, Extend) and any clip that follows an audio track run through
+  :mod:`~zvisiongenerator.backends.mac.h3_staged`, which holds one component in memory at a time; text-to-video without a
+  track runs the fork's low-memory pipeline.
 * Extend as image-to-video from the source's last frame.
+* An audio track: its window is read at the audio VAE's rate and held as clean audio rows for the whole clip, so the
+  model makes the picture only; a workflow stage replaces the clip's silence with the track.
 """
 
 from __future__ import annotations
@@ -27,12 +30,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.mac.h3_staged import generate_conditioned
+from zvisiongenerator.backends.mac.h3_staged import TRACK_SAMPLE_RATE, generate_conditioned
 from zvisiongenerator.backends.mac.memory import release_memory
 from zvisiongenerator.core.video_family import FrameRule
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.audio_resample import resample_audio
+from zvisiongenerator.utils.audio_track import read_track, window_waveform
 from zvisiongenerator.utils.h3_memory import H3_FPS, H3_FRAMES_PER_CHUNK, H3_ROW_PIXELS
 from zvisiongenerator.utils.h3_preset import H3MlxFiles, H3MlxPreset, H3Schedule, HubFiles
 from zvisiongenerator.utils.hf_snapshot import snapshot_download as hub_snapshot_download
@@ -49,7 +53,7 @@ if TYPE_CHECKING:
     import torch
     from PIL import Image
 
-    from zvisiongenerator.core.video_types import ExtendSource
+    from zvisiongenerator.core.video_types import AudioTrack, ExtendSource
 
 __all__ = ["H3_MLX_COMMIT", "H3MlxVideoBackend", "combine_loras", "ensure_text_encoder_copy", "local_int8_transformer", "local_transformer_dirs", "resolve_mlx_files"]
 
@@ -523,12 +527,14 @@ def _generate(
     steps: int,
     images: Sequence[Image.Image] = (),
     anchors: Sequence[str] = (),
+    track_audio: np.ndarray | None = None,
     step_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> _Clip:
     """Make one clip and release everything it held.
 
-    Text-to-video runs the fork's low-memory pipeline, which has no step hook, so it reports its start and end. With images the
-    staged path reports every denoise step.
+    Text-to-video runs the fork's low-memory pipeline, which has no step hook, so it reports its start and end. With images or
+    a *track_audio* (stereo ``(2, samples)`` at the audio VAE's rate, held as the clip's whole sound) the staged path runs and
+    reports every denoise step; the clip's audio is then silence for the caller to replace.
 
     Raises:
         ValueError: If images are given to a model loaded for text-to-video, or the preset has no schedule for *steps*.
@@ -543,7 +549,7 @@ def _generate(
     pipe = None
     try:
         with _process_limits(mx):
-            if images:
+            if images or track_audio is not None:
                 _progress(step_callback, 0, schedule.forwards)
                 video, audio, sample_rate = generate_conditioned(
                     fl2va_dir=model.files.fl2va_dir,
@@ -562,6 +568,7 @@ def _generate(
                     anchors=anchors,
                     step_callback=lambda current, total: _progress(step_callback, current, total),
                     verbose=model.verbose,
+                    track_audio=track_audio,
                 )
                 return _Clip(video=video, audio=audio, sample_rate=sample_rate)
             _progress(step_callback, 0, 1)
@@ -724,6 +731,7 @@ class H3MlxVideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate a video, with sound, from a text prompt.
@@ -737,17 +745,21 @@ class H3MlxVideoBackend:
             seed: Random seed.
             steps: Transformer forwards; a step count of the preset's schedules (4 or 8).
             output_path: Path to save the video.
-            step_callback: Receives a progress event when the clip starts and when it ends.
+            step_callback: Receives a progress event when the clip starts and when it ends; with an *audio_track* the
+                staged path reports every denoise step.
+            audio_track: A track to follow: its window from ``start`` is held as the clip's whole sound, so the picture
+                follows it. The clip is written with silence; a workflow stage replaces it with the track.
             **kwargs: ``stage1_steps`` and ``review`` are refused.
 
         Returns:
             Path to the generated video.
 
         Raises:
-            ValueError: If an upscale option is set, or the preset has no schedule for *steps*.
+            ValueError: If an upscale option is set, the track cannot be read, or the preset has no schedule for *steps*.
         """
         _reject_upscale(kwargs)
-        clip = _generate(model, prompt, width=width, height=height, frames=num_frames, seed=seed, steps=steps, step_callback=step_callback)
+        track_audio = None if audio_track is None else read_track(audio_track, TRACK_SAMPLE_RATE, num_frames / H3_FPS)
+        clip = _generate(model, prompt, width=width, height=height, frames=num_frames, seed=seed, steps=steps, track_audio=track_audio, step_callback=step_callback)
         return _write_clip(clip, Path(output_path))
 
     def image_to_video(
@@ -762,6 +774,7 @@ class H3MlxVideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate a video, with sound, from a first-frame image (and optionally a last-frame image) and a prompt.
@@ -777,21 +790,23 @@ class H3MlxVideoBackend:
             steps: Transformer forwards.
             output_path: Path to save the video.
             step_callback: Receives a progress event when the clip starts and after every denoise step.
+            audio_track: As for ``text_to_video``.
             **kwargs: ``end_image``, the last frame's path; ``stage1_steps`` and ``review`` are refused.
 
         Returns:
             Path to the generated video.
 
         Raises:
-            ValueError: If an upscale option is set, or the model was loaded for text-to-video.
+            ValueError: If an upscale option is set, the track cannot be read, or the model was loaded for text-to-video.
         """
         _reject_upscale(kwargs)
+        track_audio = None if audio_track is None else read_track(audio_track, TRACK_SAMPLE_RATE, num_frames / H3_FPS)
         images = [_fit_image(image_path, width, height)]
         anchors = ["first"]
         if kwargs.get("end_image"):
             images.append(_fit_image(kwargs["end_image"], width, height))
             anchors.append("last")
-        clip = _generate(model, prompt, width=width, height=height, frames=num_frames, seed=seed, steps=steps, images=images, anchors=anchors, step_callback=step_callback)
+        clip = _generate(model, prompt, width=width, height=height, frames=num_frames, seed=seed, steps=steps, images=images, anchors=anchors, track_audio=track_audio, step_callback=step_callback)
         return _write_clip(clip, Path(output_path))
 
     def extend_video(
@@ -806,6 +821,7 @@ class H3MlxVideoBackend:
         segment_dir: str | Path,
         audio_output: bool,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
     ) -> ExtendSegment | None:
         """Generate the continuation of a clip as image-to-video from its last frame.
 
@@ -822,6 +838,9 @@ class H3MlxVideoBackend:
             segment_dir: Existing directory that receives ``segment.mp4`` and, with audio, ``segment.wav``.
             audio_output: Whether to write the new part's sound (only when the clip has any).
             step_callback: Receives a progress event when the clip starts and after every denoise step.
+            audio_track: A track to follow. The window's whole sound is held: the last source frame's sound (silence for a
+                silent source), then the track from its start. No ``segment.wav`` is written; the Extend sound stage writes it
+                from the same window waveform.
 
         Returns:
             The generated segment: its video and, with audio, a 48 kHz WAV that starts at the new part.
@@ -844,6 +863,7 @@ class H3MlxVideoBackend:
         from PIL import Image
 
         last_frame = Image.fromarray(read_source_tail(source)[-1])
+        track_audio = None if audio_track is None else window_waveform(source, audio_track, carry_frames=1, extend_frames=extend_frames, rate=TRACK_SAMPLE_RATE)
         clip = _generate(
             model,
             prompt,
@@ -854,6 +874,7 @@ class H3MlxVideoBackend:
             steps=steps,
             images=[last_frame],
             anchors=["first"],
+            track_audio=track_audio,
             step_callback=step_callback,
         )
         if len(clip.video) < 1 + extend_frames:

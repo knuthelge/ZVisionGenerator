@@ -8,6 +8,7 @@ Stages are pure functions operating on the immutable request and mutable artifac
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -18,12 +19,14 @@ from pathlib import Path
 
 from zvisiongenerator.core.progress_events import failure_with_detail
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.ffmpeg import strip_audio
+from zvisiongenerator.core.video_types import ExtendSegment, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.audio_track import extension_audio, read_track
+from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, strip_audio
 from zvisiongenerator.utils.provenance import build_video_config_payload, embed_mp4_config
 from zvisiongenerator.utils.prompt_compose import compose_video_prompt, expand_random_choices, strip_quotes_while_original
-from zvisiongenerator.utils.video_extend import extend_audio_output
-from zvisiongenerator.utils.video_splice import splice_clips
+from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, extend_audio_output, extend_join_has_sound
+from zvisiongenerator.utils.video_probe import probe_video
+from zvisiongenerator.utils.video_splice import mux_audio, splice_clips, write_pcm16_wav
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 
 
@@ -136,6 +139,7 @@ def text_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorking
         steps=request.steps,
         output_path=output_path,
         step_callback=request.step_callback,
+        audio_track=request.audio_track,
         **kwargs,
     )
     artifacts.generation_time = time.monotonic() - t0 - artifacts.review_wait
@@ -170,6 +174,7 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
         steps=request.steps,
         output_path=output_path,
         step_callback=request.step_callback,
+        audio_track=request.audio_track,
         **kwargs,
     )
     artifacts.generation_time = time.monotonic() - t0 - artifacts.review_wait
@@ -212,8 +217,9 @@ def extend_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkingA
             seed=request.seed,
             steps=request.steps,
             segment_dir=segment_dir,
-            audio_output=_extend_has_audio(request),
+            audio_output=_extend_generates_sound(request),
             step_callback=request.step_callback,
+            audio_track=request.audio_track,
         )
     except BaseException:
         shutil.rmtree(segment_dir, ignore_errors=True)
@@ -244,7 +250,7 @@ def join_clips_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArt
             raise ValueError("join_clips_stage requires request.extend, a generated segment and an output filename")
         output = Path(request.output_dir) / artifacts.filename
         try:
-            artifacts.video_path = splice_clips(extend.source, segment, output, extend_frames=extend.frames, include_audio=_extend_has_audio(request))
+            artifacts.video_path = splice_clips(extend.source, segment, output, extend_frames=extend.frames, include_audio=_extend_join_has_sound(request))
         except (subprocess.CalledProcessError, RuntimeError) as exc:
             detail = exc.stderr.decode("utf-8", "replace").strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
             warnings.warn(f"Joining the clips failed: {detail}", stacklevel=2)
@@ -256,9 +262,48 @@ def join_clips_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArt
     return StageOutcome.success
 
 
-def _extend_has_audio(request: VideoGenerationRequest) -> bool:
-    """Return whether an extension carries sound: the source has audio and the job did not ask for none."""
-    return extend_audio_output(request.extend.source, no_audio=request.no_audio)
+def _extend_generates_sound(request: VideoGenerationRequest) -> bool:
+    """Return whether the model generates an extension's sound: the source has audio, the job did not ask for none and no track is set.
+
+    A request carries a track only when it is effective (the entry points refuse a track on a model that cannot follow
+    it), so a set track means the backend writes no ``segment.wav``.
+    """
+    return extend_audio_output(request.extend.source, no_audio=request.no_audio, track=request.audio_track is not None)
+
+
+def _extend_join_has_sound(request: VideoGenerationRequest) -> bool:
+    """Return whether the joined clip has sound: a track is set, or the source has audio and the job did not ask for none."""
+    return extend_join_has_sound(request.extend.source, no_audio=request.no_audio, track=request.audio_track is not None)
+
+
+def extend_audio_track_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
+    """Write the extension's ``segment.wav`` from the audio track, between ``extend_video_stage`` and ``join_clips_stage``.
+
+    The WAV is cut from the same window waveform the backend held (the source's sound under the carried frames, then the
+    track from its start), so the written sound is the held sound. The generated segment keeps its video; its audio
+    becomes the WAV. Without a track the stage does nothing.
+
+    Raises:
+        ValueError: If the request has a track but no ``extend``, or the artifacts hold no generated segment.
+    """
+    track = request.audio_track
+    if track is None:
+        return StageOutcome.success
+    extend = request.extend
+    segment = artifacts.metadata.get("extend_segment")
+    segment_dir = artifacts.metadata.get("extend_segment_dir")
+    if extend is None or segment is None or segment_dir is None:
+        raise ValueError("extend_audio_track_stage requires request.extend and a generated segment")
+    carry_frames = request.num_frames - extend.frames
+    try:
+        audio, lead = extension_audio(extend.source, track, carry_frames=carry_frames, extend_frames=extend.frames)
+    except ValueError as exc:
+        artifacts.failure_message = str(exc)
+        return StageOutcome.failed
+    wav = Path(segment_dir) / "segment.wav"
+    write_pcm16_wav(audio, wav)
+    artifacts.metadata["extend_segment"] = ExtendSegment(video_path=segment.video_path, audio_path=wav, lead_samples=lead)
+    return StageOutcome.success
 
 
 def log_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
@@ -289,4 +334,38 @@ def strip_audio_stage(request: VideoGenerationRequest, artifacts: VideoWorkingAr
         warnings.warn(f"ffmpeg strip-audio failed: {err_msg}", stacklevel=2)
         artifacts.failure_message = failure_with_detail("Removing the audio track failed", err_msg)
         return StageOutcome.failed
+    return StageOutcome.success
+
+
+def audio_track_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
+    """Put the audio track on the generated clip, in place of ``strip_audio_stage``.
+
+    The track, from its start and cut to the clip's length, replaces the clip's sound: the video is copied unchanged and
+    the track is encoded from its own sample rate (``mux_audio``). The backends only hold the track; this stage writes
+    the sound once. A track past its end is padded with silence. Without a track the stage does nothing.
+    """
+    track = request.audio_track
+    if track is None or artifacts.video_path is None:
+        return StageOutcome.success
+    video = artifacts.video_path
+    work = Path(tempfile.mkdtemp(dir=video.parent, prefix=f"{STAGING_FILE_PREFIX}track-"))
+    try:
+        probe = probe_video(video)
+        if not probe.frame_count or probe.fps <= 0:
+            raise RuntimeError("The generated video's length could not be read.")
+        wav = work / "track.wav"
+        write_pcm16_wav(read_track(track, AUDIO_SAMPLE_RATE, probe.frame_count / probe.fps), wav)
+        muxed = work / f"muxed{video.suffix or '.mp4'}"
+        mux_audio(video, wav, muxed)
+        os.replace(muxed, video)
+    except ValueError as exc:
+        artifacts.failure_message = str(exc)
+        return StageOutcome.failed
+    except (subprocess.CalledProcessError, RuntimeError) as exc:
+        detail = exc.stderr.decode("utf-8", "replace").strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        warnings.warn(f"Adding the audio track failed: {detail}", stacklevel=2)
+        artifacts.failure_message = failure_with_detail("Adding the audio track failed", detail)
+        return StageOutcome.failed
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     return StageOutcome.success

@@ -46,6 +46,10 @@ export interface GalleryAsset {
   image_path?: string | null;
   /** The image a first-and-last-frame clip ends on; absent or null for other assets. */
   end_image_path?: string | null;
+  /** The audio track a clip followed, with where in it the clip's sound starts and ends (seconds); absent or null for other assets. */
+  audio_track_path?: string | null;
+  audio_track_start?: number | null;
+  audio_track_end?: number | null;
   /** The references an image was made with, in prompt order; empty for assets made without any. */
   reference_images?: string[];
   /** Absolute path of the asset file on the host; lets the asset become a start image or frame. */
@@ -147,6 +151,10 @@ export interface ExtendSourceInfo {
   /** The model it was made with, when this machine offers it. */
   model: string | null;
   lora: string | null;
+  /** The audio file the source followed, or null when its sound was generated. */
+  audio_track_path: string | null;
+  /** Seconds into that file where the source's sound ended (where an extension carries on); null with no track. */
+  audio_track_end: number | null;
   problems: ExtendProblem[];
   /** The new frames, snapped to a multiple of 8 (a 2 s default when none was requested); null when the frame rate is unknown. */
   extend_frames: number | null;
@@ -386,6 +394,8 @@ export interface EnhanceContext {
   frames: number | null;
   fps: number | null;
   audio: boolean;
+  /** An audio track is in effect: it is the clip's sound, so none is generated. Sent only then. */
+  audio_track?: boolean;
   /** A start image is supplied (img2img's image, or a video's first frame). */
   reference_image: boolean;
   /** How many reference images are supplied; the prompt names them "image 1", "image 2". */
@@ -631,7 +641,7 @@ export interface PromptFileInspection {
 }
 
 /** What a Browse button chooses; the server owns the list (`web/path_browser.py`). */
-export type BrowsePurposeName = 'output_directory' | 'prompt_file' | 'prompt_file_folder' | 'checkpoint_file' | 'lora_file' | 'source_video' | 'reference_image';
+export type BrowsePurposeName = 'output_directory' | 'prompt_file' | 'prompt_file_folder' | 'checkpoint_file' | 'lora_file' | 'source_video' | 'reference_image' | 'audio_track';
 
 export interface BrowsePurpose {
   name: BrowsePurposeName;
@@ -751,6 +761,8 @@ export interface VideoModelDefaults {
   hidden_controls?: string[];
   /** The model can extend a clip. */
   supports_extend: boolean;
+  /** The model can upscale a clip made from an audio track; false hides the Upscale controls while a track is set. */
+  supports_audio_track_upscale: boolean;
   /** The only step counts the model offers (ascending); null or absent: any count up to `max_steps`. */
   step_options?: number[] | null;
   /** An extension adds frames in multiples of this. */
@@ -889,6 +901,18 @@ export interface DraftState {
   endImagePath: string | null;
   /** Video tab: the file name of a last frame uploaded from this device; null when none. */
   endImageUpload: string | null;
+  /** Video tab: the audio track's path on the host; null when none is set or it was uploaded (`audioTrackUpload`). Kept, but hidden and not sent, on a model without the capability. */
+  audioTrackPath: string | null;
+  /** Video tab: the file name of an audio track uploaded from this device (its file is in `heldUploads`); null when none. */
+  audioTrackUpload: string | null;
+  /** Video tab: the seconds into the track where the clip's sound starts. */
+  audioTrackStart: number;
+  /** Extend Video tab: the audio track's path on the host; null when none is set or it was uploaded (`extendAudioTrackUpload`). */
+  extendAudioTrackPath: string | null;
+  /** Extend Video tab: the file name of an audio track uploaded from this device; null when none. */
+  extendAudioTrackUpload: string | null;
+  /** Extend Video tab: the seconds into the track where the extension's sound starts. */
+  extendAudioTrackStart: number;
   referenceImageStrength: number;
   frameCount: number;
   fps: number;
@@ -951,7 +975,7 @@ export interface DraftState {
   /** Extend: the source could not be found where Reuse recorded it, so it must be chosen again. */
   missingSourceVideo: boolean;
   /** Extend: the source whose Scene and Prompt were settled, and the text its prefill put there (to tell edits from prefill). */
-  extendPrefill: { path: string; scene: string; prompt: string } | null;
+  extendPrefill: { path: string; scene: string; prompt: string; audioTrack?: { path: string; start: number } | null } | null;
   /** The slug of the settings preset the form started from; null when none. Cleared on a mode switch, Reset, a loaded source's settings and when the preset is deleted. */
   appliedPreset: string | null;
 }

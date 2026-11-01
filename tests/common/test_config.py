@@ -1188,7 +1188,18 @@ class TestVideoFamilyDispatch:
             "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
             "extend_frame_step": 17,
             "carry_frames": 22,
-            "capabilities": {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": False},
+            "capabilities": {
+                "i2v": True,
+                "end_frame": True,
+                "extend": True,
+                "upscale": True,
+                "upscale_review": True,
+                "lora": True,
+                "audio": True,
+                "low_memory": False,
+                "audio_track": False,
+                "audio_track_upscale": False,
+            },
             **preset,
         }
         return {"video_sizes": {"16:9": {"s": {"width": 768, "height": 448, "frames": 121}}}, "video_model_presets": {"h3": block}}

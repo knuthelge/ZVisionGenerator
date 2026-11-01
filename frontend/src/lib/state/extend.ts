@@ -21,16 +21,26 @@ export function isOriginalLegacyPrompt(state: Pick<DraftState, 'prompt'>, info: 
   return original !== '' && normalizePromptText(state.prompt) === original;
 }
 
+/** What a source pre-fills: the Scene and Prompt, and the audio track it followed (null for a source with none). */
+export interface ExtendPrefill {
+  scene: string;
+  prompt: string;
+  /** The track the source followed and where in it the source's sound ended, which is where the extension carries on. */
+  audioTrack: { path: string; start: number } | null;
+}
+
 /**
- * The Scene and Prompt a source pre-fills.
+ * The Scene, Prompt and audio track a source pre-fills.
  *
  * A recorded scene fills Scene and leaves Prompt empty (what happens next); a legacy source fills Prompt with its
- * old prompt and leaves Scene empty; a source with no recorded text leaves both empty.
+ * old prompt and leaves Scene empty; a source with no recorded text leaves both empty. A source made from a track fills
+ * the track with Start at at the second its sound ended; a source without one has no track, which clears the section.
  */
-export function extendPrefillFor(info: ExtendSourceInfo): { scene: string; prompt: string } {
-  if (info.scene) return { scene: info.scene, prompt: '' };
-  if (info.legacy && info.prompt) return { scene: '', prompt: info.prompt };
-  return { scene: '', prompt: '' };
+export function extendPrefillFor(info: ExtendSourceInfo): ExtendPrefill {
+  const audioTrack = info.audio_track_path ? { path: info.audio_track_path, start: info.audio_track_end ?? 0 } : null;
+  if (info.scene) return { scene: info.scene, prompt: '', audioTrack };
+  if (info.legacy && info.prompt) return { scene: '', prompt: info.prompt, audioTrack };
+  return { scene: '', prompt: '', audioTrack };
 }
 
 /** Whether a source can be extended: it was read and reports no problems. */

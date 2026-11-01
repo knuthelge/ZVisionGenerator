@@ -366,7 +366,7 @@ video_model_presets:
     extend_frame_step: 8
     # The frames of the source's end an extension carries into its window (4 latent frames); the window is these plus the new frames.
     carry_frames: 25
-    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true }
+    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true, audio_track: true, audio_track_upscale: true }
     diffusers:
       # Distilled LTX 2.3 in diffusers format, used on Windows/Linux (8 steps, guidance 1.0). Distilled checkpoints only.
       # Every LTX-2.3 source is pinned: Lightricks deletes and moves files in its repo.
@@ -477,7 +477,7 @@ video_model_presets:
     extend_fps: 24 # an Extend source must run at 24 fps
     carry_frames: 22 # 17 * 1 + 5, the smallest valid clip
     platform_carry_frames: { darwin: 1 } # macOS renders an image-to-video clip from the source's last frame, so one frame is carried
-    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: false }
+    capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: false, audio_track: true, audio_track_upscale: false }
     platform_capabilities:
       darwin: { upscale: false, upscale_review: false }
     diffusers: # Windows/Linux

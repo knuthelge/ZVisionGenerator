@@ -27,7 +27,7 @@ from zvisiongenerator.backends.mac.video import (
     _TwoStageProgress,
     _use_low_ram_streaming,
 )
-from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment
 from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
@@ -114,6 +114,8 @@ def ltx(monkeypatch):
     samplers.euler_ancestral_denoising_loop.return_value = h.output
     h.diffusion_steps = MagicMock()
     h.distilled = MagicMock(ANCESTRAL_ETA=1.0, ANCESTRAL_S_NOISE=1.0, ANCESTRAL_NOISE_SEED_OFFSET=10000)
+    # The backend calls the parent ``DistilledPipeline.generate_and_save`` unbound on the handle's pipeline; the mock pipeline records what it was asked.
+    h.distilled.DistilledPipeline = SimpleNamespace(generate_and_save=lambda pipe, **kwargs: pipe.generate_and_save(**kwargs))
     h.generation = MagicMock(is_ltx25_pack=MagicMock(return_value=False))  # a bare MagicMock return value is truthy
 
     # Modules the extension path imports lazily.
@@ -289,10 +291,10 @@ class TestLoadModel:
 
     @pytest.fixture
     def classes(self, monkeypatch):
-        base, distilled = MagicMock(name="BasePipeline"), MagicMock(name="DistilledPipeline")
+        base, distilled = MagicMock(name="BasePipeline"), MagicMock(name="A2VidDistilledPipeline")
         base.return_value = SimpleNamespace(kind="base", model_dir="model/path")
         distilled.return_value = SimpleNamespace(kind="distilled", model_dir="model/path")
-        monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", MagicMock(BasePipeline=base, DistilledPipeline=distilled))
+        monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", MagicMock(BasePipeline=base, A2VidDistilledPipeline=distilled))
         # A bare MagicMock return value is truthy, so the pack check is stubbed to a plain LTX-2.3 answer.
         generation = MagicMock(is_ltx25_pack=MagicMock(return_value=False))
         monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.utils", MagicMock(generation=generation))
@@ -311,7 +313,7 @@ class TestLoadModel:
         assert handle.pipeline.kind == "base"
         assert handle.upscale is False
 
-    def test_upscale_builds_distilled_pipeline(self, classes):
+    def test_upscale_builds_the_audio_to_video_distilled_pipeline(self, classes):
         with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             handle, _ = LtxVideoBackend().load_model("model/path", mode="i2v", upscale=True, low_memory=False)
 
@@ -1412,6 +1414,217 @@ class TestExtendVideo:
         ext.run()
 
         ext.mx.set_cache_limit.assert_not_called()
+
+
+class TestAudioTrackTwoStage:
+    """With a track, upscale hands the pipeline the track's tokens as its source audio and runs the parent ``generate_and_save``."""
+
+    _TRACK = AudioTrack("/audio/song.mp3", 12.5)
+
+    @pytest.fixture
+    def track(self, monkeypatch):
+        reader = MagicMock(return_value=np.ones((2, 32000), np.float32))
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.read_track", reader)
+        return reader
+
+    def _run(self, pipe, *, track=_TRACK, image_path=None, **extra):
+        kwargs = dict(model=_handle(pipe, upscale=True), prompt="p", width=704, height=480, num_frames=49, seed=7, steps=8, output_path="/tmp/o.mp4", stage1_steps=6, audio_track=track, **extra)
+        backend = LtxVideoBackend()
+        return backend.text_to_video(**kwargs) if image_path is None else backend.image_to_video(image_path=image_path, **kwargs)
+
+    def test_the_pipeline_holds_the_encoded_track_only_while_it_generates(self, ltx, track):
+        pipe = _track_pipeline(ltx)
+        held = []
+        pipe.generate_and_save = MagicMock(side_effect=lambda **_kwargs: held.append(pipe._source_audio_tokens))
+
+        self._run(pipe)
+
+        (tokens,) = held
+        assert tokens.shape == (1, _AUDIO_TOKENS, 128)
+        track.assert_called_once_with(self._TRACK, 16000, 49 / _FPS)
+        assert pipe._source_audio_tokens is None
+
+    def test_the_track_is_not_held_after_a_failed_generation(self, ltx, track):
+        pipe = _track_pipeline(ltx)
+        pipe.generate_and_save = MagicMock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(RuntimeError, match="boom"):
+            self._run(pipe)
+
+        assert pipe._source_audio_tokens is None
+
+    def test_the_review_shim_still_wraps_stage_one_with_a_track(self, ltx, track):
+        pipe = _track_pipeline(ltx)
+        original = pipe._stage1
+        seen = []
+        pipe.generate_and_save = MagicMock(side_effect=lambda **_kwargs: seen.append(pipe._stage1 is not original))
+
+        self._run(pipe, review=lambda _path: None)
+
+        assert seen == [True]
+
+    def test_without_a_track_the_pipeline_generates_its_own_sound(self, ltx, track):
+        pipe = _track_pipeline(ltx)
+        held = []
+        pipe.generate_and_save = MagicMock(side_effect=lambda **_kwargs: held.append(pipe._source_audio_tokens))
+
+        self._run(pipe, track=None)
+
+        assert held == [None]
+        track.assert_not_called()
+        pipe.audio_conditioner.assert_not_called()
+
+
+def _track_pipeline(h, *, low_memory: bool = False) -> MagicMock:
+    """Return a one-stage pipeline that can encode an audio waveform into patchified tokens."""
+    pipe = _pipeline(h, low_memory=low_memory)
+    pipe.audio_patchifier.patchify.side_effect = _audio_patchify
+    pipe.audio_conditioner.side_effect = lambda fn, free_after: fn("audio_encoder", "audio_processor")
+    h.calls.attach_mock(pipe.audio_conditioner, "audio_conditioner")
+    return pipe
+
+
+class TestAudioTrackOneStage:
+    """With a track and no upscale, the window's sound is encoded before the transformer loads and held as a frozen audio state."""
+
+    _TRACK = AudioTrack("/audio/song.mp3", 3.0)
+
+    @pytest.fixture
+    def track(self, monkeypatch):
+        reader = MagicMock(return_value=np.ones((2, 32000), np.float32))
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.read_track", reader)
+        return reader
+
+    def _run(self, pipe, *, image_path=None, ltx25=False):
+        kwargs = dict(model=_handle(pipe, ltx25=ltx25), prompt="p", width=704, height=480, num_frames=49, seed=42, steps=8, output_path="/tmp/o.mp4", step_callback=None, audio_track=self._TRACK)
+        backend = LtxVideoBackend()
+        return backend.text_to_video(**kwargs) if image_path is None else backend.image_to_video(image_path=image_path, **kwargs)
+
+    def test_the_audio_state_holds_the_fitted_tokens_frozen(self, ltx, track):
+        pipe = _track_pipeline(ltx)
+
+        self._run(pipe)
+
+        _, audio_call = ltx.helpers.create_noised_state.call_args_list
+        assert audio_call.kwargs["frozen"] is True
+        assert audio_call.kwargs["initial_latent"].shape == (1, _AUDIO_TOKENS, 128)
+
+    def test_the_waveform_is_read_encoded_and_fitted_to_the_clips_token_count(self, ltx, track):
+        pipe = _track_pipeline(ltx, low_memory=True)
+
+        self._run(pipe)
+
+        track.assert_called_once_with(self._TRACK, 16000, 49 / _FPS)
+        ltx.mx.array.assert_called_once_with(track.return_value)
+        stereo_batch = ltx.mx.array.return_value.__getitem__.return_value
+        ltx.audio_vae.encode_audio.assert_called_once_with(stereo_batch, 16000, "audio_encoder", "audio_processor")
+        ltx.extend_distilled.fit_audio_latent.assert_called_once_with("raw_audio_latent", _AUDIO_TOKENS)
+        assert pipe.audio_conditioner.call_args.kwargs == {"free_after": True}
+
+    def test_the_track_is_encoded_before_the_transformer_loads(self, ltx, track):
+        self._run(_track_pipeline(ltx))
+
+        names = _call_names(ltx)
+        assert names.index("encode_audio") < names.index("load")
+        assert names.index("encode_audio") < names.index("create_noised_state")
+
+    def test_a_2_5_clip_hands_the_frozen_state_to_the_ancestral_loop(self, ltx, track):
+        self._run(_track_pipeline(ltx), ltx25=True)
+
+        ltx.samplers.denoise_loop.assert_not_called()
+        assert ltx.samplers.euler_ancestral_denoising_loop.call_args.kwargs["audio_state"] is ltx.audio_state
+        _, audio_call = ltx.helpers.create_noised_state.call_args_list
+        assert audio_call.kwargs["frozen"] is True
+
+    def test_without_a_track_nothing_changes(self, ltx, track):
+        pipe = _track_pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        track.assert_not_called()
+        ltx.audio_vae.encode_audio.assert_not_called()
+        pipe.audio_conditioner.assert_not_called()
+        _, audio_call = ltx.helpers.create_noised_state.call_args_list
+        assert "frozen" not in audio_call.kwargs
+        assert audio_call.kwargs["initial_latent"] is None
+        assert audio_call.kwargs["sigma"] == 1.0
+
+
+class TestAudioTrackExtend:
+    """With a track, Extend holds the whole window's sound frozen and carries and writes no sound of its own."""
+
+    _TRACK = AudioTrack("/audio/song.mp3", 20.0)
+
+    @pytest.fixture
+    def window(self, ext, monkeypatch):
+        reader = MagicMock(return_value=np.ones((2, 72 * 16000 // 24 * 2), np.float32))
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.window_waveform", reader)
+        return reader
+
+    def _extend(self, ext, *, source=None, extend_frames=48, audio_output=None, track=_TRACK):
+        pipe = ext.pipeline()
+        result = LtxVideoBackend().extend_video(
+            _handle(pipe),
+            source or _source(),
+            "a prompt",
+            extend_frames=extend_frames,
+            seed=42,
+            steps=8,
+            segment_dir=ext.segment_dir,
+            # The workflow asks for no sound of the model's own when a track is the clip's sound.
+            audio_output=track is None if audio_output is None else audio_output,
+            audio_track=track,
+        )
+        return pipe, result
+
+    def test_the_window_waveform_covers_the_carry_and_the_new_frames_at_the_encoders_rate(self, ext, window):
+        source = _source()
+
+        self._extend(ext, source=source, extend_frames=96)
+
+        window.assert_called_once_with(source, self._TRACK, carry_frames=_CARRY, extend_frames=96, rate=16000)
+
+    def test_the_audio_state_holds_the_window_tokens_frozen(self, ext, window):
+        self._extend(ext)
+
+        _, audio_call = ext.helpers.create_noised_state.call_args_list
+        assert audio_call.kwargs["frozen"] is True
+        assert audio_call.kwargs["initial_latent"].shape == (1, _AUDIO_TOKENS, 128)
+        ext.positions.compute_audio_token_count.assert_called_once_with(_CARRY + 48, frame_rate=24.0)
+        ext.extend_distilled.fit_audio_latent.assert_called_once_with("raw_audio_latent", _AUDIO_TOKENS)
+
+    def test_no_wav_is_written_and_the_segment_has_no_audio(self, ext, window):
+        pipe, result = self._extend(ext)
+
+        pipe.audio_decoder_block.assert_not_called()
+        ext.wav.assert_not_called()
+        assert result == ExtendSegment(video_path=ext.segment_dir / "segment.mp4", audio_path=None)
+
+    def test_the_track_is_encoded_before_the_pipeline_loads(self, ext, window):
+        self._extend(ext)
+
+        names = _call_names(ext)
+        assert names.index("encode_audio") < names.index("load")
+
+    def test_the_window_stays_on_the_deterministic_loop(self, ext, window):
+        pipe = ext.pipeline()
+        LtxVideoBackend().extend_video(_handle(pipe, ltx25=True), _source(), "p", extend_frames=48, seed=42, steps=8, segment_dir=ext.segment_dir, audio_output=True, audio_track=self._TRACK)
+
+        ext.samplers.euler_ancestral_denoising_loop.assert_not_called()
+        assert ext.samplers.denoise_loop.call_args.kwargs["audio_state"] is ext.audio_state
+
+    def test_without_a_track_the_sources_sound_is_still_carried(self, ext, monkeypatch):
+        reader = MagicMock()
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.window_waveform", reader)
+
+        _, result = ext.run()
+
+        reader.assert_not_called()
+        ext.audio_io.load_audio.assert_called_once()
+        _, audio_call = ext.helpers.create_noised_state.call_args_list
+        assert len(audio_call.kwargs["conditionings"]) == 1
+        assert "frozen" not in audio_call.kwargs
+        assert result.audio_path == ext.segment_dir / "segment.wav"
 
 
 class TestDropLeadingFrames:

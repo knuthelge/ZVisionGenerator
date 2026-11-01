@@ -8,9 +8,11 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import queue
 import random
+import re
 import stat
 import subprocess
 import threading
@@ -46,10 +48,11 @@ from zvisiongenerator.converters.lora_import import import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
-from zvisiongenerator.core.video_types import VideoGenerationRequest
+from zvisiongenerator.core.video_types import AudioTrack, VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils import app_db
+from zvisiongenerator.utils.audio_track import probe_track_seconds, require_readable_track
 from zvisiongenerator.utils.atomic_write import write_bytes_atomic
 from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
@@ -136,7 +139,18 @@ from zvisiongenerator.web.lora_download import LoraInstaller, import_source
 from zvisiongenerator.web.lora_sources import SOURCES, LoraSourcesError
 from zvisiongenerator.web.recent_prompts import RecentPrompts, RecentPromptsError, recent_prompt_entry
 from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
-from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
+from zvisiongenerator.web.path_browser import (
+    AUDIO_TRACK_EXTENSIONS,
+    BrowsePlace,
+    BrowsePurpose,
+    DirectoryListing,
+    browse_places,
+    create_folder,
+    default_place_dir,
+    host_drives,
+    list_directory,
+    resolve_purpose,
+)
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
@@ -359,6 +373,19 @@ async def api_video_memory_fit(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
     try:
         return await run_in_threadpool(_video_memory_fit_response, payload, load_web_config())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/audio-track/inspect")
+async def api_audio_track_inspect(request: Request) -> dict[str, Any]:
+    """Report the length of a host-local audio file and its display name, so the Workspace can show it next to the track's name."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    try:
+        return await run_in_threadpool(_audio_track_inspection, payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -603,7 +630,7 @@ def _body_choice(body: dict[str, Any], key: str, allowed: tuple[str, ...]) -> st
 
 
 def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> EnhanceContext:
-    """Validate the enhance request's job facts (frame size or ratio, frames, fps, audio, start image, references).
+    """Validate the enhance request's job facts (frame size or ratio, frames, fps, audio, audio track, start image, references).
 
     A video request with ``context.source_video`` extends that clip: the server reads the clip's size, frame rate,
     recorded prompt and recorded scene itself, so only the source, the new length and the audio setting come from the client.
@@ -639,7 +666,8 @@ def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> Enha
         ratio=ratio,
         frames=_positive("frames"),
         fps=_positive("fps"),
-        audio=raw.get("audio") is True and supports_video_audio(),
+        # An audio track is the clip's sound, so the model generates none for the rewrite to describe.
+        audio=raw.get("audio") is True and raw.get("audio_track") is not True and supports_video_audio(),
         reference_image=raw.get("reference_image") is True,
         references=references,
         end_image=raw.get("end_image") is True,
@@ -1308,7 +1336,10 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     end_image_path = None if extend else _resolve_reference_image(form, output_dir, path_key="end_image_path")
     # The source is checked again here: the file may have changed since the Workspace inspected it.
     source = load_source_video(_optional_text(form, "source_video"), key="source_video") if extend else None
-    audio_enabled = _checkbox(form, "audio", default=True) and supports_video_audio()
+    audio_track_path = _resolve_audio_track_file(form, output_dir)
+    audio_track = _audio_track_from_form(form, audio_track_path)
+    # A track is the clip's sound, so it overrides the Audio switch.
+    audio_enabled = (_checkbox(form, "audio", default=True) and supports_video_audio()) or audio_track is not None
     scene = _optional_text(form, "scene")
     if source is not None and "scene" not in form:
         scene = source.scene
@@ -1365,9 +1396,14 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         review=review_enabled(args),
         end_image=end_image_path is not None,
         upscale=bool(args.upscale),
+        audio_track=audio_track is not None,
     )
     if refusal is not None:
         raise ValueError(refusal)
+    if audio_track is not None:
+        # An unreadable track is refused here, before the model loads; a short track, or a Start at past its end, is allowed (silence fills the rest).
+        require_readable_track(audio_track)
+    args.audio_track = audio_track
 
     args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=False)
     if source is not None:
@@ -1375,12 +1411,8 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         args.steps = clip_defaults(app_config, model_info, steps=args.steps)["steps"]
         family = video_family_on_platform(app_config, model_info.family)
         require_extend_family(source, family)
-        apply_extend_args(
-            args,
-            source,
-            requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps, step=extend_step(family)),
-            family,
-        )
+        extend_frames = requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps, step=extend_step(family))
+        apply_extend_args(args, source, extend_frames, family)
     else:
         clip = resolve_video_clip(app_config, model_info, ratio=args.ratio, size=args.size, steps=args.steps, width=args.width, height=args.height, frames=args.frames, upscale=bool(args.upscale))
         args.steps, args.width, args.height, args.num_frames = clip.steps, clip.width, clip.height, clip.num_frames
@@ -1405,6 +1437,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         upscale=args.upscale,
         upscale_steps=args.upscale_steps,
         no_audio=args.no_audio,
+        audio_track=audio_track,
         output_dir=args.output,
         output_format=args.format,
     )
@@ -1429,7 +1462,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         width=args.width,
         height=args.height,
         output_dir=args.output,
-        uploads={"image_path": image_path, "end_image_path": end_image_path},
+        uploads={"image_path": image_path, "end_image_path": end_image_path, "audio_track_path": audio_track.path if audio_track is not None else None},
     )
     supported_controls = generation_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_video_request_job(
@@ -1569,6 +1602,56 @@ def _optional_int(form: Any, key: str) -> int | None:
         return int(value)
     except ValueError as exc:
         raise ValueError(f"Field '{key}' must be an integer.") from exc
+
+
+def _resolve_audio_track_file(form: Any, output_dir: str) -> str | None:
+    """Return the audio file a video form carries: an upload (saved under the output folder) wins over a typed path, ``None`` for neither.
+
+    Raises:
+        ValueError: When an upload is not a WAV, MP3, M4A, FLAC or OGG file.
+    """
+    uploaded_file = form.get(_upload_field("audio_track_path"))
+    if _is_uploaded_file(uploaded_file):
+        return _save_upload(uploaded_file, output_dir, audio=True)
+    return _optional_text(form, "audio_track_path")
+
+
+def _audio_track_inspection(payload: Any) -> dict[str, Any]:
+    """Build the ``POST /api/audio-track/inspect`` response ``{"seconds", "name"}`` for the host-local file ``payload["path"]`` names.
+
+    The path is read as a typed ``audio_track_path`` is (a URL is refused, ``~`` is expanded), and the file must decode.
+
+    Raises:
+        ValueError: If ``path`` is not text, is a URL, or the file cannot be read as audio.
+    """
+    path = payload.get("path") if isinstance(payload, dict) else None
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("path must be the path of an audio file.")
+    track = _audio_track_from_form({}, path.strip())
+    assert track is not None
+    return {"seconds": probe_track_seconds(track.path), "name": Path(track.path).name}
+
+
+def _audio_track_from_form(form: Any, path: str | None) -> AudioTrack | None:
+    """Return the audio track a video form carries: the file *path* names and the form's ``audio_track_start``, or ``None`` without a path.
+
+    The file is not checked here: submit refuses a track that cannot be read with "Can't read the audio track" before the model loads.
+
+    Args:
+        form: The submitted form.
+        path: The track file from :func:`_resolve_audio_track_file`.
+
+    Raises:
+        ValueError: When the path is a URL, or the start is not a number of seconds that is 0 or more.
+    """
+    start = _optional_float(form, "audio_track_start")
+    if path is None:
+        return None
+    if "://" in path:
+        raise ValueError("Field 'audio_track_path' must be a host-local file path on the machine running the Web UI host.")
+    if start is not None and (not math.isfinite(start) or start < 0):
+        raise ValueError("Field 'audio_track_start' must be 0 or more seconds.")
+    return AudioTrack(str(Path(path).expanduser()), start or 0.0)
 
 
 def _optional_float(form: Any, key: str) -> float | None:
@@ -1753,30 +1836,52 @@ def _is_uploaded_file(value: Any) -> bool:
     return bool(getattr(value, "filename", None) and getattr(value, "file", None))
 
 
-def _save_upload(uploaded_file: Any, output_dir: str) -> str:
-    """Save an uploaded image under ``.web_uploads``, named by the hash of its content so the same image is saved once.
+def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False) -> str:
+    """Save an uploaded image (or, with *audio*, an audio track) under ``.web_uploads``, keyed by the hash of its content so the same file is saved once.
+
+    An image is saved as ``<hash>.<ext>``. An audio track keeps its own name, so the Web UI can show it later:
+    ``<hash>/<name>``, with the name cleaned of anything but letters, digits, spaces and ``._-()``.
+
+    An image is opened with PIL to check it; an audio file is only checked by its extension, since a track that cannot be
+    read fails the job that uses it.
+
+    Args:
+        uploaded_file: The uploaded file.
+        output_dir: The output folder uploads are saved under.
+        audio: Whether the file is an audio track rather than an image.
 
     Returns:
         The path of the saved file; a file already there (same content, same name) is left as it is.
 
     Raises:
-        ValueError: When the extension is not PNG, JPEG or WebP, or the bytes are not a readable image.
+        ValueError: When the extension is not one of the kind's, or an image's bytes are not readable.
     """
-    suffix = Path(Path(str(uploaded_file.filename)).name).suffix.lower() or ".png"
-    if suffix not in IMAGE_EXTENSIONS:
+    suffix = Path(Path(str(uploaded_file.filename)).name).suffix.lower() or ("" if audio else ".png")
+    if audio:
+        if suffix not in AUDIO_TRACK_EXTENSIONS:
+            raise ValueError("Audio track must be a WAV, MP3, M4A, FLAC, or OGG file.")
+    elif suffix not in IMAGE_EXTENSIONS:
         raise ValueError("Image must be a PNG, JPEG, or WebP file.")
     uploaded_file.file.seek(0)
     data = uploaded_file.file.read()
-    try:
-        with Image.open(io.BytesIO(data)) as image:
-            image.verify()
-    except (OSError, UnidentifiedImageError, ValueError) as exc:
-        raise ValueError("Uploaded image is invalid or unreadable.") from exc
-    path = Path(output_dir) / ".web_uploads" / f"{hashlib.sha256(data).hexdigest()}{suffix}"
+    if not audio:
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                image.verify()
+        except (OSError, UnidentifiedImageError, ValueError) as exc:
+            raise ValueError("Uploaded image is invalid or unreadable.") from exc
+    digest = hashlib.sha256(data).hexdigest()
+    path = Path(output_dir) / ".web_uploads" / (f"{digest}/{_upload_name(uploaded_file.filename, suffix)}" if audio else f"{digest}{suffix}")
     if not path.is_file():
         path.parent.mkdir(parents=True, exist_ok=True)
         write_bytes_atomic(path, data)
     return str(path)
+
+
+def _upload_name(filename: Any, suffix: str) -> str:
+    """Return the saved name of an upload: its own name with unsafe characters replaced and the extension in lower case."""
+    stem = re.sub(r"[^\w ()\-.]", "_", Path(Path(str(filename)).name).stem).strip(" .")[:100]
+    return f"{stem or 'audio'}{suffix}"
 
 
 def _resolve_output_dir(value: str | None) -> str:

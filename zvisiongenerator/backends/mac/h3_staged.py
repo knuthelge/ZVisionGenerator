@@ -1,4 +1,4 @@
-"""Staged MiniMax H3 generation from keyframe images on macOS (image-to-video, first and last frame, Extend).
+"""Staged MiniMax H3 generation on macOS: from keyframe images (image-to-video, first and last frame, Extend) and from an audio track.
 
 The vendored fork keeps the text encoder, its vision tower, both VAEs and the transformer resident for an image run, which
 peaks near 29 GiB. Unified memory makes staging cheap: each phase here loads one component, uses it, drops it and returns
@@ -9,19 +9,25 @@ The fork stays untouched; its pieces are composed here. The fork methods that re
 ``SimpleNamespace`` as ``self``, the vision tower is mlx-vlm's, and the image processor is transformers' PIL one (the fast one needs torchvision,
 which macOS does not install). The denoise loop is the one reimplemented part: it mirrors ``MiniMaxH3Pipeline.__call__``
 with the transformer streamed from disk.
+
+A user's audio track is held, not generated: its window is encoded by the audio VAE into clean audio rows that replace the
+audio noise, and every audio row of the clip is a conditioning row. The model then makes the picture only, and the clip's
+own sound is silence that a later stage replaces with the track. A track without images is text to video on this path.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.mac.memory import release_memory
+from zvisiongenerator.utils.h3_memory import H3_FPS
 
 if TYPE_CHECKING:
     import numpy as np
@@ -29,7 +35,10 @@ if TYPE_CHECKING:
 
     from zvisiongenerator.utils.h3_preset import H3Schedule
 
-__all__ = ["generate_conditioned"]
+__all__ = ["TRACK_SAMPLE_RATE", "generate_conditioned", "pack_track_latents"]
+
+# The audio VAE's sample rate, which a track window is read at (the release's ``audio_vae`` metadata; a contract test pins the fork's default).
+TRACK_SAMPLE_RATE = 32000
 
 _VISION_PREFIX = "model.visual."
 _INDEX_NAME = "model.safetensors.index.json"
@@ -70,8 +79,9 @@ def generate_conditioned(
     anchors: Sequence[str],
     step_callback: Callable[[int, int], None] | None,
     verbose: bool,
+    track_audio: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Generate a clip conditioned on keyframe images, one component in memory at a time.
+    """Generate a clip conditioned on keyframe images and, optionally, an audio track, one component in memory at a time.
 
     Args:
         fl2va_dir: The release's ``FL2VA`` folder (VAEs, tokenizer, processor).
@@ -86,23 +96,27 @@ def generate_conditioned(
         height: Video height, a multiple of 32.
         frames: Frames at 24 fps; rounded up to the model's ``17 * n + 5`` grid.
         seed: Request seed; the keyframe encode uses the fork's fixed seed before it.
-        images: The keyframes, already sized to ``width x height``.
+        images: The keyframes, already sized to ``width x height``; none with a *track_audio* (text to video).
         anchors: ``"first"`` or ``"last"`` per image.
         step_callback: Called as ``step_callback(done, total)`` after every denoise step; it may raise to cancel.
         verbose: Print each phase's MLX peak and the denoise steps.
+        track_audio: The sound of the whole clip to hold, stereo float32 ``(2, samples)`` at :data:`TRACK_SAMPLE_RATE`; it
+            is encoded to clean audio rows and the model generates no sound.
 
     Returns:
         ``(video, audio, sample_rate)``: RGB uint8 frames ``(frames, height, width, 3)`` and float32 stereo audio ``(2, samples)``.
+        With a *track_audio* the audio is silence as long as the video (the caller replaces it with the track).
 
     Raises:
-        ValueError: If there are no images, the images and anchors differ in count, or the size is not a multiple of 32.
+        ValueError: If there are neither images nor a track, the images and anchors differ in count, or the size is not a multiple of 32.
     """
+    import numpy as np
     from minimax_h3_mlx.config import DiTConfig
     from minimax_h3_mlx.load import read_audio_vae_config, read_video_vae_config
     from minimax_h3_mlx.packing import align_num_frames, audio_latent_num_frames, video_latent_num_frames
 
-    if not images:
-        raise ValueError("Staged MiniMax H3 generation needs at least one keyframe image.")
+    if not images and track_audio is None:
+        raise ValueError("Staged MiniMax H3 generation needs at least one keyframe image or an audio track.")
     if len(images) != len(anchors):
         raise ValueError(f"Each keyframe needs an anchor: {len(images)} image(s), {len(anchors)} anchor(s).")
     if height % 32 or width % 32:
@@ -125,9 +139,14 @@ def generate_conditioned(
     )
     images = list(images)
 
-    condition_rows = _phase("keyframes", verbose, _keyframe_rows, fl2va_dir, canvas, images)
-    vision_rows, deepstack_rows = _phase("vision", verbose, _vision_rows, text_encoder_dir, fl2va_dir / "processor", images)
-    prompt_rows, text_tags = _phase("prompt", verbose, _prompt_rows, text_encoder_dir, fl2va_dir, prompt, images, vision_rows, deepstack_rows)
+    if images:
+        condition_rows = _phase("keyframes", verbose, _keyframe_rows, fl2va_dir, canvas, images)
+        vision_rows, deepstack_rows = _phase("vision", verbose, _vision_rows, text_encoder_dir, fl2va_dir / "processor", images)
+        prompt_rows, text_tags = _phase("prompt", verbose, _prompt_rows, text_encoder_dir, fl2va_dir, prompt, images, vision_rows, deepstack_rows)
+    else:
+        condition_rows = np.zeros((0, video_config.latent_channels * math.prod(canvas.dit_config.patch_size)), dtype=np.float32)
+        prompt_rows, text_tags = _phase("prompt", verbose, _text_rows, text_encoder_dir, fl2va_dir, prompt)
+    track_rows = _phase("track audio", verbose, _track_rows, fl2va_dir, canvas, track_audio) if track_audio is not None else None
     video_rows, audio_rows = _phase(
         "denoise",
         verbose,
@@ -140,13 +159,18 @@ def generate_conditioned(
         text_tags=text_tags,
         condition_rows=condition_rows,
         anchors=tuple(anchors),
+        track_rows=track_rows,
         seed=seed,
         step_callback=step_callback,
         verbose=verbose,
     )
     video = _phase("video decode", verbose, _decode_video, fl2va_dir, canvas, video_rows)
+    rate = int(audio_config.sampling_rate)
+    if track_rows is not None:
+        # The track's own sound is what the clip is given afterwards; the held rows are not decoded.
+        return video, np.zeros((2, round(len(video) / H3_FPS * rate)), dtype=np.float32), rate
     audio = _phase("audio decode", verbose, _decode_audio, fl2va_dir, canvas, audio_rows)
-    return video, audio, int(audio_config.sampling_rate)
+    return video, audio, rate
 
 
 def _phase(name: str, verbose: bool, function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
@@ -235,6 +259,69 @@ def _prompt_rows(text_encoder_dir: Path, fl2va_dir: Path, prompt: str, images: l
     return np.array(hidden.astype(mx.float32)), token_tags
 
 
+def _text_rows(text_encoder_dir: Path, fl2va_dir: Path, prompt: str) -> tuple[np.ndarray, np.ndarray]:
+    """Return the text encoder's hidden rows for a prompt with no images, and the row tags (float32)."""
+    import mlx.core as mx
+    import numpy as np
+    from minimax_h3_mlx.text_encoder import MiniMaxH3TextEncoder
+
+    encoder = MiniMaxH3TextEncoder(text_encoder_dir, load_vision=False, stream_layers=False, tokenizer_dir=fl2va_dir / "tokenizer", processor_dir=fl2va_dir / "processor")
+    hidden, token_tags = encoder.encode(prompt)
+    return np.array(hidden.astype(mx.float32)), token_tags
+
+
+def pack_track_latents(mean: np.ndarray, latents_mean: Sequence[float], latents_std: Sequence[float], latents: int) -> np.ndarray:
+    """Return the audio VAE's posterior mean as *latents* normalised audio rows per stereo channel, channel-major.
+
+    The mean is normalised ``(mean - latents_mean) / latents_std``, as the pipeline's decode undoes it, then each channel is
+    trimmed, or padded by repeating its last latent, to *latents* (as the Windows/Linux backend does).
+
+    Args:
+        mean: The posterior mean ``(2, latent_channels, frames)``, one batch item per stereo channel.
+        latents_mean: The VAE's per-channel mean, ``latent_channels`` values.
+        latents_std: The VAE's per-channel standard deviation, ``latent_channels`` values.
+        latents: The latents to hold per channel.
+
+    Returns:
+        Float32 rows ``(2 * latents, latent_channels)``: channel 0's latents, then channel 1's.
+
+    Raises:
+        ValueError: If *mean* is not ``(2, latent_channels, frames)`` with at least one frame, the statistics do not match
+            ``latent_channels``, or *latents* is not positive.
+    """
+    import numpy as np
+
+    if mean.ndim != 3 or mean.shape[0] != 2 or mean.shape[2] < 1:
+        raise ValueError(f"Expected a posterior mean shaped (2, latent_channels, frames); got {tuple(mean.shape)}.")
+    if len(latents_mean) != mean.shape[1] or len(latents_std) != mean.shape[1]:
+        raise ValueError(f"The latent statistics must have {mean.shape[1]} values; got {len(latents_mean)} and {len(latents_std)}.")
+    if latents < 1:
+        raise ValueError(f"The held audio must be at least one latent per channel, got {latents}.")
+    centre = np.asarray(latents_mean, dtype=np.float32).reshape(1, -1, 1)
+    scale = np.asarray(latents_std, dtype=np.float32).reshape(1, -1, 1)
+    normalised = ((mean.astype(np.float32) - centre) / scale).transpose(0, 2, 1)  # (2, frames, channels)
+    if normalised.shape[1] < latents:
+        normalised = np.concatenate([normalised, np.repeat(normalised[:, -1:], latents - normalised.shape[1], axis=1)], axis=1)
+    return np.ascontiguousarray(normalised[:, :latents].reshape(2 * latents, -1))
+
+
+def _track_rows(fl2va_dir: Path, canvas: _Canvas, waveform: np.ndarray) -> np.ndarray:
+    """Return the clip's held audio rows ``(2 * audio_latents, latent_channels)``: *waveform* encoded by the audio VAE (float32).
+
+    Raises:
+        ValueError: If *waveform* is not stereo ``(2, samples)``.
+    """
+    import mlx.core as mx
+    import numpy as np
+    from minimax_h3_mlx.load import load_audio_vae
+
+    if waveform.ndim != 2 or waveform.shape[0] != 2:
+        raise ValueError(f"Expected a stereo waveform shaped (2, samples); got {tuple(waveform.shape)}.")
+    audio_vae = load_audio_vae(fl2va_dir / "audio_vae")
+    mean, _logs = audio_vae.encode(mx.array(waveform.astype(np.float32))[:, None])
+    return pack_track_latents(np.array(mean.astype(mx.float32)), canvas.audio_config.latents_mean, canvas.audio_config.latents_std, canvas.audio_latents)
+
+
 def _denoise(
     transformer_dir: Path,
     *,
@@ -245,6 +332,7 @@ def _denoise(
     text_tags: np.ndarray,
     condition_rows: np.ndarray,
     anchors: tuple[str, ...],
+    track_rows: np.ndarray | None,
     seed: int,
     step_callback: Callable[[int, int], None] | None,
     verbose: bool,
@@ -252,7 +340,9 @@ def _denoise(
     """Run the joint video and audio denoise loop with the transformer streamed from disk; return the generated rows (float32).
 
     Mirrors ``MiniMaxH3Pipeline.__call__``: noise is drawn conditioning, video, audio from the request seed; conditioning
-    rows are noised to the keyframe level, held there, and never written back.
+    rows are noised to the keyframe level, held there, and never written back. With no condition rows (text to video) nothing
+    is drawn for them. With *track_rows* every audio row is a clean conditioning row at timestep 1.0, no audio noise is
+    drawn, the audio is never stepped, and the returned audio is empty.
     """
     import mlx.core as mx
     import numpy as np
@@ -264,14 +354,21 @@ def _denoise(
 
     patch_size = canvas.dit_config.patch_size
     layout = build_packed_sequence(text_tags, canvas.latent_frames, canvas.latent_height, canvas.latent_width, canvas.audio_latents, patch_size, anchors)
+    if track_rows is not None:
+        layout = replace(layout, num_condition_audio_rows=AUDIO_CHANNELS * canvas.audio_latents)
 
     mx.random.seed(seed)
-    condition = mx.array(condition_rows)
-    condition_noise = mx.random.normal(condition.shape).astype(mx.float32)
-    condition = MiniMaxH3Scheduler(shift=schedule.video_shift).scale_noise(condition, KEYFRAME_NOISE_AUG, condition_noise)
+    condition = None
+    if len(condition_rows):
+        condition = MiniMaxH3Scheduler(shift=schedule.video_shift).scale_noise(mx.array(condition_rows), KEYFRAME_NOISE_AUG, mx.random.normal(condition_rows.shape).astype(mx.float32))
     latents = mx.random.normal((1, canvas.video_config.latent_channels, canvas.latent_frames, canvas.latent_height, canvas.latent_width)).astype(mx.float32)
-    audio_rows = mx.random.normal((canvas.audio_latents * AUDIO_CHANNELS, canvas.audio_config.latent_channels)).astype(mx.float32)
-    video_rows = mx.concatenate([condition, patchify_video_latents(latents, patch_size)])
+    video_rows = patchify_video_latents(latents, patch_size)
+    if condition is not None:
+        video_rows = mx.concatenate([condition, video_rows])
+    if track_rows is not None:
+        audio_rows = mx.array(track_rows).astype(mx.float32)
+    else:
+        audio_rows = mx.random.normal((canvas.audio_latents * AUDIO_CHANNELS, canvas.audio_config.latent_channels)).astype(mx.float32)
 
     video_sched, audio_sched = MiniMaxH3Scheduler(shift=schedule.video_shift), MiniMaxH3Scheduler(shift=schedule.audio_shift)
     video_sched.set_timesteps(schedule.num_inference_steps)
@@ -303,15 +400,17 @@ def _denoise(
         )
         # Only the generated rows are stepped; the conditioning rows are concatenated back unchanged.
         stepped_video = video_sched.step(video_pred[0, n_cond_v:].astype(mx.float32), float(t), video_rows[n_cond_v:])
-        stepped_audio = audio_sched.step(audio_pred[0, n_cond_a:].astype(mx.float32), float(audio_sched.timesteps[i].item()), audio_rows[n_cond_a:])
         video_rows = mx.concatenate([video_rows[:n_cond_v], stepped_video]) if n_cond_v else stepped_video
-        audio_rows = mx.concatenate([audio_rows[:n_cond_a], stepped_audio]) if n_cond_a else stepped_audio
+        if n_cond_a < audio_rows.shape[0]:
+            stepped_audio = audio_sched.step(audio_pred[0, n_cond_a:].astype(mx.float32), float(audio_sched.timesteps[i].item()), audio_rows[n_cond_a:])
+            audio_rows = mx.concatenate([audio_rows[:n_cond_a], stepped_audio]) if n_cond_a else stepped_audio
         mx.eval(video_rows, audio_rows)
         if verbose:
             print(f"  step {i + 1}/{total}  {time.perf_counter() - started:.1f}s", flush=True)
         if step_callback is not None:
             step_callback(i + 1, total)
-    return np.array(video_rows[n_cond_v:]), np.array(audio_rows[n_cond_a:])
+    generated_audio = np.array(audio_rows[n_cond_a:]) if n_cond_a < audio_rows.shape[0] else np.zeros((0, audio_rows.shape[1]), dtype=np.float32)
+    return np.array(video_rows[n_cond_v:]), generated_audio
 
 
 def _decode_video(fl2va_dir: Path, canvas: _Canvas, rows: np.ndarray) -> np.ndarray:

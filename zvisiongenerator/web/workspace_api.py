@@ -66,7 +66,7 @@ from zvisiongenerator.web.model_delete import (
 )
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
-from zvisiongenerator.web.workspace_contract import END_FRAME_CONTROLS, hidden_video_controls
+from zvisiongenerator.web.workspace_contract import AUDIO_TRACK_CONTROLS, END_FRAME_CONTROLS, hidden_video_controls
 
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.target import DownloadTarget
@@ -805,9 +805,10 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "max_steps": described.max_steps if described is not None else _default_video_max_steps(app_config, family),
         "fps": fps,
         "frame_rule": frame_rule,
-        # A family the config does not describe keeps every capability but the opt-in last frame.
-        "hidden_controls": hidden_video_controls(capabilities) if capabilities is not None else sorted(END_FRAME_CONTROLS),
+        # A family the config does not describe keeps every capability but the opt-in last frame and audio track.
+        "hidden_controls": hidden_video_controls(capabilities) if capabilities is not None else sorted((*END_FRAME_CONTROLS, *AUDIO_TRACK_CONTROLS)),
         "supports_extend": capabilities.extend if capabilities is not None else True,
+        "supports_audio_track_upscale": capabilities.audio_track_upscale if capabilities is not None else True,
         "step_options": list(described.step_options) if described is not None and described.step_options else None,
         "extend_frame_step": extend_step(described),
         "upscale": _video_bootstrap_upscale(),

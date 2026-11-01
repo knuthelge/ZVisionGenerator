@@ -10,15 +10,22 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from tests._factories import make_extend_source
+from tests._media import REAL, encode_frames, ffmpeg, numbered_frames
 from tests.video._helpers import make_video_request
 
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.video_extend import build_extend_source
+from zvisiongenerator.utils.video_probe import probe_video
+from zvisiongenerator.utils.video_splice import build_segment_command, write_pcm16_wav, write_segment_frames
 from zvisiongenerator.workflows.video_stages import (
+    audio_track_stage,
     enhance_prompt_stage,
+    extend_audio_track_stage,
     extend_video_stage,
     generate_filename_stage,
     image_to_video_stage,
@@ -283,6 +290,17 @@ class TestTextToVideoStage:
         call_kwargs = backend.text_to_video.call_args
         assert call_kwargs.kwargs.get("prompt") == "resolved version" or call_kwargs[1].get("prompt") == "resolved version"
 
+    @pytest.mark.parametrize("track", [AudioTrack("/audio/voice.wav", 1.6)])
+    def test_passes_the_audio_track_of_the_request(self, track):
+        backend = MagicMock()
+        backend.text_to_video.return_value = Path("/tmp/x.mp4")
+        arts = VideoWorkingArtifacts(resolved_prompt="p")
+        arts.filename = "f.mp4"
+
+        text_to_video_stage(make_video_request(backend=backend, audio_track=track), arts)
+
+        assert backend.text_to_video.call_args.kwargs["audio_track"] is track
+
 
 # ---------------------------------------------------------------------------
 # image_to_video_stage
@@ -317,6 +335,17 @@ class TestImageToVideoStage:
         with_end, without_end = backend.image_to_video.call_args_list
         assert with_end.kwargs["end_image"] == "/tmp/last.png"
         assert "end_image" not in without_end.kwargs
+
+    @pytest.mark.parametrize("track", [AudioTrack("/audio/voice.wav", 1.6)])
+    def test_passes_the_audio_track_of_the_request(self, track):
+        backend = MagicMock()
+        backend.image_to_video.return_value = Path("/tmp/i2v.mp4")
+        arts = VideoWorkingArtifacts()
+        arts.filename = "i2v.mp4"
+
+        image_to_video_stage(make_video_request(backend=backend, image_path="/tmp/first.png", audio_track=track), arts)
+
+        assert backend.image_to_video.call_args.kwargs["audio_track"] is track
 
     def test_backend_returns_none_fails(self):
         backend = MagicMock()
@@ -454,6 +483,12 @@ class TestExtendVideoStage:
         assert arts.metadata["extend_segment"] is segment
         assert arts.metadata["extend_segment_dir"] == str(segment_dir)
         assert segment_dir.is_dir()
+
+    @pytest.mark.parametrize("track", [AudioTrack("/audio/voice.wav", 1.6)])
+    def test_passes_the_audio_track_of_the_request(self, tmp_path, track):
+        req, arts, _segment = self._run(tmp_path, audio_track=track)
+        assert extend_video_stage(req, arts) is StageOutcome.success
+        assert req.backend.extend_video.call_args.kwargs["audio_track"] is track
 
     def test_generation_time_covers_the_backend_call(self, tmp_path):
         req, arts, _ = self._run(tmp_path)
@@ -633,3 +668,167 @@ class TestStripAudioStageFailure:
                 outcome = strip_audio_stage(req, arts)
         assert outcome is StageOutcome.failed
         assert "no such stream exit 1" in arts.failure_message
+
+
+# ---------------------------------------------------------------------------
+# The audio track on a generated clip and in an extension
+# ---------------------------------------------------------------------------
+
+_RATE = 48000
+
+
+def _tone_steps(path: Path, amplitudes: list[float], *, rate: int = 16000) -> Path:
+    """Write a mono WAV of a 440 Hz tone whose amplitude changes every second, so a stretch of it says where it was cut from."""
+    time = np.arange(rate) / rate
+    write_pcm16_wav(np.concatenate([a * np.sin(2 * np.pi * 440 * time) for a in amplitudes])[None, :], path, rate)
+    return path
+
+
+def _rms(audio: np.ndarray, begin: float, end: float) -> float:
+    """Return the RMS of a stretch of 48 kHz audio between two moments in seconds."""
+    part = audio[round(begin * _RATE) : round(end * _RATE)]
+    return float(np.sqrt(np.mean(part**2)))
+
+
+def _decode_audio(path: Path) -> np.ndarray:
+    """Decode the left channel of the first audio stream to float32 at 48 kHz."""
+    data = ffmpeg("-i", str(path), "-map", "0:a:0", "-af", "pan=mono|c0=c0", "-ar", str(_RATE), "-f", "f32le", "-")
+    return np.frombuffer(data, dtype=np.float32)
+
+
+def _video_only(path: Path, frame_count: int) -> Path:
+    """Encode a silent 24 fps video of *frame_count* frames."""
+    encode_frames(numbered_frames(frame_count, 128, 64), path, quality=("-crf", "18"))
+    return path
+
+
+@REAL
+class TestAudioTrackStage:
+    """Verify the track replaces the generated clip's sound, from Start at and as long as the clip."""
+
+    def _run(self, tmp_path, track, *, frame_count=48):
+        video = _video_only(tmp_path / "clip.mp4", frame_count)
+        request = make_video_request(audio_track=track, output_dir=str(tmp_path))
+        arts = VideoWorkingArtifacts(video_path=video)
+        return audio_track_stage(request, arts), arts, video
+
+    def test_the_audio_is_as_long_as_the_clip_and_starts_at_start_at(self, tmp_path):
+        track = _tone_steps(tmp_path / "t.wav", [0.2, 0.4, 0.8, 0.6])
+
+        outcome, _, video = self._run(tmp_path, AudioTrack(str(track), 1.0))
+
+        assert outcome is StageOutcome.success
+        probe = probe_video(video)
+        assert (probe.frame_count, probe.has_audio) == (48, True)
+        audio = _decode_audio(video)
+        assert abs(len(audio) - 2 * _RATE) <= 2048
+        # Start at 1.0 s: the clip's first second is the track's 0.4 level, its second the 0.8 level.
+        assert _rms(audio, 0.2, 0.8) == pytest.approx(0.4 / 2**0.5, rel=0.1)
+        assert _rms(audio, 1.2, 1.8) == pytest.approx(0.8 / 2**0.5, rel=0.1)
+
+    def test_the_video_is_copied_and_nothing_is_left_beside_it(self, tmp_path):
+        track = _tone_steps(tmp_path / "t.wav", [0.5, 0.5, 0.5])
+        before = _video_only(tmp_path / "before.mp4", 48)
+
+        _, _, video = self._run(tmp_path, AudioTrack(str(track), 0.0))
+
+        def packet_hashes(path: Path) -> list[str]:
+            lines = ffmpeg("-i", str(path), "-map", "0:v:0", "-c", "copy", "-f", "framemd5", "-").decode().splitlines()
+            return [line.rsplit(",", 1)[1].strip() for line in lines if line and not line.startswith("#")]
+
+        assert packet_hashes(video)[1:] == packet_hashes(before)[1:]
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["before.mp4", "clip.mp4", "t.wav"]
+
+    def test_an_unreadable_track_fails_with_the_message_and_leaves_the_clip_alone(self, tmp_path):
+        bad = tmp_path / "notes.txt"
+        bad.write_text("not audio")
+
+        outcome, arts, video = self._run(tmp_path, AudioTrack(str(bad), 0.0))
+
+        assert outcome is StageOutcome.failed
+        assert arts.failure_message == "Can't read the audio track"
+        assert not probe_video(video).has_audio
+
+    def test_without_a_track_or_a_video_it_does_nothing(self, tmp_path):
+        assert audio_track_stage(make_video_request(), VideoWorkingArtifacts(video_path=tmp_path / "gone.mp4")) is StageOutcome.success
+        assert audio_track_stage(make_video_request(audio_track=AudioTrack("t.wav", 0.0)), VideoWorkingArtifacts()) is StageOutcome.success
+
+
+class TestExtendTrackStages:
+    """Verify an extension with a track writes its own segment WAV and the backend is asked for none."""
+
+    def test_the_backend_writes_no_audio_and_the_join_includes_the_tracks_sound(self, tmp_path):
+        req = _extend_req(_source(tmp_path, has_audio=False), audio_track=AudioTrack("song.mp3", 0.0), output_dir=str(tmp_path))
+        arts = VideoWorkingArtifacts(filename="out.mp4", metadata={"extend_segment": ExtendSegment(tmp_path / "seg.mp4"), "extend_segment_dir": str(tmp_path)})
+        backend = req.backend
+        backend.extend_video.return_value = ExtendSegment(tmp_path / "seg.mp4")
+
+        extend_video_stage(req, VideoWorkingArtifacts())
+        with patch("zvisiongenerator.workflows.video_stages.splice_clips") as splice:
+            join_clips_stage(req, arts)
+
+        assert backend.extend_video.call_args.kwargs["audio_output"] is False
+        assert splice.call_args.kwargs["include_audio"] is True
+
+    def test_a_track_beats_no_audio_in_the_join(self, tmp_path):
+        req = _extend_req(_source(tmp_path), audio_track=AudioTrack("song.mp3", 0.0), no_audio=True, output_dir=str(tmp_path))
+        arts = VideoWorkingArtifacts(filename="out.mp4", metadata={"extend_segment": ExtendSegment(tmp_path / "seg.mp4"), "extend_segment_dir": str(tmp_path)})
+
+        with patch("zvisiongenerator.workflows.video_stages.splice_clips") as splice:
+            join_clips_stage(req, arts)
+
+        assert splice.call_args.kwargs["include_audio"] is True
+
+    def test_without_a_track_the_sound_stage_does_nothing(self, tmp_path):
+        arts = VideoWorkingArtifacts()
+
+        assert extend_audio_track_stage(_extend_req(output_dir=str(tmp_path)), arts) is StageOutcome.success
+        assert arts.metadata == {}
+
+    @REAL
+    def test_writes_the_segment_wav_from_the_window_and_hands_it_to_the_join(self, tmp_path):
+        track = _tone_steps(tmp_path / "t.wav", [0.2, 0.6])
+        segment_dir = tmp_path / "ziv-extend-abc"
+        segment_dir.mkdir()
+        segment = ExtendSegment(segment_dir / "segment.mp4")
+        arts = VideoWorkingArtifacts(metadata={"extend_segment": segment, "extend_segment_dir": str(segment_dir)})
+        req = _extend_req(_source(tmp_path, has_audio=False), 16, audio_track=AudioTrack(str(track), 1.0), output_dir=str(tmp_path))
+
+        assert extend_audio_track_stage(req, arts) is StageOutcome.success
+
+        joined = arts.metadata["extend_segment"]
+        assert joined.video_path == segment.video_path
+        assert joined.audio_path == segment_dir / "segment.wav" and joined.audio_path.is_file()
+        assert joined.lead_samples == 12000
+        assert arts.metadata["extend_segment_dir"] == str(segment_dir)
+
+
+@REAL
+class TestExtendWithATrackEndToEnd:
+    """Join a silent source and a generated segment with a track's sound, as the stages do."""
+
+    def _extend(self, tmp_path, track):
+        source_path = _video_only(tmp_path / "source.mp4", 33)
+        source = build_extend_source(source_path, probe_video(source_path), None)
+        assert not source.has_audio
+        segment_video = tmp_path / "gen" / "segment.mp4"
+        segment_video.parent.mkdir()
+        write_segment_frames(numbered_frames(16, 128, 64, offset=100), build_segment_command(source.width, source.height, source.fps_text, segment_video))
+        req = _extend_req(source, 16, audio_track=track, output_dir=str(tmp_path))
+        arts = VideoWorkingArtifacts(filename="joined.mp4", metadata={"extend_segment": ExtendSegment(segment_video), "extend_segment_dir": str(segment_video.parent)})
+        assert extend_audio_track_stage(req, arts) is StageOutcome.success
+        assert join_clips_stage(req, arts) is StageOutcome.success
+        return arts.video_path
+
+    def test_the_new_part_is_the_track_span_after_silence_for_the_source(self, tmp_path):
+        track = _tone_steps(tmp_path / "t.wav", [0.2, 0.8, 0.4])
+
+        output = self._extend(tmp_path, AudioTrack(str(track), 1.0))
+
+        probe = probe_video(output)
+        assert (probe.frame_count, probe.has_audio) == (49, True)
+        audio = _decode_audio(output)
+        assert abs(len(audio) - 49 * 2000) <= 2048
+        # 33 frames of source (1.375 s) are silent; the 16 new frames (0.667 s) are the track from 1.0 s.
+        assert _rms(audio, 0.05, 1.3) < 0.02
+        assert _rms(audio, 1.45, 1.95) == pytest.approx(0.8 / 2**0.5, rel=0.1)

@@ -67,6 +67,8 @@
     endImage?: boolean;
     /** How many reference images are set (uploads included); the rewrite keeps the prompt's "image 1", "image 2". */
     references?: number;
+    /** An audio track is in effect: it is the clip's sound, so the rewrite has no Sound options. */
+    track?: boolean;
     /** The image model takes JSON captions, so the popover offers Write as: Text or JSON. */
     jsonCapable?: boolean;
   }
@@ -79,6 +81,7 @@
     jsonCapable = false,
     endImage = false,
     references = 0,
+    track = false,
     extendSupport = null,
     maxWords,
     enhancing = $bindable(false),
@@ -99,7 +102,7 @@
   const audioSupported = $derived(contract.video_audio ?? true);
   // An extension of a silent clip is silent whatever the Audio toggle says, so the Sound axis does not apply.
   const sourceHasAudio = $derived(draft.state.workflow === 'extend' ? (draft.extendSource?.has_audio ?? null) : null);
-  const audio = $derived(hasAudio(draft.state, audioSupported, sourceHasAudio));
+  const audio = $derived(hasAudio(draft.state, audioSupported, sourceHasAudio, track));
   // An extension needs a source it can read before any text can be written for it.
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendSupport));
   const tier = $derived(effectiveTier(draft.state, contract));
@@ -177,7 +180,7 @@
           mode,
           settings: settingsPayload(requested, mode, audio),
           max_words: maxWords,
-          context: enhanceContext(draft.state, audioSupported, sourceHasAudio, endImage, references),
+          context: enhanceContext(draft.state, audioSupported, sourceHasAudio, endImage, references, track),
           ...(runTier === 'smart' ? { enhance_model: 'smart' as const } : {}),
           ...(runCaption ? { format: 'json' as const } : {}),
         },

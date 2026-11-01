@@ -11,6 +11,7 @@ from PIL import Image
 
 from tests._factories import load_packaged_config
 from tests._factories import make_extend_source
+from tests._media import REAL
 
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.utils.config import load_config
@@ -524,3 +525,71 @@ class TestLoraFitWhileDownloading:
         _lora_file(data_dir / "loras", "pending_style", 900)
 
         assert lora_bytes_for_fit("pending_style", family="h3", downloading={"pending_style": 700}) == 900
+
+
+class TestAudioTrack:
+    """The form's ``audio_track_path`` and ``audio_track_start`` become the job's track, refusals included."""
+
+    @pytest.fixture
+    def track(self, tmp_path, monkeypatch) -> str:
+        import zvisiongenerator.utils.audio_track as audio_track_module
+
+        path = tmp_path / "voice.mp3"
+        path.write_bytes(b"x")
+        monkeypatch.setattr(audio_track_module, "probe_track_seconds", lambda _path: 3.6)
+        return str(path)
+
+    def test_the_track_reaches_the_args_the_request_and_the_job_settings(self, tmp_path, submitted, track):
+        response = _submit(tmp_path, model="ltx-8", audio_track_path=track, audio_track_start="1.6", audio="off")
+
+        args, request = submitted[0]["args"], submitted[0]["request"]
+        assert (args.audio_track.path, args.audio_track.start) == (track, 1.6)
+        assert request.audio_track == args.audio_track
+        assert response["context"]["settings"]["audio_track_path"] == track
+        assert response["context"]["settings"]["audio_track_start"] == "1.6"
+
+    def test_the_track_is_the_sound_whatever_the_audio_switch_says(self, tmp_path, submitted, track):
+        _submit(tmp_path, model="ltx-8", audio_track_path=track, audio="off")
+
+        assert (submitted[0]["args"].no_audio, submitted[0]["request"].no_audio) == (False, False)
+
+    def test_a_track_that_runs_out_first_keeps_the_requested_frames(self, tmp_path, submitted, track):
+        _submit(tmp_path, model="ltx-8", frames="121", audio_track_path=track)
+
+        assert (submitted[0]["args"].num_frames, submitted[0]["request"].num_frames) == (121, 121)
+
+    @pytest.mark.parametrize("start", ["-1", "nan", "soon"])
+    def test_a_bad_start_is_refused(self, tmp_path, submitted, track, start):
+        with pytest.raises(ValueError, match="audio_track_start"):
+            _submit(tmp_path, model="ltx-8", audio_track_path=track, audio_track_start=start)
+
+        assert submitted == []
+
+    def test_a_url_is_refused(self, tmp_path, submitted):
+        with pytest.raises(ValueError, match="host-local"):
+            _submit(tmp_path, model="ltx-8", audio_track_path="https://example.com/voice.mp3")
+
+    def test_h3_refuses_an_upscale_with_a_track(self, tmp_path, submitted, track):
+        with pytest.raises(ValueError, match="can't upscale a clip made from your track"):
+            _submit(tmp_path, model="h3", upscale="2", audio_track_path=track)
+
+        assert submitted == []
+
+    def test_a_family_without_the_capability_refuses_a_track(self, tmp_path, submitted, track):
+        config = _web_config(tmp_path)
+        config.app_config["video_model_presets"]["ltx"]["capabilities"]["audio_track"] = False
+
+        with pytest.raises(ValueError, match="can't follow an audio track"):
+            _submit(tmp_path, config, model="ltx-8", audio_track_path=track)
+
+        assert submitted == []
+
+    @REAL
+    def test_a_track_that_cannot_be_read_fails_before_the_job_is_submitted(self, tmp_path, submitted):
+        notes = tmp_path / "notes.mp3"
+        notes.write_text("hello")
+
+        with pytest.raises(ValueError, match="Can't read the audio track"):
+            _submit(tmp_path, model="ltx-8", audio_track_path=str(notes))
+
+        assert submitted == []

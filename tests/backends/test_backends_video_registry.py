@@ -11,7 +11,7 @@ from tests._factories import load_packaged_config
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.core.video_family import VideoCapabilities
 
-_ALL_ON = {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True}
+_ALL_ON = {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": True, "audio_track": False, "audio_track_upscale": False}
 
 
 def _config(**platform_capabilities: dict[str, bool]) -> dict:
@@ -153,7 +153,7 @@ class TestVideoCapabilities:
 
         for platform_key in ("darwin", "win32", "linux"):
             monkeypatch.setattr(backends_module.sys, "platform", platform_key)
-            assert backends_module.video_capabilities(config, "ltx") == VideoCapabilities(**_ALL_ON)
+            assert backends_module.video_capabilities(config, "ltx") == VideoCapabilities(**{**_ALL_ON, "audio_track": True, "audio_track_upscale": True})
 
     def test_a_family_the_config_does_not_describe_has_none(self):
         assert backends_module.video_capabilities({}, "ltx") is None
@@ -203,4 +203,6 @@ class TestMacH3Registration:
         monkeypatch.setattr(backends_module.sys, "platform", "darwin")
         capabilities = backends_module.video_capabilities(load_packaged_config(), "h3")
 
-        assert capabilities == VideoCapabilities(i2v=True, end_frame=True, extend=True, upscale=False, upscale_review=False, lora=True, audio=True, low_memory=False)
+        assert capabilities == VideoCapabilities(
+            i2v=True, end_frame=True, extend=True, upscale=False, upscale_review=False, lora=True, audio=True, low_memory=False, audio_track=True, audio_track_upscale=False
+        )

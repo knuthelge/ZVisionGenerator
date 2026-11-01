@@ -29,11 +29,13 @@ from zvisiongenerator.backends.cuda.video.h3.adaln import (  # noqa: E402
     read_tables,
     step_keys,
     table_keys,
+    table_sources,
     unique_keys,
     write_tables,
 )
 from zvisiongenerator.backends.cuda.video.h3.schedule import (  # noqa: E402
     ROW_SETS,
+    TRACK_ROW_SETS,
     build_schedulers,
     row_timesteps,
 )
@@ -41,6 +43,7 @@ from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
 
 _SCHEDULE_8 = H3Schedule(8, 6.0, 3.0)
 _SCHEDULE_4 = H3Schedule(4, 6.0, 3.0)
+_KEYFRAME_F32 = float(torch.tensor(0.999))  # the keyframe level as the timestep tensors hold it
 _CONDITIONING = {"plain": (0, 0), "keyframe": (1, 0), "extend": (1, 2)}  # leading (video, audio) conditioning rows
 
 
@@ -113,6 +116,27 @@ def test_a_schedule_with_keys_outside_the_longest_is_refused_by_name():
 def test_fold_keys_needs_a_schedule():
     with pytest.raises(ValueError, match="At least one schedule"):
         fold_keys({})
+
+
+@pytest.mark.parametrize(("row_set", "extra"), [("track", ()), ("track_keyframe", (_KEYFRAME_F32,))])
+def test_a_track_clip_has_the_video_level_and_the_clean_levels_and_never_an_audio_step(row_set, extra):
+    video, audio = build_schedulers(_SCHEDULE_8)
+    keys = step_keys(video, audio, row_set)
+    assert len(keys) == 8
+    for key, t in zip(keys, video.timesteps, strict=True):
+        assert key == tuple(sorted({float(t), *extra, 1.0}))  # the audio schedule never shows: every audio row is at 1.0
+
+
+def test_the_track_row_sets_are_not_stored_and_leave_the_stored_keys_alone():
+    video, audio = build_schedulers(_SCHEDULE_8)
+    stored = fold_keys({8: _SCHEDULE_8})
+    assert TRACK_ROW_SETS == ("track", "track_keyframe") and not set(TRACK_ROW_SETS) & set(ROW_SETS)
+    wanted = unique_keys(key for row_set in TRACK_ROW_SETS for key in step_keys(video, audio, row_set))
+    assert len(wanted) == 16
+    # Only the first forward of a keyframe clip, (0.0, 0.999, 1.0),, is a key the copy has.
+    assert [key for key in wanted if key in set(stored)] == [(0.0, _KEYFRAME_F32, 1.0)]
+    # Every timestep of a track key is in a stored key, so each row can be assembled.
+    assert table_sources(stored, wanted)
 
 
 def test_step_keys_refuses_an_unknown_row_set_and_uneven_schedules():
@@ -300,10 +324,57 @@ def test_read_tables_refuses_a_missing_key_and_a_block_mismatch(tmp_path):
     tables, _ = _tables_for(model, [(0.5,)])
     path = tmp_path / "tables.safetensors"
     write_tables(path, tables)
-    with pytest.raises(KeyError, match="rebuild the H3 copy"):
+    with pytest.raises(KeyError, match=r"timestep 0\.7 of key \(0\.7,\).*rebuild the H3 copy"):
         read_tables(path, [(0.5,), (0.7,)], LAYERS)
     with pytest.raises(ValueError, match="2 blocks, the transformer has 3"):
         read_tables(path, [(0.5,)], 3)
+
+
+# --- assembled keys --------------------------------------------------------------------------------------------------
+
+
+def test_an_assembled_key_equals_the_stored_rows_and_the_table_built_for_it(tmp_path, monkeypatch):
+    from zvisiongenerator.utils import safetensors_stream
+
+    model = tiny_transformer()
+    video, audio = build_schedulers(_SCHEDULE_8)
+    stored_keys = unique_keys(key for row_set in ROW_SETS for key in step_keys(video, audio, row_set))
+    tables, _ = _tables_for(model, stored_keys)
+    path = tmp_path / "tables.safetensors"
+    write_tables(path, tables)
+    wanted = unique_keys(key for row_set in TRACK_ROW_SETS for key in step_keys(video, audio, row_set))
+    assert not set(wanted) <= set(stored_keys)
+
+    reads: list[str] = []
+    original = safetensors_stream.TensorFile.read
+    monkeypatch.setattr(safetensors_stream.TensorFile, "read", lambda self, name: (reads.append(name), original(self, name))[1])
+    back = read_tables(path, wanted, LAYERS)
+    ground_truth, _ = _tables_for(model, wanted)
+
+    sources = table_sources(table_keys(path), wanted)
+    assert len(reads) == len({source for rows in sources.values() for source in rows}) * LAYERS  # only the stored keys that give a row are read
+    for block in range(LAYERS):
+        assert list(back[block]) == wanted
+        for key in wanted:
+            table = back[block][key]
+            assert table.shape == ground_truth[block][key].shape and table.dtype == torch.bfloat16
+            for row, (value, source) in enumerate(zip(key, sources[key], strict=True)):
+                # A row is exactly the stored row of its timestep.
+                assert torch.equal(table[row], tables[block][source][source.index(value)])
+            # And it is the table the stock projection gives that key, up to bf16 rounding of a row computed in a different batch.
+            torch.testing.assert_close(table.float(), ground_truth[block][key].float(), rtol=2e-2, atol=2e-2)
+
+
+def test_read_tables_still_reads_whole_tables_for_stored_keys_in_the_wanted_order(tmp_path):
+    model = tiny_transformer()
+    keys = [(0.5,), (0.1, 0.5), (0.0, 0.25, 0.999)]
+    tables, _ = _tables_for(model, keys)
+    path = tmp_path / "tables.safetensors"
+    write_tables(path, tables)
+    wanted = [(0.0, 0.25, 0.999), (0.25, 0.5), (0.5,)]
+    back = read_tables(path, wanted, LAYERS)
+    assert [list(block) for block in back] == [wanted] * LAYERS
+    assert torch.equal(back[1][(0.0, 0.25, 0.999)], tables[1][(0.0, 0.25, 0.999)])
 
 
 def test_write_tables_refuses_uneven_or_empty_blocks(tmp_path):

@@ -9,7 +9,7 @@ const VIDEO_CONTROLS = ['workflow', 'model', 'runs', 'frame_count', 'steps', 'se
 function videoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoModelDefaults {
   return {
     ratio: '16:9', size: 's', steps: 8, width: 768, height: 448, frame_count: 121, audio: true, low_memory: true, supports_i2v: true,
-    supports_quantize: false, quantize: null, max_steps: 8, fps: 24, frame_rule: { alignment: 1, offset: 1, round: 'nearest' }, supports_extend: true, extend_frame_step: 8, upscale: { enabled: false, factor: 2, steps: null }, ...overrides,
+    supports_quantize: false, quantize: null, max_steps: 8, fps: 24, frame_rule: { alignment: 1, offset: 1, round: 'nearest' }, supports_extend: true, supports_audio_track_upscale: true, extend_frame_step: 8, upscale: { enabled: false, factor: 2, steps: null }, ...overrides,
   };
 }
 
@@ -184,5 +184,71 @@ describe('stepsSpec', () => {
     expect(stepsSpec(null)).toBe(SPEC.steps);
     expect(stepsSpec(undefined)).toBe(SPEC.steps);
     expect(stepsSpec([])).toBe(SPEC.steps);
+  });
+});
+
+describe('workspaceCapabilities for the audio track', () => {
+  const TRACK_CONTROLS = ['audio_track', 'audio_track_path', 'audio_track_start'];
+  const definition = (controls: string[]) => ({ mode: 'video', model_kind: 'video', visible_controls: controls, requires_reference_image: false, requires_source_video: false, clear_fields: [] });
+  const imageDefinition = { mode: 'image', model_kind: 'image', visible_controls: ['workflow', 'model'], requires_reference_image: false, requires_source_video: false, clear_fields: [] };
+  const context = {
+    video_model_defaults: {
+      ltx: videoDefaults({ hidden_controls: [] }),
+      h3: videoDefaults({ hidden_controls: [], supports_audio_track_upscale: false }),
+      plain: videoDefaults({ hidden_controls: TRACK_CONTROLS }),
+    },
+    prompt_sources: ['inline'],
+    scheduler_options: [],
+    workflow_contract: {
+      values: ['txt2img', 'txt2vid', 'extend'],
+      definitions: { txt2img: imageDefinition, txt2vid: definition([...VIDEO_CONTROLS, ...TRACK_CONTROLS]), extend: definition([...VIDEO_CONTROLS, ...TRACK_CONTROLS]) },
+      field_precedence: { defaults: [], dimensions: '' },
+    },
+  } as unknown as WorkspaceContext;
+  const stateOf = (model: string, overrides: Partial<DraftState> = {}): DraftState => ({ workflow: 'txt2vid', model, referenceImagePaths: [], audioTrackPath: null, audioTrackUpload: null, extendAudioTrackPath: null, extendAudioTrackUpload: null, ...overrides }) as unknown as DraftState;
+
+  it('offers the section on a model that follows a track, with the Audio switch until one is set', () => {
+    const caps = workspaceCapabilities(context, stateOf('ltx'));
+
+    expect([caps.showAudioTrack, caps.audioTrackInEffect, caps.showAudio]).toEqual([true, false, true]);
+  });
+
+  it('takes the Audio switch away while a track is set, as a path or as an upload', () => {
+    for (const set of [{ audioTrackPath: '/a/song.mp3' }, { audioTrackUpload: 'memo.m4a' }]) {
+      const caps = workspaceCapabilities(context, stateOf('ltx', set));
+      expect([caps.audioTrackInEffect, caps.showAudio]).toEqual([true, false]);
+    }
+  });
+
+  it('reads the track of the open tab: the Extend Video track does not count in Video', () => {
+    expect(workspaceCapabilities(context, stateOf('ltx', { extendAudioTrackPath: '/a/song.mp3' })).audioTrackInEffect).toBe(false);
+    expect(workspaceCapabilities(context, stateOf('ltx', { workflow: 'extend', extendAudioTrackPath: '/a/song.mp3' })).audioTrackInEffect).toBe(true);
+    expect(workspaceCapabilities(context, stateOf('ltx', { workflow: 'extend', audioTrackPath: '/a/song.mp3' })).audioTrackInEffect).toBe(false);
+  });
+
+  it('hides the section on a model without the capability, keeps the kept track out of effect and brings the Audio switch back', () => {
+    const caps = workspaceCapabilities(context, stateOf('plain', { audioTrackPath: '/a/song.mp3' }));
+
+    expect([caps.showAudioTrack, caps.audioTrackInEffect, caps.showAudio]).toEqual([false, false, true]);
+  });
+
+  it('offers no section in Image', () => {
+    const caps = workspaceCapabilities(context, stateOf('ltx', { workflow: 'txt2img', audioTrackPath: '/a/song.mp3' }));
+
+    expect([caps.showAudioTrack, caps.audioTrackInEffect]).toEqual([false, false]);
+  });
+
+  it('keeps the Upscale controls with a track on a model that can upscale one', () => {
+    const caps = workspaceCapabilities(context, stateOf('ltx', { audioTrackPath: '/a/song.mp3' }));
+
+    expect([caps.showVideoUpscale, caps.showVideoUpscaleFactor, caps.showVideoUpscaleReview]).toEqual([true, true, true]);
+  });
+
+  it('hides the Upscale controls while a track is in effect on a model that cannot upscale one, and shows them without', () => {
+    const withTrack = workspaceCapabilities(context, stateOf('h3', { audioTrackPath: '/a/song.mp3' }));
+    const without = workspaceCapabilities(context, stateOf('h3'));
+
+    expect([withTrack.showVideoUpscale, withTrack.showVideoUpscaleFactor, withTrack.showVideoUpscaleReview, withTrack.showLowMemory]).toEqual([false, false, false, true]);
+    expect([without.showVideoUpscale, without.showVideoUpscaleFactor, without.showVideoUpscaleReview]).toEqual([true, true, true]);
   });
 });

@@ -23,6 +23,7 @@ from zvisiongenerator.backends.cuda.video.image_crf import recompress
 from zvisiongenerator.backends.cuda.video.runtime import configure_torch_runtime as _configure_torch_runtime
 from zvisiongenerator.backends.cuda.video.runtime import fit_image as _fit_image
 from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.audio_track import read_track, window_waveform
 from zvisiongenerator.utils.lora_files import normalised_lora_state
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS
@@ -32,8 +33,11 @@ from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, CARRY_FRAMES,
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
 if TYPE_CHECKING:
+    import numpy as np
+    import torch
+
     from zvisiongenerator.backends.cuda.video.audio_carry import AudioCarry
-    from zvisiongenerator.core.video_types import ExtendSource
+    from zvisiongenerator.core.video_types import AudioTrack, ExtendSource
 
 logger = logging.getLogger(__name__)
 
@@ -759,6 +763,25 @@ def _audio_tokens(pipeline: Any, frames: int, fps: float) -> int:
     return max(1, round(frames / fps * per_second))
 
 
+def _encode_track(pipeline: Any, waveform: np.ndarray, num_frames: int, fps: float) -> torch.Tensor:
+    """Encode a track's *waveform*, at the audio VAE's sample rate, into the packed tokens that cover *num_frames* frames at *fps*."""
+
+    from zvisiongenerator.backends.cuda.video.audio_carry import encode_audio_carry
+
+    return encode_audio_carry(pipeline, waveform, _audio_tokens(pipeline, num_frames, fps)).tokens
+
+
+def _held_track(pipeline: Any, tokens: torch.Tensor | None) -> AbstractContextManager[None]:
+    """Return the block that holds the encoded track clean for every forward pass of *pipeline*'s transformer, or a no-op without a track."""
+
+    if tokens is None:
+        return nullcontext()
+
+    from zvisiongenerator.backends.cuda.video.audio_carry import pin_audio_track
+
+    return pin_audio_track(pipeline.transformer, tokens)
+
+
 def _write_extend_segment(clip: _GeneratedClip, source: ExtendSource, extend_frames: int, directory: Path, *, audio: bool) -> ExtendSegment:
     """Write the new part of a decoded extension window: its frames to ``segment.mp4`` and, with *audio*, its sound to ``segment.wav``.
 
@@ -975,11 +998,13 @@ def _generate_one_stage(
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
     audio_carry: AudioCarry | None = None,
+    track_tokens: torch.Tensor | None = None,
     conditioned: bool = False,
 ) -> _GeneratedClip:
     """Run one distilled denoising pass at full size and return its clip, with *audio_carry* pinned at the start of its sound.
 
-    A *conditioned* pass (Extend) keeps the pipeline's own scheduler whatever sampler is configured.
+    With *track_tokens* the whole sound is held clean instead (see :func:`pin_audio_track`). A *conditioned* pass
+    (Extend) keeps the pipeline's own scheduler whatever sampler is configured.
     """
 
     sigmas = _stage1_sigmas(model.runtime.distilled_sigmas, steps)
@@ -997,7 +1022,7 @@ def _generate_one_stage(
     )
     scheduler = _pass_scheduler(model, pipeline, seed=seed, stage=1, refine=False, conditioned=conditioned)
     if audio_carry is None:
-        with scheduler:
+        with scheduler, _held_track(pipeline, track_tokens):
             return _decode_clip(pipeline, pipeline(**kwargs))
 
     from zvisiongenerator.backends.cuda.video.audio_carry import pin_audio_prefix, restore_audio_prefix
@@ -1022,6 +1047,7 @@ def _generate_two_stage(
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
     review: Callable[[Path], None] | None = None,
+    track_tokens: torch.Tensor | None = None,
     conditioned: bool = False,
 ) -> _GeneratedClip:
     """Render at half size, upsample the latents 2x and refine at full size on the same pipeline.
@@ -1029,7 +1055,8 @@ def _generate_two_stage(
     Both denoising passes run on *pipeline* so its LoRA adapters apply to each. Progress covers both passes as one
     run of ``len(stage-1 sigmas) + len(stage-2 sigmas)`` steps. With *review*, the half-size result is decoded to a
     temporary video and passed to it before the upsample; an exception from it ends the generation. A *conditioned*
-    run keeps the pipeline's own scheduler in both passes whatever sampler is configured.
+    run keeps the pipeline's own scheduler in both passes whatever sampler is configured. With *track_tokens* the
+    whole sound is held clean in both passes.
     """
 
     if width % 64 or height % 64:
@@ -1042,7 +1069,7 @@ def _generate_two_stage(
     generator = _make_generator(runtime.torch, seed)
     common = {"prompt_inputs": prompt_inputs, "num_frames": num_frames, "fps": fps, "generator": generator}
 
-    with _pass_scheduler(model, pipeline, seed=seed, stage=1, refine=False, conditioned=conditioned):
+    with _pass_scheduler(model, pipeline, seed=seed, stage=1, refine=False, conditioned=conditioned), _held_track(pipeline, track_tokens):
         stage1 = pipeline(
             **_build_generation_kwargs(
                 **common,
@@ -1059,7 +1086,7 @@ def _generate_two_stage(
     upsampled = _upsample_latents(model.upsample_pipeline, stage1.frames, width=width, height=height, num_frames=num_frames, low_memory=model.low_memory)
 
     refine_kwargs = {**extra_kwargs, "latents": upsampled, "audio_latents": stage1.audio, "noise_scale": stage2_sigmas[0]}
-    with _pass_scheduler(model, pipeline, seed=seed, stage=2, refine=True, conditioned=conditioned):
+    with _pass_scheduler(model, pipeline, seed=seed, stage=2, refine=True, conditioned=conditioned), _held_track(pipeline, track_tokens):
         stage2 = pipeline(
             **_build_generation_kwargs(
                 **common,
@@ -1129,16 +1156,21 @@ def _generate_clip(
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
     audio_carry: AudioCarry | None = None,
+    track_waveform: np.ndarray | None = None,
     review: Callable[[Path], None] | None = None,
     conditioned: bool = False,
 ) -> _GeneratedClip:
     """Generate a clip at *fps* in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both.
 
-    *audio_carry* (one stage only) pins sound at the start of the clip. *review* (two stages only) sees the half-size render first.
-    *conditioned* (Extend, a last-frame image) keeps the pipeline's own scheduler whatever sampler is configured.
+    *audio_carry* (one stage only) pins sound at the start of the clip. *track_waveform*, the clip's whole sound at the
+    audio VAE's sample rate, is encoded after the prompt and before the transformer is attached, so the audio VAE is not
+    on the GPU beside a streamed transformer, and is then held clean in every pass. *review* (two stages only) sees the
+    half-size render first. *conditioned* (Extend, a last-frame image) keeps the pipeline's own scheduler whatever
+    sampler is configured.
     """
 
     prompt_inputs = _encode_prompt(model, pipeline, prompt)
+    track_tokens = _encode_track(pipeline, track_waveform, num_frames, fps) if track_waveform is not None else None
     _ensure_transformer(model, pipeline)
     if stage1_steps is None:
         return _generate_one_stage(
@@ -1154,6 +1186,7 @@ def _generate_clip(
             step_callback=step_callback,
             extra_kwargs=extra_kwargs,
             audio_carry=audio_carry,
+            track_tokens=track_tokens,
             conditioned=conditioned,
         )
     if audio_carry is not None:
@@ -1171,6 +1204,7 @@ def _generate_clip(
         step_callback=step_callback,
         extra_kwargs=extra_kwargs,
         review=review,
+        track_tokens=track_tokens,
         conditioned=conditioned,
     )
 
@@ -1341,9 +1375,13 @@ class DiffusersVideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
-        """Generate video frames from text and export them to disk."""
+        """Generate video frames from text and export them to disk.
+
+        With *audio_track* the clip's whole sound is held clean in every pass, so the picture follows it.
+        """
 
         if model.text_to_video is None:
             raise RuntimeError("This loaded video model does not include a text-to-video pipeline.")
@@ -1352,6 +1390,8 @@ class DiffusersVideoBackend:
         review = kwargs.get("review")
         _check_upscale_arguments(model, stage1_steps)
         _check_review_arguments(review, stage1_steps)
+        fps = model.model_info.default_fps
+        track_waveform = read_track(audio_track, model.text_to_video.audio_vae.config.sample_rate, num_frames / fps) if audio_track is not None else None
 
         try:
             with model.runtime.torch.inference_mode():
@@ -1362,12 +1402,13 @@ class DiffusersVideoBackend:
                     width=width,
                     height=height,
                     num_frames=num_frames,
-                    fps=model.model_info.default_fps,
+                    fps=fps,
                     seed=seed,
                     steps=steps,
                     stage1_steps=stage1_steps,
                     step_callback=step_callback,
                     extra_kwargs={},
+                    track_waveform=track_waveform,
                     review=review,
                 )
                 output = _export_video(model, clip, output_path)
@@ -1387,13 +1428,15 @@ class DiffusersVideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video frames from an image prompt pair and export them to disk.
 
         With ``end_image`` (the path of a last-frame image; the model must be loaded with ``end_image=True``), the clip
         runs from *image_path* to it: the first frame is pinned and the last image is appended as a keyframe on the
-        clip's last frame, on the pipeline's own scheduler.
+        clip's last frame, on the pipeline's own scheduler. With *audio_track* the clip's whole sound is held clean in
+        every pass, so the picture follows it.
         """
 
         if model.image_to_video is None:
@@ -1407,6 +1450,8 @@ class DiffusersVideoBackend:
         if bool(end_image) != model.end_image:
             raise RuntimeError(f"A clip {'with' if end_image else 'without'} a last-frame image needs the model loaded with end_image={bool(end_image)}.")
 
+        fps = model.model_info.default_fps
+        track_waveform = read_track(audio_track, model.image_to_video.audio_vae.config.sample_rate, num_frames / fps) if audio_track is not None else None
         input_image = _conditioning_image(model, image_path, width, height)
         if end_image:
             condition = model.runtime.pipeline_classes.video_condition
@@ -1433,12 +1478,13 @@ class DiffusersVideoBackend:
                     width=width,
                     height=height,
                     num_frames=num_frames,
-                    fps=model.model_info.default_fps,
+                    fps=fps,
                     seed=seed,
                     steps=steps,
                     stage1_steps=stage1_steps,
                     step_callback=step_callback,
                     extra_kwargs=extra_kwargs,
+                    track_waveform=track_waveform,
                     review=review,
                     conditioned=bool(end_image),
                 )
@@ -1459,6 +1505,7 @@ class DiffusersVideoBackend:
         segment_dir: str | Path,
         audio_output: bool,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
     ) -> ExtendSegment | None:
         """Generate the continuation of a clip: new frames, and their sound, that follow its last frame.
 
@@ -1466,6 +1513,10 @@ class DiffusersVideoBackend:
         own size and frame rate (``LTX2VideoCondition`` at latent index 0, full strength), and so is the sound under
         them when the clip has any (see ``audio_carry``). The window is generated and decoded, and only its new part
         is written.
+
+        With *audio_track* the whole window's sound is held clean instead: the source's sound under the 25 carried
+        frames (silence for a silent source), then the track from its start (see :func:`window_waveform`). The
+        backend then writes no ``segment.wav``; the Extend sound stage writes it from the same waveform.
 
         Args:
             model: Handle returned by ``load_model`` with ``mode="extend"``.
@@ -1478,9 +1529,10 @@ class DiffusersVideoBackend:
             audio_output: Whether to write the new part's sound. The sound is only written when the clip has any; a
                 silent clip is continued without it. The clip's sound is pinned whenever it has some.
             step_callback: Receives progress event dicts.
+            audio_track: The track the extension follows, or ``None``.
 
         Returns:
-            The generated segment: its video and, when ``audio_output`` is set and the clip has sound, its audio.
+            The generated segment: its video and, when ``audio_output`` is set, the clip has sound and no track is held, its audio.
 
         Raises:
             ValueError: If the model was loaded for upscale, or ``extend_frames`` is not a positive multiple of 8.
@@ -1499,7 +1551,9 @@ class DiffusersVideoBackend:
 
         pipeline = model.extend
         tail = read_source_tail(source)
-        tail_audio = read_source_tail_audio(source, pipeline.audio_vae.config.sample_rate) if source.has_audio else None
+        sample_rate = pipeline.audio_vae.config.sample_rate
+        track_waveform = window_waveform(source, audio_track, carry_frames=CARRY_FRAMES, extend_frames=extend_frames, rate=sample_rate) if audio_track is not None else None
+        tail_audio = read_source_tail_audio(source, sample_rate) if source.has_audio and audio_track is None else None
         carry = model.runtime.pipeline_classes.video_condition(frames=tail, index=0, strength=1.0)
         try:
             with model.runtime.torch.inference_mode():
@@ -1518,6 +1572,7 @@ class DiffusersVideoBackend:
                     step_callback=step_callback,
                     extra_kwargs={"conditions": [carry]},
                     audio_carry=audio_carry,
+                    track_waveform=track_waveform,
                     conditioned=True,
                 )
                 segment = _write_extend_segment(clip, source, extend_frames, Path(segment_dir), audio=audio_output and source.has_audio)

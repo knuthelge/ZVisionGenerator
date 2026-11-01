@@ -9,7 +9,9 @@ export type CliCaveat =
   /** The CLI runs every prompt in the file, and only some of them were chosen. */
   | 'prompt_options'
   /** The first or last frame was uploaded from the browser; the command names the uploaded file, not its path. */
-  | 'uploaded_image';
+  | 'uploaded_image'
+  /** The audio track was uploaded from the browser; the command names the uploaded file, not its path. */
+  | 'uploaded_audio';
 
 export interface CliCommand {
   /** One shell line, with every argument quoted for a POSIX shell. */
@@ -195,6 +197,18 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
       args.push('--reference', references.join(','));
       if (settings.reference_upload !== undefined && !caveats.includes('uploaded_image')) caveats.push('uploaded_image');
     }
+  }
+
+  // The audio track follows the same rule: an upload wins over a typed path and has no host path, so the command names it.
+  // A track is the clip's sound, so the form sends no Audio switch beside it. Start at 0 is the CLI's default, except on
+  // --extend, where a missing --audio-start continues the source's track, so an extension always names its start.
+  const audioUpload = isVideo ? text(settings, 'audio_track_file') : undefined;
+  const audioFile = audioUpload ?? (isVideo ? text(settings, 'audio_track_path') : undefined);
+  if (audioFile !== undefined) {
+    if (audioUpload !== undefined) caveats.push('uploaded_audio');
+    flag('--audio-file', audioFile);
+    const start = numberOrNull(first(settings, 'audio_track_start'));
+    if (start !== null && (start !== 0 || isExtend)) args.push('--audio-start', String(start));
   }
 
   if (isVideo) {

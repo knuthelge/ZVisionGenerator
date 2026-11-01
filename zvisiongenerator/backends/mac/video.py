@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS
 from zvisiongenerator.backends.mac.memory import memory_size_bytes, mlx_cache_limit
 from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.audio_track import read_track, window_waveform
 from zvisiongenerator.utils.hf_snapshot import pack_for_reference, snapshot_with
 from zvisiongenerator.utils.model_files import find_local_model_dir, ltx_mlx_bundled_text_encoder
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
@@ -27,7 +28,9 @@ from zvisiongenerator.utils.video_tail import read_source_tail
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-    from zvisiongenerator.core.video_types import ExtendSource
+    import numpy as np
+
+    from zvisiongenerator.core.video_types import AudioTrack, ExtendSource
     from zvisiongenerator.utils.h3_preset import HubFiles
 
 # Pixels per latent cell of the video VAE encoder.
@@ -74,7 +77,8 @@ class _LtxModel:
     """Handle returned by ``load_model``: a pipeline plus the settings generation needs.
 
     Attributes:
-        pipeline: ``BasePipeline`` (one-stage) or ``DistilledPipeline`` (two-stage upscale).
+        pipeline: ``BasePipeline`` (one-stage) or ``A2VidDistilledPipeline`` (two-stage upscale; it is the distilled pipeline
+            and generates its own sound unless a track is given).
         frame_rate: Frames per second used for positions, audio length and the muxed output.
         upscale: Whether ``pipeline`` is the two-stage upscale pipeline.
         low_ram_streaming: Whether the pipeline streams the transformer blocks, which also needs
@@ -306,8 +310,8 @@ def _image_conditionings(pipe: Any, image_path: str, latent_shape: tuple[int, in
     return pipe.image_conditioner(_encode, free_after=pipe.low_memory)
 
 
-def _encode_carry(pipe: Any, source: ExtendSource, frames: Any, *, fps: float) -> _Carry:
-    """Encode a clip's tail frames, and the sound under them when the clip has any, into pinnable tokens.
+def _encode_carry(pipe: Any, source: ExtendSource, frames: Any, *, fps: float, carry_audio: bool = True) -> _Carry:
+    """Encode a clip's tail frames, and the sound under them when the clip has any and *carry_audio* is set, into pinnable tokens.
 
     The video goes through the VAE encoder; the audio is read from the file at the tail's own position and goes
     through the audio encoder, then is fitted to the tail's token count before it is patchified.
@@ -317,9 +321,10 @@ def _encode_carry(pipe: Any, source: ExtendSource, frames: Any, *, fps: float) -
         source: The clip the tail comes from; its size, frame rate and audio decide the encoding.
         frames: The tail as uint8 RGB frames of shape ``(count, height, width, 3)``.
         fps: Frame rate of the clip, used for the audio token count and the audio position.
+        carry_audio: Whether to encode the tail's sound; off when an audio track holds the whole window's sound instead.
 
     Returns:
-        The encoded carry; ``audio_tokens`` is ``None`` for a silent source.
+        The encoded carry; ``audio_tokens`` is ``None`` for a silent source or without *carry_audio*.
 
     Raises:
         RuntimeError: If the source has audio that cannot be read.
@@ -347,7 +352,7 @@ def _encode_carry(pipe: Any, source: ExtendSource, frames: Any, *, fps: float) -
         aggressive_cleanup()
 
     audio_token_count = carry_audio_tokens(fps, count)
-    audio_tokens = _encode_carry_audio(pipe, source, count, fps, audio_token_count) if source.has_audio else None
+    audio_tokens = _encode_carry_audio(pipe, source, count, fps, audio_token_count) if carry_audio and source.has_audio else None
     return _Carry(video_tokens=video_tokens, audio_tokens=audio_tokens, latent_frames=carry_latent_frames(), audio_token_count=audio_token_count)
 
 
@@ -357,19 +362,37 @@ def _encode_carry_audio(pipe: Any, source: ExtendSource, count: int, fps: float,
     Raises:
         RuntimeError: If the audio cannot be read from the file.
     """
-    import mlx.core as mx
-    from ltx_core_mlx.model.audio_vae import encode_audio
     from ltx_core_mlx.utils.audio import load_audio
-    from ltx_core_mlx.utils.memory import aggressive_cleanup
-    from ltx_pipelines_mlx.extend_distilled import fit_audio_latent
 
     start_time = source.video_start + (source.frame_count - count) / fps
     audio = load_audio(source.path, target_sample_rate=_AUDIO_ENCODER_RATE, start_time=start_time, max_duration=count / fps)
     if audio is None:
         raise RuntimeError(f"Could not read the audio of {source.path} to continue it.")
+    return _encode_audio_tokens(pipe, audio.waveform, audio.sample_rate, token_count)
+
+
+def _encode_track_audio(pipe: Any, waveform: np.ndarray, token_count: int) -> Any:
+    """Return the patchified audio latent of an audio track's *waveform*, shape ``(1, token_count, 128)``.
+
+    Args:
+        pipe: The loaded LTX pipeline.
+        waveform: Stereo float32 audio of shape ``(2, samples)`` at the audio encoder's rate.
+        token_count: The clip's audio token count; the latent is padded with zeros or trimmed to it.
+    """
+    import mlx.core as mx
+
+    return _encode_audio_tokens(pipe, mx.array(waveform)[None], _AUDIO_ENCODER_RATE, token_count)
+
+
+def _encode_audio_tokens(pipe: Any, waveform: Any, sample_rate: int, token_count: int) -> Any:
+    """Encode a waveform ``(1, channels, samples)`` with the audio VAE and return its tokens fitted to ``(1, token_count, 128)``."""
+    import mlx.core as mx
+    from ltx_core_mlx.model.audio_vae import encode_audio
+    from ltx_core_mlx.utils.memory import aggressive_cleanup
+    from ltx_pipelines_mlx.extend_distilled import fit_audio_latent
 
     def _encode_audio(encoder: Any, processor: Any) -> Any:
-        latent = encode_audio(audio.waveform, audio.sample_rate, encoder, processor)
+        latent = encode_audio(waveform, sample_rate, encoder, processor)
         mx.eval(latent)
         return latent
 
@@ -380,6 +403,21 @@ def _encode_carry_audio(pipe: Any, source: ExtendSource, count: int, fps: float,
     if pipe.low_memory:
         aggressive_cleanup()
     return tokens
+
+
+def _track_audio_state(tokens: Any, positions: Any, seed: int) -> Any:
+    """Return the audio state that holds an audio track's *tokens* clean and frozen, as the audio-to-video pipeline does."""
+    from ltx_pipelines_mlx.utils.helpers import create_noised_state
+
+    return create_noised_state(
+        base_shape=tokens.shape,
+        conditionings=[],
+        spatial_dims=(tokens.shape[1], 1, 1),  # unused for audio
+        positions=positions,
+        seed=seed,
+        initial_latent=tokens,
+        frozen=True,
+    )
 
 
 def _carry_conditioning(tokens: Any, frame_indices: list[int]) -> Any:
@@ -472,6 +510,7 @@ def _generate_one_stage(
     carry: _Carry | None = None,
     segment: _SegmentTarget | None = None,
     end_image_path: str | None = None,
+    track_waveform: np.ndarray | None = None,
 ) -> None:
     """Run the distilled sampler at full resolution and write the clip to *output_path*.
 
@@ -495,6 +534,11 @@ def _generate_one_stage(
         segment: When given, decode the window into this target (dropping the carried frames) instead of writing
             a muxed clip to ``output_path``.
         end_image_path: Last-frame image (needs ``image_path``): appended as a keyframe on the clip's last frame.
+        track_waveform: The clip's whole sound as stereo float32 ``(2, samples)`` at the audio encoder's rate. It is encoded
+            before the transformer loads and held frozen, so the picture follows it and the model makes no sound of its own.
+
+    Raises:
+        ValueError: If *track_waveform* is given together with a carry that holds sound.
     """
     from ltx_core_mlx.components.patchifiers import compute_video_latent_shape, snap_output_dimensions
     from ltx_core_mlx.model.transformer.model import X0Model
@@ -504,6 +548,8 @@ def _generate_one_stage(
     from ltx_pipelines_mlx.utils.helpers import create_noised_state
     from ltx_pipelines_mlx.utils.samplers import denoise_loop
 
+    if track_waveform is not None and carry is not None and carry.audio_tokens is not None:
+        raise ValueError("A clip holds either carried sound or a track, not both.")
     pipe = model.pipeline
     fps = frame_rate or model.frame_rate
     low_memory = pipe.low_memory
@@ -522,6 +568,8 @@ def _generate_one_stage(
     elif image_path is not None:
         conditionings = _image_conditionings(pipe, image_path, (F, H, W), fps, num_frames=num_frames, end_image_path=end_image_path)
 
+    track_tokens = _encode_track_audio(pipe, track_waveform, audio_tokens) if track_waveform is not None else None
+
     pipe.load()
 
     video_state = create_noised_state(
@@ -535,16 +583,19 @@ def _generate_one_stage(
         legacy_scalar_blend=True,
     )
     pinned_audio = carry is not None and carry.audio_tokens is not None
-    audio_state = create_noised_state(
-        base_shape=(1, audio_tokens, _LATENT_CHANNELS),
-        conditionings=[_carry_conditioning(carry.audio_tokens, list(range(carry.audio_token_count)))] if pinned_audio else [],
-        spatial_dims=(audio_tokens, 1, 1) if pinned_audio else (F, H, W),
-        positions=audio_positions,
-        seed=seed + 1,
-        sigma=1.0,
-        initial_latent=None,
-        legacy_scalar_blend=True,
-    )
+    if track_tokens is not None:
+        audio_state = _track_audio_state(track_tokens, audio_positions, seed + 1)
+    else:
+        audio_state = create_noised_state(
+            base_shape=(1, audio_tokens, _LATENT_CHANNELS),
+            conditionings=[_carry_conditioning(carry.audio_tokens, list(range(carry.audio_token_count)))] if pinned_audio else [],
+            spatial_dims=(audio_tokens, 1, 1) if pinned_audio else (F, H, W),
+            positions=audio_positions,
+            seed=seed + 1,
+            sigma=1.0,
+            initial_latent=None,
+            legacy_scalar_blend=True,
+        )
 
     # Metal watchdog guard: materialize the noised states before the first denoise step.
     pipe._pre_denoise_flush(video_state, audio_state)  # noqa: SLF001
@@ -690,28 +741,45 @@ def _generate_two_stage(
     step_callback: Callable[[dict[str, Any]], None] | None,
     review: Callable[[Path], None] | None,
     end_image_path: str | None = None,
+    audio_track: AudioTrack | None = None,
 ) -> None:
     """Generate at half resolution, spatially upscale 2x, and refine with the distilled pipeline.
 
     With *review*, the half-size result is decoded to a temporary video and passed to it between the two stages. With
     *end_image_path*, both stages pin the first and last frames (the pipeline resolves ``-1`` to the clip's last frame).
+    With *audio_track*, the track is encoded the way the one-stage path encodes it (the stretch past the end of the file is
+    silence) and handed to the pipeline as its source audio, which holds it frozen in both stages. The audio-to-video
+    pipeline's own ``generate_and_save`` is bypassed, because it reads the track again with the vendored reader and muxes a
+    copy of it; the remux stage puts the track on the clip. Without a track the pipeline generates its own sound.
     """
+    from ltx_pipelines_mlx.distilled import DistilledPipeline
     from ltx_pipelines_mlx.scheduler import STAGE_2_SIGMAS
 
     pipe = model.pipeline
     pipe.stepwise = _TwoStageProgress(step_callback, stage2_total=len(STAGE_2_SIGMAS) - 1) if step_callback is not None else None
-    with _review_after_stage1(pipe, review, frame_rate=model.frame_rate, seed=seed) if review is not None else contextlib.nullcontext():
-        pipe.generate_and_save(
-            prompt=prompt,
-            output_path=output_path,
-            height=height,
-            width=width,
-            num_frames=num_frames,
-            frame_rate=model.frame_rate,
-            seed=seed,
-            stage1_steps=stage1_steps,
-            images=_conditioning_inputs(image_path, end_image_path) if image_path is not None else None,
-        )
+    source_tokens = None
+    if audio_track is not None:
+        from ltx_core_mlx.utils.positions import compute_audio_token_count
+
+        waveform = read_track(audio_track, _AUDIO_ENCODER_RATE, num_frames / model.frame_rate)
+        source_tokens = _encode_track_audio(pipe, waveform, compute_audio_token_count(num_frames, frame_rate=model.frame_rate))
+    pipe._source_audio_tokens = source_tokens  # noqa: SLF001
+    try:
+        with _review_after_stage1(pipe, review, frame_rate=model.frame_rate, seed=seed) if review is not None else contextlib.nullcontext():
+            DistilledPipeline.generate_and_save(
+                pipe,
+                prompt=prompt,
+                output_path=output_path,
+                height=height,
+                width=width,
+                num_frames=num_frames,
+                frame_rate=model.frame_rate,
+                seed=seed,
+                stage1_steps=stage1_steps,
+                images=_conditioning_inputs(image_path, end_image_path) if image_path is not None else None,
+            )
+    finally:
+        pipe._source_audio_tokens = None  # noqa: SLF001
 
 
 @contextlib.contextmanager
@@ -764,6 +832,7 @@ def _generate(
     step_callback: Callable[[dict[str, Any]], None] | None,
     review: Callable[[Path], None] | None = None,
     end_image_path: str | None = None,
+    audio_track: AudioTrack | None = None,
 ) -> Path:
     """Dispatch to the one-stage or two-stage generator that matches the loaded handle.
 
@@ -780,9 +849,10 @@ def _generate(
     # The vendored pipeline opens the images itself, so a sideways or transparent one is handed over as an upright copy.
     with _generation_scope(model), upright_image_copies(image_path, end_image_path) as (image_path, end_image_path):
         if stage1_steps is not None:
-            _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback, review, end_image_path=end_image_path)
+            _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback, review, end_image_path=end_image_path, audio_track=audio_track)
         else:
-            _generate_one_stage(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, step_callback, end_image_path=end_image_path)
+            track_waveform = read_track(audio_track, _AUDIO_ENCODER_RATE, num_frames / model.frame_rate) if audio_track is not None else None
+            _generate_one_stage(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, step_callback, end_image_path=end_image_path, track_waveform=track_waveform)
     return Path(output_path)
 
 
@@ -823,9 +893,10 @@ class LtxVideoBackend:
             # The constructor reads the LoRA mode, and sets the MLX cache limit to 0 process-wide when streaming; scope both.
             with _env_default(_LORA_MODE_ENV, _DEFAULT_LORA_MODE), mlx_cache_limit(0) if streaming else contextlib.nullcontext():
                 if upscale:
-                    from ltx_pipelines_mlx import DistilledPipeline
+                    # The audio-to-video pipeline is the distilled one; it holds a track frozen in both stages when it is given one.
+                    from ltx_pipelines_mlx import A2VidDistilledPipeline
 
-                    pipeline = DistilledPipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming, **text_encoder)
+                    pipeline = A2VidDistilledPipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming, **text_encoder)
                 else:
                     from ltx_pipelines_mlx import BasePipeline
 
@@ -867,6 +938,7 @@ class LtxVideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from text prompt.
@@ -881,6 +953,7 @@ class LtxVideoBackend:
             steps: Inference steps.
             output_path: Path to save video.
             step_callback: Receives progress event dicts.
+            audio_track: The track the clip follows, held as the clip's whole sound.
             **kwargs: stage1_steps for distilled two-stage upscale mode; review, a ``Callable[[Path], None]``
                 that receives a temporary video of the half-size render before the upscale (needs stage1_steps).
 
@@ -890,7 +963,7 @@ class LtxVideoBackend:
         Raises:
             ValueError: If stage1_steps does not match the model's upscale mode, or review is set without it.
         """
-        return _generate(model, prompt, width, height, num_frames, seed, steps, output_path, None, kwargs.get("stage1_steps"), step_callback, kwargs.get("review"))
+        return _generate(model, prompt, width, height, num_frames, seed, steps, output_path, None, kwargs.get("stage1_steps"), step_callback, kwargs.get("review"), audio_track=audio_track)
 
     def image_to_video(
         self,
@@ -904,6 +977,7 @@ class LtxVideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from image and text prompt.
@@ -919,6 +993,7 @@ class LtxVideoBackend:
             steps: Inference steps.
             output_path: Path to save video.
             step_callback: Receives progress event dicts.
+            audio_track: The track the clip follows, held as the clip's whole sound.
             **kwargs: stage1_steps for distilled two-stage upscale mode; review, a ``Callable[[Path], None]``
                 that receives a temporary video of the half-size render before the upscale (needs stage1_steps);
                 end_image, the path of a last-frame image the clip ends on.
@@ -930,7 +1005,20 @@ class LtxVideoBackend:
             ValueError: If stage1_steps does not match the model's upscale mode, or review is set without it.
         """
         return _generate(
-            model, prompt, width, height, num_frames, seed, steps, output_path, image_path, kwargs.get("stage1_steps"), step_callback, kwargs.get("review"), end_image_path=kwargs.get("end_image")
+            model,
+            prompt,
+            width,
+            height,
+            num_frames,
+            seed,
+            steps,
+            output_path,
+            image_path,
+            kwargs.get("stage1_steps"),
+            step_callback,
+            kwargs.get("review"),
+            end_image_path=kwargs.get("end_image"),
+            audio_track=audio_track,
         )
 
     def extend_video(
@@ -945,12 +1033,15 @@ class LtxVideoBackend:
         segment_dir: str | Path,
         audio_output: bool,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
     ) -> ExtendSegment | None:
         """Generate the continuation of a clip: new frames, and their sound, that follow its last frame.
 
         The clip's last 25 frames (and the sound under them) are encoded and pinned at the start of a window of
         ``25 + extend_frames`` frames at the clip's own size and frame rate. The window is generated and decoded,
-        and only its new part is written.
+        and only its new part is written. With *audio_track* the whole window's sound is held instead: the source's
+        sound under the carried frames (silence for a silent source), then the track from its start, so no sound is
+        carried or written.
 
         Args:
             model: Handle returned by ``load_model``.
@@ -963,9 +1054,10 @@ class LtxVideoBackend:
             audio_output: Whether to write the new part's sound. The sound is only written when the clip has
                 any; a silent clip is continued without it. The clip's sound is pinned whenever it has some.
             step_callback: Receives progress event dicts.
+            audio_track: The track the extension follows, or ``None``. The backend writes no ``segment.wav`` with a track.
 
         Returns:
-            The generated segment: its video and, when ``audio_output`` is set and the clip has sound, its audio.
+            The generated segment: its video and, when ``audio_output`` is set, the clip has sound and no track is held, its audio.
 
         Raises:
             ValueError: If the model was loaded for upscale, uses the diffusion video decoder, or ``extend_frames``
@@ -993,8 +1085,9 @@ class LtxVideoBackend:
             color_trc=source.color_trc,
         )
         tail = read_source_tail(source)
+        track_waveform = window_waveform(source, audio_track, carry_frames=CARRY_FRAMES, extend_frames=extend_frames, rate=_AUDIO_ENCODER_RATE) if audio_track is not None else None
         with _generation_scope(model):
-            carry = _encode_carry(model.pipeline, source, tail, fps=source.fps)
+            carry = _encode_carry(model.pipeline, source, tail, fps=source.fps, carry_audio=audio_track is None)
             _generate_one_stage(
                 model,
                 prompt,
@@ -1009,6 +1102,7 @@ class LtxVideoBackend:
                 frame_rate=source.fps,
                 carry=carry,
                 segment=target,
+                track_waveform=track_waveform,
             )
         lead = audio_lead_samples(source.fps) if target.audio_path else 0
         return ExtendSegment(video_path=target.video_path, audio_path=target.audio_path, lead_samples=lead)

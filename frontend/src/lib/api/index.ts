@@ -12,3 +12,4 @@ export * from './jobLog';
 export * from './presets';
 export * from './recentPrompts';
 export * from './discover';
+export * from './audioTrack';

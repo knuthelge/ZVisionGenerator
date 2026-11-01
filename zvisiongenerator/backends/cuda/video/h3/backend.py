@@ -14,6 +14,8 @@ latent upscaler and refines them at the full size with the last two forwards of 
 windows of latent frames (the user LoRAs applied, the start and end images held as full-size keyframe rows). One decode
 of the stitched latents gives the video, which is written with the stage-1 sound.
 Extend pins the last 22 frames of a clip, and their sound, at the start of a window and keeps only what follows them.
+An audio track is held the same way for every audio row of the clip: the model then makes the picture only, and the
+track's own sound is what the clip is given afterwards.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from zvisiongenerator.backends.cuda.video.runtime import configure_torch_runtime
 from zvisiongenerator.backends.cuda.video.token_chunking import chunk_tokens
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.audio_resample import resample_audio
+from zvisiongenerator.utils.audio_track import read_track, window_waveform
 from zvisiongenerator.utils.h3_memory import (
     H3_FPS,
     H3_FRAMES_PER_CHUNK,
@@ -46,6 +49,7 @@ from zvisiongenerator.utils.h3_memory import (
     H3_REFINE_OVERLAP_LATENT_FRAMES,
     H3_REFINE_SCHEDULE,
     H3_ROW_PIXELS,
+    h3_audio_latents,
     h3_cuda_system_bytes,
     h3_frames_of_latent_frames,
     h3_latent_frames,
@@ -68,7 +72,7 @@ if TYPE_CHECKING:
     import torch
     from PIL import Image
 
-    from zvisiongenerator.core.video_types import ExtendSource
+    from zvisiongenerator.core.video_types import AudioTrack, ExtendSource
 
 __all__ = ["H3VideoBackend"]
 
@@ -104,7 +108,9 @@ class _ClipSpec:
         keyframes: The keyframe images as given (any size); each render fits them to its own canvas.
         anchors: ``"first"`` or ``"last"`` per keyframe.
         tail: The extension tail, ``(22, height, width, 3)`` uint8 at the canvas size.
-        tail_audio: The sound under the tail, ``(2, samples)`` float32 at the audio VAE's rate.
+        tail_audio: The sound that is held, ``(2, samples)`` float32 at the audio VAE's rate: the sound under the tail, or,
+            with *track*, the sound of the whole clip.
+        track: Whether *tail_audio* is a user's track that holds every audio row of the clip.
         on_step: Receives ``{"phase", "current_step", "total_steps"}`` after every forward.
     """
 
@@ -118,17 +124,28 @@ class _ClipSpec:
     anchors: tuple[str, ...] = ()
     tail: np.ndarray | None = None
     tail_audio: np.ndarray | None = None
+    track: bool = False
     on_step: Callable[[dict[str, Any]], None] | None = None
+
+    @property
+    def held_audio_latents(self) -> int:
+        """The audio latents held per channel: the clip's all with a track, else the tail's."""
+        return h3_audio_latents(self.num_frames) if self.track else conditioning.TAIL_AUDIO_LATENTS
 
     @property
     def row_set(self) -> str:
         """Which conditioning rows the clip has, as the AdaLN fold keys name them.
 
         An extension whose source has no sound holds no audio rows, so its forwards use the keys of a keyframe-only clip.
+        A clip that holds every audio row (a track) has no generated audio row, so it never uses the ``extend`` keys: it
+        uses ``track_keyframe`` with a keyframe or a tail, and ``track`` with neither.
         """
+        has_video_rows = bool(self.keyframes) or self.tail is not None
+        if self.track:
+            return "track_keyframe" if has_video_rows else "track"
         if self.tail is not None and self.tail_audio is not None:
             return "extend"
-        return "keyframe" if self.keyframes or self.tail is not None else "plain"
+        return "keyframe" if has_video_rows else "plain"
 
 
 @dataclass(frozen=True)
@@ -280,12 +297,12 @@ def _encode_visuals(model: _H3Model, spec: _ClipSpec, images: Sequence[Image.Ima
     return keyframes, tail
 
 
-def _encode_tail_audio(model: _H3Model, tail_audio: np.ndarray) -> torch.Tensor:
-    """Return the tail's sound as held audio rows ``(74, 32)``, encoded by the audio VAE."""
+def _encode_tail_audio(model: _H3Model, tail_audio: np.ndarray, latents: int) -> torch.Tensor:
+    """Return the held sound as audio rows ``(2 * latents, 32)``, encoded by the audio VAE."""
     import torch
 
     audio_vae = h3_audio.load_audio_vae(model.files.repo_dir / "audio_vae", model.device)
-    return conditioning.encode_tail_audio(audio_vae, torch.from_numpy(tail_audio))
+    return conditioning.encode_tail_audio(audio_vae, torch.from_numpy(tail_audio), latents)
 
 
 def _fold_keys(schedulers: tuple[Any, Any], row_set: str, start: int = 0) -> list[Any]:
@@ -390,7 +407,7 @@ def _generate(model: _H3Model, spec: _ClipSpec, shared: _SharedTransformer | Non
     schedulers = schedule.build_schedulers(model.preset.schedules[spec.forwards], model.files.repo_dir)
     embeds, token_tags = _staged(_encode_text, model, spec.prompt, images)
     keyframes, tail_latents = _staged(_encode_visuals, model, spec, images) if images or spec.tail is not None else ((), None)
-    tail_audio = _staged(_encode_tail_audio, model, spec.tail_audio) if spec.tail_audio is not None else None
+    tail_audio = _staged(_encode_tail_audio, model, spec.tail_audio, spec.held_audio_latents) if spec.tail_audio is not None else None
     held = sampler.Conditioning(keyframes=keyframes, anchors=spec.anchors, tail_latents=tail_latents, tail_audio=tail_audio)
     video_latents, audio_latents = _staged(_denoise, model, spec, geo, embeds, token_tags, schedulers, held, shared)
     return _Denoised(video=video_latents, audio=audio_latents, embeds=embeds, token_tags=tuple(token_tags))
@@ -626,10 +643,18 @@ def _extend(
     directory: Path,
     audio_output: bool,
     step_callback: Callable[[dict[str, Any]], None] | None,
+    audio_track: AudioTrack | None = None,
 ) -> ExtendSegment:
-    """Read the source's tail, render the window that starts with it, and write the new part."""
+    """Read the source's tail, render the window that starts with it, and write the new part.
+
+    With an *audio_track* the window's whole sound is held: the source's sound under the tail, then the track. The model
+    makes no sound, so no ``segment.wav`` is written: a workflow stage writes it from the same window waveform.
+    """
     tail = read_source_tail(source, frames=conditioning.TAIL_FRAMES)
-    tail_audio = read_source_tail_audio(source, h3_audio.AUDIO_SAMPLE_RATE, frames=conditioning.TAIL_FRAMES) if source.has_audio else None
+    if audio_track is not None:
+        tail_audio = window_waveform(source, audio_track, carry_frames=conditioning.TAIL_FRAMES, extend_frames=extend_frames, rate=h3_audio.AUDIO_SAMPLE_RATE)
+    else:
+        tail_audio = read_source_tail_audio(source, h3_audio.AUDIO_SAMPLE_RATE, frames=conditioning.TAIL_FRAMES) if source.has_audio else None
     window = conditioning.TAIL_FRAMES + extend_frames
     spec = _ClipSpec(
         prompt=prompt,
@@ -640,6 +665,7 @@ def _extend(
         forwards=forwards,
         tail=tail,
         tail_audio=tail_audio,
+        track=audio_track is not None,
         on_step=_progress(step_callback, _PHASE),
     )
     with _out_of_memory_as_error(source.width, source.height, window):
@@ -759,6 +785,7 @@ class H3VideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate a video, with sound, from a text prompt and write it to *output_path*.
@@ -773,6 +800,9 @@ class H3VideoBackend:
             steps: Transformer forwards; a step count of the preset's schedules (4 or 8).
             output_path: Path to save the video.
             step_callback: Receives ``{"phase", "current_step", "total_steps"}`` after every forward.
+            audio_track: A track to follow: its window from ``start`` is held as the clip's whole sound, so the picture
+                follows it. The clip is written with the model's own decoding of that sound; a workflow stage replaces it
+                with the track. Not with the upscale.
             **kwargs: ``stage1_steps`` (the forwards of the half-size render, with the upscale) and ``review`` (see
                 ``VideoBackend.text_to_video``).
 
@@ -787,7 +817,8 @@ class H3VideoBackend:
         stage1_steps, review = kwargs.get("stage1_steps"), kwargs.get("review")
         _check_upscale_arguments(model, stage1_steps, review, width, height)
         forwards = _forwards(model.preset, steps if stage1_steps is None else stage1_steps)
-        spec = _ClipSpec(prompt=prompt, width=width, height=height, num_frames=num_frames, seed=seed, forwards=forwards)
+        track_sound = read_track(audio_track, h3_audio.AUDIO_SAMPLE_RATE, num_frames / H3_FPS) if audio_track is not None else None
+        spec = _ClipSpec(prompt=prompt, width=width, height=height, num_frames=num_frames, seed=seed, forwards=forwards, tail_audio=track_sound, track=track_sound is not None)
         try:
             _render_clip(model, spec, Path(output_path), stage1_steps=stage1_steps, step_callback=step_callback, review=review)
         finally:
@@ -806,6 +837,7 @@ class H3VideoBackend:
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate a video, with sound, from a first-frame image (and optionally a last-frame image) and a prompt.
@@ -823,6 +855,7 @@ class H3VideoBackend:
             steps: Transformer forwards (4 or 8).
             output_path: Path to save the video.
             step_callback: Receives ``{"phase", "current_step", "total_steps"}`` after every forward.
+            audio_track: As for ``text_to_video``.
             **kwargs: ``end_image`` (the path of the last frame), ``stage1_steps`` and ``review`` (see ``text_to_video``).
 
         Returns:
@@ -838,7 +871,19 @@ class H3VideoBackend:
         forwards = _forwards(model.preset, steps if stage1_steps is None else stage1_steps)
         end_image = kwargs.get("end_image")
         images = (open_image_upright(image_path), *((open_image_upright(end_image),) if end_image else ()))
-        spec = _ClipSpec(prompt=prompt, width=width, height=height, num_frames=num_frames, seed=seed, forwards=forwards, keyframes=images, anchors=("first", "last") if end_image else ("first",))
+        track_sound = read_track(audio_track, h3_audio.AUDIO_SAMPLE_RATE, num_frames / H3_FPS) if audio_track is not None else None
+        spec = _ClipSpec(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_frames=num_frames,
+            seed=seed,
+            forwards=forwards,
+            keyframes=images,
+            anchors=("first", "last") if end_image else ("first",),
+            tail_audio=track_sound,
+            track=track_sound is not None,
+        )
         try:
             _render_clip(model, spec, Path(output_path), stage1_steps=stage1_steps, step_callback=step_callback, review=review)
         finally:
@@ -857,6 +902,7 @@ class H3VideoBackend:
         segment_dir: str | Path,
         audio_output: bool,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
     ) -> ExtendSegment | None:
         """Generate the continuation of a clip: new frames, and their sound, that follow its last frame.
 
@@ -874,6 +920,9 @@ class H3VideoBackend:
             audio_output: Whether to write the new part's sound (only when the clip has any). The clip's sound is pinned
                 whenever it has some.
             step_callback: Receives ``{"phase", "current_step", "total_steps"}`` after every forward.
+            audio_track: A track to follow. The whole window's sound is held instead: the source's sound under the carried
+                tail (silence for a silent source), then the track from its start. No ``segment.wav`` is written; the
+                Extend sound stage writes it from the same window waveform.
 
         Returns:
             The generated segment: its video and, with audio, a 48 kHz WAV that starts at the new part.
@@ -896,6 +945,7 @@ class H3VideoBackend:
                 directory=Path(segment_dir),
                 audio_output=audio_output,
                 step_callback=step_callback,
+                audio_track=audio_track,
             )
         finally:
             release_memory()

@@ -226,6 +226,68 @@ def test_the_text_encoder_surface() -> None:
     assert {"language", "image_token_id", "_processor"} <= _self_writes(_function(encoder, "__init__"))
 
 
+# ---- Audio track -----------------------------------------------------------------------------------------------------
+# ``h3_staged`` encodes a track window with the audio VAE and holds it as clean conditioning audio rows.
+
+
+def _audio_config_fields() -> dict[str, ast.expr | None]:
+    config = _class(_tree("audio_vae.py"), "AudioVAEConfig")
+    return {node.target.id: node.value for node in config.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
+
+
+def test_the_audio_vae_encodes_a_mono_batch_to_the_posterior_mean_and_logs() -> None:
+    encode = _function(_class(_tree("audio_vae.py"), "AudioVAE"), "encode")
+    assert list(_parameters(encode)) == ["sample"]
+    returned = [node.value for node in ast.walk(encode) if isinstance(node, ast.Return)]
+    # (batch, latent_channels, frames), the layout `decode` takes back.
+    assert [ast.unparse(value) for value in returned] == ["(mean.transpose(0, 2, 1), logs.transpose(0, 2, 1))"]
+    assert "sample.shape[1] != 1" in ast.unparse(encode)
+
+
+def test_the_audio_vae_config_carries_the_rate_and_the_latent_statistics() -> None:
+    fields = _audio_config_fields()
+    assert {"sampling_rate", "latents_mean", "latents_std", "latent_channels"} <= set(fields)
+    assert ast.literal_eval(fields["sampling_rate"]) == 32000, "the track window is read at this rate"
+
+
+def test_the_loaders_fill_the_audio_config_statistics_from_the_wrapper_config() -> None:
+    for name in ("read_audio_vae_config", "load_audio_vae"):
+        source = ast.unparse(_module_function("load.py", name))
+        assert "latents_mean=tuple(wrapper.get('latents_mean', ()))" in source, name
+        assert "latents_std=tuple(wrapper.get('latents_std', ()))" in source, name
+
+
+def test_the_decode_undoes_the_normalisation_the_track_rows_apply() -> None:
+    decode = ast.unparse(_function(_pipeline_class(), "_decode_audio"))
+    assert "latents * std + mean" in decode
+    assert "unpack_audio_tokens(rows, num_audio_latents)" in decode
+
+
+def test_audio_rows_are_channel_major_with_one_batch_item_per_stereo_channel() -> None:
+    packing = _tree("packing.py")
+    assert ast.literal_eval(_assigned(packing, "AUDIO_CHANNELS")) == 2
+    unpack = _function(packing, "unpack_audio_tokens")
+    assert list(_parameters(unpack)) == ["rows", "num_audio_latents"]
+    assert "rows.reshape(AUDIO_CHANNELS, num_audio_latents, rows.shape[-1])" in ast.unparse(unpack)
+
+
+def test_the_packed_sequence_is_a_plain_dataclass_with_a_condition_audio_row_count() -> None:
+    sequence = _class(_tree("packing.py"), "PackedSequence")
+    assert [ast.unparse(decorator) for decorator in sequence.decorator_list] == ["dataclass"], "dataclasses.replace needs a dataclass that is not frozen"
+    fields = {node.target.id: ast.unparse(node.annotation) for node in sequence.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
+    assert fields["num_condition_audio_rows"] == "int"
+    assert fields["num_condition_video_rows"] == "int"
+
+
+def test_condition_audio_rows_run_at_timestep_one_and_are_not_stepped() -> None:
+    plan = _function(_pipeline_class(), "_row_timestep_plan")
+    (call,) = [node for node in ast.walk(plan) if isinstance(node, ast.Call) and ast.unparse(node.func) == "build_row_timesteps"]
+    assert ast.unparse(call.args[-1]) == "1.0"
+    rows = ast.unparse(_module_function("packing.py", "build_row_timesteps"))
+    assert "rows[audio_idx[:n_cond_a]] = float(condition_audio_timestep)" in rows
+    assert "rows[audio_idx[n_cond_a:]] = float(audio_timestep)" in rows
+
+
 # ---- Turbo LoRA ------------------------------------------------------------------------------------------------------
 
 
@@ -396,3 +458,34 @@ def test_the_pil_image_processor_loads_without_torchvision_and_reads_keyframes(t
     assert processor.merge_size == 2
     assert processed["image_grid_thw"].tolist() == [[1, 20, 36]]
     assert processed["pixel_values"].shape == (20 * 36, 3 * 2 * 16 * 16)
+
+
+def test_imported_audio_track_dependencies() -> None:
+    pytest.importorskip("mlx.core")
+    import dataclasses
+    import inspect
+
+    import numpy as np
+    from minimax_h3_mlx.audio_vae import AudioVAE, AudioVAEConfig
+    from minimax_h3_mlx.packing import AUDIO_CHANNELS, PackedSequence, build_packed_sequence
+    from minimax_h3_mlx.pipeline import MiniMaxH3Pipeline
+    from minimax_h3_mlx.scheduler import MiniMaxH3Scheduler
+    from minimax_h3_mlx.text_encoder import MiniMaxH3TextEncoder
+
+    assert AUDIO_CHANNELS == 2
+    assert list(inspect.signature(AudioVAE.encode).parameters) == ["self", "sample"]
+    assert list(inspect.signature(MiniMaxH3TextEncoder.encode).parameters) == ["self", "prompt", "images"]
+    config_fields = {field.name for field in dataclasses.fields(AudioVAEConfig)}
+    assert {"sampling_rate", "latents_mean", "latents_std", "latent_channels"} <= config_fields
+    assert AudioVAEConfig().sampling_rate == 32000
+    assert dataclasses.is_dataclass(PackedSequence) and not PackedSequence.__dataclass_params__.frozen
+
+    # A layout whose audio rows are all held: `replace` keeps the rest, and the timestep table gains the held level 1.0.
+    layout = build_packed_sequence(np.array([1, 1]), 2, 4, 4, 3, (1, 2, 2), ())
+    held = dataclasses.replace(layout, num_condition_audio_rows=AUDIO_CHANNELS * 3)
+    assert (held.num_condition_audio_rows, held.sequence_length) == (6, layout.sequence_length)
+    scheduler = MiniMaxH3Scheduler(shift=6.0)
+    scheduler.set_timesteps(4)
+    table, _plan = MiniMaxH3Pipeline._row_timestep_plan(None, held, scheduler.timesteps, scheduler.timesteps)
+    assert 1.0 in table.tolist()
+    assert 1.0 not in MiniMaxH3Pipeline._row_timestep_plan(None, layout, scheduler.timesteps, scheduler.timesteps)[0].tolist()

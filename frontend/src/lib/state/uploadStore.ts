@@ -1,10 +1,17 @@
 import type { ImageTab } from './imageSlots';
 
-/** The images a tab holds from this device: its start image (the first frame in Video), the last frame, and one entry per reference row. */
+/** The tabs that hold uploads: Image and Video hold images, Video and Extend Video an audio track. */
+export type UploadTab = ImageTab | 'extend';
+
+/**
+ * The files a tab holds from this device: its start image (the first frame in Video), the last frame, one entry per
+ * reference row, and the audio track (Video and Extend Video).
+ */
 export interface TabUploads {
   start: File | null;
   end: File | null;
   references: (File | null)[];
+  track: File | null;
 }
 
 /**
@@ -13,11 +20,11 @@ export interface TabUploads {
  */
 export interface UploadStore {
   /** Read a tab's record, or null when there is none or the store cannot be read. */
-  get(tab: ImageTab): Promise<TabUploads | null>;
+  get(tab: UploadTab): Promise<TabUploads | null>;
   /** Replace a tab's record. */
-  put(tab: ImageTab, uploads: TabUploads): Promise<void>;
+  put(tab: UploadTab, uploads: TabUploads): Promise<void>;
   /** Drop a tab's record. */
-  delete(tab: ImageTab): Promise<void>;
+  delete(tab: UploadTab): Promise<void>;
 }
 
 const DB_NAME = 'ziv-workspace-uploads';
@@ -33,7 +40,7 @@ function _asTabUploads(value: unknown): TabUploads | null {
   if (typeof value !== 'object' || value === null) return null;
   const record = value as Record<string, unknown>;
   const references = Array.isArray(record.references) ? record.references.map(_asFile) : [];
-  return { start: _asFile(record.start), end: _asFile(record.end), references };
+  return { start: _asFile(record.start), end: _asFile(record.end), references, track: _asFile(record.track) };
 }
 
 // Open the database, or resolve null when it cannot be opened or is blocked by another tab holding an older version.
@@ -94,7 +101,7 @@ export function indexedDbUploadStore(factory: IDBFactory = globalThis.indexedDB)
 
 /** Return an upload store that keeps the records in memory: for tests, and where IndexedDB is missing. */
 export function memoryUploadStore(): UploadStore {
-  const records = new Map<ImageTab, TabUploads>();
+  const records = new Map<UploadTab, TabUploads>();
   return {
     async get(tab) {
       return records.get(tab) ?? null;

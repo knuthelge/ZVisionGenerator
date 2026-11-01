@@ -13,7 +13,7 @@ from tests._factories import make_extend_source
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus
-from zvisiongenerator.core.video_types import ExtendSource
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSource
 from zvisiongenerator.utils.config import load_config, video_family
 from zvisiongenerator.preflight import _iteration_context, _job_context, plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
@@ -543,6 +543,15 @@ class TestVideoExtend:
 
         assert (references.reference_image, references.references) == (False, 2)
         assert (start_only.reference_image, start_only.references) == (True, 0)
+
+    def test_a_track_means_the_model_generates_no_sound(self):
+        track = AudioTrack("voice.mp3", 0.0)
+
+        clip = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=False, audio_track=track), mode="video")
+        extension = _job_context(self._extend_args(audio_track=track), mode="video")
+
+        assert (clip.audio, extension.audio) == (False, False)
+        assert _job_context(self._extend_args(), mode="video").audio is True
 
     def test_other_jobs_do_not_extend(self):
         context = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=False), mode="video")

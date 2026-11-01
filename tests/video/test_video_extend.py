@@ -31,6 +31,7 @@ from zvisiongenerator.utils.video_extend import (
     audio_lead_samples,
     cut_window_audio,
     extend_audio_output,
+    extend_join_has_sound,
     extend_family_problems,
     extend_frames_from_seconds,
     extend_source_problems,
@@ -475,6 +476,33 @@ class TestExtendAudioOutput:
     @pytest.mark.parametrize(("has_audio", "no_audio", "expected"), [(True, False, True), (True, True, False), (False, False, False), (False, True, False)])
     def test_sound_needs_a_source_with_audio_and_no_no_audio(self, has_audio, no_audio, expected):
         assert extend_audio_output(_source(has_audio=has_audio), no_audio=no_audio) is expected
+
+
+class TestExtendSoundRule:
+    """The one sound rule applied to an extension: the model generates sound with Audio on and no track; the join has sound with a track or with Audio on."""
+
+    @pytest.mark.parametrize(
+        ("has_audio", "no_audio", "track", "generates", "joined"),
+        [
+            (True, False, False, True, True),
+            (True, True, False, False, False),
+            (False, False, False, False, False),
+            (False, True, False, False, False),
+            (True, False, True, False, True),  # a track replaces the model's sound
+            (True, True, True, False, True),  # an effective track always means sound, whatever Audio says
+            (False, False, True, False, True),  # a silent source with a track gets the track's sound
+            (False, True, True, False, True),
+        ],
+    )
+    def test_generated_and_joined_sound(self, has_audio, no_audio, track, generates, joined):
+        source = _source(has_audio=has_audio)
+
+        assert extend_audio_output(source, no_audio=no_audio, track=track) is generates
+        assert extend_join_has_sound(source, no_audio=no_audio, track=track) is joined
+
+    def test_a_track_leaves_the_rewrite_without_sound_rules(self):
+        assert extend_enhance_context(_source(has_audio=True), 48, no_audio=False).audio is True
+        assert extend_enhance_context(_source(has_audio=True), 48, no_audio=False, track=True).audio is False
 
 
 class TestWindowArithmetic:

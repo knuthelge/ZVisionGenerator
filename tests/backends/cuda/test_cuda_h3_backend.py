@@ -26,7 +26,7 @@ from zvisiongenerator.backends.cuda.video.h3 import backend as h3_backend  # noq
 from zvisiongenerator.backends.cuda.video.h3 import conditioning, decode, sampler, schedule, sources, stored_copy, text_encoder  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.backend import H3VideoBackend  # noqa: E402
 from zvisiongenerator.core.video_backend import VideoBackend  # noqa: E402
-from zvisiongenerator.core.video_types import ExtendSegment  # noqa: E402
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment  # noqa: E402
 from zvisiongenerator.utils import hf_snapshot  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset, H3Schedule, HubFiles  # noqa: E402
 from zvisiongenerator.utils.model_memory import MemoryBudget  # noqa: E402
@@ -117,7 +117,11 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Rig:
     monkeypatch.setattr(conditioning, "encode_keyframe", lambda enc, image, w, h: (rig.note("keyframe", size=image.size, canvas=(w, h)), torch.zeros(1, 24, 1, h // 16, w // 16))[1])
     monkeypatch.setattr(conditioning, "encode_tail", lambda enc, frames: (rig.note("tail", shape=tuple(frames.shape)), torch.zeros(1, 24, 7, frames.shape[1] // 16, frames.shape[2] // 16))[1])
     monkeypatch.setattr(h3_audio, "load_audio_vae", lambda audio_dir, device: (rig.note("audio_vae.load", audio_dir=audio_dir), "audio-vae")[1])
-    monkeypatch.setattr(conditioning, "encode_tail_audio", lambda vae, waveform: (rig.note("tail_audio", shape=tuple(waveform.shape)), torch.zeros(74, 32))[1])
+    monkeypatch.setattr(
+        conditioning,
+        "encode_tail_audio",
+        lambda vae, waveform, latents=conditioning.TAIL_AUDIO_LATENTS: (rig.note("tail_audio", shape=tuple(waveform.shape), latents=latents), torch.zeros(2 * latents, 32))[1],
+    )
     monkeypatch.setattr(
         h3_backend,
         "_fold_keys",
@@ -1050,6 +1054,116 @@ class TestExtend:
 
 
 # --- real encode ---------------------------------------------------------------------------------------------------
+
+
+# --- audio track ---------------------------------------------------------------------------------------------------
+
+
+TRACK = AudioTrack("/audio/voice.mp3", 1.5)
+TRACK_FRAMES = 39  # 17 * 2 + 5: 65 audio latents per channel, more than the 37 of a tail
+
+
+@pytest.fixture
+def track_reads(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> Rig:
+    """Replace the track readers with recorders that return a constant 0.25."""
+
+    def read_track(track, rate, seconds):
+        rig.note("read_track", path=track.path, rate=rate, start=track.start, seconds=seconds)
+        return np.full((2, round(seconds * rate)), 0.25, np.float32)
+
+    def window_waveform(source, track, *, carry_frames, extend_frames, rate):
+        rig.note("window_waveform", track=track, carry_frames=carry_frames, extend_frames=extend_frames, rate=rate)
+        return np.full((2, round((carry_frames + extend_frames) / 24 * rate)), 0.25, np.float32)
+
+    monkeypatch.setattr(h3_backend, "read_track", read_track)
+    monkeypatch.setattr(h3_backend, "window_waveform", window_waveform)
+    return rig
+
+
+class TestClipSpecRowSet:
+    def _spec(self, **overrides: Any) -> h3_backend._ClipSpec:
+        return h3_backend._ClipSpec(prompt="p", width=WIDTH, height=HEIGHT, num_frames=TRACK_FRAMES, seed=1, forwards=8, **overrides)
+
+    @pytest.mark.parametrize(
+        ("overrides", "row_set"),
+        [
+            ({}, "plain"),
+            ({"tail": np.zeros(1), "tail_audio": np.zeros(1)}, "extend"),
+            ({"track": True, "tail_audio": np.zeros(1)}, "track"),
+            ({"track": True, "tail_audio": np.zeros(1), "tail": np.zeros(1)}, "track_keyframe"),
+        ],
+    )
+    def test_a_track_never_uses_the_extend_keys(self, overrides, row_set):
+        assert self._spec(**overrides).row_set == row_set
+
+
+class TestAudioTrack:
+    def test_text_to_video_holds_every_audio_row_of_the_track_window(self, track_reads, tmp_path):
+        rig = track_reads
+        model = _load(rig)
+        _t2v(model, tmp_path / "out.mp4", num_frames=TRACK_FRAMES, audio_track=TRACK)
+        assert rig.last("read_track") == {"path": "/audio/voice.mp3", "rate": 32000, "start": 1.5, "seconds": TRACK_FRAMES / 24}
+        assert rig.events.index("read_track") < rig.events.index("schedulers")  # an unreadable track fails before any model loads
+        assert rig.last("tail_audio") == {"shape": (2, round(TRACK_FRAMES / 24 * 32000)), "latents": 65}
+        held = rig.last("denoise")["conditioning"]
+        assert held.keyframes == () and held.tail_latents is None
+        assert tuple(held.tail_audio.shape) == (130, 32) and held.held_audio_latents == rig.last("denoise")["geo"].audio_latents
+        assert rig.row_sets == ["track"]
+        assert "vae_encoder.load" not in rig.calls  # no keyframe and no tail to encode
+
+    def test_a_clip_without_a_track_holds_nothing(self, track_reads, tmp_path):
+        rig = track_reads
+        _t2v(_load(rig), tmp_path / "out.mp4")
+        assert "read_track" not in rig.calls and "tail_audio" not in rig.calls
+        assert rig.last("denoise")["conditioning"].tail_audio is None
+        assert rig.row_sets == ["plain"]
+
+    def test_image_to_video_holds_the_track_with_the_keyframe_keys(self, track_reads, tmp_path):
+        rig = track_reads
+        model = _load(rig, mode="i2v")
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "waves", WIDTH, HEIGHT, TRACK_FRAMES, 3, 8, str(tmp_path / "out.mp4"), audio_track=TRACK)
+        held = rig.last("denoise")["conditioning"]
+        assert (len(held.keyframes), held.anchors) == (1, ("first",))
+        assert tuple(held.tail_audio.shape) == (130, 32)
+        assert rig.row_sets == ["track_keyframe"]
+        assert rig.last("copy.load")["keys"] == [("fold", "track_keyframe")]
+
+    def test_the_clip_is_written_with_the_models_own_decoding_of_the_held_sound(self, track_reads, tmp_path):
+        rig = track_reads
+        _t2v(_load(rig), tmp_path / "out.mp4", num_frames=TRACK_FRAMES, audio_track=TRACK)
+        assert rig.last("encode_video")["audio_sample_rate"] == 32000 and rig.last("decode_audio")["shape"] == (2, 32, 65)
+
+    def _extend(self, rig: Rig, tmp_path: Path, **kwargs: Any) -> Any:
+        source = kwargs.pop("source", None) or make_extend_source(width=WIDTH, height=HEIGHT)
+        arguments: dict[str, Any] = dict(extend_frames=EXTEND, seed=7, steps=8, segment_dir=tmp_path, audio_track=TRACK)
+        arguments.update(kwargs)
+        # The workflow generates no sound of its own with a track.
+        arguments.setdefault("audio_output", arguments["audio_track"] is None)
+        return H3VideoBackend().extend_video(_load(rig, mode="extend"), source, "she waves", **arguments)
+
+    @pytest.mark.parametrize("has_audio", [True, False])
+    def test_extend_holds_the_whole_window_and_writes_no_segment_wav(self, track_reads, tmp_path, has_audio):
+        rig = track_reads
+        segment = self._extend(rig, tmp_path, source=make_extend_source(width=WIDTH, height=HEIGHT, has_audio=has_audio))
+        assert rig.last("window_waveform") == {"track": TRACK, "carry_frames": 22, "extend_frames": EXTEND, "rate": 32000}
+        assert "read_tail_audio" not in rig.calls  # the source's sound is the first part of the window waveform
+        assert rig.last("tail_audio") == {"shape": (2, round(WINDOW / 24 * 32000)), "latents": 65}
+        held = rig.last("denoise")["conditioning"]
+        assert tuple(held.tail_latents.shape[:3]) == (1, 24, 7)
+        assert held.held_audio_latents == rig.last("denoise")["geo"].audio_latents
+        assert rig.row_sets == ["track_keyframe"]  # never "extend": no audio row is generated
+        assert segment.audio_path is None and segment.lead_samples == 0
+        assert not (tmp_path / "segment.wav").exists()
+        assert (tmp_path / "segment.mp4") == segment.video_path
+
+    def test_extend_without_a_track_still_pins_the_tail_sound_and_writes_the_wav(self, track_reads, tmp_path):
+        rig = track_reads
+        rig.window_waveform = _window_waveform
+        segment = self._extend(rig, tmp_path, audio_track=None)
+        assert "window_waveform" not in rig.calls
+        assert rig.last("tail_audio")["latents"] == conditioning.TAIL_AUDIO_LATENTS
+        assert rig.row_sets == ["extend"]
+        assert segment.audio_path == tmp_path / "segment.wav"
 
 
 class TestRealEncode:

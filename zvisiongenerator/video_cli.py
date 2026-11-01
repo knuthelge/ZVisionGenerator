@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review, video_family_on_platform
 from zvisiongenerator.core.video_family import ANY_FRAMES, UNDESCRIBED_UPSCALE_STEPS, settle_video_steps
+from zvisiongenerator.core.video_types import AudioTrack
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.app_log import setup_logging
+from zvisiongenerator.utils.audio_track import continue_track, require_readable_track
 from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice, video_family, video_load_options
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
@@ -115,6 +117,22 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         help="Pause after each half-size render, before the upscale: press y to upscale it, n to discard it or q to quit. Needs --upscale and a terminal.",
     )
     parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=True, help="Include audio in output (default: enabled).")
+    parser.add_argument(
+        "--audio-file",
+        dest="audio_file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="An audio file the clip follows; its sound is exactly this track. Overrides --no-audio. The clip keeps its length; the sound after the track ends is silence. Works with --image and --extend.",
+    )
+    parser.add_argument(
+        "--audio-start",
+        dest="audio_start",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="Seconds into --audio-file where the clip's sound starts. Needs --audio-file. Default: 0, or with --extend and the same file the source followed, where the source's sound ended.",
+    )
     add_enhance_arguments(parser, mode="video")
     return parser
 
@@ -343,6 +361,12 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error("--upscale only supports factor 2")
     if args.end_image_path is not None and args.image_path is None:
         parser.error("--end-image needs --image: a last frame needs a first frame.")
+    if args.audio_start is not None and args.audio_file is None:
+        parser.error("--audio-start needs --audio-file.")
+    if args.audio_start is not None and (not math.isfinite(args.audio_start) or args.audio_start < 0):
+        parser.error("--audio-start must be a finite number of seconds, 0 or more.")
+    if args.audio_file is not None and not args.audio_file.strip():
+        parser.error("--audio-file needs a path.")
     if args.review and args.upscale is None:
         parser.error("--review needs --upscale: without an upscale there is no half-size render to review.")
     if args.review and not supports_video_upscale_review():
@@ -359,6 +383,7 @@ def main(*, prog: str = "ziv-video") -> None:
         args.end_image_path = str(Path(args.end_image_path).expanduser())
     if args.extend_path is not None:
         args.extend_path = str(Path(args.extend_path).expanduser())
+    args.audio_track = AudioTrack(str(Path(args.audio_file).expanduser()), args.audio_start or 0.0) if args.audio_file is not None else None
     args.output = str(Path(args.output).expanduser())
     scene_given = args.scene is not None
     args.scene = (args.scene or "").strip() or None
@@ -387,6 +412,9 @@ def main(*, prog: str = "ziv-video") -> None:
         except ValueError as e:
             parser.error(str(e))
         args.lora = _extend_lora(args.lora, source)
+        # Without --audio-start, a track the source followed continues from where its sound ended.
+        if args.audio_track is not None and args.audio_start is None:
+            args.audio_track = continue_track(args.audio_track, source)
 
     # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...); the picked name chooses the quantize level
     # and is what the video records, as the Web UI does: on Windows/Linux ltx-4 and ltx-8 resolve to the same repo.
@@ -428,6 +456,7 @@ def main(*, prog: str = "ziv-video") -> None:
             review=bool(args.review),
             end_image=args.end_image_path is not None,
             upscale=bool(args.upscale),
+            audio_track=args.audio_track is not None,
         )
     except ValueError as e:
         parser.error(str(e))
@@ -444,6 +473,14 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error(f"First frame not found: {args.image_path}")
     if args.end_image_path and not os.path.isfile(args.end_image_path):
         parser.error(f"Last frame not found: {args.end_image_path}")
+    if args.audio_track is not None and not os.path.isfile(args.audio_track.path):
+        parser.error(f"Audio track not found: {args.audio_track.path}")
+    if args.audio_track is not None:
+        # An unreadable track fails here, before the model loads. A short track, or a Start at past its end, is allowed: the rest of the clip is silence.
+        try:
+            require_readable_track(args.audio_track)
+        except ValueError as e:
+            parser.error(str(e))
 
     # Validate T2V-only model with --image
     if args.image_path and not model_info.supports_i2v:
@@ -488,7 +525,8 @@ def main(*, prog: str = "ziv-video") -> None:
     _resolve_upscale_steps(args, config, model_info.family, steps_explicitly_set=steps_explicitly_set)
 
     # Audio flag normalization; a backend without an audio track records and rewrites for silent video.
-    args.no_audio = not getattr(args, "audio", True) or not supports_video_audio()
+    # A track is the clip's sound, so it overrides --no-audio.
+    args.no_audio = (not getattr(args, "audio", True) or not supports_video_audio()) and args.audio_track is None
 
     if source is not None:
         # The source decides size and frame rate; its length was checked on load, so there is no resolution or frame alignment.

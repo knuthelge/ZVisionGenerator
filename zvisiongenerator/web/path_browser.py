@@ -81,6 +81,9 @@ class BrowsePlace:
 # Containers a video can be extended from (the browser, the inspect route and job submission share this list).
 SOURCE_VIDEO_EXTENSIONS = (".mp4", ".mov", ".m4v", ".mkv", ".webm")
 
+# Audio files a clip can follow as its track (the browser, uploads and job submission share this list).
+AUDIO_TRACK_EXTENSIONS = (".wav", ".mp3", ".m4a", ".flac", ".ogg")
+
 _PURPOSES: dict[str, BrowsePurpose] = {
     "output_directory": BrowsePurpose(name="output_directory", kind="directory", label="Output folder", default_place="output"),
     "prompt_file": BrowsePurpose(name="prompt_file", kind="existing_file", label="Prompt file", accepted_extensions=(".yaml", ".yml")),
@@ -88,6 +91,7 @@ _PURPOSES: dict[str, BrowsePurpose] = {
     "checkpoint_file": BrowsePurpose(name="checkpoint_file", kind="existing_file", label="Checkpoint file", accepted_extensions=(".safetensors",), default_place="models"),
     "lora_file": BrowsePurpose(name="lora_file", kind="existing_file", label="LoRA file", accepted_extensions=(".safetensors",), default_place="loras"),
     "reference_image": BrowsePurpose(name="reference_image", kind="existing_file", label="Image", accepted_extensions=IMAGE_EXTENSIONS, default_place="output"),
+    "audio_track": BrowsePurpose(name="audio_track", kind="existing_file", label="Audio track", accepted_extensions=AUDIO_TRACK_EXTENSIONS, default_place="output"),
     "source_video": BrowsePurpose(name="source_video", kind="existing_file", label="Source video", accepted_extensions=SOURCE_VIDEO_EXTENSIONS, default_place="output"),
 }
 

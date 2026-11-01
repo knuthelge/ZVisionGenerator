@@ -2,6 +2,7 @@
   import { Icon } from '$lib/components/atoms';
   import { PathBrowser } from '$lib/components/molecules';
   import { galleryStore } from '$lib/state/gallery.svelte';
+  import { AUDIO_ACCEPT } from '$lib/state/audioTrack';
   import { IMAGE_ACCEPT } from '$lib/state/references';
 
   interface Props {
@@ -15,13 +16,17 @@
     onpath: (path: string) => void;
     /** The id of the first button, for a caller that moves focus to it. */
     deviceId?: string;
+    /** What the sources hold: images, or an audio track (no latest output, the server's audio files to browse). */
+    kind?: 'image' | 'audio';
   }
 
-  let { multiple = false, browseFrom = null, onfiles, onpath, deviceId }: Props = $props();
+  let { multiple = false, browseFrom = null, onfiles, onpath, deviceId, kind = 'image' }: Props = $props();
+
+  const audio = $derived(kind === 'audio');
 
   let fileInput = $state<HTMLInputElement | null>(null);
   let browseOpen = $state(false);
-  const latest = $derived(galleryStore.assets[0]?.media_type === 'image' ? (galleryStore.assets[0].file_path ?? null) : null);
+  const latest = $derived(!audio && galleryStore.assets[0]?.media_type === 'image' ? (galleryStore.assets[0].file_path ?? null) : null);
 
   function picked(input: HTMLInputElement): void {
     const chosen = [...(input.files ?? [])];
@@ -31,16 +36,16 @@
   }
 </script>
 
-<div class="img-sources" role="group" aria-label="Where the image comes from">
-  <button id={deviceId} type="button" class="src-item" onclick={() => fileInput?.click()}><Icon name="upload" size={16} />Choose from this device<small>{multiple ? 'one or more' : 'photos or files'}</small></button>
+<div class="img-sources" role="group" aria-label={audio ? 'Where the audio track comes from' : 'Where the image comes from'}>
+  <button id={deviceId} type="button" class="src-item" onclick={() => fileInput?.click()}><Icon name="upload" size={16} />Choose from this device<small>{audio ? 'audio files' : multiple ? 'one or more' : 'photos or files'}</small></button>
   <!-- No name: the chosen file is attached on submit only while it is the slot's image (see WorkspacePage). -->
-  <input bind:this={fileInput} type="file" accept={IMAGE_ACCEPT} {multiple} class="hidden" tabindex="-1" aria-hidden="true" onchange={(e) => picked(e.currentTarget)}>
-  <button type="button" class="src-item" onclick={() => { browseOpen = true; }}><Icon name="folder" size={16} />Browse the server<small>output and reference folders</small></button>
+  <input bind:this={fileInput} type="file" accept={audio ? AUDIO_ACCEPT : IMAGE_ACCEPT} {multiple} class="hidden" tabindex="-1" aria-hidden="true" onchange={(e) => picked(e.currentTarget)}>
+  <button type="button" class="src-item" onclick={() => { browseOpen = true; }}><Icon name="folder" size={16} />Browse the server<small>{audio ? 'audio files' : 'output and reference folders'}</small></button>
   {#if latest}
     <button type="button" class="src-item" onclick={() => onpath(latest)}><Icon name="film" size={16} />Use the latest output</button>
   {/if}
 </div>
-<PathBrowser bind:open={browseOpen} purpose="reference_image" initialPath={browseFrom} onchoose={onpath} />
+<PathBrowser bind:open={browseOpen} purpose={audio ? 'audio_track' : 'reference_image'} initialPath={browseFrom} onchoose={onpath} />
 
 <style>
   .img-sources { display: flex; flex-direction: column; gap: 2px; }

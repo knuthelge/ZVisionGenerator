@@ -4,7 +4,7 @@ import type { ExtendSourceInfo } from '$lib/types';
 export function sourceInfo(overrides: Partial<ExtendSourceInfo> = {}): ExtendSourceInfo {
   return {
     path: '/clips/walk.mp4', filename: 'walk.mp4', media_url: '/media/walk.mp4', width: 512, height: 288, rotation: 0, fps: 24, frame_count: 97,
-    duration_seconds: 4.042, has_audio: true, scene: null, prompt: null, legacy: false, model: null, lora: null, problems: [],
+    duration_seconds: 4.042, has_audio: true, scene: null, prompt: null, legacy: false, model: null, lora: null, audio_track_path: null, audio_track_end: null, problems: [],
     extend_frames: 48, window_frames: 73, memory_fit: null, ...overrides,
   };
 }

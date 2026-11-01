@@ -107,10 +107,12 @@
   const LEGACY_SCENE_PLACEHOLDER = 'Move the scene description here from the prompt (who, where, look). Then change the prompt to what happens next.';
   const extending = $derived(s.workflow === 'extend');
   const fromImage = $derived(s.workflow === 'img2vid');
+  // A track is the clip's sound, so the box asks for who speaks or sings instead of what is heard.
+  const heard = $derived(caps.audioTrackInEffect ? 'who speaks or sings' : 'sound, dialogue');
   const promptPlaceholder = $derived(
     extending ? 'What happens next…'
-      : fromImage ? 'What happens from the image: motion, camera moves, sound, dialogue.'
-      : caps.showScene ? 'What happens: action, camera moves, sound, dialogue.'
+      : fromImage ? `What happens from the image: motion, camera moves, ${heard}.`
+      : caps.showScene ? `What happens: action, camera moves, ${heard}.`
       : 'Describe the scene...'
   );
   // A source that recorded one prompt and no scene: the old prompt is pre-filled and the scene is left for the user to write.
@@ -434,6 +436,7 @@
         {jobsActive}
         endImage={images.sent.end !== null}
         references={images.references?.rows.length ?? 0}
+        track={caps.audioTrackInEffect}
         jsonCapable={caps.supportsJsonPrompt}
         extendSupport={extendModelSupport(context, s.model)}
         maxWords={caps.enhanceMaxWords}
@@ -621,7 +624,7 @@
     >
       {#snippet tools()}
         {#if caps.showEnhanceAuto && caps.enhancer}
-          <PromptEnhancer contract={caps.enhancer} variant="file" {busy} {jobsActive} jsonCapable={caps.supportsJsonPrompt} maxWords={caps.enhanceMaxWords} />
+          <PromptEnhancer contract={caps.enhancer} variant="file" {busy} {jobsActive} track={caps.audioTrackInEffect} jsonCapable={caps.supportsJsonPrompt} maxWords={caps.enhanceMaxWords} />
         {/if}
       {/snippet}
     </PromptFileField>

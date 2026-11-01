@@ -1,10 +1,12 @@
+import type { TrackTab } from './audioTrack';
 import type { ImageTab } from './imageSlots';
-import { defaultUploadStore, type TabUploads, type UploadStore } from './uploadStore';
+import { defaultUploadStore, type TabUploads, type UploadStore, type UploadTab } from './uploadStore';
 
-type FileField = 'startImage' | 'firstFrame' | 'lastFrame';
+type FileField = 'startImage' | 'firstFrame' | 'lastFrame' | 'audioTrack' | 'extendAudioTrack';
 
-// The images picked from this device that wait for Generate: per tab the start image (the first frame in Video), the
-// last frame, and one entry per reference row (null for a row that holds a path). The Workspace is unmounted on another
+// The files picked from this device that wait for Generate: per tab the start image (the first frame in Video), the
+// last frame, and one entry per reference row (null for a row that holds a path), and the audio track of Video and Extend
+// Video. The Workspace is unmounted on another
 // page, so they live here to survive a visit to the Gallery or the Prompts page. Every write is mirrored into an upload
 // store (IndexedDB), and `restore` reads it back after a reload. The draft keeps only the file's name as the upload marker.
 class HeldUploads {
@@ -14,6 +16,10 @@ class HeldUploads {
   firstFrame = $state.raw<File | null>(null);
   /** The pending last frame of the Video tab, or null. */
   lastFrame = $state.raw<File | null>(null);
+  /** The pending audio track of the Video tab, or null. */
+  audioTrack = $state.raw<File | null>(null);
+  /** The pending audio track of the Extend Video tab, or null. */
+  extendAudioTrack = $state.raw<File | null>(null);
   /** The pending reference uploads by row. */
   references = $state.raw<(File | null)[]>([]);
   /** Whether the stored uploads have been read back. True once `restore` settles, also when the store failed. */
@@ -43,6 +49,8 @@ class HeldUploads {
     this.startImage = null;
     this.firstFrame = null;
     this.lastFrame = null;
+    this.audioTrack = null;
+    this.extendAudioTrack = null;
     this.references = [];
     this.restored = false;
   }
@@ -64,14 +72,20 @@ class HeldUploads {
     this.#persist('video');
   }
 
+  /** Hold the audio track of a tab, or forget it with null. */
+  setTrack(tab: TrackTab, file: File | null): void {
+    this.#setFile(tab === 'video' ? 'audioTrack' : 'extendAudioTrack', file);
+    this.#persist(tab);
+  }
+
   /** Replace the pending reference uploads. */
   setReferences(files: (File | null)[]): void {
     this.#setReferences(files);
     this.#persist('image');
   }
 
-  /** Forget every pending upload of a tab: the start image and references in Image, the first and last frame in Video. */
-  clearTab(tab: ImageTab): void {
+  /** Forget every pending upload of a tab: the start image and references in Image, the first and last frame and the audio track in Video, the audio track in Extend Video. */
+  clearTab(tab: UploadTab): void {
     this.#forget(tab);
     this.#persist(tab);
   }
@@ -80,6 +94,7 @@ class HeldUploads {
   clear(): void {
     this.clearTab('image');
     this.clearTab('video');
+    this.clearTab('extend');
   }
 
   /**
@@ -105,29 +120,34 @@ class HeldUploads {
     this.references = files;
   }
 
-  #forget(tab: ImageTab): void {
+  #forget(tab: UploadTab): void {
     if (tab === 'image') {
       this.#setFile('startImage', null);
       this.#setReferences([]);
-    } else {
+    } else if (tab === 'video') {
       this.#setFile('firstFrame', null);
       this.#setFile('lastFrame', null);
+      this.#setFile('audioTrack', null);
+    } else {
+      this.#setFile('extendAudioTrack', null);
     }
   }
 
   // The record a tab holds now, or null when it holds nothing.
-  #record(tab: ImageTab): TabUploads | null {
+  #record(tab: UploadTab): TabUploads | null {
     const record: TabUploads =
       tab === 'image'
-        ? { start: this.startImage, end: null, references: this.references }
-        : { start: this.firstFrame, end: this.lastFrame, references: [] };
-    const empty = record.start === null && record.end === null && record.references.every((file) => file === null);
+        ? { start: this.startImage, end: null, references: this.references, track: null }
+        : tab === 'video'
+          ? { start: this.firstFrame, end: this.lastFrame, references: [], track: this.audioTrack }
+          : { start: null, end: null, references: [], track: this.extendAudioTrack };
+    const empty = record.start === null && record.end === null && record.track === null && record.references.every((file) => file === null);
     return empty ? null : record;
   }
 
   // Queue the tab's current record for the store. It runs after the restore, started here if the Workspace has not yet, so
   // the record includes the stored fields the write did not change (a write from the Gallery page precedes any restore).
-  #persist(tab: ImageTab): void {
+  #persist(tab: UploadTab): void {
     const generation = this.#generation;
     const store = this.store;
     this.#queue = this.#queue.then(async () => {
@@ -147,18 +167,20 @@ class HeldUploads {
   async #restore(): Promise<void> {
     const generation = this.#generation;
     try {
-      const [image, video] = await Promise.all([this.#read('image'), this.#read('video')]);
+      const [image, video, extend] = await Promise.all([this.#read('image'), this.#read('video'), this.#read('extend')]);
       if (generation !== this.#generation) return;
       if (!this.#written.has('startImage')) this.startImage = image?.start ?? null;
       if (!this.#written.has('references')) this.references = image?.references ?? [];
       if (!this.#written.has('firstFrame')) this.firstFrame = video?.start ?? null;
       if (!this.#written.has('lastFrame')) this.lastFrame = video?.end ?? null;
+      if (!this.#written.has('audioTrack')) this.audioTrack = video?.track ?? null;
+      if (!this.#written.has('extendAudioTrack')) this.extendAudioTrack = extend?.track ?? null;
     } finally {
       if (generation === this.#generation) this.restored = true;
     }
   }
 
-  async #read(tab: ImageTab): Promise<TabUploads | null> {
+  async #read(tab: UploadTab): Promise<TabUploads | null> {
     try {
       return await this.store.get(tab);
     } catch {

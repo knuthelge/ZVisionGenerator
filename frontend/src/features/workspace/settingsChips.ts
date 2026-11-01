@@ -1,3 +1,5 @@
+import { formatTimestamp } from '$lib/state/audioTrack';
+import type { AudioTrackView } from './audioTrackView';
 import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
 import type { DraftState, Workflow } from '$lib/types';
@@ -5,7 +7,7 @@ import type { DraftState, Workflow } from '$lib/types';
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
   | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'seed' | 'runs'
-  | 'source' | 'images' | 'size' | 'audio' | 'loras' | 'upscale' | 'transparent' | 'model';
+  | 'source' | 'images' | 'track' | 'size' | 'audio' | 'loras' | 'upscale' | 'transparent' | 'model';
 
 export interface SettingChip {
   key: ChipKey;
@@ -47,6 +49,8 @@ export interface ChipFacts {
   sourceName: string | null;
   /** The Images section's summary; null where the section is not offered (a model that can use no image, Extend Video). */
   images: ImagesSummary | null;
+  /** The audio track view; null where the section is not offered (Image, a model that follows no track). */
+  track: Pick<AudioTrackView, 'set' | 'start' | 'gone'> | null;
   /** The clip or extension may not fit memory. */
   memoryWarn: boolean;
   /** The applied settings preset's name, or null when none is applied. */
@@ -79,6 +83,8 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
     // One chip for every image the tab takes; its value is the section's summary, and its dot shows a Strength off its default.
     f.images ? { key: 'images', label: 'Images', value: f.images.text, changed: s.workflow === 'img2img' && caps.showI2IStrength && f.changed('referenceImageStrength'), on: f.images.tone === 'active', warn: f.images.tone === 'error' } : null,
     caps.showSourceVideo ? { key: 'source', label: 'Source', value: f.sourceName ?? 'none', changed: false, on: f.sourceName !== null, warn: s.missingSourceVideo } : null,
+    // One chip for the audio track; its value is where in the track the clip starts when that isn't the beginning.
+    f.track ? { key: 'track', label: 'Track', value: !f.track.set ? 'none' : f.track.start > 0 ? formatTimestamp(f.track.start) : 'on', changed: false, on: f.track.set, warn: f.track.gone } : null,
     caps.showDimensions ? { key: 'size', label: '', value: `${f.width}×${f.height}`, changed: f.changed('ratio', 'size', 'dimensionMode') } : null,
     caps.showAudio || caps.showLowMemory || caps.showVideoUpscale
       ? { key: 'audio', label: 'Audio', value: caps.showAudio ? (s.audio ? 'on' : 'off') : s.lowMemory ? 'low mem' : 'off', changed: f.changed('audio', 'lowMemory', 'videoUpscaleEnabled'), on: caps.showAudio ? s.audio : s.lowMemory }
@@ -95,13 +101,13 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
 
 /** The chips the strip shows before the context is known, so the frame is complete from the first frame. */
 const PENDING_IMAGE_CHIPS: [ChipKey, string][] = [['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['runs', 'Batch'], ['images', 'Images'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']];
-const PENDING_VIDEO_CHIPS: [ChipKey, string][] = [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['images', 'Images'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']];
+const PENDING_VIDEO_CHIPS: [ChipKey, string][] = [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['images', 'Images'], ['track', 'Track'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']];
 const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
   txt2img: PENDING_IMAGE_CHIPS,
   img2img: PENDING_IMAGE_CHIPS,
   txt2vid: PENDING_VIDEO_CHIPS,
   img2vid: PENDING_VIDEO_CHIPS,
-  extend: [['extendSeconds', 'Extend'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['source', 'Source'], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
+  extend: [['extendSeconds', 'Extend'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['source', 'Source'], ['track', 'Track'], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
 };
 
 /**

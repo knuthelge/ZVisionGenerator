@@ -147,6 +147,17 @@ describe('sound, direction and context', () => {
     expect(enhanceContext(video, false).audio).toBe(false);
   });
 
+  it('has no generated sound while an audio track is in effect, and says so in the context', () => {
+    const video = state({ workflow: 'txt2vid', audio: true });
+    expect(hasAudio(video, true, null, true)).toBe(false);
+    expect(enhanceContext(video, true, null, false, 0, true)).toMatchObject({ audio: false, audio_track: true });
+    expect(enhanceContext(video)).not.toHaveProperty('audio_track');
+    const extending = state({ workflow: 'extend', audio: true, extendSourcePath: '/in/c.mp4' });
+    expect(enhanceContext(extending, true, true, false, 0, true)).toMatchObject({ audio: false, audio_track: true });
+    expect(enhanceContext(extending, true, true)).toMatchObject({ audio: true });
+    expect(enhanceContext(extending, true, true)).not.toHaveProperty('audio_track');
+  });
+
   it('describes the image job without video facts', () => {
     const image = state({ workflow: 'txt2img', ratio: '2:3', dimensionMode: 'custom', width: 1024, height: 576, frameCount: 97, fps: 24, audio: true });
     expect(enhanceContext(image)).toEqual({ ratio: '2:3', width: 1024, height: 576, frames: null, fps: null, audio: false, reference_image: false, references: 0, end_image: false });

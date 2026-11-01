@@ -53,6 +53,14 @@ describe('extend flows', () => {
     expect(draft.state).toMatchObject({ scene: '', prompt: '' });
   });
 
+  it('a Reuse of an extension keeps the track it ran with through the inspection that follows', () => {
+    draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '48', scene: 'A singer.', audio_track_path: '/audio/song.mp3', audio_track_start: '10' }, null, { replaceSlots: true });
+
+    draft.applyExtendSource(sceneSource({ path: SOURCE, audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
+
+    expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackStart: 10 });
+  });
+
   it('a Reuse of an extension that recorded no text keeps both boxes blank through the inspection', () => {
     draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '48', scene: '', prompt: '' });
     draft.applyExtendSource(sceneSource());

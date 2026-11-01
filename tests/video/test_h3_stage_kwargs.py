@@ -55,4 +55,4 @@ def test_the_extend_stage_sends_keywords_the_backend_takes(backend_class, tmp_pa
 
     video_stages.extend_video_stage(_request(backend, tmp_path, extend=ExtendSpec(source, 17)), _artifacts())
 
-    assert set(backend.extend_video.call_args.kwargs) == {"model", "source", "prompt", "extend_frames", "seed", "steps", "segment_dir", "audio_output", "step_callback"}
+    assert set(backend.extend_video.call_args.kwargs) == {"model", "source", "prompt", "extend_frames", "seed", "steps", "segment_dir", "audio_output", "step_callback", "audio_track"}

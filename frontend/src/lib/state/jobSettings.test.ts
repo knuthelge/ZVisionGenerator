@@ -37,6 +37,29 @@ describe('jobSettingsPrefill', () => {
     expect(params).toMatchObject({ workflow: 'img2vid', image_path: '/in/start.png', end_image_path: '/out/.web_uploads/end.png' });
   });
 
+  it('carries a submitted audio track and its Start at as prefill params, for a clip and for an extension', () => {
+    const clip = jobSettingsPrefill({ mode: 'video', workflow: 'img2vid', model: 'ltx', prompt: 'a', image_path: '/in/start.png', audio_track_path: '/out/.web_uploads/memo.m4a', audio_track_start: '90' });
+    expect(clip.params).toMatchObject({ audio_track_path: '/out/.web_uploads/memo.m4a', audio_track_start: '90' });
+
+    const extension = jobSettingsPrefill({ mode: 'video', workflow: 'extend', model: 'ltx', source_video: '/clips/walk.mp4', audio_track_path: '/in/song.mp3', audio_track_start: '6.65' });
+    expect(extension.params).toMatchObject({ workflow: 'extend', audio_track_path: '/in/song.mp3', audio_track_start: '6.65' });
+  });
+
+  it('names no track for a job made without one, which clears the tab\'s track', () => {
+    const { params } = jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', model: 'ltx', prompt: 'a', audio: 'true' });
+
+    expect(params).not.toHaveProperty('audio_track_path');
+    expect(params).not.toHaveProperty('audio_track_start');
+  });
+
+  it('leaves the Audio switch alone for a job that followed a track, which sent none', () => {
+    const track = jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', model: 'ltx', prompt: 'a', audio_track_path: '/in/song.mp3' });
+    const plain = jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', model: 'ltx', prompt: 'a', audio: 'false' });
+
+    expect(track.patch).not.toHaveProperty('audio');
+    expect(plain.patch.audio).toBe(false);
+  });
+
   it('keeps a blank LoRA list so loading a job without LoRAs clears them', () => {
     const { params } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'zit', lora: '', steps: '' });
 

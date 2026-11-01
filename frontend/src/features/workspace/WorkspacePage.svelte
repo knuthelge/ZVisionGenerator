@@ -58,12 +58,14 @@
   import FirstRunDialog from './FirstRunDialog.svelte';
   import { firstRun, shouldOfferFirstRun } from './firstRun.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
+  import { trackLengths } from '$lib/state/audioTrackLength.svelte';
   import ControlsSidebar from './ControlsSidebar.svelte';
   import ComposePane from './ComposePane.svelte';
   import GalleryStrip from './GalleryStrip.svelte';
   import SettingsStrip from './SettingsStrip.svelte';
   import SettingPopover from './SettingPopover.svelte';
   import { imagesSummary } from './imagesSummary';
+  import { currentAudioTrackView } from './audioTrackView';
   import { currentImagesView } from './imagesView';
   import PresetMenu from './PresetMenu.svelte';
   import { pendingChips, settingsChips, type ChipKey } from './settingsChips';
@@ -146,6 +148,7 @@
     negative_prompt: 'The CLI takes negative prompts only from a prompts file, so it was left out.',
     prompt_options: 'The CLI runs every prompt in the file, not only the chosen ones.',
     uploaded_image: 'An uploaded image is named by file name; replace it with its path.',
+    uploaded_audio: 'An uploaded audio track is named by file name; replace it with its path.',
   };
   const OUTPUT_GAP_PX = 12;
   const MIN_OUTPUT_CELL_PX = 160;
@@ -292,6 +295,13 @@
   // submit sends and why Generate is off when one of them is gone: dropping a reference would renumber the prompt's "image 2".
   const images = $derived(context === null ? null : currentImagesView(context));
   const imageBlock = $derived(images?.block ?? null);
+  // Whether the open tab follows an audio track, what a submit sends for it, and why Generate is off when an uploaded track is gone.
+  const audioTrack = $derived(context === null ? null : currentAudioTrackView(context));
+  const trackBlock = $derived(audioTrack?.block ?? null);
+  // The track's length shows beside its name and sets the note under Start at: read it once the track is in use.
+  $effect(() => {
+    if (audioTrack?.visible && audioTrack.set) trackLengths.ensure(audioTrack.path, audioTrack.file);
+  });
   // Keep the preview occupied until the latest image has painted. Videos show at once:
   // some browsers load nothing until play is pressed, so no load event is guaranteed.
   const latestLoading = $derived(
@@ -401,6 +411,7 @@
       modelDownloaded: selectedModel?.downloaded !== false,
       sourceName: s.extendSourcePath ? fileName(s.extendSourcePath) : null,
       images: images?.visible ? imagesSummary(images) : null,
+      track: audioTrack?.visible ? audioTrack : null,
       memoryWarn: memoryStatus === 'tight' || memoryStatus === 'too_large',
       presetName: activePreset?.name ?? null,
       presetSlug: activePreset?.slug ?? null,
@@ -419,7 +430,7 @@
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
   });
-  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || block.blocked);
+  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || trackBlock !== null || block.blocked);
   // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
   const controlsPending = $derived(!context || !authorityReady);
 
@@ -669,14 +680,17 @@
 
   /**
    * Drop the uploads a prefill makes stale. The server prefers an uploaded file over a path, so a file held for a slot would
-   * win over what the prefill chose, or stay when the prefill names nothing (a reused clip without a last frame).
-   * A Use as (marked by `use_as`) sets one slot and drops only that slot's upload, leaving the other slot and the references.
-   * Any other prefill replaces the images of the tab it opens, and only that tab's uploads go.
+   * win over what the prefill chose, or stay when the prefill names nothing (a reused clip without a last frame or a track).
+   * A Use as (marked by `use_as`) sets one slot and drops only that slot's upload, leaving the other slot, the track and the
+   * references. Any other prefill replaces the images and the audio track of the tab it opens, and only that tab's uploads go.
    */
   function dropHeldUploads(params: PrefillParams): void {
     const tab = workspaceTab(draft.state.workflow);
-    // Extend Video holds no image of its own, so a prefill that opens it leaves every tab's uploads alone.
-    if (tab === 'extend') return;
+    // Extend Video holds only an audio track, which a prefill replaces; it leaves the other tabs' uploads alone.
+    if (tab === 'extend') {
+      if (params.use_as === undefined) heldUploads.setTrack('extend', null);
+      return;
+    }
     if (params.use_as === 'start') heldUploads.setStart(tab, null);
     else if (params.use_as === 'last') heldUploads.setLastFrame(null);
     else heldUploads.clearTab(tab);
@@ -816,7 +830,8 @@
     if (!asset.file_path || !canExtend(asset)) return;
     const params = extendParams(asset);
     if (draft.state.workflow === params.workflow) {
-      draft.loadFromUrl(params, context);
+      // The new source brings its own track (or none), so the held one goes with the draft's.
+      draft.loadFromUrl(params, context, { replaceSlots: true });
       dropHeldUploads(params);
       draft.setAppliedPreset(null);
     } else applyPrefill(params, { keepSettings: true });
@@ -1162,6 +1177,13 @@
     if (sent.strength !== null) formData.set('image_strength', String(sent.strength));
     if (typeof sent.end === 'string') formData.set('end_image_path', sent.end);
     else if (sent.end !== null) formData.set('end_image_file', sent.end);
+    // The audio track is the clip's sound (an upload wins over a path), so no Audio switch is sent beside it.
+    const track = audioTrack?.sent ?? null;
+    if (track !== null) {
+      if (track.file !== null) formData.set('audio_track_file', track.file);
+      else if (track.path !== null) formData.set('audio_track_path', track.path);
+      formData.set('audio_track_start', String(track.start));
+    }
     // References go as one repeated field, a file or a path per row in prompt order, so the rows keep their numbers.
     for (const row of images?.references?.rows ?? []) {
       if (row.file) formData.append('reference', row.file);
@@ -1247,8 +1269,9 @@
     if (!formEl || !authorityReady || !formEl.reportValidity()) return;
     await settleExtendSource();
     if (extendBlocked()) return;
-    if (imageBlock) {
-      addToast(imageBlock, 'error');
+    const refusal = imageBlock ?? trackBlock;
+    if (refusal) {
+      addToast(refusal, 'error');
       return;
     }
     if (promptChoiceMissing()) {
@@ -1303,8 +1326,9 @@
     if (block.blocked) return;
     await settleExtendSource();
     if (extendBlocked()) return;
-    if (imageBlock) {
-      addToast(imageBlock, 'error');
+    const refusal = imageBlock ?? trackBlock;
+    if (refusal) {
+      addToast(refusal, 'error');
       return;
     }
     submitError = null;
@@ -1799,13 +1823,14 @@
       {@render stage()}
       <!-- Always in the frame, even before the context answers: a loading state never changes the stage's height. -->
       <div class="compact-controls" use:dockHeight={'--toast-dock'}>
-        {#if activeChip && context && images}
+        {#if activeChip && context && images && audioTrack}
           <button type="button" class="pop-scrim" aria-label="Close setting" tabindex="-1" onclick={() => { activeChip = null; }}></button>
           <SettingPopover
             key={activeChip}
             {context}
             {busy}
             {images}
+            {audioTrack}
             models={currentModels}
             quantizeOptions={supportsQuantize ? quantizeOptions : null}
             lastSeed={galleryStore.assets[0]?.seed ?? null}
@@ -1911,6 +1936,7 @@
           submitError={generateError}
           lastSeed={galleryStore.assets[0]?.seed ?? null}
           {images}
+          {audioTrack}
         />
       </Sheet>
     </div>
@@ -1927,6 +1953,7 @@
         submitError={generateError}
         lastSeed={galleryStore.assets[0]?.seed ?? null}
         {images}
+        {audioTrack}
         oncopycli={copyCliCommand}
       />
       {@render stage()}

@@ -1,4 +1,5 @@
 import { workflowLabel } from '$lib/state/assetActions';
+import { formatTimestamp } from '$lib/state/audioTrack';
 import type { GalleryAsset } from '$lib/types';
 
 export interface DetailFact {
@@ -40,6 +41,7 @@ export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
       ...(asset.lora ? loraFacts(asset.lora) : []),
       asset.image_path ? { label: isVideo ? 'First frame' : 'Start image', value: fileName(asset.image_path), wide: details.image_strength == null && !asset.end_image_path } : null,
       asset.end_image_path ? { label: 'Last frame', value: fileName(asset.end_image_path) } : null,
+      asset.audio_track_path ? { label: 'Audio track', value: describeTrack(asset), wide: true, title: asset.audio_track_path } : null,
       asset.reference_images?.length ? { label: 'References', value: asset.reference_images.map(fileName).join(', '), wide: true } : null,
       asset.image_path && details.image_strength != null ? { label: 'Strength', value: String(details.image_strength) } : null,
     ]),
@@ -57,6 +59,14 @@ export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
       { label: 'Created', value: new Date(asset.created_at).toLocaleString(), wide: !generation.time },
     ]),
   };
+}
+
+/** Describe the track a clip followed: `song.mp3 · 1:30–1:34.2`, or `song.mp3 · from 1:30` when the end was not recorded. */
+function describeTrack(asset: GalleryAsset): string {
+  const start = asset.audio_track_start ?? 0;
+  const end = asset.audio_track_end;
+  const range = end != null && end > start ? `${formatTimestamp(start)}–${formatTimestamp(end)}` : `from ${formatTimestamp(start)}`;
+  return `${fileName(asset.audio_track_path ?? '')} · ${range}`;
 }
 
 /** List recorded LoRAs (`path:weight` entries joined by commas) one per row as `name · weight`, full entry on hover. */

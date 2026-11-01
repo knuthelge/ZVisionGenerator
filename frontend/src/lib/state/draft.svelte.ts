@@ -1,6 +1,7 @@
 import { extendPrefillFor } from './extend';
 import { downloadStore } from './downloads.svelte';
 import { heldUploads } from './heldUploads.svelte';
+import { isPrefilledTrack, trackOf, trackPatch, trackSet, trackStartPatch, type TrackTab } from './audioTrack';
 import { imageSupport, lastSlotPatch, startSlotPatch, type SlotValue, type ImageTab } from './imageSlots';
 import { keepInstalledLoras, modelLoraFamily, withoutLora } from './loras';
 import { outputSettingsPatch } from './jobSettings';
@@ -55,6 +56,12 @@ const DEFAULT_DRAFT: DraftState = {
   missingReferencePaths: [],
   endImagePath: null,
   endImageUpload: null,
+  audioTrackPath: null,
+  audioTrackUpload: null,
+  audioTrackStart: 0,
+  extendAudioTrackPath: null,
+  extendAudioTrackUpload: null,
+  extendAudioTrackStart: 0,
   referenceImageStrength: 0,
   frameCount: 0,
   fps: 24,
@@ -120,6 +127,7 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   extend_frames: 'extend_length',
   image_path: 'reference_image_path',
   end_image_path: 'end_image_path',
+  audio_track_path: 'audio_track_path',
   reference_path: 'references',
   negative_prompt: 'negative_prompt',
   scheduler: 'scheduler',
@@ -225,11 +233,11 @@ export function slotPaths(state: Pick<DraftState, (typeof SLOT_KEYS)[number]>, k
   });
 }
 
-/** The draft fields that hold each tab's images, with the upload markers and Strength. Extend Video holds none. */
+/** The draft fields that hold each tab's images and audio track, with the upload markers and Strength. Extend Video holds only its track. */
 const TAB_IMAGE_KEYS = {
   image: ['referenceImagePath', 'referenceImageUpload', 'referenceImagePaths', 'referenceImageStrength'],
-  video: ['firstFramePath', 'firstFrameUpload', 'endImagePath', 'endImageUpload'],
-  extend: [],
+  video: ['firstFramePath', 'firstFrameUpload', 'endImagePath', 'endImageUpload', 'audioTrackPath', 'audioTrackUpload', 'audioTrackStart'],
+  extend: ['extendAudioTrackPath', 'extendAudioTrackUpload', 'extendAudioTrackStart'],
 } as const satisfies Record<WorkspaceTab, readonly (keyof DraftState)[]>;
 
 /** The image fields of the tabs other than the open one: what a Reset keeps. */
@@ -720,6 +728,14 @@ export const draft = {
       if (params.end_image_path && canApply('end_image_path')) Object.assign(prefill, lastSlotPatch({ path: params.end_image_path }));
       else if (replacing) Object.assign(prefill, lastSlotPatch(null));
     }
+    // The audio track belongs to the same tab (Video or Extend Video) and follows the images' rule: a full prefill replaces it,
+    // so a job made without a track clears it. A Use as leaves it alone.
+    if (slotTab !== 'image') {
+      if (params.audio_track_path && canApply('audio_track_path')) {
+        const start = Number(params.audio_track_start);
+        Object.assign(prefill, trackPatch(slotTab, { path: params.audio_track_path }, Number.isFinite(start) && start > 0 ? start : 0));
+      } else if (replacing) Object.assign(prefill, trackPatch(slotTab, null));
+    }
     // A named list, even an empty one, replaces the references: a reused image has exactly its source's. The list is kept
     // whole, whatever the model takes; the Workspace shows and sends the first few.
     if (lists.reference_path !== undefined && canApply('reference_path')) prefill.referenceImagePaths = lists.reference_path.filter((path) => path !== '');
@@ -860,12 +876,28 @@ export const draft = {
   },
 
   /**
+   * Set or clear the audio track of a tab (Video or Extend Video): the draft holds its path or the upload's file name and
+   * the file is held for Generate. A new track starts at 0; clearing puts Start at back to 0.
+   */
+  setAudioTrack(tab: TrackTab, value: SlotValue): void {
+    heldUploads.setTrack(tab, value !== null && 'file' in value ? value.file : null);
+    _draft = { ..._draft, ...trackPatch(tab, value) };
+    this.saveDraft();
+  },
+
+  /** Set the seconds into the track where the tab's clip starts. */
+  setAudioTrackStart(tab: TrackTab, start: number): void {
+    _draft = { ..._draft, ...trackStartPatch(tab, Math.max(0, start)) };
+    this.saveDraft();
+  },
+
+  /**
    * Reset all generation selections to the model's defaults, keeping the
    * tab, model, LoRAs, quantization, and the prompt inputs of both tabs (including the
    * Enhanced prompt) untouched. Enhancement options and auto-enhance reset. The applied preset clears, since its
-   * settings are gone. The open tab's images clear with their upload markers and held files (Image: the start image, the
-   * references and Strength; Video: the first and last frame; Extend Video: none), so its workflow falls back to text.
-   * The other tabs keep theirs.
+   * settings are gone. The open tab's images and audio track clear with their upload markers and held files (Image: the
+   * start image, the references and Strength; Video: the first and last frame and the track; Extend Video: its track), so
+   * its workflow falls back to text. The other tabs keep theirs.
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
@@ -892,8 +924,8 @@ export const draft = {
       extendPrefill: s.extendPrefill,
       extendFrames: _extendSource?.fps ? defaultExtendFrames(_extendSource.fps, extendStepFor(ctx, s.model)) : s.extendFrames,
     };
-    // Reset empties the open tab's images, the uploads held for them included; Extend Video holds none.
-    if (tab !== 'extend') heldUploads.clearTab(tab);
+    // Reset empties the open tab's images and track, the uploads held for them included.
+    heldUploads.clearTab(tab);
     this.hydrateFromContext(ctx, s.model);
     // Restore prompt inputs after hydration, which re-applies the default prompt source.
     _draft = {
@@ -913,6 +945,9 @@ export const draft = {
       enhancedHistory: s.enhancedHistory,
       savedText: s.savedText,
     };
+    // The source stays, so the track it filled in comes back with it, from where the source's sound ended.
+    const sourceTrack = tab === 'extend' && s.extendPrefill?.path === s.extendSourcePath ? (s.extendPrefill?.audioTrack ?? null) : null;
+    if (sourceTrack !== null) _draft = { ..._draft, ...trackPatch('extend', { path: sourceTrack.path }, sourceTrack.start) };
     this.saveDraft();
   },
 
@@ -1023,7 +1058,20 @@ export const draft = {
         updates.enhancedScene = '';
         updates.enhancedFrom = null;
       }
-      updates.extendPrefill = { path: sourceKey, scene: updates.scene ?? previous?.scene ?? '', prompt: updates.prompt ?? previous?.prompt ?? '' };
+      // The track follows the same rule as the text: it is replaced only while it is empty or still the previous source's own
+      // prefill, so a track the user chose (an upload included) stays. A source without a track empties a prefilled one.
+      const track = fill.audioTrack;
+      const trackFree = !trackSet(trackOf(_draft, 'extend')) || isPrefilledTrack(_draft, previous?.audioTrack ?? null);
+      if (trackFree) {
+        Object.assign(updates, trackPatch('extend', track === null ? null : { path: track.path }, track?.start ?? 0));
+        heldUploads.setTrack('extend', null);
+      }
+      updates.extendPrefill = {
+        path: sourceKey,
+        scene: updates.scene ?? previous?.scene ?? '',
+        prompt: updates.prompt ?? previous?.prompt ?? '',
+        audioTrack: trackFree ? track : (previous?.audioTrack ?? null),
+      };
     }
     _draft = { ..._draft, ...updates };
     if (!settled || options.replaceText) {

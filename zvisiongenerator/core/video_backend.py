@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 if TYPE_CHECKING:
-    from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource
+    from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment, ExtendSource
 
 
 @runtime_checkable
@@ -63,6 +63,7 @@ class VideoBackend(Protocol):
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from text. Returns output path or None if failed.
@@ -73,6 +74,8 @@ class VideoBackend(Protocol):
           half-resolution result to a temporary video file, calls ``review(path)`` and continues with the upscale
           when it returns; the file is deleted afterwards. ``review`` may raise to end the generation. A backend
           that cannot pause after the half-size render raises ``ValueError`` (see ``supports_video_upscale_review``).
+        - ``audio_track``: an ``AudioTrack`` the clip's sound is held to, so the picture follows it. Only a model whose family has
+          the ``audio_track`` capability is given one; the backend writes no separate sound, and the workflow puts the track on the clip.
         - H3: ``steps`` must be a step count of the preset's schedules (4 or 8); ``stage1_steps`` is the same count
           for the half-size render. The full-size result comes from a 2x latent upscale of the stage-1 latents and a short
           refinement at full size, not from enlarging the decoded frames.
@@ -91,6 +94,7 @@ class VideoBackend(Protocol):
         steps: int,
         output_path: str,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from image + text. Returns output path or None if failed.
@@ -120,6 +124,11 @@ class VideoExtender(Protocol):
         segment_dir: str | Path,
         audio_output: bool,
         step_callback: Any | None = None,
+        audio_track: AudioTrack | None = None,
     ) -> ExtendSegment | None:
-        """Generate the segment that follows ``source``; returns its video and optional audio files, or None if failed."""
+        """Generate the segment that follows ``source``; returns its video and optional audio files, or None if failed.
+
+        With ``audio_track`` the backend holds the window's sound (the source's sound under the carried frames, then the
+        track) and writes no audio file; the Extend sound stage writes it.
+        """
         ...

@@ -68,6 +68,10 @@ A missing image is marked in red in its group, and the chip shows a warning mark
 
 **All** has the same **Images** section as a computer, third after **Size** and **Sampling**.
 
+### The audio track on a phone
+
+A **Track** chip after **Images** (after **Source** in **Extend Video**) opens the [audio track](workspace.md#audio-track) in a popover. It reads *none*, *on*, or the **Start at** time. A voice memo from your phone works as a file.
+
 ### The viewer on a phone
 
 Tapping an image grows it out of its tile into the viewer, which fills the screen.

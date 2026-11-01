@@ -82,12 +82,31 @@ def window_frames(extend_frames: int, family: VideoFamily | None = None) -> int:
     return align_frames(family.carry_frames + extend_frames, family.frame_rule)
 
 
-def extend_audio_output(source: ExtendSource, *, no_audio: bool) -> bool:
-    """Return whether an extension has sound: the source has audio and the job did not ask for none.
+def extend_audio_output(source: ExtendSource, *, no_audio: bool, track: bool = False) -> bool:
+    """Return whether the model generates an extension's sound: the source has audio, the job did not ask for none and no track is effective.
 
-    A silent source stays silent, so it gets no generated audio, no joined audio and no Sound rules in a rewrite.
+    A silent source stays silent, so it gets no generated audio, no joined audio and no Sound rules in a rewrite. An
+    effective track is the clip's sound, so the model generates none.
+
+    Args:
+        source: The clip being extended.
+        no_audio: Whether the job asked for no sound.
+        track: Whether an audio track is effective (set, on a model that can follow it).
     """
-    return source.has_audio and not no_audio
+    return source.has_audio and not no_audio and not track
+
+
+def extend_join_has_sound(source: ExtendSource, *, no_audio: bool, track: bool = False) -> bool:
+    """Return whether the joined clip has sound: an effective track is set, or the source has audio and the job did not ask for none.
+
+    A silent source with a track gets the track's sound for the new part, after silence for the source's length.
+
+    Args:
+        source: The clip being extended.
+        no_audio: Whether the job asked for no sound.
+        track: Whether an audio track is effective (set, on a model that can follow it).
+    """
+    return track or (source.has_audio and not no_audio)
 
 
 def carry_latent_frames() -> int:
@@ -167,7 +186,7 @@ def resolve_extend_frames(
     return resolved, f"{seconds_name} {seconds:g} is {seconds * fps:g} frames at {fps:g} fps; using {resolved} frames ({resolved / fps:.2f} s)."
 
 
-def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio: bool, prompt: str | None = None, family: VideoFamily | None = None) -> EnhanceContext:
+def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio: bool, prompt: str | None = None, family: VideoFamily | None = None, track: bool = False) -> EnhanceContext:
     """Return the rewrite context of an extension: the generation window, the source's prompt and the new frames.
 
     Args:
@@ -177,6 +196,7 @@ def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio
         prompt: The user's prompt template, to tell whether it is still a legacy source's own prompt. Left out, nothing is
             known about it, and callers set ``prompt_is_original`` for each prompt later.
         family: The model's family, which sets the carried frames of the window (``None``: the LTX frames).
+        track: Whether an audio track is effective; the model then generates no sound, so the rewrite has no Sound rules.
     """
     return enhance_context(
         mode="video",
@@ -184,7 +204,7 @@ def extend_enhance_context(source: ExtendSource, extend_frames: int, *, no_audio
         height=source.height,
         frames=window_frames(extend_frames, family),
         fps=source.fps,
-        audio=extend_audio_output(source, no_audio=no_audio),
+        audio=extend_audio_output(source, no_audio=no_audio, track=track),
         reference_image=False,
         extends=True,
         previous=source.prompt,
@@ -341,6 +361,8 @@ def build_extend_source(path: str | Path, probe: VideoProbe, recorded: RecordedS
         prompt=prompt,
         model=recorded.model if recorded else None,
         lora=recorded.lora if recorded else None,
+        audio_track_path=recorded.audio_track_path if recorded else None,
+        audio_track_end=recorded.audio_track_end if recorded else None,
         probe=probe,
     )
 

@@ -76,6 +76,7 @@ export function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): 
     fps: 24,
     frame_rule: { alignment: 8, offset: 1, round: 'nearest' },
     supports_extend: true,
+    supports_audio_track_upscale: true,
     extend_frame_step: 8,
     upscale: {
       enabled: false,
@@ -177,6 +178,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'end_image', 'end_image_path', 'end_image_clear',
+            'audio_track', 'audio_track_path', 'audio_track_start',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
             'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
           ],
@@ -192,6 +194,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'end_image', 'end_image_path', 'end_image_clear',
+            'audio_track', 'audio_track_path', 'audio_track_start',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
             'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
           ],
@@ -202,7 +205,7 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
         extend: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
+          visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'audio_track', 'audio_track_path', 'audio_track_start', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
           requires_reference_image: false,
           requires_source_video: true,
           clear_fields: ['negative_prompt', 'guidance', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor', 'transparent'],

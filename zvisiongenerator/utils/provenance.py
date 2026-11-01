@@ -88,10 +88,13 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
 
     An extension (``workflow`` ``"extend"``) records the action as sent, the ``source_video`` it continued and the
     new frames as ``extend_frames``; ``frame_count`` is the whole output clip and the size is the source's displayed one.
+
+    A clip that followed an audio track records its ``audio_track_path``, ``audio_track_start`` and ``audio_track_end``
+    (where in the track the clip's sound ends), and ``generation.audio`` is true.
     """
     upscale = _drop_empty({"factor": request.upscale, "steps": request.upscale_steps}) if request.upscale else None
     extend = request.extend
-    audio = not request.no_audio if extend is None else _extend_audio_output(extend.source, no_audio=request.no_audio)
+    audio = _video_has_sound(request)
     payload = {
         "schema": VIDEO_CONFIG_SCHEMA,
         "workflow": _video_workflow(request),
@@ -119,11 +122,28 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     }
     if request.end_image_path:
         payload["end_image_path"] = _portable_path(request.end_image_path)
+    payload.update(_audio_track_fields(request))
     if extend is not None:
         payload["source_video"] = _portable_path(str(extend.source.path))
         payload["extend_frames"] = extend.frames
     payload.update(_enhance_fields(request.enhance_record))
     return _drop_unserializable(payload)
+
+
+def _audio_track_fields(request: VideoGenerationRequest) -> dict[str, Any]:
+    """Return the payload keys of the audio track a clip followed, or none.
+
+    ``audio_track_end`` is where in the track the clip's sound ends: its start plus the clip's frames over the frame
+    rate, or for an extension its new frames over the source's frame rate. It is left out when the frame rate is unknown.
+    """
+    track = request.audio_track
+    if track is None:
+        return {}
+    fields: dict[str, Any] = {"audio_track_path": _portable_path(track.path), "audio_track_start": track.start}
+    end = request.audio_track_end
+    if end is not None:
+        fields["audio_track_end"] = end
+    return fields
 
 
 def build_video_upscale_payload(
@@ -204,11 +224,17 @@ def _enhance_fields(record: dict[str, Any] | None, *, prompt_input: str | None =
     return fields
 
 
-def _extend_audio_output(source: Any, *, no_audio: bool) -> bool:
-    """Return whether an extension has sound (see ``extend_audio_output``); imported late because ``video_extend`` imports this module."""
-    from zvisiongenerator.utils.video_extend import extend_audio_output
+def _video_has_sound(request: VideoGenerationRequest) -> bool:
+    """Return whether the finished clip has sound; an audio track is the clip's sound, whatever the Audio switch said.
 
-    return extend_audio_output(source, no_audio=no_audio)
+    ``video_extend`` is imported late because it imports this module.
+    """
+    track = request.audio_track is not None
+    if request.extend is None:
+        return track or not request.no_audio
+    from zvisiongenerator.utils.video_extend import extend_join_has_sound
+
+    return extend_join_has_sound(request.extend.source, no_audio=request.no_audio, track=track)
 
 
 def _video_workflow(request: VideoGenerationRequest) -> str:
@@ -344,6 +370,10 @@ class RecordedSettings:
     # An extension: the clip it continued and the frames it added (``frame_count`` is the whole clip).
     source_video: str | None = None
     extend_frames: int | None = None
+    # The audio file a video followed, where in it the clip's sound started and where it ended.
+    audio_track_path: str | None = None
+    audio_track_start: float | None = None
+    audio_track_end: float | None = None
     # ``path:weight`` entries joined by commas, as ``--lora`` takes them.
     lora: str | None = None
     # How the prompt was enhanced: ``{settings, model, tier, format}``; None when it was not (or the file predates it).
@@ -380,6 +410,9 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         prompt_input=optional_text(config.get("prompt_input")),
         source_video=_local_path(optional_text(config.get("source_video"))),
         extend_frames=optional_int(config.get("extend_frames")),
+        audio_track_path=_local_path(optional_text(config.get("audio_track_path"))),
+        audio_track_start=optional_float(config.get("audio_track_start")),
+        audio_track_end=optional_float(config.get("audio_track_end")),
         lora=_lora_string(config.get("lora")),
         generation=_generation_block(config.get("generation"), is_video=_is_video_config(config)),
         source=_source_block(config.get("source")),

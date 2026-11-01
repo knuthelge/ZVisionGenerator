@@ -54,6 +54,13 @@ class _VideoVae(_Component):
 
 
 class _AudioVae(_Component):
+    def encode(self, sample: Any) -> tuple[Any, Any]:
+        """Return a posterior whose value names its stereo channel and frame: ``stereo * 50 + frame`` on every latent channel."""
+        assert sample.shape[:2] == (2, 1)
+        frames = -(-sample.shape[2] // 800)
+        grid = np.arange(2)[:, None, None] * 50 + np.arange(frames)[None, None, :] + np.zeros((1, AUDIO_CHANNELS_LATENT, 1))
+        return mx.array(grid.astype(np.float32)), mx.zeros_like(mx.array(grid.astype(np.float32)))
+
     def decode(self, latents: Any) -> Any:
         assert latents.shape == (2, AUDIO_CHANNELS_LATENT, AUDIO_LATENTS)
         return mx.zeros((2, 1, 100))
@@ -91,6 +98,10 @@ class _TextEncoder(_Component):
         super().__init__(rig, "text encoder")
         rig.encoder_kwargs = kwargs
         self.language = SimpleNamespace(embed_tokens=lambda ids: mx.zeros((1, ids.shape[1], 4), dtype=mx.bfloat16))
+
+    def encode(self, prompt: str) -> tuple[Any, np.ndarray]:
+        self.rig.text_only_prompt = prompt
+        return mx.ones((1, 4, 4), dtype=mx.bfloat16), np.array([1, 1, 1, 1])
 
     def build_request(self, prompt: str, images: list) -> tuple[Any, np.ndarray, tuple[None, np.ndarray]]:
         self.rig.request = (prompt, self._processor.image_processor)
@@ -166,6 +177,7 @@ def _generate(
     anchors: tuple[str, ...] = ("first",),
     images: int | None = None,
     seed: int = 7,
+    track_audio: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, int]:
     image = Image.new("RGB", (SIZE, SIZE), (200, 30, 30))
     return h3_staged.generate_conditioned(
@@ -185,7 +197,13 @@ def _generate(
         anchors=anchors,
         step_callback=callback,
         verbose=False,
+        track_audio=track_audio,
     )
+
+
+def _waveform() -> np.ndarray:
+    """Return a stereo waveform that the fake audio VAE encodes to the clip's audio latents."""
+    return np.zeros((2, AUDIO_LATENTS * 800), dtype=np.float32)
 
 
 class TestPhases:
@@ -350,3 +368,69 @@ class TestConditioningRows:
             video_rows = call["row_timesteps"][call["video_indices"]]
             assert set(video_rows[:ROWS_PER_FRAME].tolist()) == {np.float32(max(timestep, KEYFRAME_NOISE_AUG))}
             assert set(video_rows[ROWS_PER_FRAME:].tolist()) == {np.float32(timestep)}
+
+
+class TestAudioTrack:
+    """A track replaces the audio noise with clean rows that every step holds; the model makes the picture only."""
+
+    @pytest.fixture
+    def seen(self, rig, monkeypatch):
+        calls: list[dict[str, Any]] = []
+
+        def forward(
+            dit: _Dit, video: Any, audio: Any, embeds: Any, table: Any, indices: Any, tags: Any, positions: Any, video_indices: Any, audio_indices: Any, text_indices: Any, **kwargs: Any
+        ) -> Any:
+            rows = np.array(table)[np.array(indices)]
+            calls.append({"video": video.shape, "audio": np.array(audio[0].astype(mx.float32)), "row_timesteps": rows, "audio_indices": np.array(audio_indices), "embeds": embeds.shape})
+            return mx.ones_like(video), mx.ones_like(audio)
+
+        monkeypatch.setattr(_Dit, "__call__", forward)
+        return calls
+
+    def test_text_to_video_builds_no_vision_request_and_encodes_the_prompt_alone(self, rig, seen):
+        _generate(rig, anchors=(), images=0, track_audio=_waveform())
+
+        assert rig.text_only_prompt == "a fox"
+        assert rig.encoder_kwargs["load_vision"] is False
+        assert not hasattr(rig, "request") and not hasattr(rig, "vision_input")
+
+    def test_text_to_video_draws_noise_for_the_video_only(self, rig, seen):
+        _generate(rig, anchors=(), images=0, track_audio=_waveform(), seed=5)
+
+        assert rig.rng == [("seed", 5), ("draw",)]
+
+    def test_text_to_video_packs_the_text_rows_and_the_generated_video_rows_only(self, rig, seen):
+        _generate(rig, anchors=(), images=0, track_audio=_waveform())
+
+        assert {call["video"] for call in seen} == {(1, LATENT_FRAMES * ROWS_PER_FRAME, 8)}
+        assert {call["embeds"] for call in seen} == {(1, 4, 4)}
+
+    def test_with_keyframes_the_conditioning_noise_still_precedes_the_video_draw(self, rig, seen):
+        _generate(rig, track_audio=_waveform(), seed=3)
+
+        assert rig.rng == [("seed", 42), ("draw",), ("seed", 3), ("draw",), ("draw",)]
+        assert {call["video"] for call in seen} == {(1, (1 + LATENT_FRAMES) * ROWS_PER_FRAME, 8)}
+
+    def test_the_audio_rows_are_the_encoded_track_channel_major_and_never_stepped(self, rig, seen):
+        _generate(rig, anchors=(), images=0, track_audio=_waveform())
+
+        assert len(seen) == SCHEDULE.forwards
+        expected = np.concatenate([np.tile((stereo * 50 + np.arange(AUDIO_LATENTS))[:, None], (1, AUDIO_CHANNELS_LATENT)) for stereo in range(2)]).astype(np.float32)
+        assert expected.shape == (2 * AUDIO_LATENTS, AUDIO_CHANNELS_LATENT)
+        for call in seen:
+            np.testing.assert_array_equal(call["audio"], expected)
+
+    def test_every_audio_row_sits_at_timestep_one_and_the_table_holds_it(self, rig, seen):
+        _generate(rig, track_audio=_waveform())
+
+        for call in seen:
+            assert call["audio_indices"].shape == (2 * AUDIO_LATENTS,)
+            assert set(call["row_timesteps"][call["audio_indices"]].tolist()) == {np.float32(1.0)}
+
+    def test_the_clip_comes_back_with_silence_of_its_length_and_the_track_is_not_decoded(self, rig, seen):
+        video, audio, rate = _generate(rig, anchors=(), images=0, track_audio=_waveform())
+
+        assert video.shape == (FRAMES, SIZE, SIZE, 3)
+        assert (audio.dtype, audio.shape, rate) == (np.float32, (2, round(FRAMES / 24 * SAMPLE_RATE)), SAMPLE_RATE)
+        assert not audio.any()
+        assert rig.events.count("load audio vae") == 1

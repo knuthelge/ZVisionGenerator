@@ -160,8 +160,10 @@ export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnha
  * Whether the job's video has an audio track, so the Sound axis applies; *supported* is false where the video backend writes no audio.
  *
  * @param sourceHasAudio Extend only: whether the source has audio; a silent source yields a silent clip. Null when unknown.
+ * @param track Whether an audio track is in effect: it is the clip's sound, so the model generates none and there is no Sound axis.
  */
-export function hasAudio(state: DraftState, supported = true, sourceHasAudio: boolean | null = null): boolean {
+export function hasAudio(state: DraftState, supported = true, sourceHasAudio: boolean | null = null, track = false): boolean {
+  if (track) return false;
   if (state.workflow === 'extend' && sourceHasAudio === false) return false;
   return supported && workflowMode(state.workflow) === 'video' && state.audio;
 }
@@ -190,6 +192,7 @@ export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, a
  * @param sourceHasAudio Extend only: whether the source has audio, when known.
  * @param endImage Whether the clip also ends on a last-frame image (chosen, or uploaded and pending).
  * @param references How many reference rows the draft has, uploads included (an uploaded row has an empty path in the draft).
+ * @param track Whether an audio track is in effect; the context then says so, and the clip has no generated sound.
  */
 export function enhanceContext(
   state: DraftState,
@@ -197,6 +200,7 @@ export function enhanceContext(
   sourceHasAudio: boolean | null = null,
   endImage = false,
   references = 0,
+  track = false,
 ): EnhanceContext {
   if (state.workflow === 'extend') {
     return {
@@ -205,7 +209,8 @@ export function enhanceContext(
       height: null,
       frames: null,
       fps: null,
-      audio: hasAudio(state, audioSupported, sourceHasAudio),
+      audio: hasAudio(state, audioSupported, sourceHasAudio, track),
+      ...(track ? { audio_track: true } : {}),
       reference_image: false,
       source_video: state.extendSourcePath,
       extend_frames: state.extendFrames,
@@ -220,7 +225,8 @@ export function enhanceContext(
     height: custom ? state.height : null,
     frames: video ? state.frameCount : null,
     fps: video ? state.fps : null,
-    audio: hasAudio(state, audioSupported),
+    audio: hasAudio(state, audioSupported, null, track),
+    ...(track ? { audio_track: true } : {}),
     reference_image: state.workflow === 'img2img' || state.workflow === 'img2vid',
     references,
     end_image: video && endImage,

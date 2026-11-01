@@ -325,6 +325,7 @@ class TestSpliceClipsMocked:
         monkeypatch.setattr(video_splice, "probe_video", fake_probe)
         monkeypatch.setattr(video_splice, "run_ffmpeg", fake_run)
         monkeypatch.setattr(video_splice, "_prepare_join_audio", fake_prepare)
+        monkeypatch.setattr(video_splice, "_prepare_silent_join_audio", fake_prepare)
         output = tmp_path / "out" / "result.mp4"
         output.parent.mkdir()
         if existing is not None:
@@ -403,8 +404,8 @@ class TestSpliceClipsMocked:
     @pytest.mark.parametrize("segment_probe", [None, make_probe(profile="Main", frame_count=16, has_audio=False)])
     @pytest.mark.parametrize(
         "case",
-        [{"has_audio": False, "source_probe": make_probe(has_audio=False)}, {"include_audio": False}, {"wav": False}],
-        ids=["silent source", "audio not wanted", "no wav"],
+        [{"has_audio": False, "include_audio": False, "source_probe": make_probe(has_audio=False)}, {"include_audio": False}, {"wav": False}],
+        ids=["silent source, audio not wanted", "audio not wanted", "no wav"],
     )
     def test_output_without_audio_has_no_audio_stream_or_map(self, tmp_path, monkeypatch, case, segment_probe):
         self._run_splice(tmp_path, monkeypatch, segment_probe=segment_probe, joined_probe=make_probe(frame_count=89, has_audio=False), **case)
@@ -659,17 +660,43 @@ def _tagged_source(tmp_path, **kwargs: Any) -> ExtendSource:
     return _make_clip(tmp_path / "source.mp4", numbered_frames(33, 128, 64), video_args=("-crf", "18", *_BT709_TAGS), **kwargs)
 
 
+def _read_wav_samples(path: Path) -> np.ndarray:
+    """Read a 16-bit stereo WAV as ``(2, samples)`` floats in -1..1."""
+    with wave.open(str(path), "rb") as reader:
+        return np.frombuffer(reader.readframes(reader.getnframes()), dtype=np.int16).reshape(-1, reader.getnchannels()).T.astype(np.float32) / 32767
+
+
 @REAL
 class TestRealWithoutAudio:
-    def test_silent_source_stays_silent_even_with_new_audio(self, tmp_path):
+    def test_silent_source_stays_silent_when_the_join_has_no_sound(self, tmp_path):
         source = _tagged_source(tmp_path)
         segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
         assert segment.audio_path is not None
         output = tmp_path / "joined.mp4"
-        splice_clips(source, segment, output, extend_frames=16, include_audio=True)
+        splice_clips(source, segment, output, extend_frames=16, include_audio=False)
         probe = probe_video(output)
         assert not probe.has_audio
         assert probe.frame_count == 49
+
+    @pytest.mark.parametrize("lead", [0, 6000])
+    def test_a_silent_source_with_new_audio_gets_silence_for_its_length_then_the_new_part(self, tmp_path, lead):
+        source = _tagged_source(tmp_path)
+        segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64))
+        segment = ExtendSegment(segment.video_path, segment.audio_path, lead_samples=lead)
+        # The WAV holds the lead-in too: prepend silence so the new part is the tone and the lead is not.
+        tone = _read_wav_samples(segment.audio_path)
+        write_pcm16_wav(np.concatenate([np.zeros((2, lead)), tone], axis=1), segment.audio_path)
+        output = tmp_path / "joined.mp4"
+
+        splice_clips(source, segment, output, extend_frames=16, include_audio=True)
+
+        probe = probe_video(output)
+        assert (probe.frame_count, probe.has_audio) == (49, True)
+        pcm = _audio_pcm(output)[:, 0].astype(np.float32) / 32768
+        assert abs(len(pcm) - 49 * RATE // FPS) <= 2048
+        source_samples = 33 * RATE // FPS
+        assert np.abs(pcm[: source_samples - 1000]).max() < 0.01
+        assert np.abs(pcm[source_samples + 2000 : source_samples + 30000]).max() > 0.2
 
 
 @REAL

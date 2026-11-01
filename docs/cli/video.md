@@ -71,6 +71,21 @@ Clips have sound by default. `--no-audio` removes it:
 ziv-video -m ltx-4 --no-audio --prompt "A cat walking through a garden"
 ```
 
+## Audio track
+
+```bash
+ziv-video -m ltx25-4 --image face.png --audio-file voice.wav --prompt "She talks to the camera"
+ziv-video -m ltx25-4 --prompt "A band on a small stage" --audio-file song.mp3 --audio-start 90
+```
+
+`--audio-start` is where in the track the clip's sound starts, in seconds. After each clip, the part of the track it used is printed, for example `Audio track: song.mp3 1:30.0–1:34.0`. To carry on with a long track, extend the clip with the same file; without `--audio-start`, the extension starts where the source's sound ended:
+
+```bash
+ziv-video --extend clip.mp4 --audio-file song.mp3 --prompt "The singer steps forward"
+```
+
+See [Audio track](../concepts/video.md#audio-track) for what the track does and which models take it.
+
 ## LoRAs
 
 ```bash
