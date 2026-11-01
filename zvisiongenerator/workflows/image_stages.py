@@ -367,12 +367,12 @@ def matte_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifact
 
     Runs last, after every post-processing stage, because sharpening drops the alpha channel and contrast and
     saturation would recolour the pixels under it. The chain loads on its first cut-out; ``make_room`` is asked to
-    free memory for it only while it is not loaded.
+    free memory for it, given the image's pixel count, only while it is not loaded.
     """
     if artifacts.image is None or request.matte is None:
         return StageOutcome.success
     if not request.matte.loaded and request.make_room is not None:
-        request.make_room()
+        request.make_room(artifacts.image.width * artifacts.image.height)
     artifacts.image = request.matte.cut_out(artifacts.image.convert("RGB"))
     callback = emit_step_progress(request.step_callback, phase="image_matte", total_steps=1)
     if callback is not None:

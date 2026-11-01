@@ -12,10 +12,12 @@ from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.image_runner import run_batch
-from zvisiongenerator.matte_room import MIN_FREE_BYTES, MatteRoom, needs_swap
+from zvisiongenerator.matte_room import FOREGROUND_BYTES_PER_PIXEL, MIN_FREE_BYTES, MatteRoom, needs_swap, required_free_bytes
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
 _GB = 1024**3
+_SMALL = 1024 * 1024
+_4X_UPSCALE = 4096 * 4096
 _MODEL_INFO = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 
 
@@ -49,11 +51,26 @@ class TestNeedsSwap:
         assert needs_swap(free, MIN_FREE_BYTES) is expected
 
 
+class TestRequiredFreeBytes:
+    def test_grows_with_the_image_size(self):
+        assert required_free_bytes(0) == MIN_FREE_BYTES
+        assert required_free_bytes(_4X_UPSCALE) == MIN_FREE_BYTES + _4X_UPSCALE * FOREGROUND_BYTES_PER_PIXEL
+        assert required_free_bytes(_4X_UPSCALE) > 5 * _GB
+
+
 class TestMakeRoom:
+    def test_three_gigabytes_free_releases_the_model_before_a_4x_upscaled_cut_out(self):
+        room, calls = _room(3 * _GB)
+
+        room.make_room(_4X_UPSCALE)
+
+        assert calls.release_model.call_count == 1
+        assert room.swapping and room.released
+
     def test_one_gigabyte_free_releases_the_model_and_then_the_memory(self):
         room, calls = _room(1 * _GB)
 
-        room.make_room()
+        room.make_room(_SMALL)
 
         assert [c[0] for c in calls.mock_calls] == ["release_model", "release_memory"]
         assert calls.release_model.call_args.args == ("model",)
@@ -62,7 +79,7 @@ class TestMakeRoom:
     def test_three_gigabytes_free_releases_nothing(self):
         room, calls = _room(3 * _GB)
 
-        room.make_room()
+        room.make_room(_SMALL)
 
         assert calls.mock_calls == []
         assert not room.swapping and not room.released
@@ -70,7 +87,7 @@ class TestMakeRoom:
     def test_unknown_free_memory_never_releases(self):
         room, calls = _room(None)
 
-        room.make_room()
+        room.make_room(_SMALL)
 
         assert calls.mock_calls == []
 
@@ -78,11 +95,11 @@ class TestMakeRoom:
         free = [1 * _GB]
         room, calls = _room(0)
         room.free_bytes = lambda: free[0]
-        room.make_room()
+        room.make_room(_SMALL)
         room.model_for_render(MagicMock(), MagicMock())
         free[0] = 8 * _GB
 
-        room.make_room()
+        room.make_room(_SMALL)
 
         assert calls.release_model.call_count == 2
         assert room.released
@@ -90,7 +107,7 @@ class TestMakeRoom:
     def test_without_a_reloader_nothing_is_released(self):
         room, calls = _room(1 * _GB, reload=False)
 
-        room.make_room()
+        room.make_room(_SMALL)
 
         assert calls.mock_calls == []
         assert not room.swapping and not room.released
@@ -109,7 +126,7 @@ class TestModelForRender:
 
     def test_a_released_model_is_reloaded_after_the_chain_is_closed_and_prompts_are_prepared_again(self):
         room, calls = _room(1 * _GB)
-        room.make_room()
+        room.make_room(_SMALL)
         calls.reset_mock()
         chain, prepare = MagicMock(), MagicMock()
         calls.attach_mock(chain.close, "close")
@@ -124,7 +141,7 @@ class TestModelForRender:
 
     def test_the_reload_happens_once_per_release(self):
         room, calls = _room(1 * _GB)
-        room.make_room()
+        room.make_room(_SMALL)
         room.model_for_render(MagicMock(), MagicMock())
 
         room.model_for_render(MagicMock(), MagicMock())
@@ -135,7 +152,7 @@ class TestModelForRender:
 def _stage_that_makes_room(request, artifacts) -> StageOutcome:
     """Stand in for the matte stage: ask for room as the real one does while the chain is not loaded."""
     if request.make_room is not None:
-        request.make_room()
+        request.make_room(_SMALL)
     return StageOutcome.success
 
 

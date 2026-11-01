@@ -9,10 +9,18 @@ from typing import Any
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.matte import MatteChain
 
-__all__ = ["MIN_FREE_BYTES", "MatteRoom", "needs_swap"]
+__all__ = ["FOREGROUND_BYTES_PER_PIXEL", "MIN_FREE_BYTES", "MatteRoom", "needs_swap", "required_free_bytes"]
 
 # The cut-out models take about 1.5 to 3 GB beside the image model; below this the image model makes room.
 MIN_FREE_BYTES = 2 * 1024**3
+# The foreground colour estimate runs at the full output size on the accelerator: about 200 bytes per pixel on top of
+# its inputs, so a 4x upscale to 4096x4096 needs several gigabytes more than a 1024x1024 image.
+FOREGROUND_BYTES_PER_PIXEL = 256
+
+
+def required_free_bytes(pixels: int) -> int:
+    """Return the free accelerator memory a cut-out of an image with *pixels* pixels needs beside the image model."""
+    return MIN_FREE_BYTES + pixels * FOREGROUND_BYTES_PER_PIXEL
 
 
 def needs_swap(free: int | None, min_free: int) -> bool:
@@ -36,7 +44,6 @@ class MatteRoom:
         release_memory: Returns freed memory to the system.
         swapping: Whether the guard has tripped; stays on for the rest of the job.
         released: Whether the model is released and has to be loaded again before the next render.
-        min_free: Free bytes below which the job swaps.
     """
 
     backend: ImageBackend
@@ -46,13 +53,16 @@ class MatteRoom:
     release_memory: Callable[[], None]
     swapping: bool = False
     released: bool = False
-    min_free: int = MIN_FREE_BYTES
 
-    def make_room(self) -> None:
-        """Release the image model when the chain has too little memory, or always once the job swaps."""
+    def make_room(self, pixels: int) -> None:
+        """Release the image model when the chain has too little memory, or always once the job swaps.
+
+        Args:
+            pixels: The pixel count of the image about to be cut out.
+        """
         if self.reload is None:
             return
-        if not self.swapping and not needs_swap(self.free_bytes(), self.min_free):
+        if not self.swapping and not needs_swap(self.free_bytes(), required_free_bytes(pixels)):
             return
         self.swapping = True
         self.backend.release_model(self.model)

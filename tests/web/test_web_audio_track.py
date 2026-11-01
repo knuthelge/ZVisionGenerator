@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from starlette.datastructures import UploadFile
 
 import zvisiongenerator.utils.audio_track as audio_track_module
+from tests._media import REAL
 from tests.web._helpers import stub_video_submission
 from zvisiongenerator.web import server as web_server
 
@@ -118,6 +119,7 @@ class TestInspectRoute:
         assert response.json()["name"] == "song.mp3"
         assert seen == [str(Path("~/song.mp3").expanduser())]
 
+    @REAL
     def test_a_file_that_cannot_be_read_is_refused_with_the_track_message(self, tmp_path):
         response = self._post({"path": str(tmp_path / "gone.mp3")})
 

@@ -342,9 +342,16 @@ class _ProgressChecker:
             return None
 
 
-# The mflux model attributes that hold weights. ``transformer`` is mflux's own attribute and is not referenced
-# elsewhere in this repo, so the release only touches the ones a model has.
-_WEIGHT_ATTRIBUTES = ("transformer", "vae", "text_encoder")
+def _weight_attributes(model: Any) -> list[str]:
+    """Return the names of *model*'s attributes that hold an MLX module.
+
+    mflux families name their weights differently (Ideogram 4 keeps its denoisers in ``conditional_transformer`` and
+    ``unconditional_transformer``), so the release looks for modules instead of a fixed list of names. An mflux model is
+    itself an ``nn.Module``, which stores its child modules as dict entries rather than in ``__dict__``.
+    """
+    entries = dict(model) if isinstance(model, dict) else {}
+    entries.update(getattr(model, "__dict__", {}))
+    return [name for name, value in entries.items() if isinstance(value, nn.Module)]
 
 
 @contextlib.contextmanager
@@ -534,13 +541,12 @@ class MfluxBackend:
         _prepare_prompts(model, self._model_info.family, prompts, width=width, height=height, cancelled=cancelled)
 
     def release_model(self, model: Any) -> None:
-        """Drop *model*'s transformer, VAE and text encoder and clear its prompt cache, so the MLX arrays are unreferenced.
+        """Drop every MLX module *model* holds and clear its prompt cache, so the MLX arrays are unreferenced.
 
         Calling it again does nothing.
         """
-        for name in _WEIGHT_ATTRIBUTES:
-            if getattr(model, name, None) is not None:
-                setattr(model, name, None)
+        for name in _weight_attributes(model):
+            setattr(model, name, None)
         prompt_cache = getattr(model, "prompt_cache", None)
         if prompt_cache is not None:
             prompt_cache.clear()
