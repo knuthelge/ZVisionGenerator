@@ -152,7 +152,7 @@ class TestRun:
 
     @pytest.fixture
     def core(self, monkeypatch):
-        pytest.importorskip("torchvision")
+        pytest.importorskip("omegaconf")  # the vendored core needs it; macOS does not install it
         pytest.importorskip("seedvr2_torch")
         import torch
         from seedvr2_torch.src.core import generation_phases, generation_utils
@@ -250,7 +250,7 @@ class TestUpscaleVideo:
 
     @pytest.fixture
     def core(self, monkeypatch):
-        pytest.importorskip("torchvision")
+        pytest.importorskip("omegaconf")  # the vendored core needs it; macOS does not install it
         pytest.importorskip("seedvr2_torch")
         import torch
         from seedvr2_torch.src.core import generation_phases, generation_utils

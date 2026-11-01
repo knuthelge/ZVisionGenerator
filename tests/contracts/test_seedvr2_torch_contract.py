@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("torchvision")
+pytest.importorskip("omegaconf")  # the vendored core needs it; macOS does not install it
 pytest.importorskip("seedvr2_torch")
 
 from seedvr2_torch.src.core import generation_phases, generation_utils  # noqa: E402
