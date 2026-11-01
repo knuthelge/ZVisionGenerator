@@ -38,6 +38,8 @@ from zvisiongenerator.utils.prompt_enhance import (
     resolve_parts,
     strip_reasoning,
     system_message,
+    framing_rules,
+    palette_rules,
     theme_rules,
     validate_settings,
     word_count,
@@ -182,6 +184,8 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
         f"For the SCENE: {STYLE_AXIS.option(settings.style).instruction}",
         f"For the SCENE: {MOOD_AXIS.option(settings.mood).instruction}",
         *theme_rules(settings, lead="For the SCENE: "),
+        *framing_rules(settings, lead="For the SCENE: "),
+        *palette_rules(settings, lead="For the SCENE: "),
         *detail_rules(settings, shorter=shorter, lead="For the SCENE: "),
     ]
     rules.extend(action_rules(settings, context, for_pair=True))

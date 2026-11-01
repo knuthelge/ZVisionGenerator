@@ -579,6 +579,16 @@ def test_an_enhanced_image_shows_how_and_reuses_both_texts_and_the_options(tmp_p
     assert json.loads(params["enhance"])["settings"]["style"] == "cinematic"
 
 
+def test_reusing_an_enhanced_image_keeps_the_custom_palette_and_its_colours(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    settings = {"style": "keep", "palette": "custom", "colors": ["#1B3A4B", "#E07A5F"], "shot": "wide", "angle": "low", "details": [], "length": "same"}
+    payload, params = _image_reuse(tmp_path, {"prompt_input": "a fox in snow", "enhance": {**_ENHANCE, "settings": settings}})
+
+    assert payload["enhance"]["summary"].endswith("Custom")
+    reused = json.loads(params["enhance"])["settings"]
+    assert (reused["palette"], reused["colors"]) == ("custom", ["#1B3A4B", "#E07A5F"])
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected"),
     [

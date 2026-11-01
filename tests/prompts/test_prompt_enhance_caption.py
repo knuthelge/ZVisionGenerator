@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from zvisiongenerator.utils.prompt_enhance import DETAILS_AXIS, STYLE_AXIS, THEME_AXIS, EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance import ANGLE_AXIS, DETAILS_AXIS, PALETTE_AXIS, STYLE_AXIS, THEME_AXIS, EnhanceSettings
 from zvisiongenerator.utils.prompt_enhance_caption import CAPTION_NO_USABLE_MESSAGE, enhance_caption
 
 _PHOTO_KEYS = ["aesthetics", "lighting", "photo", "medium", "color_palette"]
@@ -244,3 +244,39 @@ class TestRun:
     def test_empty_prompt(self) -> None:
         with pytest.raises(ValueError):
             enhance_caption(_FakeEnhancer(), "  ", EnhanceSettings(), seed=1, ceiling=300)
+
+
+class TestFramingAndPaletteInCaptions:
+    def test_a_palette_fills_the_caption_palette_exactly(self) -> None:
+        caption = _caption("a fox in snow", _REPLY, settings=EnhanceSettings(palette="jewel"))
+        assert caption["style_description"]["color_palette"] == list(PALETTE_AXIS.option("jewel").swatches)
+
+    def test_own_colours_fill_the_caption_palette(self) -> None:
+        caption = _caption("a fox in snow", _REPLY, settings=EnhanceSettings(palette="custom", colors=("#FF0000", "#0A1F44")))
+        assert caption["style_description"]["color_palette"] == ["#FF0000", "#0A1F44"]
+
+    def test_black_and_white_keeps_no_palette(self) -> None:
+        assert "color_palette" not in _caption("a fox in snow", _REPLY, settings=EnhanceSettings(style="bw", palette="neon"))["style_description"]
+
+    def test_framing_is_asked_for_in_the_camera_line(self) -> None:
+        enhancer = _FakeEnhancer(_REPLY)
+        enhance_caption(enhancer, "a fox in snow", EnhanceSettings(angle="worms-eye"), seed=1, ceiling=300)
+        system = enhancer.messages[0][0]["content"]
+        assert ANGLE_AXIS.option("worms-eye").instruction in system and "the CAMERA line" in system
+
+    def test_the_fallback_camera_line_names_the_chosen_angle(self) -> None:
+        reply = "\n".join(["SUMMARY: s", "AESTHETICS: a", "LIGHTING: l", "COLORS: red", "BACKGROUND: b", "OBJECT: a fox"])
+        assert _caption("a fox in snow", reply)["style_description"]["photo"] == "eye-level, natural perspective"
+        photo = _caption("a fox in snow", reply, settings=EnhanceSettings(angle="low"))["style_description"]["photo"]
+        assert photo == f"{ANGLE_AXIS.option('low').label.lower()}, natural perspective" and "eye" not in photo
+
+    def test_the_format_example_drops_eye_level_for_another_angle(self) -> None:
+        def example(settings: EnhanceSettings) -> str:
+            enhancer = _FakeEnhancer(_REPLY)
+            enhance_caption(enhancer, "a fox in snow", settings, seed=1, ceiling=300)
+            return enhancer.messages[0][0]["content"].split("(never copy its content):\n", 1)[1]
+
+        assert "CAMERA: eye-level, 35mm lens" in example(EnhanceSettings())
+        assert "CAMERA: eye-level, 35mm lens" in example(EnhanceSettings(angle="eye-level"))
+        low = example(EnhanceSettings(angle="low"))
+        assert f"CAMERA: {ANGLE_AXIS.option('low').label.lower()}, 35mm lens" in low and "eye-level" not in low

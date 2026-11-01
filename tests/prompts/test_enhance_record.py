@@ -9,7 +9,7 @@ import pytest
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.enhance_record import build_enhance_record, enhancer_tier, parse_enhance_record, planned_enhance_record
+from zvisiongenerator.utils.enhance_record import build_enhance_record, enhance_record_summary, enhancer_tier, parse_enhance_record, planned_enhance_record
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import build_image_config_payload, build_video_config_payload, recorded_settings
 
@@ -76,6 +76,23 @@ class TestReadBack:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             assert parse_enhance_record(record, mode="image")["settings"]["style"] == "film"
+
+
+class TestCameraAndColours:
+    _SETTINGS = EnhanceSettings(palette="custom", colors=("#1B3A4B", "#E07A5F"), shot="wide", angle="low")
+
+    @pytest.mark.parametrize("mode", ["image", "video"])
+    def test_shot_angle_palette_and_colours_survive_a_round_trip(self, mode):
+        record = build_enhance_record(self._SETTINGS, mode=mode, repo="org/fast", revision=None, tier="fast", fmt="text")
+        assert {key: record["settings"][key] for key in ("palette", "colors", "shot", "angle")} == {"palette": "custom", "colors": ["#1B3A4B", "#E07A5F"], "shot": "wide", "angle": "low"}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            parsed = parse_enhance_record(record, mode=mode)
+        assert {key: parsed["settings"][key] for key in ("palette", "colors", "shot", "angle")} == {"palette": "custom", "colors": ["#1B3A4B", "#E07A5F"], "shot": "wide", "angle": "low"}
+
+    def test_the_summary_names_shot_angle_and_palette_but_not_the_colours(self):
+        record = build_enhance_record(self._SETTINGS, mode="image", repo="org/fast", revision=None, tier="fast", fmt="text")
+        assert enhance_record_summary(record) == "Fast · Wide, Low angle, Custom"
 
 
 class TestParse:

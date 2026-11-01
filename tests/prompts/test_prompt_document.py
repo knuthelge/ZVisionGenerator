@@ -172,6 +172,17 @@ class TestRender:
 
         assert rendered.endswith("extra:\n  - active: False\n    prompt: fresh\n    enhance:\n      style: cinematic\n")
 
+    def test_custom_palette_colours_are_quoted_and_load_back(self):
+        enhance = {"palette": "custom", "colors": ["#1B3A4B"]}
+        new = DocumentEntry(id="new-1", prompt=_text("fresh"), enhance=enhance)
+        document = load_prompt_document("")
+        edited = replace(document, sets=(DocumentSet(id="new-2", name="extra", entries=(new,)),))
+
+        rendered = render_prompt_document("", edited)
+
+        assert "'#1B3A4B'" in rendered or '"#1B3A4B"' in rendered
+        assert load_prompt_document(rendered).sets[0].entries[0].enhance == enhance
+
     def test_turning_off_enhance_negative_and_active(self):
         text = "s:\n  - prompt: a\n    negative: b\n    enhance: true\n"
         document = load_prompt_document(text)

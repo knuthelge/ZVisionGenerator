@@ -7,14 +7,19 @@ import warnings
 import pytest
 
 from zvisiongenerator.utils.prompt_enhance import (
+    ANGLE_AXIS,
     CAMERA_AXIS,
+    CUSTOM_PALETTE,
+    KEEP,
     DEFAULT_LENGTH_CONFIG,
     DETAILS_AXIS,
     MOOD_AXIS,
     MOTION_AXIS,
     PACE_AXIS,
+    PALETTE_AXIS,
     PHOTO_REALISM,
     PRESERVATION_RULES,
+    SHOT_AXIS,
     SOUND_AXIS,
     STYLE_AXIS,
     THEME_AXIS,
@@ -31,11 +36,15 @@ from zvisiongenerator.utils.prompt_enhance import (
     enhance_prompt,
     format_enhance_spec,
     frame_rule,
+    framing_rules,
+    framing_view,
     image_enhance_entries,
     is_unusable,
     labelled_prompt,
     length_instruction,
     matrix_contract,
+    palette_colors,
+    palette_rules,
     parse_enhance_entry,
     parse_enhance_spec,
     perception_rule,
@@ -94,11 +103,15 @@ class _FakeEnhancer:
 class TestMatrix:
     def test_contract_lists_axes_and_defaults(self):
         contract = matrix_contract()
-        assert [axis["key"] for axis in contract["axes"]] == ["style", "mood", "theme", "details", "camera", "pace", "motion", "sound", "length"]
+        assert [axis["key"] for axis in contract["axes"]] == ["style", "mood", "theme", "shot", "angle", "palette", "details", "camera", "pace", "motion", "sound", "length"]
         assert contract["defaults"] == {
             "style": "keep",
             "mood": "keep",
             "theme": "keep",
+            "shot": "keep",
+            "angle": "keep",
+            "palette": "keep",
+            "colors": [],
             "details": [],
             "length": "same",
             "camera": "keep",
@@ -1487,3 +1500,68 @@ class TestActionOnlyWhenExtending:
         repeat = f'SCENE: {_EXT_SCENE}\nACTION: She says "I told you so".'
         result, enhancer = _extend_run([repeat, _EXT_PAIR], settings=EnhanceSettings(parts="both"))
         assert result.prompt == "She opens a black umbrella." and len(enhancer.calls) == 2
+
+
+# ── Framing and palette ─────────────────────────────────────────────────────
+
+
+class TestFramingAndPalette:
+    def test_shot_and_angle_open_the_rewrite_in_both_modes(self):
+        settings = EnhanceSettings(shot="close-up", angle="low")
+        rule = framing_rules(settings)[0]
+        assert SHOT_AXIS.option("close-up").instruction in rule and ANGLE_AXIS.option("low").instruction in rule
+        assert rule in _system(settings) and rule in _system(settings, mode="video")
+
+    def test_the_view_example_names_only_the_chosen_framing(self):
+        rule = framing_rules(EnhanceSettings(angle="high"))[0]
+        assert f'"{framing_view(EnhanceSettings(angle="high"))} of ..."' in rule and "low" not in rule.lower()
+        assert framing_view(EnhanceSettings(shot="close-up", angle="low")) == "A low-angle view"
+        assert framing_view(EnhanceSettings(shot="full")) == "A full-length shot"
+        assert framing_view(EnhanceSettings(angle="behind")) == "A view from behind"
+
+    def test_kept_framing_adds_no_rule(self):
+        assert framing_rules(EnhanceSettings()) == []
+        assert "Framing:" not in _system(EnhanceSettings())
+
+    def test_a_palette_names_its_colours(self):
+        rule = palette_rules(EnhanceSettings(palette="earth"))[0]
+        assert PALETTE_AXIS.option("earth").instruction in rule and rule in _system(EnhanceSettings(palette="earth"))
+        assert palette_colors(EnhanceSettings(palette="earth")) == PALETTE_AXIS.option("earth").swatches
+
+    def test_your_colours_are_sent_as_names(self):
+        settings = EnhanceSettings(palette="custom", colors=("#FF0000", "#0A1F44"))
+        rule = palette_rules(settings)[0]
+        assert "red and navy blue" in rule and "#FF0000" not in rule
+        assert palette_colors(settings) == ("#FF0000", "#0A1F44")
+
+    def test_your_colors_without_colours_adds_no_rule(self):
+        assert palette_rules(EnhanceSettings(palette="custom")) == [] and palette_colors(EnhanceSettings(palette="custom")) == ()
+
+    def test_colours_need_the_custom_palette(self):
+        assert settings_from_mapping({"palette": "custom", "colors": ["#ff0000"]}, mode="image").colors == ("#FF0000",)
+        for mapping in ({"colors": ["#ff0000"]}, {"palette": "keep", "colors": ["#ff0000"]}, {"palette": "neon", "colors": ["#ff0000"]}):
+            with pytest.raises(ValueError, match="palette=custom"):
+                settings_from_mapping(mapping, mode="image")
+
+    def test_framing_and_palette_shape_the_video_scene(self):
+        settings = EnhanceSettings(angle="overhead", palette="pastel")
+        system = _pair_system(settings)
+        assert framing_rules(settings, lead="For the SCENE: ")[0] in system
+        assert palette_rules(settings, lead="For the SCENE: ")[0] in system
+
+    def test_colours_parse_from_a_spec_and_a_mapping_and_round_trip(self):
+        settings = parse_enhance_spec("palette=custom,colors=ff0000+0a1f44", mode="image")
+        assert settings.colors == ("#FF0000", "#0A1F44")
+        assert parse_enhance_spec(format_enhance_spec(settings, mode="image"), mode="image") == settings
+
+    def test_too_many_or_bad_colours_are_rejected(self):
+        with pytest.raises(ValueError, match="up to 5"):
+            settings_from_mapping({"palette": "custom", "colors": ["#111111", "#222222", "#333333", "#444444", "#555555", "#666666"]}, mode="image")
+        with pytest.raises(ValueError, match="not a colour"):
+            settings_from_mapping({"palette": "custom", "colors": "teal"}, mode="image")
+
+    def test_contract_gives_each_preset_five_swatches_and_keep_and_custom_none(self):
+        options = {axis["key"]: axis for axis in matrix_contract()["axes"]}["palette"]["options"]
+        assert options[0]["slug"] == KEEP and options[-1]["slug"] == CUSTOM_PALETTE
+        assert [len(option["swatches"]) for option in options] == [0, *[5] * (len(options) - 2), 0]
+        assert palette_rules(EnhanceSettings()) == [] and palette_colors(EnhanceSettings()) == ()

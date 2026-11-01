@@ -507,3 +507,79 @@ cases:
     settings: {style: illustration, mood: dramatic}
     context: {ratio: "2:3"}
     keep: [lighthouse, cliff]
+
+  # --- Framing: shot and angle ----------------------------------------------------------------------------------
+  # The person rows cover every angle; the motorcycle rows repeat the hard ones on an object. The "bare" rows put the
+  # angle's name in the prompt with no option, so their "Your prompt" picture shows what the keyword alone does.
+  - {id: angle-eye-level, tags: [framing, angle, image], prompt: &angle-woman a woman in a green coat standing on a city sidewalk, settings: {angle: eye-level}, context: {ratio: "2:3"}, keep: [woman, coat, sidewalk|street]}
+  - {id: angle-high, tags: [framing, angle, image], prompt: *angle-woman, settings: {angle: high}, context: {ratio: "2:3"}, keep: [woman, coat, "above|high angle|looking down"]}
+  - {id: angle-low, tags: [framing, angle, image], prompt: *angle-woman, settings: {angle: low}, context: {ratio: "2:3"}, keep: [woman, coat, "low angle|below|looking up"]}
+  - {id: angle-overhead, tags: [framing, angle, image], prompt: *angle-woman, settings: {angle: overhead}, context: {ratio: "2:3"}, keep: [woman, coat, "overhead|top-down|directly above"]}
+  - {id: angle-worms-eye, tags: [framing, angle, image], prompt: *angle-woman, settings: {angle: worms-eye}, context: {ratio: "2:3"}, keep: [woman, coat, "worm|ground|looking up"]}
+  - {id: angle-dutch, tags: [framing, angle, image], prompt: *angle-woman, settings: {angle: dutch}, context: {ratio: "2:3"}, keep: [woman, coat, "tilt|dutch|diagonal"]}
+  - {id: angle-over-shoulder, tags: [framing, angle, image], prompt: *angle-woman, settings: {angle: over-shoulder}, context: {ratio: "2:3"}, keep: [woman, coat, shoulder]}
+  - {id: angle-behind, tags: [framing, angle, image], prompt: *angle-woman, settings: {angle: behind}, context: {ratio: "2:3"}, keep: [woman, coat, "behind|back|away"]}
+  - {id: angle-moto-low, tags: [framing, angle, image], prompt: &angle-moto a vintage motorcycle parked by a brick wall, settings: {angle: low}, context: {ratio: "3:2"}, keep: [motorcycle, brick wall]}
+  - {id: angle-moto-high, tags: [framing, angle, image], prompt: *angle-moto, settings: {angle: high}, context: {ratio: "3:2"}, keep: [motorcycle, brick wall]}
+  - {id: angle-moto-worms-eye, tags: [framing, angle, image], prompt: *angle-moto, settings: {angle: worms-eye}, context: {ratio: "3:2"}, keep: [motorcycle, brick wall]}
+  - {id: angle-moto-dutch, tags: [framing, angle, image], prompt: *angle-moto, settings: {angle: dutch}, context: {ratio: "3:2"}, keep: [motorcycle, brick wall]}
+  - {id: angle-bare-low, tags: [framing, angle, bare, image], prompt: low angle shot of a woman in a green coat standing on a city sidewalk, settings: {}, context: {ratio: "2:3"}, keep: [woman, coat]}
+  - {id: angle-bare-worms-eye, tags: [framing, angle, bare, image], prompt: worm's-eye view of a woman in a green coat standing on a city sidewalk, settings: {}, context: {ratio: "2:3"}, keep: [woman, coat]}
+  - {id: angle-bare-dutch, tags: [framing, angle, bare, image], prompt: dutch angle shot of a woman in a green coat standing on a city sidewalk, settings: {}, context: {ratio: "2:3"}, keep: [woman, coat]}
+  - {id: angle-bare-behind, tags: [framing, angle, bare, image], prompt: a woman in a green coat standing on a city sidewalk seen from behind, settings: {}, context: {ratio: "2:3"}, keep: [woman, coat]}
+  - {id: shot-extreme-close-up, tags: [framing, shot, image], prompt: &shot-man an old man reading a newspaper on a park bench, settings: {shot: extreme-close-up}, context: {ratio: "2:3"}, keep: [man]}
+  - {id: shot-close-up, tags: [framing, shot, image], prompt: *shot-man, settings: {shot: close-up}, context: {ratio: "2:3"}, keep: [man, newspaper]}
+  - {id: shot-medium, tags: [framing, shot, image], prompt: *shot-man, settings: {shot: medium}, context: {ratio: "2:3"}, keep: [man, newspaper, bench]}
+  - {id: shot-full, tags: [framing, shot, image], prompt: *shot-man, settings: {shot: full}, context: {ratio: "2:3"}, keep: [man, newspaper, bench]}
+  - {id: shot-wide, tags: [framing, shot, image], prompt: *shot-man, settings: {shot: wide}, context: {ratio: "2:3"}, keep: [man, newspaper, bench, park]}
+  - {id: shot-extreme-wide, tags: [framing, shot, image], prompt: *shot-man, settings: {shot: extreme-wide}, context: {ratio: "2:3"}, keep: [man, bench, park]}
+  - {id: shot-close-low, tags: [framing, shot, angle, image], prompt: *shot-man, settings: {shot: close-up, angle: low}, context: {ratio: "2:3"}, keep: [man, newspaper]}
+  - {id: shot-wide-high, tags: [framing, shot, angle, image], prompt: *shot-man, settings: {shot: wide, angle: high}, context: {ratio: "2:3"}, keep: [man, bench, park]}
+  - {id: shot-photo-style, tags: [framing, shot, angle, image], prompt: *shot-man, settings: {style: film, shot: full, angle: low}, context: {ratio: "2:3"}, keep: [man, newspaper, bench], forbid: *realism-forbid}
+  - {id: shot-art-style, tags: [framing, shot, angle, image], prompt: *shot-man, settings: {style: watercolor, shot: wide, angle: high}, context: {ratio: "2:3"}, keep: [man, bench]}
+
+  # --- Palettes and your own colours ----------------------------------------------------------------------------
+  - {id: palette-teal-orange, tags: [palette, image], prompt: &palette-room "a living room with a sofa, a rug and a reading lamp", settings: {palette: teal-orange}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, teal, orange]}
+  - {id: palette-pastel, tags: [palette, image], prompt: *palette-room, settings: {palette: pastel}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "pink|mint|powder blue|lilac"]}
+  - {id: palette-earth, tags: [palette, image], prompt: *palette-room, settings: {palette: earth}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "terracotta|olive"]}
+  - {id: palette-cool, tags: [palette, image], prompt: *palette-room, settings: {palette: cool}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, blue]}
+  - {id: palette-warm, tags: [palette, image], prompt: *palette-room, settings: {palette: warm}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "gold|amber|rust"]}
+  - {id: palette-neon, tags: [palette, image], prompt: *palette-room, settings: {palette: neon}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "pink|cyan|neon"]}
+  - {id: palette-film, tags: [palette, image], prompt: *palette-room, settings: {palette: film}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "cream|peach|dusty blue"]}
+  - {id: palette-neutrals, tags: [palette, image], prompt: *palette-room, settings: {palette: neutrals}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "greige|taupe|off-white"]}
+  - {id: palette-forest, tags: [palette, image], prompt: *palette-room, settings: {palette: forest}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "forest green|moss|sage"]}
+  - {id: palette-retro, tags: [palette, image], prompt: *palette-room, settings: {palette: retro}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "mustard|avocado"]}
+  - {id: palette-jewel, tags: [palette, image], prompt: *palette-room, settings: {palette: jewel}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "emerald|sapphire|burgundy"]}
+  - {id: palette-primary, tags: [palette, image], prompt: *palette-room, settings: {palette: primary}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, red, yellow, blue]}
+  - {id: palette-sunset, tags: [palette, image], prompt: *palette-room, settings: {palette: sunset}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp, "coral|indigo|peach"]}
+  - {id: palette-portrait-teal-orange, tags: [palette, image], prompt: &palette-cafe a young man in a knitted sweater sitting in a cafe, settings: {palette: teal-orange}, context: {ratio: "2:3"}, keep: [man, sweater, cafe]}
+  - {id: palette-portrait-neon, tags: [palette, image], prompt: *palette-cafe, settings: {palette: neon}, context: {ratio: "2:3"}, keep: [man, sweater, cafe]}
+  - {id: palette-portrait-pastel, tags: [palette, image], prompt: *palette-cafe, settings: {palette: pastel}, context: {ratio: "2:3"}, keep: [man, sweater, cafe]}
+  - {id: palette-keeps-named-colour, tags: [palette, image], prompt: a red bicycle leaning against a wall, settings: {palette: cool}, context: {ratio: "3:2"}, keep: [red bicycle, wall]}
+  - {id: palette-with-mood, tags: [palette, image], prompt: *palette-room, settings: {palette: pastel, mood: eerie}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp]}
+  - {id: colors-two, tags: [palette, colors, image], prompt: *palette-room, settings: {palette: custom, colors: ["#1B3A4B", "#E07A5F"]}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp]}
+  - {id: colors-five, tags: [palette, colors, image], prompt: *palette-cafe, settings: {palette: custom, colors: ["#264653", "#2A9D8F", "#E9C46A", "#F4A261", "#E76F51"]}, context: {ratio: "2:3"}, keep: [man, sweater, cafe]}
+  - {id: colors-mono, tags: [palette, colors, image], prompt: *angle-moto, settings: {palette: custom, colors: ["#7F3FBF"]}, context: {ratio: "3:2"}, keep: [motorcycle, brick wall]}
+
+  # One Custom colour on a plain object, across the colour-name range: vivid, less common and two controls.
+  - {id: color-name-electric-blue, tags: [palette, colors, color-names, image], prompt: &color-vase a plain ceramic vase on a wooden table, settings: {palette: custom, colors: ["#0000FF"]}, context: {ratio: "2:3"}, keep: [vase, electric blue]}
+  - {id: color-name-neon-green, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#39FF14"]}, context: {ratio: "2:3"}, keep: [vase, neon green]}
+  - {id: color-name-fuchsia, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#FF00FF"]}, context: {ratio: "2:3"}, keep: [vase, fuchsia]}
+  - {id: color-name-bright-orange, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#FF6600"]}, context: {ratio: "2:3"}, keep: [vase, bright orange]}
+  - {id: color-name-chartreuse, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#C1F80A"]}, context: {ratio: "2:3"}, keep: [vase, chartreuse]}
+  - {id: color-name-periwinkle, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#8E82FE"]}, context: {ratio: "2:3"}, keep: [vase, periwinkle]}
+  - {id: color-name-cerulean, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#0485D1"]}, context: {ratio: "2:3"}, keep: [vase, cerulean]}
+  - {id: color-name-dusty-rose, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#C0737A"]}, context: {ratio: "2:3"}, keep: [vase, dusty rose]}
+  - {id: color-name-deep-purple, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#36013F"]}, context: {ratio: "2:3"}, keep: [vase, deep purple]}
+  - {id: color-name-wine-red, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#7B0323"]}, context: {ratio: "2:3"}, keep: [vase, wine red]}
+  - {id: color-name-jade-green, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#2BAF6A"]}, context: {ratio: "2:3"}, keep: [vase, jade green]}
+  - {id: color-name-petrol-blue, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#1B3A4B"]}, context: {ratio: "2:3"}, keep: [vase, petrol blue]}
+  - {id: color-name-terracotta, tags: [palette, colors, color-names, image], prompt: *color-vase, settings: {palette: custom, colors: ["#C8643B"]}, context: {ratio: "2:3"}, keep: [vase, terracotta]}
+  - {id: color-name-vivid-trio, tags: [palette, colors, color-names, image], prompt: *palette-room, settings: {palette: custom, colors: ["#0652FF", "#ED0DD9", "#C1F80A"]}, context: {ratio: "3:2"}, keep: [sofa, electric blue, fuchsia, chartreuse]}
+
+  # --- Framing and palette in captions and video ----------------------------------------------------------------
+  - {id: caption-framing-palette, tags: [caption, framing, palette], mode: caption, family: ideogram4, prompt: *angle-woman, settings: {angle: low, shot: full, palette: jewel}, context: {ratio: "2:3"}, keep: [woman, coat]}
+  - {id: caption-colors, tags: [caption, palette, colors], mode: caption, family: ideogram4, prompt: *palette-room, settings: {palette: custom, colors: ["#1B3A4B", "#E07A5F", "#F2CC8F"]}, context: {ratio: "3:2"}, keep: [sofa, rug, lamp]}
+  - {id: t2v-framing-palette, tags: [video, t2v, framing, palette], mode: video, prompt: a dancer spins in an empty warehouse, settings: {shot: wide, angle: high, palette: sunset}, context: {ratio: "16:9", frames: 97, fps: 24}, keep: [dancer, warehouse]}
+  - {id: t2v-angle-low, tags: [video, t2v, framing, angle], mode: video, prompt: a skateboarder rolls down an empty city street, settings: {angle: low, shot: full}, context: {ratio: "16:9", frames: 97, fps: 24}, keep: [skateboarder, street]}
+  - {id: t2v-angle-overhead, tags: [video, t2v, framing, angle], mode: video, prompt: a chef plates a dessert on a kitchen counter, settings: {angle: overhead}, context: {ratio: "16:9", frames: 97, fps: 24}, keep: [chef, dessert, counter]}

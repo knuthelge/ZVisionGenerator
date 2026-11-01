@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 
+from zvisiongenerator.utils.color_names import color_name, parse_hex
 from zvisiongenerator.utils.prompt_quotes import lettering_spans, missing_quotes, quoted_texts
 
 if TYPE_CHECKING:
@@ -52,6 +53,7 @@ class EnhanceOption:
     Attributes:
         description: One line for the Web UI menu: what the option asks the enhancer for.
         group: The menu group it is listed under (Style: Photo or Art; Theme: its five groups), or None.
+        swatches: The ``#RRGGBB`` colours a Palette option shows and puts in a JSON caption's palette; empty elsewhere.
     """
 
     slug: str
@@ -59,6 +61,7 @@ class EnhanceOption:
     instruction: str
     description: str = ""
     group: str | None = None
+    swatches: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -216,6 +219,108 @@ THEME_AXIS = EnhanceAxis(
     ),
     default=(KEEP,),
 )
+
+
+SHOT_AXIS = EnhanceAxis(
+    key="shot",
+    label="Shot",
+    multi=False,
+    video_only=False,
+    options=(
+        EnhanceOption(KEEP, "Keep", "", "The framing your prompt implies"),
+        EnhanceOption("extreme-close-up", "Extreme close-up", "an extreme close-up: one detail, such as an eye, a hand or a texture, fills the frame", "One detail fills the frame"),
+        EnhanceOption("close-up", "Close-up", "a close-up: the face or the main object fills most of the frame", "A face or object fills the frame"),
+        EnhanceOption("medium", "Medium", "a medium shot: a person from the waist up, or the main object with a little of its surroundings", "Waist up, or the object and a little around it"),
+        EnhanceOption("full", "Full body", "a full-length shot: the whole subject from head to toe, with some ground around it", "The whole subject, head to toe"),
+        EnhanceOption("wide", "Wide", "a wide shot: the subject small within its own surroundings", "The subject within its surroundings"),
+        EnhanceOption("extreme-wide", "Extreme wide", "an extreme wide shot: a vast view of the subject's own setting, in which the subject is a small figure", "A vast view; the subject is small"),
+    ),
+    default=(KEEP,),
+)
+# Angles a bare keyword rarely achieves (low, worm's-eye, Dutch, from behind) say where the camera is, which way it looks
+# and what that view shows behind the subject, which models follow far more often than the angle's name alone.
+ANGLE_AXIS = EnhanceAxis(
+    key="angle",
+    label="Angle",
+    multi=False,
+    video_only=False,
+    options=(
+        EnhanceOption(KEEP, "Keep", "", "The angle your prompt implies"),
+        EnhanceOption("eye-level", "Eye level", "an eye-level view: the camera at the subject's eye height, looking straight at it", "Straight on, at eye height"),
+        EnhanceOption("high", "High angle", "a high-angle view: the camera is above the subject and looks down at it, so the ground around it fills the background", "From above, looking down"),
+        EnhanceOption(
+            "low",
+            "Low angle",
+            "a low-angle view: the camera is low near the ground and looks up at the subject, who towers over the viewer; always show the sky or ceiling above and behind them",
+            "From below, looking up",
+        ),
+        EnhanceOption(
+            "overhead",
+            "Overhead",
+            "a top-down overhead view: the camera directly above looking straight down, so the floor, ground or table is the whole background",
+            "Straight down from above",
+        ),
+        EnhanceOption(
+            "worms-eye",
+            "Worm's-eye",
+            "a worm's-eye view: the camera lies on the ground looking steeply up, so the nearest part of the subject looms large, the rest shrinks upward and the sky or ceiling fills the background",
+            "From the ground, steeply up",
+        ),
+        EnhanceOption(
+            "dutch",
+            "Dutch angle",
+            "a Dutch-angle view: the whole image is rotated about 20 degrees, so the horizon, the ground and every upright line slant diagonally across the frame",
+            "Tilted; the horizon runs diagonally",
+        ),
+        EnhanceOption(
+            "over-shoulder",
+            "Over the shoulder",
+            "an over-the-shoulder view: the subject's own shoulder and the back of their head fill one side of the frame, very close to the camera, "
+            "out of focus and cut off by the frame edge, while what they look at is sharp in the rest of the frame",
+            "Past the subject's shoulder",
+        ),
+        EnhanceOption(
+            "behind", "From behind", "a view from behind: the camera is behind the subject, who faces away; we see their back and the back of their head, never their face", "The subject faces away"
+        ),
+    ),
+    default=(KEEP,),
+)
+
+
+# The Palette option that uses your own colours (``colors``) instead of a preset's swatches.
+CUSTOM_PALETTE = "custom"
+
+
+def _palette(slug: str, label: str, swatches: tuple[str, ...], names: str, description: str) -> EnhanceOption:
+    return EnhanceOption(slug, label, names, description, swatches=swatches)
+
+
+PALETTE_AXIS = EnhanceAxis(
+    key="palette",
+    label="Palette",
+    multi=False,
+    video_only=False,
+    options=(
+        EnhanceOption(KEEP, "Keep", "", "The colours your prompt and options suggest"),
+        _palette(
+            "teal-orange", "Teal & orange", ("#0F5257", "#1F8A8A", "#F28C28", "#CC5500", "#F3E5C0"), "deep teal, teal, warm orange, burnt orange and cream", "Cinematic teal shadows, warm orange"
+        ),
+        _palette("pastel", "Pastel", ("#F2C9CF", "#B5E8C8", "#C6DDF0", "#FCEFA1", "#C8A2C8"), "blush pink, mint green, powder blue, pale yellow and lilac", "Soft, light, airy colours"),
+        _palette("earth", "Earth tones", ("#6B4226", "#C8643B", "#6B7032", "#C2A878", "#F3E5C0"), "brown, terracotta, olive green, sand and cream", "Browns, terracotta, olive, sand"),
+        _palette("film", "Film", ("#F2E3C9", "#E6A57E", "#9DB8C2", "#8C9A6B", "#5A4636"), "cream, soft peach, dusty blue, faded olive and warm brown", "Soft, faded film colours"),
+        _palette("neutrals", "Neutrals", ("#F0EEE9", "#D6CFC4", "#A89F91", "#6E6A64", "#2F2F2F"), "off-white, greige, taupe, stone grey and charcoal", "Off-white, greige, taupe"),
+        _palette("forest", "Forest", ("#1F3B2D", "#3E6B48", "#8DA47E", "#C9C29A", "#5B3A29"), "forest green, moss green, sage, pale khaki and bark brown", "Deep greens, moss, bark"),
+        _palette("cool", "Cool blues", ("#1B2A4A", "#1E5AA8", "#6FA8DC", "#C6DDF0", "#F7F7F5"), "navy blue, blue, sky blue, powder blue and white", "Shades of blue"),
+        _palette("warm", "Warm gold", ("#3E2416", "#A64B2A", "#F28C28", "#D4AF37", "#FFF8E7"), "dark brown, rust, amber, gold and ivory", "Amber, gold, rust"),
+        _palette("neon", "Neon", ("#111111", "#FF3E9A", "#00E5FF", "#7F3FBF", "#39FF14"), "deep black, hot pink, electric cyan, violet and neon green", "Glowing colours on black"),
+        _palette("jewel", "Jewel tones", ("#0E7C4A", "#0047AB", "#6D1A2B", "#5E2750", "#D4AF37"), "emerald green, sapphire blue, burgundy, plum and gold", "Rich emerald, sapphire, ruby"),
+        _palette("primary", "Primary", ("#D32F2F", "#FFD92F", "#1E5AA8", "#F7F7F5", "#111111"), "bold red, bright yellow, blue, white and black", "Bold red, yellow and blue"),
+        _palette("sunset", "Sunset", ("#2C1E4A", "#7F3FBF", "#F27561", "#FFB07C", "#FFD92F"), "deep indigo, violet, coral, peach and golden yellow", "Indigo, coral, peach, gold"),
+        _palette("retro", "Retro", ("#F3E9D2", "#D9A441", "#C8553D", "#7C8B3A", "#6B4226"), "cream, mustard, burnt orange, avocado green and brown", "Mustard, avocado, burnt orange"),
+        EnhanceOption(CUSTOM_PALETTE, "Custom", "", "Up to five colours you pick"),
+    ),
+    default=(KEEP,),
+)
 DETAILS_AXIS = EnhanceAxis(
     key="details",
     label="Focus on",
@@ -322,20 +427,23 @@ SOUND_AXIS = EnhanceAxis(
     ),
     default=(),
 )
-# Display order in the Web UI: Look (Style, Mood, Theme), Focus on, Motion (Camera, Pace, Describe), Sound, then Length.
-ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, MOOD_AXIS, THEME_AXIS, DETAILS_AXIS, CAMERA_AXIS, PACE_AXIS, MOTION_AXIS, SOUND_AXIS, LENGTH_AXIS)
+# Display order in the Web UI: Look (Style, Mood, Theme), Framing (Shot, Angle), Palette, Focus on, Motion (Camera, Pace, Describe), Sound, then Length.
+ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, MOOD_AXIS, THEME_AXIS, SHOT_AXIS, ANGLE_AXIS, PALETTE_AXIS, DETAILS_AXIS, CAMERA_AXIS, PACE_AXIS, MOTION_AXIS, SOUND_AXIS, LENGTH_AXIS)
 _AXES_BY_KEY = {axis.key: axis for axis in ENHANCE_AXES}
 # Axes that only apply when the video has an audio track.
 AUDIO_AXES = frozenset({SOUND_AXIS.key})
 NOTE_KEY = "note"
 NOTE_MAX_CHARS = 300
+# Your own colours: up to five ``#RRGGBB`` codes, used by Palette Custom (``custom``) only.
+COLORS_KEY = "colors"
+COLORS_MAX = 5
 # Which parts of a video prompt the rewrite writes: ``both`` (scene and action) or ``action`` (the scene is kept as written).
 # It is video only and not an option axis: ``None`` on the settings means "auto" (see ``resolve_parts``).
 PARTS_KEY = "parts"
 PARTS_OPTIONS = (("both", "Scene and action"), ("action", "Action only"))
 PARTS_VALUES = tuple(slug for slug, _label in PARTS_OPTIONS)
 PARTS_DESCRIPTIONS = {"both": "Rewrite both parts; a blank scene is written from your text", "action": "Keep your scene exactly; write the action to fit it"}
-_SETTING_KEYS = (*_AXES_BY_KEY, NOTE_KEY, PARTS_KEY)
+_SETTING_KEYS = (*_AXES_BY_KEY, COLORS_KEY, NOTE_KEY, PARTS_KEY)
 _DURATION_BEATS = ((5.0, "one continuous action"), (10.0, "two or three beats at most"))
 
 
@@ -352,6 +460,10 @@ class EnhanceSettings:
     style: str = STYLE_AXIS.default[0]
     mood: str = MOOD_AXIS.default[0]
     theme: str = THEME_AXIS.default[0]
+    shot: str = SHOT_AXIS.default[0]
+    angle: str = ANGLE_AXIS.default[0]
+    palette: str = PALETTE_AXIS.default[0]
+    colors: tuple[str, ...] = ()
     details: tuple[str, ...] = DETAILS_AXIS.default
     length: str = LENGTH_AXIS.default[0]
     camera: str = CAMERA_AXIS.default[0]
@@ -429,7 +541,7 @@ def matrix_contract() -> dict[str, Any]:
                 "multi": axis.multi,
                 "video_only": axis.video_only,
                 "audio_only": axis.key in AUDIO_AXES,
-                "options": [{"slug": option.slug, "label": option.label, "description": option.description, "group": option.group} for option in axis.options],
+                "options": [{"slug": option.slug, "label": option.label, "description": option.description, "group": option.group, "swatches": list(option.swatches)} for option in axis.options],
                 "default": list(axis.default),
             }
             for axis in ENHANCE_AXES
@@ -444,6 +556,10 @@ def settings_to_mapping(settings: EnhanceSettings) -> dict[str, Any]:
         "style": settings.style,
         "mood": settings.mood,
         "theme": settings.theme,
+        "shot": settings.shot,
+        "angle": settings.angle,
+        "palette": settings.palette,
+        "colors": list(settings.colors),
         "details": list(settings.details),
         "length": settings.length,
         "camera": settings.camera,
@@ -566,17 +682,36 @@ def _parse_note(raw: Any) -> str:
     return note
 
 
+def _parse_colors(raw: Any) -> tuple[str, ...]:
+    """Return your own colours as uppercase ``#RRGGBB`` codes, from a list or a ``+``-separated string."""
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        items = [part for part in raw.split("+") if part.strip()]
+    elif isinstance(raw, (list, tuple)):
+        items = [str(part) for part in raw if str(part).strip()]
+    else:
+        raise ValueError(f"Colors must be a list of hex codes, got {type(raw).__name__}.")
+    colors = tuple(dict.fromkeys(parse_hex(item) for item in items))
+    if len(colors) > COLORS_MAX:
+        raise ValueError(f"Too many colors ({len(colors)}); pick up to {COLORS_MAX}.")
+    return colors
+
+
 def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: str = "error") -> EnhanceSettings:
     """Build settings from a mapping; omitted keys keep their defaults.
 
     Args:
-        data: Mapping with any of ``style``, ``mood``, ``theme``, ``details``, ``length``, ``camera``, ``pace``, ``motion``, ``sound``, ``note``, ``parts``.
+        data: Mapping with any of ``style``, ``mood``, ``theme``, ``shot``, ``angle``, ``palette``, ``colors``, ``details``, ``length``,
+            ``camera``, ``pace``, ``motion``, ``sound``, ``note``, ``parts``. ``colors`` lists up to five ``#RRGGBB`` codes and needs
+            ``palette`` to be ``custom``.
         mode: ``"image"`` or ``"video"``.
         motion_in_image: ``"error"`` to reject the video-only keys (``camera``, ``pace``, ``motion``, ``sound``, ``parts``) in image mode,
             ``"warn"`` to warn and ignore them.
 
     Raises:
-        ValueError: On unknown keys or values, or a video-only key in image mode with ``motion_in_image="error"``.
+        ValueError: On unknown keys or values, a video-only key in image mode with ``motion_in_image="error"``, or ``colors`` with a
+            palette other than ``custom`` (including the default Keep).
     """
     _check_mode(mode)
     if not isinstance(data, dict):
@@ -589,12 +724,19 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
         if key == NOTE_KEY:
             values[key] = _parse_note(raw)
             continue
+        if key == COLORS_KEY:
+            values[key] = _parse_colors(raw)
+            continue
         if (key == PARTS_KEY or _AXES_BY_KEY[key].video_only) and mode != "video":
             if motion_in_image == "warn":
                 warnings.warn(f"'{key}' only applies to video prompts and is ignored for images.", stacklevel=2)
                 continue
             raise ValueError(f"'{key}' only applies to video prompts.")
         values[key] = _parse_parts(raw) if key == PARTS_KEY else _parse_axis_value(_AXES_BY_KEY[key], raw)
+    if values.get(COLORS_KEY):
+        palette = values.get(PALETTE_AXIS.key, KEEP)
+        if palette != CUSTOM_PALETTE:
+            raise ValueError(f"Colors need palette={CUSTOM_PALETTE} (Custom), not palette={palette}.")
     return EnhanceSettings(**values)
 
 
@@ -634,6 +776,8 @@ def format_enhance_spec(settings: EnhanceSettings, *, mode: str = "video") -> st
             continue
         value = current[axis.key]
         parts.append(f"{axis.key}={'+'.join(value) if axis.multi else value}")
+    if settings.colors:
+        parts.append(f"{COLORS_KEY}={'+'.join(color.removeprefix('#') for color in settings.colors)}")
     if mode == "video" and settings.parts is not None:
         parts.append(f"{PARTS_KEY}={settings.parts}")
     return ",".join(parts) or f"{STYLE_AXIS.key}={KEEP}"
@@ -979,6 +1123,55 @@ def detail_rules(settings: EnhanceSettings, *, shorter: bool, lead: str = "") ->
     return [f"{lead}{text}" if lead else text[0].upper() + text[1:]]
 
 
+def framing_rules(settings: EnhanceSettings, *, lead: str = "") -> list[str]:
+    """Return the Shot and Angle rule, or none when both are kept; *lead* ("For the SCENE: ") prefixes it.
+
+    Models follow a camera angle far more often when it opens the prompt and the scene agrees with it, so the rule asks for both.
+    """
+    chosen = [axis.option(getattr(settings, axis.key)) for axis in (SHOT_AXIS, ANGLE_AXIS) if getattr(settings, axis.key) != KEEP]
+    if not chosen:
+        return []
+    return [
+        f"{lead}Framing: {'; '.join(option.instruction for option in chosen)}. Open the rewrite with this framing and say where the camera is and which way it looks "
+        "(the camera's view, not where the subject looks), then describe what that view shows behind and around the subject in the prompt's own setting. "
+        f'Write it as a view ("{framing_view(settings)} of ..."), never with a camera or photographer in the scene. Still name the style.'
+    ]
+
+
+def framing_view(settings: EnhanceSettings) -> str:
+    """Return how the rewrite opens ("A low-angle view", "A close-up"), so an example never names another framing.
+
+    It is the chosen angle's own phrase, or the shot's when the angle is kept: each instruction starts with it, before the colon.
+    """
+    axis = ANGLE_AXIS if settings.angle != KEEP else SHOT_AXIS
+    lead = axis.option(getattr(settings, axis.key)).instruction.split(":", 1)[0]
+    return lead[0].upper() + lead[1:]
+
+
+def palette_colors(settings: EnhanceSettings) -> tuple[str, ...]:
+    """Return the ``#RRGGBB`` colours the rewrite uses: your own colours for Custom, else the Palette option's swatches."""
+    return settings.colors if settings.palette == CUSTOM_PALETTE else PALETTE_AXIS.option(settings.palette).swatches
+
+
+def palette_rules(settings: EnhanceSettings, *, lead: str = "") -> list[str]:
+    """Return the Palette rule naming the colours to use, or none without a palette; *lead* ("For the SCENE: ") prefixes it.
+
+    Image models follow colour names far better than hex codes, so your own colours are sent as the nearest plain names.
+    """
+    if settings.palette == CUSTOM_PALETTE and settings.colors:
+        names = list(dict.fromkeys(color_name(color) for color in settings.colors))
+        listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    elif settings.palette not in (KEEP, CUSTOM_PALETTE):
+        listed = PALETTE_AXIS.option(settings.palette).instruction
+    else:
+        return []
+    return [
+        f"{lead}Colors: use this palette: {listed}. Color the things already in the prompt and their surroundings (surfaces, walls, clothing) with it, "
+        "naming each color where it appears; never add objects, clothing or accessories to show a color. "
+        "It replaces colors the style, mood or theme suggest, but keep every color the prompt names."
+    ]
+
+
 def direction_rules(settings: EnhanceSettings, *, both_parts: bool = False) -> list[str]:
     """Return the rule that carries the user's free-text direction, or none when there is no direction."""
     if not settings.note:
@@ -1006,6 +1199,8 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     rules.append(STYLE_AXIS.option(settings.style).instruction)
     rules.append(MOOD_AXIS.option(settings.mood).instruction)
     rules.extend(theme_rules(settings))
+    rules.extend(framing_rules(settings))
+    rules.extend(palette_rules(settings))
     rules.extend(detail_rules(settings, shorter=plan.length == "shorter" and not plan.clamped))
     if mode == "video":
         rules.extend(action_rules(settings, context))
