@@ -1,6 +1,6 @@
 # MOSS-Image: macOS (Milestone 2)
 
-**Status:** In progress (2026-10-26). Milestone 1 (Windows and Linux) shipped in `[Unreleased]`; Milestone 2 (macOS through mflux) is open.
+**Status:** In progress (2026-11-01). Milestone 1 (Windows and Linux) shipped in 0.14.0b1; Milestone 2 (macOS through mflux) is implemented and checked on a 32 GB Mac on `feat/moss-mac`; a full release waits for an mflux release with #939.
 
 ## Shipped: Milestone 1, Windows and Linux
 
@@ -47,39 +47,44 @@ Measured numbers (Turbo, 4 steps, 1024x1024 unless stated):
 
 ## Milestone 2: macOS through mflux
 
-mflux-community/mflux#914 (MOSS-Image-SFT support, with an MLX port of the Qwen3.5 text encoder) merged on 2026-10-22, after mflux 0.23.0 (2026-10-16), so 0.23 does not have it and no release does yet. We pin `mflux>=0.22.0,<0.23` on macOS. mflux's MOSS pipeline is text-to-image only: no image input and no LoRA flags.
+### Where mflux stands (0.24.0, checked 2026-10-31)
 
-### 1. Upgrade mflux to the first release with MOSS
+mflux 0.24.0 (2026-10-27) contains #914, and we already pin `mflux>=0.24.0,<0.25` on macOS (f3fb308). From the installed source:
 
-Wait for the first mflux release that contains #914; 0.23 alone brings nothing our families use, so there is no separate 0.23 step. Upgrade to that release as its own commit before any MOSS work: re-run the mflux contract tests, including `tests/contracts/test_mflux_seedvr2_contract.py`, check the Z-Image, Klein, Krea 2 and Ideogram 4 paths for regressions in output and memory, and rebuild the stored quants if the format changes. Note that mflux 0.23 started loading built-in models from pinned Hugging Face commits, so a cached model may need one online run after the upgrade.
+- **Parts.** MOSS-Image SFT and Base in MLX: transformer, Qwen3.5 text encoder (Gated DeltaNet), FLUX.2 VAE with the small decoder. `quantize` 3 to 8 covers the transformer and the text encoder. The text encoder loads only `language_model.*`; the repo's 333 vision-tower tensors stay on disk.
+- **`MOSSImage.generate_image` is text-to-image only** (no start image, start index or scheduler), with mflux callbacks.
+- **LoRAs unmerged** with `bake_lora=False`; the factors keep the file's dtype and the product runs in the activation dtype (bfloat16). Accepted for macOS unless the Mac check shows lost text.
+- **Pinned revision.** mflux pins `OpenMOSS-Team/MOSS-Image-SFT` at `f972bd4`, the same commit as `moss_image.sft`.
+- **Turbo LoRA.** The pinned `akhaliq/MOSS-Image-SFT-4-steps` file has 756 F32 kohya tensors on the six projections of the 42 layers, rank 128; mflux's mapping covers every key.
+- **Curated LoRAs** (headers read 2026-10-31): six of nine load through mflux's own mapping; one is a LoKr with a fused `qkv`, and two use a fused `qkv` and text-embedder layers.
 
-### 2. Long prompts: mflux#920
+### Long prompts: mflux#920
 
-mflux-community/mflux#920 reports all-black images from prompts above about 500 tokens, because the text embeddings go NaN inside a Gated DeltaNet layer: `_gated_delta_rule` inverts `(I - A)` by repeated squaring, which loses precision in fp32 when neighbouring keys in a 64-token chunk are correlated. The reference implementation in transformers uses forward substitution. Check whether the release we pin fixes it. If it does not:
+Not fixed in 0.24.0; #939 (forward substitution in `_gated_delta_rule`) merged to mflux main on 2026-10-27, after the release. On mflux's correlated-key regression input, 0.24.0 returns non-finite values on the Mac GPU and the #939 version is finite (max error 2e-3). Decision: no workaround. MOSS on macOS goes to main and the betas as is (prompts above about 500 tokens render black, which the docs say); the full release waits for the mflux release with #939, and that bump re-runs the long-prompt check.
 
-- refuse or warn on prompts above the limit on macOS, with a message that names the limit, or
-- carry the forward-substitution fix as a patch, if mflux exposes a hook for it.
+### What is built (`feat/moss-mac`)
 
-The Windows and Linux backend keeps its embeddings finite on long prompts; macOS needs the same check.
+- `moss` and `moss-sft` aliases are plain folder names on every platform; the builder, download plan and build records were already platform-neutral. Size labels for darwin.
+- `backends/mac/moss.py`: **staged load** (text encoder alone, encode the job's texts, free it, then transformer and VAE with the LoRAs), so the two are never resident together; **own loop** for text-to-image, image-to-image and the upscale refine, reporting through mflux's callback registry so skip, progress and previews work as for the other families; **stored copies** saved one stage at a time without LoRAs.
+- `backends/mac/moss_lora.py`: our mapping for mflux's LoRA loader, covering every naming the CUDA loader reads (prefixes, Kohya flat names, fused `qkv` split by rows, text embedder, global linears, LoKr), applied in place.
+- Live preview: the FLUX.2 projection after the batch norm and patchify are undone.
+- Memory estimate: the larger stage, without the vision tower. `_IMAGE_WORKING_BYTES` stands in until the Mac check measures it.
+- `utils/moss_build.turbo_lora_for`, shared by both backends.
+- Tests: `tests/contracts/test_mflux_moss_contract.py` (every mflux name used), `tests/backends/mac/test_mac_moss.py` (stage order, loop, save, backend wiring), `tests/backends/mac/test_mac_moss_lora.py` (each layout through the real loader on a tiny transformer).
 
-### 3. The macOS family
+### Mac results (32 GB Mac, 2026-10-31 and 11-01)
 
-- Add `darwin` entries to `model_aliases` for `moss` and `moss-sft`, and size labels. The macOS Models page then lists both rows.
-- Load through mflux with its `quantize` levels, and map the family in the mac image backend, `download_plan.py` and the memory estimate (MLX unified memory).
-- Measure on a Mac with 32 GB: seconds per step at 1024², peak memory at 4 and 8 bits, and live preview.
-- Replace the generic unsupported-model error with the real backend, and update the docs' macOS tabs.
+All checks ran with the real weights; the fanless Mac throttles, so times vary by about 30%.
 
-#### Parity with Windows and Linux
+- **Turbo:** about 25 to 40 s per image at 1024x1024 at q4 and q8, readable text; 2x creative upscale 32 s; 4x creative upscale (576x864 to 2304x3456) 265 s, peaking at 14.5 GiB at q8 once large start images are encoded in tiles without the transformer (the whole-image encode asked for 62 GB). **SFT:** 905 s at 50 steps, q4, with a negative prompt and the layer skip.
+- **Memory (peak):** text-encoder stage 4.2 / 7.9 / 14.8 GiB at q4 / q8 / unquantized; the image stage at 1 MP 5.9 / 8.2 / 12.6 GiB, at 4 MP 8.3 GiB at q8. The estimate's denoiser stage takes a 2 GiB working margin from these.
+- **Found and fixed:** mflux's MOSS VAE decoded the whole image (17.8 GiB at 1 MP, 38 GiB at 4 MP); strip decode gives the same image (PSNR 59.6 dB). Above 2 MP the transformer is also dropped before the decode (13.8 to 8.3 GiB at 4 MP, about 2 s to reload). A fused `qkv` LoKr did not load; it now applies through our wrapper. The second alias's stored copy is hard-linked, as on CUDA.
+- **LoRAs:** PEFT, kohya (the Turbo LoRA), LoKr with a fused `qkv`, and a fused `qkv` plus text-embedder LoRA apply and change the image; the curated MOSS LoRAs list macOS.
+- **Previews, image-to-image, skip:** work. **Long prompt:** a 2,262-token prompt renders black on 0.24.0, as expected.
 
-mflux's MOSS pipeline only does text-to-image, so macOS gets the rest from our side, using mflux for the weights and layers:
+### Left
 
-- **Own MLX denoise loop** for image-to-image and creative upscale, the counterpart of `moss_sampler`, driving mflux's transformer, text encoder and VAE.
-- **Progress, skip and live preview** through that same loop, since mflux's pipeline has no callback.
-- **User LoRAs** through mflux's `LoRALoader.load_and_apply_lora` with our own MOSS key mapping, the way the mac backend already applies LoRAs for Ideogram 4 (`Ideogram4LoRAMapping` passed to the loader). The mapping covers the same file layouts as Windows and Linux, with the same skip-with-a-warning for formats it cannot apply.
-
-### 4. Turbo LoRA through mflux
-
-Check whether mflux's LoRA path applies the Turbo LoRA (kohya-style keys `diffusion_model.layers.{i}.proj.{name}.lora_down/lora_up/alpha`) in FP32 and unmerged. If it only merges, measure the cost to fine text before shipping Turbo on macOS; the fallback is `moss-sft` alone there. User LoRAs follow the same check: unmerged is the goal for them too.
+Bump mflux to the release with #939 as its own commit (re-run the contract tests and the 2,262-token prompt), then archive this proposal.
 
 ### Done when
 
