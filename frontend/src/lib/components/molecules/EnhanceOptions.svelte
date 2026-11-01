@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { CUSTOM_PALETTE } from '$lib/state/promptEnhance';
   import type { EnhanceAxis, EnhanceAxisKey, EnhanceSettings, WorkflowMode } from '$lib/types';
+  import ColorSwatches from './ColorSwatches.svelte';
   import EnhancePicker from './EnhancePicker.svelte';
   import InspectorRow from './InspectorRow.svelte';
 
@@ -21,6 +23,8 @@
 
   /** Matches the server's limit on a direction. */
   const NOTE_MAX_CHARS = 300;
+  /** Matches the server's limit on Custom colours. */
+  const COLORS_MAX = 5;
 
   const video = $derived(mode === 'video');
 
@@ -52,13 +56,18 @@
     const order = axis.options.map((option) => option.slug);
     onchange({ ...settings, [axis.key]: next.sort((a, b) => order.indexOf(a) - order.indexOf(b)) });
   }
+
+  // A palette other than Custom owns no colours, so leaving Custom (or clearing back to Keep) drops them.
+  function choosePalette(slug: string): void {
+    onchange({ ...settings, palette: slug, colors: slug === CUSTOM_PALETTE ? settings.colors : [] });
+  }
 </script>
 
-{#snippet picker(key: EnhanceAxisKey)}
+{#snippet picker(key: EnhanceAxisKey, choose?: (slug: string) => void, swatches?: string[])}
   {@const axis = axisFor(key)}
   {#if axis}
     <InspectorRow label={axis.label} forId={`${idPrefix}-${key}`}>
-      <EnhancePicker {axis} value={String(settings[key])} id={`${idPrefix}-${key}`} {disabled} onchange={(slug) => onchange({ ...settings, [key]: slug })} />
+      <EnhancePicker {axis} value={String(settings[key])} id={`${idPrefix}-${key}`} {disabled} {swatches} onchange={choose ?? ((slug) => onchange({ ...settings, [key]: slug }))} />
     </InspectorRow>
   {/if}
 {/snippet}
@@ -97,6 +106,26 @@
     {@render picker('mood')}
     {@render picker('theme')}
   </section>
+
+  {#if axisFor('shot') || axisFor('angle')}
+    <section class="enhance-section" aria-label="Framing">
+      <h3 class="enhance-title ui-area-label">Framing</h3>
+      {@render picker('shot')}
+      {@render picker('angle')}
+    </section>
+  {/if}
+
+  {#if axisFor('palette')}
+    <section class="enhance-section" aria-label="Color">
+      <h3 class="enhance-title ui-area-label">Color</h3>
+      {@render picker('palette', choosePalette, settings.palette === CUSTOM_PALETTE ? settings.colors : undefined)}
+      {#if settings.palette === CUSTOM_PALETTE}
+        <div class="enhance-colors">
+          <ColorSwatches colors={settings.colors} max={COLORS_MAX} {disabled} onchange={(colors) => onchange({ ...settings, colors })} />
+        </div>
+      {/if}
+    </section>
+  {/if}
 
   {#if axisFor('details')}
     <section class="enhance-section">{@render chips('details', 'Focus on')}</section>
@@ -139,6 +168,8 @@
   .enhance-section { display: grid; gap: 2px; padding: 8px 0; }
   .enhance-section + .enhance-section { border-top: 1px solid var(--color-border-subtle); }
   .enhance-title { margin: 0 0 4px 12px; }
+  .enhance-colors { padding: 2px 8px 4px 116px; }
+  @media (pointer: coarse) { .enhance-colors { padding: 4px 12px; } }
   .enhance-chips { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0 12px; border: 0; }
   .enhance-subtitle { display: flex; width: 100%; align-items: center; gap: 8px; padding: 0; }
   .toggle-all { margin-left: auto; }

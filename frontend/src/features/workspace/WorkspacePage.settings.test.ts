@@ -704,7 +704,7 @@ describe('WorkspacePage last frame', () => {
       context.prompt_enhancer = {
         matrix: {
           axes: [{ key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] }],
-          defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' },
+          defaults: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' },
         },
         model: 'owner/llm', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, error: null,
       };

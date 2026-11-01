@@ -41,6 +41,9 @@ Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but
 | Style | one | Keep; **Photo:** Natural photo, Candid, Street, Analog film, Black & white, Studio portrait, Product, Cinematic; **Art:** Illustration, Anime, Comic, 3D render, Oil painting, Watercolor, Gouache, Sketch, Pixel art, Concept art, Graphic design, Isometric, Claymation, Ukiyo-e, Papercraft | `style` |
 | Mood | one | Keep, Serene, Cozy, Joyful, Romantic, Whimsical, Nostalgic, Melancholic, Mysterious, Eerie, Dramatic, Epic | `mood` |
 | Theme | one | Keep, Zen, Spiritual, Rustic, Sensual, Glamorous, Gothic, Noir, Horror, Dystopian, Fairytale, Mythic, Surreal, Retro, Futuristic, Cyberpunk, Steampunk | `theme` |
+| Shot | one | Keep, Extreme close-up, Close-up, Medium, Full body, Wide, Extreme wide | `shot` |
+| Angle | one | Keep, Eye level, High angle, Low angle, Overhead, Worm's-eye, Dutch angle, Over the shoulder, From behind | `angle` |
+| Palette | one | Keep, Teal & orange, Pastel, Earth tones, Film, Neutrals, Forest, Cool blues, Warm gold, Neon, Jewel tones, Primary, Sunset, Retro, Custom (up to five colours you pick) | `palette`, `colors` |
 | Focus on | any | Lighting, Composition, Camera & viewpoint, Materials & textures, Color palette, Environment, Subject, Expression | `details` |
 | Camera (video) | one | Keep, Auto, Static, Push in, Pull back, Pan, Tilt, Tracking, Orbit, Handheld, Aerial | `camera` |
 | Pace (video) | one | Keep, Slow motion, Slow, Brisk, Fast | `pace` |
@@ -54,6 +57,9 @@ The CLI and prompt files use the key with a short value, such as `film` for Anal
 - **Style** sets the medium. The **Photo** styles ask for a real photograph: a camera or lens, where the light comes from, and natural skin rather than airbrushed skin. They avoid words like "hyperrealistic" or "8k", which push models toward a glossy, rendered look.
 - **Mood** sets the feeling, shown through light, colour, setting and expression rather than named.
 - **Theme** sets the character the image carries, such as zen, noir or cyberpunk, through styling, materials, colour and small details. It never adds people, animals or objects. Time of day and weather aren't themes: write them in your prompt.
+- **Shot** and **Angle** set the framing: how much of the subject the frame holds, and where the camera sits. The rewrite opens with the framing, for example "A low-angle view of …", and describes what that view sees, such as sky behind a low-angle subject. Angles land more often on some models than others: Low angle and Worm's-eye vary most, and the other angles are dependable.
+- **Palette** colours what your prompt already has, such as "a terracotta sofa on an olive green rug", and adds no new objects to carry the colours. It decides the colours over Mood and Theme: Pastel with Eerie stays pastel, and the mood still shows through light, setting and expressions. It differs from **Focus on → Color palette**, which only asks for more description of whatever colours the image has.
+- **Custom** takes up to five colours you pick. The image models follow plain colour names better than codes, so each colour is matched to the nearest plain name, such as petrol blue or coral, and the rewrite uses the names.
 - **Focus on** decides where the rewrite spends its words. With Length Shorter, the picked aspects are kept while the rest is cut.
 - **Camera** and **Pace** shape a video's action. **Auto** lets the enhancer pick a camera move. A faster pace fits more action into the clip. **Secondary motion** describes what moves along with the action: hair, cloth, water, smoke, leaves or dust.
 - **Direction** is a short instruction the enhancer follows.
@@ -96,7 +102,7 @@ For video, one rewrite returns two parts, a **scene** and an **action** (see [Sc
 
 | Option | Shapes |
 |---|---|
-| Style, Mood, Theme, Focus on | Mostly the scene |
+| Style, Mood, Theme, Shot, Angle, Palette, Focus on | Mostly the scene |
 | Camera, Pace, Describe, Sound | The action |
 | Direction, Length | Both |
 
@@ -113,13 +119,14 @@ The default depends on the workflow, and on whether a first frame is set. The ch
 - **Video with a first frame** rewrites the action only when you gave a scene (what the image shows), so it isn't restyled. With a blank scene it writes a short scene too.
 - **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. It uses the previous clip's prompt as context, so it doesn't repeat its actions or lines.
 
-Action only needs a scene; with a blank one, both parts are written. Style, Mood, Theme and Focus on have no effect with Action only, since they shape the scene.
+Action only needs a scene; with a blank one, both parts are written. Style, Mood, Theme, Shot, Angle, Palette and Focus on have no effect with Action only, since they shape the scene.
 
 ## JSON captions (Ideogram 4)
 
 [Ideogram 4](models.md#ideogram-4-instant) reads structured JSON captions. With `ideo`, **Write as: JSON** (`--enhance-format json`) writes a full caption from your prompt: a summary, the look, lighting and colours, the background, one element per thing you named, and the lettering you asked for.
 
 - The same options apply: Style decides photo or artwork, Mood and Theme shape the look, Focus on and Length decide how much is described.
+- A palette's exact colours go into the caption's colour palette, and its colour names into the descriptions of the things in the picture. Shot and Angle are asked for in the camera line. Ideogram 4 often keeps eye level whatever the angle.
 - Quoted text (`"OPEN"`, `'LISBOA'`, `「パン屋」`) and names after *called* or *named* become text elements, copied exactly. Signs you mention without their words may get short words that fit, in the language you name.
 - The caption appears in the **Enhanced** tab, laid out for reading, and you can edit it there.
 - If the enhancer returns no usable caption twice, the run reports it and keeps your prompt.
@@ -129,7 +136,7 @@ Action only needs a scene; with a blank one, both parts are written. Style, Mood
 ## In the Web UI
 
 - **Enhance now:** click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. Enhancing again always starts from your text; **Use mine** drops the Enhanced text.
-- **The popover** groups the options as **Look** (Style, Mood, Theme), **Focus on**, **Motion** and **Sound** for video, and **Output** (Rewrite or Write as, and Length), then Direction. **Reset** puts every option back. **Enhancer** (Fast or Smart) sits next to **Enhance prompt**. Images and video remember their own options.
+- **The popover** groups the options as **Look** (Style, Mood, Theme), **Framing** (Shot, Angle), **Color** (Palette), **Focus on**, **Motion** and **Sound** for video, and **Output** (Rewrite or Write as, and Length), then Direction. With **Custom**, a row of colour dots appears under **Palette**: **+** adds a colour (up to five), tap a dot to change it, and **×** removes it. The popover scrolls when it doesn't fit, with **Enhance prompt** pinned at the bottom. **Reset** puts every option back. **Enhancer** (Fast or Smart) sits next to **Enhance prompt**. Images and video remember their own options.
 - **What Generate sends:** for each part, the Enhanced text when it has any, otherwise your text. The line under the prompt box says **Generate uses the Enhanced text**, with **Use mine** to go back to yours. In video, each part that uses its Enhanced text shows **Uses enhanced** with its own **Use mine**.
 - **Out of date:** if you change your text or switch tabs afterwards, the line under the box says **Out of date**, in either tab. The Enhanced text is still used until you choose **Use mine** or **Re-enhance**.
 - **The last five rewrites:** each time you enhance the same text, the rewrite is kept, up to five. In the **Enhanced** tab, `‹ 2 of 3 ›` steps back and forward through them, and Generate sends the one shown, recording how it was written. The stepper is hidden while auto-enhance is on, while the text is out of date and after you edit the Enhanced text by hand. Enhancing a different text starts a new list. The rewrites are kept in the browser with the rest of the form, not on the server.
@@ -154,6 +161,11 @@ woman:
       note: rain on the pavement
   - prompt: a quiet street at dawn
     enhance: true                  # a general rewrite
+  - prompt: a ceramic teapot on a wooden table
+    enhance:
+      angle: overhead
+      palette: custom
+      colors: ["#1B3A4B", "#E07A5F"]   # quote hex codes
   - prompt: two friends talking at a cafe table
     enhance:
       sound: [ambient, dialogue]   # video with audio on

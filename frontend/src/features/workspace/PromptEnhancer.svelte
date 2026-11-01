@@ -145,6 +145,9 @@
     draft.update(enhanceSettingsKey(draft.state.workflow), remembered ? { ...defaults, partsByWorkflow: remembered } : null);
   }
 
+  // The run row is empty (auto-enhance on, no Smart choice) for the inline variant; no footer is drawn then.
+  const hasFoot = $derived(Boolean(contract.smart) || variant === 'file' || (variant === 'inline' && !draft.state.enhanceAuto));
+
   const changed = $derived(!isDefaultEnhanceSettings(settings, contract.matrix.defaults));
 
   function updateParts(parts: EnhanceParts): void {
@@ -260,7 +263,7 @@
   <Icon name="sparkle" size={13} />Enhance{draft.state.enhanceAuto ? ' · each image' : ''}<Icon name="chevdown" size={12} />
 </button>
 
-{#snippet panel(titled: boolean)}
+{#snippet body(titled: boolean)}
   <div class="enhance-head">
     {#if titled}<h2 class="enhance-heading">Enhance</h2>{/if}
     <button type="button" class="enhance-reset ui-btn ui-btn-sm ui-btn-quiet" disabled={!changed || enhancing} onclick={resetSettings}>Reset</button>
@@ -278,6 +281,10 @@
       onchange={(e) => draft.update('enhanceAuto', (e.currentTarget as HTMLInputElement).checked)}
     />
   </div>
+{/snippet}
+
+<!-- The Enhancer choice and the run button stay in view while the options scroll. -->
+{#snippet foot()}
   <div class="enhance-foot">
     {#if contract.smart}
       <EnhanceChoice label="Enhancer" options={TIER_OPTIONS} value={tier} disabled={enhancing} idPrefix={`ws-enhance-${variant}-model`} onchange={(value) => draft.update('enhanceModel', value)} />
@@ -296,25 +303,25 @@
         </button>
       {/if}
     {/if}
-  </div>
-  {#if variant === 'inline' && !draft.state.enhanceAuto && !enhancing}
-    {#if disabledHint}
-      <p class="ui-help enhance-pad">{disabledHint}</p>
-    {:else if downloadSize}
-      <p class="ui-help enhance-pad">First use downloads ≈{downloadSize}.</p>
-    {:else if fastUndownloaded}
-      <p class="ui-help enhance-pad">First use downloads the model.</p>
+    {#if variant === 'inline' && !draft.state.enhanceAuto && !enhancing}
+      {#if disabledHint}
+        <p class="ui-help enhance-hint">{disabledHint}</p>
+      {:else if downloadSize}
+        <p class="ui-help enhance-hint">First use downloads ≈{downloadSize}.</p>
+      {:else if fastUndownloaded}
+        <p class="ui-help enhance-hint">First use downloads the model.</p>
+      {/if}
     {/if}
-  {/if}
-  {#if variant === 'file'}
-    <p class="ui-help enhance-pad">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
-  {/if}
+    {#if variant === 'file'}
+      <p class="ui-help enhance-hint">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
+    {/if}
+  </div>
 {/snippet}
 
 {#if layout.compact}
-  <!-- A phone: the options as a sheet, like every menu there. -->
-  <Sheet bind:open={panelOpen} title="Prompt enhancer">
-    <div id="ws-enhance-panel" class="enhance-sheet">{@render panel(false)}</div>
+  <!-- A phone: the options as a sheet, like every menu there; the run row is the sheet's footer. -->
+  <Sheet bind:open={panelOpen} title="Prompt enhancer" footer={hasFoot ? foot : undefined}>
+    <div id="ws-enhance-panel" class="enhance-sheet">{@render body(false)}</div>
   </Sheet>
 {:else if panelOpen}
   <div
@@ -324,7 +331,10 @@
     role="dialog"
     aria-label="Prompt enhancer"
   >
-    {@render panel(true)}
+    <div class="enhance-body">{@render body(true)}</div>
+    {#if hasFoot}
+      <div class="enhance-popover-foot">{@render foot()}</div>
+    {/if}
   </div>
 {/if}
 
@@ -339,14 +349,19 @@
 {/if}
 
 <style>
-  /* Never taller or wider than the window: on small screens the options scroll inside the popover. */
-  .enhance-popover { z-index: 70; width: min(368px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; padding: 8px 0 0; border-radius: var(--radius-md); }
+  /* Never taller or wider than the window: on small screens the options scroll inside the popover while the run row stays. */
+  .enhance-popover { z-index: 70; display: flex; flex-direction: column; width: min(368px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: hidden; padding: 0; border-radius: var(--radius-md); }
+  .enhance-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: 8px; }
+  .enhance-popover-foot { flex: none; border-top: 1px solid var(--color-border-subtle); }
   .enhance-sheet { padding: 4px max(4px, env(safe-area-inset-right, 0px)) 12px max(4px, env(safe-area-inset-left, 0px)); }
   .enhance-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; }
   .enhance-heading { margin: 0; font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; }
   .enhance-reset { margin-left: auto; }
   .enhance-pad { padding: 0 12px; }
   .enhance-pad:first-of-type { margin-top: 8px; }
-  .enhance-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px 12px; }
+  /* In the sheet the footer pads itself; in the popover the row carries its own padding. */
+  .enhance-foot { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .enhance-popover-foot .enhance-foot { padding: 10px 12px 12px; }
+  .enhance-hint { flex-basis: 100%; margin: 0; }
   .enhance-spacer { flex: 1; }
 </style>

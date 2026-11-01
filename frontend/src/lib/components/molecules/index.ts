@@ -2,6 +2,7 @@ export { default as EnhanceOptions } from './EnhanceOptions.svelte';
 export { default as EnhanceRewrite } from './EnhanceRewrite.svelte';
 export { default as EnhanceChoice } from './EnhanceChoice.svelte';
 export { default as EnhancePicker } from './EnhancePicker.svelte';
+export { default as ColorSwatches } from './ColorSwatches.svelte';
 export { default as FormField } from './FormField.svelte';
 export { default as Select, type SelectOption, type SelectVariant } from './Select.svelte';
 export { default as ActionMenu, type ActionMenuEntry, type ActionMenuItem } from './ActionMenu.svelte';

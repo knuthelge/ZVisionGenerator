@@ -348,7 +348,7 @@ export interface WorkspaceContext {
 
 // ── Prompt enhancer ────────────────────────────────────────────────────────────
 
-export type EnhanceAxisKey = 'style' | 'mood' | 'theme' | 'details' | 'camera' | 'pace' | 'length' | 'motion' | 'sound';
+export type EnhanceAxisKey = 'style' | 'mood' | 'theme' | 'shot' | 'angle' | 'palette' | 'details' | 'camera' | 'pace' | 'length' | 'motion' | 'sound';
 
 /** Which parts of a video prompt an enhancement writes: the scene and the action, or only the action (the scene is kept as written). */
 export type EnhanceParts = 'both' | 'action';
@@ -357,6 +357,11 @@ export interface EnhanceSettings {
   style: string;
   mood: string;
   theme: string;
+  shot: string;
+  angle: string;
+  palette: string;
+  /** Custom palette's own `#RRGGBB` colours; empty unless `palette` is custom. */
+  colors: string[];
   details: string[];
   length: string;
   /** Video only. */
@@ -414,6 +419,8 @@ export interface EnhanceOptionInfo {
   description: string;
   /** The menu group it is listed under (Style: Photo or Art; Theme: its five groups), or null. */
   group: string | null;
+  /** Palette options only: the `#RRGGBB` swatches that show the palette; empty for Keep and Custom. */
+  swatches?: string[];
 }
 
 export interface PromptEnhancerContract {
@@ -520,7 +527,7 @@ export interface PromptField {
 }
 
 /** An entry's `enhance:` value: off, default options, or the mapping as written. */
-export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey | 'note' | 'parts', string | string[]>>;
+export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey | 'colors' | 'note' | 'parts', string | string[]>>;
 
 export interface DocumentEntry {
   id: string;

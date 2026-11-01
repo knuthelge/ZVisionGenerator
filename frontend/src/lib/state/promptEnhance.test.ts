@@ -26,6 +26,9 @@ import {
   DEFAULT_ENHANCE_SETTINGS,
   enhanceSettingsKey,
   isDefaultEnhanceSettings,
+  CUSTOM_PALETTE,
+  restoredEnhanceSettings,
+  reusedEnhance,
 } from './promptEnhance';
 import { createNdjsonParser } from '$lib/api/promptEnhance';
 import type { DraftState, EnhanceFrame, EnhanceSettings, PromptEnhancerContract } from '$lib/types';
@@ -46,7 +49,7 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
   } as DraftState;
 }
 
-const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
 
 describe('Fast/Smart and Text/JSON', () => {
   const contract = (smart: PromptEnhancerContract['smart']): PromptEnhancerContract =>
@@ -163,7 +166,7 @@ describe('entryEnhanceSpec', () => {
 
 describe('settings helpers', () => {
   it('strips motion for images', () => {
-    expect(settingsPayload({ ...SETTINGS, motion: ['secondary'], camera: 'orbit' }, 'image')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', details: [], length: 'same' });
+    expect(settingsPayload({ ...SETTINGS, motion: ['secondary'], camera: 'orbit' }, 'image')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], details: [], length: 'same' });
     expect(settingsPayload({ ...SETTINGS, camera: 'orbit', pace: 'fast' }, 'video')).toMatchObject({ camera: 'orbit', pace: 'fast' });
     expect(settingsPayload({ ...SETTINGS, motion: ['secondary'] }, 'video').motion).toEqual(['secondary']);
   });
@@ -179,7 +182,7 @@ describe('settings helpers', () => {
   it('fills axes missing from saved settings with contract defaults', () => {
     const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
     const saved = { style: 'photo', details: [], length: 'longer', motion: [], sound: [], note: '' } as unknown as EnhanceSettings;
-    expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep' });
+    expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep' });
   });
 
   it('drops saved values the server no longer offers', () => {
@@ -307,7 +310,7 @@ describe('scene and prompt pair', () => {
 
     it('is sent with a video payload and left out for images and for the browser-only memory', () => {
       const settings = { ...SETTINGS, parts: 'action' as const };
-      expect(settingsPayload(settings, 'video')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', parts: 'action', motion: [] });
+      expect(settingsPayload(settings, 'video')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', parts: 'action', motion: [] });
       expect(settingsPayload(SETTINGS, 'video')).not.toHaveProperty('parts');
     });
   });
@@ -413,5 +416,51 @@ describe('options per mode', () => {
     expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, theme: 'zen' })).toBe(false);
     expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, details: ['lighting'] })).toBe(false);
     expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, note: 'at dusk' })).toBe(false);
+  });
+});
+
+describe('shot, angle and palette', () => {
+  const OWN = ['#1B3A4B', '#e07a5f'];
+
+  it('starts on Keep for shot, angle and palette with no colors, and names the Custom palette', () => {
+    expect(CUSTOM_PALETTE).toBe('custom');
+    expect(DEFAULT_ENHANCE_SETTINGS).toMatchObject({ shot: 'keep', angle: 'keep', palette: 'keep', colors: [] });
+  });
+
+  it('counts a picked shot, angle, palette or colour as not default', () => {
+    expect(isDefaultEnhanceSettings(DEFAULT_ENHANCE_SETTINGS)).toBe(true);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, shot: 'wide' })).toBe(false);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, angle: 'low' })).toBe(false);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, palette: 'earth' })).toBe(false);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, colors: OWN })).toBe(false);
+  });
+
+  it('gives each run its own colors array and fills the new keys of older saved settings', () => {
+    const contract = { matrix: { axes: [], defaults: { ...DEFAULT_ENHANCE_SETTINGS, colors: [] } } } as unknown as PromptEnhancerContract;
+    const result = effectiveEnhanceSettings(state({ enhanceSettings: null }), contract);
+    expect(result.colors).toEqual([]);
+    expect(result.colors).not.toBe(contract.matrix.defaults.colors);
+
+    const saved = { style: 'anime', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } as unknown as EnhanceSettings;
+    expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toMatchObject({ shot: 'keep', angle: 'keep', palette: 'keep', colors: [] });
+  });
+
+  it('sends the colors only with the Custom palette', () => {
+    expect(settingsPayload({ ...SETTINGS, palette: 'earth', colors: OWN }, 'image').colors).toEqual([]);
+    expect(settingsPayload({ ...SETTINGS, palette: 'keep', colors: OWN }, 'video').colors).toEqual([]);
+    expect(settingsPayload({ ...SETTINGS, palette: CUSTOM_PALETTE, colors: OWN }, 'image').colors).toEqual(OWN);
+    expect(settingsPayload({ ...SETTINGS, palette: CUSTOM_PALETTE, colors: OWN }, 'video').colors).toEqual(OWN);
+  });
+
+  it('sends shot, angle, palette and colors for an image', () => {
+    expect(settingsPayload({ ...SETTINGS, shot: 'wide', angle: 'low', palette: 'earth' }, 'image')).toMatchObject({ shot: 'wide', angle: 'low', palette: 'earth', colors: [] });
+  });
+
+  it('restores the Custom palette and its colors from a stored record', () => {
+    const settings = { palette: CUSTOM_PALETTE, colors: OWN, shot: 'wide' };
+    expect(restoredEnhanceSettings(JSON.stringify(settings), 'txt2img')).toMatchObject(settings);
+    const reused = reusedEnhance(JSON.stringify({ settings, model: 'owner/llm', format: 'text' }), 'txt2img');
+    expect(reused?.settings).toMatchObject(settings);
+    expect(reused?.record.settings).toEqual(settings);
   });
 });

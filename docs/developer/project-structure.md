@@ -143,6 +143,7 @@ zvisiongenerator/
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
 │   ├── audio_resample.py          Polyphase resampling of multi-channel audio
+│   ├── color_names.py             Plain colour names for hex codes (nearest by OKLab), for Palette Custom
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
 │   ├── curated_loras.json         The curated list: hand-checked Hugging Face LoRAs, each pinned to a commit, file, size and SHA-256, with its Hugging Face download count

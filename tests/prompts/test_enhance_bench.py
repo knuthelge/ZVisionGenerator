@@ -271,4 +271,8 @@ class TestSheet:
     def test_render_command_fixes_model_seed_and_turns_enhancement_off(self, tmp_path):
         command = render_command(tmp_path / "p.yaml", tmp_path, model="zit", seed=73914826, ratio="2:3", size="s")
         assert command[command.index("-m") + 1] == "zit" and command[command.index("--seed") + 1] == "73914826"
-        assert "--no-enhance" in command
+        assert "--no-enhance" in command and "-q" not in command
+
+    def test_render_command_passes_the_quantize_level(self, tmp_path):
+        command = render_command(tmp_path / "p.yaml", tmp_path, model="krea2", seed=1, ratio="2:3", size="s", quantize=8)
+        assert command[command.index("-q") + 1] == "8"

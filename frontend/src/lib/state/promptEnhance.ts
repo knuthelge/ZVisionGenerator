@@ -37,8 +37,14 @@ export function workflowMode(workflow: Workflow): WorkflowMode {
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'video' : 'image';
 }
 
+/** The Palette option slug that takes the user's own colours. */
+export const CUSTOM_PALETTE = 'custom';
+
+/** The value the add-colour input rests on between picks; unlikely enough that any real pick, even black, differs from it. */
+export const COLOR_ADD_RESET = '#010203';
+
 /** The enhance options when nothing is picked: Keep everywhere, Same length (the server's defaults). */
-export const DEFAULT_ENHANCE_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', details: [], length: 'same', camera: 'keep', pace: 'keep', motion: [], sound: [], note: '' };
+export const DEFAULT_ENHANCE_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], details: [], length: 'same', camera: 'keep', pace: 'keep', motion: [], sound: [], note: '' };
 
 /**
  * What Rewrite starts as: an extension keeps its scene and writes the next action, and so does Image to Video, whose scene
@@ -145,7 +151,7 @@ function offeredOnly(settings: EnhanceSettings, contract: PromptEnhancerContract
 /** The user's last-used options, with axes they never set (e.g. saved before an axis existed) taken from the backend matrix defaults. */
 export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnhancerContract | undefined): EnhanceSettings {
   const defaults = { ...DEFAULT_ENHANCE_SETTINGS, ...contract?.matrix.defaults };
-  const settings = offeredOnly({ ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state[enhanceSettingsKey(state.workflow)] }, contract);
+  const settings = offeredOnly({ ...defaults, colors: [...defaults.colors], details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state[enhanceSettingsKey(state.workflow)] }, contract);
   delete settings.parts;
   return workflowMode(state.workflow) === 'video' ? { ...settings, parts: rememberedParts(state) } : settings;
 }
@@ -162,13 +168,14 @@ export function hasAudio(state: DraftState, supported = true, sourceHasAudio: bo
 
 /**
  * Settings as sent to the backend; `camera`, `pace`, `motion` and `parts` only apply to video, `sound` only to video with audio,
- * and a blank `note` is left out.
+ * `colors` only with the Custom palette, and a blank `note` is left out.
  *
  * The per-workflow Rewrite memory stays in the browser.
  */
 export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, audio = false): Partial<EnhanceSettings> {
   const { camera, pace, motion, sound, note, parts, partsByWorkflow: _remembered, ...rest } = settings;
-  const base: Partial<EnhanceSettings> = note.trim() ? { ...rest, note } : rest;
+  const withColors = { ...rest, colors: rest.palette === CUSTOM_PALETTE ? rest.colors : [] };
+  const base: Partial<EnhanceSettings> = note.trim() ? { ...withColors, note } : withColors;
   if (mode !== 'video') return base;
   const video = parts === undefined ? { ...base, camera, pace, motion } : { ...base, parts, camera, pace, motion };
   return audio ? { ...video, sound } : video;

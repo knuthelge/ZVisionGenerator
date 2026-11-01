@@ -29,12 +29,15 @@
     /** Id of the trigger button, which a row label points at. */
     id: string;
     disabled?: boolean;
+    /** Colours the closed trigger shows; defaults to the chosen option's own swatches (Custom passes the user's colours). */
+    swatches?: string[];
     onchange: (slug: string) => void;
   }
 
-  let { axis, value, id, disabled = false, onchange }: Props = $props();
+  let { axis, value, id, disabled = false, swatches, onchange }: Props = $props();
 
   const current = $derived(axis.options.find((option) => option.slug === value) ?? axis.options[0]);
+  const triggerSwatches = $derived(swatches ?? current?.swatches ?? []);
   const fallback = $derived(axis.default[0] ?? KEEP);
   // A picker that differs from its default is "set": it turns teal, and one with a Keep option gets a clear button.
   const isSet = $derived(value !== fallback);
@@ -78,6 +81,14 @@
   }
 </script>
 
+{#snippet strip(colors: string[])}
+  {#if colors.length > 0}
+    <span class="picker-swatches" aria-hidden="true">
+      {#each colors as hex, index (index)}<span class="picker-swatch" data-swatch={hex} style:background={hex}></span>{/each}
+    </span>
+  {/if}
+{/snippet}
+
 <div class="picker-wrap">
   <button
     bind:this={trigger}
@@ -92,6 +103,7 @@
     onclick={toggle}
   >
     <span class="picker-value" class:keep={value === KEEP}>{current?.label ?? value}</span>
+    {@render strip(triggerSwatches)}
     {#if !clearable}<Icon name="chevdown" size={12} />{/if}
   </button>
   {#if clearable}
@@ -119,7 +131,10 @@
         {@const selected = option.slug === value}
         <button type="button" class="picker-option" role="option" aria-selected={selected} data-slug={option.slug} onclick={() => choose(option.slug)}>
           <span class="picker-tick">{#if selected}<Icon name="check" size={14} />{/if}</span>
-          <span class="picker-name">{option.label}</span>
+          <span class="picker-label">
+            <span class="picker-name">{option.label}</span>
+            {@render strip(option.swatches ?? [])}
+          </span>
           {#if option.description}<span class="picker-desc">{option.description}</span>{/if}
         </button>
       {/each}
@@ -144,6 +159,9 @@
   .picker-option:focus-visible, .picker-option[aria-selected='true'] { background: var(--color-bg-surface-hover); outline: none; }
   @media (hover: hover) { .picker-option:hover { background: var(--color-bg-surface-hover); } }
   .picker-tick { display: grid; place-items: start center; padding-top: 2px; color: var(--color-primary-main); }
+  .picker-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+  .picker-swatches { display: inline-flex; flex: none; gap: 2px; }
+  .picker-swatch { width: 12px; height: 12px; border-radius: 2px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 24%, transparent); }
   .picker-name { font-size: var(--text-ui); font-weight: 600; line-height: 18px; color: var(--color-text-primary); }
   .picker-desc { grid-column: 2; font-size: var(--text-meta); line-height: 1.35; color: var(--color-text-muted); }
 </style>

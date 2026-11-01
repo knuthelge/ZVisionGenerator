@@ -33,6 +33,21 @@ const LENGTH: EnhanceAxis = {
   default: ['same'],
 };
 
+const EARTH = ['#6B4226', '#C8643B', '#6B7032', '#C2A878', '#F3E5C0'];
+const PALETTE: EnhanceAxis = {
+  key: 'palette',
+  label: 'Palette',
+  multi: false,
+  video_only: false,
+  audio_only: false,
+  options: [
+    { slug: 'keep', label: 'Keep', description: "Don't impose one", group: null },
+    { slug: 'earth', label: 'Earth tones', description: 'Browns, terracotta, olive', group: null, swatches: EARTH },
+    { slug: 'custom', label: 'Custom', description: 'Pick your own colours', group: null },
+  ],
+  default: ['keep'],
+};
+
 describe('EnhancePicker', () => {
   let app: Record<string, unknown> | null = null;
   const target = document.createElement('div');
@@ -43,9 +58,9 @@ describe('EnhancePicker', () => {
     document.querySelectorAll('[role="listbox"]').forEach((node) => node.remove());
   });
 
-  function mountPicker(axis: EnhanceAxis, value: string, onchange = vi.fn()): typeof onchange {
+  function mountPicker(axis: EnhanceAxis, value: string, onchange = vi.fn(), extra: Record<string, unknown> = {}): typeof onchange {
     document.body.appendChild(target);
-    app = flushSync(() => mount(EnhancePicker, { target, props: { axis, value, id: 'p', onchange } }));
+    app = flushSync(() => mount(EnhancePicker, { target, props: { axis, value, id: 'p', onchange, ...extra } }));
     return onchange;
   }
 
@@ -109,5 +124,37 @@ describe('EnhancePicker', () => {
     await unmount(app); app = null; target.innerHTML = '';
     mountPicker(LENGTH, 'shorter');
     expect(target.querySelector('[aria-label="Length: back to Keep"]')).toBeNull();
+  });
+
+  const swatchHexes = (root: ParentNode) => Array.from(root.querySelectorAll<HTMLElement>('[data-swatch]')).map((node) => node.dataset.swatch);
+
+  it('shows a swatch strip on palette options that have colours, and none on Keep or Custom', async () => {
+    mountPicker(PALETTE, 'keep');
+    trigger().click();
+    await settle();
+    const bySlug = (slug: string) => options().find((option) => option.dataset.slug === slug) as HTMLElement;
+    expect(swatchHexes(bySlug('earth'))).toEqual(EARTH);
+    expect(swatchHexes(bySlug('keep'))).toEqual([]);
+    expect(swatchHexes(bySlug('custom'))).toEqual([]);
+  });
+
+  it('hides every swatch strip from screen readers', async () => {
+    mountPicker(PALETTE, 'earth');
+    trigger().click();
+    await settle();
+    const strips = Array.from(document.querySelectorAll('.picker-swatches'));
+    expect(strips.length).toBe(2);
+    for (const strip of strips) expect(strip.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('shows the chosen option\'s swatches on the closed trigger, or the ones passed in', async () => {
+    mountPicker(PALETTE, 'earth');
+    expect(swatchHexes(trigger())).toEqual(EARTH);
+    await unmount(app); app = null; target.innerHTML = '';
+    mountPicker(PALETTE, 'earth', vi.fn(), { swatches: ['#111111'] });
+    expect(swatchHexes(trigger())).toEqual(['#111111']);
+    await unmount(app); app = null; target.innerHTML = '';
+    mountPicker(PALETTE, 'custom');
+    expect(swatchHexes(trigger())).toEqual([]);
   });
 });

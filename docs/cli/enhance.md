@@ -23,6 +23,12 @@ ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,camera=tracki
 # Video: keep your scene, rewrite only the action
 ziv-video -m ltx-8 --scene "A fox in a snowy birch forest at dawn." --prompt "it runs" --enhance parts=action
 
+# Framing and colour: a wide shot from a low angle, in earth tones
+ziv-image -m klein9b --prompt "a living room" --enhance shot=wide,angle=low,palette=earth
+
+# Your own colours (up to five hex codes joined with +)
+ziv-image -m klein9b --prompt "a living room" --enhance palette=custom,colors=1b3a4b+e07a5f
+
 # Ideogram 4: write a JSON caption
 ziv-image -m ideo --prompt "a travel poster for Lisbon with the text 'LISBOA'" --enhance-format json
 ```
@@ -36,6 +42,10 @@ ziv-image -m ideo --prompt "a travel poster for Lisbon with the text 'LISBOA'" -
 | `style` | `keep`; photo: `photo`, `candid`, `street`, `film`, `bw`, `portrait`, `product`, `cinematic`; art: `illustration`, `anime`, `comic`, `3d`, `painterly`, `watercolor`, `gouache`, `sketch`, `pixel`, `concept`, `graphic`, `isometric`, `claymation`, `ukiyo-e`, `papercraft` |
 | `mood` | `keep`, `serene`, `cozy`, `joyful`, `romantic`, `whimsical`, `nostalgic`, `melancholic`, `mysterious`, `eerie`, `dramatic`, `epic` |
 | `theme` | `keep`, `zen`, `spiritual`, `rustic`, `sensual`, `glamorous`, `gothic`, `noir`, `horror`, `dystopian`, `fairytale`, `mythic`, `surreal`, `retro`, `futuristic`, `cyberpunk`, `steampunk` |
+| `shot` | `keep`, `extreme-close-up`, `close-up`, `medium`, `full`, `wide`, `extreme-wide` |
+| `angle` | `keep`, `eye-level`, `high`, `low`, `overhead`, `worms-eye`, `dutch`, `over-shoulder`, `behind` |
+| `palette` | `keep`, `teal-orange`, `pastel`, `earth`, `film`, `neutrals`, `forest`, `cool`, `warm`, `neon`, `jewel`, `primary`, `sunset`, `retro`, `custom` |
+| `colors` | Up to five hex codes joined with `+`, such as `1b3a4b+e07a5f`; the `#` is optional. Needs `palette=custom`; with any other palette, or none, it is an error |
 | `details` | Any of `lighting`, `composition`, `camera`, `materials`, `color`, `environment`, `subject`, `expression` |
 | `length` | `shorter`, `same` (default), `longer`, `extra` |
 | `camera` (video) | `keep`, `auto`, `static`, `push-in`, `pull-back`, `pan`, `tilt`, `tracking`, `orbit`, `handheld`, `aerial` |
@@ -44,7 +54,7 @@ ziv-image -m ideo --prompt "a travel poster for Lisbon with the text 'LISBOA'" -
 | `sound` (video with audio) | Any of `ambient`, `effects`, `dialogue`, `music` |
 | `parts` (video) | `both` or `action` |
 
-What each option asks for is in [Prompt enhancer options](../concepts/prompt-enhancer.md#options).
+What each option asks for, including how Custom colours are used, is in [Prompt enhancer options](../concepts/prompt-enhancer.md#options).
 
 ## The other flags
 
@@ -70,6 +80,11 @@ woman:
       note: rain on the pavement
   - prompt: a quiet street at dawn
     enhance: true        # a general rewrite
+  - prompt: a ceramic teapot on a wooden table
+    enhance:
+      angle: overhead
+      palette: custom
+      colors: ["#1B3A4B", "#E07A5F"]   # quote hex codes
 ```
 
 `--enhance` on the command line enhances every prompt and overrides the entries' settings; `--no-enhance` turns all of it off. With `--enhance-format json` and a prompt file, only entries with their own `enhance:` get captions, unless you add `--enhance`.

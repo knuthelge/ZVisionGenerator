@@ -75,6 +75,8 @@ In the **Enhanced** tab, `‹ 2 of 3 ›` at the right steps through the last fi
 - 🕘 **Recent prompts**: bring back a prompt you generated before. See below.
 - **Save…**: append the prompt to a prompt file. See [Save a Workspace prompt](prompts.md#save-a-workspace-prompt).
 
+![The Enhance popover with Shot, Angle and Palette set under Framing and Color](../assets/screenshots/enhance-popover.webp){ width="420" }
+
 **The status line** under the box says what Generate sends and counts the words. It shows **Generate uses the Enhanced text** with **Use mine** to go back to your text; **Out of date** with **Re-enhance** and **Use mine**; or **Enhanced when the job runs** with auto-enhance on. Nothing shows while your own text is sent.
 
 For video, *Compose* has a **Scene** box above the **Action** box. See [Scene and action](../concepts/video.md#scene-and-action).

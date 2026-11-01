@@ -87,5 +87,6 @@
   .enhance-title { margin-bottom: 8px; }
   .enhance-mode { margin-bottom: 10px; }
   .enhance-hint { margin-top: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
-  .enhance-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
+  /* Pinned to the bottom while the options scroll; the negative bottom and padding cover the popover's own padding. */
+  .enhance-actions { position: sticky; bottom: -12px; display: flex; justify-content: flex-end; gap: 6px; margin: 12px -12px -12px; padding: 10px 12px 12px; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); }
 </style>

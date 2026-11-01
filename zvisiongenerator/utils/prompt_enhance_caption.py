@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.utils.prompt_enhance import (
+    ANGLE_AXIS,
     DEFAULT_TEMPERATURE,
+    KEEP,
     MOOD_AXIS,
     PRESERVATION_RULES,
     STYLE_AXIS,
@@ -22,8 +24,12 @@ from zvisiongenerator.utils.prompt_enhance import (
     EnhanceSettings,
     context_rules,
     direction_rules,
+    framing_rules,
+    framing_view,
     generate_raw,
     labelled_prompt,
+    palette_colors,
+    palette_rules,
     perception_rule,
     plan_length,
     prompt_rule,
@@ -164,10 +170,23 @@ _EXAMPLE_TAIL = (
     "OBJECT: Jagged black rocks of the headland below the lighthouse, wet with spray.\n"
     "OBJECT: Rough teal waves breaking into white foam in the foreground."
 )
+_EXAMPLE_ANGLE = "eye-level"
 _EXAMPLE = {
-    "photo": _EXAMPLE_HEAD + "CAMERA: eye-level, 35mm lens, deep depth of field\n" + _EXAMPLE_TAIL,
+    "photo": _EXAMPLE_HEAD + f"CAMERA: {_EXAMPLE_ANGLE}, 35mm lens, deep depth of field\n" + _EXAMPLE_TAIL,
     "art": _EXAMPLE_HEAD + "ART STYLE: gouache illustration, flat layered shapes, visible brush texture\n" + _EXAMPLE_TAIL,
 }
+
+
+def _angle_wording(settings: EnhanceSettings) -> str | None:
+    """Return the chosen camera angle in words ("low angle"), or None when the angle is kept."""
+    return None if settings.angle == KEEP else ANGLE_AXIS.option(settings.angle).label.lower()
+
+
+def _example(branch: str, settings: EnhanceSettings) -> str:
+    """Return the format example for *branch*, with the chosen angle in place of its eye-level so the model does not copy that."""
+    angle = _angle_wording(settings)
+    example = _EXAMPLE[branch]
+    return example if angle is None or settings.angle == "eye-level" else example.replace(_EXAMPLE_ANGLE, angle, 1)
 
 
 @dataclass(frozen=True)
@@ -315,6 +334,9 @@ def _messages(prompt: str, settings: EnhanceSettings, *, lettering: _Lettering, 
         rules.append("COLORS: only black, white and greys.")
     rules.append(MOOD_AXIS.option(settings.mood).instruction + " Show it in AESTHETICS, LIGHTING and COLORS.")
     rules.extend(f"{rule} Show it in AESTHETICS, COLORS and the OBJECT lines." for rule in theme_rules(settings))
+    rules.extend(f'{rule} SUMMARY opens with it ("{framing_view(settings)} of ..."), and so does the {"CAMERA" if branch == "photo" else "ART STYLE"} line.' for rule in framing_rules(settings))
+    if settings.style != "bw":
+        rules.extend(f"{rule} Show it in COLORS and the OBJECT lines." for rule in palette_rules(settings))
     design = _design(prompt)
     if design and branch == "art":
         rules.append(
@@ -341,7 +363,7 @@ def _messages(prompt: str, settings: EnhanceSettings, *, lettering: _Lettering, 
     if lettering.mode != "none":
         format_lines.append('TEXT: "the exact words" | how the lettering looks and where it is')
     closing = "Reply with these labelled lines in this order and nothing else (no JSON, no markdown, no preamble):\n" + "\n".join(format_lines)
-    closing += "\n\nExample of the format for a different prompt (never copy its content):\n" + _EXAMPLE[branch]
+    closing += "\n\nExample of the format for a different prompt (never copy its content):\n" + _example(branch, settings)
     system = system_message("You turn prompts into structured captions for a text-to-image model.", rules, closing)
     return [{"role": "system", "content": system}, {"role": "user", "content": labelled_prompt(prompt)}]
 
@@ -389,10 +411,10 @@ def _assemble(draft: _Draft, prompt: str, settings: EnhanceSettings, lettering: 
     branch, medium = _look(settings, prompt)
     style: dict[str, Any] = {"aesthetics": draft.aesthetics or "detailed, natural", "lighting": draft.lighting or "natural light"}
     if branch == "photo":
-        style |= {"photo": draft.camera or "eye-level, natural perspective", "medium": medium}
+        style |= {"photo": draft.camera or f"{_angle_wording(settings) or 'eye-level'}, natural perspective", "medium": medium}
     else:
         style |= {"medium": medium, "art_style": draft.art_style or medium.replace("_", " ")}
-    palette = [] if settings.style == "bw" else _colors(draft.colors)
+    palette = [] if settings.style == "bw" else list(palette_colors(settings)) or _colors(draft.colors)
     if palette:
         style["color_palette"] = palette
     return {
