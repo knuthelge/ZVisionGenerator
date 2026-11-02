@@ -9,17 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
-from zvisiongenerator.core.video_types import ExtendSource, VideoFileUpscaleRequest
+from zvisiongenerator.core.video_types import ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest
 from zvisiongenerator.upscale_runner import UpscaleSource
-from zvisiongenerator.utils.config import resolve_defaults, resolve_scheduler_class, resolve_upscale_steps, sharpening_amounts
+from zvisiongenerator.utils.config import ltx_version, resolve_defaults, resolve_scheduler_class, resolve_upscale_steps, sharpening_amounts
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
-from zvisiongenerator.utils.paths import resolve_model_path
-from zvisiongenerator.utils.provenance import UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_SEEDVR2, RecordedSettings
+from zvisiongenerator.utils.paths import is_existing_file, is_explicit_local_path, resolve_lora_path, resolve_model_path
+from zvisiongenerator.utils.provenance import UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2, RecordedSettings, optional_int, original_video_workflow
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, SEEDVR2_REPO, SeedVR2Setup
 from zvisiongenerator.utils.upscale import (
     UPSCALE_FACTORS,
     VIDEO_UPSCALE_FACTOR,
+    VIDEO_UPSCALE_SEED,
     UpscaleOption,
     existing_image_denoise,
     seedvr2_options,
@@ -27,12 +28,16 @@ from zvisiongenerator.utils.upscale import (
     upscale_options,
     video_upscale_batch_size,
 )
+from zvisiongenerator.utils.video_model_detect import detect_video_model, known_ltx_repo_version
+from zvisiongenerator.utils.video_upscale import ltx_upscale_problem, ltx_upscale_prompt, ltx_upscale_steps
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 
 NOTICE_SETTINGS_UNKNOWN = "original settings unknown"
 NOTICE_MODEL_NOT_CONFIGURED = "original model not configured, using the default"
 NOTICE_LORA_MISSING = "missing LoRAs left out"
-_UPSCALE_METHODS = (UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_SEEDVR2)
+NOTICE_MODEL_NOT_LTX23 = "original model can't refine, using LTX-2.3"
+NOTICE_LORA_OTHER_MODEL = "LoRAs of the original model left out"
+_UPSCALE_METHODS = (UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_SEEDVR2, UPSCALE_METHOD_LTX)
 
 
 @dataclass(frozen=True)
@@ -50,7 +55,7 @@ class UpscalePlan:
 class VideoUpscalePlan:
     """Everything needed to submit one video upscale job."""
 
-    request: VideoFileUpscaleRequest
+    request: VideoFileUpscaleRequest | LtxVideoUpscaleRequest
     # Job-panel notes on how the job differs from the original, e.g. settings that were not recorded.
     notices: tuple[str, ...] = field(default_factory=tuple)
 
@@ -193,6 +198,89 @@ def plan_video_upscale(source: ExtendSource, recorded_config: Mapping[str, Any] 
     return VideoUpscalePlan(request=request, notices=notices)
 
 
+def ltx_upscale_model(recorded_model: str | None, web_config: WebUiConfig) -> tuple[str, bool]:
+    """Return the LTX-2.3 model that refines a video upscale, and whether it is the one the clip was made with.
+
+    The clip's own model when it is a configured LTX-2.3 model, else the default video model when it is one, else the
+    first configured LTX-2.3 model. LTX-2.5 and other families are passed over: the upscale is tuned on LTX-2.3's refine.
+
+    Raises:
+        ValueError: If no LTX-2.3 model is configured.
+    """
+    candidates = [name for name in web_config.video_model_options if _is_ltx23(name, web_config.app_config)]
+    if recorded_model in candidates:
+        return recorded_model, True
+    choice = preferred_option(web_config.default_models.video, tuple(candidates))
+    if choice is None:
+        raise ValueError("Upscaling a video on this computer needs an LTX-2.3 video model, and none is configured.")
+    return choice, False
+
+
+def _is_ltx23(model_name: str, app_config: dict[str, Any]) -> bool:
+    """Return whether *model_name* is an LTX model outside every version block and not a known LTX-2.5 repo, which makes it LTX-2.3."""
+    model_ref = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+    return detect_video_model(model_ref).family == "ltx" and ltx_version(app_config, model_name) is None and known_ltx_repo_version(model_ref) != "2.5"
+
+
+def _recorded_ltx23(model_name: str, app_config: dict[str, Any]) -> bool:
+    """Return whether a clip's recorded *model_name*, which may no longer be configured, is surely LTX-2.3.
+
+    Unlike ``_is_ltx23``, a name that resolves to neither a known LTX repo nor a local folder is not trusted, since an
+    ``ltx`` in the name alone does not tell the version.
+    """
+    model_ref = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+    known = known_ltx_repo_version(model_ref)
+    if known is not None:
+        return known == "2.3" and ltx_version(app_config, model_name) is None
+    return Path(model_ref).expanduser().is_dir() and _is_ltx23(model_name, app_config)
+
+
+def plan_ltx_video_upscale(source: ExtendSource, recorded_config: Mapping[str, Any] | None, web_config: WebUiConfig) -> VideoUpscalePlan:
+    """Build the LTX upscale request for the checked video *source*, always 2× (macOS).
+
+    The refine runs on the clip's own LTX-2.3 model when it is configured (``ltx_upscale_model``), with the clip's
+    recorded scene and prompt (empty when none was recorded; the scene alone for an extended clip), its seed and the
+    configured refine steps. When the clip was made with LTX-2.3 it also keeps the clip's LoRAs; any that no longer
+    exist locally, or all of them for a clip of another model, are left out with a notice.
+    *recorded_config* is carried on to the result; without it the job says the original settings are unknown.
+
+    Raises:
+        ValueError: If the clip is off the LTX grid or no LTX-2.3 model is configured.
+    """
+    problem = ltx_upscale_problem(source.width, source.height, source.frame_count)
+    if problem is not None:
+        raise ValueError(f"{source.path.name} can't be upscaled: {problem}")
+    app_config = web_config.app_config
+    model_name, own_model = ltx_upscale_model(source.model, web_config)
+    notices: list[str] = []
+    if not recorded_config:
+        notices.append(NOTICE_SETTINGS_UNKNOWN)
+    elif not own_model and source.model is not None:
+        notices.append(NOTICE_MODEL_NOT_LTX23 if source.model in web_config.video_model_options else NOTICE_MODEL_NOT_CONFIGURED)
+    loras: tuple[tuple[str, float], ...] = ()
+    if own_model or (source.model is not None and _recorded_ltx23(source.model, app_config)):
+        loras, dropped_loras = _existing_video_loras(source.lora)
+        if dropped_loras:
+            notices.append(NOTICE_LORA_MISSING)
+    elif source.lora:
+        notices.append(NOTICE_LORA_OTHER_MODEL)
+    recorded_seed = optional_int((recorded_config or {}).get("seed"))
+    request = LtxVideoUpscaleRequest(
+        source=source,
+        recorded_config=recorded_config,
+        output_dir=str(source.path.parent),
+        width=source.width * VIDEO_UPSCALE_FACTOR,
+        height=source.height * VIDEO_UPSCALE_FACTOR,
+        model_name=model_name,
+        model_ref=resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform),
+        prompt=ltx_upscale_prompt(source.scene, source.prompt, extended=original_video_workflow(recorded_config) == "extend"),
+        seed=recorded_seed if recorded_seed is not None else VIDEO_UPSCALE_SEED,
+        steps=ltx_upscale_steps(app_config),
+        loras=loras,
+    )
+    return VideoUpscalePlan(request=request, notices=tuple(notices))
+
+
 def _source_request_fields(source: UpscaleSource, recorded: RecordedSettings) -> dict[str, Any]:
     """Return the request fields both upscale methods take from *source* and its recorded settings."""
     prompt = recorded.prompt or ""
@@ -246,6 +334,31 @@ def _existing_loras(lora: str | None, *, keep_missing: bool = False) -> tuple[li
     return [path for path, _ in kept], [weight for _, weight in kept], len(kept) != len(entries)
 
 
+def _existing_video_loras(lora: str | None) -> tuple[tuple[tuple[str, float], ...], bool]:
+    """Resolve a clip's recorded LoRAs to the local files that still exist.
+
+    Returns:
+        ``(loras, dropped)``: each kept LoRA as ``(path, weight)``, and whether any were left out (missing, remote or unreadable).
+    """
+    if not lora:
+        return (), False
+    try:
+        entries = parse_lora_arg(lora)
+    except ValueError:
+        return (), True
+    resolved = [(_lora_file(name), weight) for name, weight in entries]
+    kept = tuple((path, weight) for path, weight in resolved if path is not None)
+    return kept, len(kept) != len(entries)
+
+
+def _lora_file(name: str) -> str | None:
+    """Return the existing LoRA file *name* resolves to, or ``None``; a bare name not in the LoRA folder resolves to nothing."""
+    path = resolve_lora_path(name)
+    if path == name.strip() and not is_explicit_local_path(path):
+        return None
+    return path if is_existing_file(path) else None
+
+
 def _is_missing_local_file(reference: str) -> bool:
     path = Path(reference).expanduser()
     return path.is_absolute() and not path.exists()
@@ -265,7 +378,7 @@ def video_upscale_size_label(plan: VideoUpscalePlan) -> str:
 def upscale_json_request(body: Any) -> tuple[str, int, str]:
     """Validate a ``POST /api/upscale`` body and return ``(asset_id, factor, method)``.
 
-    ``method`` is optional and defaults to ``creative``.
+    ``method`` is optional and defaults to ``creative``; ``ltx`` is for videos on macOS.
 
     Raises:
         ValueError: If the asset ID, factor or method is missing or malformed.

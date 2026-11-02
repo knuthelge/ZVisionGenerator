@@ -767,7 +767,7 @@ def _ffprobe_data(config=None, *, size=None, rotation=None):
 
 @pytest.fixture
 def video_gallery(monkeypatch):
-    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_file_upscale", lambda: True)
+    monkeypatch.setattr("zvisiongenerator.web.gallery.video_file_upscale_method", lambda: "seedvr2")
 
 
 def _video_asset_json(tmp_path, name, data, web_config=None):
@@ -806,7 +806,7 @@ def test_gallery_video_carries_a_warning_code_without_disabling_the_option(tmp_p
 
 @pytest.mark.parametrize("case", ["unsupported", "no_setup", "no_size"])
 def test_gallery_video_has_no_upscale_menu_without_support_a_setup_or_a_size(tmp_path, monkeypatch, case):
-    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_file_upscale", lambda: case != "unsupported")
+    monkeypatch.setattr("zvisiongenerator.web.gallery.video_file_upscale_method", lambda: None if case == "unsupported" else "seedvr2")
     web_config = _web_config(tmp_path, seedvr2=None if case == "no_setup" else _video_setup())
     data = _ffprobe_data() if case == "no_size" else _ffprobe_data(size=(768, 448))
 
@@ -830,7 +830,7 @@ def video_upscale_client(upscale_client, monkeypatch):
     submitted: list[dict] = []
     upscale_client.web_config.seedvr2 = _video_setup()
     source = make_extend_source(path=upscale_client.root / "clip.mp4", width=768, height=448, frame_count=121, scene=None, prompt=None)
-    monkeypatch.setattr(web_server, "supports_video_file_upscale", lambda: True)
+    monkeypatch.setattr(web_server, "video_file_upscale_method", lambda: "seedvr2")
     monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
     monkeypatch.setattr(web_server, "read_video_upscale_source", lambda path: (source, None))
 
@@ -861,13 +861,13 @@ def test_video_upscale_route_queues_the_job(video_upscale_client):
     request = submitted["request"]
     assert (request.width, request.height, request.batch_size, request.upscale_model, request.softness) == (1536, 896, 29, "seedvr2-7b", 0.0)
     assert Path(request.output_dir) == video_upscale_client.root
-    assert submitted["context"]["media_type"] == "video"
+    assert (submitted["context"]["media_type"], payload["upscale_method"]) == ("video", "seedvr2")
     assert submitted["context"]["settings"] == {}
     assert video_upscale_client.image_submitted == []
 
 
 def _video_unsupported(client):
-    client.monkeypatch.setattr(web_server, "supports_video_file_upscale", lambda: False)
+    client.monkeypatch.setattr(web_server, "video_file_upscale_method", lambda: None)
 
 
 def _video_without_setup(client):
@@ -950,3 +950,255 @@ def test_video_upscale_plan_carries_the_clips_settings_and_softness():
     assert (plan.request.width, plan.request.height) == (2560, 1408)
     assert (plan.request.batch_size, plan.request.softness, plan.request.recorded_config) == (9, 0.25, {"workflow": "txt2vid"})
     assert plan.notices == ()
+
+
+# --- macOS: LTX upscale of a gallery video ---
+
+_LTX_ALIASES = {"ltx-4": "dgrauet/ltx-2.3-mlx-q4@a", "ltx-8": "dgrauet/ltx-2.3-mlx-q8@b", "ltx25-4": "MarceloFSO/ltx-2.5-mlx-q4-fast@c", "h3": "MiniMax/H3@d"}
+
+
+def _ltx_web_config(tmp_path, *, video_model_options=("ltx-8", "ltx-4", "ltx25-4", "h3"), default_video="ltx-8", steps=2):
+    web_config = _web_config(tmp_path, video_model_options=video_model_options, default_models=WebUiDefaultModels(image="zit", video=default_video))
+    web_config.app_config = {
+        **web_config.app_config,
+        "model_aliases": _LTX_ALIASES,
+        "model_labels": {"ltx-4": {"name": "LTX-2.3 4-bit", "download_size_label": {"darwin": "26 GB"}}},
+        "video_model_presets": {"ltx": {"upscale": {"existing_video_steps": steps}, "versions": {"ltx25": {"aliases": ["ltx25-4"]}}}},
+    }
+    return web_config
+
+
+def _ltx_source(tmp_path, **overrides):
+    values = dict(path=tmp_path / "clip.mp4", width=768, height=448, frame_count=121, model="ltx-4", scene="A harbour at dawn.", prompt="A man walks his bicycle.")
+    return make_extend_source(**{**values, **overrides})
+
+
+class TestLtxVideoUpscalePlan:
+    def test_the_clip_is_refined_with_its_own_model_prompt_and_seed_at_twice_the_size(self, tmp_path):
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path), {"workflow": "txt2vid", "seed": 11}, _ltx_web_config(tmp_path))
+
+        request = plan.request
+        assert (request.width, request.height, request.model_name, request.model_ref) == (1536, 896, "ltx-4", "dgrauet/ltx-2.3-mlx-q4@a")
+        assert (request.prompt, request.seed, request.steps) == ("A harbour at dawn. A man walks his bicycle.", 11, 2)
+        assert (Path(request.output_dir), request.recorded_config) == (tmp_path, {"workflow": "txt2vid", "seed": 11})
+        assert plan.notices == ()
+
+    def test_the_configured_steps_are_used(self, tmp_path):
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path), {"workflow": "txt2vid"}, _ltx_web_config(tmp_path, steps=1))
+
+        assert plan.request.steps == 1
+
+    def test_a_clip_without_recorded_settings_gets_the_default_model_an_empty_prompt_and_the_fixed_seed(self, tmp_path):
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path, model=None, scene=None, prompt=None), None, _ltx_web_config(tmp_path))
+
+        assert (plan.request.model_name, plan.request.prompt, plan.request.seed) == ("ltx-8", "", 42)
+        assert plan.notices == (upscale_api.NOTICE_SETTINGS_UNKNOWN,)
+
+    @pytest.mark.parametrize(
+        ("recorded_model", "notice"), [("ltx25-4", upscale_api.NOTICE_MODEL_NOT_LTX23), ("h3", upscale_api.NOTICE_MODEL_NOT_LTX23), ("gone", upscale_api.NOTICE_MODEL_NOT_CONFIGURED)]
+    )
+    def test_a_clip_made_with_another_model_is_refined_with_the_default_ltx_2_3_model(self, tmp_path, recorded_model, notice):
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path, model=recorded_model), {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.model_name == "ltx-8"
+        assert plan.notices == (notice,)
+
+    def test_an_extended_clip_is_refined_with_its_scene_alone(self, tmp_path):
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path), {"workflow": "extend"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.prompt == "A harbour at dawn."
+
+    def test_an_upscale_of_an_extended_clip_is_refined_with_its_scene_alone(self, tmp_path):
+        recorded = {"workflow": "upscale", "source": {"workflow": "extend"}}
+
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path), recorded, _ltx_web_config(tmp_path))
+
+        assert plan.request.prompt == "A harbour at dawn."
+
+    def test_without_an_ltx_2_3_default_the_first_ltx_2_3_model_is_used(self, tmp_path):
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path, model=None), {"workflow": "txt2vid"}, _ltx_web_config(tmp_path, default_video="h3"))
+
+        assert plan.request.model_name == "ltx-8"
+
+    def test_without_any_ltx_2_3_model_it_is_refused(self, tmp_path):
+        with pytest.raises(ValueError, match="LTX-2.3"):
+            upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path), {"workflow": "txt2vid"}, _ltx_web_config(tmp_path, video_model_options=("ltx25-4", "h3"), default_video="h3"))
+
+    def test_the_clip_keeps_its_loras_on_its_own_model_and_missing_ones_are_left_out(self, tmp_path):
+        kept = tmp_path / "style.safetensors"
+        kept.write_bytes(b"")
+        source = _ltx_source(tmp_path, lora=f"{kept}:0.8,{tmp_path / 'gone.safetensors'}:1")
+
+        plan = upscale_api.plan_ltx_video_upscale(source, {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.loras == ((str(kept), 0.8),)
+        assert plan.notices == (upscale_api.NOTICE_LORA_MISSING,)
+
+    def test_a_clip_of_another_model_leaves_its_loras_out_with_a_notice(self, tmp_path):
+        kept = tmp_path / "style.safetensors"
+        kept.write_bytes(b"")
+        source = _ltx_source(tmp_path, model="ltx25-4", lora=f"{kept}:0.8")
+
+        plan = upscale_api.plan_ltx_video_upscale(source, {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.loras == ()
+        assert plan.notices == (upscale_api.NOTICE_MODEL_NOT_LTX23, upscale_api.NOTICE_LORA_OTHER_MODEL)
+
+    def test_a_clip_of_an_unconfigured_ltx_2_3_model_keeps_its_loras(self, tmp_path):
+        kept = tmp_path / "style.safetensors"
+        kept.write_bytes(b"")
+        source = _ltx_source(tmp_path, model="dgrauet/ltx-2.3-mlx-q4", lora=f"{kept}:0.8")
+
+        plan = upscale_api.plan_ltx_video_upscale(source, {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.model_name == "ltx-8"
+        assert plan.request.loras == ((str(kept), 0.8),)
+
+    def test_a_clip_of_a_removed_ltx_alias_leaves_its_loras_out_since_its_version_is_unknown(self, tmp_path):
+        kept = tmp_path / "style.safetensors"
+        kept.write_bytes(b"")
+        source = _ltx_source(tmp_path, model="ltx25-gone", lora=f"{kept}:0.8")
+
+        plan = upscale_api.plan_ltx_video_upscale(source, {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.loras == ()
+        assert plan.notices == (upscale_api.NOTICE_MODEL_NOT_CONFIGURED, upscale_api.NOTICE_LORA_OTHER_MODEL)
+
+    def test_a_bare_lora_name_missing_from_the_lora_folder_is_left_out_whatever_the_working_folder_holds(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "style").write_bytes(b"")
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / "data")
+
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path, lora="style:0.8"), {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.loras == ()
+        assert plan.notices == (upscale_api.NOTICE_LORA_MISSING,)
+
+    def test_a_lora_folder_is_left_out(self, tmp_path):
+        folder = tmp_path / "style"
+        folder.mkdir()
+
+        plan = upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path, lora=f"{folder}:0.8"), {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+        assert plan.request.loras == ()
+
+    @pytest.mark.parametrize(("width", "frames"), [(770, 121), (768, 124)])
+    def test_a_clip_off_the_ltx_grid_is_refused(self, tmp_path, width, frames):
+        with pytest.raises(ValueError, match="can't be upscaled"):
+            upscale_api.plan_ltx_video_upscale(_ltx_source(tmp_path, width=width, frame_count=frames), None, _ltx_web_config(tmp_path))
+
+
+@pytest.fixture
+def ltx_gallery(monkeypatch):
+    state = SimpleNamespace(downloaded=True, fit=None)
+    monkeypatch.setattr("zvisiongenerator.web.gallery.video_file_upscale_method", lambda: "ltx")
+    monkeypatch.setattr("zvisiongenerator.web.gallery.video_model_downloaded", lambda *_args, **_kwargs: state.downloaded)
+    monkeypatch.setattr("zvisiongenerator.web.gallery.accelerator_memory_budget_or_none", lambda: object())
+    monkeypatch.setattr("zvisiongenerator.utils.model_memory.clip_memory_fit", lambda *_args, **_kwargs: state.fit)
+    return state
+
+
+_LTX_CLIP = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "model": "ltx-4", "width": 768, "height": 448, "frame_count": 121}
+
+
+def test_gallery_video_offers_the_ltx_2x_option_on_macos(tmp_path, ltx_gallery):
+    upscale = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(_LTX_CLIP), _ltx_web_config(tmp_path))["upscale"]
+
+    assert (upscale["factors"], upscale["seedvr2"]) == ([], None)
+    assert upscale["ltx"] == {
+        "options": [{"factor": 2, "width": 1536, "height": 896, "allowed": True, "reason": None, "warning": None, "warning_code": None}],
+        "model": "LTX-2.3 4-bit",
+        "downloaded": True,
+        "download_size_label": None,
+    }
+
+
+def test_gallery_ltx_option_names_the_first_use_download_while_the_model_is_missing(tmp_path, ltx_gallery):
+    ltx_gallery.downloaded = False
+
+    ltx = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(_LTX_CLIP), _ltx_web_config(tmp_path))["upscale"]["ltx"]
+
+    assert (ltx["downloaded"], ltx["download_size_label"]) == (False, "26 GB")
+
+
+@pytest.mark.parametrize("status", ["tight", "too_large"])
+def test_gallery_ltx_option_is_warned_when_the_clip_may_not_fit(tmp_path, ltx_gallery, status):
+    ltx_gallery.fit = {"status": status, "required_gb": 27.0, "budget_gb": 25.0}
+
+    option = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(_LTX_CLIP), _ltx_web_config(tmp_path))["upscale"]["ltx"]["options"][0]
+
+    assert (option["warning"], option["warning_code"], option["allowed"]) == (SEEDVR2_MEMORY_WARNING, "memory", True)
+
+
+@pytest.mark.parametrize(
+    ("config", "web_config_overrides"),
+    [
+        ({**_LTX_CLIP, "frame_count": 124}, {}),
+        ({**_LTX_CLIP, "width": 770}, {}),
+        (_LTX_CLIP, {"video_model_options": ("ltx25-4", "h3"), "default_video": "h3"}),
+    ],
+    ids=["off-grid frames", "off-grid size", "no ltx-2.3 model"],
+)
+def test_gallery_video_has_no_ltx_option_when_it_cannot_run(tmp_path, ltx_gallery, config, web_config_overrides):
+    upscale = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(config), _ltx_web_config(tmp_path, **web_config_overrides))["upscale"]
+
+    assert upscale is None
+
+
+@pytest.fixture
+def ltx_upscale_client(upscale_client, monkeypatch):
+    submitted: list[dict] = []
+    web_config = _ltx_web_config(upscale_client.root)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    source = _ltx_source(upscale_client.root)
+    monkeypatch.setattr(web_server, "video_file_upscale_method", lambda: "ltx")
+    monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(web_server, "read_video_upscale_source", lambda path: (source, {"workflow": "txt2vid", "seed": 5}))
+
+    def _submit(**kwargs):
+        submitted.append(kwargs)
+        return "job-ltx"
+
+    monkeypatch.setattr(web_server.web_runner, "submit_ltx_video_upscale_job", _submit)
+    monkeypatch.setattr(web_server.web_runner, "submit_video_file_upscale_job", lambda **_kwargs: pytest.fail("the SeedVR2 job must not be submitted on macOS"))
+    (upscale_client.root / "clip.mp4").write_bytes(b"\x00")
+    return SimpleNamespace(client=upscale_client.client, root=upscale_client.root, monkeypatch=monkeypatch, submitted=submitted)
+
+
+def test_ltx_video_upscale_route_queues_the_ltx_job(ltx_upscale_client):
+    response = ltx_upscale_client.client.post("/api/upscale", json={"asset_id": "clip.mp4", "factor": 2, "method": "ltx"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert (payload["job_id"], payload["workflow"], payload["media_type"], payload["meta"], payload["supported_controls"]) == ("job-ltx", "upscale", "video", "2× → 1536×896", ["quit"])
+    assert (payload["model"], payload["model_label"], payload["upscale_method"]) == ("ltx-4", "LTX-2.3 4-bit", "ltx")
+    request = ltx_upscale_client.submitted[0]["request"]
+    assert (request.model_name, request.steps, request.seed) == ("ltx-4", 2, 5)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"method": "seedvr2"}, {"method": "creative"}, {"factor": 4}],
+    ids=["seedvr2 on macos", "creative", "4x"],
+)
+def test_ltx_video_upscale_route_refusals(ltx_upscale_client, body):
+    response = ltx_upscale_client.client.post("/api/upscale", json={"asset_id": "clip.mp4", "factor": 2, "method": "ltx", **body})
+
+    assert response.status_code == 422
+    assert ltx_upscale_client.submitted == []
+
+
+def test_ltx_video_upscale_route_refuses_ltx_on_a_platform_that_upscales_with_seedvr2(video_upscale_client):
+    response = _post_video(video_upscale_client, method="ltx")
+
+    assert response.status_code == 422
+    assert video_upscale_client.submitted == []
+
+
+def test_the_ltx_method_is_refused_for_an_image(upscale_client):
+    _write_png(upscale_client.root / "a.png", config={"prompt": "a barn", "model": "zit"})
+
+    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2, "method": "ltx"})
+
+    assert response.status_code == 422
+    assert upscale_client.submitted == []

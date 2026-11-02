@@ -118,20 +118,23 @@ class TestPlatformFlagsReadTheMap:
 
 
 class TestVideoFileUpscaleCapability:
-    def test_an_upscaler_with_a_video_method_supports_it(self, monkeypatch):
+    def test_an_upscaler_with_a_video_method_upscales_with_seedvr2(self, monkeypatch):
         monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: MagicMock(spec=["upscale_image", "upscale_video"]))
 
-        assert backends_module.supports_video_file_upscale() is True
+        assert (backends_module.video_file_upscale_method(), backends_module.supports_video_file_upscale()) == ("seedvr2", True)
 
-    def test_an_upscaler_without_a_video_method_does_not(self, monkeypatch):
+    def test_macos_upscales_with_ltx_when_its_seedvr2_engine_has_no_video_method(self, monkeypatch):
         monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: MagicMock(spec=["upscale_image"]))
+        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
 
-        assert backends_module.supports_video_file_upscale() is False
+        assert (backends_module.video_file_upscale_method(), backends_module.supports_video_file_upscale()) == ("ltx", True)
 
-    def test_no_upscaler_does_not(self, monkeypatch):
+    @pytest.mark.parametrize("platform", ["linux", "freebsd"])
+    def test_other_platforms_without_a_video_method_have_none(self, monkeypatch, platform):
         monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: None)
+        monkeypatch.setattr(backends_module.sys, "platform", platform)
 
-        assert backends_module.supports_video_file_upscale() is False
+        assert (backends_module.video_file_upscale_method(), backends_module.supports_video_file_upscale()) == (None, False)
 
 
 class TestFamilyAvailability:

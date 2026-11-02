@@ -35,7 +35,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
 | **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video | ++e++ |
 | **Extend** | Opens a video in Extend Video | ++e++ |
-| **Upscale** | Upscales an image 2× or 4×, or a video 2× (Windows and Linux) | ++x++ then ++2++ or ++4++ |
+| **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
 | **Download** | Saves the file to this device | ++d++ |
 | Copy prompt | Copies the prompt to the clipboard | ++c++ |
 | Delete | Deletes the file, after asking (++shift+delete++ skips asking) | ++delete++ |
@@ -70,7 +70,7 @@ A target the model it opens on can't use is greyed, with the reason beside it, s
 
 ### Upscale a video
 
-On Windows and Linux, **Upscale** on a video offers one item, such as **2× → 1536×896**, and makes `<name>_2x.mp4` with SeedVR2, keeping the frames, frame rate and sound. A size that has to go one frame at a time is marked **· very slow**. See [Upscaling an existing video](../concepts/upscaling.md#upscaling-an-existing-video).
+**Upscale** on a video offers one item, such as **2× → 1536×896**, and makes `<name>_2x.mp4`, keeping the frames, frame rate and sound. Windows and Linux use SeedVR2, and mark a size that has to go one frame at a time **· very slow**. macOS uses LTX and offers the item for LTX clips. A size that may not fit memory is marked **· high memory**. See [Upscaling an existing video](../concepts/upscaling.md#upscaling-an-existing-video).
 
 ### Upscale an image
 

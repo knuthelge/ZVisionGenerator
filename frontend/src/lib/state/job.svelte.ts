@@ -240,6 +240,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     id: snapshot.id,
     workflow: snapshot.workflow,
     media_type: snapshot.media_type,
+    upscale_method: snapshot.upscale_method,
     prompt: snapshot.prompt,
     model: snapshot.model,
     model_label: snapshot.model_label,

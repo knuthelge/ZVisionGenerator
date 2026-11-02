@@ -89,6 +89,29 @@ class VideoFileUpscaleRequest:
 
 
 @dataclass(frozen=True)
+class LtxVideoUpscaleRequest:
+    """Everything one LTX upscale of an existing video file needs (macOS): the checked clip, its recorded settings and the refine.
+
+    *recorded_config* is the payload embedded in the clip (``None`` when it has none), carried on to the result. *width*
+    and *height* are the output size. *model_name* is the LTX model that refines the clip, *model_ref* its resolved
+    reference; *prompt* is what the refine is told the clip shows (empty when nothing was recorded) and *steps* the refine steps.
+    *loras* are the LoRAs the refine loads, each as ``(path, weight)``.
+    """
+
+    source: ExtendSource
+    recorded_config: Mapping[str, Any] | None
+    output_dir: str
+    width: int
+    height: int
+    model_name: str
+    model_ref: str
+    prompt: str
+    seed: int
+    steps: int
+    loras: tuple[tuple[str, float], ...] = ()
+
+
+@dataclass(frozen=True)
 class ExtendSegment:
     """The generated part of an extension: its video and, when the source has sound, its audio as a WAV file.
 

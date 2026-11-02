@@ -29,7 +29,7 @@ from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_vid
 from zvisiongenerator.built_models import ensure_built_model
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.progress_events import exception_message
-from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
+from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.downloads import (
     DETACHED,
@@ -51,7 +51,7 @@ from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.seedvr2_loader import load_seedvr2
 from zvisiongenerator.upscale_runner import run_upscale, upscale_prompts
-from zvisiongenerator.video_file_upscale_runner import run_video_file_upscale
+from zvisiongenerator.video_file_upscale_runner import run_ltx_video_upscale, run_video_file_upscale
 from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
@@ -421,6 +421,26 @@ class WebRunner:
             context=dict(context or {}),
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_video_file_upscale_request(request=request, progress_callback=progress_callback, control_signal=control_signal),
+        )
+
+    def submit_ltx_video_upscale_job(
+        self,
+        *,
+        request: LtxVideoUpscaleRequest,
+        config: dict[str, Any],
+        admission_check: Callable[[], None] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Queue the job that upscales an existing video file with LTX (macOS); the worker downloads and loads the model and refines the clip."""
+        control_signal = SkipSignal()
+        return self._submit_job(
+            job_type="upscale",
+            exclusive=True,
+            control_signal=control_signal,
+            supported_controls=UPSCALE_SUPPORTED_CONTROLS,
+            context=dict(context or {}),
+            admission_check=admission_check,
+            target_factory=lambda progress_callback: self._run_ltx_video_upscale_request(request=request, config=config, progress_callback=progress_callback, control_signal=control_signal),
         )
 
     def submit_dummy_job(self, *, total_steps: int = 5, delay_seconds: float = 0.25) -> str:
@@ -864,6 +884,38 @@ class WebRunner:
             return
         upscaler, model = _load_seedvr2_with_progress(request.upscale_model, progress_callback, mode="video")
         run_video_file_upscale(upscaler, model, request, progress_callback=progress_callback, skip_signal=control_signal)
+
+    def _run_ltx_video_upscale_request(
+        self,
+        *,
+        request: LtxVideoUpscaleRequest,
+        config: dict[str, Any],
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> None:
+        """Download and load the LTX model for upscale inside the worker thread, then upscale the video file once; Quit stops it between steps and decoded chunks."""
+        if control_signal.pending() == "quit":
+            progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
+            return
+        if not self._ensure_downloads(
+            video_plan(request.model_ref, family="ltx", config=config, model_name=request.model_name, upscale=True),
+            mode="video",
+            role="model",
+            model=request.model_name,
+            total_iterations=1,
+            progress_callback=progress_callback,
+            control_signal=control_signal,
+        ):
+            return
+        progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name})
+        backend = get_video_backend("ltx")
+        model, _model_info = backend.load_model(
+            request.model_ref,
+            low_memory=True,
+            loras=list(request.loras) or None,
+            **video_load_options("ltx", config, request.model_name, upscale=True, quiet=True),
+        )
+        run_ltx_video_upscale(backend, model, request, progress_callback=progress_callback, skip_signal=control_signal)
 
     def _run_video_request(
         self,

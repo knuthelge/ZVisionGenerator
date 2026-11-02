@@ -530,7 +530,7 @@ Hand testing after M2 found two problems with H3's `--upscale 2` on Windows and 
 
 **Built on this branch now:** a Last frame control in the Web UI for H3, for first and last frame parity with the CLI.
 
-**Kept gap:** H3 has no upscale on macOS. The Mac video upscale plan is [video-upscale-existing.md](video-upscale-existing.md).
+**Kept gap:** H3 has no upscale on macOS. The Mac video upscale plan is [video-upscale-existing.md](archive/video-upscale-existing.md).
 
 ### Phase 3: macOS (tested afterwards on a Mac)
 

@@ -49,7 +49,6 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 
 ## Code hygiene (no user impact)
 
-- `backends/__init__.py` `__all__` omits `convert_h3_checkpoint`, `supports_video_audio`, `supports_video_extend` and `supports_video_file_upscale`, which other modules import.
 - Dead config key `video_model_presets.h3.diffusers.attention` (`config.yaml`, `utils/h3_preset.py`): parsed and validated, never read.
 - Dead code: `utils/h3_memory.h3_extend_window_frames` (duplicates `video_extend.window_frames`), `web_runner.WebRunner.get_job_result_path`, `job_contract.ACTIVE_STATUSES`, the job snapshot field `supports_controls` (duplicates `supported_controls`), `backends/cuda/image/backend._make_skip_callback`, the `GET /docs/assets/{asset_name}` route (always 404 once installed), the frontend `progress_text` SSE handler, `draft.reset()`.
 - Duplicated helpers: `backends/mac/video.py` `_snapshot_download` repeats `utils/hf_snapshot.snapshot_download`; `workflows/video_stages.py` handles a `CalledProcessError` that `splice_clips` can never raise while `strip_audio` and `embed_mp4_config` still raise it.

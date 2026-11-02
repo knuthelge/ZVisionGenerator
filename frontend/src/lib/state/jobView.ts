@@ -139,9 +139,15 @@ export function isVideoUpscale(job: ActiveJobState): boolean {
   return job.workflow === 'upscale' && job.media_type === 'video';
 }
 
-/** What one progress unit is called: a "Batch" of frames for a video upscale, a "Step" of denoising otherwise. */
+/** Whether the job is a video upscale whose progress counts batches of frames (SeedVR2); the LTX upscale counts steps. */
+function countsBatches(job: ActiveJobState): boolean {
+  if (!isVideoUpscale(job)) return false;
+  return job.upscale_method ? job.upscale_method === 'seedvr2' : job.stepPhase !== 'video_file_refine';
+}
+
+/** What one progress unit is called: a "Batch" of frames for a SeedVR2 video upscale, a "Step" otherwise. */
 export function stepUnit(job: ActiveJobState): 'Batch' | 'Step' {
-  return isVideoUpscale(job) ? 'Batch' : 'Step';
+  return countsBatches(job) ? 'Batch' : 'Step';
 }
 
 export function itemNoun(job: ActiveJobState): 'image' | 'video' {
@@ -539,14 +545,14 @@ export function positionLabel(job: ActiveJobState): string {
 
 /**
  * The estimate for the rest of the job, or why there is none yet. Single-item jobs never get one, except a video upscale,
- * whose one item reports the time left from its batches and has none once the last batch is done.
+ * whose one item reports the time left from its batches (or steps) and has none once the last one is done.
  */
 export function etaLabel(job: ActiveJobState): string {
   if (!isActive(job) || isPaused(job) || jobPhase(job) !== 'generate' || job.connection === 'reconnecting') return '';
   const batches = isVideoUpscale(job);
   if (iterations(job).total < 2 && !batches) return '';
   if (job.remaining > 0) return timeLeft(job.remaining);
-  if (batches) return job.totalSteps > 0 && job.currentStep >= job.totalSteps ? '' : 'Estimate after the first batch';
+  if (batches) return job.totalSteps > 0 && job.currentStep >= job.totalSteps ? '' : `Estimate after the first ${countsBatches(job) ? 'batch' : 'step'}`;
   return `Estimate after the first ${itemNoun(job)}`;
 }
 

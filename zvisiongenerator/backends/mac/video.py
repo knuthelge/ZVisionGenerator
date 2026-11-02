@@ -23,7 +23,9 @@ from zvisiongenerator.utils.video_extend import CARRY_FRAMES, EXTEND_FRAME_STEP,
 from zvisiongenerator.utils.lora_files import readable_lora_files
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 from zvisiongenerator.utils.video_splice import build_segment_command, write_pcm16_wav
-from zvisiongenerator.utils.video_tail import read_source_tail
+from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_FACTOR
+from zvisiongenerator.utils.video_tail import read_source_tail, stream_frames
+from zvisiongenerator.utils.video_upscale import ltx_upscale_problem, upscale_progress_units
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -56,6 +58,12 @@ _LORA_FAMILY = "ltx"
 _DEFAULT_LORA_MODE = "unfused"
 # Sample rate the audio VAE encoder reads.
 _AUDIO_ENCODER_RATE = 16000
+# A file upscale encodes the clip in tiles of this many pixels and frames, with this much overlap. The encoder's own tiles
+# (768 px, 80 frames) make the encode the largest step of an upscale; these keep it below the decode, at no visible cost.
+_UPSCALE_ENCODE_TILE_PIXELS = 512
+_UPSCALE_ENCODE_TILE_FRAMES = 48
+_UPSCALE_ENCODE_OVERLAP_PIXELS = 64
+_UPSCALE_ENCODE_OVERLAP_FRAMES = 16
 
 
 def _use_low_ram_streaming(low_memory: bool, memory_bytes: int | None, threshold_bytes: int = _LOW_RAM_THRESHOLD_BYTES) -> bool:
@@ -455,6 +463,38 @@ def _free_dit(pipe: Any) -> None:
     aggressive_cleanup()
 
 
+def _count_frames(chunks: Iterable[Any], counter: list[int], interrupt: Callable[[], None] | None = None) -> Iterator[Any]:
+    """Yield decoded chunks ``(B, 3, T, H, W)`` unchanged, adding their frames to ``counter[0]`` and calling *interrupt* after each."""
+    for chunk in chunks:
+        counter[0] += chunk.shape[2]
+        yield chunk
+        if interrupt is not None:
+            interrupt()
+
+
+def _stream_decode(pipe: Any, video_latent: Any, command: list[str], *, fps: float, drop_frames: int = 0, interrupt: Callable[[], None] | None = None) -> int:
+    """Decode *video_latent* in tiles and stream it to the ffmpeg *command*, without its first *drop_frames* frames.
+
+    Under ``low_memory`` the transformer is released first, so it does not sit beside the decoder at its peak.
+    *interrupt* is called between decoded chunks; raising from it stops the decode and closes ffmpeg.
+
+    Returns:
+        The frames written.
+    """
+    from ltx_core_mlx.model.video_vae.video_vae import _compute_decode_tiling, _ffmpeg_sink, decode_cache_limit, stream_chunks_to_ffmpeg
+
+    if pipe.low_memory and pipe.dit is not None:
+        _free_dit(pipe)
+
+    decoder = pipe.video_decoder_block.load()
+    written = [0]
+    with decode_cache_limit():
+        chunks = decoder.tiled_decode(video_latent, _compute_decode_tiling(tuple(video_latent.shape), frame_rate=fps))
+        with _ffmpeg_sink(command) as proc:
+            stream_chunks_to_ffmpeg(_count_frames(_drop_leading_frames(chunks, drop_frames), written, interrupt), proc)
+    return written[0]
+
+
 def _decode_window_segment(pipe: Any, video_latent: Any, audio_latent: Any, target: _SegmentTarget, *, fps: float) -> None:
     """Decode an extension window and write only its new part: the video to ffmpeg, the sound to a WAV file.
 
@@ -464,12 +504,7 @@ def _decode_window_segment(pipe: Any, video_latent: Any, audio_latent: Any, targ
     """
     import mlx.core as mx
     import numpy as np
-    from ltx_core_mlx.model.video_vae.video_vae import _compute_decode_tiling, _ffmpeg_sink, decode_cache_limit, stream_chunks_to_ffmpeg
 
-    if pipe.low_memory and pipe.dit is not None:
-        _free_dit(pipe)
-
-    decoder = pipe.video_decoder_block.load()
     command = build_segment_command(
         target.width,
         target.height,
@@ -479,10 +514,7 @@ def _decode_window_segment(pipe: Any, video_latent: Any, audio_latent: Any, targ
         color_primaries=target.color_primaries,
         color_trc=target.color_trc,
     )
-    with decode_cache_limit():
-        chunks = decoder.tiled_decode(video_latent, _compute_decode_tiling(tuple(video_latent.shape), frame_rate=fps))
-        with _ffmpeg_sink(command) as proc:
-            stream_chunks_to_ffmpeg(_drop_leading_frames(chunks, CARRY_FRAMES), proc)
+    _stream_decode(pipe, video_latent, command, fps=fps, drop_frames=CARRY_FRAMES)
 
     if target.audio_path is None:
         return
@@ -856,6 +888,181 @@ def _generate(
     return Path(output_path)
 
 
+class _RefineProgress:
+    """Fill the pipeline's ``stepwise`` slot for a file upscale: the refine's start calls *on_start*, and every refine step *on_step*; either may raise to stop it."""
+
+    def __init__(self, on_start: Callable[[], None], on_step: Callable[[], None]) -> None:
+        self._on_start = on_start
+        self._on_step = on_step
+
+    def bind(self, *, stage: int, **_: Any) -> Callable[[int, int, Any, float], None]:
+        """Return the ``on_step`` callable of a stage, calling *on_start* when the refine (stage 2) binds it, just before its first step.
+
+        The latent geometry and decoder arguments are unused.
+        """
+        if stage == 2:
+            self._on_start()
+
+        def on_step(_step_idx: int, _total: int, _x0: Any, _sigma: float) -> None:
+            self._on_step()
+
+        return on_step
+
+
+def _encoder_tiling() -> Any:
+    """Return the encoder tiling of a file upscale (``_UPSCALE_ENCODE_TILE_*``)."""
+    from ltx_core_mlx.model.video_vae.tiling import SpatialTilingConfig, TemporalTilingConfig, TilingConfig
+
+    return TilingConfig(
+        spatial_config=SpatialTilingConfig(tile_size_in_pixels=_UPSCALE_ENCODE_TILE_PIXELS, tile_overlap_in_pixels=_UPSCALE_ENCODE_OVERLAP_PIXELS),
+        temporal_config=TemporalTilingConfig(tile_size_in_frames=_UPSCALE_ENCODE_TILE_FRAMES, tile_overlap_in_frames=_UPSCALE_ENCODE_OVERLAP_FRAMES),
+    )
+
+
+def _encode_upscale_video(pipe: Any, source: ExtendSource) -> Any:
+    """Return the patchified VAE latent of the whole clip, ``(1, F*H*W, 128)``, encoded in the upscale's tiles.
+
+    Raises:
+        RuntimeError: If the clip does not decode to its probed frame count.
+    """
+    import mlx.core as mx
+    from ltx_core_mlx.utils.memory import aggressive_cleanup
+    from ltx_pipelines_mlx.utils.media_io import video_preprocess
+
+    with contextlib.closing(stream_frames(source.path, width=source.width, height=source.height)) as frames:
+        pixels = video_preprocess(frames, source.height, source.width)
+    # Evaluated once, so the float32 copy behind the lazy bf16 cast does not stay alive through the tiled encode.
+    mx.eval(pixels)
+    if pixels.shape[2] != source.frame_count:
+        raise RuntimeError(f"{source.path.name} decoded to {pixels.shape[2]} frames, but its probe reports {source.frame_count}.")
+    tiling = _encoder_tiling()
+
+    def _encode(encoder: Any) -> Any:
+        latent = encoder.tiled_encode(pixels, tiling).astype(mx.bfloat16)
+        mx.eval(latent)
+        return latent
+
+    latent = pipe.image_conditioner(_encode, free_after=pipe.low_memory)
+    tokens = pipe.video_patchifier.patchify(latent)[0]
+    mx.eval(tokens)
+    if pipe.low_memory:
+        aggressive_cleanup()
+    return tokens
+
+
+def _encode_upscale_audio(pipe: Any, source: ExtendSource, token_count: int) -> Any:
+    """Return the clip's sound as audio tokens ``(1, token_count, 128)``: encoded silence for a clip without readable sound."""
+    import numpy as np
+    from ltx_core_mlx.utils.audio import load_audio
+
+    duration = source.frame_count / source.fps
+    audio = load_audio(str(source.path), target_sample_rate=_AUDIO_ENCODER_RATE, start_time=source.video_start, max_duration=duration) if source.has_audio else None
+    if audio is None:
+        return _encode_track_audio(pipe, np.zeros((2, round(duration * _AUDIO_ENCODER_RATE)), dtype=np.float32), token_count)
+    return _encode_audio_tokens(pipe, _pad_with_silence(audio.waveform, round(duration * audio.sample_rate)), audio.sample_rate, token_count)
+
+
+def _pad_with_silence(waveform: Any, samples: int) -> Any:
+    """Return *waveform* ``(1, channels, n)`` padded with silence to *samples*, so a short track does not leave latent zeros at the end."""
+    import mlx.core as mx
+
+    short = samples - waveform.shape[-1]
+    if short <= 0:
+        return waveform
+    return mx.concatenate([waveform, mx.zeros((*waveform.shape[:-1], short), dtype=waveform.dtype)], axis=-1)
+
+
+def _upscale_stage1(video_tokens: Any, audio_tokens: Any, latent_dims: tuple[int, int, int]) -> Any:
+    """Wrap the encoded clip as the stage-1 result the pipeline resumes from; it rebuilds the rest for the request."""
+    from ltx_pipelines_mlx.distilled import Stage1Result
+
+    return Stage1Result(
+        video_tokens=video_tokens,
+        audio_tokens=audio_tokens,
+        generated_keyframes=None,
+        latent_dims=latent_dims,
+        resolved_images=[],
+        video_embeds=None,
+        audio_embeds=None,
+        relay_mask=None,
+        relay_audio_mask=None,
+        x0_model=None,
+    )
+
+
+def _upscale_file(
+    model: _LtxModel,
+    source: ExtendSource,
+    *,
+    prompt: str,
+    seed: int,
+    steps: int,
+    video_path: Path,
+    progress: Callable[[int, int], None],
+    interrupt: Callable[[], None],
+) -> int:
+    """Encode the clip, upsample its latent 2x, refine it in *steps* distilled steps and stream the decode to *video_path*.
+
+    The encoded clip stands in for the half-size render of a two-stage generation, through the pipeline's resume path,
+    so stage 2 runs exactly as in the in-run upscale. The clip's sound is held frozen while the video is refined.
+
+    Returns:
+        The frames written.
+    """
+    from ltx_core_mlx.components.patchifiers import compute_video_latent_shape
+    from ltx_core_mlx.utils.memory import aggressive_cleanup
+    from ltx_core_mlx.utils.positions import compute_audio_token_count
+
+    pipe = model.pipeline
+    total = upscale_progress_units(steps)
+    done = 0
+
+    def advance() -> None:
+        nonlocal done
+        interrupt()
+        done += 1
+        progress(done, total)
+
+    latent_dims = compute_video_latent_shape(source.frame_count, source.height, source.width)
+    video_tokens = _encode_upscale_video(pipe, source)
+    audio_tokens = _encode_upscale_audio(pipe, source, compute_audio_token_count(source.frame_count, frame_rate=source.fps))
+    interrupt()
+    # The first unit ends when the refine starts, so it also holds the model loads and the prompt encode before step 1.
+    pipe.stepwise = _RefineProgress(on_start=advance, on_step=advance)
+    pipe._source_audio_tokens = audio_tokens  # noqa: SLF001
+    try:
+        video_latent, _ = pipe.generate_two_stage(
+            prompt=prompt,
+            height=source.height * VIDEO_UPSCALE_FACTOR,
+            width=source.width * VIDEO_UPSCALE_FACTOR,
+            num_frames=source.frame_count,
+            frame_rate=source.fps,
+            seed=seed,
+            stage2_steps=steps,
+            stage1=_upscale_stage1(video_tokens, audio_tokens, latent_dims),
+        )
+    finally:
+        pipe._source_audio_tokens = None  # noqa: SLF001
+        pipe.stepwise = None
+    del video_tokens, audio_tokens
+    command = build_segment_command(
+        source.width * VIDEO_UPSCALE_FACTOR,
+        source.height * VIDEO_UPSCALE_FACTOR,
+        source.fps_text,
+        video_path,
+        color_space=source.color_space,
+        color_primaries=source.color_primaries,
+        color_trc=source.color_trc,
+    )
+    interrupt()
+    written = _stream_decode(pipe, video_latent, command, fps=source.fps, interrupt=interrupt)
+    if pipe.low_memory:
+        pipe.vae_decoder = None
+        aggressive_cleanup()
+    progress(total, total)
+    return written
+
+
 class LtxVideoBackend:
     """Video backend using ltx-pipelines-mlx (dgrauet/ltx-2-mlx)."""
 
@@ -1020,6 +1227,63 @@ class LtxVideoBackend:
             end_image_path=kwargs.get("end_image"),
             audio_track=audio_track,
         )
+
+    def upscale_video(
+        self,
+        model: Any,
+        source: ExtendSource,
+        *,
+        prompt: str,
+        seed: int,
+        steps: int,
+        video_path: str | Path,
+        progress: Callable[[int, int], None] | None = None,
+        interrupt: Callable[[], None] | None = None,
+    ) -> int:
+        """Upscale a clip 2x with the model's spatial upsampler and a short refine, into the video-only file *video_path*.
+
+        The clip is encoded, its latent upsampled 2x and refined in *steps* distilled steps (the end of the stage-2
+        schedule) with the clip's sound held, then decoded in tiles straight to the file. The frame count, frame rate
+        and colour tags are the clip's; the sound is not written.
+
+        Args:
+            model: Handle returned by ``load_model`` with ``upscale=True``.
+            source: The checked clip: sides that are multiples of 32 and an 8k+1 frame count.
+            prompt: What the refine is told the clip shows (the scene and the prompt it was made with), or empty.
+            seed: Random seed of the refine.
+            steps: Refine steps, 1 to the length of the stage-2 schedule.
+            video_path: The video-only file to write.
+            progress: Called as ``progress(done, total)`` when the refine starts (after the encode and the model
+                setup), after each refine step and after the decode (``upscale_progress_units(steps)`` units).
+            interrupt: Called after the encode and each refine step, before the decode and between decoded chunks;
+                raising from it stops the upscale and frees the model.
+
+        Returns:
+            The frames written.
+
+        Raises:
+            ValueError: If the model was not loaded for upscale, uses the diffusion video decoder, or the clip's
+                size or frame count is off the LTX grid.
+            RuntimeError: If the clip cannot be read or the encoder fails.
+        """
+        if not model.upscale:
+            raise ValueError("Upscaling a video file needs the model loaded for upscale (it uses the spatial upsampler).")
+        if model.pipeline.video_decoder_block.video_decoder == "diffusion":
+            raise ValueError("Upscaling a video file is not supported with the diffusion video decoder.")
+        problem = ltx_upscale_problem(source.width, source.height, source.frame_count)
+        if problem is not None:
+            raise ValueError(problem)
+        with _generation_scope(model):
+            return _upscale_file(
+                model,
+                source,
+                prompt=prompt,
+                seed=seed,
+                steps=steps,
+                video_path=Path(video_path),
+                progress=progress or (lambda _done, _total: None),
+                interrupt=interrupt or (lambda: None),
+            )
 
     def extend_video(
         self,

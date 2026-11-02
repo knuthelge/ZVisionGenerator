@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "accelerator_free_bytes",
+    "convert_h3_checkpoint",
     "convert_ltx_checkpoint",
     "create_matte_chain",
     "create_prompt_enhancer",
@@ -46,11 +47,15 @@ __all__ = [
     "release_accelerator_memory",
     "supports_seedvr2",
     "supports_stored_quants",
+    "supports_video_audio",
+    "supports_video_extend",
+    "supports_video_file_upscale",
     "supports_video_upscale_review",
     "video_capabilities",
     "video_download_plan",
     "video_family_available",
     "video_family_on_platform",
+    "video_file_upscale_method",
 ]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
@@ -251,9 +256,27 @@ def get_seedvr2_upscaler() -> "SeedVR2Upscaler | None":
     return _SEEDVR2_UPSCALERS[sys.platform]
 
 
+# Platforms that upscale a video file with their LTX video backend (spatial upsampler and a short refine) instead of SeedVR2.
+_LTX_VIDEO_FILE_UPSCALE_PLATFORMS = frozenset({"darwin"})
+
+
+def video_file_upscale_method() -> str | None:
+    """Return how this platform upscales a video file: ``seedvr2`` (the PyTorch core), ``ltx`` (macOS) or ``None``.
+
+    The Mac's SeedVR2 engine has no video path at the sizes the app makes, so macOS refines the clip with LTX instead.
+    """
+    from zvisiongenerator.utils.provenance import UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2
+
+    if hasattr(get_seedvr2_upscaler(), "upscale_video"):
+        return UPSCALE_METHOD_SEEDVR2
+    if sys.platform in _LTX_VIDEO_FILE_UPSCALE_PLATFORMS and "ltx" in _VIDEO_BACKENDS_MAP.get(sys.platform, {}):
+        return UPSCALE_METHOD_LTX
+    return None
+
+
 def supports_video_file_upscale() -> bool:
-    """Return whether this platform's SeedVR2 upscaler can upscale a video file (the PyTorch core can; the Mac one cannot)."""
-    return hasattr(get_seedvr2_upscaler(), "upscale_video")
+    """Return whether this platform can upscale a video file, by any method."""
+    return video_file_upscale_method() is not None
 
 
 # --- Accelerator memory ---

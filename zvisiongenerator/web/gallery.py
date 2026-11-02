@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -15,14 +16,16 @@ from urllib.parse import quote, unquote, urlencode
 
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import supports_video_extend, supports_video_file_upscale
+from zvisiongenerator.backends import accelerator_memory_budget_or_none, supports_video_extend, video_file_upscale_method
 from zvisiongenerator.core.ideogram4 import is_json_caption
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.enhance_record import enhance_record_summary
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
-from zvisiongenerator.utils.paths import is_existing_file
+from zvisiongenerator.utils.paths import is_existing_file, resolve_model_path
 from zvisiongenerator.utils.provenance import (
     UPSCALE_METHOD_CREATIVE,
+    UPSCALE_METHOD_LTX,
+    UPSCALE_METHOD_SEEDVR2,
     UPSCALE_WORKFLOW,
     RecordedSettings,
     image_prompt_text,
@@ -33,14 +36,17 @@ from zvisiongenerator.utils.provenance import (
     read_png_config,
     recorded_settings,
 )
-from zvisiongenerator.utils.config import model_capabilities
+from zvisiongenerator.downloads import video_model_downloaded
+from zvisiongenerator.utils.config import model_capabilities, model_display_name, model_download_size_label
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
 from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedvr2_options, seedvr2_video_option, upscale_options, upscale_output_size
 from zvisiongenerator.utils.video_probe import ffprobe_json, parse_probe
 from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
+from zvisiongenerator.utils.video_upscale import ltx_upscale_problem, ltx_video_option
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
+from zvisiongenerator.web.upscale_api import ltx_upscale_model
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
 
@@ -363,7 +369,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params, doseq=True)}",
         "details": _asset_details_json(asset),
         "enhance": _asset_enhance_json(asset),
-        "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else _video_upscale_json(asset, web_config.seedvr2),
+        "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else _video_upscale_json(asset, web_config, requested_model),
         "extend": _asset_extend_json(asset) if asset.kind == "video" and video_extend else None,
     }
 
@@ -691,15 +697,45 @@ def _seedvr2_upscale_json(options: list[UpscaleOption], setup: SeedVR2Setup | No
     }
 
 
-def _video_upscale_json(asset: GalleryAsset, setup: SeedVR2Setup | None) -> dict[str, Any] | None:
-    """Return the upscale menu for a video: one SeedVR2 2× option, or ``None`` where it is unsupported or the size is unknown.
+def _video_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, recorded_model: str | None) -> dict[str, Any] | None:
+    """Return the upscale menu for a video: one 2× option by this platform's method, or ``None`` where it can't be offered.
 
-    The size is the recorded one, else the displayed size ffprobe reported. The option is never disabled, only warned.
+    Windows and Linux offer SeedVR2; macOS offers LTX (``ltx``), for clips on the LTX grid while an LTX-2.3 model is
+    configured. The size is the recorded one, else the displayed size ffprobe reported. The option is never disabled,
+    only warned. ``None`` where the platform has no video upscale or the size is unknown.
     """
-    if setup is None or asset.width is None or asset.height is None or not supports_video_file_upscale():
+    method = video_file_upscale_method()
+    if asset.width is None or asset.height is None:
         return None
-    option = seedvr2_video_option(asset.width, asset.height, setup.tier, budget_bytes=setup.budget_bytes)
-    return {"factors": [], "seedvr2": _seedvr2_upscale_json([option], setup)}
+    if method == UPSCALE_METHOD_SEEDVR2 and web_config.seedvr2 is not None:
+        option = seedvr2_video_option(asset.width, asset.height, web_config.seedvr2.tier, budget_bytes=web_config.seedvr2.budget_bytes)
+        return {"factors": [], "seedvr2": _seedvr2_upscale_json([option], web_config.seedvr2)}
+    if method == UPSCALE_METHOD_LTX:
+        ltx = _ltx_upscale_json(asset, web_config, recorded_model)
+        return None if ltx is None else {"factors": [], "seedvr2": None, "ltx": ltx}
+    return None
+
+
+def _ltx_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, recorded_model: str | None) -> dict[str, Any] | None:
+    """Return the LTX part of a video's upscale menu, or ``None`` for a clip off the LTX grid or without an LTX-2.3 model."""
+    width, height = asset.width or 0, asset.height or 0
+    frames = asset.frame_count
+    if ltx_upscale_problem(width, height, frames if frames is not None else 9):
+        return None
+    try:
+        model_name, _ = ltx_upscale_model(recorded_model, web_config)
+    except ValueError:
+        return None
+    app_config = web_config.app_config
+    model_ref = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
+    option = ltx_video_option(width, height, frames, model_ref=model_ref, model_name=model_name, app_config=app_config, budget=accelerator_memory_budget_or_none())
+    downloaded = video_model_downloaded(model_ref, family="ltx", config=app_config, model_name=model_name)
+    return {
+        "options": [asdict(option)],
+        "model": model_display_name(app_config, model_name),
+        "downloaded": downloaded,
+        "download_size_label": None if downloaded else model_download_size_label(app_config, model_name),
+    }
 
 
 def _source_with_asset_id(root: Path, source: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -28,7 +28,7 @@ Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2
 | Load-time memory check for video | n/a | yes (`estimate_ltx_cuda_system_memory`) | 5 |
 | Prompt enhancer | yes, 2.4 GB download | yes, 9 GB download | 10 |
 | Offer to install a missing ffmpeg | Homebrew, MacPorts | winget, apt, dnf, pacman | 9 |
-| Upscale an existing video | proposed, macOS only ([video-upscale-existing](../video-upscale-existing.md)) | not planned yet | when it ships |
+| Upscale an existing video | proposed, macOS only ([video-upscale-existing](video-upscale-existing.md)) | not planned yet | when it ships |
 
 Same on both, nothing to do: the CLI, the Web UI (queue, gallery, prompt builder, config, file picker, Models page), `ziv-model` and the LoRA import, size presets, accelerator memory release, and the LTX-2 LoRA format (diffusers 0.41's `_convert_non_diffusers_ltx2_lora_to_diffusers` converts the official `diffusion_model.*` layout that macOS loads).
 
@@ -385,7 +385,7 @@ diffusers 0.41.0 ships `Ideogram4Pipeline`, and both official repos are already 
 - ~~Which attribute holds the LTX-2 audio sample rate in diffusers 0.41 (step 2).~~ Answered (2026-10-14): `pipeline.vocoder.config.output_sampling_rate`.
 - ~~Whether Ideogram 4 on CUDA should use the NF4 diffusers repo or the same FP8 repo as macOS (step 13).~~ Answered (2026-10-16): the NF4 repo. It loads as is and `supports_quantize: false` holds on both platforms, each with its one repo.
 - ~~Which PyTorch SeedVR2 to vendor for step 12: ByteDance's reference code or numz's node.~~ Answered (2026-10-17): numz's inference core, without its ComfyUI node files. See the evidence table and Alternatives considered.
-- Whether "Upscale an existing video" gets a CUDA step here when [it ships](../video-upscale-existing.md) on macOS. The building blocks exist: `LTX2LatentUpsamplePipeline` and step 3's `LTX2Pipeline(latents=, sigmas=)` refine.
+- Whether "Upscale an existing video" gets a CUDA step here when [it ships](video-upscale-existing.md) on macOS. The building blocks exist: `LTX2LatentUpsamplePipeline` and step 3's `LTX2Pipeline(latents=, sigmas=)` refine.
 - ~~Whether the configured repo includes the latent upsampler, and whether `LTX2Pipeline` accepts `latents=` plus `sigmas=` for the refine stage (step 3).~~ Answered (2026-10-14): the repo has no upsampler, which is loaded from `Lightricks/LTX-2.3`, and `LTX2Pipeline` accepts both.
 - Whether the per-backend capability override in step 1 is worth adding, or the fix should ship directly.
 - How much quality q4 costs for LTX on CUDA (step 5). Both levels are offered; q4 is the one that fits a 32 GB machine.

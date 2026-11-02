@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- **Upscale an existing video on macOS**: **Upscale → 2×** in the viewer and the **⋯** menu refines an LTX clip at twice the size with LTX, keeping its frames, frame rate and sound (`video_model_presets.ltx.upscale.existing_video_steps`)
+
 ## [0.14.0b3] - 2026-11-01
 
 ### Added

@@ -1768,3 +1768,217 @@ class TestResolveModelDir:
         _resolve_model_dir("o/r@abc", packs={}, find_local_dir=MagicMock(return_value=None), download=download, allow_patterns=("*.json", "model*.safetensors"))
 
         download.assert_called_once_with(repo_id="o/r", revision="abc", allow_patterns=["*.json", "model*.safetensors"])
+
+
+# ---------------------------------------------------------------------------
+# File upscale: the encoded clip resumes stage 2 of the distilled pipeline
+# ---------------------------------------------------------------------------
+
+_UP_WIDTH, _UP_HEIGHT, _UP_FRAMES = 768, 448, 121
+
+
+@pytest.fixture
+def up(ltx, monkeypatch, tmp_path):
+    """Extend the ``ltx`` fixture with the frame reader, the encoder tiling and a runner for ``upscale_video``."""
+    ltx.tiling = MagicMock()
+    ltx.tiling.TilingConfig.side_effect = lambda **fields: SimpleNamespace(**fields)
+    ltx.tiling.SpatialTilingConfig.side_effect = lambda *, tile_size_in_pixels, tile_overlap_in_pixels: ("spatial", tile_size_in_pixels, tile_overlap_in_pixels)
+    ltx.tiling.TemporalTilingConfig.side_effect = lambda *, tile_size_in_frames, tile_overlap_in_frames: ("temporal", tile_size_in_frames, tile_overlap_in_frames)
+    monkeypatch.setitem(sys.modules, "ltx_core_mlx.model.video_vae.tiling", ltx.tiling)
+    ltx.distilled.Stage1Result = lambda **fields: SimpleNamespace(**fields)
+    ltx.media_io.video_preprocess.return_value = SimpleNamespace(shape=(1, 3, _UP_FRAMES, _UP_HEIGHT, _UP_WIDTH))
+    ltx.frames = MagicMock(side_effect=lambda path, *, width, height: (frame for frame in [np.zeros((height, width, 3), np.uint8)]))
+    monkeypatch.setattr("zvisiongenerator.backends.mac.video.stream_frames", ltx.frames)
+    ltx.chunks = _chunks([48, 48, 25])
+    ltx.clip_samples = round(_UP_FRAMES / 24.0 * 16000)
+    ltx.audio_io.load_audio.return_value = SimpleNamespace(waveform=SimpleNamespace(shape=(1, 2, ltx.clip_samples), dtype="float32"), sample_rate=16000)
+    ltx.video_path = tmp_path / "video.mp4"
+    ltx.seen = {}
+
+    def pipeline(*, low_memory: bool = True, steps_run: int = 2) -> MagicMock:
+        pipe = _pipeline(ltx, low_memory=low_memory)
+        pipe.dit = object()
+        pipe.video_patchifier.patchify.return_value = ("video_tokens", (16, 14, 24))
+        pipe.audio_patchifier.patchify.side_effect = _audio_patchify
+        pipe.audio_conditioner.side_effect = lambda fn, free_after: fn("audio_encoder", "audio_processor")
+        pipe.video_decoder_block.video_decoder = "conv"
+        pipe.video_decoder_block.load.return_value.tiled_decode.side_effect = lambda latent, tiling: ltx.chunks
+        ltx.encoder.tiled_encode.return_value = MagicMock(name="latent")
+
+        def generate_two_stage(**kwargs):
+            ltx.seen.update(kwargs=kwargs, audio_during=pipe._source_audio_tokens)
+            on_step = pipe.stepwise.bind(latent_frames=16, stage=2)
+            for index in range(steps_run):
+                on_step(index, steps_run, None, 0.5)
+            return SimpleNamespace(shape=(1, 128, 16, 28, 48)), "audio_latent"
+
+        pipe.generate_two_stage.side_effect = generate_two_stage
+        return pipe
+
+    def run(pipe=None, *, source=None, steps=2, handle=None, progress=None, interrupt=None):
+        pipe = pipe or pipeline(steps_run=steps)
+        written = LtxVideoBackend().upscale_video(
+            handle or _handle(pipe, upscale=True),
+            source or make_extend_source(width=_UP_WIDTH, height=_UP_HEIGHT, frame_count=_UP_FRAMES),
+            prompt="a harbour at dawn",
+            seed=42,
+            steps=steps,
+            video_path=ltx.video_path,
+            progress=progress,
+            interrupt=interrupt,
+        )
+        return pipe, written
+
+    ltx.pipeline = pipeline
+    ltx.run = run
+    return ltx
+
+
+class TestUpscaleVideo:
+    """Verify the file upscale: encode, resume stage 2, decode; no model is loaded."""
+
+    def test_refuses_a_model_loaded_without_upscale(self, up):
+        pipe = up.pipeline()
+
+        with pytest.raises(ValueError, match="loaded for upscale"):
+            up.run(pipe, handle=_handle(pipe, upscale=False))
+
+        pipe.generate_two_stage.assert_not_called()
+
+    def test_refuses_the_diffusion_decoder(self, up):
+        pipe = up.pipeline()
+        pipe.video_decoder_block.video_decoder = "diffusion"
+
+        with pytest.raises(ValueError, match="diffusion video decoder"):
+            up.run(pipe)
+
+    @pytest.mark.parametrize(("width", "frames"), [(500, 121), (768, 120)])
+    def test_refuses_a_clip_off_the_ltx_grid(self, up, width, frames):
+        with pytest.raises(ValueError):
+            up.run(source=make_extend_source(width=width, height=_UP_HEIGHT, frame_count=frames))
+
+        up.frames.assert_not_called()
+
+    def test_resumes_stage_2_from_the_encoded_clip_at_twice_the_size(self, up):
+        up.run(steps=2)
+
+        kwargs = up.seen["kwargs"]
+        assert (kwargs["width"], kwargs["height"], kwargs["num_frames"], kwargs["frame_rate"]) == (_UP_WIDTH * 2, _UP_HEIGHT * 2, _UP_FRAMES, 24.0)
+        assert (kwargs["prompt"], kwargs["seed"], kwargs["stage2_steps"]) == ("a harbour at dawn", 42, 2)
+        assert kwargs["stage1"].video_tokens == "video_tokens"
+        assert kwargs["stage1"].latent_dims == _LATENT_SHAPE
+        up.patchifiers.compute_video_latent_shape.assert_called_once_with(_UP_FRAMES, _UP_HEIGHT, _UP_WIDTH)
+
+    def test_encodes_the_clip_in_the_upscale_tiles(self, up):
+        up.run()
+
+        tiling = up.encoder.tiled_encode.call_args.args[1]
+        assert (tiling.spatial_config, tiling.temporal_config) == (("spatial", 512, 64), ("temporal", 48, 16))
+
+    def test_holds_the_clip_sound_during_the_refine_and_lets_go_after(self, up):
+        pipe, _ = up.run()
+
+        assert up.seen["audio_during"] is up.seen["kwargs"]["stage1"].audio_tokens
+        assert up.seen["audio_during"] is not None
+        assert pipe._source_audio_tokens is None
+        assert pipe.stepwise is None
+        up.audio_io.load_audio.assert_called_once()
+
+    def test_a_sound_track_shorter_than_the_clip_is_padded_with_silence(self, up):
+        short = SimpleNamespace(shape=(1, 2, up.clip_samples - 1000), dtype="float32")
+        up.audio_io.load_audio.return_value = SimpleNamespace(waveform=short, sample_rate=16000)
+
+        up.run()
+
+        up.mx.zeros.assert_any_call((1, 2, 1000), dtype="float32")
+        assert up.mx.concatenate.call_args.args[0][0] is short
+        assert up.audio_vae.encode_audio.call_args.args[0] is up.mx.concatenate.return_value
+
+    def test_a_full_sound_track_is_encoded_as_it_is(self, up):
+        up.run()
+
+        assert up.audio_vae.encode_audio.call_args.args[0] is up.audio_io.load_audio.return_value.waveform
+
+    def test_a_silent_clip_is_refined_with_encoded_silence(self, up):
+        up.run(source=make_extend_source(width=_UP_WIDTH, height=_UP_HEIGHT, frame_count=_UP_FRAMES, has_audio=False))
+
+        up.audio_io.load_audio.assert_not_called()
+        waveform = up.mx.array.call_args_list[-1].args[0]
+        assert waveform.shape == (2, round(_UP_FRAMES / 24.0 * 16000))
+        assert not waveform.any()
+        up.audio_vae.encode_audio.assert_called_once()
+
+    def test_the_first_unit_ends_when_the_refine_starts_so_it_holds_the_model_setup(self, up):
+        pipe = up.pipeline()
+        first: list[bool] = []
+        progress = MagicMock(side_effect=lambda done, total: first.append(pipe.generate_two_stage.called) if done == 1 else None)
+
+        up.run(pipe, progress=progress)
+
+        assert first == [True]
+
+    def test_reports_the_encode_each_step_and_the_decode(self, up):
+        progress = MagicMock()
+
+        up.run(steps=2, progress=progress)
+
+        assert progress.call_args_list == [call(1, 4), call(2, 4), call(3, 4), call(4, 4)]
+
+    def test_an_interrupt_during_the_refine_stops_before_the_decode_and_frees_the_model(self, up):
+        pipe = up.pipeline(steps_run=2)
+        calls = iter([None, RuntimeError("quit")])
+
+        def interrupt():
+            error = next(calls)
+            if error:
+                raise error
+
+        with pytest.raises(RuntimeError, match="quit"):
+            up.run(pipe, interrupt=interrupt)
+
+        pipe.video_decoder_block.load.assert_not_called()
+        assert pipe._source_audio_tokens is None
+        assert pipe.dit is None
+
+    def test_an_interrupt_after_the_last_step_stops_before_the_decode(self, up):
+        pipe = up.pipeline(steps_run=2)
+        # After the encode, at the refine's start, after each of the two steps, then before the decode.
+        calls = iter([None, None, None, None, RuntimeError("quit")])
+
+        def interrupt():
+            error = next(calls)
+            if error:
+                raise error
+
+        with pytest.raises(RuntimeError, match="quit"):
+            up.run(pipe, interrupt=interrupt)
+
+        pipe.video_decoder_block.load.assert_not_called()
+
+    def test_an_interrupt_between_decoded_chunks_stops_the_decode(self, up):
+        pipe = up.pipeline(steps_run=2)
+        calls = iter([None, None, None, None, None, RuntimeError("quit")])
+
+        def interrupt():
+            error = next(calls)
+            if error:
+                raise error
+
+        with pytest.raises(RuntimeError, match="quit"):
+            up.run(pipe, interrupt=interrupt)
+
+        assert sum(chunk.shape[2] for chunk in up.streamed) == 48
+
+    def test_decodes_every_frame_to_the_video_file_at_twice_the_size(self, up):
+        _, written = up.run()
+
+        assert written == _UP_FRAMES
+        command = up.video_vae._ffmpeg_sink.call_args.args[0]
+        assert f"{_UP_WIDTH * 2}x{_UP_HEIGHT * 2}" in command
+        assert command[-1] == str(up.video_path)
+
+    def test_a_clip_that_decodes_to_another_frame_count_is_refused(self, up):
+        up.media_io.video_preprocess.return_value = SimpleNamespace(shape=(1, 3, _UP_FRAMES - 8, _UP_HEIGHT, _UP_WIDTH))
+
+        with pytest.raises(RuntimeError, match="frames"):
+            up.run()

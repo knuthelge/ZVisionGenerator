@@ -1,6 +1,6 @@
 # Upscale existing videos 2×
 
-**Status:** In progress (2026-10-24). Windows and Linux ship in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is not started: it uses LTX's own upsampler and refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
+**Status:** Done (2026-11-01, unreleased). Windows and Linux shipped in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is built on branch `feat/video-upscale-mac` with LTX's own upsampler and a 2-step refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)); the spike and its blind review are in [macOS spike results](#macos-spike-results). It plugs into the SeedVR2 path's gallery item, route, runner and job card as a second method, `ltx`, instead of building parallel ones.
 
 ## Problem
 
@@ -83,6 +83,51 @@ A web survey on 2026-10-22 of upscaler repos, model cards, the ComfyUI community
 | FlashVSR is designed for 4× only, its sparse attention is tuned for A100-class GPUs, and users report grid patterns and shimmer. FlashVSR+ (2026-10) targets a 24 GB RTX 4090 | [FlashVSR](https://github.com/OpenImagingLab/FlashVSR), [FlashVSR+ paper](https://huggingface.co/papers/2610.17552) |
 | Fast options without diffusion: NVIDIA RTX Video Super Resolution (`nvidia-vfx` on PyPI, RTX GPUs only) and Apple's `VTSuperResolutionScalerConfiguration` (VideoToolbox, macOS 26+, model downloaded by the OS, Swift/Objective-C API; scale factors and limits are only reported at run time). Real-ESRGAN works per frame and shimmers on fine detail | [NVIDIA RTX VSR node](https://github.com/tritant/ComfyUI_NVIDIA_RTX_VSR_Long_Video), [Apple docs](https://developer.apple.com/documentation/videotoolbox/vtsuperresolutionscalerconfiguration), [Real-ESRGAN video models](https://mintlify.com/xinntao/Real-ESRGAN/models/video-models) |
 
+### macOS spike results
+
+Measured on 2026-11-01 on a 32 GB M5 MacBook Air (25 GiB MLX budget) with `ltx-4`, `--low-memory`, seed 51207733, by `bench/video_upscale` (`render`, `run`, `encode-check`, and a blind-review site, `review`). The refine builds a `Stage1Result` from the encoded video through the pipeline's own resume path (`generate_two_stage(stage1=...)`), holds the source's encoded sound frozen in stage 2 (`A2VidDistilledPipeline._source_audio_tokens`) and muxes the source's own audio stream onto the result; no vendored code changes. Four app renders: `walk5` (`s`, 121 frames), `walk10` (`s`, 121 frames plus two 64-frame extends, 249 frames), `face` (`s` close-up, 121 frames), `medium5` (`m`, 121 frames).
+
+Time and MLX peak per upscale (encode, refine including the prompt encode, decode):
+
+| Clip, output | Method | Total | Per output second | Peak | Encode / refine / decode peak (GiB) |
+|---|---|---|---|---|---|
+| walk5, 1536×896 | 1 step | 258 s | 51 s | 18.3 GiB | 18.3 / 14.2 / 15.0 |
+| | 2 steps | 417 s | 83 s | 18.3 GiB | |
+| | 3 steps | 569 s | 113 s | 18.3 GiB | |
+| | IC-LoRA 2×, strength 1.0 | 1972 s | 391 s | 15.0 GiB | one 8-step pass at the output size |
+| face, 1536×896 | 1 / 2 / 3 steps | 271 / 428 / 585 s | 54 / 85 / 116 s | 18.3 GiB | 18.3 / 14.2 / 15.0 |
+| walk10, 1536×896 | 1 step | 690 s | 66 s | 19.2 GiB | 19.2 / 17.9 / 15.5 |
+| | 2 / 3 steps | 1129 / 1564 s | 109 / 151 s | 19.2 GiB | |
+| medium5, 2048×1152 | 1 step | 539 s | 107 s | 23.4 GiB | 23.4 / 16.8 / 18.5 |
+| | 2 / 3 steps | 882 / 1231 s | 175 / 244 s | 23.4 GiB | |
+
+| Gate | Result |
+|---|---|
+| Fit | Passes. The 10 s extended clip refines in one piece, untiled, at 17.9 GiB. `VideoModalityTiler` isn't needed up to 10 s at `s`; longer clips and `l` are unmeasured |
+| Time | One refine step costs about 155 s at `s` for 5 s, 440 s for the 10 s clip and 340 s at `m`; the decode adds 95 s, 200 s and 150 s. Loading and the prompt encode add a few seconds |
+| Strength | 3 steps re-renders the shot: on `walk5` a different woman, other people at the tables and a flock of pigeons that isn't in the source; on `face` different eyebrows, eyes, mouth and teeth. The blind review marked it as changing the content on every clip it covered. Out. The review picked 2 steps on `face` and `medium5`, over 1 step and bicubic. On `walk10` it picked bicubic: the frames after the extend joins are soft and motion-blurred, and both 1 and 2 steps rebuilt the cyclist (his head turned, the handlebars changed) instead of sharpening him. `walk5` was left out as too soft a source to judge. Default: 2 steps. A soft or blurred source gains invented detail at any step count |
+| IC-LoRA | Faithful to the source's layout and the sharpest result, but 33 minutes for a 5 s `s` clip, about 8× the 1-step refine, and its weights are gated (a Hugging Face login and Lightricks' terms; no ungated mirror found). Not chosen as the default |
+| Extend joins | The frames either side of each join of the upscaled `walk10` are continuous, with no jump in detail or colour |
+| Prompt | Passes. The blind review couldn't tell the 1-step refine with an empty prompt from the one with the recorded prompt on `face`. The recorded scene and prompt are used when there are any; a video without them is refined with an empty prompt |
+| Encode | Fits, but sets the peak with the encoder's default tiles (768 px, 80 frames): 18.3 GiB at `s`, 23.4 GiB at `m`, within 2 GiB of the budget. 512 px × 48-frame tiles bring the encode to 9.6 GiB at `m` and 8.7 GiB for the 10 s clip, for 10–16 s more; the whole `m` upscale then peaks at 18.5 GiB, in the decode. The blind review couldn't tell the two apart after the refine. Rule: encode in 512 px × 48-frame tiles |
+| Estimate | With 512 px × 48-frame encoder tiles the peak is the refine or the decode (14.2–18.5 GiB), at or below `clip_memory_fit(upscale=True)` in every case (17.1 GiB at `s` for 5 s, 20.0 GiB for the 10 s clip, 18.8 GiB at `m`); the margin at `m` is 0.3 GiB. With the default tiles the encode would exceed it |
+
+Every output keeps the source's frame count and lines up with it frame for frame.
+
+### macOS as built
+
+Where the build differs from the plan below:
+
+- **One path with two methods.** By the time macOS was built, Windows and Linux had shipped the gallery item, `POST /api/upscale`, the runner and the job card for SeedVR2. macOS adds the method `ltx` beside `seedvr2` (`backends.video_file_upscale_method()`), and the runner runs either through one job body; there is no separate route, runner or menu item.
+- **Settings:** `video_model_presets.ltx.upscale.existing_video_steps` (default 2, 1–3) beside the in-run upscale's `default_upscale_steps`, instead of a top-level `video_upscale:` block.
+- **No DiT tiling.** The spike fit 10 s at `s` untiled, so `tile_count` stays unset.
+- **Encoder tiles** of 512 px × 48 frames (64 px and 16 frames of overlap) for the whole clip.
+- **Model:** the clip's own LTX-2.3 model when configured, else the default video model when it is LTX-2.3, else the first LTX-2.3 model; LTX-2.5 and H3 clips are refined with LTX-2.3. The menu item is offered only for clips on the LTX grid (sides a multiple of 32, 8k+1 frames).
+- **Prompt:** an extended clip records only its last part's action, so it is refined with its scene alone. The spike's blind review of the extended `walk10` clip used the last action; it was not re-run with the scene alone.
+- **LoRAs:** kept when the clip was made with LTX-2.3 (configured or not), files only; left out with a job notice when missing or when the clip is of another model.
+- **Silent clips** hold encoded silence as their frozen audio, not a zero latent.
+- **Progress:** the encode, each refine step and the decode, with the time left estimated from the steps once one has finished; the job card counts steps, not batches.
+
 ## Proposed change
 
 On macOS, the viewer's Upscale menu shows **2×** for videos, with the output size and, when `clip_memory_fit` says the clip is tight or too large, the high-memory marker and warning. The job encodes the video, upsamples it 2× with LTX's spatial upsampler, refines it with the video's own model in a few distilled steps (tiled over time for long clips), decodes it, keeps the original audio and frame rate, and records the source and the upscale settings.
@@ -148,7 +193,7 @@ Write the numbers, the default step count, the tiling rule and the plain-or-IC-L
 
 ## Windows and Linux: SeedVR2 (shipped)
 
-Shipped on 2026-10-24, in v0.13.0. The viewer's Upscale menu offers **2×** for every video in the gallery, made by the app or not. `TorchSeedVR2Upscaler.upscale_video` runs the vendored core in our own chunk loop: the DiT and VAE are built once and cached across chunks, each chunk's frames are streamed to the encoder, and the original sound is kept (AAC copied, other codecs re-encoded to AAC). Settings: the image upscale's SeedVR2 tier (7B FP8, 3B below about 22 GB of system memory), softness 0, temporal overlap 0, 512-px VAE tiles, and the largest 4n+1 batch whose estimate fits the GPU's budget. A clip the card can only take at batch 1 is marked as very slow. The job card shows batches done and the time left. HDR, variable frame rate, interlaced, non-square-pixel and unreadable sources are refused when clicked. An upscaled video can't be extended. Stepping the batch down after an out-of-memory error is proposed separately in [video-upscale-batch-step-down.md](video-upscale-batch-step-down.md).
+Shipped on 2026-10-24, in v0.13.0. The viewer's Upscale menu offers **2×** for every video in the gallery, made by the app or not. `TorchSeedVR2Upscaler.upscale_video` runs the vendored core in our own chunk loop: the DiT and VAE are built once and cached across chunks, each chunk's frames are streamed to the encoder, and the original sound is kept (AAC copied, other codecs re-encoded to AAC). Settings: the image upscale's SeedVR2 tier (7B FP8, 3B below about 22 GB of system memory), softness 0, temporal overlap 0, 512-px VAE tiles, and the largest 4n+1 batch whose estimate fits the GPU's budget. A clip the card can only take at batch 1 is marked as very slow. The job card shows batches done and the time left. HDR, variable frame rate, interlaced, non-square-pixel and unreadable sources are refused when clicked. An upscaled video can't be extended. Stepping the batch down after an out-of-memory error is proposed separately in [video-upscale-batch-step-down.md](../video-upscale-batch-step-down.md).
 
 ### W0 spike results
 

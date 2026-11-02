@@ -47,19 +47,25 @@ export function seedvr2Options(asset: GalleryAsset): AssetUpscaleFactor[] {
   return asset.upscale?.seedvr2?.options ?? [];
 }
 
-/** Return the upscale factors an asset offers by any method, smallest first (the chord's keys and the button's tooltip). */
-export function offeredUpscaleFactors(asset: GalleryAsset): UpscaleFactor[] {
-  return [...new Set([...upscaleFactors(asset), ...seedvr2Options(asset)].map((option) => option.factor))].sort((a, b) => a - b);
+/** Return the LTX upscale options a video offers on macOS, or none elsewhere. */
+export function ltxOptions(asset: GalleryAsset): AssetUpscaleFactor[] {
+  return asset.upscale?.ltx?.options ?? [];
 }
 
-/** Return the method the plain upscale shortcut runs: SeedVR2 where it is offered, otherwise creative. */
+/** Return the upscale factors an asset offers by any method, smallest first (the chord's keys and the button's tooltip). */
+export function offeredUpscaleFactors(asset: GalleryAsset): UpscaleFactor[] {
+  return [...new Set([...upscaleFactors(asset), ...seedvr2Options(asset), ...ltxOptions(asset)].map((option) => option.factor))].sort((a, b) => a - b);
+}
+
+/** Return the method the plain upscale shortcut runs: SeedVR2 where it is offered, LTX for a video on macOS, otherwise creative. */
 export function plainUpscaleMethod(asset: GalleryAsset): UpscaleMethod {
-  return asset.upscale?.seedvr2 ? 'seedvr2' : 'creative';
+  if (asset.upscale?.seedvr2) return 'seedvr2';
+  return asset.upscale?.ltx ? 'ltx' : 'creative';
 }
 
 /** Return the upscale option for one factor and method, or undefined when the asset does not offer it. */
 export function upscaleOption(asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod): AssetUpscaleFactor | undefined {
-  const options = method === 'seedvr2' ? seedvr2Options(asset) : upscaleFactors(asset);
+  const options = method === 'seedvr2' ? seedvr2Options(asset) : method === 'ltx' ? ltxOptions(asset) : upscaleFactors(asset);
   return options.find((option) => option.factor === factor);
 }
 

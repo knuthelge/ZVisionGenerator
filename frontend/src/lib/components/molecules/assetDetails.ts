@@ -1,6 +1,6 @@
 import { workflowLabel } from '$lib/state/assetActions';
 import { formatTimestamp } from '$lib/state/audioTrack';
-import type { GalleryAsset } from '$lib/types';
+import type { GalleryAsset, UpscaleMethod } from '$lib/types';
 
 export interface DetailFact {
   label: string;
@@ -86,11 +86,13 @@ export function loraFacts(lora: string): DetailFact[] {
   });
 }
 
+const UPSCALE_METHOD_LABELS: Record<UpscaleMethod, string> = { seedvr2: 'SeedVR2', creative: 'creative', ltx: 'LTX' };
+
 /** Describe a recorded upscale, e.g. `2× · denoise 0.4 · 3 steps`. */
 export function describeUpscale(upscale: NonNullable<NonNullable<GalleryAsset['details']>['generation']>['upscale']): string {
   if (!upscale?.factor) return '';
   const parts = [`${upscale.factor}×`];
-  if (upscale.method) parts.push(upscale.method === 'seedvr2' ? 'SeedVR2' : 'creative');
+  if (upscale.method) parts.push(UPSCALE_METHOD_LABELS[upscale.method]);
   if (upscale.model) parts.push(upscale.quantize ? `${upscale.model} q${upscale.quantize}` : upscale.model);
   if (upscale.softness != null) parts.push(`softness ${upscale.softness}`);
   if (upscale.denoise != null) parts.push(`denoise ${upscale.denoise}`);

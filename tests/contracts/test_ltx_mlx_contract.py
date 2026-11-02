@@ -23,6 +23,7 @@ from ltx_core_mlx.text_encoders.gemma.encoders import encoder_configurator  # no
 from ltx_core_mlx.model.transformer.model import X0Model  # noqa: E402
 from ltx_core_mlx.model.video_vae.video_vae import (  # noqa: E402
     VideoDecoder as VaeVideoDecoder,
+    VideoEncoder as VaeVideoEncoder,
     _compute_decode_tiling,
     _ffmpeg_sink,
     decode_cache_limit,
@@ -47,6 +48,8 @@ from ltx_pipelines_mlx.utils.stepwise import StepwisePreview  # noqa: E402
 
 from ltx_pipelines_mlx.ti2vid_two_stages import TI2VidTwoStagesPipeline  # noqa: E402
 from zvisiongenerator.utils.config import load_config, ltx_mlx_packs, ltx_mlx_text_encoder_repo_id  # noqa: E402
+from zvisiongenerator.backends.mac.video import _encoder_tiling, _upscale_stage1  # noqa: E402
+from zvisiongenerator.utils.video_upscale import MAX_LTX_UPSCALE_STEPS  # noqa: E402
 from zvisiongenerator.utils.model_files import ltx_mlx_bundled_text_encoder, ltx_mlx_transformer_file, ltx_mlx_upsampler_file, ltx_mlx_video_decoder_file  # noqa: E402
 
 
@@ -74,7 +77,7 @@ ACCEPTED_PARAMS = [
     (DistilledPipeline.__init__, ("model_dir", "low_memory", "low_ram_streaming", "gemma_model_id")),
     (DistilledPipeline.generate_and_save, ("prompt", "output_path", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image", "images")),
     (A2VidDistilledPipeline.__init__, ("model_dir", "low_memory", "low_ram_streaming", "gemma_model_id")),
-    (DistilledPipeline._stage1, ("prompt", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image")),
+    (DistilledPipeline._stage1, ("prompt", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image", "resume")),
     (ImageConditioner.resolve_crf, ("images",)),
     (denoise_loop, ("model", "video_state", "audio_state", "video_text_embeds", "audio_text_embeds", "sigmas", "on_step")),
     (create_noised_state, ("base_shape", "conditionings", "spatial_dims", "positions", "seed", "sigma", "initial_latent", "legacy_scalar_blend", "frozen")),
@@ -91,6 +94,7 @@ KEYWORD_ONLY_PARAMS = [
     (BasePipeline._decode_and_save_video, ("frame_rate", "seed")),
     (BasePipeline._stepwise_hook, ("stage",)),
     (DistilledPipeline.generate_and_save, ("frame_rate", "seed", "stage1_steps", "image", "images")),
+    (DistilledPipeline.generate_two_stage, ("frame_rate", "seed", "stage2_steps", "stage1")),
     (PromptEncoder.__call__, ("free_after",)),
     (ImageConditioner.__call__, ("free_after",)),
     (AudioConditioner.__call__, ("free_after",)),
@@ -117,6 +121,7 @@ EXACT_PARAMS = [
     (AudioDecoder.__call__, slice(None), ("self", "audio_latent")),
     (AudioPatchifier.patchify, slice(None), ("self", "latent")),
     (VaeVideoDecoder.tiled_decode, slice(None), ("self", "latent", "tiling_config")),
+    (VaeVideoEncoder.tiled_encode, slice(None), ("self", "video", "tiling_config")),
     (_compute_decode_tiling, slice(None), ("latent_shape", "frame_rate", "budget_bytes")),
     (decode_cache_limit, slice(None), ()),
     (stream_chunks_to_ffmpeg, slice(None), ("chunks", "proc")),
@@ -175,6 +180,34 @@ class TestReviewContract:
     def test_stage1_result_fields_used_for_the_preview(self):
         fields = {field.name for field in dataclasses.fields(Stage1Result)}
         assert {"video_tokens", "audio_tokens", "latent_dims"} <= fields
+
+
+class TestFileUpscaleContract:
+    """What upscaling a video file relies on: the encoded clip resumes stage 2 in place of a stage-1 render."""
+
+    def test_two_stage_generation_hands_the_stage1_result_to_stage1_as_its_resume(self):
+        # generate_two_stage takes **_unused_kwargs, so a renamed resume keyword would be dropped silently and run stage 1 from noise.
+        assert "resume=stage1" in inspect.getsource(DistilledPipeline.generate_two_stage)
+
+    def test_the_stage1_result_is_built_from_the_encoded_clip(self):
+        import mlx.core as mx
+
+        result = _upscale_stage1(mx.zeros((1, 24, 128)), mx.zeros((1, 26, 128)), (2, 3, 4))
+
+        assert isinstance(result, Stage1Result)
+        assert result.latent_dims == (2, 3, 4)
+
+    def test_the_upscale_encoder_tiles_pass_the_tilings_own_checks(self):
+        tiling = _encoder_tiling()
+
+        assert (tiling.spatial_config.tile_size_in_pixels, tiling.temporal_config.tile_size_in_frames) == (512, 48)
+
+    def test_the_most_refine_steps_are_the_stage2_schedule(self):
+        # shorten_schedule returns the whole table when asked for more steps than it has.
+        assert len(STAGE_2_SIGMAS) - 1 == MAX_LTX_UPSCALE_STEPS
+
+    def test_the_audio_to_video_pipeline_holds_source_audio_tokens_in_stage2(self):
+        assert "_source_audio_tokens" in inspect.getsource(A2VidDistilledPipeline._stage2_audio_state)
 
 
 class TestBlockContract:

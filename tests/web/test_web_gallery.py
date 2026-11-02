@@ -203,6 +203,13 @@ def test_embedded_mp4_config_drives_gallery_metadata(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_video_file_upscale(monkeypatch):
+    """Pin the platform's video file upscale off: the upscale menu is tested in ``test_web_upscale``, and this keeps the
+    gallery JSON the same on every machine."""
+    monkeypatch.setattr("zvisiongenerator.web.gallery.video_file_upscale_method", lambda: None)
+
+
 def _reuse_web_config() -> SimpleNamespace:
     return SimpleNamespace(
         image_model_options=("zit",),

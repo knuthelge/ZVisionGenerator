@@ -10,6 +10,10 @@ describe('describeUpscale', () => {
     expect(text).toBe('2× · SeedVR2 · seedvr2-7b q8 · softness 0.2');
   });
 
+  it('names an LTX video upscale with its model and steps', () => {
+    expect(describeUpscale({ factor: 2, method: 'ltx', model: 'ltx-4', steps: 2, seed: 42 })).toBe('2× · LTX · ltx-4 · 2 steps');
+  });
+
   it('names a creative upscale and keeps its settings', () => {
     expect(describeUpscale({ factor: 4, method: 'creative', denoise: 0.4, steps: 3 })).toBe('4× · creative · denoise 0.4 · 3 steps');
   });

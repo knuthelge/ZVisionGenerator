@@ -388,6 +388,9 @@ video_model_presets:
         filename: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
     upscale:
       default_upscale_steps: 8
+      # macOS: refine steps of an upscale of an existing video (1-3, the end of the stage-2 schedule). 3 re-renders faces and
+      # scenes; 1 is the most faithful and the fastest.
+      existing_video_steps: 2
     # Lightricks' distilled LoRA: `ziv model model --model-type ltx-2.3 --distill` merges it into a plain-dev
     # checkpoint, which otherwise renders broken at the 8 steps the app runs LTX at.
     distilled_lora:
