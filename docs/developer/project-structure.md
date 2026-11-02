@@ -15,7 +15,7 @@ zvisiongenerator/
 ├── image_runner.py                Image generation run orchestration
 ├── moss_builder.py                Build the MOSS-Image model folders on first use (link the downloaded SFT files, and the Turbo LoRA for moss)
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
-├── video_file_upscale_runner.py   Upscale one existing video: check it, stream its frames through SeedVR2, keep its sound and settings
+├── video_file_upscale_runner.py   Upscale one existing video: check it, run SeedVR2 or LTX (macOS) on it, keep its sound and settings
 ├── review.py                      Shared wait for a review decision
 ├── job_controls.py                Shared pause and repeat steps of the image and video runners
 ├── matte_room.py                  Memory guard for the background removal chain: swaps the image model out and back in when free memory is short
@@ -201,7 +201,8 @@ zvisiongenerator/
 │   ├── video_probe.py             ffprobe a clip: stream facts, rotation and the checks' inputs
 │   ├── video_splice.py            Join a generated segment onto the source clip (stream copy or one re-encode) with the audio
 │   ├── video_support.py           Refuse a video request the model's family cannot do on this platform
-│   └── video_tail.py              Read a clip's last frames, or all its frames, at their displayed size
+│   ├── video_tail.py              Read a clip's last frames, or all its frames, at their displayed size
+│   └── video_upscale.py           LTX video file upscale (macOS): the clips it takes, its steps, menu option, progress units and time left
 ├── web/
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly

@@ -7,7 +7,7 @@ Upscaling makes a larger image or video than the model would make well, or quick
 | [While generating](#while-generating-an-image) | Images, as part of the job | Generate small, enlarge, refine with the same model |
 | [An existing image](#upscaling-an-existing-image) | Any image, from the viewer | A plain upscale (SeedVR2), or a creative one with the image model |
 | [Video](#video-upscale) | Video, as part of the job | Generate at half size, upsample 2×, refine at full size |
-| [An existing video](#upscaling-an-existing-video) | Any video, from the viewer (Windows and Linux) | A plain 2× upscale with SeedVR2, frame by frame |
+| [An existing video](#upscaling-an-existing-video) | Any video, from the viewer | 2× with SeedVR2 (Windows and Linux) or LTX (macOS) |
 
 ## While generating an image
 
@@ -107,14 +107,18 @@ A creative option is unavailable, with the reason in its tooltip, when the model
 
 ## Upscaling an existing video
 
-On Windows and Linux, any video in the output folder can be made twice as large with SeedVR2, the same model as the [plain image upscale](#plain-upscale). It enlarges the frames faithfully and adds fine detail; it doesn't make a new clip.
+Any video in the output folder can be made twice as large. Open a video in the viewer and choose **Upscale**, or press ++x++ then ++2++. The same item is in each video tile's **⋯** menu. The job joins the queue like any other, shows as **Upscaling video** on the job card, and can be cancelled.
 
-Open a video in the viewer and choose **Upscale**, or press ++x++ then ++2++. The same item is in each video tile's **⋯** menu. The job joins the queue like any other, shows as **Upscaling video** on the job card, and can be cancelled.
-
-- **What it takes:** any video in the output folder, made by the app or not, as `.mp4`, `.mov`, `.webm` or `.mkv`, including one that was already upscaled. HDR video, a variable frame rate, interlaced video, non-square pixels and files with no readable video are refused, with the reason.
-- **What you get:** `<name>_2x.mp4` beside the original, at twice the width and height, with the same frames, frame rate and sound (an AAC track is copied; anything else is converted to AAC). A clip rotated by a flag comes out upright. The original is never changed.
+- **What you get:** `<name>_2x.mp4` beside the original, at twice the width and height, with the same frames, frame rate and sound (an AAC track is copied; anything else is converted to AAC). The original is never changed.
 - **Settings:** the original's recorded settings are carried over, so **Reuse settings** on the result loads them at the original size.
-- **Extend first, upscale last:** an upscaled video can't be extended.
+- **Extend first, upscale last:** generate at a small size, [extend](video.md#extending-a-video) the clip until it's right, then upscale it; an upscaled video can't be extended.
+- **Refused:** HDR video, a variable frame rate, interlaced video, non-square pixels and files with no readable video, with the reason.
+
+Windows and Linux use SeedVR2; macOS refines the clip with LTX. Both enlarge faithfully and add fine detail rather than making a new clip, but how much detail can come back depends on the source: a very soft or motion-blurred clip stays soft, and the LTX refine may redraw what it can't see clearly.
+
+### Windows and Linux: SeedVR2
+
+The same model as the [plain image upscale](#plain-upscale) upscales any video in the output folder, made by the app or not, as `.mp4`, `.mov`, `.webm` or `.mkv`, including one that was already upscaled. A clip rotated by a flag comes out upright.
 
 **Memory and time.** The frames stream through the GPU a few at a time, so the clip's length doesn't change the memory it needs; the size of the result does. The app uses the largest batch of frames (up to 29) that fits your GPU, and bigger batches run faster with fewer seams.
 
@@ -124,3 +128,12 @@ Open a video in the viewer and choose **Upscale**, or press ++x++ then ++2++. Th
 - The first upscale downloads the model (9.0 GB for 7B, 3.9 GB for 3B), as the image upscale does.
 
 Playback may show a faint change in texture where one batch of frames meets the next, about once a second at the smaller sizes. `seedvr2.video_softness` (default `0`) softens each frame before it is enlarged; see [Configuration](configuration.md#seedvr2).
+
+### macOS: LTX
+
+On a Mac, LTX's spatial upsampler doubles the clip and two refine steps with the clip's own model, prompt and seed add detail, as in the [in-run video upscale](#video-upscale). The sound is kept as it is.
+
+- **What it takes:** clips whose sides are multiples of 32 and whose frame count is 8k+1, which every LTX render and extension is. Other clips have no **Upscale** item.
+- **Model and LoRAs:** the clip's own LTX-2.3 model and LoRAs. A clip made with LTX-2.5 or MiniMax H3 is refined with LTX-2.3, without its LoRAs. The job card notes anything left out.
+- **Time and memory:** expect a few minutes per second of video, so a 10-second clip can take 20 minutes or more. A clip that may not fit this Mac's memory is marked **· high memory**; it can still be started.
+- **Steps:** set by [`existing_video_steps`](configuration.md#model_presets-and-video_model_presets) (default 2). Fewer steps stay closer to the original; three redraw faces.

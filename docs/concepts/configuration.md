@@ -166,6 +166,8 @@ A family can split into variants (`variants.<name>`), such as FLUX.2 Klein disti
 
 `max_reference_images` is how many [reference images](images.md#references) a family takes; `0`, the default, means none. FLUX.2 Klein sets `4`.
 
+`video_model_presets.ltx.upscale.existing_video_steps` (default `2`, from `1` to `3`) sets the refine steps of [upscaling an existing video](upscaling.md#macos-ltx) on macOS.
+
 You rarely need to change these. They are documented in the packaged `config.yaml`.
 
 ## `ideogram4_instant`

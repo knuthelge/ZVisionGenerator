@@ -23,7 +23,7 @@ In code, config and recorded settings, the methods are `seedvr2` and `creative`.
 
 ### Relation to the video proposal
 
-[Upscale existing videos 2× on macOS](../video-upscale-existing.md) uses the same model. This proposal is the smaller first step and builds the shared foundation the video one then reuses:
+[Upscale existing videos 2× on macOS](video-upscale-existing.md) uses the same model. This proposal is the smaller first step and builds the shared foundation the video one then reuses:
 
 - the SeedVR2 loader and the capability flag in `backends/`
 - the `seedvr2` config block and the automatic model choice

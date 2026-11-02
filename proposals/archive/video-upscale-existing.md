@@ -1,6 +1,6 @@
 # Upscale existing videos 2×
 
-**Status:** In progress (2026-10-24). Windows and Linux ship in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS: the spike and its blind review ran on 2026-11-01 (see [macOS spike results](#macos-spike-results)): 2 refine steps, 512 px × 48-frame encoder tiles, the recorded prompt or an empty one, no tiling up to 10 s at `s`; step 1 is next. macOS uses LTX's own upsampler and refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
+**Status:** Done (2026-11-01, unreleased). Windows and Linux shipped in v0.13.0 with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is built on branch `feat/video-upscale-mac` with LTX's own upsampler and a 2-step refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)); the spike and its blind review are in [macOS spike results](#macos-spike-results). It plugs into the SeedVR2 path's gallery item, route, runner and job card as a second method, `ltx`, instead of building parallel ones.
 
 ## Problem
 
@@ -114,6 +114,20 @@ Time and MLX peak per upscale (encode, refine including the prompt encode, decod
 
 Every output keeps the source's frame count and lines up with it frame for frame.
 
+### macOS as built
+
+Where the build differs from the plan below:
+
+- **One path with two methods.** By the time macOS was built, Windows and Linux had shipped the gallery item, `POST /api/upscale`, the runner and the job card for SeedVR2. macOS adds the method `ltx` beside `seedvr2` (`backends.video_file_upscale_method()`), and the runner runs either through one job body; there is no separate route, runner or menu item.
+- **Settings:** `video_model_presets.ltx.upscale.existing_video_steps` (default 2, 1–3) beside the in-run upscale's `default_upscale_steps`, instead of a top-level `video_upscale:` block.
+- **No DiT tiling.** The spike fit 10 s at `s` untiled, so `tile_count` stays unset.
+- **Encoder tiles** of 512 px × 48 frames (64 px and 16 frames of overlap) for the whole clip.
+- **Model:** the clip's own LTX-2.3 model when configured, else the default video model when it is LTX-2.3, else the first LTX-2.3 model; LTX-2.5 and H3 clips are refined with LTX-2.3. The menu item is offered only for clips on the LTX grid (sides a multiple of 32, 8k+1 frames).
+- **Prompt:** an extended clip records only its last part's action, so it is refined with its scene alone. The spike's blind review of the extended `walk10` clip used the last action; it was not re-run with the scene alone.
+- **LoRAs:** kept when the clip was made with LTX-2.3 (configured or not), files only; left out with a job notice when missing or when the clip is of another model.
+- **Silent clips** hold encoded silence as their frozen audio, not a zero latent.
+- **Progress:** the encode, each refine step and the decode, with the time left estimated from the steps once one has finished; the job card counts steps, not batches.
+
 ## Proposed change
 
 On macOS, the viewer's Upscale menu shows **2×** for videos, with the output size and, when `clip_memory_fit` says the clip is tight or too large, the high-memory marker and warning. The job encodes the video, upsamples it 2× with LTX's spatial upsampler, refines it with the video's own model in a few distilled steps (tiled over time for long clips), decodes it, keeps the original audio and frame rate, and records the source and the upscale settings.
@@ -179,7 +193,7 @@ Write the numbers, the default step count, the tiling rule and the plain-or-IC-L
 
 ## Windows and Linux: SeedVR2 (shipped)
 
-Shipped on 2026-10-24, in v0.13.0. The viewer's Upscale menu offers **2×** for every video in the gallery, made by the app or not. `TorchSeedVR2Upscaler.upscale_video` runs the vendored core in our own chunk loop: the DiT and VAE are built once and cached across chunks, each chunk's frames are streamed to the encoder, and the original sound is kept (AAC copied, other codecs re-encoded to AAC). Settings: the image upscale's SeedVR2 tier (7B FP8, 3B below about 22 GB of system memory), softness 0, temporal overlap 0, 512-px VAE tiles, and the largest 4n+1 batch whose estimate fits the GPU's budget. A clip the card can only take at batch 1 is marked as very slow. The job card shows batches done and the time left. HDR, variable frame rate, interlaced, non-square-pixel and unreadable sources are refused when clicked. An upscaled video can't be extended. Stepping the batch down after an out-of-memory error is proposed separately in [video-upscale-batch-step-down.md](video-upscale-batch-step-down.md).
+Shipped on 2026-10-24, in v0.13.0. The viewer's Upscale menu offers **2×** for every video in the gallery, made by the app or not. `TorchSeedVR2Upscaler.upscale_video` runs the vendored core in our own chunk loop: the DiT and VAE are built once and cached across chunks, each chunk's frames are streamed to the encoder, and the original sound is kept (AAC copied, other codecs re-encoded to AAC). Settings: the image upscale's SeedVR2 tier (7B FP8, 3B below about 22 GB of system memory), softness 0, temporal overlap 0, 512-px VAE tiles, and the largest 4n+1 batch whose estimate fits the GPU's budget. A clip the card can only take at batch 1 is marked as very slow. The job card shows batches done and the time left. HDR, variable frame rate, interlaced, non-square-pixel and unreadable sources are refused when clicked. An upscaled video can't be extended. Stepping the batch down after an out-of-memory error is proposed separately in [video-upscale-batch-step-down.md](../video-upscale-batch-step-down.md).
 
 ### W0 spike results
 
