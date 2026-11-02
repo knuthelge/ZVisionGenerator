@@ -98,6 +98,23 @@ def build_questions(runs: Path) -> list[Question]:
                     flag_changes=False,
                 )
             )
+    scene = (
+        runs / "steps" / "walk10" / "bicubic.mp4",
+        runs / "scene" / "walk10" / "refine-1.mp4",
+        runs / "scene" / "walk10" / "refine-2.mp4",
+        runs / "scene-noprompt" / "walk10" / "refine-2-noprompt.mp4",
+    )
+    if all(path.exists() for path in scene):
+        questions.append(
+            Question(
+                id="scene-walk10",
+                title="Extended clip · walk10",
+                prompt="Pick the one you'd keep. Compare with the source: a good upscale is sharper without changing faces, people, objects or light.",
+                clip="walk10",
+                candidates=scene,
+                flag_changes=True,
+            )
+        )
     return questions
 
 
