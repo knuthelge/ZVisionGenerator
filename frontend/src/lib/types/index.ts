@@ -8,7 +8,7 @@ export type JobWorkflow = Workflow | 'upscale';
 export type UpscaleFactor = 2 | 4;
 
 /** How an image upscale runs: the SeedVR2 model (macOS), or the image model's creative pass. */
-export type UpscaleMethod = 'seedvr2' | 'creative';
+export type UpscaleMethod = 'seedvr2' | 'creative' | 'ltx';
 
 export type WorkflowMode = 'image' | 'video';
 
@@ -222,11 +222,23 @@ export interface AssetSeedvr2Upscale {
   download_size_label: string | null;
 }
 
+/** The LTX upscale a video offers on macOS: the clip's latent upsampled 2× and refined in a few steps. */
+export interface AssetLtxUpscale {
+  options: AssetUpscaleFactor[];
+  /** Label of the LTX model that refines the clip, e.g. `LTX-2.3 4-bit`. */
+  model: string;
+  downloaded: boolean;
+  /** Size of the first-use download; null once the model is on this machine. */
+  download_size_label: string | null;
+}
+
 export interface AssetUpscale {
   /** Creative upscale options (the image model's img2img pass). */
   factors: AssetUpscaleFactor[];
   /** SeedVR2 upscale options, or null where SeedVR2 is not offered. */
   seedvr2: AssetSeedvr2Upscale | null;
+  /** LTX upscale options for a video on macOS; absent or null elsewhere. */
+  ltx?: AssetLtxUpscale | null;
 }
 
 export type MemoryFitStatus = 'fits' | 'tight' | 'too_large';
@@ -1021,6 +1033,8 @@ export interface JobContext {
   workflow: JobWorkflow;
   /** `video` for a job that upscales an existing video file; absent on other jobs. */
   media_type?: 'image' | 'video';
+  /** How a video file upscale runs; absent on other jobs and on jobs from an older server. */
+  upscale_method?: UpscaleMethod;
   prompt: string;
   model: string;
   /** How the Web UI shows `model`: its configured name, else the id. Absent on jobs from an older server. */

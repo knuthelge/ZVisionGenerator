@@ -1,4 +1,4 @@
-import { canExtend, canUseAsReference, extendReason, seedvr2Options, upscaleFactors, type AssetActionHandlers, type ReferenceTarget, type UseAsState } from '$lib/state/assetActions';
+import { canExtend, canUseAsReference, extendReason, plainUpscaleMethod, upscaleFactors, type AssetActionHandlers, type ReferenceTarget, type UseAsState } from '$lib/state/assetActions';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
@@ -52,19 +52,20 @@ export function assetMenuEntries(
 }
 
 /**
- * Build the upscale items: the SeedVR2 ones where offered (`2× → 1664×2432`), a separator, then the creative ones
- * (`2× creative → 1664×2432`). A SeedVR2 item is never disabled: over the memory estimate it is marked and explained
- * in its tooltip. A creative factor over a limit is disabled with its reason.
+ * Build the upscale items: the plain ones where offered (SeedVR2, or LTX for a video on macOS: `2× → 1664×2432`), a
+ * separator, then the creative ones (`2× creative → 1664×2432`). A plain item is never disabled: over the memory estimate
+ * it is marked and explained in its tooltip. A creative factor over a limit is disabled with its reason.
  */
 export function upscaleEntries(asset: GalleryAsset, onupscale: NonNullable<AssetActionHandlers['onupscale']>): ActionMenuEntry[] {
-  const seedvr2 = asset.upscale?.seedvr2;
-  const plain = seedvr2
-    ? seedvr2Options(asset).map((option) => ({
+  const method = plainUpscaleMethod(asset);
+  const block = method === 'seedvr2' ? asset.upscale?.seedvr2 : method === 'ltx' ? asset.upscale?.ltx : null;
+  const plain = block
+    ? block.options.map((option) => ({
         kind: 'item' as const,
-        id: `upscale-seedvr2-${option.factor}`,
+        id: `upscale-${method}-${option.factor}`,
         label: `${sizeLabel(option, '')}${warningMarker(option)}`,
-        title: plainTitle(option, seedvr2.download_size_label),
-        onselect: () => onupscale(asset, option.factor, 'seedvr2'),
+        title: plainTitle(option, block.download_size_label),
+        onselect: () => onupscale(asset, option.factor, method),
       }))
     : [];
   const creative = upscaleFactors(asset).map((option) => ({
@@ -81,7 +82,7 @@ export function upscaleEntries(asset: GalleryAsset, onupscale: NonNullable<Asset
 const HIGH_MEMORY_MARKER = ' · high memory';
 const ONE_FRAME_MARKER = ' · very slow';
 
-/** The label suffix for a warned SeedVR2 option: what the warning is about, from its code; none without a warning. */
+/** The label suffix for a warned plain option: what the warning is about, from its code; none without a warning. */
 function warningMarker(option: AssetUpscaleFactor): string {
   if (!option.warning) return '';
   return option.warning_code === 'one_frame_batch' ? ONE_FRAME_MARKER : HIGH_MEMORY_MARKER;
@@ -91,7 +92,7 @@ function sizeLabel(option: AssetUpscaleFactor, suffix: string): string {
   return `${option.factor}×${suffix} → ${option.width}×${option.height}`;
 }
 
-/** The tooltip of a SeedVR2 item: its memory warning, then the first-use download size while the model is not on disk. */
+/** The tooltip of a plain item: its memory warning, then the first-use download size while the model is not on disk. */
 function plainTitle(option: AssetUpscaleFactor, downloadSizeLabel: string | null): string | undefined {
   const lines = [option.warning, downloadSizeLabel ? `First use downloads ${downloadSizeLabel}` : null].filter(Boolean);
   return lines.length > 0 ? lines.join('\n') : undefined;

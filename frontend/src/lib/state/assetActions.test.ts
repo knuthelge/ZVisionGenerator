@@ -4,7 +4,7 @@ import { draft } from '$lib/state/draft.svelte';
 import type { AssetUpscaleFactor, DraftState, GalleryAsset } from '$lib/types';
 
 import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
-import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, workflowLabel } from './assetActions';
+import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -84,6 +84,17 @@ describe('asset actions', () => {
       expect(upscaleOption(video, 2, 'seedvr2')).toBe(plainTwo);
       expect(plainUpscaleMethod(video)).toBe('seedvr2');
       expect(seedvr2Options(makeAsset({ media_type: 'video', upscale: null }))).toEqual([]);
+    });
+
+    it('offers a video on macOS its one LTX option, which the plain shortcut runs with the ltx method', () => {
+      const video = makeAsset({ media_type: 'video', upscale: { factors: [], seedvr2: null, ltx: { options: [plainTwo], model: 'LTX-2.3 4-bit', downloaded: true, download_size_label: null } } });
+
+      expect(ltxOptions(video)).toEqual([plainTwo]);
+      expect(offeredUpscaleFactors(video)).toEqual([2]);
+      expect(plainUpscaleMethod(video)).toBe('ltx');
+      expect(upscaleOption(video, 2, 'ltx')).toBe(plainTwo);
+      expect(upscaleOption(video, 2, 'seedvr2')).toBeUndefined();
+      expect(ltxOptions(makeAsset({ media_type: 'video', upscale: null }))).toEqual([]);
     });
 
     it('lists the factors an asset offers by any method, smallest first', () => {

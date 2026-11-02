@@ -490,6 +490,21 @@ describe('AssetViewer', () => {
     expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'seedvr2');
   });
 
+  const ltxVideoUpscale = (warning: string | null = null) => ({
+    factors: [],
+    seedvr2: null,
+    ltx: { options: [{ factor: 2 as const, width: 1536, height: 896, allowed: true as const, reason: null, warning }], model: 'LTX-2.3 4-bit', downloaded: true, download_size_label: null },
+  });
+
+  it('upscales a video on macOS with the LTX 2x item from the menu', () => {
+    const onupscale = vi.fn();
+    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: ltxVideoUpscale() })], onupscale });
+    flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
+    expect(upscaleItems().map((item) => item.textContent?.trim())).toEqual(['2× → 1536×896']);
+    flushSync(() => upscaleItems()[0].click());
+    expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'ltx');
+  });
+
   const noCreative = (seedvr2: typeof seedvr2Upscale.seedvr2 | null) => ({
     factors: upscale.factors.map((option) => ({ ...option, allowed: false, reason: 'This model cannot upscale.' })),
     seedvr2,
@@ -502,6 +517,7 @@ describe('AssetViewer', () => {
       upscale: seedvr2Upscale, video: false, keys: ['2', '4'], calls: [[2, 'seedvr2'], [4, 'seedvr2']], warnings: ['May need more memory than this Mac has.'],
     },
     { name: 'video: only 2x runs, with its warning', upscale: videoUpscale('May need more memory.'), video: true, keys: ['4', '2'], calls: [[2, 'seedvr2']], warnings: ['May need more memory.'] },
+    { name: 'LTX video on macOS: only 2x runs, with its warning', upscale: ltxVideoUpscale('May need more memory.'), video: true, keys: ['4', '2'], calls: [[2, 'ltx']], warnings: ['May need more memory.'] },
     { name: 'SeedVR2 runs when every creative factor is disabled', upscale: noCreative(seedvr2Upscale.seedvr2), video: false, keys: ['2'], calls: [[2, 'seedvr2']], warnings: [] },
     { name: 'disabled creative factors alone explain instead of upscaling', upscale: noCreative(null), video: false, keys: ['2'], calls: [], warnings: ['This model cannot upscale.'] },
   ])('runs the X then digit chord, $name', ({ upscale: options, video, keys, calls, warnings }) => {

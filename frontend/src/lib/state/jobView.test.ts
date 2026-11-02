@@ -259,6 +259,22 @@ describe('jobView', () => {
       expect(etaLabel(upscale({ currentStep: 3, remaining: 240, status: 'paused', paused: true }))).toBe('');
     });
 
+    it('counts steps for the LTX upscale, which reports its encode, steps and decode', () => {
+      const ltx = (overrides: Partial<ActiveJobState> = {}) => upscale({ stepPhase: 'video_file_refine', totalSteps: 4, ...overrides });
+
+      expect(stepUnit(ltx())).toBe('Step');
+      expect(stepUnit(upscale({ stepPhase: 'video_file_upscale' }))).toBe('Batch');
+      expect(etaLabel(ltx())).toBe('Estimate after the first step');
+      expect(etaLabel(ltx({ currentStep: 2, remaining: 300 }))).toBe('About 5 min left');
+      expect(etaLabel(ltx({ currentStep: 4, remaining: 0 }))).toBe('');
+    });
+
+    it('counts by the job\'s upscale method when the server names it, before any step has arrived', () => {
+      expect(stepUnit(upscale({ upscale_method: 'ltx' }))).toBe('Step');
+      expect(etaLabel(upscale({ upscale_method: 'ltx' }))).toBe('Estimate after the first step');
+      expect(stepUnit(upscale({ upscale_method: 'seedvr2', stepPhase: 'video_file_refine' }))).toBe('Batch');
+    });
+
     it('does not give a single-item image job an estimate', () => {
       expect(etaLabel(job({ workflow: 'upscale', remaining: 240 }))).toBe('');
       expect(etaLabel(job({ remaining: 240 }))).toBe('');

@@ -22,6 +22,26 @@ const seedvr2 = (options: AssetUpscaleFactor[], overrides = {}) => ({
 const kinds = (entries: ReturnType<typeof upscaleEntries>) => entries.map((entry) => (entry.kind === 'item' ? entry.id : entry.kind));
 
 describe('upscaleEntries', () => {
+  it('lists the one LTX 2x item of a video on macOS, which upscales with the ltx method', () => {
+    const onupscale = vi.fn();
+    const video = { ...makeAsset({ factors: [], seedvr2: null, ltx: seedvr2([option(2)], { model: 'LTX-2.3 4-bit' }) }), media_type: 'video' as const };
+
+    const entries = upscaleEntries(video, onupscale);
+    expect(kinds(entries)).toEqual(['upscale-ltx-2']);
+    expect(entries[0]).toMatchObject({ label: '2× → 1664×2432', title: undefined });
+    if (entries[0].kind === 'item') entries[0].onselect?.();
+    expect(onupscale).toHaveBeenCalledWith(video, 2, 'ltx');
+  });
+
+  it('marks a warned LTX item and names its first-use download', () => {
+    const warning = 'May need more memory than this computer has: it may be slow or fail.';
+    const ltx = seedvr2([option(2, { warning, warning_code: 'memory' })], { downloaded: false, download_size_label: '26 GB' });
+
+    const [entry] = upscaleEntries({ ...makeAsset({ factors: [], seedvr2: null, ltx }), media_type: 'video' }, vi.fn());
+
+    expect(entry).toMatchObject({ id: 'upscale-ltx-2', label: '2× → 1664×2432 · high memory', title: `${warning}\nFirst use downloads 26 GB` });
+  });
+
   it('lists the SeedVR2 items, a separator, then the creative items', () => {
     const asset = makeAsset({ factors: [option(2), option(4)], seedvr2: seedvr2([option(2), option(4)]) });
     const entries = upscaleEntries(asset, vi.fn());
