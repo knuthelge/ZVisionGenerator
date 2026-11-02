@@ -103,7 +103,8 @@ def _parse_tiles(text: str) -> tuple[int, int, int]:
 
 def _cmd_run(args: argparse.Namespace) -> int:
     from bench.video_upscale.refine import RefineSettings, bicubic_upscale, estimate_fit, iclora_upscale, load_upscale_model, upscale_video
-    from zvisiongenerator.utils.prompt_compose import compose_video_prompt
+    from zvisiongenerator.utils.provenance import original_video_workflow
+    from zvisiongenerator.utils.video_upscale import ltx_upscale_prompt
     from zvisiongenerator.video_file_upscale_runner import read_video_upscale_source
 
     cases = load_cases()
@@ -116,7 +117,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     metrics_path = run_dir / "metrics.jsonl"
     _write_meta(run_dir, args)
 
-    sources = {name: read_video_upscale_source(SOURCES_DIR / f"{name}.mp4")[0] for name in clips}
+    read = {name: read_video_upscale_source(SOURCES_DIR / f"{name}.mp4") for name in clips}
+    sources = {name: source for name, (source, _config) in read.items()}
     model = load_upscale_model(args.model or cases["model"], low_memory=args.low_memory) if steps_list or args.iclora else None
     lora_path = _iclora_file() if args.iclora else None
     seed = cases["seed"]
@@ -124,7 +126,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         clip_dir = run_dir / name
         clip_dir.mkdir(exist_ok=True)
         print(f"{name}: {source.width}x{source.height}, {source.frame_count} frames at {source.fps:g} fps")
-        prompt = "" if args.empty_prompt else compose_video_prompt(source.scene, source.prompt or "")
+        extended = original_video_workflow(read[name][1]) == "extend"
+        prompt = "" if args.empty_prompt else ltx_upscale_prompt(source.scene, source.prompt, extended=extended)
+        print(f"  prompt: {prompt!r}")
         suffix = "-noprompt" if args.empty_prompt else ""
         jobs: list[tuple[str, Callable[[Path], dict[str, Any]]]] = []
         if args.bicubic:
