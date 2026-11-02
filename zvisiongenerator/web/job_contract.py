@@ -98,6 +98,8 @@ def public_job_snapshot(
     }
     if "media_type" in context:
         snapshot["media_type"] = context["media_type"]
+    if "upscale_method" in context:
+        snapshot["upscale_method"] = context["upscale_method"]
     terminal_event = terminal_event_for_status(status)
     if terminal_event is not None:
         snapshot["terminal_event"] = terminal_event

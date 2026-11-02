@@ -18,11 +18,11 @@ from tests._factories import make_extend_source, make_probe
 
 from zvisiongenerator import video_file_upscale_runner as runner
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import VideoFileUpscaleRequest
+from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_SEED, WORK_DIR_PREFIX
 from zvisiongenerator.utils.video_extend import ExtendInspection, ExtendProblem, extend_source_problems
-from zvisiongenerator.video_file_upscale_runner import read_video_upscale_source, run_video_file_upscale
+from zvisiongenerator.video_file_upscale_runner import read_video_upscale_source, run_ltx_video_upscale, run_video_file_upscale
 
 _FINISHED = "finished.mp4"
 _RECORDED_CONFIG = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "prompt": "A knight rides in.", "model": "ltx-8", "seed": 7, "steps": 8, "frame_count": 7}
@@ -470,3 +470,117 @@ class TestReadVideoUpscaleSource:
         source, _config = read_video_upscale_source(path)
 
         assert (source.width, source.height, source.fps_text, source.has_audio) == (512, 256, "24/1", True)
+
+
+class _FakeLtxBackend:
+    """An LTX backend whose ``upscale_video`` writes the video file and reports one unit per phase (encode, steps, decode)."""
+
+    def __init__(self, *, raise_at: int | None = None, frames: int = 7) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.raise_at = raise_at
+        self.frames = frames
+
+    def upscale_video(self, model, source, *, prompt, seed, steps, video_path, progress, interrupt):
+        self.calls.append({"model": model, "source": source.path.name, "prompt": prompt, "seed": seed, "steps": steps})
+        total = steps + 2
+        for done in range(1, total + 1):
+            interrupt()
+            if done == self.raise_at:
+                raise RuntimeError("refine blew up")
+            progress(done, total)
+        Path(video_path).write_bytes(b"video")
+        return self.frames
+
+
+def _ltx_request(tmp_path, *, steps=2, has_audio=True, recorded_config=_RECORDED_CONFIG) -> LtxVideoUpscaleRequest:
+    source = make_extend_source(path=tmp_path / "clip.mp4", width=4, height=2, frame_count=7, has_audio=has_audio, probe=make_probe(has_audio=has_audio, audio_codec="aac" if has_audio else None))
+    return LtxVideoUpscaleRequest(
+        source=source,
+        recorded_config=recorded_config,
+        output_dir=str(tmp_path),
+        width=8,
+        height=4,
+        model_name="ltx-4",
+        model_ref="o/ltx@abc",
+        prompt="A castle. A knight rides in.",
+        seed=7,
+        steps=steps,
+    )
+
+
+def _run_ltx(tmp_path, backend=None, *, skip=None, request=None, clock=None):
+    events: list[dict[str, Any]] = []
+    backend = backend or _FakeLtxBackend()
+    outcome = run_ltx_video_upscale(backend, "handle", request or _ltx_request(tmp_path), progress_callback=events.append, skip_signal=skip, **({"clock": clock} if clock else {}))
+    return outcome, events, backend
+
+
+class TestLtxUpscale:
+    def test_the_backend_refines_the_clip_with_the_request_and_the_output_sits_beside_the_source(self, tmp_path, fakes):
+        outcome, events, backend = _run_ltx(tmp_path)
+
+        assert outcome is StageOutcome.success
+        assert backend.calls == [{"model": "handle", "source": "clip.mp4", "prompt": "A castle. A knight rides in.", "seed": 7, "steps": 2}]
+        finished = next(event for event in events if event["type"] == "generation_finished")
+        assert (finished["status"], Path(finished["output_path"])) == ("success", tmp_path / "clip_2x.mp4")
+        assert _leftovers(tmp_path) == ["clip_2x.mp4"]
+
+    def test_progress_counts_the_encode_each_step_and_the_decode_in_the_refine_phase(self, tmp_path, fakes):
+        _outcome, events, _backend = _run_ltx(tmp_path, request=_ltx_request(tmp_path, steps=3))
+
+        steps = [event for event in events if event["type"] == "step_progress"]
+        assert {event["phase"] for event in steps} == {"video_file_refine"}
+        assert [(event["current_step"], event["total_steps"]) for event in steps] == [(0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
+
+    def test_the_time_left_starts_after_the_first_refine_step_and_counts_the_decode_as_half_a_step(self, tmp_path, fakes):
+        clock = _Clock()
+
+        class _Timed(_FakeLtxBackend):
+            def upscale_video(self, model, source, *, steps, progress, interrupt, video_path, **kwargs):
+                for done, seconds in enumerate([20.0, 100.0, 100.0, 50.0], start=1):
+                    clock.now += seconds
+                    progress(done, steps + 2)
+                Path(video_path).write_bytes(b"video")
+                return 7
+
+        _outcome, events, _backend = _run_ltx(tmp_path, _Timed(), clock=clock)
+
+        etas = [event.get("eta_secs") for event in events if event["type"] == "step_progress" and event["current_step"] > 0]
+        assert etas == [None, pytest.approx(150.0), pytest.approx(50.0), 0.0]
+
+    def test_the_result_records_the_ltx_upscale_and_keeps_the_source_settings(self, tmp_path, fakes):
+        _run_ltx(tmp_path)
+
+        embedded = _embedded(fakes)
+        assert embedded["generation"]["upscale"] == {"method": "ltx", "factor": 2, "model": "ltx-4", "steps": 2, "seed": 7}
+        assert (embedded["workflow"], embedded["width"], embedded["height"], embedded["frame_count"]) == ("upscale", 8, 4, 7)
+        assert (embedded["prompt"], embedded["model"], embedded["source"]["workflow"]) == ("A knight rides in.", "ltx-8", "txt2vid")
+
+    def test_the_source_sound_is_muxed_back_in(self, tmp_path, fakes):
+        _run_ltx(tmp_path)
+
+        assert any(part.endswith("audio.m4a") for part in _finish_command(fakes))
+
+    def test_a_quit_during_the_refine_skips_and_leaves_nothing(self, tmp_path, fakes):
+        skip = SkipSignal()
+
+        class _Quitting(_FakeLtxBackend):
+            def upscale_video(self, model, source, *, progress, interrupt, **kwargs):
+                progress(1, 4)
+                skip.queue_action("quit")
+                interrupt()
+                raise AssertionError("must stop at the interrupt")
+
+        outcome, events, _backend = _run_ltx(tmp_path, _Quitting(), skip=skip)
+
+        assert outcome is StageOutcome.skipped
+        assert _types(events)[-1] == "batch_cancelled"
+        assert _leftovers(tmp_path) == []
+
+    def test_a_backend_failure_fails_the_job_and_leaves_nothing(self, tmp_path, fakes):
+        outcome, events, _backend = _run_ltx(tmp_path, _FakeLtxBackend(raise_at=2))
+
+        assert outcome is StageOutcome.failed
+        failed = next(event for event in events if event["type"] == "batch_failed")
+        assert "refine blew up" in failed["message"]
+        assert _leftovers(tmp_path) == []

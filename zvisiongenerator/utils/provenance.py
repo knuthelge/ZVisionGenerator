@@ -26,6 +26,8 @@ EXIF_IMAGE_DESCRIPTION = 0x010E
 # The recorded ``generation.upscale.method`` values: refine with the image model, or upscale with SeedVR2.
 UPSCALE_METHOD_CREATIVE = "creative"
 UPSCALE_METHOD_SEEDVR2 = "seedvr2"
+# A video file upscaled on macOS: LTX's spatial upsampler and a short refine of the clip's own latent.
+UPSCALE_METHOD_LTX = "ltx"
 UPSCALE_WORKFLOW = "upscale"
 
 
@@ -184,7 +186,7 @@ def build_video_upscale_payload(
             "path": _portable_path(source_path),
             "width": optional_int(origin.get("width")) or source_width,
             "height": optional_int(origin.get("height")) or source_height,
-            "workflow": _original_video_workflow(source_config),
+            "workflow": original_video_workflow(source_config),
         },
     }
     return _drop_unserializable(payload)
@@ -198,7 +200,7 @@ def _upscale_origin(source_config: Mapping[str, Any] | None) -> Mapping[str, Any
     return source if isinstance(source, Mapping) else {}
 
 
-def _original_video_workflow(source_config: Mapping[str, Any] | None) -> str | None:
+def original_video_workflow(source_config: Mapping[str, Any] | None) -> str | None:
     """Return the workflow that made the original behind *source_config*: its own, or the one its upscale source recorded."""
     if not source_config:
         return None
@@ -456,7 +458,7 @@ def _is_video_config(config: dict[str, Any]) -> bool:
 
 
 def _generation_block(value: Any, *, is_video: bool = False) -> dict[str, Any]:
-    """Keep the known, well-typed keys of a recorded ``generation`` block; a video keeps the upscale method only when it is ``seedvr2``."""
+    """Keep the known, well-typed keys of a recorded ``generation`` block; a video keeps the upscale method only when it is ``seedvr2`` or ``ltx``."""
     if not isinstance(value, dict):
         return {}
     generation: dict[str, Any] = {}
@@ -490,7 +492,7 @@ def _generation_block(value: Any, *, is_video: bool = False) -> dict[str, Any]:
         coerced = {key: item for key, item in coerced.items() if item is not None}
         if coerced and is_video:
             # A video upscaled from a file records its method; the in-run upscale of a generated clip records none.
-            method = {"method": UPSCALE_METHOD_SEEDVR2} if upscale.get("method") == UPSCALE_METHOD_SEEDVR2 else {}
+            method = {"method": upscale["method"]} if upscale.get("method") in (UPSCALE_METHOD_SEEDVR2, UPSCALE_METHOD_LTX) else {}
             generation["upscale"] = {**method, **coerced}
         elif coerced:
             # Image files that predate the method were all refined by the image model.

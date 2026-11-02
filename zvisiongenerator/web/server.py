@@ -38,7 +38,7 @@ from zvisiongenerator.backends import (
     get_prompt_enhancer_session,
     supports_video_audio,
     supports_video_extend,
-    supports_video_file_upscale,
+    video_file_upscale_method,
     supports_video_upscale_review,
     video_family_on_platform,
 )
@@ -48,7 +48,7 @@ from zvisiongenerator.converters.lora_import import import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
-from zvisiongenerator.core.video_types import AudioTrack, VideoGenerationRequest
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils import app_db
@@ -94,7 +94,7 @@ from zvisiongenerator.utils.prompt_enhance_caption import enhance_caption
 from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhance_video_prompt, split_scene_action
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
-from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
+from zvisiongenerator.utils.provenance import UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.references import check_reference_count, check_reference_files, missing_reference_files
 from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_FACTOR
@@ -152,7 +152,7 @@ from zvisiongenerator.web.path_browser import (
     resolve_purpose,
 )
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
-from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
+from zvisiongenerator.web.upscale_api import plan_ltx_video_upscale, plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
@@ -803,6 +803,7 @@ def _job_response(job_id: str, context: dict[str, Any], supported_controls: tupl
             "notices": list(context.get("notices", ())),
             "queue_position": queue_position,
             **({"media_type": context["media_type"]} if "media_type" in context else {}),
+            **({"upscale_method": context["upscale_method"]} if "upscale_method" in context else {}),
         }
     )
 
@@ -906,6 +907,8 @@ def _upscale_from_body(body: Any) -> JSONResponse:
     if source_path.suffix.lower() not in IMAGE_EXTENSIONS or not source_path.is_file():
         raise HTTPException(status_code=404, detail=f"Unknown image: {asset_id}")
 
+    if method == UPSCALE_METHOD_LTX:
+        raise HTTPException(status_code=422, detail="Images are upscaled with SeedVR2 or the creative refine; LTX upscales videos.")
     web_config = load_web_config()
     setup = web_config.seedvr2
     use_seedvr2 = method == UPSCALE_METHOD_SEEDVR2
@@ -956,14 +959,17 @@ def _upscale_from_body(body: Any) -> JSONResponse:
 
 
 def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSONResponse:
-    """Validate an upscale request for a gallery video, plan the job and submit it; runs off the event loop."""
-    if method != UPSCALE_METHOD_SEEDVR2:
-        raise HTTPException(status_code=422, detail="Videos are upscaled with SeedVR2 only.")
+    """Validate an upscale request for a gallery video, plan the job and submit it; runs off the event loop.
+
+    The method must be this platform's: ``seedvr2`` on Windows and Linux, ``ltx`` on macOS.
+    """
+    if method not in (UPSCALE_METHOD_SEEDVR2, UPSCALE_METHOD_LTX):
+        raise HTTPException(status_code=422, detail="Videos are upscaled with SeedVR2 or LTX only.")
     if factor != VIDEO_UPSCALE_FACTOR:
         raise HTTPException(status_code=422, detail=f"Videos are upscaled {VIDEO_UPSCALE_FACTOR}× only.")
     web_config = load_web_config()
-    setup = web_config.seedvr2
-    if setup is None or not supports_video_file_upscale():
+    platform_method = video_file_upscale_method()
+    if platform_method != method or (method == UPSCALE_METHOD_SEEDVR2 and web_config.seedvr2 is None):
         raise HTTPException(status_code=422, detail="Video upscaling is not available on this machine.")
     try:
         require_ffmpeg()
@@ -972,12 +978,16 @@ def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSO
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if method == UPSCALE_METHOD_LTX:
+        return _submit_ltx_video_upscale(source, recorded_config, web_config)
+    setup = web_config.seedvr2
     plan = plan_video_upscale(source, recorded_config, setup=setup)
     upscale_model = seedvr2_tier_label(setup.tier.model, setup.weights)
     context = {
         "workflow": "upscale",
         "job_type": "Upscale",
         "media_type": "video",
+        "upscale_method": UPSCALE_METHOD_SEEDVR2,
         "prompt": source.prompt or "",
         "model": upscale_model,
         "model_label": model_display_name(web_config.app_config, upscale_model),
@@ -992,6 +1002,37 @@ def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSO
     }
     try:
         job_id = web_runner.submit_video_file_upscale_job(request=plan.request, admission_check=_reject_while_busy, context=context)
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)
+
+
+def _submit_ltx_video_upscale(source: ExtendSource, recorded_config: dict[str, Any] | None, web_config: WebUiConfig) -> JSONResponse:
+    """Plan the LTX upscale of a checked gallery video and submit it (macOS)."""
+    try:
+        plan = plan_ltx_video_upscale(source, recorded_config, web_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    request = plan.request
+    context = {
+        "workflow": "upscale",
+        "job_type": "Upscale",
+        "media_type": "video",
+        "upscale_method": UPSCALE_METHOD_LTX,
+        "prompt": request.prompt,
+        "model": request.model_name,
+        "model_label": model_display_name(web_config.app_config, request.model_name),
+        "runs": 1,
+        "meta": video_upscale_size_label(plan),
+        "width": request.width,
+        "height": request.height,
+        "notices": list(plan.notices),
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "output_dir": web_config.output_dir,
+        "settings": {},
+    }
+    try:
+        job_id = web_runner.submit_ltx_video_upscale_job(request=request, config=web_config.app_config, admission_check=_reject_while_busy, context=context)
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)

@@ -1,4 +1,4 @@
-"""Upscale one existing video file: check it, then stream its frames through SeedVR2 into a new file with progress events."""
+"""Upscale one existing video file: check it, then upscale it (SeedVR2, or LTX on macOS) into a new file with progress events."""
 
 from __future__ import annotations
 
@@ -7,21 +7,23 @@ import os
 import shutil
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_generation_finished, emit_progress, exception_message
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import ExtendSource, VideoFileUpscaleRequest
+from zvisiongenerator.core.video_types import ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest
 from zvisiongenerator.utils.filename import unique_output_path
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2, build_video_upscale_payload, mp4_config_args
+from zvisiongenerator.utils.provenance import UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2, build_video_upscale_payload, mp4_config_args
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS
 from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_FACTOR, VIDEO_UPSCALE_SEED, WORK_DIR_PREFIX
 from zvisiongenerator.utils.video_extend import build_extend_source, inspect_extend_source
 from zvisiongenerator.utils.video_splice import build_audio_prep_command, build_final_mux_command, build_segment_command, run_ffmpeg, write_segment_frames
 from zvisiongenerator.utils.video_tail import stream_frames
+from zvisiongenerator.utils.video_upscale import ltx_upscale_eta, upscale_progress_units
 
 if TYPE_CHECKING:
     import numpy as np
@@ -31,6 +33,8 @@ if TYPE_CHECKING:
 _REFUSED_CODES = frozenset({"no_video_stream", "unreadable", "unreadable_audio", "hdr", "variable_frame_rate", "interlaced", "non_square_pixels"})
 # The progress phase the job card shows as batches.
 _PHASE = "video_file_upscale"
+# The progress phase of an LTX upscale, whose units are its encode, refine steps and decode.
+_LTX_PHASE = "video_file_refine"
 _STAGE = "upscale"
 # Tells the client which workflow stage each batch belongs to, as the stage wrapper does for denoising steps.
 _STAGE_FIELDS = {"workflow_stage_index": 1, "workflow_total_stages": 1, "workflow_stage_name": _STAGE}
@@ -62,6 +66,29 @@ def read_video_upscale_source(path: str | Path) -> tuple[ExtendSource, dict[str,
     return build_extend_source(path, inspection.probe, inspection.recorded), inspection.config
 
 
+@dataclass(frozen=True)
+class _UpscaleJob:
+    """What one video file upscale job runs, whatever makes the upscaled frames.
+
+    *write* fills the video-only file it is given and returns the frames written, reporting ``progress(done, total)`` in
+    *units* and calling ``interrupt()`` between them. *upscale* is the recorded ``generation.upscale`` block, *phase* the
+    progress phase the job card reads, and *eta* the seconds left from when each finished unit ended (seconds from the
+    first report), ``None`` while it can't tell.
+    """
+
+    source: ExtendSource
+    recorded_config: Mapping[str, Any] | None
+    output_dir: str
+    width: int
+    height: int
+    units: int
+    phase: str
+    seed: int
+    upscale: Mapping[str, Any]
+    write: Callable[[Path, Callable[[int, int], None], Callable[[], None]], int]
+    eta: Callable[[Sequence[float], int], float | None]
+
+
 def run_video_file_upscale(
     upscaler: Any,
     model: Any,
@@ -71,7 +98,7 @@ def run_video_file_upscale(
     skip_signal: SkipSignal | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> StageOutcome:
-    """Upscale ``request.source`` into ``<name>_2x.mp4`` beside it and emit the events of a one-video batch.
+    """Upscale ``request.source`` with SeedVR2 into ``<name>_2x.mp4`` beside it and emit the events of a one-video batch.
 
     The frames stream from the source through the engine's ``upscale_video`` into an encoder, so memory stays flat
     for any length. Everything is built in a hidden work folder and moved into place at the end, so a quit or a
@@ -89,17 +116,86 @@ def run_video_file_upscale(
     Returns:
         ``success``, ``skipped`` when the job was stopped, or ``failed``.
     """
+    job = _UpscaleJob(
+        source=request.source,
+        recorded_config=request.recorded_config,
+        output_dir=request.output_dir,
+        width=request.width,
+        height=request.height,
+        units=math.ceil(request.source.frame_count / request.batch_size),
+        phase=_PHASE,
+        seed=VIDEO_UPSCALE_SEED,
+        upscale={
+            "method": UPSCALE_METHOD_SEEDVR2,
+            "factor": VIDEO_UPSCALE_FACTOR,
+            "model": request.upscale_model,
+            "quantize": SEEDVR2_BITS,
+            "softness": request.softness,
+            "seed": VIDEO_UPSCALE_SEED,
+        },
+        write=lambda video, progress, interrupt: _write_upscaled_video(upscaler, model, request, video, progress=progress, interrupt=interrupt),
+        eta=_even_units_eta,
+    )
+    return _run_job(job, progress_callback=progress_callback, skip_signal=skip_signal, clock=clock)
+
+
+def run_ltx_video_upscale(
+    backend: Any,
+    model: Any,
+    request: LtxVideoUpscaleRequest,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    skip_signal: SkipSignal | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> StageOutcome:
+    """Upscale ``request.source`` with LTX into ``<name>_2x.mp4`` beside it and emit the events of a one-video batch.
+
+    The backend's ``upscale_video`` encodes the clip, upsamples its latent 2x, refines it in ``request.steps`` steps and
+    writes the video; the rest is the SeedVR2 job's: a hidden work folder, the source's own audio muxed back in and its
+    recorded settings embedded, so a quit or a failure leaves no file.
+
+    Args:
+        backend: The LTX video backend; it needs ``upscale_video``.
+        model: Its model handle, loaded for upscale.
+        request: The checked clip, its settings and the refine.
+        progress_callback: Receives the progress events, one unit per phase (the encode, each step, the decode).
+        skip_signal: A pending quit stops the upscale at the next unit.
+        clock: Seconds, for the time left and the recorded time.
+
+    Returns:
+        ``success``, ``skipped`` when the job was stopped, or ``failed``.
+    """
+    job = _UpscaleJob(
+        source=request.source,
+        recorded_config=request.recorded_config,
+        output_dir=request.output_dir,
+        width=request.width,
+        height=request.height,
+        units=upscale_progress_units(request.steps),
+        phase=_LTX_PHASE,
+        seed=request.seed,
+        upscale={"method": UPSCALE_METHOD_LTX, "factor": VIDEO_UPSCALE_FACTOR, "model": request.model_name, "steps": request.steps, "seed": request.seed},
+        write=lambda video, progress, interrupt: backend.upscale_video(
+            model, request.source, prompt=request.prompt, seed=request.seed, steps=request.steps, video_path=video, progress=progress, interrupt=interrupt
+        ),
+        eta=ltx_upscale_eta,
+    )
+    return _run_job(job, progress_callback=progress_callback, skip_signal=skip_signal, clock=clock)
+
+
+def _run_job(job: _UpscaleJob, *, progress_callback: ProgressCallback | None, skip_signal: SkipSignal | None, clock: Callable[[], float]) -> StageOutcome:
+    """Run *job* as a one-video batch: the batch, prompt, workflow and generation events around ``_upscale_to_output``."""
     skip = skip_signal or SkipSignal()
-    stem = request.source.path.stem
+    stem = job.source.path.stem
     context = {"mode": "video", "run_index": 0, "total_runs": 1, "ran_iterations": 1, "total_iterations": 1, "set_name": stem, "prompt_index": 0, "total_prompts": 1}
-    prompt = request.source.prompt or ""
+    prompt = job.source.prompt or ""
     emit_progress(progress_callback, "batch_started", mode="video", total_iterations=1, total_runs=1)
-    emit_progress(progress_callback, "prompt_started", **context, prompt=prompt, seed=VIDEO_UPSCALE_SEED)
+    emit_progress(progress_callback, "prompt_started", **context, prompt=prompt, seed=job.seed)
     if _quit_pending(skip):
         emit_progress(progress_callback, "batch_cancelled", mode="video", completed_iterations=0, total_iterations=1)
         return StageOutcome.skipped
 
-    event_context = {**context, "prompt": prompt, "seed": VIDEO_UPSCALE_SEED, "filename": stem}
+    event_context = {**context, "prompt": prompt, "seed": job.seed, "filename": stem}
     emit_progress(progress_callback, "generation_started", **event_context, retry=0)
     emit_progress(progress_callback, "workflow_started", total_stages=1, stage_name=_STAGE, stage_names=[_STAGE], **event_context)
     emit_progress(progress_callback, "workflow_stage_started", stage_index=1, total_stages=1, stage_name=_STAGE, **event_context)
@@ -107,7 +203,7 @@ def run_video_file_upscale(
     output: Path | None = None
     message: str | None = None
     try:
-        output = _upscale_to_output(upscaler, model, request, skip=skip, clock=clock, progress=lambda payload: emit_progress(progress_callback, "step_progress", **context, **_STAGE_FIELDS, **payload))
+        output = _upscale_to_output(job, skip=skip, clock=clock, progress=lambda payload: emit_progress(progress_callback, "step_progress", **context, **_STAGE_FIELDS, **payload))
         outcome = StageOutcome.success
     except _Cancelled:
         outcome = StageOutcome.skipped
@@ -135,67 +231,59 @@ def run_video_file_upscale(
     return outcome
 
 
-def _upscale_to_output(
-    upscaler: Any,
-    model: Any,
-    request: VideoFileUpscaleRequest,
-    *,
-    skip: SkipSignal,
-    clock: Callable[[], float],
-    progress: Callable[[dict[str, Any]], None],
-) -> Path:
+def _upscale_to_output(job: _UpscaleJob, *, skip: SkipSignal, clock: Callable[[], float], progress: Callable[[dict[str, Any]], None]) -> Path:
     """Build the upscaled file in a work folder, move it beside the source and return its path.
 
     Raises:
         _Cancelled: If a quit was requested; nothing is left behind.
         RuntimeError: If the engine or ffmpeg fails.
     """
-    source = request.source
+    source = job.source
     started = clock()
-    work = Path(tempfile.mkdtemp(dir=request.output_dir, prefix=WORK_DIR_PREFIX))
+    work = Path(tempfile.mkdtemp(dir=job.output_dir, prefix=WORK_DIR_PREFIX))
     try:
         audio = _prepare_audio(source, work)
-        total = math.ceil(source.frame_count / request.batch_size)
-        progress({"phase": _PHASE, "current_step": 0, "total_steps": total})
-        frames_started = clock()
+        progress({"phase": job.phase, "current_step": 0, "total_steps": job.units})
+        units_started = clock()
+        unit_ends: list[float] = []
 
-        def report(done: int, batches: int) -> None:
-            elapsed = clock() - frames_started
-            progress({"phase": _PHASE, "current_step": done, "total_steps": batches, "eta_secs": elapsed / done * (batches - done) if done else None})
+        def report(done: int, total: int) -> None:
+            del unit_ends[done:]
+            unit_ends.extend([clock() - units_started] * (done - len(unit_ends)))
+            progress({"phase": job.phase, "current_step": done, "total_steps": total, "eta_secs": job.eta(unit_ends, total)})
 
         def interrupt() -> None:
             if _quit_pending(skip):
                 raise _Cancelled
 
         video = work / "video.mp4"
-        written = _write_upscaled_video(upscaler, model, request, video, progress=report, interrupt=interrupt)
+        written = job.write(video, report, interrupt)
         payload = build_video_upscale_payload(
-            request.recorded_config,
+            job.recorded_config,
             source_path=str(source.path),
             source_width=source.width,
             source_height=source.height,
-            width=request.width,
-            height=request.height,
+            width=job.width,
+            height=job.height,
             frame_count=written,
             audio=audio is not None,
-            upscale={
-                "method": UPSCALE_METHOD_SEEDVR2,
-                "factor": VIDEO_UPSCALE_FACTOR,
-                "model": request.upscale_model,
-                "quantize": SEEDVR2_BITS,
-                "softness": request.softness,
-                "seed": VIDEO_UPSCALE_SEED,
-            },
+            upscale=job.upscale,
             generation_time=clock() - started,
         )
         finished = work / "finished.mp4"
         run_ffmpeg(build_final_mux_command(video, audio, finished, video_offset=source.video_start, metadata=mp4_config_args(payload)), "ffmpeg could not finish the upscaled video")
         interrupt()
-        target = unique_output_path(request.output_dir, f"{source.path.stem}{_OUTPUT_SUFFIX}", ".mp4")
+        target = unique_output_path(job.output_dir, f"{source.path.stem}{_OUTPUT_SUFFIX}", ".mp4")
         os.replace(finished, target)
         return target
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _even_units_eta(finished: Sequence[float], total: int) -> float | None:
+    """Return the seconds left when every unit takes as long as the average finished one (SeedVR2's equal batches)."""
+    done = len(finished)
+    return finished[-1] / done * (total - done) if done else None
 
 
 def _prepare_audio(source: ExtendSource, work: Path) -> Path | None:

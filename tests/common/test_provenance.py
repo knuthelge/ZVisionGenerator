@@ -619,10 +619,14 @@ _VIDEO_STEPS = {"factor": 2, "steps": 8}
         ({"generation": {"upscale": {"method": "seedvr2"}}}, {}),
         ({"workflow": "txt2img", "generation": {"upscale": {"factor": 2, "steps": 3}}}, {"upscale": {"method": "creative", "factor": 2, "steps": 3}}),
         ({"workflow": "upscale", "generation": {"upscale": {"method": "seedvr2", "factor": 2}}}, {"upscale": {"method": "seedvr2", "factor": 2}}),
-        # Videos record no method, except that seedvr2 is kept.
+        # Videos record no method, except that the file upscales' seedvr2 and ltx are kept.
         ({"workflow": "txt2vid", "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
         ({"frame_count": 121, "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
         ({"workflow": "upscale", "frame_count": 97, "generation": {"upscale": {"method": "seedvr2", "factor": 2}}}, {"upscale": {"method": "seedvr2", "factor": 2}}),
+        (
+            {"workflow": "upscale", "frame_count": 121, "generation": {"upscale": {"method": "ltx", "factor": 2, "model": "ltx-4", "steps": 2, "seed": 7}}},
+            {"upscale": {"method": "ltx", "factor": 2, "model": "ltx-4", "steps": 2, "seed": 7}},
+        ),
         ({"workflow": "txt2vid", "generation": {"upscale": {"method": "creative", "factor": 2}}}, {"upscale": {"factor": 2}}),
         ({"workflow": "extend", "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
         ({"workflow": "extend", "frame_count": 193, "generation": {"upscale": _VIDEO_STEPS}}, {"upscale": _VIDEO_STEPS}),
@@ -637,6 +641,7 @@ _VIDEO_STEPS = {"factor": 2, "steps": 8}
         "video-by-workflow",
         "video-by-frames",
         "video-keeps-seedvr2",
+        "video-keeps-ltx",
         "video-drops-creative",
         "extend-by-workflow",
         "extend-by-frames",

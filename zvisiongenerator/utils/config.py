@@ -10,6 +10,7 @@ resolve_defaults() for the config layering precedence:
 from __future__ import annotations
 
 import importlib.resources
+import sys
 import warnings
 from copy import deepcopy
 from dataclasses import fields
@@ -473,6 +474,13 @@ def get_variant_key(model_info: ImageModelInfo) -> str | None:
     if model_info.family == "moss":
         return "turbo" if model_info.is_distilled else "sft"
     return None
+
+
+def model_download_size_label(config: dict[str, Any], name: str) -> str | None:
+    """Return the download size label ``model_labels.<name>.download_size_label`` gives for this platform, or ``None``."""
+    sizes = ((config.get("model_labels") or {}).get(name) or {}).get("download_size_label") or {}
+    label = sizes.get(sys.platform) if isinstance(sizes, dict) else None
+    return label if isinstance(label, str) else None
 
 
 def model_display_name(config: dict[str, Any], name: str) -> str:

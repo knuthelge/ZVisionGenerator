@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import importlib.util
 import json
 import os
@@ -26,7 +27,7 @@ from tests._factories import _make_video_args, make_extend_source
 from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
-from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
+from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.upscale_runner import upscale_prompts
 from zvisiongenerator.utils import app_db
@@ -598,6 +599,104 @@ class TestWebRunner:
 
         try:
             runner._run_video_file_upscale_request(request=self._video_file_request(tmp_path), progress_callback=lambda _event: None, control_signal=SkipSignal())
+        finally:
+            runner.shutdown()
+
+    def _ltx_request(self, tmp_path):
+        return LtxVideoUpscaleRequest(
+            source=make_extend_source(path=tmp_path / "clip.mp4"),
+            recorded_config=None,
+            output_dir=str(tmp_path),
+            width=1024,
+            height=512,
+            model_name="ltx-4",
+            model_ref="dgrauet/ltx-2.3-mlx-q4@a",
+            prompt="",
+            seed=42,
+            steps=2,
+        )
+
+    def test_ltx_video_upscale_job_downloads_the_upscale_files_loads_for_upscale_and_runs_in_video_mode(self, tmp_path, monkeypatch):
+        """An LTX file upscale downloads the model with its upsampler, loads it for upscale, runs once, and accepts only quit."""
+        backend = MagicMock(name="ltx_backend")
+        backend.load_model.return_value = ("handle", "info")
+        plans: list = []
+        downloads: list = []
+        runs: list = []
+        config = {"video_model_presets": {}}
+
+        def _fake_ensure(self, planned, **kwargs):
+            downloads.append((planned, kwargs["mode"], kwargs["role"], kwargs["model"]))
+            return True
+
+        def _fake_run(engine, model, request, *, progress_callback, skip_signal):
+            runs.append((engine, model, request))
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        monkeypatch.setattr(web_runner_module, "video_plan", lambda ref, **kwargs: plans.append((ref, kwargs)) or ("targets",))
+        monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", _fake_ensure)
+        monkeypatch.setattr(web_runner_module, "get_video_backend", lambda family: backend if family == "ltx" else pytest.fail(family))
+        monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, upscale, quiet: {"upscale": upscale, "mlx_packs": {}})
+        monkeypatch.setattr(web_runner_module, "run_ltx_video_upscale", _fake_run)
+        request = self._ltx_request(tmp_path)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = runner.submit_ltx_video_upscale_job(request=request, config=config, context={"output_dir": str(tmp_path), "media_type": "video", "upscale_method": "ltx"})
+            snapshot = wait_for_status(runner, job_id, "completed")
+            loading = [event for event in runner._get_job(job_id).history if event["type"] == "model_loading"]
+        finally:
+            runner.shutdown()
+
+        assert (snapshot["job_type"], snapshot["supported_controls"], snapshot["media_type"], snapshot["upscale_method"]) == ("upscale", ["quit"], "video", "ltx")
+        assert plans == [("dgrauet/ltx-2.3-mlx-q4@a", {"family": "ltx", "config": config, "model_name": "ltx-4", "upscale": True})]
+        assert downloads == [(("targets",), "video", "model", "ltx-4")]
+        backend.load_model.assert_called_once_with("dgrauet/ltx-2.3-mlx-q4@a", low_memory=True, loras=None, upscale=True, mlx_packs={})
+        assert [(event["mode"], event["model"]) for event in loading] == [("video", "ltx-4")]
+        assert runs == [(backend, "handle", request)]
+
+    def test_an_ltx_video_upscale_loads_the_requests_loras(self, tmp_path, monkeypatch):
+        backend = MagicMock(name="ltx_backend")
+        backend.load_model.return_value = ("handle", "info")
+        monkeypatch.setattr(web_runner_module, "video_plan", lambda ref, **kwargs: ())
+        monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", lambda self, planned, **kwargs: True)
+        monkeypatch.setattr(web_runner_module, "get_video_backend", lambda family: backend)
+        monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, upscale, quiet: {})
+        monkeypatch.setattr(web_runner_module, "run_ltx_video_upscale", lambda *args, **kwargs: None)
+        request = replace(self._ltx_request(tmp_path), loras=(("/loras/style.safetensors", 0.8),))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            runner._run_ltx_video_upscale_request(request=request, config={}, progress_callback=lambda _event: None, control_signal=SkipSignal())
+        finally:
+            runner.shutdown()
+
+        assert backend.load_model.call_args.kwargs["loras"] == [("/loras/style.safetensors", 0.8)]
+
+    def test_a_quit_before_an_ltx_video_upscale_starts_cancels_without_loading(self, tmp_path, monkeypatch):
+        control = SkipSignal()
+        control.queue_action("quit")
+        events: list = []
+        monkeypatch.setattr(web_runner_module, "run_ltx_video_upscale", MagicMock(side_effect=AssertionError("must not run")))
+        monkeypatch.setattr(web_runner_module, "get_video_backend", MagicMock(side_effect=AssertionError("must not load")))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            runner._run_ltx_video_upscale_request(request=self._ltx_request(tmp_path), config={}, progress_callback=events.append, control_signal=control)
+        finally:
+            runner.shutdown()
+
+        assert events == [{"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1}]
+
+    def test_a_stopped_ltx_download_ends_the_job_without_loading(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "video_plan", lambda *_a, **_kw: ("targets",))
+        monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", lambda self, *_a, **_kw: False)
+        monkeypatch.setattr(web_runner_module, "get_video_backend", MagicMock(side_effect=AssertionError("must not load")))
+        monkeypatch.setattr(web_runner_module, "run_ltx_video_upscale", MagicMock(side_effect=AssertionError("must not run")))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            runner._run_ltx_video_upscale_request(request=self._ltx_request(tmp_path), config={}, progress_callback=lambda _event: None, control_signal=SkipSignal())
         finally:
             runner.shutdown()
 
