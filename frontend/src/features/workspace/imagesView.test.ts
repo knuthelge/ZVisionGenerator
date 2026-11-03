@@ -48,7 +48,7 @@ describe('imagesView in Image', () => {
     expect(view('txt2img', {}, { caps: { maxReferences: 0 } }).references).toBeNull();
   });
 
-  it('is not visible when the model takes neither, nor in Extend Video', () => {
+  it('is not visible when the model takes neither, nor in Extend', () => {
     expect(view('txt2img', {}, { caps: { showRefImage: false, maxReferences: 0 } }).visible).toBe(false);
     expect(view('extend', {}, { caps: { showRefImage: false, takesLastFrame: false, maxReferences: 0 } }).visible).toBe(false);
   });

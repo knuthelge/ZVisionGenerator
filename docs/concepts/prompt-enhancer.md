@@ -117,7 +117,7 @@ The default depends on the workflow, and on whether a first frame is set. The ch
 
 - **Video without a first frame** rewrites both, splitting what you wrote: setting, look and camera setup go to the scene, events in order to the action.
 - **Video with a first frame** rewrites the action only when you gave a scene (what the image shows), so it isn't restyled. With a blank scene it writes a short scene too.
-- **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. It uses the previous clip's prompt as context, so it doesn't repeat its actions or lines.
+- **Extend** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. It uses the previous clip's prompt as context, so it doesn't repeat its actions or lines.
 
 Action only needs a scene; with a blank one, both parts are written. Style, Mood, Theme, Shot, Angle, Palette and Focus on have no effect with Action only, since they shape the scene.
 

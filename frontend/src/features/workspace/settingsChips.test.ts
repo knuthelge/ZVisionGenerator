@@ -18,7 +18,7 @@ const state = {
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
   return {
     caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null, extendChanged: false,
-    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
+    loraNames: [], videoKind: null, modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
     presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
   };
@@ -29,8 +29,8 @@ describe('settingsChips', () => {
     const image = pendingChips('txt2img');
     expect(image.map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
     expect(image.every((chip) => chip.value === '—' && !chip.changed)).toBe(true);
-    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
-    expect(pendingChips('extend')[1]?.key).toBe('extendSeconds');
+    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['kind', 'preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
+    expect(pendingChips('extend').map((chip) => chip.key).slice(0, 3)).toEqual(['kind', 'preset', 'extendSeconds']);
     expect(pendingChips('extend').map((chip) => chip.key)).not.toContain('images');
   });
 
@@ -50,11 +50,28 @@ describe('settingsChips', () => {
     expect(settingsChips(facts({ caps, seconds: 5 })).map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'seed', 'runs', 'size', 'audio', 'loras', 'model']);
   });
 
+  describe('the Kind chip of Video', () => {
+    const videoCaps = { ...imageCaps, isImageMode: false, showFrameCount: true, showImageUpscale: false } as WorkspaceCapabilities;
+    const extendCaps = { ...videoCaps, showFrameCount: false, showExtendLength: true, showSourceVideo: true } as WorkspaceCapabilities;
+
+    it('comes first and names the open kind, when the machine offers more than one', () => {
+      const chips = settingsChips(facts({ caps: videoCaps, seconds: 5, videoKind: 'new' }));
+      expect(chips[0]).toMatchObject({ key: 'kind', value: 'New' });
+      expect(settingsChips(facts({ caps: extendCaps, extendSeconds: 2, videoKind: 'extend' }))[0]).toMatchObject({ key: 'kind', value: 'Extend' });
+      expect(settingsChips(facts({ caps: videoCaps, seconds: 5 })).map((chip) => chip.key)).not.toContain('kind');
+    });
+
+    it('calls the extension length Length, so no two chips are named Extend', () => {
+      const chips = settingsChips(facts({ caps: extendCaps, extendSeconds: 2, videoKind: 'extend' }));
+      expect(chips.find((chip) => chip.key === 'extendSeconds')).toMatchObject({ label: 'Length', value: '+2 s' });
+    });
+  });
+
   describe('the Track chip', () => {
     const track = (f: Partial<ChipFacts>) => settingsChips(facts(f)).find((chip) => chip.key === 'track');
     const videoCaps = { ...imageCaps, isImageMode: false, showFrameCount: true, showImageUpscale: false, showSourceVideo: false } as WorkspaceCapabilities;
 
-    it('comes right after Images, and after Source in Extend Video', () => {
+    it('comes right after Images, and after Source in Extend', () => {
       const images: ImagesSummary = { text: 'None', tone: 'muted' };
       const keys = (f: Partial<ChipFacts>) => settingsChips(facts({ caps: videoCaps, seconds: 5, ...f })).map((chip) => chip.key);
 

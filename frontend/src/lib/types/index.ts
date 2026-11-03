@@ -20,6 +20,10 @@ export type WorkflowMode = 'image' | 'video' | 'audio';
 
 /** What the user picks in the top bar: an image, a video, or the continuation of a video. The workflow follows from it and the tab's images. */
 export type WorkspaceTab = 'image' | 'video' | 'extend' | 'audio';
+/** The tabs of the top bar. Extend is a kind of Video, not a tab; `WorkspaceTab` also names its slot. */
+export type NavTab = 'image' | 'video' | 'audio';
+/** The kinds of the Video tab: a new clip (from text or a first frame) or the extension of a clip. */
+export type VideoKind = 'new' | 'extend';
 
 export type PromptSource = 'inline' | 'file';
 
@@ -902,7 +906,7 @@ export interface WritableConfigSchema {
 
 // ── Draft / workspace form state ──────────────────────────────────────────────
 
-/** The text a tab keeps for itself: what is typed, and the Enhanced text made from it. Image and Video each hold one; Extend Video shares Video's. */
+/** The text a tab keeps for itself: what is typed, and the Enhanced text made from it. Image and Video each hold one; Video's two kinds share it. */
 export interface TabText {
   prompt: string;
   scene: string;
@@ -969,11 +973,11 @@ export interface DraftState {
   audioTrackUpload: string | null;
   /** Video tab: the seconds into the track where the clip's sound starts. */
   audioTrackStart: number;
-  /** Extend Video tab: the audio track's path on the host; null when none is set or it was uploaded (`extendAudioTrackUpload`). */
+  /** Extend kind: the audio track's path on the host; null when none is set or it was uploaded (`extendAudioTrackUpload`). */
   extendAudioTrackPath: string | null;
-  /** Extend Video tab: the file name of an audio track uploaded from this device; null when none. */
+  /** Extend kind: the file name of an audio track uploaded from this device; null when none. */
   extendAudioTrackUpload: string | null;
-  /** Extend Video tab: the seconds into the track where the extension's sound starts. */
+  /** Extend kind: the seconds into the track where the extension's sound starts. */
   extendAudioTrackStart: number;
   referenceImageStrength: number;
   frameCount: number;
@@ -1038,6 +1042,8 @@ export interface DraftState {
   missingSourceVideo: boolean;
   /** Extend: the source whose Scene and Prompt were settled, and the text its prefill put there (to tell edits from prefill). */
   extendPrefill: { path: string; scene: string; prompt: string; audioTrack?: { path: string; start: number } | null } | null;
+  /** Video tab: the kind last open (New or Extend); coming back to the tab restores it. */
+  videoKind: VideoKind;
   /** Audio tab: the kind last open (Music, Speech or Sound); coming back to the tab restores it. */
   audioKind: AudioWorkflow;
   /** Audio tab: the model last chosen for each kind. Empty before one was chosen. */

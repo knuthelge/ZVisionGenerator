@@ -9,10 +9,10 @@ import { outputSettingsPatch } from './jobSettings';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
-import { isAudioWorkflow, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
+import { isAudioWorkflow, navTab, videoKindOf, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
 import { voiceConsent } from './voiceConsent.svelte';
 import { firstValues, listOf } from '$lib/prefillParams';
-import type { WorkspaceTab, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { NavTab, VideoKind, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -107,6 +107,7 @@ const DEFAULT_DRAFT: DraftState = {
   missingSourceVideo: false,
   extendPrefill: null,
   appliedPreset: null,
+  videoKind: 'new',
   audioKind: 'music',
   audioModels: { music: '', speech: '', sound: '' },
   ...AUDIO_FIELD_DEFAULTS,
@@ -219,7 +220,7 @@ function _textOf(state: DraftState): TabText {
 /**
  * Return the state with the text of the mode a workflow belongs to. Image and Video each keep their own: moving to the other
  * mode saves the open text under the mode being left and brings back what the entered one saved (nothing, for a mode not
- * visited yet). Video and Extend Video share one text, so moving between them changes nothing.
+ * visited yet). Video's two kinds share one text, so moving between them changes nothing.
  */
 function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
   const from = workflowMode(state.workflow);
@@ -240,7 +241,7 @@ export function slotPaths(state: Pick<DraftState, (typeof SLOT_KEYS)[number]>, k
   });
 }
 
-/** The draft fields that hold each tab's images and audio track, with the upload markers and Strength. Extend Video holds only its track. */
+/** The draft fields that hold each tab's images and audio track, with the upload markers and Strength. The Extend kind holds only its track. */
 const TAB_IMAGE_KEYS = {
   image: ['referenceImagePath', 'referenceImageUpload', 'referenceImagePaths', 'referenceImageStrength'],
   video: ['firstFramePath', 'firstFrameUpload', 'endImagePath', 'endImageUpload', 'audioTrackPath', 'audioTrackUpload', 'audioTrackStart'],
@@ -748,7 +749,7 @@ export const draft = {
       if (params.end_image_path && canApply('end_image_path')) Object.assign(prefill, lastSlotPatch({ path: params.end_image_path }));
       else if (replacing) Object.assign(prefill, lastSlotPatch(null));
     }
-    // The audio track belongs to the same tab (Video or Extend Video) and follows the images' rule: a full prefill replaces it,
+    // The audio track belongs to the same tab (Video or Extend) and follows the images' rule: a full prefill replaces it,
     // so a job made without a track clears it. A Use as leaves it alone.
     if (slotTab !== 'image') {
       if (params.audio_track_path && canApply('audio_track_path')) {
@@ -812,6 +813,8 @@ export const draft = {
    * step cap) and takes its own defaults for the rest; the same model keeps everything.
    */
   hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null, options: { keepSettings?: boolean; keepChangedSettings?: boolean } = {}): void {
+    // A machine that cannot extend gives the Extend kind back to New.
+    if (_draft.workflow === 'extend' && !ctx.workflow_contract.values.includes('extend')) _draft = _withDerivedWorkflow(ctx, { ..._draft, workflow: 'txt2vid', videoKind: 'new' });
     // The Audio tab settles on a kind and one of its models; a machine that runs no audio model gives the tab back to Image.
     if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img' };
     if (isAudioWorkflow(_draft.workflow)) {
@@ -860,16 +863,32 @@ export const draft = {
   },
 
   /**
-   * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind). When the tab is of the other mode (image or video) the
+   * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind, the Video tab's the kind it was
+   * left on). When the tab is of the other mode (image or video) the
    * applied preset is forgotten and the text swaps to what that mode kept. The model and defaults follow when the Workspace calls `onTabChange` with its context.
    * Without a context the model's capabilities are unknown, so the tab's start image is assumed to be usable.
    */
-  setTab(tab: WorkspaceTab): void {
-    if (tab === workspaceTab(_draft.workflow)) return;
-    // The Audio tab opens on the kind it was left on.
-    const workflow = tab === 'audio' ? _draft.audioKind : workflowFor(tab, _draft, true);
+  setTab(tab: NavTab): void {
+    if (tab === navTab(_draft.workflow)) return;
+    // Leaving Video notes the kind it was on, so coming back opens it again.
+    const left = videoKindOf(_draft.workflow);
+    const videoKind = left ?? _draft.videoKind;
+    // The Audio tab opens on the kind it was left on, the Video tab on its kind.
+    const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && videoKind === 'extend' ? 'extend' : workflowFor(tab, _draft, true);
     const leavesMode = workflowMode(workflow) !== workflowMode(_draft.workflow);
-    _draft = { ..._withTextOfMode(_draft, workflow), workflow, ...(leavesMode ? { appliedPreset: null } : {}) };
+    _draft = { ..._withTextOfMode(_draft, workflow), workflow, videoKind, ...(leavesMode ? { appliedPreset: null } : {}) };
+    this.saveDraft();
+  },
+
+  /**
+   * Open a kind of the Video tab: New (a text or first-frame clip) or Extend. Only the workflow changes; each kind keeps its own
+   * inputs, and the text, the model and the settings are shared. The model and defaults follow when the Workspace calls `onTabChange`.
+   *
+   * @param ctx Tells whether the model takes a first frame; without it one is assumed.
+   */
+  setVideoKind(kind: VideoKind, ctx: WorkspaceContext | null): void {
+    const workflow = kind === 'extend' ? 'extend' : workflowFor('video', _draft, imageSupport(ctx, _draft.model, 'video').start);
+    _draft = { ..._draft, workflow, videoKind: kind };
     this.saveDraft();
   },
 
@@ -905,7 +924,7 @@ export const draft = {
   },
 
   /**
-   * Set or clear the audio track of a tab (Video or Extend Video): the draft holds its path or the upload's file name and
+   * Set or clear the audio track of a tab (Video or Extend): the draft holds its path or the upload's file name and
    * the file is held for Generate. A new track starts at 0; clearing puts Start at back to 0.
    */
   setAudioTrack(tab: TrackTab, value: SlotValue): void {
@@ -949,7 +968,7 @@ export const draft = {
    * tab, model, LoRAs, quantization, and the prompt inputs of both tabs (including the
    * Enhanced prompt) untouched. Enhancement options and auto-enhance reset. The applied preset clears, since its
    * settings are gone. The open tab's images and audio track clear with their upload markers and held files (Image: the
-   * start image, the references and Strength; Video: the first and last frame and the track; Extend Video: its track), so
+   * start image, the references and Strength; Video: the first and last frame and the track; Extend: its track), so
    * its workflow falls back to text. The other tabs keep theirs.
    */
   resetSelections(ctx: WorkspaceContext): void {

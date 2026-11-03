@@ -1,6 +1,6 @@
 # Video
 
-Videos are made with LTX or MiniMax H3, with sound, from a prompt or from a starting image. In the Web UI, **Video** makes both: add a first frame in its **Images** section to start from an image. **Extend Video** continues a clip you already have.
+Videos are made with LTX or MiniMax H3, with sound, from a prompt or from a starting image. In the Web UI, **Video** makes both: add a first frame in its **Images** section to start from an image. Its **Extend** kind continues a clip you already have.
 
 ## Models
 
@@ -127,7 +127,7 @@ On a Mac, MiniMax H3 text to video cannot stop in the middle of a clip, so **Nex
 
 Extend continues a clip from where it ends: it generates what happens next, with sound, and writes a new file. Your original clip is never changed.
 
-**Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from the **Extend Video** tab with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
+**Start one** with **Extend** in the viewer (++e++) or a video's **⋯** menu, from **Video** set to **Extend** with **Browse**, or with `ziv-video --extend clip.mp4`. **Reuse settings** on an extension brings back its source, scene, prompt and length.
 
 The extension takes the source's size and frame rate, and starts from its model and LoRAs when they're still installed.
 

@@ -13,7 +13,7 @@
 
   let { track }: Props = $props();
 
-  // `visible` is only true in Video and Extend Video, so the tab is known wherever the section renders.
+  // `visible` is only true in Video (either kind), so the tab is known wherever the section renders.
   const tab = $derived(track.tab ?? 'video');
 </script>
 

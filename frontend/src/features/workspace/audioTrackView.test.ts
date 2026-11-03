@@ -45,7 +45,7 @@ describe('audioTrackView', () => {
     expect(v.name).toBe('memo.m4a');
   });
 
-  it('keeps the track of Extend Video apart from the Video track', () => {
+  it('keeps the track of Extend apart from the Video track', () => {
     const extending = view({ workflow: 'extend', audioTrackPath: '/audio/video.mp3', extendAudioTrackPath: '/audio/extend.mp3', extendAudioTrackStart: 6.65 });
 
     expect(extending).toMatchObject({ tab: 'extend', sent: { path: '/audio/extend.mp3', file: null, start: 6.65 } });

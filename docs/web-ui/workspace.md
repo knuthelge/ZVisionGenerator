@@ -1,6 +1,8 @@
 # Workspace
 
-The Workspace is where you make things. Pick **Image**, **Video**, **Extend Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, and **Extend Video** shares the prompt of **Video**, so switching tabs never moves text from one to the other.
+The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, so switching tabs never moves text from one to the other.
+
+**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). Both kinds share the prompt, the model, the LoRAs and the steps and seed. Each keeps its own inputs, so switching back and forth loses nothing: **New** its size, duration, frames, upscale and audio track, **Extend** its source video, **Extend by** and audio track. Video reopens on the kind you left it on. **Kind** is hidden on a computer that can't extend. On a tablet held upright the toolbar shows only the controls, without the words *Kind* and *Model*. On a phone, a **Kind** chip leads the strip ([Video on a phone](devices.md#video-on-a-phone)).
 
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
@@ -85,7 +87,7 @@ For video, *Compose* has a **Scene** box above the **Action** box. See [Scene an
 
 ### Recent prompts
 
-The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video** and **Extend Video**. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
+The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video**, whichever kind. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
 
 - **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text is dropped. A JSON caption turns on **{ } JSON** and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and tab don't change.
 - **From the keyboard:** press ++alt+up++ in an empty prompt to open the list with the filter ready. ++up++ and ++down++ move, ++enter++ picks and ++esc++ closes and puts the cursor back in the prompt box (or on the button, if you opened the list with it).
@@ -106,7 +108,7 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 | **Size** | **Ratio**, **Resolution**, or a custom **W × H**; **Duration (s)** for video |
 | **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
 | **Images** | In Image, the **Start image** with its **Strength**, and [references](#references) (FLUX.2 Klein). In Video, a **First frame** and an optional **Last frame**. See [Images](#images) |
-| **Audio track** | In Video and Extend Video, an audio file the clip follows, with **Start at**. See [Audio track](#audio-track) |
+| **Audio track** | In Video, either kind, an audio file the clip follows, with **Start at**. See [Audio track](#audio-track) |
 | **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
 | **Post-processing** | **Sharpen**, **Contrast**, **Saturation** and **Transparent** (images) |
 | **Video** | **Audio**, **Low memory** |
@@ -150,9 +152,9 @@ Folded, the header's summary says what **Generate** will use: in Image *None*, *
 **Where images stay**
 
 - An image stays until you press its × or **Reset**, including after you reload the page and including images uploaded from your device.
-- **Image** and **Video** each keep their own images. Adding a first frame in Video doesn't put it into Image, and switching between **Image**, **Video** and **Extend Video**, or changing the model, clears none of them.
+- **Image** and **Video** each keep their own images. Adding a first frame in Video doesn't put it into Image, and switching between **Image** and **Video**, between its kinds, or changing the model, clears none of them.
 - **Reuse settings** and **Load settings** replace the images of the tab they open with the ones the job used. A job made from text leaves that tab's images empty.
-- **Reset** in the *Settings* header clears the open tab's images along with the other settings: in Image the start image, the references and **Strength**, in Video the first and last frame. In **Extend Video** it clears no images. The other tab keeps its images.
+- **Reset** in the *Settings* header clears the open tab's images along with the other settings: in Image the start image, the references and **Strength**, in Video the first and last frame. In the **Extend** kind it clears no images. The other tab keeps its images.
 
 **Images a model can't use**
 
@@ -175,9 +177,9 @@ When the model takes [references](../concepts/images.md#references), the **Image
 
 ### Audio track
 
-The **Audio track** section comes after **Images** in **Video**, and after **Source video** in **Extend Video**. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
+The **Audio track** section comes after **Images** in **Video**, and after **Source video** in the **Extend** kind. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
 
-In **Extend Video**, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. **Reset** clears the track, except one the source filled in.
+In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. **Reset** clears the track, except one the source filled in.
 
 A server file that can't be read is refused at **Generate** with *Can't read the audio track*. An upload lost on reload blocks **Generate** with *Choose the audio track again.* On a phone, the **Track** chip opens the same rows in a popover.
 
@@ -261,7 +263,7 @@ Takes appear in the Gallery strip as audio tiles. See [Audio in the Gallery](gal
 
 ### On other screens
 
-On a tablet held upright, *Compose* and *Settings* sit side by side under the player. On a phone, **Audio** is the fourth choice in the top strip's workflow menu, and the strip's chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**. See [Other devices](devices.md#audio-on-a-phone).
+On a tablet held upright, *Compose* and *Settings* sit side by side under the player. On a phone, **Audio** is the third choice in the top strip's workflow menu, and the strip's chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**. See [Other devices](devices.md#audio-on-a-phone).
 
 ## Generate
 

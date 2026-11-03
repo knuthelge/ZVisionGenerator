@@ -6,6 +6,7 @@ import { ApiError } from '$lib/api/client';
 import { draft } from '$lib/state/draft.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
+import { workspaceMemory } from '$lib/state/pageMemory';
 import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from '$lib/types';
@@ -1418,7 +1419,7 @@ describe('WorkspacePage Images section', () => {
     });
   }
 
-  it('Images is third after Size and Sampling, in Image and Video, not in Extend', async () => {
+  it('Images is third after Size and Sampling, in Image and Video, not in the Extend kind', async () => {
     await mountWorkspace(makeContext());
     expect(sections().slice(0, 3)).toEqual(['size', 'sampling', 'images']);
     await unmount(app!);
@@ -1430,6 +1431,8 @@ describe('WorkspacePage Images section', () => {
     await unmount(app!);
     app = null;
 
+    // The page remembers the last context, which cannot extend; the Extend kind needs the one that can.
+    workspaceMemory.forget();
     const extendContext = makeContext();
     extendContext.workflow_contract.values = [...extendContext.workflow_contract.values, 'extend'];
     draft.update('workflow', 'extend');

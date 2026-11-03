@@ -3,8 +3,9 @@ import type { AudioTrackView } from './audioTrackView';
 import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
 import type { IconName } from '$lib/components/atoms/Icon.svelte';
-import type { AudioWorkflow, DraftState, Workflow, WorkspaceWorkflow } from '$lib/types';
+import type { AudioWorkflow, DraftState, VideoKind, Workflow, WorkspaceWorkflow } from '$lib/types';
 import { KIND_INFO } from './audioKinds';
+import { VIDEO_KIND_INFO } from './kindInfo';
 import type { VoiceView } from './audioView';
 
 /** The settings a phone shows as chips, each opening one control. */
@@ -53,7 +54,9 @@ export interface ChipFacts {
   modelDownloaded: boolean;
   /** Extend: the source clip's name, or null. */
   sourceName: string | null;
-  /** The Images section's summary; null where the section is not offered (a model that can use no image, Extend Video). */
+  /** The Video tab's open kind when the machine offers more than one (New, Extend); null where there is nothing to choose. */
+  videoKind: VideoKind | null;
+  /** The Images section's summary; null where the section is not offered (a model that can use no image, the Extend kind). */
   images: ImagesSummary | null;
   /** The audio track view; null where the section is not offered (Image, a model that follows no track). */
   track: Pick<AudioTrackView, 'set' | 'start' | 'gone'> | null;
@@ -79,9 +82,11 @@ const fmt = (value: number): string => (Number.isInteger(value) ? String(value) 
 export function settingsChips(f: ChipFacts): SettingChip[] {
   const { caps, state: s } = f;
   const chips: (SettingChip | null)[] = [
+    f.videoKind ? { key: 'kind', label: '', value: VIDEO_KIND_INFO[f.videoKind].label, changed: false, icon: VIDEO_KIND_INFO[f.videoKind].icon } : null,
     { key: 'preset', label: 'Preset', value: f.presetName ?? 'none', changed: f.presetChanged, on: f.presetName !== null, applied: f.presetSlug ?? '' },
     caps.showFrameCount && f.seconds !== null ? { key: 'seconds', label: 'Length', value: `${fmt(f.seconds)} s`, changed: f.changed('frameCount'), warn: f.memoryWarn } : null,
-    caps.showExtendLength ? { key: 'extendSeconds', label: 'Extend', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.extendChanged, warn: f.memoryWarn } : null,
+    // The Kind chip already says Extend, so the length chip reads Length in both kinds.
+    caps.showExtendLength ? { key: 'extendSeconds', label: 'Length', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.extendChanged, warn: f.memoryWarn } : null,
     caps.showSteps ? { key: 'steps', label: 'Steps', value: fmt(s.steps), changed: f.changed('steps') } : null,
     caps.showGuidance ? { key: 'guidance', label: 'Guidance', value: fmt(s.guidance), changed: f.changed('guidance') } : null,
     caps.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
@@ -151,7 +156,7 @@ const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
   img2img: PENDING_IMAGE_CHIPS,
   txt2vid: PENDING_VIDEO_CHIPS,
   img2vid: PENDING_VIDEO_CHIPS,
-  extend: [['extendSeconds', 'Extend'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['source', 'Source'], ['track', 'Track'], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
+  extend: [['extendSeconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['source', 'Source'], ['track', 'Track'], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
 };
 
 /**
@@ -162,6 +167,7 @@ export function pendingChips(workflow: WorkspaceWorkflow): SettingChip[] {
   if (workflow === 'music' || workflow === 'speech' || workflow === 'sound') {
     return PENDING_AUDIO_CHIPS[workflow].map(([key, label]) => ({ key, label, value: '—', changed: false }));
   }
-  const keys: [ChipKey, string][] = [['preset', 'Preset'], ...(PENDING_CHIPS[workflow] ?? PENDING_CHIPS.txt2img)];
+  const kind: [ChipKey, string][] = workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? [['kind', '']] : [];
+  const keys: [ChipKey, string][] = [...kind, ['preset', 'Preset'], ...(PENDING_CHIPS[workflow] ?? PENDING_CHIPS.txt2img)];
   return keys.map(([key, label]) => ({ key, label, value: '—', changed: false }));
 }

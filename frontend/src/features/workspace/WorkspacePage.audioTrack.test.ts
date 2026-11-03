@@ -311,7 +311,7 @@ describe('WorkspacePage audio track', () => {
     });
   });
 
-  describe('in Extend Video', () => {
+  describe('in Extend', () => {
     async function mountExtend(): Promise<void> {
       extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ path: '/clips/walk.mp4', audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
       draft.setExtendSourcePath('/clips/walk.mp4');
@@ -329,7 +329,7 @@ describe('WorkspacePage audio track', () => {
       expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackStart: 6.65 });
     });
 
-    it('sends the Extend Video track fields and not the Video track', async () => {
+    it('sends the Extend track fields and not the Video track', async () => {
       await mountExtend();
       draft.setAudioTrack('video', { path: '/audio/video-only.mp3' });
       draft.applyExtendSource(sceneSource({ path: '/clips/walk.mp4', audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }), trackContext());
@@ -344,7 +344,7 @@ describe('WorkspacePage audio track', () => {
   });
 
   describe('Load settings', () => {
-    it('Load settings of an extension puts its track in Extend Video and leaves the Video track alone', async () => {
+    it('Load settings of an extension puts its track in Extend and leaves the Video track alone', async () => {
       await mountTab('txt2vid');
       draft.setAudioTrack('video', { path: '/audio/video.mp3' });
       await settle();

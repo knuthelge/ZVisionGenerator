@@ -6,8 +6,8 @@
   import { jobStatusLine } from '$lib/state/jobStatusLine';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { router } from '$lib/state/router.svelte';
-  import { visibleTabs, workspaceTab, WORKSPACE_TABS } from '$lib/state/workspaceTab';
-  import type { PageId, WorkspaceTab, WorkspaceWorkflow } from '$lib/types';
+  import { navTab, visibleTabs, WORKSPACE_TABS } from '$lib/state/workspaceTab';
+  import type { NavTab, PageId, WorkspaceWorkflow } from '$lib/types';
 
   interface Props {
     currentPage: PageId;
@@ -26,9 +26,9 @@
   let { currentPage, workflows = null, onmenu, onstatus, onjoblog, ontitle }: Props = $props();
 
   const PAGE_TITLES: Record<PageId, string> = { workspace: 'Workspace', prompts: 'Prompts', gallery: 'Gallery', models: 'Models', config: 'Config' };
-  // Until the contract is known Image and Video show; Extend Video and Audio appear only when the server lists them.
+  // Until the contract is known Image and Video show; Audio appears only when the server lists an audio workflow.
   const tabs = $derived(visibleTabs(workflows));
-  const activeTab = $derived(workspaceTab(draft.state.workflow));
+  const activeTab = $derived(navTab(draft.state.workflow));
   const tabLabel = $derived(WORKSPACE_TABS.find((tab) => tab.id === activeTab)?.label ?? '');
   const onWorkspace = $derived(currentPage === 'workspace');
   const status = $derived(jobStatusLine(jobStore.current, jobStore.queuedJobs.length));
@@ -46,7 +46,7 @@
       ariaLabel="Workflow"
       value={activeTab}
       options={tabs.map((item) => ({ value: item.id, label: item.label }))}
-      onchange={(next) => draft.setTab(next as WorkspaceTab)}
+      onchange={(next) => draft.setTab(next as NavTab)}
     >
       {#snippet trigger()}
         <span class="flex min-w-0 items-center gap-1.5">

@@ -5,7 +5,7 @@
   import { isReviewing } from '$lib/state/jobView';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { Badge, Icon, MascotHome, Wordmark } from '$lib/components/atoms';
-  import { visibleTabs, workspaceTab } from '$lib/state/workspaceTab';
+  import { navTab, visibleTabs } from '$lib/state/workspaceTab';
   import type { PageId, WorkspaceWorkflow } from '$lib/types';
 
   interface Props {
@@ -26,9 +26,9 @@
   ];
 
   const reviewWaiting = $derived(isReviewing(jobStore.current));
-  // Until the contract is known Image and Video show; Extend Video and Audio appear only when the server lists them.
+  // Until the contract is known Image and Video show; Audio appears only when the server lists an audio workflow.
   const tabs = $derived(visibleTabs(workflows));
-  const activeTab = $derived(workspaceTab(draft.state.workflow));
+  const activeTab = $derived(navTab(draft.state.workflow));
 </script>
 
 <header class="app-nav">
@@ -90,7 +90,7 @@
   @media (hover: hover) { .nav-tab:hover { color: var(--color-text-primary); } }
   .nav-tab:focus-visible { outline-offset: -2px; }
   .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }
-  /* Under 1000 px the bar tightens to stay on one row with four workflow tabs (a 744 px portrait tablet fits, with the
+  /* Under 1000 px the bar tightens to stay on one row with three workflow tabs (a 744 px portrait tablet fits, with the
      Review badge): the wordmark goes (the mascot and the screen-reader name stay) and the tabs sit closer. */
   @media (max-width: 1000px) {
     .app-nav { gap: 8px; padding: 0 12px; }

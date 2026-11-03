@@ -25,9 +25,11 @@
   import AudioTrackPopover from './AudioTrackPopover.svelte';
   import type { AudioTrackView } from './audioTrackView';
   import { KIND_INFO } from './audioKinds';
+  import { VIDEO_KIND_INFO } from './kindInfo';
   import { soundRange, type AudioView } from './audioView';
   import VoicePopover from './VoicePopover.svelte';
   import { availableKinds } from '$lib/state/audioDraft';
+  import { videoKinds } from '$lib/state/workspaceTab';
   import ImagesPopover from './ImagesPopover.svelte';
   import type { ImagesView } from './imagesView';
   import type { ChipKey } from './settingsChips';
@@ -116,6 +118,8 @@
   // --- Length of a sound ---
   const lengthRange = $derived(soundRange(context.audio_models?.find((entry) => entry.id === s.model) ?? null));
   const kinds = $derived(availableKinds(context));
+  const videoKindOptions = $derived(videoKinds(context.workflow_contract.values));
+  const videoKind = $derived(s.workflow === 'extend' ? 'extend' : 'new');
 
   function setLength(seconds: number | null): void {
     if (seconds !== null) draft.update('audioSeconds', Math.min(lengthRange.max, Math.max(lengthRange.min, seconds)));
@@ -172,7 +176,7 @@
   }
 
   // --- Images ---
-  // The popover holds the section's groups; when the model can use no image (or the tab is Extend Video) it has nothing to show.
+  // The popover holds the section's groups; when the model can use no image (or the kind is Extend) it has nothing to show.
   const imagesVisible = $derived(images.visible);
   $effect(() => {
     if (key === 'images' && !imagesVisible) onclose();
@@ -275,6 +279,16 @@
       <InspectorNumber ariaLabel="Length in seconds" value={s.audioSeconds} step={1} min={lengthRange.min} max={lengthRange.max} stepper size="lg" commitOnly onchange={setLength} />
       <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={s.audioSeconds} style:--fill={rangeFill(s.audioSeconds, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
       <p class="ui-help">From {lengthRange.min} to {lengthRange.max} seconds.</p>
+    {:else if key === 'kind' && !caps.isAudio}
+      <div class="pop-list" role="radiogroup" aria-label="Kind">
+        {#each videoKindOptions as kind (kind)}
+          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === videoKind} onclick={() => { if (kind !== videoKind) draft.setVideoKind(kind, context); }}>
+            <Icon name={VIDEO_KIND_INFO[kind].icon} size={16} />
+            <span class="pop-item-text">{VIDEO_KIND_INFO[kind].label}</span>
+            <small>{VIDEO_KIND_INFO[kind].description}</small>
+          </button>
+        {/each}
+      </div>
     {:else if key === 'kind'}
       <div class="pop-list" role="radiogroup" aria-label="Kind">
         {#each kinds as kind (kind)}

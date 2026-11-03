@@ -1482,7 +1482,7 @@ describe('WorkspacePage extend', () => {
       expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'download', 'delete']);
     });
 
-    it('turns the Workspace to Extend Video with the clip as source, its scene in the boxes, and checks it', async () => {
+    it('turns the Workspace to Extend with the clip as source, its scene in the boxes, and checks it', async () => {
       const asset = clip();
       await mountWithClip(asset);
       openMenu(asset);
@@ -1490,13 +1490,14 @@ describe('WorkspacePage extend', () => {
       await settle();
 
       expect(draft.state).toMatchObject({ workflow: 'extend', extendSourcePath: SOURCE, scene: 'A woman on a rainy street.', prompt: '' });
+      expect(target.querySelector('[data-testid="kind-control"] [data-value="extend"]')?.getAttribute('aria-pressed')).toBe('true');
       expect(lastInspect()).toMatchObject({ path: SOURCE });
       expect(input('ws-source-path').value).toBe(SOURCE);
       expect(text('[data-testid="extend-source-facts"]')).toContain('512 × 288');
       expect(toasts.map((toast) => toast.message)).toContain('walk.mp4 is now the source video');
     });
 
-    it('replaces the text of an earlier source when already on Extend Video', async () => {
+    it('replaces the text of an earlier source when already on Extend', async () => {
       const asset = clip();
       await mountWithClip(asset, 'extend');
       draft.patch({ scene: 'Old scene.', prompt: 'Old action.', extendSourcePath: '/clips/old.mp4' });
@@ -1550,7 +1551,7 @@ describe('WorkspacePage extend', () => {
     });
   });
 
-  describe('a prefill that opens Extend Video', () => {
+  describe('a prefill that opens Extend', () => {
     it('leaves the uploads of the Image and Video tabs alone, as Extend holds no image of its own', async () => {
       const png = (name: string) => new File(['img'], name, { type: 'image/png' });
       heldUploads.setStart('image', png('start.png'));

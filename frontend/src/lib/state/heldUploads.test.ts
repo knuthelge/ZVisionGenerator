@@ -134,7 +134,7 @@ describe('heldUploads', () => {
     const get = vi.spyOn(store, 'get');
     await Promise.all([heldUploads.restore(), heldUploads.restore()]);
     await heldUploads.restore();
-    // One read per tab: Image, Video, Extend Video and Audio.
+    // One read per tab: Image, Video, Extend and Audio.
     expect(get).toHaveBeenCalledTimes(4);
   });
 

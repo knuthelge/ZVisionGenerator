@@ -46,7 +46,7 @@ export interface AudioTrackView {
 export interface AudioTrackViewInput {
   state: TrackState & Pick<DraftState, 'workflow'>;
   caps: Pick<WorkspaceCapabilities, 'showAudioTrack' | 'audioTrackInEffect'>;
-  /** The held uploads (`heldUploads`): the track of Video and the track of Extend Video. */
+  /** The held uploads (`heldUploads`): the track of Video and the track of the Extend kind. */
   files: { audioTrack: File | null; extendAudioTrack: File | null };
   /** The held uploads have been read back, so an upload without a file is known to be lost. */
   restored: boolean;

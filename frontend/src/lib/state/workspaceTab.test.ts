@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isAudioWorkflow, visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
+import { isAudioWorkflow, navTab, videoKindOf, videoKinds, visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
 import type { DraftState, Workflow, WorkspaceWorkflow } from '$lib/types';
 
 const NONE = { referenceImagePath: null, referenceImageUpload: null, firstFramePath: null, firstFrameUpload: null } satisfies Partial<DraftState>;
 
 describe('WORKSPACE_TABS', () => {
-  it('lists Image, Video, Extend Video and Audio in that order', () => {
-    expect(WORKSPACE_TABS.map((tab) => [tab.id, tab.label])).toEqual([['image', 'Image'], ['video', 'Video'], ['extend', 'Extend Video'], ['audio', 'Audio']]);
+  it('lists Image, Video and Audio in that order', () => {
+    expect(WORKSPACE_TABS.map((tab) => [tab.id, tab.label])).toEqual([['image', 'Image'], ['video', 'Video'], ['audio', 'Audio']]);
   });
 });
 
@@ -17,17 +17,32 @@ describe('visibleTabs', () => {
     expect(ids(null)).toEqual(['image', 'video']);
   });
 
-  it('offers Extend Video only when the server lists the extend workflow', () => {
-    expect(ids(['txt2img', 'img2img', 'txt2vid', 'img2vid'])).toEqual(['image', 'video']);
-    expect(ids(['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'])).toEqual(['image', 'video', 'extend']);
+  it('never offers Extend as a tab of its own', () => {
+    expect(ids(['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'])).toEqual(['image', 'video']);
   });
 
-  it('hides Audio without a music, speech or sound workflow, and shows it, fourth, with any of them', () => {
+  it('hides Audio without a music, speech or sound workflow, and shows it, last, with any of them', () => {
     const media: Workflow[] = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
     expect(ids(media)).not.toContain('audio');
     expect(ids(null)).not.toContain('audio');
-    expect(ids([...media, 'sound'])).toEqual(['image', 'video', 'extend', 'audio']);
+    expect(ids([...media, 'sound'])).toEqual(['image', 'video', 'audio']);
     expect(ids(['txt2img', 'img2img', 'txt2vid', 'img2vid', 'music', 'speech'])).toEqual(['image', 'video', 'audio']);
+  });
+});
+
+describe('videoKinds', () => {
+  it('offers Extend beside New only when the server lists the extend workflow', () => {
+    expect(videoKinds(null)).toEqual(['new']);
+    expect(videoKinds(['txt2img', 'img2img', 'txt2vid', 'img2vid'])).toEqual(['new']);
+    expect(videoKinds(['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'])).toEqual(['new', 'extend']);
+  });
+});
+
+describe('navTab and videoKindOf', () => {
+  it('puts both kinds of Video under the Video tab, and tells them apart', () => {
+    expect((['txt2vid', 'img2vid', 'extend'] as const).map(navTab)).toEqual(['video', 'video', 'video']);
+    expect((['txt2vid', 'img2vid', 'extend', 'txt2img', 'music'] as const).map(videoKindOf)).toEqual(['new', 'new', 'extend', null, null]);
+    expect((['txt2img', 'img2img', 'sound'] as const).map(navTab)).toEqual(['image', 'image', 'audio']);
   });
 });
 
@@ -68,7 +83,7 @@ describe('workflowFor', () => {
     expect(workflowFor('video', { ...NONE, firstFramePath: '/in/a.png' }, false)).toBe('txt2vid');
   });
 
-  it('is extend on the Extend Video tab, whatever the images', () => {
+  it('is extend in the Extend slot, whatever the images', () => {
     expect(workflowFor('extend', { ...NONE, referenceImagePath: '/in/a.png', firstFramePath: '/in/b.png' }, true)).toBe('extend');
   });
 });

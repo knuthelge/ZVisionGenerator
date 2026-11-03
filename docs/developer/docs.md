@@ -89,7 +89,7 @@ Shots crop to the part being explained (the job card, the Job log, the Preset me
 A picture that can't be taken yet uses the placeholder, with a slug in the title:
 
 ```markdown
-![Extend Video with the source clip shown under Source video](../assets/screenshots/placeholder.svg "extend-video")
+![Video on its Extend kind with the source clip shown under Source video](../assets/screenshots/placeholder.svg "extend-video")
 ```
 
 The alt text says what the shot must show. `grep -r placeholder.svg docs/` lists every shot still missing.

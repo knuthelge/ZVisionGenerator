@@ -75,6 +75,7 @@
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
   import KindControl from './KindControl.svelte';
   import { KIND_INFO } from './audioKinds';
+  import { VIDEO_KIND_INFO } from './kindInfo';
   import { currentImagesView } from './imagesView';
   import PresetMenu from './PresetMenu.svelte';
   import { audioChips, pendingChips, settingsChips, type ChipKey } from './settingsChips';
@@ -92,7 +93,7 @@
   import { hasPendingJobSettings, takeJobSettings } from '$lib/state/pendingJobSettings.svelte';
   import { hasPendingReference, takeReference } from '$lib/state/pendingReference.svelte';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
-  import { isAudioWorkflow, workspaceTab } from '$lib/state/workspaceTab';
+  import { isAudioWorkflow, videoKinds, workspaceTab } from '$lib/state/workspaceTab';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
   import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow, WorkspaceWorkflow, AudioWorkflow } from '$lib/types';
 
@@ -368,6 +369,9 @@
   // The Audio tab is open: the kind's models, and the kinds this machine runs, in place of the image or video models.
   const isAudio = $derived(isAudioWorkflow(draft.state.workflow));
   const audioKinds = $derived(context ? availableKinds(context) : []);
+  // The Video tab's kinds (New, and Extend where the machine can extend). With one kind there is nothing to choose, so no Kind control.
+  const videoKindOptions = $derived(videoKinds(context?.workflow_contract.values ?? null));
+  const showVideoKind = $derived(!isAudio && !isImageMode && videoKindOptions.length > 1);
   const currentModels = $derived<ModelOption[]>(isAudio && context ? audioModelsOf(context, draft.state.workflow as AudioWorkflow) : isImageMode ? imageModels : videoModels);
   const modelOptions = $derived(currentModels.map((m) => ({ value: m.id, label: modelOptionText(m) })));
   // Matches the toolbar label, which falls back to the first model when the draft has none.
@@ -433,6 +437,7 @@
     return settingsChips({
       caps,
       state: s,
+      videoKind: showVideoKind ? (s.workflow === 'extend' ? 'extend' : 'new') : null,
       changed: (...keys) => keys.some((key) => key in defaults && s[key] !== defaults[key]),
       width: s.dimensionMode === 'custom' ? s.width : presets[0],
       height: s.dimensionMode === 'custom' ? s.height : presets[1],
@@ -730,7 +735,7 @@
       if (replacesVoice(firstValues(params), draft.state.workflow as AudioWorkflow)) heldUploads.setVoice(null);
       return;
     }
-    // Extend Video holds only an audio track, which a prefill replaces; it leaves the other tabs' uploads alone.
+    // The Extend kind holds only an audio track, which a prefill replaces; it leaves the other tabs' uploads alone.
     if (tab === 'extend') {
       if (params.use_as === undefined) heldUploads.setTrack('extend', null);
       return;
@@ -1537,16 +1542,23 @@
         <!-- Audio: the Kind first, then the model of that kind. No presets, quantization or LoRAs. -->
         <div class="flex items-center gap-2 min-w-0 {stacked ? 'justify-between' : ''}">
           <span class="ui-label" id="ws-kind-label">Kind</span>
-          <KindControl kinds={audioKinds} value={(draft.state.workflow as AudioWorkflow)} disabled={!authorityReady} onchange={(kind) => draft.setAudioKind(kind, context)} />
+          <KindControl kinds={audioKinds} info={KIND_INFO} value={(draft.state.workflow as AudioWorkflow)} disabled={!authorityReady} onchange={(kind) => draft.setAudioKind(kind, context)} />
         </div>
       {:else}
+      {#if showVideoKind}
+        <!-- Video: the Kind first (a new clip or an extension), then the preset and the model. On a tablet the words Kind and Model give way to the row. -->
+        <div class="flex items-center gap-2 min-w-0 {stacked ? 'justify-between' : ''}">
+          <span class="ui-label {tall && !stacked ? 'sr-only' : ''}" id="ws-kind-label">Kind</span>
+          <KindControl kinds={videoKindOptions} info={VIDEO_KIND_INFO} value={draft.state.workflow === 'extend' ? 'extend' : 'new'} disabled={!authorityReady} onchange={(kind) => draft.setVideoKind(kind, context)} />
+        </div>
+      {/if}
       <!-- Settings presets -->
       <PresetMenu {context} {stacked} applied={activePreset} changed={presetChanged} />
       {/if}
 
       <!-- Model selector -->
       <div class="flex items-center gap-2 min-w-0 {stacked ? 'flex-nowrap' : 'flex-wrap'}">
-        <label class="ui-label {stacked ? 'sr-only' : ''}" for="ws-model">Model</label>
+        <label class="ui-label {stacked || (tall && showVideoKind) ? 'sr-only' : ''}" for="ws-model">Model</label>
         <Select
           id="ws-model"
           name="model"
@@ -1604,9 +1616,9 @@
       {#if !isAudio}
       <div class="bg-border-subtle shrink-0 {stacked ? 'h-px w-full' : 'h-6 w-px'}"></div>
 
-      <!-- LoRA chips area -->
-      <div class="flex items-center gap-2 flex-1 min-w-0">
-        <span class="ui-label shrink-0">LoRAs</span>
+      <!-- LoRA chips area. On a tablet the word LoRAs gives way to the row, and the area keeps the width of its content so it drops to a second line instead of being squeezed out of view. -->
+      <div class="flex items-center gap-2 flex-1 {tall && !stacked ? 'min-w-fit' : 'min-w-0'}">
+        <span class="ui-label shrink-0 {tall && !stacked ? 'sr-only' : ''}">LoRAs</span>
         {#if authorityReady}
           <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
             <!-- Chips -->

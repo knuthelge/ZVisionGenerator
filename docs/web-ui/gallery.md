@@ -55,7 +55,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 | **Details** | Shows the settings the file was made with | ++i++ |
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
 | **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track or a speech voice | ++e++ |
-| **Extend** | Opens a video in Extend Video | ++e++ |
+| **Extend** | Opens a video in Video, on its Extend kind | ++e++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
 | **Download** | Saves the file to this device | ++d++ |
 | Copy prompt | Copies the prompt to the clipboard | ++c++ |

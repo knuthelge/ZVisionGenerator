@@ -58,7 +58,7 @@ The figures are peaks for Turbo images from 1024×1024 up to 4 megapixels, on a 
 
 ## Video
 
-Video, with or without a first frame, checks the clip's size and length against memory before generating, and Extend Video checks the extension. The check never blocks a job; it warns when the clip may run slowly or fail.
+Video, with or without a first frame, checks the clip's size and length against memory before generating, and an extension checks the extension. The check never blocks a job; it warns when the clip may run slowly or fail.
 
 - **Web UI:** a note under **Duration (s)** says **Tight** or **Too large** and which memory it's about. It follows the model, size, duration, **Low memory** and **Upscale** (for MiniMax H3 on Windows and Linux, also the LoRAs and **Review**), and stays hidden while the clip fits. For MiniMax H3 it also shows the expected time. The badge on a video model is the estimate for a 5 s clip at 768×448.
 - **CLI:** `ziv-video` prints one warning and carries on.

@@ -102,7 +102,7 @@ const WORKFLOW_LABELS: Record<Workflow, string> = {
   img2img: 'Image, with a start image',
   txt2vid: 'Video, without a first frame',
   img2vid: 'Video, with a first frame',
-  extend: 'Extend Video',
+  extend: 'Video, extending a clip',
 };
 
 export function workflowLabel(workflow: Workflow): string {

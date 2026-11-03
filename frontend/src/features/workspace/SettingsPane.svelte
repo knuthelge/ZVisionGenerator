@@ -263,7 +263,7 @@
       <SourceVideoSection {context} {busy} guard={sourceGuard} />
     {/if}
 
-    <!-- Extend Video has no Images section: its track follows the source, as the phone's chips do. In Video it follows Images. -->
+    <!-- The Extend kind has no Images section: its track follows the source, as the phone's chips do. In Video it follows Images. -->
     {#if audioTrack.tab === 'extend'}
       <AudioTrackSection track={audioTrack} />
     {/if}

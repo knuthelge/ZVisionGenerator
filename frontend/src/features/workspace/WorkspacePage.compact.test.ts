@@ -77,7 +77,7 @@ describe('WorkspacePage on a phone', () => {
     expect(strip).not.toBeNull();
     expect(strip!.getAttribute('aria-busy')).toBe('true');
     const chips = Array.from(strip!.querySelectorAll<HTMLButtonElement>('[data-chip]'));
-    expect(chips.map((chip) => chip.dataset.chip)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
+    expect(chips.map((chip) => chip.dataset.chip)).toEqual(['kind', 'preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
     expect(chips.every((chip) => chip.disabled)).toBe(true);
     expect((strip!.querySelector('[aria-label="All settings"]') as HTMLButtonElement).disabled).toBe(true);
 
@@ -429,7 +429,7 @@ describe('WorkspacePage on a phone', () => {
       expect(popover()!.querySelector('input[aria-label="Strength"]')).toBeNull();
     });
 
-    it('is hidden on a model that can use no image, and in Extend Video', async () => {
+    it('is hidden on a model that can use no image, and in the Extend kind', async () => {
       const ideo = makeContext({
         image_models: [{ id: 'zit', label: 'zit', type: 'image' }, { id: 'ideo', label: 'ideo', type: 'image' }],
         image_model_defaults: { zit: makeImageDefaults({ max_reference_images: 4 }), ideo: makeIdeogramDefaults() },
@@ -445,6 +445,8 @@ describe('WorkspacePage on a phone', () => {
 
       await unmount(app!);
       app = null;
+      // The page remembers the last context, which cannot extend; the Extend kind needs the one that can.
+      workspaceMemory.forget();
       const extendContext = makeContext();
       extendContext.workflow_contract.values = [...extendContext.workflow_contract.values, 'extend'];
       draft.reset();

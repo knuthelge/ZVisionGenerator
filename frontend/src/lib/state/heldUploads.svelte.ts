@@ -18,7 +18,7 @@ class HeldUploads {
   lastFrame = $state.raw<File | null>(null);
   /** The pending audio track of the Video tab, or null. */
   audioTrack = $state.raw<File | null>(null);
-  /** The pending audio track of the Extend Video tab, or null. */
+  /** The pending audio track of the Extend kind, or null. */
   extendAudioTrack = $state.raw<File | null>(null);
   /** The pending voice recording of the Audio tab, or null. */
   voice = $state.raw<File | null>(null);
@@ -93,7 +93,7 @@ class HeldUploads {
     this.#persist('image');
   }
 
-  /** Forget every pending upload of a tab: the start image and references in Image, the first and last frame and the audio track in Video, the audio track in Extend Video, the voice recording in Audio. */
+  /** Forget every pending upload of a tab: the start image and references in Image, the first and last frame and the audio track in Video, the audio track in the Extend kind, the voice recording in Audio. */
   clearTab(tab: UploadTab): void {
     this.#forget(tab);
     this.#persist(tab);

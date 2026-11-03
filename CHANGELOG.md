@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **The download dialog, the Models page and the CLI name the terms of models that have them**, with links to the licence and its NOTICE
 
 ### Changed
+- **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio. In Video, **Kind** switches between **New** and **Extend** (a chip on a phone). Each kind keeps its own inputs, the prompt, model and LoRAs are shared, Video reopens on the kind you left, and **Extend** in the viewer or a video's menu opens it as before
 - Checkboxes have a clearer outline, and the top bar fits narrower windows by hiding its wordmark
 - **Generate, Upscale and Enhance now ask before downloading a model**, with its size and free space, as the Models page does
 

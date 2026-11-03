@@ -390,7 +390,7 @@ describe('GalleryPage regressions', () => {
     draft.reset();
   });
 
-  it('sends a video to the Extend Video workflow from its menu, with its model, and leaves the text to the source', async () => {
+  it('sends a video to the Extend workflow from its menu, with its model, and leaves the text to the source', async () => {
     const asset = makeAsset({
       filename: 'walk.mp4', media_type: 'video', workflow: 'txt2vid', file_path: '/outputs/walk.mp4', scene: 'A street at night.', prompt: 'She waves.',
       lora: 'style:0.8', reuse_state: {
