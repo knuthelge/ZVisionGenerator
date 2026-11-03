@@ -81,7 +81,7 @@ The workflow menu in the top strip has **Image**, **Video** and **Audio**. In **
 **Audio** is the third choice in the workflow menu in the top strip. The chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**; see [The Audio tab](workspace.md#the-audio-tab) for what each does.
 
 - **Kind** opens a list of the three kinds with a line about each.
-- **Model** lists the kind's models. A model with terms has an **ⓘ** at the end of its row, and **All** shows it beside the picker.
+- **Model** lists the kind's models. Every built-in model has an **ⓘ** at the end of its row, and **All** shows it beside the picker.
 - **Voice** holds the choice between **Any** and **From a recording**, the file, **What it says** and the consent tick.
 - The composer shows **Style** and **Lyrics**, **Text** or **Prompt**, and the reason **Generate** is off sits above its row.
 - The finished take is a player on the preview. Its **⋯** button opens the same menu as an image's, with **Use as** → **Audio track** and **Voice**.

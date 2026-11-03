@@ -58,7 +58,7 @@ The YuE2 inference kit (`packages/yue2`, used for music) is vendored from [multi
 
 Licensed under the Apache License, Version 2.0. The full license text ships with the vendored code as `packages/yue2/LICENSE`, and at http://www.apache.org/licenses/LICENSE-2.0. The kit's own notices ship as `packages/yue2/THIRD_PARTY_NOTICES.md`: its VAE (`modeling_vae.py`) is derived from [Stability-AI/stable-audio-tools](https://github.com/Stability-AI/stable-audio-tools) (Copyright (c) 2023 Stability AI, MIT) and its SnakeBeta activation from NVIDIA's BigVGAN (Copyright (c) 2022 NVIDIA CORPORATION, MIT), with their license texts in `packages/yue2/licenses/`.
 
-The code license does not cover the YuE2 model weights, which are not vendored and are licensed separately by their authors under CC BY-NC 4.0.
+The code license does not cover the YuE2 model weights, which are not vendored and are licensed separately by their authors under CC BY-NC 4.0 with additional permission for individual creators.
 
 ## stable_audio_3
 

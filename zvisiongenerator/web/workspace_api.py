@@ -29,7 +29,7 @@ from zvisiongenerator.utils.config import (
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
-from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, licence_payload, load_licences
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, SEEDVR2_LICENCE_MODEL, enhancer_licence_model, licence_payload, load_licences
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.ltx_version import ltx_model_version
 from zvisiongenerator.utils.matte_models import MATTE_DOWNLOAD_SIZE_LABEL, MATTE_LABEL, MATTE_ROW_NAME
@@ -322,7 +322,7 @@ def build_models_response(
     licences = load_licences()
     for row in (*image_rows, *video_rows):
         row["download_needed"] = download_needed(KIND_MODEL, row["name"], row["downloaded"])
-        row["licences"] = licence_payload(licences, row["name"])
+        row["licences"] = licence_payload(licences, SEEDVR2_LICENCE_MODEL if row["family"] == "seedvr2" else row["name"])
     return {
         "models_dir": web_config.models_dir,
         "loras_dir": web_config.loras_dir,
@@ -399,6 +399,7 @@ def _enhancer_model_rows(
     section = app_config.get("prompt_enhancer") or {}
     size_sections = {"fast": section, "smart": section.get("smart") or {}}
     rows = []
+    licences = load_licences()
     for tier, (repo, revision) in enhancer_tier_models(app_config, platform_key=sys.platform).items():
         target = enhancer_delete_target(repo)
         disk_bytes = repo_disk_bytes(target.path) if target is not None else 0
@@ -414,6 +415,7 @@ def _enhancer_model_rows(
                 "unavailable": unavailable,
                 "deletable": target is not None,
                 "download_needed": _enhancer_download_needed(tier, repo, revision, unavailable, present),
+                "licences": licence_payload(licences, enhancer_licence_model(tier)),
             }
         )
     return rows

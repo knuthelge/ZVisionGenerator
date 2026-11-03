@@ -11,7 +11,19 @@ from urllib.parse import urlparse
 import pytest
 
 from tests._licences import use_licences
-from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, LicenceRecord, licence_notice, licence_payload, licence_text, licences_for, load_licences
+from zvisiongenerator.utils.licences import (
+    ENHANCER_LICENCE_TIERS,
+    MATTE_LICENCE_MODEL,
+    SEEDVR2_LICENCE_MODEL,
+    LicenceRecord,
+    enhancer_licence_model,
+    licence_notice,
+    licence_payload,
+    licence_text,
+    licences_for,
+    load_licences,
+    record_notice,
+)
 
 _SHA = "455f1273c2f08f1fc93d725c2e6f1d7fc681cd94"
 _URL = f"https://huggingface.co/owner/repo/blob/{_SHA}/LICENSE.md"
@@ -123,17 +135,29 @@ class TestPackagedRecords:
 
         assert [r.id for r in load_licences() if any(mirror in r.url for mirror in mirrors)] == []
 
-    def test_only_the_stability_and_higgs_audio_records_carry_an_attribution(self) -> None:
+    def test_only_the_stability_and_higgs_records_carry_an_attribution(self) -> None:
         carrying = {r.id: r.attribution for r in load_licences() if r.attribution}
 
-        assert set(carrying) == {"stability-community", "higgs-audio2-community"}
+        assert set(carrying) == {"stability-community", "higgs3-nc", "higgs-audio2-community"}
         assert carrying["stability-community"] == "Powered by Stability AI"
+        assert carrying["higgs3-nc"] == "Built with Higgs TTS 3 licensed from Boson AI USA, Inc."
+
+    @staticmethod
+    def _model_ids(config: dict[str, Any]) -> set[str]:
+        """Every id a record may name: aliases, audio presets, background removal, SeedVR2 and the enhancer tiers."""
+        enhancers = {enhancer_licence_model(tier) for tier in ENHANCER_LICENCE_TIERS}
+        return {MATTE_LICENCE_MODEL, SEEDVR2_LICENCE_MODEL, *enhancers, *config["model_aliases"], *config["audio_model_presets"]}
 
     def test_every_record_names_known_models(self, packaged_config_shared: dict[str, Any]) -> None:
-        known = {MATTE_LICENCE_MODEL, *packaged_config_shared["model_aliases"], *packaged_config_shared["audio_model_presets"]}
+        known = self._model_ids(packaged_config_shared)
 
         for record in load_licences():
             assert record.models and set(record.models) <= known, record.id
+
+    def test_every_model_the_app_downloads_has_a_record(self, packaged_config_shared: dict[str, Any]) -> None:
+        records = load_licences()
+
+        assert [model for model in sorted(self._model_ids(packaged_config_shared)) if not licences_for(records, model)] == []
 
     @pytest.mark.parametrize(
         ("model", "expected"),
@@ -149,9 +173,14 @@ class TestPackagedRecords:
             ("higgs3", ["higgs3-nc", "higgs-audio2-community"]),
             ("sa3", ["stability-community", "gemma"]),
             ("matte", ["matte"]),
-            ("zit", []),
-            ("klein4b", []),
-            ("moss", []),
+            ("zit", ["zimage-apache"]),
+            ("klein4b", ["flux-klein-apache"]),
+            ("moss", ["moss-apache"]),
+            ("moss-sft", ["moss-apache"]),
+            ("seedvr2", ["seedvr2-apache"]),
+            ("enhancer-fast", ["qwen-apache"]),
+            ("enhancer-smart", ["qwen-apache"]),
+            ("enhancer-custom", []),
         ],
     )
     def test_the_records_of_each_model(self, model: str, expected: list[str]) -> None:
@@ -168,4 +197,20 @@ def test_a_licences_key_in_the_user_config_has_no_effect(tmp_path: Path, monkeyp
     load_config()
 
     assert load_licences() == before
-    assert licences_for(load_licences(), "zit") == ()
+    assert [record.id for record in licences_for(load_licences(), "zit")] == ["zimage-apache"]
+
+
+def test_a_record_notice_names_only_the_record_asked_for() -> None:
+    records = _records(first=_record(name="First"), second=_record(name="Second", attribution=_ATTRIBUTION))
+
+    lines = record_notice(records, "second", _plan(["target"]), lambda target: False)
+
+    assert lines == ("By downloading you agree to these terms:", "Second (Acme): Non-commercial", f"  {_URL}", f"  {_ATTRIBUTION}")
+
+
+def test_a_record_notice_is_empty_for_an_unknown_record_without_planning_or_when_the_files_are_present() -> None:
+    plan = MagicMock()
+
+    assert record_notice(_records(), "other", plan) == ()
+    plan.assert_not_called()
+    assert record_notice(_records(), "test", _plan(["a"]), lambda target: True) == ()

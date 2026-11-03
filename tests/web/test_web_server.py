@@ -928,7 +928,16 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
             "disk_size_label": "2.5 GB",
             "download_size_label": "17.0 GB",
             "download_needed": False,
-            "licences": [],
+            "licences": [
+                {
+                    "name": "Apache License 2.0",
+                    "supplier": "ByteDance Seed",
+                    "summary": "Free to use, also commercially",
+                    "url": "https://huggingface.co/ByteDance-Seed/SeedVR2-7B",
+                    "url_label": "Model page",
+                    "attribution": None,
+                }
+            ],
         }
     ]
 
@@ -2021,19 +2030,20 @@ class TestModelDownloadPlanRoute:
         response = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"})
 
         assert response.status_code == 200
-        assert response.json() == {
+        payload = response.json()
+        assert [(entry["model"], entry["supplier"]) for entry in payload.pop("licences")] == [("zit", "Tongyi-MAI")]
+        assert payload == {
             "label": "zit",
             "parts": [{"label": "zit", "model": "zit", "bytes": 3_500}],
             "total_bytes": 3_500,
             "space": {"path": str(tmp_path / "hub"), "needed_bytes": 3_500, "free_bytes": 1_000, "enough": False},
             "unchecked": False,
-            "licences": [],
         }
 
     def test_an_enhancer_row_is_looked_up_by_tier(self, client):
         payload = client.get("/api/models/download/plan", params={"kind": "enhancer", "name": "fast"}).json()
 
-        assert (payload["label"], payload["parts"][0]["model"], payload["total_bytes"]) == ("Fast enhancer model", "owner/enhancer", 40)
+        assert (payload["label"], payload["parts"][0]["model"], payload["total_bytes"]) == ("Fast enhancer model", "enhancer-fast", 40)
 
     def test_unknown_row_is_404(self, client):
         assert client.get("/api/models/download/plan", params={"kind": "model", "name": "nope"}).status_code == 404

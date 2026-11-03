@@ -167,7 +167,7 @@ MiniMax H3 is released under the MiniMax H3 Community License Agreement, publish
 
 | Model | Alias | Makes | Download | License |
 |---|---|---|---|---|
-| YuE2 3B | `yue2` | Songs and instrumentals up to 6:00 | about 8 GB | CC BY-NC 4.0 with individual creator permission |
+| YuE2 3B | `yue2` | Songs and instrumentals up to 6:00 | about 8 GB | CC BY-NC 4.0 with additional creator permission |
 | Higgs TTS 3 4B | `higgs3` | Speech of up to about 10 minutes, in a voice the model picks or one that follows a recording | about 10 GB | Boson Higgs TTS 3 Research and Non-Commercial License and Boson Higgs Audio 2 Community License Agreement |
 | Stable Audio 3 Medium | `sa3` | Ambience and sound effects of 1 to 380 s | about 10 GB | Stability AI Community License and Gemma Terms of Use |
 
@@ -175,24 +175,31 @@ The alias is what you pass to `ziv audio -m`. What each kind does, and how long 
 
 ## Licences
 
-Some models come with terms. The Web UI names them in the download dialog, the model picker and the Models page, and the CLI prints them before a download starts. Downloading a model means you agree to its terms. The links lead to the model's original repository, where a gated model's page shows its terms and the form that grants access; the app downloads from a mirror that needs no access, so you need no Hugging Face account. Where a licence asks for a credit line, it shows next to that model in the download dialog and in the **ⓘ** popover. A model under MIT or Apache-2.0 has no entry here unless something else limits its use.
+Every built-in model comes with terms. The Web UI names them in the download dialog, the model picker and the Models page, and the CLI prints them before a download starts. Downloading a model means you agree to its terms. The links lead to the model's original repository, where a gated model's page shows its terms and the form that grants access; the app downloads from a mirror that needs no access, so you need no Hugging Face account. Where a licence asks for a credit line, it shows next to that model in the download dialog and in the **ⓘ** popover. Every model has an entry, the free ones too, so the **ⓘ** shows for all of them.
 
 | Licence | Supplier | Covers | Terms | Links |
 |---|---|---|---|---|
-| FLUX Non-Commercial License v2.1 | Black Forest Labs | `klein9b` | Non-commercial | [Model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
-| Krea 2 Community License Agreement | Krea | `krea2` | Free under $1M revenue | [Licence](https://cdn.jsdelivr.net/gh/krea-ai/krea-2@db3984fbc6e13b34c0064990fc2d95ac64d00058/assets/hf_samples/LICENSE.pdf) |
-| Ideogram Non-Commercial Model Agreement | Ideogram | `ideo` | Non-commercial | [Model page](https://huggingface.co/ideogram-ai/ideogram-4-fp8) |
+| FLUX Non-Commercial License v2.1 | Black Forest Labs | `klein9b` | Non-commercial use of the model; images may be used commercially | [Model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
+| Krea 2 Community License Agreement | Krea | `krea2` | Free under $1M revenue, images included; you must filter harmful content | [Licence](https://cdn.jsdelivr.net/gh/krea-ai/krea-2@db3984fbc6e13b34c0064990fc2d95ac64d00058/assets/hf_samples/LICENSE.pdf) |
+| Ideogram Non-Commercial Model Agreement | Ideogram | `ideo` | Non-commercial, images included: no ads, client work or paid products | [Model page](https://huggingface.co/ideogram-ai/ideogram-4-fp8) |
 | LTX-2 Community License Agreement | Lightricks | `ltx-4`, `ltx-8` | Free under $10M revenue | [Licence](https://github.com/Lightricks/LTX-2/blob/a95ab856bf29407b6b066ede0abe1846050db56c/LICENSE-2) |
 | LTX-2.x Community License Agreement | Lightricks | `ltx25-4` | Free under $10M revenue | [Model page](https://huggingface.co/Lightricks/LTX-2.5) |
 | MiniMax H3 Community License Agreement | MiniMax | `h3` | Not licensed in the EU, UK, South Korea or the USA; written permission needed over $20M revenue; commercial products show "MiniMax H3" | [Licence](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE) |
-| CC BY-NC 4.0 with individual creator permission | M-A-P | `yue2` | Non-commercial; individual creators may monetise their outputs, companies need a licence | [Licence](https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE) |
-| Boson Higgs TTS 3 Research and Non-Commercial License | Boson AI | `higgs3` | Non-commercial; creators may publish with credit; the app's Higgs code is "Derived from Higgs TTS 3, licensed from Boson AI USA, Inc." | [Licence](https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE) |
+| CC BY-NC 4.0 with additional creator permission | M-A-P | `yue2` | Non-commercial; individual creators may monetise their outputs, companies need a licence | [Licence](https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE) |
+| Boson Higgs TTS 3 Research and Non-Commercial License | Boson AI | `higgs3` | Non-commercial; creators may publish and monetise their own content if they credit Boson AI's Higgs Audio; apps and demos show "Built with Higgs TTS 3 licensed from Boson AI USA, Inc." | [Licence](https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE) |
 | Boson Higgs Audio 2 Community License Agreement | Boson AI | `higgs3` | Free up to 100,000 annual active users; products show "Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved" | [Licence](https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE) |
 | Stability AI Community License | Stability AI | `sa3` | Free under $1M revenue; commercial use needs a free registration | [Model page](https://huggingface.co/stabilityai/stable-audio-3-medium) |
-| Gemma Terms of Use | Google | `ltx-4`, `ltx-8`, `sa3` | Gemma's use policy applies | [Model page](https://huggingface.co/google/gemma-3-12b-it) |
-| BiRefNet (MIT) and ViTMatte (Apache-2.0) | BiRefNet and ViTMatte authors | Background removal | Trained on research datasets that don't allow commercial use | [Model card](https://huggingface.co/hustvl/vitmatte-small-composition-1k/blob/6a58ad7646403c1df626fbd746900aec7361ea1d/README.md) |
+| Gemma Terms of Use | Google | `ltx-4`, `ltx-8`, `sa3` | Free to use, also commercially; Gemma's prohibited use policy applies | [Model page](https://huggingface.co/google/gemma-3-12b-it) |
+| Apache License 2.0 | Tongyi-MAI | `zit` | Free to use, also commercially | [Model page](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) |
+| Apache License 2.0 | Black Forest Labs | `klein4b` | Free to use, also commercially | [Licence](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/e7b7dc27f91deacad38e78976d1f2b499d76a294/LICENSE.md) |
+| Apache License 2.0 | OpenMOSS | `moss`, `moss-sft` | Free to use, also commercially | [Licence](https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT/blob/f972bd4b4b9e3852133cc5da954d87bc32cd8fb9/LICENSE) |
+| Apache License 2.0 | Qwen | The Fast and Smart [prompt enhancer](prompt-enhancer.md) models | Free to use, also commercially | [Licence](https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/LICENSE) |
+| Apache License 2.0 | ByteDance Seed | The SeedVR2 upscale models | Free to use, also commercially | [Model page](https://huggingface.co/ByteDance-Seed/SeedVR2-7B) |
+| Research-only training data | BiRefNet and ViTMatte authors | Background removal | Non-commercial: ViTMatte was trained on Adobe's Deep Image Matting dataset, whose agreement allows models trained on it only for non-commercial use, and BiRefNet (MIT) partly on DIS5K, which is research-only | [Dataset terms](https://github.com/xuebinqin/DIS/blob/e6455bae3892b3a7d8cf59ca91011a220d1ed606/DIS5K-Dataset-Terms-of-Use.pdf) |
 
-LTX-2.3 and Stable Audio 3 Medium each come with two licences, their own and Gemma's, because a Gemma model is their text encoder. Higgs TTS 3 comes with two as well, one for the model and one for the audio codec it uses. LTX-2.5 uses Gemma 4, which is Apache-2.0. The background removal models of [Transparent background](images.md#transparent-background) are licensed MIT and Apache-2.0, but they were trained on research datasets that don't allow commercial use, so treat the result as non-commercial.
+LTX-2.3 and Stable Audio 3 Medium each come with two licences, their own and Gemma's, because a Gemma model is their text encoder. Higgs TTS 3 comes with two as well, one for the model and one for the audio codec it uses. LTX-2.5 uses Gemma 4, which is Apache-2.0, as are the text encoder and the latent upscaler of MiniMax H3. The background removal models of [Transparent background](images.md#transparent-background) are licensed MIT and Apache-2.0, but ViTMatte was trained on Adobe's Deep Image Matting dataset, whose agreement allows models trained on it only for non-commercial use, and BiRefNet partly on DIS5K, a research-only dataset (the link is DIS5K's terms; Adobe's agreement is not public). Neither licence clears commercial use of the cut-outs, so treat the result as non-commercial.
+
+**FLUX.2 Klein 9B.** The licence limits the model and anything built from it to non-commercial use, but the images it makes may be used for any purpose, commercial ones included (section 2.d). They may not be used to train a model that competes with FLUX.
 
 **MiniMax H3.** The licence requires commercial products to prominently show "MiniMax H3" in their user interface. A line such as "Powered by MiniMax H3" is encouraged, not required. Read the full licence for the regions and the revenue limit.
 

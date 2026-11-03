@@ -667,6 +667,7 @@ def test_models_payload_lists_enhancer_tiers(layout):
     assert fast["disk_size_label"] is not None
     assert (smart["tier"], smart["downloaded"], smart["deletable"], smart["disk_size_label"], smart["download_size_label"]) == ("smart", False, False, None, "19 GB")
     assert smart["unavailable"] is not None
+    assert [[record["supplier"] for record in row["licences"]] for row in rows] == [["Qwen"], ["Qwen"]]
 
 
 class TestEnhancerDeleteRoute:

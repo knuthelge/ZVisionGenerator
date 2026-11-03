@@ -95,15 +95,17 @@ class TestGeneratePlan:
 
         licences = plan_env.client.post("/api/generate/plan", data=_form()).json()["licences"]
 
-        assert [(entry["model"], entry["name"], entry["supplier"], entry["summary"]) for entry in licences] == [("klein9b", "FLUX Non-Commercial License v2.1", "Black Forest Labs", "Non-commercial")]
+        assert [(entry["model"], entry["name"], entry["supplier"], entry["summary"]) for entry in licences] == [
+            ("klein9b", "FLUX Non-Commercial License v2.1", "Black Forest Labs", "Non-commercial use of the model; images may be used commercially")
+        ]
         assert licences[0]["url_label"] == "Model page"
         assert licences[0]["url"] == "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B"
         assert licences[0]["attribution"] is None
 
-    def test_a_model_without_a_record_has_no_licences(self, plan_env):
+    def test_a_model_of_the_user_s_own_has_no_licences(self, plan_env):
         plan_env.enhance = False
 
-        assert plan_env.client.post("/api/generate/plan", data=_form(model="zit")).json()["licences"] == []
+        assert plan_env.client.post("/api/generate/plan", data=_form(model="owner/my-finetune")).json()["licences"] == []
 
     def test_only_the_parts_that_download_carry_licences(self, plan_env):
         plan_env.enhance = False
@@ -112,7 +114,7 @@ class TestGeneratePlan:
         plan = plan_env.client.post("/api/generate/plan", data=_form(transparent="on")).json()
 
         assert [part["model"] for part in plan["parts"]] == ["matte"]
-        assert [(entry["model"], entry["url_label"]) for entry in plan["licences"]] == [("matte", "Model card")]
+        assert [(entry["model"], entry["url_label"]) for entry in plan["licences"]] == [("matte", "Dataset terms")]
 
     def test_a_video_model_with_two_records_carries_both(self, plan_env, monkeypatch):
         stub_video_submission(monkeypatch, plan_env.root)

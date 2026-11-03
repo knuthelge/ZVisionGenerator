@@ -12,14 +12,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Blob wears headphones on the Audio tab.** He grooves to the beat with his eyes closed while a take is made, and notes rise from his head. He adds the finishing touches once the take is decoded, dances with note confetti when it lands, and lifts a cup when paused. He shows the headphones wherever he appears for audio, down to the logo. During a take he now shows as creating instead of staying in his thinking pose
 - **The download dialog, the Models page and the CLI name the terms of models that have them**, with a link to the licensor's own page and any credit line the licence asks for, such as "Powered by Stability AI"
 
+- **Every built-in model shows its licence**, the free ones too. Z-Image Turbo, FLUX.2 Klein 4B, MOSS-Image, the Fast and Smart prompt enhancer models and the SeedVR2 upscale models now have an **ⓘ** (Apache License 2.0, free to use also commercially) on the Models page, the picker and the download dialog, and the CLIs print their terms before a first download
+
 ### Changed
 - **Reset acts on the open tab only.** It puts back that tab's settings, images and *Enhance* options and nothing on another tab or in the other mode: Image and Video no longer clear the Audio tab or each other's *Enhance* options, and a Reset on Extend stays on Extend. The enhancer, its format and auto-enhance keep your choice, and **Batch size** and **Seed** go back to their defaults on every tab. On Audio, Reset keeps the kind, the models and the text and puts back the length, the voice, **Batch size** and **Seed**. The Settings badge, the phone's *All* count and the chips count the same changes, the Extend length included
 - **Reuse settings and Load settings apply a take's settings exactly.** What the take did not record takes its default instead of what the form held: LoRAs, quant, a negative prompt, finishing settings, seed, **Batch size** and the *Enhance* options no longer carry over, and a size the model doesn't offer becomes its largest preset
 - **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio. In Video, **Kind** switches between **New** and **Extend** (a chip on a phone). Each kind keeps its own inputs, the prompt, model and LoRAs are shared, Video reopens on the kind you left, and **Extend** in the viewer or a video's menu opens it as before
+- **The ⓘ licence mark opens the full card on hover.** Resting a mouse on it shows the licence's name, supplier, summary, credit line and links, the same card a click opens, and the card stays open while the pointer is on it. A click or tap pins it; the short tooltip is gone
 - Checkboxes have a clearer outline, and the top bar fits narrower windows by hiding its wordmark
 - **Generate, Upscale and Enhance now ask before downloading a model**, with its size and free space, as the Models page does
 
 ### Fixed
+- **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is
+- **`ziv-model --distill` names the LTX licence before it downloads Lightricks' distilled LoRA**, the LTX-2 Community License for LTX-2.3 and the LTX-2.x one for LTX-2.5, as the other commands do for a model
+- **The FLUX.2 Klein 9B and Background removal terms say what they allow.** Klein 9B's licence limits the model to non-commercial use while the images it makes may be used commercially; the terms said only "Non-commercial". The Background removal terms now say its models were trained on research-only datasets, so commercial use of the cut-outs is not cleared, and link the dataset terms
 - **A visit to the Audio or Video tab no longer drops the Image tab's LoRAs or quant**, and Audio's **Generate** no longer waits for an image LoRA that is still downloading
 - **The speaker's consent tick stays while the voice stays.** Reusing a song or a sound no longer clears it; a new recording, **Reset** and anything that replaces the voice still do
 - `ziv image -m <owner/repo>` for a model that has an alias now runs as that alias, so it shows the model's licence notice and records the alias as the model name

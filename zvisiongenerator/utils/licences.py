@@ -17,7 +17,21 @@ import yaml
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.target import DownloadTarget
 
-__all__ = ["DATA_FILE", "MATTE_LICENCE_MODEL", "NOTICE_HEADER", "LicenceRecord", "licence_notice", "licence_payload", "licence_text", "licences_for", "load_licences"]
+__all__ = [
+    "DATA_FILE",
+    "ENHANCER_LICENCE_TIERS",
+    "MATTE_LICENCE_MODEL",
+    "NOTICE_HEADER",
+    "SEEDVR2_LICENCE_MODEL",
+    "LicenceRecord",
+    "enhancer_licence_model",
+    "licence_notice",
+    "licence_payload",
+    "record_notice",
+    "licence_text",
+    "licences_for",
+    "load_licences",
+]
 
 DATA_FILE: Final = Path(__file__).with_name("licences.yaml")
 """The packaged records: a mapping of record id to record."""
@@ -25,13 +39,19 @@ DATA_FILE: Final = Path(__file__).with_name("licences.yaml")
 MATTE_LICENCE_MODEL: Final = "matte"
 """The model id of the background removal models, which are no alias but have a licence record."""
 
+SEEDVR2_LICENCE_MODEL: Final = "seedvr2"
+"""The model id of the SeedVR2 upscale models (every tier and weights format), which are no alias but have a licence record."""
+
+ENHANCER_LICENCE_TIERS: Final = ("fast", "smart")
+"""The prompt enhancer tiers that have a licence record; a custom model has none."""
+
 NOTICE_HEADER: Final = "By downloading you agree to these terms:"
 """The first line of a licence notice."""
 
 
 @dataclass(frozen=True)
 class LicenceRecord:
-    """One licence and the models it covers (aliases, audio presets or ``matte``); URLs are pinned to a revision or are a model page."""
+    """One licence and the models it covers (aliases, audio presets, ``matte``, ``seedvr2`` or ``enhancer-<tier>``); URLs are pinned to a revision or are a model page."""
 
     id: str
     name: str
@@ -41,6 +61,11 @@ class LicenceRecord:
     models: tuple[str, ...]
     url_label: str = "Licence"
     attribution: str | None = None
+
+
+def enhancer_licence_model(tier: str) -> str:
+    """Return the model id under which a record covers the prompt enhancer *tier* (``enhancer-fast``, ``enhancer-smart``)."""
+    return f"enhancer-{tier}"
 
 
 def load_licences() -> tuple[LicenceRecord, ...]:
@@ -101,7 +126,26 @@ def licence_notice(
         The header, then per record its text, ``"  <url>"`` and, if it has one, ``"  <attribution>"``. Empty when the
         model has no record or every target is present.
     """
-    covering = licences_for(records, model_id)
+    return _notice_lines(licences_for(records, model_id), plan, present)
+
+
+def record_notice(
+    records: Sequence[LicenceRecord],
+    record_id: str,
+    plan: Callable[[], Sequence[DownloadTarget] | None],
+    present: Callable[[DownloadTarget], bool] | None = None,
+) -> tuple[str, ...]:
+    """Return the lines that name the terms of the record *record_id* before the files *plan* lists download.
+
+    For a download that is no model of its own, such as the LoRA a checkpoint conversion merges, so only the record that covers
+    it is named and not every record of the model it belongs to. Same lines and rules as :func:`licence_notice`: empty when
+    no record has that id or every target is present.
+    """
+    return _notice_lines(tuple(record for record in records if record.id == record_id), plan, present)
+
+
+def _notice_lines(covering: Sequence[LicenceRecord], plan: Callable[[], Sequence[DownloadTarget] | None], present: Callable[[DownloadTarget], bool] | None) -> tuple[str, ...]:
+    """Return the notice for the *covering* records; nothing when there are none (the plan is not called) or every target is present."""
     if not covering:
         return ()
     targets = plan()

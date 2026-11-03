@@ -8,7 +8,7 @@ zvisiongenerator/
 ├── audio_cli.py                   Audio CLI entry point (ziv-audio): music, speech and sound, with the refusals for flags a model does not take
 ├── cli.py                         Unified CLI entry point (ziv)
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model / --enhance-format CLI handling
-├── licence_cli.py                 Shared licence notice of the image and video CLIs: plans a model's downloads only when it has a licence record, then prints the terms
+├── licence_cli.py                 Shared licence notice of the CLIs and the LTX converter: plans a download only when its model or record exists, then prints the terms
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── built_models.py                One entry point for the models built on first use: recognise their folders, prepare them, name the step
 ├── ideogram4_instant_builder.py   Build the Ideogram 4 Instant model folder on first use (download, convert, link the base components)

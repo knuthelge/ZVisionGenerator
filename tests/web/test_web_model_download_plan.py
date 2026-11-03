@@ -389,8 +389,9 @@ class TestRowSummary:
         )
 
         assert [(entry["model"], entry["supplier"]) for entry in klein["licences"]] == [("klein9b", "Black Forest Labs")]
-        assert [(entry["model"], entry["url_label"]) for entry in matte["licences"]] == [(MATTE_LICENCE_MODEL, "Model card")]
-        assert enhancer["licences"] == zit["licences"] == []
+        assert [(entry["model"], entry["url_label"]) for entry in matte["licences"]] == [(MATTE_LICENCE_MODEL, "Dataset terms")]
+        assert [(entry["model"], entry["supplier"]) for entry in enhancer["licences"]] == [("enhancer-fast", "Qwen")]
+        assert [(entry["model"], entry["supplier"]) for entry in zit["licences"]] == [("zit", "Tongyi-MAI")]
 
 
 class TestInstantStatus:

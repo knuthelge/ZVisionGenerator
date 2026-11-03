@@ -1671,6 +1671,8 @@ export interface EnhancerModelEntry {
   deletable: boolean;
   /** Files are missing, so the Models page offers Download. */
   download_needed: boolean;
+  /** The licence of the Fast and Smart tiers; empty for a custom model. */
+  licences?: ModelLicence[];
 }
 
 /** The background removal models (the cut-out behind Transparent background): two repositories shown as one row. */

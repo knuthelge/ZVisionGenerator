@@ -179,6 +179,7 @@ class TestPartsMatchTheRunner:
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas")
 
         assert [(part.role, part.event_model, part.label) for part in parts] == [("model", "SeedVR2 7B fp8", "SeedVR2 7B fp8")]
+        assert [part.model_id for part in parts] == ["seedvr2"]
         _same_downloads(parts, runner_planners)
 
     def test_a_creative_upscale_downloads_the_refinement_model(self, monkeypatch, runner_planners, tmp_path):
@@ -263,6 +264,14 @@ class TestPartLabels:
 
         assert labels == ["Fast enhancer model", "Smart enhancer model", "Custom enhancer model", "a/other"]
 
+    def test_an_enhancer_part_looks_up_its_licence_by_tier_and_a_custom_or_unnamed_model_by_its_reference(self, monkeypatch, runner_planners):
+        config = {"prompt_enhancer": {"model": "a/fast", "smart": {"model": "a/smart", "revision": "r1"}, "user_model": "a/mine"}}
+        monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, revision: True)
+
+        ids = [enhancer_part(repo, revision, config, platform_key=_PLATFORM).model_id for repo, revision in (("a/fast", None), ("a/smart", "r1"), ("a/mine", None), ("a/other", None))]
+
+        assert ids == ["enhancer-fast", "enhancer-smart", "a/mine", "a/other"]
+
 
 class TestUncheckedParts:
     def test_an_enhancer_missing_while_offline_is_an_unchecked_part(self, monkeypatch):
@@ -276,7 +285,7 @@ class TestUncheckedParts:
         parts = job_download_parts(_image_request(), _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas", args=args)
 
         enhancer = parts[0]
-        assert (enhancer.role, enhancer.event_model, enhancer.model_id, enhancer.targets) == ("enhancer", "Fast enhancer model", "a/enhancer", None)
+        assert (enhancer.role, enhancer.event_model, enhancer.model_id, enhancer.targets) == ("enhancer", "Fast enhancer model", "enhancer-fast", None)
         assert parts[1].targets == ()
 
     def test_a_planner_that_cannot_plan_gives_an_unchecked_model_part(self, monkeypatch, runner_planners):
@@ -293,7 +302,7 @@ class TestUncheckedParts:
 
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas")
 
-        assert [(part.event_model, part.targets) for part in parts] == [("seedvr2-7b", None)]
+        assert [(part.event_model, part.model_id, part.targets) for part in parts] == [("seedvr2-7b", "seedvr2", None)]
 
 
 def test_a_job_that_needs_a_model_ref_refuses_without_one():

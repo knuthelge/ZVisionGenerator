@@ -97,7 +97,7 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
         "--transparent",
         action="store_true",
         default=False,
-        help="Cut the subject out and save a PNG with transparency. Non-commercial: the cut-out models were trained on research datasets that don't allow commercial use.",
+        help="Cut the subject out and save a PNG with transparency. Non-commercial: the cut-out models were trained on research-only datasets, so commercial use is not cleared.",
     )
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="Path to a start image for img2img.")
     parser.add_argument("--image-strength", dest="image_strength", type=float, default=0.5, help="Denoising strength for the start image (0.0–1.0). Default: 0.5.")

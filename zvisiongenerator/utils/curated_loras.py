@@ -63,7 +63,7 @@ LICENCES: dict[str, str] = {
     "krea-2-community-license": "Krea 2 community licence",
     "minimax-h3-community-license": "MiniMax H3 community licence",
     "ltx-2-community-license": "LTX-2 community licence",
-    "ideogram-community": "Ideogram community licence",
+    "ideogram-4-non-commercial": "Ideogram 4 non-commercial",
     "other": "Other (see the model card)",
 }
 # The hosts a preview may be on: the Hub, and its upload CDN for repositories whose card images live only there.

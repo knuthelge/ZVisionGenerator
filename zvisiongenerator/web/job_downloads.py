@@ -16,7 +16,7 @@ from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileU
 from zvisiongenerator.downloads import DownloadTarget, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name, model_reference, resolve_enhancer_model
-from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
+from zvisiongenerator.utils.licences import ENHANCER_LICENCE_TIERS, MATTE_LICENCE_MODEL, SEEDVR2_LICENCE_MODEL, enhancer_licence_model
 from zvisiongenerator.utils.matte_models import MATTE_LABEL
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
@@ -60,7 +60,7 @@ class JobDownloadPart:
     Attributes:
         label: The name the download dialog shows.
         event_model: The ``model`` value the job's ``model_downloading`` events carry.
-        model_id: The model's identifier for looking up its licence records.
+        model_id: The model's identifier for looking up its licence records: the alias, ``matte``, ``seedvr2`` or ``enhancer-<tier>``.
         role: ``model``, ``enhancer`` or ``matte``; the ``role`` of the job's download events.
         targets: The files to fetch (``()`` when nothing is to be fetched), or ``None`` when they cannot be planned
             now (offline); a part with ``None`` is *unchecked* and a job loads without downloading it.
@@ -111,7 +111,7 @@ def matte_part() -> JobDownloadPart:
 def seedvr2_tier_part(model_name: str, weights: SeedVR2Weights, models_dir: Path) -> JobDownloadPart:
     """Return the part for SeedVR2 tier *model_name* as *weights* run it, with its files under *models_dir*."""
     label = seedvr2_tier_label(model_name, weights)
-    return JobDownloadPart(label, label, model_name, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
+    return JobDownloadPart(label, label, SEEDVR2_LICENCE_MODEL, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
 
 
 def seedvr2_part(model_name: str | None) -> JobDownloadPart:
@@ -119,7 +119,7 @@ def seedvr2_part(model_name: str | None) -> JobDownloadPart:
     upscaler = get_seedvr2_upscaler()
     if upscaler is None:
         # The load reports that this platform has no SeedVR2 engine.
-        return JobDownloadPart(str(model_name), str(model_name), str(model_name), ROLE_MODEL, None)
+        return JobDownloadPart(str(model_name), str(model_name), SEEDVR2_LICENCE_MODEL, ROLE_MODEL, None)
     return seedvr2_tier_part(str(model_name), upscaler.weights, get_ziv_data_dir() / "models")
 
 
@@ -229,7 +229,8 @@ def _enhancer_part(repo: str, revision: str | None, tier: str | None, targets: T
     """Return an enhancer part labelled "Smart enhancer model" for its *tier*, or by its reference when it has none."""
     reference = model_reference(repo, revision)
     label = f"{tier.capitalize()} enhancer model" if tier else reference
-    return JobDownloadPart(label, label, reference, ROLE_ENHANCER, targets)
+    model_id = enhancer_licence_model(tier) if tier in ENHANCER_LICENCE_TIERS else reference
+    return JobDownloadPart(label, label, model_id, ROLE_ENHANCER, targets)
 
 
 def _enhancer_tier(config: dict[str, Any], platform_key: str, repo: str, revision: str | None) -> str | None:

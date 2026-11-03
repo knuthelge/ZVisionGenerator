@@ -1,6 +1,6 @@
 // @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FLUX_LICENCE, GEMMA_LICENCE, LTX_LICENCE } from '../../../test-utils/workspace';
 import LicenceMark from './LicenceMark.svelte';
@@ -10,11 +10,13 @@ describe('LicenceMark', () => {
   let app: Record<string, unknown> | null = null;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     target = document.createElement('div');
     document.body.appendChild(target);
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (app) unmount(app);
     app = null;
     target.remove();
@@ -27,10 +29,19 @@ describe('LicenceMark', () => {
     return target.querySelector('button') as HTMLButtonElement;
   }
 
-  const bubble = (): HTMLElement => target.querySelector('[role="tooltip"]') as HTMLElement;
   const popover = (): HTMLElement | null => document.querySelector('[data-testid="licence-popover"]');
 
-  /** A key on a focused button, as a browser delivers it: Enter and Space end in the click that opens the popover. */
+  /** A pointer event of a mouse (or a finger with `pointerType: 'touch'`) on *node*. */
+  function point(node: Element, type: 'pointerenter' | 'pointerleave', pointerType = 'mouse'): void {
+    node.dispatchEvent(Object.assign(new Event(type), { pointerType }));
+    flushSync();
+  }
+
+  function wait(ms: number): void {
+    vi.advanceTimersByTime(ms);
+    flushSync();
+  }
+
   it('is a button named by its record, with a popup and nothing expanded', () => {
     const button = render();
 
@@ -59,20 +70,96 @@ describe('LicenceMark', () => {
     expect(button.getAttribute('aria-label')).toBe('Non-commercial. Licence: FLUX Non-Commercial License v2.1');
   });
 
-  it('shows the terms in brief on hover and on keyboard focus, one line per record', () => {
+  it('opens the full card when a mouse rests on the mark, and closes it after the pointer leaves', () => {
     const button = render({ licences: [LTX_LICENCE, GEMMA_LICENCE] });
 
-    expect(bubble().textContent).toBe("LTX-2 Community License Agreement: Free under $10M revenue\nGemma Terms of Use: Gemma's use policy applies");
-    target.firstElementChild!.dispatchEvent(new Event('pointerenter'));
-    flushSync();
-    expect(bubble().dataset.open).toBe('true');
-    target.firstElementChild!.dispatchEvent(new Event('pointerleave'));
-    flushSync();
-    expect(bubble().dataset.open).toBe('false');
+    point(button, 'pointerenter');
+    expect(popover()).toBeNull();
+    wait(150);
 
-    button.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(popover()!.textContent).toContain(LTX_LICENCE.supplier);
+    expect(popover()!.textContent).toContain(GEMMA_LICENCE.summary);
+    expect(popover()!.querySelectorAll('a')).toHaveLength(2);
+    point(button, 'pointerleave');
+    wait(400);
+    expect(popover()).toBeNull();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens nothing for a pointer that only passes over the mark', () => {
+    const button = render();
+
+    point(button, 'pointerenter');
+    wait(50);
+    point(button, 'pointerleave');
+    wait(400);
+
+    expect(popover()).toBeNull();
+  });
+
+  it('stays open while the pointer moves from the mark into the card', () => {
+    const button = render();
+    point(button, 'pointerenter');
+    wait(150);
+
+    point(button, 'pointerleave');
+    wait(100);
+    point(popover()!, 'pointerenter');
+    wait(1000);
+    expect(popover()).not.toBeNull();
+
+    point(popover()!, 'pointerleave');
+    wait(400);
+    expect(popover()).toBeNull();
+  });
+
+  it('is not opened by a finger resting on the mark', () => {
+    const button = render();
+
+    point(button, 'pointerenter', 'touch');
+    wait(400);
+
+    expect(popover()).toBeNull();
+  });
+
+  it('keeps focus where it was while a hover shows the card', () => {
+    const button = render();
+    button.focus();
+
+    point(button, 'pointerenter');
+    wait(150);
+
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('pins the card with a click, so it stays after the pointer leaves, and a second click closes it', () => {
+    const button = render();
+    point(button, 'pointerenter');
+    wait(150);
+
+    button.click();
     flushSync();
-    expect(bubble().dataset.open).toBe('true');
+    point(button, 'pointerleave');
+    wait(1000);
+    expect(popover()).not.toBeNull();
+    expect(document.activeElement).toBe(popover());
+
+    button.click();
+    flushSync();
+    expect(popover()).toBeNull();
+  });
+
+  it('opens pinned when clicked before the hover delay is over', () => {
+    const button = render();
+    point(button, 'pointerenter');
+
+    button.click();
+    flushSync();
+    wait(1000);
+
+    expect(popover()).not.toBeNull();
+    expect(button.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('opens a dialog popover on click with the record, the supplier, the summary and the links', () => {
@@ -102,18 +189,6 @@ describe('LicenceMark', () => {
     flushSync();
 
     expect(Array.from(popover()!.querySelectorAll('[data-testid="licence-attribution"]')).map((line) => line.textContent)).toEqual(['Powered by Example']);
-  });
-
-  it('keeps the tooltip away while the popover is open', () => {
-    const button = render();
-
-    button.click();
-    flushSync();
-    button.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    target.firstElementChild!.dispatchEvent(new Event('pointerenter'));
-    flushSync();
-
-    expect(bubble().dataset.open).toBe('false');
   });
 
   it('shows one block per record in the popover', () => {

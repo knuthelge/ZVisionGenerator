@@ -894,6 +894,20 @@ describe('ModelsPage downloads', () => {
       expect(markIn('LTX distilled model')!.getAttribute('aria-label')).toBe(`Licences: ${LTX_LICENCE.name} and ${GEMMA_LICENCE.name}`);
       expect(markIn('zit')).toBeNull();
     });
+
+    it('puts a mark on an enhancer tier that has a record and none on a custom model', async () => {
+      const tier = { revision: null, download_size_label: null, unavailable: null, downloaded: true, download_needed: false, disk_size_label: null, deletable: false };
+      await mountPage({
+        ...inventoryWith(),
+        enhancer_models: [
+          { ...tier, tier: 'fast', repo: 'org/fast', licences: [FLUX_LICENCE] },
+          { ...tier, tier: 'custom', repo: 'org/mine', licences: [] },
+        ],
+      });
+
+      const marks = Array.from(target.querySelectorAll('[data-testid="enhancer-row"]')).map((row) => row.querySelector('[data-testid="licence-mark"]')?.getAttribute('aria-label') ?? null);
+      expect(marks).toEqual(['Licence: FLUX Non-Commercial License v2.1', null]);
+    });
   });
 
   describe('background removal row', () => {

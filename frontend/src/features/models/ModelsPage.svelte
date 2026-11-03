@@ -720,7 +720,7 @@
                       {@const label = ENHANCER_TIER_LABELS[e.tier]}
                       <tr data-testid="enhancer-row" data-tier={e.tier} class:dl-main={downloadStore.active('enhancer', e.tier) !== null}>
                         <td>
-                          {@render modelName({ name: label, downloaded: e.downloaded, source: 'enhancer', download_needed: e.download_needed })}
+                          {@render modelName({ name: label, downloaded: e.downloaded, source: 'enhancer', download_needed: e.download_needed, licences: e.licences })}
                           {#if e.unavailable}
                             <span class="ui-help block font-normal" data-testid="enhancer-unavailable">{e.unavailable}</span>
                           {/if}
