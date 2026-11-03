@@ -8,7 +8,7 @@ type Store = typeof import('./gallery.svelte').galleryStore;
 
 const PAGE_SIZE = 3;
 
-function asset(id: number, media_type: 'image' | 'video' = 'image'): GalleryAsset {
+function asset(id: number, media_type: 'image' | 'video' | 'audio' = 'image'): GalleryAsset {
   return { id: `a${id}`, media_type } as GalleryAsset;
 }
 
@@ -162,6 +162,20 @@ describe('galleryStore views', () => {
     expect(store.view(images).totalCount).toBe(2);
     // An oldest-first list would need its last page, so it is dropped and its next visit reloads it.
     expect(store.view(oldest).assets).toEqual([]);
+  });
+});
+
+describe('galleryStore audio filter', () => {
+  it('keeps new audio only in the audio list and the whole list, never in the image list', () => {
+    const audio = { filter: 'audio' as const, sort: 'newest' as const };
+    const images = { filter: 'image' as const, sort: 'newest' as const };
+    store.setView(audio, { assets: [asset(3, 'audio')], page: 1, totalPages: 1, totalCount: 1 });
+    store.setView(images, { assets: [asset(4)], page: 1, totalPages: 1, totalCount: 1 });
+
+    store.mergeOutputs([asset(1, 'audio'), asset(0)]);
+    expect(ids(store)).toEqual(['a0', 'a1']);
+    expect(store.view(audio).assets.map((item) => item.id)).toEqual(['a1', 'a3']);
+    expect(store.view(images).assets.map((item) => item.id)).toEqual(['a0', 'a4']);
   });
 });
 

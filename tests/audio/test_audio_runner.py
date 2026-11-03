@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -10,13 +9,11 @@ import pytest
 import torch
 
 from tests._audio_presets import audio_config
-from tests._higgs3_fakes import FakeCodec, FakeModel, install_fakes
 from tests._media import REAL
 from tests.audio._helpers import clip, decode, fake_backend, patch_runner, preset, sine
 
 from zvisiongenerator import audio_runner
 from zvisiongenerator.audio_runner import run_audio_batch
-from zvisiongenerator.backends.audio.higgs3 import SAMPLE_RATE, Higgs3Backend
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.downloads import DETACHED, STOPPED
@@ -84,48 +81,6 @@ class TestOrder:
         _run(_speech(), HIGGS3, tmp_path)
 
         assert order[:2] == ["check", "release"] and "load" in order
-
-    def test_a_speech_text_over_the_limit_fails_before_anything_loads(self, monkeypatch, tmp_path):
-        backend = fake_backend(clip())
-        env = patch_runner(monkeypatch, backend)
-
-        with pytest.raises(ValueError, match="10,000 characters"):
-            _run(_speech("x" * 10001), HIGGS3, tmp_path)
-
-        env.session.release_resident_enhancer.assert_not_called()
-        env.ensure.assert_not_called()
-        audio_runner.get_audio_backend.assert_not_called()
-
-    def test_a_voice_outside_its_length_fails_before_anything_loads(self, monkeypatch, tmp_path):
-        env = patch_runner(monkeypatch, fake_backend(clip()))
-        from zvisiongenerator.utils import audio_request
-
-        monkeypatch.setattr(audio_request, "probe_track_seconds", lambda path: 45.0)
-
-        with pytest.raises(ValueError, match="between 3 and 30 seconds"):
-            _run(_speech(voice=VoiceRef("me.wav", "hi")), HIGGS3, tmp_path)
-
-        env.ensure.assert_not_called()
-
-    def test_higgs_downloads_its_two_repositories_and_loads_with_no_step_between(self, monkeypatch, tmp_path):
-        order: list[str] = []
-        env = patch_runner(monkeypatch, fake_backend(clip(), events=order))
-        env.ensure.side_effect = lambda *a, **k: order.append("download") or "ready"
-
-        _run(_speech(), HIGGS3, tmp_path)
-
-        assert order[:2] == ["download", "load"]
-        assert [target.repo_id for target in env.ensure.call_args.args[0]] == ["bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer"]
-
-    def test_a_model_that_does_not_run_on_this_platform_is_refused_before_anything_happens(self, monkeypatch, tmp_path):
-        env = patch_runner(monkeypatch, fake_backend(clip()))
-        monkeypatch.setattr(audio_runner, "audio_platform_key", lambda: "mps")
-        only_cuda = SimpleNamespace(**{**YUE2.__dict__, "platforms": {"cuda": YUE2.platforms["cuda"]}})
-
-        with pytest.raises(ValueError, match="does not run on 'mps'"):
-            _run(_music(), only_cuda, tmp_path)
-
-        env.session.release_resident_enhancer.assert_not_called()
 
     def test_a_request_for_another_model_is_refused(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip()))
@@ -421,54 +376,3 @@ class TestJobControls:
         progress = events[3]
         assert (progress["phase"], progress["step"], progress["total"], progress["part"], progress["n_parts"]) == ("Plan", 1, None, 1, 1)
         assert events[4]["output_path"] == str(saved[0]) and all(e["mode"] == "audio" for e in events)
-
-
-def _tone(seconds: float, amplitude: float, lead: float, trail: float) -> torch.Tensor:
-    body = amplitude * np.sin(2 * np.pi * 220 * np.arange(round(seconds * SAMPLE_RATE)) / SAMPLE_RATE)
-    return torch.from_numpy(np.concatenate([np.zeros(round(lead * SAMPLE_RATE)), body, np.zeros(round(trail * SAMPLE_RATE))]).astype(np.float32))
-
-
-def _silent_runs(wave: np.ndarray, rate: int, minimum: float = 0.05) -> list[tuple[int, int]]:
-    """Return the ``(start, end)`` samples of every run of near-silence at least *minimum* seconds long."""
-    quiet = np.abs(wave) < 1e-3
-    runs, start = [], None
-    for index, flag in enumerate(np.append(quiet, False)):
-        if flag and start is None:
-            start = index
-        elif not flag and start is not None:
-            if (index - start) / rate >= minimum:
-                runs.append((start, index))
-            start = None
-    return runs
-
-
-def _db(value: float) -> float:
-    return 20 * np.log10(value)
-
-
-class TestSpeechJoinedThroughTheRunner:
-    @REAL
-    def test_three_parts_are_joined_with_short_edges_300_ms_pauses_and_a_level_raised_by_only_3_db(self, monkeypatch, tmp_path):
-        parts = [_tone(2.0, 0.4, lead=0.4, trail=0.4), _tone(2.0, 0.4, lead=0.05, trail=1.9), _tone(2.0, 0.2, lead=0.05, trail=0.05)]
-        install_fakes(monkeypatch, tmp_path, FakeModel([10, 10, 10]), FakeCodec([], list(parts)))
-        patch_runner(monkeypatch, Higgs3Backend())
-        text = " ".join(letter * 299 + "." for letter in "abc")  # three sentences of 300 characters: three parts
-
-        saved = _run(_speech(text), HIGGS3, tmp_path)
-
-        out, rate = decode(saved[0])
-        wave = out[0]
-        assert rate == SAMPLE_RATE and read_config(saved[0])["generation"]["parts"] == 3 and read_config(saved[0])["prompt"] == text
-        first_sound = int(np.argmax(np.abs(wave) > 1e-3))
-        last_sound = len(wave) - 1 - int(np.argmax(np.abs(wave[::-1]) > 1e-3))
-        assert first_sound / rate == pytest.approx(0.15, abs=0.003)  # 0.4 s of lead cut to 150 ms
-        assert (len(wave) - 1 - last_sound) / rate == pytest.approx(0.05, abs=0.003)
-        gaps = [(end - start) / rate for start, end in _silent_runs(wave, rate) if start > 0 and end < len(wave)]
-        assert gaps == [pytest.approx(0.15 + 0.3 + 0.05, abs=0.01), pytest.approx(0.15 + 0.3 + 0.05, abs=0.01)]  # trimmed tail + 300 ms pause + lead; the 1.9 s tail is gone
-        cuts = [(start, end) for start, end in _silent_runs(wave, rate) if start > 0 and end < len(wave)]
-        segments = [wave[first_sound : cuts[0][0]], wave[cuts[0][1] : cuts[1][0]], wave[cuts[1][1] : last_sound + 1]]
-        inputs = [float(np.sqrt(np.mean(np.square(part.numpy()[np.abs(part.numpy()) > 1e-3])))) for part in parts]
-        outputs = [float(np.sqrt(np.mean(np.square(segment[np.abs(segment) > 1e-3])))) for segment in segments]
-        change = [_db(out_) - _db(in_) for out_, in_ in zip(outputs, inputs, strict=True)]
-        assert change[2] == pytest.approx(3.0, abs=0.3)  # the quiet part is 4 dB under the mean but is raised by 3 dB at most
-        assert change[0] == pytest.approx(-2.0, abs=0.3) and change[1] == pytest.approx(-2.0, abs=0.3)

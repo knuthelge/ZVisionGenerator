@@ -44,7 +44,7 @@ def plan_env(monkeypatch, tmp_path):
     env = SimpleNamespace(present=set(), unreachable=False, enhance=True, hub_calls=[], flights=DownloadFlights(), submitted=[], web_config=make_web_config(), root=tmp_path)
     env.web_config.output_dir = str(tmp_path)
     packaged = load_packaged_config()
-    env.web_config.app_config.update(model_aliases=packaged["model_aliases"], licences=packaged["licences"], audio_model_presets=packaged["audio_model_presets"])
+    env.web_config.app_config.update(model_aliases=packaged["model_aliases"], audio_model_presets=packaged["audio_model_presets"])
     monkeypatch.setattr(web_server, "load_web_config", lambda: env.web_config)
     patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="flux2", is_distilled=False, size=None), defaults=make_resolved_image_defaults(), submitted=env.submitted)
     monkeypatch.setattr(web_server.download_flights, "active", env.flights.active)
@@ -260,17 +260,117 @@ class TestGeneratePlan:
         assert planned_request == submitted[0]["request"]
         assert vars(planned_args) == vars(submitted[0]["args"])
 
-    def test_a_planned_upload_is_saved_once_and_the_submit_reuses_it(self, plan_env):
-        png = io.BytesIO()
-        Image.new("RGB", (64, 64), "teal").save(png, format="PNG")
-        files = {"image_file": ("start.png", png.getvalue(), "image/png")}
+    def test_a_plan_saves_no_upload_and_the_submit_saves_it_once(self, plan_env):
+        files = {"image_file": ("start.png", _png_bytes(), "image/png")}
         form = _form(workflow="img2img")
 
         planned = plan_env.client.post("/api/generate/plan", data=form, files=files)
-        queued = plan_env.client.post("/api/generate", data=form, files=files)
 
-        assert planned.status_code == queued.status_code == 200
+        assert planned.status_code == 200
+        assert not (plan_env.root / ".web_uploads").exists()
+        queued = plan_env.client.post("/api/generate", data=form, files=files)
+        assert queued.status_code == 200
         assert len(list((plan_env.root / ".web_uploads").iterdir())) == 1
+
+
+def _png_bytes() -> bytes:
+    png = io.BytesIO()
+    Image.new("RGB", (64, 64), "teal").save(png, format="PNG")
+    return png.getvalue()
+
+
+def _without_bodies(files):
+    """Return *files* as the Workspace sends them to the plan: each part keeps its field and file name and has no body."""
+    return [(field, (name, b"", kind)) for field, (name, _body, kind) in files]
+
+
+def _plan(plan_env, data, files):
+    return plan_env.client.post("/api/generate/plan", data=data, files=files)
+
+
+class TestPlanWithoutFileBodies:
+    """The Workspace plans a form with its file bodies left out; the plan is the one the full form gets, and no upload is read or saved."""
+
+    @pytest.fixture
+    def video_env(self, plan_env, monkeypatch):
+        stub_video_submission(monkeypatch, plan_env.root)
+        monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: plan_env.submitted.append(kwargs) or "job-123")
+        return plan_env
+
+    def _same_parts(self, plan_env, data, files):
+        full = _plan(plan_env, data, files)
+        bare = _plan(plan_env, data, _without_bodies(files))
+
+        assert full.status_code == bare.status_code == 200, (full.text, bare.text)
+        assert bare.json() == full.json()
+        assert bare.json()["parts"]  # something to download, so the comparison is not of two empty plans
+        assert not (plan_env.root / ".web_uploads").exists()
+
+    def test_an_image_form_with_a_start_image_plans_the_same_parts(self, plan_env):
+        self._same_parts(plan_env, _form(workflow="img2img"), [("image_file", ("start.png", _png_bytes(), "image/png"))])
+
+    def test_an_image_form_with_references_plans_the_same_parts(self, plan_env, monkeypatch):
+        monkeypatch.setattr(web_server, "resolve_defaults", lambda *_args: make_resolved_image_defaults(max_reference_images=3))
+        files = [("reference", (f"ref{index}.png", _png_bytes(), "image/png")) for index in range(2)]
+
+        self._same_parts(plan_env, _form(transparent="on"), files)
+
+    def test_a_video_form_with_both_frames_and_a_track_plans_the_same_parts(self, video_env):
+        files = [
+            ("image_file", ("first.png", _png_bytes(), "image/png")),
+            ("end_image_file", ("last.png", _png_bytes(), "image/png")),
+            ("audio_track_file", ("song.m4a", b"not really audio", "audio/mp4")),
+        ]
+        data = {"mode": "video", "model": "ltx-8", "prompt": "a lake", "workflow": "img2vid"}
+
+        self._same_parts(video_env, data, files)
+
+    def test_an_upload_is_not_checked_as_a_file_by_the_plan_only_by_the_submit(self, plan_env):
+        files = [("image_file", ("start.gif", b"", "image/gif"))]
+        form = _form(workflow="img2img")
+
+        planned = _plan(plan_env, form, files)
+        submitted = plan_env.client.post("/api/generate", data=form, files=files)
+
+        assert planned.status_code == 200
+        assert submitted.status_code == 422
+        assert "PNG, JPEG, or WebP" in submitted.json()["detail"]
+
+    def test_an_unreadable_track_is_refused_by_the_submit_and_not_by_the_plan(self, video_env):
+        files = [("audio_track_file", ("song.m4a", b"", "audio/mp4"))]
+        data = {"mode": "video", "model": "ltx-8", "prompt": "a lake"}
+
+        planned = _plan(video_env, data, files)
+        submitted = video_env.client.post("/api/generate", data=data, files=[("audio_track_file", ("song.m4a", b"not audio", "audio/mp4"))])
+
+        assert planned.status_code == 200
+        assert submitted.status_code == 422
+
+    @pytest.mark.parametrize("fields", [{"steps": "-4"}, {"width": "999"}, {"prompt": ""}], ids=["steps", "width", "prompt"])
+    def test_a_field_error_still_refuses_the_plan(self, plan_env, fields):
+        files = [("image_file", ("start.png", b"", "image/png"))]
+        data = _form(workflow="img2img", **fields)
+
+        planned = _plan(plan_env, data, files)
+        submitted = plan_env.client.post("/api/generate", data=data, files=[("image_file", ("start.png", _png_bytes(), "image/png"))])
+
+        assert planned.status_code == submitted.status_code == 422
+        assert planned.json() == submitted.json()
+
+    def test_a_start_image_workflow_without_any_image_is_still_refused(self, plan_env):
+        response = plan_env.client.post("/api/generate/plan", data=_form(workflow="img2img"))
+
+        assert response.status_code == 422
+        assert "start image" in response.json()["detail"]
+
+    def test_a_video_field_error_still_refuses_the_plan(self, video_env):
+        files = [("end_image_file", ("last.png", b"", "image/png"))]
+        data = {"mode": "video", "model": "ltx-8", "prompt": "a lake"}
+
+        response = _plan(video_env, data, files)
+
+        assert response.status_code == 422
+        assert "first frame" in response.json()["detail"]
 
 
 def _write_png(path, config=None):

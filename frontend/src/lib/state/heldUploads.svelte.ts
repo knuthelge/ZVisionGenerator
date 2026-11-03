@@ -2,11 +2,11 @@ import type { TrackTab } from './audioTrack';
 import type { ImageTab } from './imageSlots';
 import { defaultUploadStore, type TabUploads, type UploadStore, type UploadTab } from './uploadStore';
 
-type FileField = 'startImage' | 'firstFrame' | 'lastFrame' | 'audioTrack' | 'extendAudioTrack';
+type FileField = 'startImage' | 'firstFrame' | 'lastFrame' | 'audioTrack' | 'extendAudioTrack' | 'voice';
 
 // The files picked from this device that wait for Generate: per tab the start image (the first frame in Video), the
-// last frame, and one entry per reference row (null for a row that holds a path), and the audio track of Video and Extend
-// Video. The Workspace is unmounted on another
+// last frame, and one entry per reference row (null for a row that holds a path), the audio track of Video and Extend
+// Video, and the recording of the Audio tab's voice. The Workspace is unmounted on another
 // page, so they live here to survive a visit to the Gallery or the Prompts page. Every write is mirrored into an upload
 // store (IndexedDB), and `restore` reads it back after a reload. The draft keeps only the file's name as the upload marker.
 class HeldUploads {
@@ -20,6 +20,8 @@ class HeldUploads {
   audioTrack = $state.raw<File | null>(null);
   /** The pending audio track of the Extend Video tab, or null. */
   extendAudioTrack = $state.raw<File | null>(null);
+  /** The pending voice recording of the Audio tab, or null. */
+  voice = $state.raw<File | null>(null);
   /** The pending reference uploads by row. */
   references = $state.raw<(File | null)[]>([]);
   /** Whether the stored uploads have been read back. True once `restore` settles, also when the store failed. */
@@ -51,6 +53,7 @@ class HeldUploads {
     this.lastFrame = null;
     this.audioTrack = null;
     this.extendAudioTrack = null;
+    this.voice = null;
     this.references = [];
     this.restored = false;
   }
@@ -78,13 +81,19 @@ class HeldUploads {
     this.#persist(tab);
   }
 
+  /** Hold the Audio tab's voice recording, or forget it with null. */
+  setVoice(file: File | null): void {
+    this.#setFile('voice', file);
+    this.#persist('audio');
+  }
+
   /** Replace the pending reference uploads. */
   setReferences(files: (File | null)[]): void {
     this.#setReferences(files);
     this.#persist('image');
   }
 
-  /** Forget every pending upload of a tab: the start image and references in Image, the first and last frame and the audio track in Video, the audio track in Extend Video. */
+  /** Forget every pending upload of a tab: the start image and references in Image, the first and last frame and the audio track in Video, the audio track in Extend Video, the voice recording in Audio. */
   clearTab(tab: UploadTab): void {
     this.#forget(tab);
     this.#persist(tab);
@@ -95,6 +104,7 @@ class HeldUploads {
     this.clearTab('image');
     this.clearTab('video');
     this.clearTab('extend');
+    this.clearTab('audio');
   }
 
   /**
@@ -128,8 +138,10 @@ class HeldUploads {
       this.#setFile('firstFrame', null);
       this.#setFile('lastFrame', null);
       this.#setFile('audioTrack', null);
-    } else {
+    } else if (tab === 'extend') {
       this.#setFile('extendAudioTrack', null);
+    } else {
+      this.#setFile('voice', null);
     }
   }
 
@@ -140,7 +152,9 @@ class HeldUploads {
         ? { start: this.startImage, end: null, references: this.references, track: null }
         : tab === 'video'
           ? { start: this.firstFrame, end: this.lastFrame, references: [], track: this.audioTrack }
-          : { start: null, end: null, references: [], track: this.extendAudioTrack };
+          : tab === 'extend'
+            ? { start: null, end: null, references: [], track: this.extendAudioTrack }
+            : { start: null, end: null, references: [], track: this.voice };
     const empty = record.start === null && record.end === null && record.track === null && record.references.every((file) => file === null);
     return empty ? null : record;
   }
@@ -167,7 +181,7 @@ class HeldUploads {
   async #restore(): Promise<void> {
     const generation = this.#generation;
     try {
-      const [image, video, extend] = await Promise.all([this.#read('image'), this.#read('video'), this.#read('extend')]);
+      const [image, video, extend, audio] = await Promise.all([this.#read('image'), this.#read('video'), this.#read('extend'), this.#read('audio')]);
       if (generation !== this.#generation) return;
       if (!this.#written.has('startImage')) this.startImage = image?.start ?? null;
       if (!this.#written.has('references')) this.references = image?.references ?? [];
@@ -175,6 +189,7 @@ class HeldUploads {
       if (!this.#written.has('lastFrame')) this.lastFrame = video?.end ?? null;
       if (!this.#written.has('audioTrack')) this.audioTrack = video?.track ?? null;
       if (!this.#written.has('extendAudioTrack')) this.extendAudioTrack = extend?.track ?? null;
+      if (!this.#written.has('voice')) this.voice = audio?.track ?? null;
     } finally {
       if (generation === this.#generation) this.restored = true;
     }

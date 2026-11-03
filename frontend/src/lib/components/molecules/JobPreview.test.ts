@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
 import JobPreview from './JobPreview.svelte';
+import { makeAudioAsset } from '../../../test-utils/audio';
 import { mountComponent } from '../../../test-utils/mount';
 
 function makeJob(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
@@ -66,4 +67,20 @@ describe('JobPreview', () => {
     expect(target.textContent).toContain('50%');
   });
 
+  describe('an audio job', () => {
+    const takeJob = (overrides: Partial<ActiveJobState> = {}) => makeJob({ workflow: 'music', media_type: 'audio', width: null, height: null, ...overrides });
+    const figure = (target: HTMLElement) => target.querySelector('[data-testid="job-preview"]') as HTMLElement;
+
+    it('shows no image for an audio job', () => {
+      const { target } = mountComponent(JobPreview, { job: takeJob() });
+
+      expect(figure(target).querySelector('img')).toBeNull();
+    });
+
+    it('shows the waveform of the take that just finished while paused between takes', () => {
+      const { target } = mountComponent(JobPreview, { job: takeJob({ status: 'paused', paused: true, itemFinished: true, outputs: [makeAudioAsset()] }) });
+
+      expect(figure(target).querySelectorAll('rect.bar')).toHaveLength(100);
+    });
+  });
 });

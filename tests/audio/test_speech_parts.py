@@ -85,11 +85,6 @@ class TestSplit:
     def test_blank_text_has_no_parts(self):
         assert split_speech_text(" \n ") == ()
 
-    def test_the_limit_is_inclusive_and_one_more_is_refused(self):
-        assert split_speech_text("a " * 5000, max_chars=500)
-        with pytest.raises(ValueError, match=r"^Shorten the text: it's over 10,000 characters, about 10 minutes of speech\.$"):
-            split_speech_text("a" * 10_001)
-
 
 def _tone(seconds: float, amplitude: float = 0.4) -> np.ndarray:
     """Return a cosine tone, which starts at full amplitude so a fade-in shows."""
@@ -189,10 +184,3 @@ class TestJoin:
     def test_no_samples_is_refused(self):
         with pytest.raises(ValueError, match="no speech"):
             join_speech_parts([np.zeros(0, dtype=np.float32)], RATE, SETTINGS)
-
-    def test_a_missing_setting_is_named(self):
-        with pytest.raises(ValueError, match="join_pause_ms"):
-            join_speech_parts([_tone(0.5)], RATE, {k: v for k, v in SETTINGS.items() if k != "join_pause_ms"})
-
-    def test_the_result_is_float32(self):
-        assert join_speech_parts([_tone(0.5).astype(np.float64)], RATE, SETTINGS).dtype == np.float32

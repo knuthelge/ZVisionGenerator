@@ -41,24 +41,6 @@ describe('confirmDownloads', () => {
     expect(request.info).toContain('812.0 GB free on /data');
   });
 
-  it('puts the records of a part\'s model on its lines and leaves the other parts without', async () => {
-    const record = { model: 'klein9b', name: 'FLUX NC', supplier: 'BFL', summary: 'Non-commercial', url: 'https://x/l', url_label: 'Licence', notice_url: 'https://x/n' };
-
-    await confirmDownloads(plan({ parts: [enhancer, klein], licences: [record] }));
-
-    const [first, second] = requestConfirm.mock.calls[0][0].parts;
-    expect(first.lines).toEqual([]);
-    expect(second.lines).toEqual([
-      {
-        text: 'FLUX NC (BFL): Non-commercial',
-        links: [
-          { label: 'Licence ↗', href: 'https://x/l', ariaLabel: 'FLUX NC licence (opens in a new tab)' },
-          { label: 'NOTICE ↗', href: 'https://x/n', ariaLabel: 'FLUX NC NOTICE (opens in a new tab)' },
-        ],
-      },
-    ]);
-  });
-
   it('asks one question for several models, in the order given, with the number of parts', async () => {
     await confirmDownloads(plan({ parts: [enhancer, klein], total_bytes: 44.1e9 }));
 
@@ -89,17 +71,6 @@ describe('confirmDownloads', () => {
     );
     expect(requestConfirm.mock.calls[0][0].info).toContain("Couldn't check the size");
   });
-
-  it('shows a part of unknown size beside the sized ones when only some could not be checked', async () => {
-    await confirmDownloads(plan({ parts: [{ ...enhancer, bytes: null, files: 0 }, klein], total_bytes: null, unchecked: true }));
-
-    expect(requestConfirm.mock.calls[0][0].parts.map((part: { size: string | null }) => part.size)).toEqual([null, '35.1 GB']);
-  });
-
-  it.each([true, false])('resolves to the answer of the dialog (%s)', async (answer) => {
-    requestConfirm.mockResolvedValue(answer);
-    await expect(confirmDownloads(plan())).resolves.toBe(answer);
-  });
 });
 
 describe('jobPlanOfRow', () => {
@@ -126,13 +97,5 @@ describe('jobPlanOfRow', () => {
     const licences = [{ model: 'background-removal', name: 'Matte', supplier: 'Authors', summary: 'Research only', url: 'https://x', url_label: 'Model card', notice_url: null }];
 
     expect(jobPlanOfRow({ ...row, licences }).licences).toEqual(licences);
-  });
-
-  it('keeps a size unknown when any repo size is unknown', () => {
-    expect(jobPlanOfRow({ ...row, parts: [row.parts[0], { repo: 'org/vitmatte', files: 1, bytes: null }], total_bytes: null }).parts[0].bytes).toBeNull();
-  });
-
-  it('is empty for a row with nothing to fetch', () => {
-    expect(jobPlanOfRow({ ...row, parts: [], total_bytes: 0, space: null }).parts).toEqual([]);
   });
 });

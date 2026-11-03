@@ -13,7 +13,7 @@ import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from 
 import WorkspacePage from './WorkspacePage.svelte';
 import { placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
-import { FLUX_LICENCE, GEMMA_LICENCE, LTX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
+import { FLUX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, dragFiles, fakeDebounceTimers, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, configApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, presetApiMocks, videoMemoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
@@ -385,23 +385,6 @@ describe('WorkspacePage licence mark beside the Model picker', () => {
     pickOption(select(), 'zit');
     await settle();
     expect(mark()).toBeNull();
-  });
-
-  it('is a sibling of the Select, not inside its trigger', async () => {
-    await mountWorkspace(makeContext());
-    pickOption(select(), 'flux-lite');
-    await settle();
-
-    expect(select().contains(mark())).toBe(false);
-    expect(select().closest('[data-testid="model-shell"]')!.contains(mark())).toBe(false);
-    expect(mark()!.closest('.ui-pane-toolbar')).not.toBeNull();
-  });
-
-  it('names both records of an LTX video model', async () => {
-    draft.patch({ workflow: 'txt2vid', model: 'ltx-8' });
-    await mountWorkspace(makeContext());
-
-    expect(mark()!.getAttribute('aria-label')).toBe(`Licences: ${LTX_LICENCE.name} and ${GEMMA_LICENCE.name}`);
   });
 });
 

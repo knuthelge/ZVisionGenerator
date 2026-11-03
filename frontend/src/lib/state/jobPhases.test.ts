@@ -24,6 +24,7 @@ describe('jobPhases', () => {
     ['model_downloading', { role: 'matte' }, 'load'],
     ['batch_started', {}, 'generate'],
     ['step_progress', {}, 'generate'],
+    ['audio_progress', {}, 'generate'],
     ['control_queued', {}, null],
   ] as const)('maps %s %j to %s', (type, event, phase) => {
     expect(phaseForEvent(type, event)).toBe(phase);

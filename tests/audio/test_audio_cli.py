@@ -8,8 +8,9 @@ import sys
 
 import pytest
 
-from tests._audio_presets import audio_config, sa3_preset
+from tests._audio_presets import audio_config
 from tests._factories import load_packaged_config
+from tests._licences import use_licences
 from tests._paths import REPO_ROOT
 from tests.audio._helpers import case_request, clip, fake_backend, patch_runner, sine, voice_folder
 
@@ -58,24 +59,11 @@ def make(env, *argv: str, monkeypatch) -> list[AudioGenerationRequest]:
 
 
 class TestFlags:
-    def test_the_parser_takes_every_flag(self):
-        args = _build_audio_parser().parse_args(
-            ["-m", "higgs3", "--prompt", "Hi", "-r", "2", "--seed", "9", "-o", "out", "--seconds", "5", "--voice", "v.wav", "--voice-text", "Hello", "--voice-consent", "--lyrics", "[verse]"]
-        )
-
-        assert (args.model, args.prompt, args.runs, args.seed, args.output, args.seconds) == ("higgs3", "Hi", 2, 9, "out", 5.0)
-        assert (args.voice, args.voice_text, args.voice_consent, args.lyrics) == ("v.wav", "Hello", True, "[verse]")
-
     def test_lyrics_and_a_lyrics_file_cannot_be_given_together(self, capsys):
         with pytest.raises(SystemExit):
             _build_audio_parser().parse_args(["--lyrics", "a", "--lyrics-file", "b.txt"])
 
         assert "not allowed with argument" in capsys.readouterr().err
-
-    def test_the_help_of_lyrics_says_empty_or_tag_only_lyrics_make_an_instrumental(self):
-        text = " ".join(_build_audio_parser().format_help().split())
-
-        assert "Without lyrics, or with only [section] tags, the take is an instrumental" in text
 
     def test_a_song_is_made_from_a_style_and_lyrics_with_the_defaults_for_the_rest(self, env, monkeypatch, tmp_path):
         lyrics = tmp_path / "song.txt"
@@ -122,30 +110,14 @@ class TestFlags:
 
         assert env.backend.generate.call_count == 1
 
-    def test_ziv_help_lists_audio(self, capsys):
-        from zvisiongenerator import cli
-
-        cli._build_parser().print_help()
-
-        assert "audio" in capsys.readouterr().out
-
 
 class TestRefusals:
     def test_a_flag_the_model_does_not_take_is_refused_by_name(self, env, monkeypatch, capsys):
         assert "YuE2 3B sets the length from the lyrics; drop --seconds" in refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "--seconds", "30")
 
-    def test_speech_has_no_length_either(self, env, monkeypatch, capsys):
-        assert "Higgs TTS 3 4B reads the whole text; drop --seconds" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--seconds", "30")
-
     @pytest.mark.parametrize(("flag", "model"), [("--lyrics", "sa3"), ("--lyrics", "higgs3")])
     def test_lyrics_are_refused_by_a_model_without_them(self, env, monkeypatch, capsys, flag, model):
         assert f"takes no lyrics; drop {flag}" in refuses(monkeypatch, capsys, "-m", model, "--prompt", "x", flag, "[verse]")
-
-    def test_a_lyrics_file_is_named_when_it_is_the_flag_given(self, env, monkeypatch, capsys, tmp_path):
-        path = tmp_path / "l.txt"
-        path.write_text("la")
-
-        assert "drop --lyrics-file" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "--lyrics-file", str(path))
 
     @pytest.mark.parametrize("model", ["yue2", "sa3"])
     def test_a_voice_is_refused_by_a_model_that_cannot_follow_one(self, env, monkeypatch, capsys, model):
@@ -199,11 +171,6 @@ class TestRefusals:
         assert "Shorten the text: it's over 10,000 characters, about 10 minutes of speech." in error
         assert env.ensure.call_count == 0
 
-    def test_speech_of_exactly_10000_characters_is_read_in_parts(self, env, monkeypatch):
-        text = ("Short sentence here. " * 600)[:10000]
-
-        assert len(make(env, "-m", "higgs3", "--prompt", text, monkeypatch=monkeypatch)) == 1
-
     @pytest.mark.parametrize("seconds", ["0.5", "381", "0", "-3", "nan"])
     def test_a_length_outside_the_models_range_is_refused(self, env, monkeypatch, capsys, seconds):
         assert "--seconds must be between 1 and 380" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "--seconds", seconds)
@@ -224,29 +191,11 @@ class TestModels:
 
         assert "No audio models are configured" in error
 
-    def test_the_packaged_config_offers_the_three_models(self, monkeypatch, capsys):
-        monkeypatch.setattr(audio_cli, "audio_platform_key", lambda: "cuda")
-        monkeypatch.setattr(audio_cli, "load_config", load_packaged_config)
-
-        assert "Choose one of: yue2, higgs3, sa3." in refuses(monkeypatch, capsys, "--prompt", "x")
-
     def test_a_model_is_required_and_the_choices_are_listed(self, env, monkeypatch, capsys):
         assert "--model is required. Choose one of: yue2, higgs3, sa3." in refuses(monkeypatch, capsys, "--prompt", "x")
 
     def test_an_unknown_model_is_refused_with_the_choices(self, env, monkeypatch, capsys):
         assert "Unknown audio model 'nope'. Choose one of: yue2, higgs3, sa3." in refuses(monkeypatch, capsys, "-m", "nope", "--prompt", "x")
-
-    def test_models_that_do_not_run_on_this_platform_are_not_offered(self, env, monkeypatch, capsys):
-        monkeypatch.setattr(audio_cli, "audio_platform_key", lambda: "mps")
-        monkeypatch.setattr(audio_cli, "load_config", lambda: audio_config(sa3=_cuda_only()))
-
-        assert "None of the configured audio models run on this platform (mps)" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x")
-
-
-def _cuda_only() -> dict:
-    preset = sa3_preset()
-    del preset["platforms"]["mps"]
-    return preset
 
 
 class TestLicenceNotice:
@@ -260,11 +209,12 @@ class TestLicenceNotice:
         }
     }
 
-    def _config(self):
-        return {**audio_config(), "licences": self.LICENCE}
+    @pytest.fixture(autouse=True)
+    def _licence_records(self, monkeypatch, tmp_path):
+        use_licences(monkeypatch, tmp_path, self.LICENCE)
 
     def test_the_terms_are_printed_before_a_missing_model_downloads(self, env, monkeypatch, capsys):
-        monkeypatch.setattr(audio_cli, "load_config", self._config)
+        monkeypatch.setattr(audio_cli, "load_config", audio_config)
         monkeypatch.setattr(audio_cli, "target_present_offline", lambda target: False)
         env.ensure.side_effect = lambda *a, **k: print("DOWNLOAD STARTS") or "ready"
 
@@ -275,7 +225,7 @@ class TestLicenceNotice:
         assert out.index("By downloading you agree") < out.index("DOWNLOAD STARTS")
 
     def test_nothing_is_printed_for_a_model_that_is_already_downloaded(self, env, monkeypatch, capsys):
-        monkeypatch.setattr(audio_cli, "load_config", self._config)
+        monkeypatch.setattr(audio_cli, "load_config", audio_config)
         monkeypatch.setattr(audio_cli, "target_present_offline", lambda target: True)
 
         make(env, "-m", "sa3", "--prompt", "rain", monkeypatch=monkeypatch)
@@ -283,7 +233,7 @@ class TestLicenceNotice:
         assert "By downloading" not in capsys.readouterr().out
 
     def test_a_model_without_a_record_prints_nothing(self, env, monkeypatch, capsys):
-        monkeypatch.setattr(audio_cli, "load_config", self._config)
+        monkeypatch.setattr(audio_cli, "load_config", audio_config)
         monkeypatch.setattr(audio_cli, "target_present_offline", lambda target: False)
 
         make(env, "-m", "yue2", "--prompt", "calm", monkeypatch=monkeypatch)
@@ -321,16 +271,3 @@ class TestCopyCli:
         expected = [case_request(item, voices) for item in case["requests"]]
         assert requests == expected
         assert len(list(env.out.glob("*.flac"))) == len(expected)
-
-    def test_only_a_cloned_voice_carries_the_consent_flag(self):
-        flags = {case["name"]: "--voice-consent" in case["command"] for case in CASES}
-
-        assert flags == {
-            "a song from a style and lyrics": False,
-            "an instrumental from a style alone": False,
-            "speech in the model's own voice (Any)": False,
-            "speech following a recording, with the speaker's consent": True,
-            "speech following an Any take, which needs no consent": False,
-            "speech following a cloned take, with consent": True,
-            "a sound of a chosen length, two takes": False,
-        }

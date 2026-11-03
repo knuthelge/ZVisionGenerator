@@ -14,7 +14,7 @@ function view(state: Partial<AudioTrackViewInput['state']> = {}, input: Partial<
   const tab = workspaceTab(full.workflow);
   return audioTrackView({
     state: full,
-    caps: { showAudioTrack: shown, audioTrackInEffect: shown && tab !== 'image' && trackSet(trackOf(full, tab)) },
+    caps: { showAudioTrack: shown, audioTrackInEffect: shown && (tab === 'video' || tab === 'extend') && trackSet(trackOf(full, tab)) },
     files: { audioTrack: null, extendAudioTrack: null },
     restored: true,
     lengthOf: () => null,

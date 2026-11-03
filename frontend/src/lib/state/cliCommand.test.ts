@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import audioCases from '../../../../tests/fixtures/audio_cli_cases.json';
 import { cliCommand, formSettings, shellQuote } from './cliCommand';
+import type { JobSettings } from '$lib/types';
 
 describe('shellQuote', () => {
   it('leaves plain words bare and single-quotes everything else', () => {
@@ -26,6 +28,7 @@ describe('formSettings', () => {
 });
 
 describe('cliCommand', () => {
+
   it('builds an image command with every submitted setting', () => {
     const { command, caveats } = cliCommand({
       mode: 'image', workflow: 'img2img', model: 'zit', quantize: '8', prompt_source: 'inline', prompt: 'a lake at dawn',
@@ -327,5 +330,65 @@ describe('cliCommand', () => {
     it('refuses an extension without a source', () => {
       expect(() => cliCommand({ mode: 'video', workflow: 'extend', prompt: 'a', source_video: ' ' })).toThrow('video to extend');
     });
+  });
+});
+
+describe('cliCommand for audio', () => {
+  // The same cases run through `ziv audio` in tests/audio/test_audio_cli.py, which checks each command makes the form's job.
+  it.each(audioCases)('builds the command for $name', ({ settings, command }) => {
+    expect(cliCommand(settings as unknown as JobSettings)).toEqual({ command, caveats: [] });
+  });
+
+  it('adds --voice-consent only when the form carries the tick', () => {
+    const cloned = { mode: 'audio', workflow: 'speech', model: 'higgs3', prompt: 'Hi', voice_path: '/v/me.wav', voice_text: 'Hello' };
+
+    expect(cliCommand({ ...cloned, voice_consent: ['false', 'on'] }).command).toContain('--voice-consent');
+    expect(cliCommand({ ...cloned, voice_consent: 'false' }).command).not.toContain('--voice-consent');
+    expect(cliCommand(cloned).command).not.toContain('--voice-consent');
+  });
+
+  it('adds --voice-consent to a command copied from a job, whose settings carry no tick', () => {
+    const job = { mode: 'audio', workflow: 'speech', model: 'higgs3', prompt: 'Hi', voice_path: '/v/me.wav', voice_text: 'Hello' };
+
+    expect(cliCommand(job, { voiceConsent: true }).command).toBe("ziv audio --model higgs3 --prompt Hi --voice /v/me.wav --voice-text Hello --voice-consent");
+    expect(cliCommand({ ...job, voice_path: undefined, voice_text: undefined } as unknown as JobSettings, { voiceConsent: true }).command).not.toContain('--voice-consent');
+  });
+
+  it('sends lyrics with music, the length with sound and a voice with speech only', () => {
+    const extras = { lyrics: '[verse]', seconds: '12', voice_path: '/v/me.wav', voice_text: 'Hello', voice_consent: 'on' };
+
+    expect(cliCommand({ mode: 'audio', workflow: 'music', model: 'm', prompt: 'p', ...extras }).command).toBe("ziv audio --model m --prompt p --lyrics '[verse]'");
+    expect(cliCommand({ mode: 'audio', workflow: 'sound', model: 's', prompt: 'p', ...extras }).command).toBe('ziv audio --model s --prompt p --seconds 12');
+    expect(cliCommand({ mode: 'audio', workflow: 'speech', model: 'h', prompt: 'p', ...extras }).command).toBe('ziv audio --model h --prompt p --voice /v/me.wav --voice-text Hello --voice-consent');
+  });
+
+  it('names an uploaded recording by file name and says so', () => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries({ mode: 'audio', workflow: 'speech', model: 'higgs3', prompt: 'Hi', voice_text: 'Hello', voice_consent: 'on' })) form.append(key, value);
+    form.append('voice_file', new File(['x'], 'my voice.wav', { type: 'audio/wav' }));
+    form.append('voice_path', '/old/me.wav');
+
+    expect(cliCommand(formSettings(form))).toEqual({
+      command: "ziv audio --model higgs3 --prompt Hi --voice 'my voice.wav' --voice-text Hello --voice-consent",
+      caveats: ['uploaded_voice'],
+    });
+  });
+
+  it('adds the batch, the seed and the output folder', () => {
+    const { command } = cliCommand({ mode: 'audio', workflow: 'sound', model: 'sa3', prompt: 'rain', seconds: '5', runs: '3', seed: '8' }, { outputDir: '/out' });
+
+    expect(command).toBe('ziv audio --model sa3 --prompt rain --seconds 5 --runs 3 --seed 8 --output /out');
+  });
+
+  it.each([
+    ['music', 'Write a style first.'],
+    ['speech', 'Write the text to read first.'],
+    ['sound', 'Describe the sound first.'],
+  ])('refuses a %s job without its text', (workflow, message) => {
+    expect(() => cliCommand({ mode: 'audio', workflow, model: 'm', prompt: '  ' })).toThrow(message);
+  });
+
+  it('refuses a recording without its transcript', () => {
+    expect(() => cliCommand({ mode: 'audio', workflow: 'speech', model: 'h', prompt: 'Hi', voice_path: '/v/me.wav' })).toThrow('Write what the recording says first.');
   });
 });

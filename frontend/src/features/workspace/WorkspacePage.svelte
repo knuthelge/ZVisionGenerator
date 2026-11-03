@@ -13,13 +13,15 @@
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
   import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
+  import { firstValues } from '$lib/prefillParams';
   import { checkReferencePaths, getWorkspaceCoreContext, planGenerate, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { confirmDownloads } from '$lib/state/confirmDownloads';
   import { updateConfig } from '$lib/api/config';
   import { workspaceMemory } from '$lib/state/pageMemory';
   import { deleteAsset } from '$lib/api/gallery';
-  import { canExtend, extendParams, referenceParams, reuseParams, useAsState, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
-  import { Icon, MascotSpot } from '$lib/components/atoms';
+  import { audioTrackParams, canExtend, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { audioModelLabel, cutNote, lengthLabel } from '$lib/state/audioAsset';
+  import { Badge, Icon, MascotSpot, Tooltip } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import {
@@ -67,9 +69,15 @@
   import SettingPopover from './SettingPopover.svelte';
   import { imagesSummary } from './imagesSummary';
   import { currentAudioTrackView } from './audioTrackView';
+  import { audioFormData, currentAudioView } from './audioView';
+  import { audioModelsOf, availableKinds } from '$lib/state/audioDraft';
+  import { replacesVoice } from '$lib/state/audioDraft';
+  import { voiceConsent } from '$lib/state/voiceConsent.svelte';
+  import KindControl from './KindControl.svelte';
+  import { KIND_INFO } from './audioKinds';
   import { currentImagesView } from './imagesView';
   import PresetMenu from './PresetMenu.svelte';
-  import { pendingChips, settingsChips, type ChipKey } from './settingsChips';
+  import { audioChips, pendingChips, settingsChips, type ChipKey } from './settingsChips';
   import { Sheet } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { settingDefaultsFor, stepOptionsFor } from '$lib/state/draft.svelte';
@@ -84,13 +92,13 @@
   import { hasPendingJobSettings, takeJobSettings } from '$lib/state/pendingJobSettings.svelte';
   import { hasPendingReference, takeReference } from '$lib/state/pendingReference.svelte';
   import { heldUploads } from '$lib/state/heldUploads.svelte';
-  import { workspaceTab } from '$lib/state/workspaceTab';
+  import { isAudioWorkflow, workspaceTab } from '$lib/state/workspaceTab';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow, WorkspaceWorkflow, AudioWorkflow } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
-    workflows?: Workflow[] | null;
+    workflows?: WorkspaceWorkflow[] | null;
   }
 
   let { workflows = $bindable(null) }: Props = $props();
@@ -150,6 +158,7 @@
     prompt_options: 'The CLI runs every prompt in the file, not only the chosen ones.',
     uploaded_image: 'An uploaded image is named by file name; replace it with its path.',
     uploaded_audio: 'An uploaded audio track is named by file name; replace it with its path.',
+    uploaded_voice: 'An uploaded voice recording is named by file name; replace it with its path.',
   };
   const OUTPUT_GAP_PX = 12;
   const MIN_OUTPUT_CELL_PX = 160;
@@ -299,6 +308,13 @@
   // Whether the open tab follows an audio track, what a submit sends for it, and why Generate is off when an uploaded track is gone.
   const audioTrack = $derived(context === null ? null : currentAudioTrackView(context));
   const trackBlock = $derived(audioTrack?.block ?? null);
+  // What the Audio tab sends and why Generate is off on it: the kind's text, the voice and the speaker's tick.
+  const audio = $derived(context === null ? null : currentAudioView(context));
+  const audioReason = $derived(audio?.active ? audio.reason : null);
+  // A voice recording's length is read once it is chosen: it must be within what the model follows.
+  $effect(() => {
+    if (audio?.voice.recording && audio.voice.set) trackLengths.ensure(audio.voice.path, audio.voice.file);
+  });
   // The track's length shows beside its name and sets the note under Start at: read it once the track is in use.
   $effect(() => {
     if (audioTrack?.visible && audioTrack.set) trackLengths.ensure(audioTrack.path, audioTrack.file);
@@ -349,7 +365,10 @@
 
   const imageModels = $derived(context?.image_models ?? []);
   const videoModels = $derived(context?.video_models ?? []);
-  const currentModels = $derived(isImageMode ? imageModels : videoModels);
+  // The Audio tab is open: the kind's models, and the kinds this machine runs, in place of the image or video models.
+  const isAudio = $derived(isAudioWorkflow(draft.state.workflow));
+  const audioKinds = $derived(context ? availableKinds(context) : []);
+  const currentModels = $derived<ModelOption[]>(isAudio && context ? audioModelsOf(context, draft.state.workflow as AudioWorkflow) : isImageMode ? imageModels : videoModels);
   const modelOptions = $derived(currentModels.map((m) => ({ value: m.id, label: modelOptionText(m) })));
   // Matches the toolbar label, which falls back to the first model when the draft has none.
   const selectedModel = $derived(currentModels.find((m) => m.id === (draft.state.model || currentModels[0]?.id)) ?? null);
@@ -392,6 +411,20 @@
     if (!context || !authorityReady) return pendingChips(draft.state.workflow);
     const s = draft.state;
     const caps = workspaceCapabilities(context, s);
+    if (caps.isAudio && caps.audioKind && audio) {
+      const audioDefaults = settingDefaultsFor(context, { workflow: s.workflow, model: s.model }) as Partial<DraftState>;
+      return audioChips({
+        kind: caps.audioKind,
+        state: s,
+        modelLabel: selectedModel?.label ?? s.model,
+        modelDownloaded: selectedModel?.downloaded !== false,
+        voice: caps.showVoice ? audio.voice : null,
+        changed: (...keys) => keys.some((key) => key in audioDefaults && s[key] !== audioDefaults[key]),
+        showLength: caps.showLength,
+        showSeed: caps.showSeed,
+        showRuns: caps.showRuns,
+      });
+    }
     const defaults = settingDefaultsFor(context, { workflow: s.workflow, model: s.model }) as Partial<DraftState>;
     const presets = (caps.isImageMode ? context.image_size_dimensions : (context.video_size_dimensions ?? {}))[s.ratio]?.[s.size] ?? [s.width, s.height];
     const timing = videoTimingFor(context, s.model);
@@ -426,12 +459,17 @@
   const composerSummary = $derived.by(() => {
     const s = draft.state;
     if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} ${s.promptFileOptionIds.length === 1 ? 'prompt' : 'prompts'}` : 'Choose a prompt file', empty: !s.promptFilePath };
+    // The Audio tab's composer reads the open kind's own text.
+    if (isAudioWorkflow(s.workflow)) {
+      const kind = { music: { label: 'Style · Lyrics', text: s.audioStyle, empty: 'Describe the style…' }, speech: { label: 'Text', text: s.speechText, empty: 'What to say…' }, sound: { label: 'Prompt', text: s.soundPrompt, empty: 'Describe the sound…' } }[s.workflow];
+      return { label: kind.label, text: kind.text || kind.empty, empty: !kind.text };
+    }
     const video = s.workflow === 'img2vid' || s.workflow === 'txt2vid' || s.workflow === 'extend';
     const enhanced = anyEnhancedUsed(s);
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
   });
-  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || trackBlock !== null || block.blocked);
+  const compactSubmitDisabled = $derived(busy || !authorityReady || audioReason !== null || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || trackBlock !== null || block.blocked);
   // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
   const controlsPending = $derived(!context || !authorityReady);
 
@@ -636,7 +674,7 @@
   /** A picker option's text: the model's label, plus its download state when its files are not all there. */
   function modelOptionText(model: ModelOption): string {
     if (model.downloaded !== false) return model.label;
-    const status = downloadStatusText(downloadStore.active('model', model.id));
+    const status = downloadStatusText(downloadStore.active(model.type === 'audio' ? 'audio' : 'model', model.id));
     return `${model.label} (${status ? status.toLowerCase() : 'not downloaded'})`;
   }
 
@@ -687,6 +725,11 @@
    */
   function dropHeldUploads(params: PrefillParams): void {
     const tab = workspaceTab(draft.state.workflow);
+    // The Audio tab holds the voice recording, which a Reuse or a Use as → Voice replaces; the other tabs' uploads stay.
+    if (tab === 'audio') {
+      if (replacesVoice(firstValues(params), draft.state.workflow as AudioWorkflow)) heldUploads.setVoice(null);
+      return;
+    }
     // Extend Video holds only an audio track, which a prefill replaces; it leaves the other tabs' uploads alone.
     if (tab === 'extend') {
       if (params.use_as === undefined) heldUploads.setTrack('extend', null);
@@ -694,6 +737,7 @@
     }
     if (params.use_as === 'start') heldUploads.setStart(tab, null);
     else if (params.use_as === 'last') heldUploads.setLastFrame(null);
+    else if (params.use_as === 'audio_track') heldUploads.setTrack('video', null);
     else heldUploads.clearTab(tab);
   }
 
@@ -822,6 +866,22 @@
       dropHeldUploads(params);
       draft.saveDraft();
       void recheckImages();
+    } else applyPrefill(params, { keepSettings: true });
+    closeLightbox();
+  }
+
+  /**
+   * Make an audio take the Video tab's audio track (from 0 s) or the Speech tab's voice. Both go through the same prefill as
+   * a Reuse, marked by `use_as` (`audio_track`, `voice`) so only that one slot changes; see `audioTrackParams` and `voiceParams`.
+   */
+  function useAudio(asset: GalleryAsset, target: AudioUseTarget): void {
+    if (!asset.file_path || useAs[target]?.disabled) return;
+    const params = target === 'audio_track' ? audioTrackParams(asset) : voiceParams(asset);
+    // The track sits on the Video tab: within it the take just goes in place, and the opened tab shows it without a toast.
+    if (target === 'audio_track' && workspaceTab(draft.state.workflow) === 'video') {
+      draft.loadFromUrl(params, context);
+      dropHeldUploads(params);
+      draft.saveDraft();
     } else applyPrefill(params, { keepSettings: true });
     closeLightbox();
   }
@@ -1167,6 +1227,8 @@
 
   /** Collect the fields Generate submits; with `run`, that one prompt-file prompt replaces the form's prompt. */
   function buildFormData(form: HTMLFormElement, run: PendingPromptRun | null): FormData {
+    // The Audio tab sends the fields of its open kind, built from the draft: the same ones Copy CLI reads.
+    if (audio?.active) return audioFormData(audio, draft.state, draft.state.runs, draft.state.seed);
     const formData = new FormData(form);
     // Send canonical workflow directly; backend accepts and normalises it.
     formData.set('mode', isImageMode ? 'image' : 'video');
@@ -1212,6 +1274,13 @@
     // Outside an extension a blank scene is no scene: today's form data, without the field. An extension always sends it.
     finalizeSceneFields(formData, draft.state);
     return formData;
+  }
+
+  /** The settings a job is shown with: the form's fields, and never the speaker's tick (a job's settings carry none, as the server's record). */
+  function submittedSettings(formData: FormData): JobSettings {
+    const settings = formSettings(formData);
+    delete settings.voice_consent;
+    return settings;
   }
 
   /** Record the user's own prompt and how the Enhanced text was made, so the asset keeps both. */
@@ -1261,7 +1330,8 @@
 
   /** Whether prompt-file mode lacks a file or a chosen prompt, so there is nothing to run. */
   function promptChoiceMissing(): boolean {
-    return draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0);
+    // A prompt file means nothing on the Audio tab, whatever the other tabs last chose.
+    return !isAudio && draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0);
   }
 
   /** Copy the CLI command that would run what Generate submits now. */
@@ -1325,6 +1395,8 @@
     }
     // A LoRA chip whose file is downloading (or failed) holds every run back, the keyboard's included.
     if (block.blocked) return;
+    // The Audio tab's one reason (a missing text, a recording that is not ready, a tick not given) holds every run back, the keyboard's included.
+    if (audioReason !== null) return;
     await settleExtendSource();
     if (extendBlocked()) return;
     const refusal = imageBlock ?? trackBlock;
@@ -1342,7 +1414,7 @@
       if (!(await confirmDownloads(await planGenerate(formData)))) return;
       const jobCtx = await submitGenerate(formData);
       // The response omits the settings; the review line needs the upscale factor.
-      jobStore.jobSubmitted({ ...jobCtx, settings: formSettings(formData) });
+      jobStore.jobSubmitted({ ...jobCtx, settings: submittedSettings(formData) });
       // The phone shows the job where the output lands: fold the composer and close any open control.
       composerOpen = false;
       activeChip = null;
@@ -1422,12 +1494,26 @@
 </script>
 
 {#snippet assetMeta(asset: GalleryAsset)}
+  {#if asset.media_type === 'audio'}
+    {@const cut = cutNote(asset, context?.audio_models)}
+    <!-- A take's caption: its words, then the model, the length and the seed; a take that hit its model's cap says so. -->
+    <p class="latest-meta latest-meta-audio" data-testid="audio-caption">
+      <span class="latest-words truncate" title={asset.prompt}>{asset.kind == null ? asset.filename : (asset.prompt || asset.filename)}</span>
+      {#if asset.kind != null && asset.model}<b>{audioModelLabel(asset, context?.audio_models)}</b>{/if}
+      {#if asset.duration != null}<b>{lengthLabel(asset.duration)}</b>{/if}
+      {#if asset.seed != null}<b>seed {asset.seed}</b>{/if}
+      {#if cut}
+        <Tooltip text={cut.tip} testId="audio-cut-tip" class="cut-note"><Badge variant="warning" class="whitespace-nowrap">{cut.text}</Badge></Tooltip>
+      {/if}
+    </p>
+  {:else}
   <p class="latest-meta">
     <span class="truncate" title={asset.prompt}>{asset.prompt || asset.filename}</span>
     {#if asset.model}<b>{asset.model}</b>{/if}
     {#if asset.width && asset.height}<b>{asset.width}×{asset.height}</b>{/if}
     {#if asset.seed != null}<b class="latest-seed">seed {asset.seed}</b>{/if}
   </p>
+  {/if}
 {/snippet}
 
 <form
@@ -1438,7 +1524,7 @@
   oninvalidcapture={revealInvalidField}
 >
   <!-- Hidden fields -->
-  <input type="hidden" name="mode" value={isImageMode ? 'image' : 'video'}>
+  <input type="hidden" name="mode" value={isAudio ? 'audio' : isImageMode ? 'image' : 'video'}>
   <input type="hidden" name="workflow" value={draft.state.workflow}>
   <input type="hidden" name="lora" value={formatLoraString(loraChips)}>
 
@@ -1447,8 +1533,16 @@
   <div class="ui-pane-toolbar z-10 shrink-0" class:toolbar-stacked={stacked}>
     <div class="flex items-center px-3 py-2 gap-3 {stacked ? 'flex-col items-stretch' : 'flex-wrap'}">
 
+      {#if isAudio}
+        <!-- Audio: the Kind first, then the model of that kind. No presets, quantization or LoRAs. -->
+        <div class="flex items-center gap-2 min-w-0 {stacked ? 'justify-between' : ''}">
+          <span class="ui-label" id="ws-kind-label">Kind</span>
+          <KindControl kinds={audioKinds} value={(draft.state.workflow as AudioWorkflow)} disabled={!authorityReady} onchange={(kind) => draft.setAudioKind(kind, context)} />
+        </div>
+      {:else}
       <!-- Settings presets -->
       <PresetMenu {context} {stacked} applied={activePreset} changed={presetChanged} />
+      {/if}
 
       <!-- Model selector -->
       <div class="flex items-center gap-2 min-w-0 {stacked ? 'flex-nowrap' : 'flex-wrap'}">
@@ -1497,16 +1591,17 @@
         {#if authorityReady && selectedModel}
           <ModelStatusBadges
             downloaded={selectedModel.downloaded}
-            downloadStatus={downloadStatusText(downloadStore.active('model', selectedModel.id))}
+            downloadStatus={downloadStatusText(downloadStore.active(isAudio ? 'audio' : 'model', selectedModel.id))}
             memoryFit={selectedModel.memory_fit}
             quantize={supportsQuantize ? draft.state.quantize : null}
-            lowMemory={!visibleControls.has('low_memory') || draft.state.lowMemory}
+            lowMemory={isAudio || !visibleControls.has('low_memory') || draft.state.lowMemory}
             size="control"
             tooltipPlacement="bottom"
           />
         {/if}
       </div>
 
+      {#if !isAudio}
       <div class="bg-border-subtle shrink-0 {stacked ? 'h-px w-full' : 'h-6 w-px'}"></div>
 
       <!-- LoRA chips area -->
@@ -1586,6 +1681,7 @@
           <p class="ui-help">Loading models…</p>
         {/if}
       </div>
+      {/if}
     </div>
   </div>
 
@@ -1648,7 +1744,7 @@
             </div>
             {#if jobOutputs.length === 1}
               {@const output = jobOutputs[0]}
-              <div class="latest-region flex min-h-0 flex-1 flex-col px-16">
+              <div class="latest-region flex min-h-0 flex-1 flex-col px-16" class:audio={output.media_type === 'audio'}>
                 <AssetTile
                   asset={output}
                   density="stage"
@@ -1658,12 +1754,34 @@
                   onpreview={openOutputViewer}
                   onreuse={reuseAsset}
                   onreference={useAsReference}
+                  onuseaudio={useAudio}
                   onextend={extendAsset}
                   onupscale={upscaleAsset}
                   {useAs}
                   ondelete={deleteWorkspaceAsset}
                 />
                 {@render assetMeta(output)}
+              </div>
+            {:else if jobOutputs[0].media_type === 'audio'}
+              <!-- Takes are players, not pictures: one panel under another, scrolling from the top. -->
+              <div class="completed-output-scroll min-h-0 flex-1 overflow-y-auto" data-testid="audio-outputs">
+                <div class="audio-output-list">
+                  {#each jobOutputs as output (output.id)}
+                    <div class="audio-output latest-region">
+                      <AssetTile
+                        asset={output}
+                        density="stage"
+                        deleting={deletingIds.has(output.id)}
+                        class="completed-output"
+                        onreuse={reuseAsset}
+                        onuseaudio={useAudio}
+                        {useAs}
+                        ondelete={deleteWorkspaceAsset}
+                      />
+                      {@render assetMeta(output)}
+                    </div>
+                  {/each}
+                </div>
               </div>
             {:else}
               <!-- Centred while the outputs fit; once they overflow, the auto margins collapse and the grid scrolls from the top. -->
@@ -1686,6 +1804,7 @@
                       onpreview={openOutputViewer}
                       onreuse={reuseAsset}
                       onreference={useAsReference}
+                      onuseaudio={useAudio}
                       onextend={extendAsset}
                       onupscale={upscaleAsset}
                       {useAs}
@@ -1750,7 +1869,7 @@
             <Icon name="chevright" size={16} />
           </button>
           <!-- Side padding keeps wide media clear of the newer and older arrows. -->
-          <div class="latest-region flex h-full w-full flex-col px-20 py-4" class:fit={latest.width && latest.height} style:--ar={latest.width && latest.height ? latest.width / latest.height : null} style:--natural-w={latest.width ? `${latest.width}px` : null}>
+          <div class="latest-region flex h-full w-full flex-col px-20 py-4" class:fit={latest.width && latest.height} class:audio={latest.media_type === 'audio'} style:--ar={latest.width && latest.height ? latest.width / latest.height : null} style:--natural-w={latest.width ? `${latest.width}px` : null}>
             <AssetTile
               asset={latest}
               density="stage"
@@ -1761,6 +1880,7 @@
               onpreview={openHistoryViewer}
               onreuse={reuseAsset}
               onreference={useAsReference}
+              onuseaudio={useAudio}
               onextend={extendAsset}
               onupscale={upscaleAsset}
               {useAs}
@@ -1815,6 +1935,7 @@
           onpreview={openHistoryViewer}
           onreuse={reuseAsset}
           onreference={useAsReference}
+          onuseaudio={useAudio}
           onextend={extendAsset}
           onupscale={upscaleAsset}
           {useAs}
@@ -1831,7 +1952,7 @@
       {@render stage()}
       <!-- Always in the frame, even before the context answers: a loading state never changes the stage's height. -->
       <div class="compact-controls" use:dockHeight={'--toast-dock'}>
-        {#if activeChip && context && images && audioTrack}
+        {#if activeChip && context && images && audioTrack && audio}
           <button type="button" class="pop-scrim" aria-label="Close setting" tabindex="-1" onclick={() => { activeChip = null; }}></button>
           <SettingPopover
             key={activeChip}
@@ -1839,6 +1960,7 @@
             {busy}
             {images}
             {audioTrack}
+            {audio}
             models={currentModels}
             quantizeOptions={supportsQuantize ? quantizeOptions : null}
             lastSeed={galleryStore.assets[0]?.seed ?? null}
@@ -1858,6 +1980,8 @@
             </p>
           {/if}
           {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
+          <!-- The Audio tab's one reason, above the row, so a disabled Generate says why. -->
+          {#if audioReason}<p id="ws-generate-reason-compact" class="ui-alert ui-alert-warning composer-error" data-testid="audio-reason">{audioReason}</p>{/if}
           <div class="composer-row" hidden={composerOpen}>
             <button type="button" class="composer-summary" aria-label="Edit the prompt" disabled={controlsPending} onclick={() => void openComposer()}>
               <span class="ui-area-label composer-label">{composerSummary.label}</span>
@@ -1871,6 +1995,7 @@
                 class:ui-btn-wait={block.waiting !== null}
                 style:--p={block.waiting ? `${block.waiting.percent ?? 0}%` : undefined}
                 disabled={compactSubmitDisabled}
+                aria-describedby={audioReason ? 'ws-generate-reason-compact' : undefined}
                 title={block.waiting ? waitFull : 'Hold for more'}
                 aria-label={block.waiting ? waitFull : undefined}
                 use:hold={{ onhold: () => { generateMenuOpen = true; } }}
@@ -1896,7 +2021,7 @@
             <ActionMenu open={generateMenuOpen} anchor={generateButton} label="Generate" items={generateMenuItems} onclose={() => { generateMenuOpen = false; }} />
           </div>
           <div class="composer-pane" hidden={!composerOpen}>
-            {#if context && images}<ComposePane {context} {busy} {images} jobsActive={jobStore.jobsActive} />{/if}
+            {#if context && images && audio}<ComposePane {context} {busy} {images} {audio} jobsActive={jobStore.jobsActive} />{/if}
             <div class="composer-foot">
               <button type="button" class="ui-btn" onclick={() => { composerOpen = false; }}>Done</button>
               <button
@@ -1905,6 +2030,7 @@
                 class:ui-btn-wait={block.waiting !== null}
                 style:--p={block.waiting ? `${block.waiting.percent ?? 0}%` : undefined}
                 disabled={compactSubmitDisabled}
+                aria-describedby={audioReason ? 'ws-generate-reason-compact' : undefined}
                 aria-label={block.waiting ? waitFull : undefined}
                 title={block.waiting ? waitFull : undefined}
               >{#if block.waiting}<WaitingLabel waiting={block.waiting} compact />{:else}<Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}{/if}</button>
@@ -1945,6 +2071,7 @@
           lastSeed={galleryStore.assets[0]?.seed ?? null}
           {images}
           {audioTrack}
+          {audio}
         />
       </Sheet>
     </div>
@@ -1962,6 +2089,7 @@
         lastSeed={galleryStore.assets[0]?.seed ?? null}
         {images}
         {audioTrack}
+        {audio}
         oncopycli={copyCliCommand}
       />
       {@render stage()}
@@ -2005,8 +2133,10 @@
   onnearend={() => { if (lightboxMode === 'history') void galleryStore.loadMore(); }}
   onreuse={reuseAsset}
   onreference={useAsReference}
+  onuseaudio={useAudio}
   onextend={extendAsset}
   {useAs}
+  audioModels={context?.audio_models}
   onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}
 />
@@ -2111,6 +2241,15 @@
   @media (pointer: coarse) { .stage-nav { display: none; } }
   .latest-region :global(.latest-media) { opacity: 0; transition: opacity 250ms ease; }
   .latest-region :global(.latest-media.loaded) { opacity: 1; }
+  /* An audio take: its panel and caption sit together in the middle of the stage. */
+  .latest-region.audio { justify-content: center; }
+  .latest-meta.latest-meta-audio { flex-wrap: wrap; row-gap: 4px; }
+  .latest-meta.latest-meta-audio span.latest-words { flex: 0 1 auto; max-width: 420px; }
+  .latest-meta.latest-meta-audio :global(.cut-note) { flex: none; max-width: none; }
+  /* A phone: the words take a line of their own, and the facts and the cut badge sit under them. */
+  .compact-workspace :global(.latest-meta.latest-meta-audio span.latest-words) { flex: 1 1 100%; max-width: none; text-align: center; }
+  .audio-output-list { display: flex; flex-direction: column; gap: 20px; width: 100%; margin: auto 0; padding: 4px 0; }
+  .audio-output { display: flex; flex-direction: column; align-items: center; }
   .latest-meta { display: flex; flex: none; align-items: center; justify-content: center; gap: 14px; min-width: 0; padding-top: 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
   .latest-meta span { max-width: 520px; color: var(--color-text-secondary); }
   .latest-meta b { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 500; color: var(--color-text-secondary); }

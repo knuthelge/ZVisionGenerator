@@ -1,7 +1,12 @@
 <script lang="ts" generics="T extends string">
+  import { Icon } from '$lib/components/atoms';
+  import type { IconName } from '$lib/components/atoms/Icon.svelte';
+
   interface Option {
     value: T;
     label: string;
+    /** A small glyph before the label. */
+    icon?: IconName;
     disabled?: boolean;
     title?: string;
   }
@@ -37,6 +42,6 @@
       title={option.title}
       data-value={option.value}
       onclick={() => { if (option.value !== value) onchange(option.value); }}
-    >{option.label}</button>
+    >{#if option.icon}<Icon name={option.icon} size={14} />{/if}{option.label}</button>
   {/each}
 </div>

@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed, isEnhancedStale, rememberedParts } from './promptEnhance';
 import { presetDiffers } from './presets';
 import { downloadStore } from './downloads.svelte';
 import { changedSettings, draft, extendStepFor, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
 import { heldUploads } from './heldUploads.svelte';
+import { voiceConsent } from './voiceConsent.svelte';
 import { memoryUploadStore } from './uploadStore';
 import { workspaceTab } from './workspaceTab';
 import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults, Workflow } from '$lib/types';
@@ -2180,6 +2181,8 @@ describe('applyPreset', () => {
     enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
     extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
     videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
+    audioKind: 'speech', audioModels: { music: 'yue2', speech: 'higgs3', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
+    audioSeconds: 30, voiceMode: 'recording', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
   };
 
   beforeEach(() => {

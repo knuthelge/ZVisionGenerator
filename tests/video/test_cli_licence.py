@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._licences import use_licences
 from tests.video._helpers import patch_video_cli_for_preflight
 from zvisiongenerator.downloads import DownloadTarget
 from zvisiongenerator.utils.licences import NOTICE_HEADER
@@ -17,10 +18,15 @@ _CONFIG = {
     "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
     "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}},
     "model_aliases": {"ltx-4": "owner/ltx", "ltx25-4": "owner/ltx25"},
-    "licences": {
-        "ltx-2-community": {"name": "Test Licence", "supplier": "Test Lab", "summary": "Free under $10M revenue", "url": f"https://example.com/{'a' * 40}/LICENSE", "models": ["ltx-4"]},
-    },
 }
+_LICENCES = {
+    "ltx-2-community": {"name": "Test Licence", "supplier": "Test Lab", "summary": "Free under $10M revenue", "url": f"https://example.com/{'a' * 40}/LICENSE", "models": ["ltx-4"]},
+}
+
+
+@pytest.fixture(autouse=True)
+def _licence_records(monkeypatch, tmp_path):
+    use_licences(monkeypatch, tmp_path, _LICENCES)
 
 
 @pytest.fixture

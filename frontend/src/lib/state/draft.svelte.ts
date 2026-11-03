@@ -1,3 +1,4 @@
+import { AUDIO_FIELD_DEFAULTS, AUDIO_RESET, audioPrefill, availableKinds, hydrateAudio } from './audioDraft';
 import { extendPrefillFor } from './extend';
 import { downloadStore } from './downloads.svelte';
 import { heldUploads } from './heldUploads.svelte';
@@ -8,16 +9,17 @@ import { outputSettingsPatch } from './jobSettings';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
-import { workflowFor, workspaceTab } from './workspaceTab';
+import { isAudioWorkflow, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
+import { voiceConsent } from './voiceConsent.svelte';
 import { firstValues, listOf } from '$lib/prefillParams';
-import type { WorkspaceTab, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { WorkspaceTab, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
 /** Highest sharpen amount the backend accepts (`MAX_SHARPEN_AMOUNT` in utils/config.py). */
 export const MAX_SHARPEN_AMOUNT = 1.5;
 
-function _canonicalWorkflow(raw: string, ctx: WorkspaceContext): Workflow | null {
+function _canonicalWorkflow(raw: string, ctx: WorkspaceContext): WorkspaceWorkflow | null {
   const workflowValue = raw.trim();
   return ctx.workflow_contract.values.find((workflow) => workflow === workflowValue) ?? null;
 }
@@ -105,6 +107,9 @@ const DEFAULT_DRAFT: DraftState = {
   missingSourceVideo: false,
   extendPrefill: null,
   appliedPreset: null,
+  audioKind: 'music',
+  audioModels: { music: '', speech: '', sound: '' },
+  ...AUDIO_FIELD_DEFAULTS,
 };
 
 const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
@@ -191,6 +196,8 @@ const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> =
  * image follows from the tab's start image and whether the model takes one.
  */
 function _withDerivedWorkflow(ctx: WorkspaceContext | null, state: DraftState): DraftState {
+  // The Audio tab's workflow is its kind, whatever the images are.
+  if (isAudioWorkflow(state.workflow)) return state;
   const tab = workspaceTab(state.workflow);
   const workflow = workflowFor(tab, state, imageSupport(ctx, state.model, tab === 'video' ? 'video' : 'image').start);
   return workflow === state.workflow ? state : { ...state, workflow };
@@ -214,7 +221,7 @@ function _textOf(state: DraftState): TabText {
  * mode saves the open text under the mode being left and brings back what the entered one saved (nothing, for a mode not
  * visited yet). Video and Extend Video share one text, so moving between them changes nothing.
  */
-function _withTextOfMode(state: DraftState, workflow: Workflow): DraftState {
+function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
   const from = workflowMode(state.workflow);
   const to = workflowMode(workflow);
   if (from === to) return state;
@@ -238,10 +245,10 @@ const TAB_IMAGE_KEYS = {
   image: ['referenceImagePath', 'referenceImageUpload', 'referenceImagePaths', 'referenceImageStrength'],
   video: ['firstFramePath', 'firstFrameUpload', 'endImagePath', 'endImageUpload', 'audioTrackPath', 'audioTrackUpload', 'audioTrackStart'],
   extend: ['extendAudioTrackPath', 'extendAudioTrackUpload', 'extendAudioTrackStart'],
-} as const satisfies Record<WorkspaceTab, readonly (keyof DraftState)[]>;
+} as const satisfies Record<MediaTab, readonly (keyof DraftState)[]>;
 
 /** The image fields of the tabs other than the open one: what a Reset keeps. */
-function _imagesOfOtherTabs(state: DraftState, tab: WorkspaceTab): Partial<DraftState> {
+function _imagesOfOtherTabs(state: DraftState, tab: MediaTab): Partial<DraftState> {
   const cleared: readonly (keyof DraftState)[] = TAB_IMAGE_KEYS[tab];
   const kept = Object.values(TAB_IMAGE_KEYS).flat().filter((key) => !cleared.includes(key));
   return Object.fromEntries(kept.map((key) => [key, state[key]]));
@@ -306,7 +313,7 @@ function _applyVideoDefaults(state: DraftState, defaults: VideoModelDefaults): D
   };
 }
 
-function _visibleControlsForWorkflow(ctx: WorkspaceContext, workflow: Workflow): Set<string> {
+function _visibleControlsForWorkflow(ctx: WorkspaceContext, workflow: WorkspaceWorkflow): Set<string> {
   return new Set(ctx.workflow_contract.definitions[workflow]?.visible_controls ?? []);
 }
 
@@ -328,7 +335,7 @@ export const SETTING_KEYS = [
   'postprocessSharpenEnabled', 'postprocessSharpenAmount', 'postprocessContrastEnabled', 'postprocessContrastAmount',
   'postprocessSaturationEnabled', 'postprocessSaturationAmount', 'postprocessTransparent',
   'upscaleEnabled', 'upscaleFactor', 'upscaleDenoise', 'upscaleSteps', 'upscaleGuidance', 'upscaleSharpen', 'upscaleReview',
-  'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor', 'videoUpscaleReview',
+  'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor', 'videoUpscaleReview', 'audioSeconds',
 ] as const satisfies readonly (keyof DraftState)[];
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -338,7 +345,7 @@ function _pickSettings(state: DraftState): SettingDefaults {
   return Object.fromEntries(SETTING_KEYS.map((key) => [key, state[key]])) as SettingDefaults;
 }
 
-function _isVideoWorkflow(workflow: Workflow): boolean {
+function _isVideoWorkflow(workflow: WorkspaceWorkflow): boolean {
   return workflowMode(workflow) === 'video';
 }
 
@@ -350,7 +357,7 @@ function _rememberModel(ctx: WorkspaceContext, state: DraftState): DraftState {
 }
 
 /** Return the backend defaults for a model in a workflow's mode, or null when none are known. */
-function _modelDefaultsFor(ctx: WorkspaceContext, workflow: Workflow, model: string): ImageModelDefaults | VideoModelDefaults | null {
+function _modelDefaultsFor(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string): ImageModelDefaults | VideoModelDefaults | null {
   const isVideoMode = _isVideoWorkflow(workflow);
   const defaultsMap = isVideoMode ? ctx.video_model_defaults : ctx.image_model_defaults;
   const fallback = isVideoMode ? ctx.video_defaults : ctx.defaults;
@@ -432,7 +439,7 @@ function _withModelDefaults(ctx: WorkspaceContext, state: DraftState): DraftStat
 }
 
 /** Return a fresh draft for a workflow and model with that model's defaults applied. */
-function _defaultState(ctx: WorkspaceContext, workflow: Workflow, model: string): DraftState {
+function _defaultState(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string): DraftState {
   return _withModelDefaults(ctx, { ...DEFAULT_DRAFT, workflow, model });
 }
 
@@ -446,7 +453,7 @@ export function settingDefaultsFor(ctx: WorkspaceContext, state: Pick<DraftState
 }
 
 /** Return the size presets offered for a ratio; image presets beyond the model's dimension limit are left out. */
-export function offeredSizes(ctx: WorkspaceContext, workflow: Workflow, model: string, ratio: string): string[] {
+export function offeredSizes(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string, ratio: string): string[] {
   if (_isVideoWorkflow(workflow)) return ctx.video_size_options[ratio] ?? [];
   const options = ctx.image_size_options[ratio] ?? [];
   const max = (_modelDefaultsFor(ctx, workflow, model) as ImageModelDefaults | null)?.dimension_max ?? null;
@@ -498,7 +505,7 @@ export function fitDimensions(width: number, height: number, limits: DimensionLi
 }
 
 /** Return the preset of a ratio with the most pixels; presets without known pixel sizes lose to ones with, and the last listed wins a tie. */
-function _largestPreset(ctx: WorkspaceContext, workflow: Workflow, ratio: string, presets: string[]): string {
+function _largestPreset(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, ratio: string, presets: string[]): string {
   const dims = (_isVideoWorkflow(workflow) ? ctx.video_size_dimensions : ctx.image_size_dimensions)?.[ratio] ?? {};
   const area = (size: string): number => (dims[size] ? dims[size][0] * dims[size][1] : 0);
   return presets.reduce((best, size) => (area(size) >= area(best) ? size : best));
@@ -540,6 +547,8 @@ function _fitToModel(ctx: WorkspaceContext, state: DraftState): DraftState {
 /** Clear what the state's model cannot use, and align the frame count to its grid. */
 function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftState {
   const { workflow, model } = state;
+  // Nothing of an image or a video applies to a kind of audio.
+  if (isAudioWorkflow(workflow)) return state;
   const isVideoMode = _isVideoWorkflow(workflow);
   const modelDefaults = _modelDefaultsFor(ctx, workflow, model);
   let nextState = state;
@@ -598,7 +607,7 @@ let _authorityReady = $state(false);
 let _extendSource = $state<ExtendSourceInfo | null>(null);
 
 /** The frame rate an extension runs at: its source's, once known. */
-function _sourceFps(workflow: Workflow): number | null {
+function _sourceFps(workflow: WorkspaceWorkflow): number | null {
   return workflow === 'extend' ? _extendSource?.fps ?? null : null;
 }
 
@@ -635,6 +644,17 @@ export const draft = {
         prefill.workflow = canonical;
         workflow = canonical;
       }
+    }
+
+    // The Audio tab has its own fields: its kind opens, and a Use as → Voice or a Reuse sets only what it names.
+    if (isAudioWorkflow(workflow)) {
+      const { patch, voice } = audioPrefill(params, ctx, workflow, options.ungated === true);
+      // The tick is never carried over: a new voice (or any prefill) leaves it for the person to give.
+      if (voice) voiceConsent.reset(voice.exempt);
+      else voiceConsent.clear();
+      const opened: DraftState = { ..._withTextOfMode(_draft, workflow), ...prefill, ...patch, workflow, audioKind: workflow };
+      _draft = ctx ? hydrateAudio(ctx, opened) : opened;
+      return;
     }
 
     const visibleControls = ctx ? _visibleControlsForWorkflow(ctx, workflow) : null;
@@ -792,6 +812,14 @@ export const draft = {
    * step cap) and takes its own defaults for the rest; the same model keeps everything.
    */
   hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null, options: { keepSettings?: boolean; keepChangedSettings?: boolean } = {}): void {
+    // The Audio tab settles on a kind and one of its models; a machine that runs no audio model gives the tab back to Image.
+    if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img' };
+    if (isAudioWorkflow(_draft.workflow)) {
+      _draft = hydrateAudio(ctx, _draft, preferredModel);
+      _authorityReady = true;
+      this.saveDraft();
+      return;
+    }
     const workflow = _draft.workflow;
     const isVideoMode = _isVideoWorkflow(workflow);
     const validModels = isVideoMode ? ctx.video_models : ctx.image_models;
@@ -832,13 +860,14 @@ export const draft = {
   },
 
   /**
-   * Open a tab: the workflow becomes the one its images call for. When the tab is of the other mode (image or video) the
+   * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind). When the tab is of the other mode (image or video) the
    * applied preset is forgotten and the text swaps to what that mode kept. The model and defaults follow when the Workspace calls `onTabChange` with its context.
    * Without a context the model's capabilities are unknown, so the tab's start image is assumed to be usable.
    */
   setTab(tab: WorkspaceTab): void {
     if (tab === workspaceTab(_draft.workflow)) return;
-    const workflow = workflowFor(tab, _draft, true);
+    // The Audio tab opens on the kind it was left on.
+    const workflow = tab === 'audio' ? _draft.audioKind : workflowFor(tab, _draft, true);
     const leavesMode = workflowMode(workflow) !== workflowMode(_draft.workflow);
     _draft = { ..._withTextOfMode(_draft, workflow), workflow, ...(leavesMode ? { appliedPreset: null } : {}) };
     this.saveDraft();
@@ -885,6 +914,30 @@ export const draft = {
     this.saveDraft();
   },
 
+  /** Open a kind of the Audio tab: Music, Speech or Sound, on the model last chosen for it. */
+  setAudioKind(kind: AudioWorkflow, ctx: WorkspaceContext | null): void {
+    const opened: DraftState = { ..._withTextOfMode(_draft, kind), workflow: kind, audioKind: kind, model: _draft.audioModels[kind] };
+    _draft = ctx ? hydrateAudio(ctx, opened) : opened;
+    this.saveDraft();
+  },
+
+  /**
+   * Set or clear the recording the Speech tab's voice follows: the draft holds its path or the upload's file name and the
+   * file is held for Generate. A new recording is a new voice, so the speaker's tick is cleared with it. Choosing one
+   * switches the voice to *From a recording*.
+   */
+  setVoice(value: SlotValue): void {
+    heldUploads.setVoice(value !== null && 'file' in value ? value.file : null);
+    voiceConsent.clear();
+    _draft = {
+      ..._draft,
+      voicePath: value !== null && 'path' in value ? value.path : null,
+      voiceUpload: value !== null && 'file' in value ? value.file.name : null,
+      voiceMode: value === null ? _draft.voiceMode : 'recording',
+    };
+    this.saveDraft();
+  },
+
   /** Set the seconds into the track where the tab's clip starts. */
   setAudioTrackStart(tab: TrackTab, start: number): void {
     _draft = { ..._draft, ...trackStartPatch(tab, Math.max(0, start)) };
@@ -901,6 +954,14 @@ export const draft = {
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
+    if (isAudioWorkflow(s.workflow)) {
+      // The Audio tab keeps the text of every kind, like the prompt on the Image tab, and clears the length, the voice with its held recording and its tick, the batch and the seed. The kind and its models stay.
+      heldUploads.clearTab('audio');
+      voiceConsent.clear();
+      _draft = { ..._draft, ...AUDIO_RESET, appliedPreset: null };
+      this.hydrateFromContext(ctx, s.model);
+      return;
+    }
     const tab = workspaceTab(s.workflow);
     const kept = { ...DEFAULT_DRAFT, ..._imagesOfOtherTabs(s, tab) };
     const keptPaths = slotPaths(kept);
@@ -1091,6 +1152,7 @@ export const draft = {
     _authorityReady = false;
     _extendSource = null;
     heldUploads.clear();
+    voiceConsent.clear();
     localStorage.removeItem(STORAGE_KEY);
   }
 };

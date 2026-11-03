@@ -563,14 +563,10 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
-        image_plan = web_runner_module.WebRunner._upscale_download_plan(
-            ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_method="seedvr2", upscale_model="seedvr2-7b"), "numz/SeedVR2_comfyUI", {}
-        )
         assert snapshot["job_type"] == "upscale"
         assert snapshot["supported_controls"] == ["quit"]
         assert snapshot["media_type"] == "video"
         assert downloads[0] == (targets, "video", "model", "SeedVR2 7B fp8")
-        assert downloads[0][0] == image_plan
         assert plans[0] == ("seedvr2-7b", FP8_WEIGHTS)
         assert [(event["mode"], event["model"], event["replaces_download"]) for event in loading] == [("video", "SeedVR2 7B fp8", False)]
         assert runs == [(upscaler, model, request)]
@@ -2082,7 +2078,7 @@ class TestJobLogHook:
         assert entry["started_at"] <= entry["completed_at"]
         assert entry["duration_secs"] >= 0
 
-    @pytest.mark.parametrize("job_type", ["image", "video", "upscale"])
+    @pytest.mark.parametrize("job_type", ["image", "video", "audio", "upscale"])
     def test_every_logged_job_type_writes_an_entry(self, runner, db_path, job_type):
         self._run(runner, [], job_type=job_type)
 

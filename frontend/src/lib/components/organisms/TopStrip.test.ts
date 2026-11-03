@@ -42,6 +42,18 @@ describe('TopStrip', () => {
     expect(target.querySelector('button[aria-label="Back to the Workspace"]')).toBeNull();
   });
 
+  it('offers Audio as the fourth workflow when the contract lists an audio kind, and opens it on the kind it was left on', () => {
+    app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', workflows: ['txt2img', 'img2img', 'img2vid', 'txt2vid', 'extend', 'music', 'speech', 'sound'], onmenu: vi.fn() } }));
+    draft.update('audioKind', 'speech');
+
+    const select = target.querySelector('[role="combobox"][aria-label="Workflow"]') as HTMLButtonElement;
+    expect(optionValues(select)).toEqual(['image', 'video', 'extend', 'audio']);
+    pickOption(select, 'audio');
+
+    expect(draft.state.workflow).toBe('speech');
+    expect(target.querySelector('[role="combobox"][aria-label="Workflow"]')?.textContent).toContain('Audio');
+  });
+
   it('scrolls the page to its top when its title is tapped', () => {
     const ontitle = vi.fn();
     app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'gallery', onmenu: vi.fn(), ontitle } }));

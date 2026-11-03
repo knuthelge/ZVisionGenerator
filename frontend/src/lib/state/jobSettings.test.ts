@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { hasJobSettings, jobSettingsPrefill, outputSettingsPatch } from './jobSettings';
 
 describe('jobSettingsPrefill', () => {
+  it('loads an audio job into the Audio tab instead of reading it as an image job', () => {
+    expect(jobSettingsPrefill({ mode: 'audio', workflow: 'music', prompt: 'a calm piano', lyrics: '[verse]\nla', model: 'yue2', steps: '9' })).toEqual({
+      params: { workflow: 'music', prompt: 'a calm piano', lyrics: '[verse]\nla', model: 'yue2' },
+      patch: {},
+    });
+    expect(jobSettingsPrefill({ mode: 'image', prompt: 'a calm piano' }).patch).toMatchObject({ prompt: 'a calm piano' });
+  });
+
   it('splits an inline image job into prefill params and the remaining settings', () => {
     const { params, patch } = jobSettingsPrefill({
       mode: 'image', workflow: 'img2img', model: 'zit', prompt_source: 'inline', prompt: 'a lake', negative_prompt: 'blur',

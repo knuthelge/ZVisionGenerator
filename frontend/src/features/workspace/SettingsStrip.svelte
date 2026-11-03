@@ -53,6 +53,7 @@
         disabled={pending}
         onclick={() => onopen(chip.key)}
       >
+        {#if chip.icon}<Icon name={chip.icon} size={14} />{/if}
         {#if chip.key === 'preset'}<Icon name="list" size={14} />{/if}
         {#if chip.key === 'model'}<Icon name="cube" size={14} />{/if}
         {#if chip.key === 'images'}<Icon name="reference" size={14} />{/if}

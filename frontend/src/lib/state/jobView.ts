@@ -1,4 +1,4 @@
-import type { ActiveJobState, JobControlAction, JobDownload, JobPhase } from '$lib/types';
+import type { ActiveJobState, AudioWorkflow, JobControlAction, JobDownload, JobPhase } from '$lib/types';
 import { jobReviewUrl } from '$lib/api/workspace';
 import { downloadLine, partLabel } from './downloadProgress';
 import { phaseSeconds } from './jobPhases';
@@ -150,8 +150,88 @@ export function stepUnit(job: ActiveJobState): 'Batch' | 'Step' {
   return countsBatches(job) ? 'Batch' : 'Step';
 }
 
-export function itemNoun(job: ActiveJobState): 'image' | 'video' {
+/** What the job makes, one at a time: an image, a video, or a take (a piece of audio). */
+export function itemNoun(job: ActiveJobState): 'image' | 'video' | 'take' {
+  if (isAudioJob(job)) return 'take';
   return isVideo(job) ? 'video' : 'image';
+}
+
+/** Whether the job makes audio (music, speech or sound). */
+export function isAudioJob(job: ActiveJobState): boolean {
+  return job.media_type === 'audio';
+}
+
+/**
+ * The phases of an audio take, by kind, in the order the model reports them. A phase the model names that is not listed
+ * (a newer backend) is added after these as it arrives.
+ */
+export const AUDIO_PHASES: Record<AudioWorkflow, readonly string[]> = {
+  music: ['Plan', 'Song tokens', 'Synthesis', 'Decode'],
+  speech: ['Speech tokens', 'Decode'],
+  sound: ['Sampling'],
+};
+
+/** How a phase reads in the card when the model's name for it is not the one to show. */
+const AUDIO_PHASE_LABELS: Record<string, string> = { Sampling: 'Steps' };
+
+/** The phase whose rows count parts of a long speech text. */
+const AUDIO_PART_PHASE = 'Speech tokens';
+
+/** One row of an audio take's phases. */
+export interface AudioRow {
+  /** The model's name for the phase. */
+  phase: string;
+  /** What the card calls it. */
+  label: string;
+  state: 'done' | 'current' | 'next';
+  /** "Part 2 of 4" on the row that reads a part of a long speech text; null elsewhere. */
+  part: string | null;
+  /** The current row's progress, "token 812 of 1875" (just "token 812" while the total is unknown) or "step 5 of 8"; empty until it starts. */
+  progress: string;
+  /** The current row's percentage; null while its total is unknown. */
+  percent: number | null;
+  /** The bar's numbers: finished units and the total (1 while it is unknown, and the bar is indeterminate). */
+  value: number;
+  max: number;
+}
+
+function isTokenPhase(phase: string): boolean {
+  return phase === 'Plan' || phase.toLowerCase().includes('tokens');
+}
+
+/** The rows of the current take: its kind's phases with where the model is. Empty for a job that is not audio. */
+export function audioRows(job: ActiveJobState): AudioRow[] {
+  if (!isAudioJob(job)) return [];
+  const known = AUDIO_PHASES[job.workflow as AudioWorkflow] ?? [];
+  const progress = job.audio ?? null;
+  const phases = progress && !known.includes(progress.phase) ? [...known, progress.phase] : known;
+  const current = job.itemFinished ? phases.length : progress ? phases.indexOf(progress.phase) : 0;
+  return phases.map((phase, index): AudioRow => {
+    const here = index === current && progress !== null;
+    const total = here ? progress.total : null;
+    const percent = here && total !== null && total > 0 ? Math.min(100, Math.round((progress.step / total) * 100)) : null;
+    const unit = isTokenPhase(phase) ? 'token' : 'step';
+    return {
+      phase,
+      label: AUDIO_PHASE_LABELS[phase] ?? phase,
+      state: index < current ? 'done' : index === current ? 'current' : 'next',
+      part: phase === AUDIO_PART_PHASE && progress !== null && progress.parts > 1 ? `Part ${progress.part} of ${progress.parts}` : null,
+      progress: here ? `${unit} ${progress.step}${total !== null ? ` of ${total}` : ''}` : '',
+      percent,
+      value: here && percent !== null ? progress.step : 0,
+      max: here && percent !== null && total !== null ? total : 1,
+    };
+  });
+}
+
+/** The current take's progress in [0, 1]: its finished phases and the share of the current one, counting each phase equally. */
+export function audioFraction(job: ActiveJobState): number {
+  const rows = audioRows(job);
+  if (job.itemFinished || rows.length === 0) return job.itemFinished ? 1 : 0;
+  const index = rows.findIndex((row) => row.state === 'current');
+  const done = index < 0 ? rows.length : index;
+  const part = index >= 0 ? (rows[index].percent ?? 0) / 100 : 0;
+  return Math.min(1, (done + part) / rows.length);
 }
 
 export function jobPhase(job: ActiveJobState): JobPhase {
@@ -217,6 +297,7 @@ export function stageBars(job: ActiveJobState): StageBar[] {
 
 /** The current item's progress in [0, 1], counting each stage of a multi-stage item equally. */
 export function itemFraction(job: ActiveJobState): number {
+  if (isAudioJob(job)) return audioFraction(job);
   if (job.itemFinished || itemActivity(job) === 'finishing') return 1;
   const bars = stageBars(job);
   if (!bars.length) return stepFraction(job);
@@ -343,6 +424,7 @@ export function headline(job: ActiveJobState): string {
     return job.loadQuant ? 'Preparing the model' : 'Loading the model';
   }
   if (job.workflow === 'upscale') return isVideo(job) ? 'Upscaling video' : 'Upscaling';
+  if (isAudioJob(job)) return total > 1 ? `Take ${index + 1} of ${total}` : 'Making the take';
   const verb = job.stageName === 'upscale' && !job.itemFinished ? 'Upscaling' : 'Generating';
   return total > 1 ? `${verb} ${noun} ${index + 1} of ${total}` : `${verb} ${noun}`;
 }

@@ -2,7 +2,7 @@ import type { GalleryAsset } from '$lib/types';
 import { getGallery } from '$lib/api/gallery';
 import { keepLoadedTail } from '$lib/state/pageMerge';
 
-export type MediaFilter = 'all' | 'image' | 'video';
+export type MediaFilter = 'all' | 'image' | 'video' | 'audio';
 export type SortOrder = 'newest' | 'oldest';
 
 /** What a Gallery view shows: the media it keeps and the order it runs in. */

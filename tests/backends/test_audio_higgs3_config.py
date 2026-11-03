@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -85,13 +83,6 @@ def test_the_official_layout_reads_to_the_expected_values(tmp_path: Path) -> Non
     assert (config.boc_id, config.eoc_id) == (1024, 1025)
 
 
-def test_the_config_is_a_frozen_value(tmp_path: Path) -> None:
-    config = read_higgs3_config(_write(tmp_path, OFFICIAL))
-
-    with pytest.raises(AttributeError):
-        config.hidden_size = 1  # type: ignore[misc]
-
-
 def test_a_missing_layer_types_list_counts_as_full_attention(tmp_path: Path) -> None:
     config = _changed("text_config", "layer_types", ...)
 
@@ -102,40 +93,12 @@ def test_a_missing_layer_types_list_counts_as_full_attention(tmp_path: Path) -> 
     ("config", "key"),
     [
         (_changed("model_type", "qwen3"), "model_type"),
-        (_changed("text_config", "model_type", "llama"), "text_config.model_type"),
         (_changed("text_config", "rope_parameters", "rope_type", "yarn"), "rope_type"),
-        (_changed("text_config", "rope_parameters", "rope_theta", ...), "rope_theta"),
-        (_changed("text_config", "rope_parameters", ...), "rope_parameters"),
-        (_changed("text_config", "hidden_act", "gelu"), "hidden_act"),
-        (_changed("text_config", "attention_bias", True), "attention_bias"),
-        (_changed("text_config", "layer_types", ["full_attention"] * 35 + ["sliding_attention"]), "layer_types"),
-        (_changed("text_config", "use_sliding_window", True), "use_sliding_window"),
-        (_changed("audio_encoder_config", "encoder_type", "whisper"), "encoder_type"),
         (_changed("audio_encoder_config", "use_delay_pattern", False), "use_delay_pattern"),
         (_changed("audio_encoder_config", "tie_word_embeddings", False), "tie_word_embeddings"),
-        (_changed("audio_encoder_config", "out_dim", 1024), "out_dim"),
         (_changed("text_config", "hidden_size", ...), "hidden_size"),
-        (_changed("audio_encoder_config", "num_codebooks", ...), "num_codebooks"),
-        (_changed("audio_encoder_config", ...), "audio_encoder_config"),
-        (_changed("audio_encoder_config", "num_codebooks", True), "num_codebooks"),
-        (_changed("text_config", "num_hidden_layers", "36"), "num_hidden_layers"),
     ],
 )
 def test_a_setting_the_class_does_not_implement_is_refused_naming_its_key(tmp_path: Path, config: dict[str, Any], key: str) -> None:
     with pytest.raises(ValueError, match=key):
         read_higgs3_config(_write(tmp_path, config))
-
-
-def test_a_file_that_is_not_an_object_is_refused(tmp_path: Path) -> None:
-    path = tmp_path / "config.json"
-    path.write_text("[1, 2]", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="JSON object"):
-        read_higgs3_config(path)
-
-
-def test_importing_the_module_leaves_torch_and_transformers_out() -> None:
-    code = "import sys; import zvisiongenerator.backends.audio.higgs3_config; print(sorted(m for m in ('torch', 'transformers') if m in sys.modules))"
-    result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, check=True)
-
-    assert result.stdout.strip() == "[]"

@@ -7,12 +7,12 @@
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { router } from '$lib/state/router.svelte';
   import { visibleTabs, workspaceTab, WORKSPACE_TABS } from '$lib/state/workspaceTab';
-  import type { PageId, Workflow, WorkspaceTab } from '$lib/types';
+  import type { PageId, WorkspaceTab, WorkspaceWorkflow } from '$lib/types';
 
   interface Props {
     currentPage: PageId;
     /** The workflows the server offers (the contract's values); null until the Workspace has loaded them. */
-    workflows?: readonly Workflow[] | null;
+    workflows?: readonly WorkspaceWorkflow[] | null;
     /** Open the navigation drawer. */
     onmenu: () => void;
     /** The job state was tapped (the queue panel opens when jobs wait). */
@@ -26,7 +26,7 @@
   let { currentPage, workflows = null, onmenu, onstatus, onjoblog, ontitle }: Props = $props();
 
   const PAGE_TITLES: Record<PageId, string> = { workspace: 'Workspace', prompts: 'Prompts', gallery: 'Gallery', models: 'Models', config: 'Config' };
-  // Until the contract is known Image and Video show; Extend Video appears only when the server lists it.
+  // Until the contract is known Image and Video show; Extend Video and Audio appear only when the server lists them.
   const tabs = $derived(visibleTabs(workflows));
   const activeTab = $derived(workspaceTab(draft.state.workflow));
   const tabLabel = $derived(WORKSPACE_TABS.find((tab) => tab.id === activeTab)?.label ?? '');

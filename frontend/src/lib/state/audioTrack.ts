@@ -3,7 +3,7 @@ import { addToast } from './toasts.svelte';
 import type { DraftState, WorkspaceTab } from '$lib/types';
 
 /** The tabs that can hold an audio track: Video (with or without a first frame) and Extend Video. Image holds none. */
-export type TrackTab = Exclude<WorkspaceTab, 'image'>;
+export type TrackTab = Exclude<WorkspaceTab, 'image' | 'audio'>;
 
 /** What a tab's track holds: a path on the host, the name of a file uploaded from this device, and where in the track the clip starts. */
 export interface TrackFields {

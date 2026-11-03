@@ -6,12 +6,12 @@
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { Badge, Icon, MascotHome, Wordmark } from '$lib/components/atoms';
   import { visibleTabs, workspaceTab } from '$lib/state/workspaceTab';
-  import type { PageId, Workflow } from '$lib/types';
+  import type { PageId, WorkspaceWorkflow } from '$lib/types';
 
   interface Props {
     currentPage: PageId;
     /** The workflows the server offers (the contract's values); null until the Workspace has loaded them. */
-    workflows?: readonly Workflow[] | null;
+    workflows?: readonly WorkspaceWorkflow[] | null;
     /** Open the job log drawer. */
     onjoblog?: () => void;
   }
@@ -26,7 +26,7 @@
   ];
 
   const reviewWaiting = $derived(isReviewing(jobStore.current));
-  // Until the contract is known Image and Video show; Extend Video appears only when the server lists it.
+  // Until the contract is known Image and Video show; Extend Video and Audio appear only when the server lists them.
   const tabs = $derived(visibleTabs(workflows));
   const activeTab = $derived(workspaceTab(draft.state.workflow));
 </script>
@@ -90,11 +90,14 @@
   @media (hover: hover) { .nav-tab:hover { color: var(--color-text-primary); } }
   .nav-tab:focus-visible { outline-offset: -2px; }
   .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }
-  /* Under 1000 px the bar tightens to stay on one row (a 744 px portrait tablet fits, with the Review badge). */
+  /* Under 1000 px the bar tightens to stay on one row with four workflow tabs (a 744 px portrait tablet fits, with the
+     Review badge): the wordmark goes (the mascot and the screen-reader name stay) and the tabs sit closer. */
   @media (max-width: 1000px) {
     .app-nav { gap: 8px; padding: 0 12px; }
     .nav-workflows { gap: 16px; }
-    .nav-tab { padding: 0 8px; }
+    .brand :global(.wordmark) { display: none; }
+    .nav-tab { padding: 0 6px; }
+    .nav-icon { padding: 0 10px; }
   }
   /* Too narrow for one row: the workflow tabs take a second row. */
   @media (max-width: 739px) {

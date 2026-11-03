@@ -6,7 +6,7 @@
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
   import {
-    downloadLabel, etaLabel, finishingText, formatClock, headline, isActive, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
+    downloadLabel, etaLabel, finishingText, formatClock, headline, isActive, isAudioJob, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
     stageBars, type JobTone
   } from '$lib/state/jobView';
   import { trackStepTiming, type StepTiming } from '$lib/state/stepTiming';
@@ -190,7 +190,7 @@
   });
   const stepMs = $derived(stepTiming?.stepMs ?? null);
   // A single-stage, single-item job: the job bar is the step bar, so it carries the live step cues.
-  const headerSteps = $derived(total === 1 && active && phase === 'generate' && !stageBars(job).length);
+  const headerSteps = $derived(total === 1 && active && phase === 'generate' && !stageBars(job).length && !isAudioJob(job));
   const activity = $derived(itemActivity(job));
   const headerLive = $derived(ticking && !offline);
 

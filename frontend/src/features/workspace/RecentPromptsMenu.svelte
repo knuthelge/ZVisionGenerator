@@ -28,6 +28,13 @@
   let { open, anchor, returnFocus, mode, jsonCapable, onpick, onclose }: Props = $props();
 
   const JSON_REASON = 'Needs a model that takes JSON captions';
+  /** What the confirmation says stays when a mode's prompts are cleared, and what its empty list tells. */
+  const OTHER_MODES: Record<WorkflowMode, string> = { image: 'video and audio', video: 'image and audio', audio: 'image and video' };
+  const EMPTY_NOTES: Record<WorkflowMode, string> = {
+    image: 'Every image prompt you generate is kept here.',
+    video: 'Every scene and action you generate is kept here.',
+    audio: 'Every style, text and sound description you generate is kept here.',
+  };
 
   type Phase = 'loading' | 'error' | 'empty' | 'nomatch' | 'rows';
 
@@ -183,7 +190,7 @@
     onclose();
     const approved = await requestConfirm({
       question: `Clear all recent ${mode} prompts?`,
-      info: `Every ${mode} prompt kept for the Recent prompts list is removed, on every device. Your ${mode === 'video' ? 'image' : 'video'} prompts, job log and files stay.`,
+      info: `Every ${mode} prompt kept for the Recent prompts list is removed, on every device. Your ${OTHER_MODES[mode]} prompts, job log and files stay.`,
       confirmLabel: 'Clear recents',
       cancelLabel: 'Keep',
       danger: true,
@@ -238,7 +245,7 @@
       <div class="recents-state">
         <Icon name="clock" size={20} />
         <span class="recents-state-title">No recent prompts yet</span>
-        <span>{mode === 'video' ? 'Every scene and action you generate is kept here.' : 'Every image prompt you generate is kept here.'}</span>
+        <span>{EMPTY_NOTES[mode]}</span>
       </div>
     {:else if phase === 'nomatch'}
       <div class="recents-state">

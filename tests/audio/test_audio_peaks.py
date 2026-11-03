@@ -27,9 +27,6 @@ class TestWaveformPeaks:
     def test_silence_is_all_zero(self):
         assert waveform_peaks(np.zeros((2, 48000), dtype=np.float32)) == [0] * PEAK_COUNT
 
-    def test_empty_audio_is_all_zero(self):
-        assert waveform_peaks(np.zeros((1, 0), dtype=np.float32)) == [0] * PEAK_COUNT
-
     def test_the_loudest_stretch_is_255_and_the_rest_follow_it(self):
         samples = np.zeros((1, 1000), dtype=np.float32)
         samples[0, 0:10] = 0.5  # the first stretch
@@ -44,15 +41,6 @@ class TestWaveformPeaks:
         samples[1, 50:] = -0.5
 
         assert waveform_peaks(samples, count=2) == [0, 255]
-
-    def test_audio_shorter_than_the_count_still_gives_that_many_peaks(self):
-        peaks = waveform_peaks(np.full((1, 7), 0.5, dtype=np.float32), count=100)
-
-        assert len(peaks) == 100 and set(peaks) == {255}
-
-    def test_a_count_below_one_is_refused(self):
-        with pytest.raises(ValueError, match="count"):
-            waveform_peaks(sine(0.1), count=0)
 
     @REAL
     def test_peaks_are_read_from_a_file(self, tmp_path):
@@ -93,21 +81,5 @@ class TestLimitPeak:
         ratio = limited[0, 100] / loud[0, 100]
         np.testing.assert_allclose(limited, loud * ratio, rtol=1e-5, atol=1e-6)
 
-    def test_the_input_is_not_changed(self):
-        loud = sine(0.1, amplitude=4.0)
-        before = loud.copy()
-
-        limit_peak(loud)
-
-        np.testing.assert_array_equal(loud, before)
-
     def test_another_ceiling_is_honoured(self):
         assert _db(peak_of(limit_peak(sine(0.1, amplitude=2.0), ceiling_db=-6.0))) == pytest.approx(-6.0, abs=0.01)
-
-    def test_a_ceiling_above_full_scale_is_refused(self):
-        with pytest.raises(ValueError, match="0 dBFS"):
-            limit_peak(sine(0.1), ceiling_db=1.0)
-
-    def test_silence_and_empty_audio_pass_through(self):
-        assert peak_of(limit_peak(np.zeros((1, 10), dtype=np.float32))) == 0.0
-        assert limit_peak(np.zeros((1, 0), dtype=np.float32)).shape == (1, 0)

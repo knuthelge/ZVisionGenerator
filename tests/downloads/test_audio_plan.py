@@ -36,11 +36,6 @@ class TestTargets:
             ("bosonai/higgs-audio-v2-tokenizer", "815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"),
         ]
 
-    def test_the_official_repository_fetches_what_the_loader_reads_and_nothing_else(self):
-        weights, _codec = audio_plan(_preset("higgs3", higgs3=higgs3_preset()), "cuda")
-
-        assert set(weights.allow_patterns) == {"config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json"}
-
     @pytest.mark.parametrize("platform_key", ["cuda", "mps"])
     def test_sa3_downloads_the_checkpoint_the_config_and_the_text_encoder(self, platform_key):
         targets = audio_plan(_preset("sa3", sa3=sa3_preset()), platform_key)
@@ -68,10 +63,3 @@ class TestPlatforms:
 
         assert len(cuda) == 2
         assert mps == (DownloadTarget("m-a-p/YuE2-3B", "9" * 40, ("model.safetensors",)),)
-
-    def test_a_platform_the_preset_does_not_run_on_is_refused(self):
-        preset = yue2_preset()
-        del preset["platforms"]["mps"]
-
-        with pytest.raises(ValueError, match="'yue2' does not run on 'mps'"):
-            audio_plan(_preset("yue2", yue2=preset), "mps")

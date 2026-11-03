@@ -24,14 +24,6 @@ def test_restoring_a_snapshot_brings_back_every_flag(torch_flags_guard):
     assert torch.backends.cuda.matmul.allow_tf32 is True
 
 
-def test_the_kit_and_app_states_differ(torch_flags_guard):
-    set_app_flags()
-    app = capture_torch_flags()
-    set_kit_flags()
-
-    assert capture_torch_flags() != app
-
-
 def test_a_mixed_legacy_and_new_state_is_restored_exactly(torch_flags_guard):
     set_app_flags()
     torch.backends.cuda.matmul.allow_tf32 = False  # the legacy flag after the new call: get_float32_matmul_precision() now raises

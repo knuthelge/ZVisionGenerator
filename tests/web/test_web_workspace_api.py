@@ -464,7 +464,7 @@ def test_workspace_options_and_the_models_page_carry_each_model_s_licence_record
     web_config.video_model_options = ("ltx-4",)
     web_config.image_inventory = tuple(ImageInventoryEntry(name=name, family="flux2", size=None, source="alias", resolved_path=f"owner/{name}") for name in ("klein9b", "zit"))
     web_config.video_inventory = (VideoInventoryEntry(name="ltx-4", family="ltx", supports_i2v=True, source="alias", resolved_path="owner/ltx"),)
-    web_config.app_config.update(model_aliases=packaged["model_aliases"], licences=packaged["licences"], audio_model_presets=packaged["audio_model_presets"])
+    web_config.app_config.update(model_aliases=packaged["model_aliases"], audio_model_presets=packaged["audio_model_presets"])
     monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
 
     workspace = workspace_api_module.build_workspace_response(

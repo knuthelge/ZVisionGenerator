@@ -21,6 +21,7 @@ from typing import Any
 
 from zvisiongenerator.downloads.built_sources import BUILT_MODEL_NAMES, built_model_downloads, built_model_source_repos, built_model_sources
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
+from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import enhancer_tier_models, video_companion_repos
 from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
@@ -167,6 +168,24 @@ def seedvr2_delete_target(model: str, models_dir: Path, weights: SeedVR2Weights)
     """
     folder = seedvr2_weights_dir(model, models_dir, weights)
     return DeleteTarget("installed", folder) if folder.is_dir() else None
+
+
+def audio_delete_target(preset: AudioPreset, platform_key: str) -> DeleteTarget | None:
+    """Return what deleting the audio model *preset* removes, or ``None`` when nothing of it is on disk.
+
+    The target is the model's repositories in the Hugging Face cache (a partial download counts, so an interrupted first
+    use can be cleared too). No other model loads an audio model's repositories, so none is kept.
+
+    Raises:
+        ValueError: If the preset has no entry for *platform_key*.
+    """
+    platform = preset.platforms.get(platform_key)
+    if platform is None:
+        raise ValueError(f"Audio model '{preset.id}' does not run on '{platform_key}'. It runs on: {', '.join(preset.platforms)}.")
+    repos = tuple(dict.fromkeys(files.repo_id for files in platform.files if huggingface_cache_repo_dir(files.repo_id).is_dir()))
+    if not repos:
+        return None
+    return DeleteTarget("huggingface", huggingface_cache_repo_dir(repos[0]), repo_id=repos[0], companion_repos=repos[1:])
 
 
 def enhancer_delete_target(repo: str) -> DeleteTarget | None:

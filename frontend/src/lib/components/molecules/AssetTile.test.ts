@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GalleryAsset } from '$lib/types';
 
 import AssetTile from './AssetTile.svelte';
+import { makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../../test-utils/audio';
 import { mountComponent } from '../../../test-utils/mount';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
@@ -276,5 +277,79 @@ describe('AssetTile', () => {
     mountTile({ asset: video, density: 'stage', ondelete: vi.fn() });
     expect(rightClick(target.querySelector('video')!).defaultPrevented).toBe(false);
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+});
+
+describe('AssetTile with audio', () => {
+  let page: ReturnType<typeof mountComponent>;
+  let target: HTMLElement;
+
+  function mountTile(props: Record<string, unknown>): void {
+    page = mountComponent(AssetTile, props);
+    target = page.target;
+  }
+
+  const words = () => target.querySelector('[data-testid="audio-words"]')?.textContent ?? null;
+  const cover = () => target.querySelector<HTMLElement>('[data-testid="audio-cover"]')!;
+
+  it('shows a song\'s style and its lyric lines, never the [section] lines', () => {
+    mountTile({ asset: makeAudioAsset() });
+
+    expect(words()).toBe('Dreamy synth-pop, warm analog pads\nStreetlights hum a quiet tune\nHold the night, don\'t let it go');
+    expect(words()).not.toContain('[verse]');
+    expect(words()).not.toContain('[chorus]');
+  });
+
+  it('shows the kind icon, the length and a waveform, and the kind and date in the foot', () => {
+    mountTile({ asset: makeSpeechAsset() });
+
+    expect(words()).toBe('Welcome back to the workshop.');
+    expect(target.querySelector('[data-testid="audio-length"]')?.textContent).toBe('0:21');
+    expect(cover().querySelectorAll('svg rect.bar').length).toBe(100);
+    expect(target.querySelector('.asset-tile-foot')?.textContent).toContain('speech · ');
+    expect(target.querySelector('img')).toBeNull();
+  });
+
+  it('shows only the icon and waveform of a file without settings, whose foot says so', () => {
+    mountTile({ asset: makeImportedAudio() });
+
+    expect(cover().dataset.bare).toBe('true');
+    expect(words()).toBeNull();
+    expect(target.querySelector('.asset-tile-foot')?.textContent).toContain('audio · no settings');
+    expect(target.querySelector('[data-testid="audio-length"]')).not.toBeNull();
+  });
+
+  it('shows a strip tile as the bare layout with its length, whatever the words', () => {
+    mountTile({ asset: makeAudioAsset(), density: 'compact' });
+
+    expect(cover().dataset.bare).toBe('true');
+    expect(words()).toBeNull();
+    expect(target.querySelector('[data-testid="audio-length"]')?.textContent).toBe('2:00');
+    expect(target.querySelector('.asset-tile-foot')).toBeNull();
+  });
+
+  it('never plays in a grid or strip, and opens the viewer on a click', () => {
+    const onpreview = vi.fn();
+    mountTile({ asset: makeAudioAsset(), onpreview });
+
+    expect(target.querySelector('audio')).toBeNull();
+    target.querySelector<HTMLButtonElement>('button.asset-tile-media')!.click();
+    expect(onpreview).toHaveBeenCalledOnce();
+  });
+
+  it('plays in the stage panel, with Reuse and the menu in its corner and no fullscreen button', () => {
+    mountTile({ asset: makeAudioAsset(), density: 'stage', onpreview: vi.fn(), onreuse: vi.fn() });
+
+    expect(target.querySelector('audio')?.getAttribute('aria-label')).toBe('Play song.flac');
+    expect(target.querySelector('[data-testid="audio-player"]')).not.toBeNull();
+    expect(target.querySelector('button[aria-label^="Reuse settings from"]')).not.toBeNull();
+    expect(target.querySelector('button[aria-label^="More actions"]')).not.toBeNull();
+    expect(target.querySelector('.asset-tile-expand')).toBeNull();
+  });
+
+  it('disables Reuse for a file without settings', () => {
+    mountTile({ asset: makeImportedAudio(), onreuse: vi.fn() });
+
+    expect(target.querySelector<HTMLButtonElement>('button[aria-label="Reusable settings unavailable"]')?.disabled).toBe(true);
   });
 });

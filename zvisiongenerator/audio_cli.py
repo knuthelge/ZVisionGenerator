@@ -172,7 +172,7 @@ def main(*, prog: str = "ziv-audio") -> None:
     # The terms of a model that has them are named before its files download.
     platform_key = audio_platform_key()
     try:
-        print_licence_notice(config, preset.id, lambda: audio_plan(preset, platform_key), present=target_present_offline)
+        print_licence_notice(preset.id, lambda: audio_plan(preset, platform_key), present=target_present_offline)
     except ValueError as e:
         parser.error(str(e))
 

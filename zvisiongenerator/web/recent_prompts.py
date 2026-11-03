@@ -46,7 +46,7 @@ def recent_prompt_entry(
         json_prompt: The submitted JSON caption text.
         scene: The submitted video scene.
         negative_prompt: The submitted negative prompt.
-        mode: ``"image"`` or ``"video"``.
+        mode: ``"image"``, ``"video"`` or ``"audio"``.
         used_at: Server time of the submit in epoch seconds.
 
     Returns:
@@ -56,6 +56,11 @@ def recent_prompt_entry(
         return None
     negative = (negative_prompt or "").strip()
     caption = (json_prompt or "").strip()
+    if mode == "audio":  # An audio submit keeps its prompt only: no JSON caption, scene or negative prompt.
+        text = (prompt or "").strip()
+        if not text:
+            return None
+        return {"format": "text", "prompt": text, "scene": "", "negative_prompt": "", "mode": mode, "used_at": used_at}
     if mode == "image" and caption:
         return {"format": "json", "prompt": caption, "scene": "", "negative_prompt": negative, "mode": mode, "used_at": used_at}
     text = (prompt or "").strip()

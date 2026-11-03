@@ -1,12 +1,11 @@
-"""Tests that the Licences section of the models page names every licence record of the packaged config."""
+"""Tests that the Licences section of the models page names every licence record of the packaged licence file."""
 
 from __future__ import annotations
 
 import re
 
-from tests._factories import load_packaged_config
 from tests._paths import REPO_ROOT
-from zvisiongenerator.utils.licences import parse_licences
+from zvisiongenerator.utils.licences import load_licences
 
 _MODELS_PAGE = REPO_ROOT / "docs" / "concepts" / "models.md"
 
@@ -21,7 +20,7 @@ def _licences_section() -> str:
 
 def test_every_licence_record_is_listed_in_the_licences_section() -> None:
     section = _licences_section()
-    records = parse_licences(load_packaged_config())
+    records = load_licences()
 
     assert records
     assert [record.name for record in records if record.name not in section] == []
@@ -29,6 +28,6 @@ def test_every_licence_record_is_listed_in_the_licences_section() -> None:
 
 def test_every_licence_record_links_its_licence_and_notice() -> None:
     section = _licences_section()
-    records = parse_licences(load_packaged_config())
+    records = load_licences()
 
     assert [record.id for record in records if record.url not in section or (record.notice_url is not None and record.notice_url not in section)] == []

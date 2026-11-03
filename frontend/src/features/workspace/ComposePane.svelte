@@ -19,6 +19,8 @@
   import { promptToSave } from './savePrompt';
   import { workspaceCapabilities } from './capabilities';
   import type { ImagesView } from './imagesView';
+  import AudioCompose from './AudioCompose.svelte';
+  import type { AudioView } from './audioView';
   import TriggerMenu from './TriggerMenu.svelte';
   import { insertWordPatch, triggerMenu, triggerModes } from './triggerMenu';
 
@@ -27,13 +29,15 @@
     busy: boolean;
     /** The images view of the open tab, computed once by the Workspace; the enhancer counts the last frame and references it sends. */
     images: ImagesView;
+    /** The Audio tab's view of the open kind, computed once by the Workspace; its boxes replace the prompt's on that tab. */
+    audio: AudioView;
     /** A job is running or queued. */
     jobsActive?: boolean;
     /** Fold the sidebar into its strip; no button is shown when absent. */
     oncollapse?: () => void;
   }
 
-  let { context, busy, images, jobsActive = false, oncollapse }: Props = $props();
+  let { context, busy, images, audio, jobsActive = false, oncollapse }: Props = $props();
 
   /** Remember the loaded prompts file; an unchanged file is not written again. */
   function setPromptFileLoaded(loaded: DraftState['promptFileLoaded']): void {
@@ -492,7 +496,7 @@
   </div>
 {/snippet}
 
-<section class="compose-pane" aria-labelledby="ws-compose-title">
+<section class="compose-pane" class:audio-compose={caps.isAudio} aria-labelledby="ws-compose-title">
   <div class="compose-head">
     <div class="compose-title">
       {#if oncollapse}
@@ -513,6 +517,10 @@
       <input type="hidden" name="prompt_source" value={s.promptSource}>
     {/if}
   </div>
+
+  {#if caps.isAudio}
+    <AudioCompose view={audio} />
+  {/if}
 
   {#if !promptFileMode && caps.showPromptInline}
     {#if pairMode}
@@ -649,6 +657,8 @@
 
 <style>
   .compose-pane { display: flex; flex: none; flex-direction: column; gap: 8px; max-height: 44%; overflow-y: auto; padding: 12px; border-bottom: 1px solid var(--color-border-subtle); }
+  /* The Audio tab's Settings are short, so its boxes and status line get more of the column before Compose scrolls. */
+  @media (min-width: 640px) { .compose-pane.audio-compose { max-height: 60%; } }
   .compose-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .compose-title { display: flex; align-items: center; gap: 6px; }
   .collapse-toggle { display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 4px; color: var(--color-text-muted); }

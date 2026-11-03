@@ -12,6 +12,9 @@ export interface JobSettingsPrefill {
   patch: Partial<DraftState>;
 }
 
+/** The fields of an audio job's settings the Audio tab loads back (the speaker's consent is never recorded, so it is never among them). */
+const AUDIO_PREFILL_KEYS = ['workflow', 'model', 'prompt', 'lyrics', 'seconds', 'voice_path', 'voice_text', 'seed', 'runs'] as const;
+
 /** Whether a job was submitted from the form, so its settings can be loaded back (an upscale was not). */
 export function hasJobSettings(settings: JobSettings | null | undefined): boolean {
   return Object.keys(settings ?? {}).length > 0;
@@ -87,10 +90,21 @@ export function outputSettingsPatch(settings: JobSettings, isVideo: boolean): Pa
 /**
  * Turn the form fields a job was submitted with back into workspace state, so the form can be refilled from it.
  *
+ * An audio job fills the Audio tab's kind, model, text, lyrics, length, voice, seed and batch.
+ *
  * @param rememberedParts The Rewrite choice the draft remembers for each video workflow; the job's own workflow takes the job's.
  * @param extendStep The step between the lengths the job's model can extend by.
  */
 export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: EnhanceSettings['partsByWorkflow'], extendStep: number = EXTEND_FRAME_STEP): JobSettingsPrefill {
+  // An audio job fills the Audio tab's boxes like a Reuse does; its tick stays unticked, as nothing records it.
+  if (first(settings, 'mode') === 'audio') {
+    const audio: PrefillParams = { prompt: '' };
+    for (const key of AUDIO_PREFILL_KEYS) {
+      const value = first(settings, key);
+      if (value !== undefined) audio[key] = value;
+    }
+    return { params: audio, patch: {} };
+  }
   const params: PrefillParams = {};
   for (const key of PREFILL_KEYS) {
     const value = first(settings, key);

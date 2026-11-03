@@ -24,7 +24,7 @@ zvisiongenerator/
 ├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
 ├── audio_runner.py                Audio generation run orchestration: plan, download, load once, make and save each take as FLAC, close; out-of-memory messages
-├── config.yaml                    Default configuration (sizes, image, video and audio model presets, licence records)
+├── config.yaml                    Default configuration (sizes, image, video and audio model presets)
 ├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
 │   ├── matte/                     Background removal on a torch device (CUDA or MPS), one code path for both platforms
@@ -187,7 +187,8 @@ zvisiongenerator/
 │   ├── image_model_detect.py      Image model type detection
 │   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`), `flatten_alpha` for another backdrop, and the accepted extensions
 │   ├── interactive.py             Keyboard interrupt handling and review state
-│   ├── licences.py                Pure reader of the config's `licences` section: frozen `LicenceRecord`s, lookups by model, the JSON form of a model's records, and the licence notice for a download that is about to start
+│   ├── licences.py                Pure parser and lookups of the licence records: frozen `LicenceRecord`s, the check that each names a known model, lookups by model, the JSON form of a model's records, and the licence notice for a download that is about to start; `load_licences` reads `licences.yaml` once
+│   ├── licences.yaml              The licence records of the models: one per licence, each with its supplier, a short summary, URLs pinned to a commit and the models it covers; read directly, never merged with the user's config
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
 │   ├── lora_files.py              Give a loader a LoRA under the tensor names its family reads: the tensors renamed, or a temporary renamed copy of the file for loaders that take only a path

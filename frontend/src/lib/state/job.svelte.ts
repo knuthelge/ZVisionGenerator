@@ -1,4 +1,4 @@
-import type { ActiveJobState, EnhanceStatus, JobContext, JobReview, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
+import type { ActiveJobState, AudioProgressEvent, EnhanceStatus, JobContext, JobReview, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
@@ -99,6 +99,18 @@ function promptProgress(event: Record<string, unknown> | null | undefined): Part
   return progress;
 }
 
+/** The progress of an audio take an `audio_progress` event reports; a count that is missing reads as unknown (`total`) or the first (`part`). */
+function audioProgressOf(event: AudioProgressEvent): NonNullable<ActiveJobState['audio']> {
+  const total = event.total;
+  return {
+    phase: event.phase,
+    step: typeof event.step === 'number' ? event.step : 0,
+    total: typeof total === 'number' && total > 0 ? total : null,
+    part: typeof event.part === 'number' && event.part > 0 ? event.part : 1,
+    parts: typeof event.n_parts === 'number' && event.n_parts > 0 ? event.n_parts : 1,
+  };
+}
+
 function statusMessageForEvent(type: string | undefined, event: Record<string, unknown> | null | undefined): string {
   if (type === 'model_loading') {
     const model = eventFieldString(event, 'model');
@@ -193,7 +205,7 @@ function isGalleryAsset(value: unknown): value is GalleryAsset {
     && typeof asset.url === 'string'
     && typeof asset.thumbnail_url === 'string'
     && typeof asset.filename === 'string'
-    && (asset.media_type === 'image' || asset.media_type === 'video');
+    && (asset.media_type === 'image' || asset.media_type === 'video' || asset.media_type === 'audio');
 }
 
 function validTerminalOutputs(value: unknown): GalleryAsset[] | null {
@@ -321,7 +333,7 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
     ..._job,
     ...promptProgress(data),
     ...(msg ? { message: msg } : {}),
-    ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.', enhancedPrompt: undefined, enhanceStatus: eventEnhanceStatus(data) } : {}),
+    ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.', enhancedPrompt: undefined, enhanceStatus: eventEnhanceStatus(data), audio: null } : {}),
     ...(type === 'prompt_started' && !isReplayedBeforeSnapshot(data) ? { review: null } : {}),
     ...(type === 'prompts_enhancing' ? { stageName: 'enhancing_prompts', currentStep: Math.max(0, eventFieldNumber(data, 'index') - 1), totalSteps: eventFieldNumber(data, 'total') } : {}),
     ...(type === 'preflight_finished' ? { currentStep: 0, totalSteps: 0, stageName: '' } : {}),
@@ -386,6 +398,17 @@ function attachJobEvents(jobId: string, afterEventId = 0): void {
         previewUrl: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>)
           ? _job.previewUrl
           : previewUrlFor(_job.job_id, ev.preview_version) ?? _job.previewUrl,
+      };
+    },
+    onAudioProgress(event) {
+      _recoveryAttempts = 0;
+      if (!_job) return;
+      track('audio_progress', event);
+      _job = {
+        ..._job,
+        status: _job.status === 'paused' ? 'paused' : 'running',
+        ...promptProgress(event as unknown as Record<string, unknown>),
+        audio: audioProgressOf(event),
       };
     },
     onGenerationFinished(event) {

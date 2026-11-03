@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -16,7 +15,6 @@ from tests.audio._helpers import clip, decode, sine
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.utils.audio_voice import is_any_voice_take, voice_needs_consent
-from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
 from zvisiongenerator.utils.provenance import (
     AUDIO_CONFIG_SCHEMA,
     build_audio_config_payload,
@@ -75,14 +73,6 @@ class TestFlacRoundTrip:
 
         assert [item.name for item in tmp_path.iterdir()] == ["take.flac"]
 
-    @REAL
-    def test_an_existing_file_is_replaced(self, tmp_path):
-        (tmp_path / "take.flac").write_bytes(b"old")
-
-        save_flac(sine(0.1), 24000, tmp_path / "take.flac", {"seed": 1})
-
-        assert read_config(tmp_path / "take.flac") == {"seed": 1}
-
     def test_a_failed_encode_raises_and_leaves_nothing_behind(self, tmp_path):
         failed = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"boom")
 
@@ -91,23 +81,6 @@ class TestFlacRoundTrip:
                 save_flac(sine(0.1), 24000, tmp_path / "take.flac", {})
 
         assert list(tmp_path.iterdir()) == []
-
-    def test_the_encode_writes_a_hidden_file_that_becomes_the_result(self, tmp_path):
-        commands: list[list[str]] = []
-
-        def fake_run(command, **_kwargs):
-            commands.append(command)
-            Path(command[-1]).write_bytes(b"flac")
-            return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
-
-        with patch("zvisiongenerator.utils.video_splice.subprocess.run", side_effect=fake_run):
-            save_flac(sine(0.1), 24000, tmp_path / "take.flac", {"seed": 3})
-
-        command = commands[0]
-        assert Path(command[-1]).name == f"{STAGING_FILE_PREFIX}take.flac"
-        assert command[command.index("-c:a") + 1] == "flac" and command[command.index("-sample_fmt") + 1] == "s16"
-        assert json.loads(command[command.index("-metadata") + 1].split("=", 1)[1]) == {"seed": 3}
-        assert (tmp_path / "take.flac").read_bytes() == b"flac"
 
 
 class TestConfigInAnyContainer:

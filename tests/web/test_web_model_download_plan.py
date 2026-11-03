@@ -22,6 +22,7 @@ from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import model_download_plan as plan_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
+from zvisiongenerator.utils.licences import load_licences
 from zvisiongenerator.web.model_download_plan import PlanUnchecked, RowPlan, plan_summary, row_download_needed, row_plan
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.web.workspace_api import build_models_response
@@ -323,7 +324,7 @@ class TestModelsResponse:
             blob.parent.mkdir(parents=True)
             blob.write_bytes(b"x" * 2048)
 
-        row = workspace_api_module._background_removal_row({}, present=lambda target: True)
+        row = workspace_api_module._background_removal_row(present=lambda target: True)
 
         assert (row["downloaded"], row["deletable"], row["download_needed"]) == (True, True, False)
         assert row["disk_size_label"]
@@ -335,7 +336,7 @@ class TestModelsResponse:
         monkeypatch.setattr(workspace_api_module, "matte_download_needed", _boom)
 
         with pytest.warns(UserWarning, match="background removal"):
-            row = workspace_api_module._background_removal_row({})
+            row = workspace_api_module._background_removal_row()
 
         assert (row["downloaded"], row["download_needed"]) == (None, False)
 
@@ -375,9 +376,8 @@ class TestPlanSummary:
         }
 
     def test_a_row_s_licences_are_tagged_with_its_name_and_the_matte_row_uses_the_matte_record(self, tmp_path):
-        config = load_packaged_config()
         target = DownloadTarget("owner/a")
-        kwargs = {"check": lambda t: TargetCheck(1, 10), "present": lambda t: False, "space": MagicMock(return_value=None), "cache_dir": lambda: tmp_path, "config": config}
+        kwargs = {"check": lambda t: TargetCheck(1, 10), "present": lambda t: False, "space": MagicMock(return_value=None), "cache_dir": lambda: tmp_path, "licences": load_licences()}
 
         klein = plan_summary(RowPlan("model", "klein9b", "FLUX.2 Klein 9B", (target,)), **kwargs)
         matte = plan_summary(RowPlan("matte", MATTE_ROW_NAME, MATTE_LABEL, (target,)), **kwargs)

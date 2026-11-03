@@ -1,6 +1,8 @@
-import { workflowLabel } from '$lib/state/assetActions';
+import { reuseParams, workflowLabel } from '$lib/state/assetActions';
+import { audioModelLabel, formatFact, kindFact, lengthFact } from '$lib/state/audioAsset';
 import { formatTimestamp } from '$lib/state/audioTrack';
-import type { GalleryAsset, UpscaleMethod } from '$lib/types';
+import { sizeLabel } from '$lib/state/downloadProgress';
+import type { AudioModelOption, GalleryAsset, UpscaleMethod } from '$lib/types';
 
 export interface DetailFact {
   label: string;
@@ -18,7 +20,8 @@ export interface AssetDetailSections {
 }
 
 /** Group everything recorded about an asset into the viewer's detail sections; unrecorded fields are left out. */
-export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
+export function assetDetailSections(asset: GalleryAsset, audioModels?: readonly AudioModelOption[]): AssetDetailSections {
+  if (asset.media_type === 'audio') return audioDetailSections(asset, audioModels);
   const details = asset.details ?? {};
   const generation = details.generation ?? {};
   const upscale = generation.upscale;
@@ -59,6 +62,36 @@ export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
       { label: 'Created', value: new Date(asset.created_at).toLocaleString(), wide: !generation.time },
     ]),
   };
+}
+
+/** Group what is recorded about an audio take: how it was made, and its file. A file without this app's settings has no Generation. */
+function audioDetailSections(asset: GalleryAsset, audioModels: readonly AudioModelOption[] | undefined): AssetDetailSections {
+  const recorded = asset.kind != null;
+  return {
+    negativePrompt: null,
+    generation: recorded
+      ? compact([
+          { label: 'Kind', value: kindFact(asset) },
+          { label: 'Model', value: audioModelLabel(asset, audioModels) || '—' },
+          asset.kind === 'speech' ? { label: 'Voice', value: voiceFact(asset) } : null,
+          { label: 'Length', value: lengthFact(asset) },
+          { label: 'Seed', value: asset.seed != null ? String(asset.seed) : '—' },
+        ])
+      : [],
+    postProcessing: [],
+    file: compact([
+      { label: 'Format', value: formatFact(asset), wide: true },
+      asset.file_bytes != null ? { label: 'Size', value: sizeLabel(asset.file_bytes) } : null,
+      { label: 'Created', value: new Date(asset.created_at).toLocaleString(), wide: asset.file_bytes == null },
+    ]),
+  };
+}
+
+/** The Voice fact of a speech take: "Any" when the model picked the voice, else the recording's file name. */
+function voiceFact(asset: GalleryAsset): string {
+  if (asset.has_reference_voice !== true) return 'Any';
+  const path = reuseParams(asset).voice_path;
+  return typeof path === 'string' && path !== '' ? fileName(path) : 'A recording';
 }
 
 /** Describe the track a clip followed: `song.mp3 · 1:30–1:34.2`, or `song.mp3 · from 1:30` when the end was not recorded. */

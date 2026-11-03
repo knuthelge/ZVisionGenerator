@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
   import { errorText } from '$lib/api/client';
-  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteBackgroundRemoval, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
+  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteAudioModel, deleteEnhancerModel, deleteBackgroundRemoval, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
   import { downloadLine, partLabel } from '$lib/state/downloadProgress';
   import { draft } from '$lib/state/draft.svelte';
   import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
@@ -9,7 +9,7 @@
   import { router } from '$lib/state/router.svelte';
   import { downloadStore, type PlannedKind } from '$lib/state/downloads.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { BackgroundRemovalEntry, ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelLicence, ModelOperationResult, ModelStatusFields } from '$lib/types';
+  import type { AudioModelEntry, BackgroundRemovalEntry, ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelLicence, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
   import { Alert, ConfirmDialog, EmptyState, FormField, KeyValueList, LicenceMark, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
@@ -25,7 +25,7 @@
   let localLoraPath = $state('');
   let checkpointPathReset = $state(0);
   let localLoraPathReset = $state(0);
-  let pendingDelete = $state<{ type: 'model'; name: string; label: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'matte'; model: BackgroundRemovalEntry } | { type: 'download'; name: string; sizeLabel: string } | { type: 'stranded'; name: string; count: number; sizeLabel: string } | { type: 'lora'; name: string } | null>(null);
+  let pendingDelete = $state<{ type: 'model'; name: string; label: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'audio'; name: string; model: AudioModelEntry; info: ModelDeleteInfo } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'matte'; model: BackgroundRemovalEntry } | { type: 'download'; name: string; sizeLabel: string } | { type: 'stranded'; name: string; count: number; sizeLabel: string } | { type: 'lora'; name: string } | null>(null);
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
@@ -51,6 +51,8 @@
 
   /** The row name the Models-page download API knows the background removal models by. */
   const MATTE_NAME = 'background-removal';
+  /** How the Audio models table names a model's kind. */
+  const AUDIO_KIND_LABELS: Record<AudioModelEntry['kind'], string> = { music: 'Music', speech: 'Speech', sound: 'Sound' };
   const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
 
   type DownloadKind = DownloadItem['kind'];
@@ -91,7 +93,7 @@
 
   /** How the page names a model row: its configured name, else its alias. */
   function modelLabelFor(name: string): string {
-    const row = inventory?.image_models.find((m) => m.name === name) ?? inventory?.video_models.find((m) => m.name === name);
+    const row = inventory?.image_models.find((m) => m.name === name) ?? inventory?.video_models.find((m) => m.name === name) ?? inventory?.audio_models?.find((m) => m.name === name);
     return row?.label || name;
   }
 
@@ -329,6 +331,7 @@
   function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
     if (target.type === 'lora') return `Delete ${target.name}.safetensors from the LoRAs folder?`;
     if (target.type === 'matte') return 'Delete the background removal models?';
+    if (target.type === 'audio') return `Delete the downloads of ${target.model.label}?`;
     if (target.type === 'enhancer') return `Delete the ${target.name} enhancer model ${target.model.repo}?`;
     if (target.type === 'download') return `Delete the Hugging Face download of ${target.name}?`;
     if (target.type === 'stranded') return `Delete ${target.count} unused Hugging Face cache files?`;
@@ -344,6 +347,7 @@
   function runDelete(target: NonNullable<typeof pendingDelete>): Promise<ModelOperationResult> {
     switch (target.type) {
       case 'model': return deleteModel(target.name);
+      case 'audio': return deleteAudioModel(target.name);
       case 'enhancer': return deleteEnhancerModel(target.model.tier);
       case 'matte': return deleteBackgroundRemoval();
       case 'download': return deleteOtherDownload(target.name);
@@ -657,6 +661,46 @@
               </div>
             {/if}
           </Panel>
+
+          {#if inventory.audio_models?.length}
+            <Panel title="Audio models" icon="cube" flush>
+              {#snippet actions()}{@render count(inventory!.audio_models!.length)}{/snippet}
+              <div class="@container overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable sticky-actions" data-testid="audio-models">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Kind</th>
+                      <th>Size</th>
+                      <th>Memory</th>
+                      <th class="w-8"><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each inventory.audio_models as m (m.name)}
+                      <tr data-testid="audio-row" data-model={m.name} class:dl-main={downloadStore.active('audio', m.name) !== null}>
+                        <td>{@render modelName({ ...m, source: 'audio' })}</td>
+                        <td data-testid="audio-kind">{AUDIO_KIND_LABELS[m.kind]}</td>
+                        <td>{@render diskSizeCell(m.disk_size_label)}</td>
+                        <td>{@render memoryFitCell(m)}</td>
+                        {#snippet remove()}
+                          <span class="dl-actions">
+                            {#if m.download_needed}{@render downloadButton('audio', m.name, m.downloaded === true)}{/if}
+                            {#if m.delete}
+                              {@const info = m.delete}
+                              {@render deleteButton(`Delete the downloads of ${m.label}`, () => requestDelete({ type: 'audio', name: m.name, model: m, info }))}
+                            {/if}
+                          </span>
+                        {/snippet}
+                        {@render downloadControl('audio', m.name, remove)}
+                      </tr>
+                      {@render downloadSubRow('audio', m.name, 5)}
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          {/if}
 
           {#if inventory.enhancer_models?.length}
             <Panel title="Prompt enhancer" icon="cube" flush>
@@ -1042,6 +1086,11 @@
       {#if pendingDelete.type === 'matte'}
         <p data-testid="delete-matte">
           Frees {pendingDelete.model.disk_size_label ?? 'their download'}. They download again the next time you make a transparent image.
+        </p>
+      {/if}
+      {#if pendingDelete.type === 'audio'}
+        <p data-testid="delete-audio">
+          Frees {pendingDelete.model.disk_size_label ?? 'its downloads'}. They download again the next time you make a take with {pendingDelete.model.label}.
         </p>
       {/if}
       {#if pendingDelete.type === 'enhancer'}

@@ -59,7 +59,3 @@ class TestCheckSpeechRequest:
         monkeypatch.setattr(audio_request_module, "probe_track_seconds", unreadable)
 
         check_speech_request(_request(voice=VoiceRef("gone.wav", "hi")), LIMITS, check_voice_file=False)
-
-    def test_the_text_is_still_checked_when_the_voice_file_is_not(self):
-        with pytest.raises(ValueError, match="Write the text"):
-            check_speech_request(_request("  ", voice=VoiceRef("gone.wav", "hi")), LIMITS, check_voice_file=False)

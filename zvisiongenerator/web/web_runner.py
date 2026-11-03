@@ -26,7 +26,9 @@ from typing import Any
 from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, release_accelerator_memory
+from zvisiongenerator.audio_runner import run_audio_batch
 from zvisiongenerator.built_models import ensure_built_model
+from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.progress_events import exception_message
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
@@ -52,6 +54,7 @@ from zvisiongenerator.review import review_enabled
 from zvisiongenerator.seedvr2_loader import load_seedvr2
 from zvisiongenerator.upscale_runner import run_upscale, upscale_prompts
 from zvisiongenerator.video_file_upscale_runner import run_ltx_video_upscale, run_video_file_upscale
+from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
@@ -63,6 +66,7 @@ from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, seedvr2_tier_label
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
 from zvisiongenerator.web.job_downloads import (
+    ROLE_MODEL,
     DownloadPlanners,
     JobDownloadPart,
     enhancer_part,
@@ -379,6 +383,44 @@ class WebRunner:
                 control_signal=control_signal,
                 enhance_by_set=enhance_by_set,
                 scene_by_set=scene_by_set,
+            ),
+        )
+
+    def submit_audio_request_job(
+        self,
+        *,
+        request: AudioGenerationRequest,
+        preset: AudioPreset,
+        config: dict[str, Any],
+        runs: int,
+        seed: int | None,
+        output_dir: str,
+        admission_check: Callable[[], None] | None = None,
+        context: dict[str, Any] | None = None,
+        supported_controls: tuple[str, ...] | None = None,
+    ) -> str:
+        """Queue the audio job; the worker downloads and loads the model once and makes every take of every run.
+
+        The job supports the same controls as an image job without a review. A take that fails ends the job as failed;
+        the takes saved before it stay in the job's outputs. *supported_controls* defaults to those controls.
+        """
+        control_signal = SkipSignal()
+        return self._submit_job(
+            job_type="audio",
+            exclusive=True,
+            control_signal=control_signal,
+            supported_controls=supported_controls if supported_controls is not None else generation_supported_controls(review=False),
+            context={"output_dir": output_dir, **(context or {})},
+            admission_check=admission_check,
+            target_factory=lambda progress_callback: self._run_audio_request(
+                request=request,
+                preset=preset,
+                config=config,
+                runs=runs,
+                seed=seed,
+                output_dir=output_dir,
+                progress_callback=progress_callback,
+                control_signal=control_signal,
             ),
         )
 
@@ -919,6 +961,36 @@ class WebRunner:
         )
         run_ltx_video_upscale(backend, model, request, progress_callback=progress_callback, skip_signal=control_signal)
 
+    def _run_audio_request(
+        self,
+        *,
+        request: AudioGenerationRequest,
+        preset: AudioPreset,
+        config: dict[str, Any],
+        runs: int,
+        seed: int | None,
+        output_dir: str,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> None:
+        """Run the audio batch inside the worker thread; it downloads (as ``model_downloading`` events), loads once and saves each take.
+
+        A take that fails raises out of the batch, after the takes before it were saved and reported with their ``generation_finished`` events.
+        """
+        require_ffmpeg()
+        run_audio_batch(
+            request,
+            preset,
+            config,
+            runs=runs,
+            seed=seed,
+            output_dir=output_dir,
+            progress_callback=progress_callback,
+            skip_signal=control_signal,
+            flights=self._download_flights,
+            on_download=lambda update: progress_callback(_download_event(update, mode="audio", role=ROLE_MODEL, model=preset.id)),
+        )
+
     def _run_video_request(
         self,
         *,
@@ -986,11 +1058,6 @@ class WebRunner:
             progress_callback=progress_callback,
             skip_signal=control_signal,
         )
-
-    @staticmethod
-    def _upscale_download_plan(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any]) -> tuple[DownloadTarget, ...] | None:
-        """Return the downloads an upscale job needs: the SeedVR2 tier's files or the creative refinement model's."""
-        return upscale_model_part(request, model_ref, config, platform_key=sys.platform, planners=_planners()).targets
 
     def _ensure_matte_downloads(
         self,
@@ -1086,22 +1153,7 @@ class WebRunner:
             return True
 
         def report(update: DownloadReport) -> None:
-            progress_callback(
-                {
-                    "type": DOWNLOADING_EVENT,
-                    "mode": mode,
-                    "role": role,
-                    "model": model,
-                    "repo": update.repo,
-                    "part": update.part,
-                    "parts": update.parts,
-                    "bytes_done": update.progress.bytes_done,
-                    "bytes_total": update.progress.bytes_total,
-                    "bytes_per_sec": update.progress.bytes_per_sec,
-                    "download_eta_secs": update.progress.eta_secs,
-                    "shared": update.shared,
-                }
-            )
+            progress_callback(_download_event(update, mode=mode, role=role, model=model))
 
         outcome = ensure_downloaded(targets, flights=self._download_flights, report=report, cancelled=lambda: control_signal.pending() == "quit")
         if outcome in (STOPPED, DETACHED):
@@ -1310,6 +1362,24 @@ class WebRunner:
         if event.get("type") == "batch_failed":
             return {**event, "type": FAILED_TERMINAL_EVENT}
         return event
+
+
+def _download_event(update: DownloadReport, *, mode: str, role: str, model: str) -> EventPayload:
+    """Return the ``model_downloading`` event for a download report of *model* (the ``role`` it plays in a job of *mode*)."""
+    return {
+        "type": DOWNLOADING_EVENT,
+        "mode": mode,
+        "role": role,
+        "model": model,
+        "repo": update.repo,
+        "part": update.part,
+        "parts": update.parts,
+        "bytes_done": update.progress.bytes_done,
+        "bytes_total": update.progress.bytes_total,
+        "bytes_per_sec": update.progress.bytes_per_sec,
+        "download_eta_secs": update.progress.eta_secs,
+        "shared": update.shared,
+    }
 
 
 def _planners() -> DownloadPlanners:

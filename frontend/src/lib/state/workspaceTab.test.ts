@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
-import type { DraftState, Workflow } from '$lib/types';
+import { isAudioWorkflow, visibleTabs, WORKSPACE_TABS, workflowFor, workspaceTab } from './workspaceTab';
+import type { DraftState, Workflow, WorkspaceWorkflow } from '$lib/types';
 
 const NONE = { referenceImagePath: null, referenceImageUpload: null, firstFramePath: null, firstFrameUpload: null } satisfies Partial<DraftState>;
 
 describe('WORKSPACE_TABS', () => {
-  it('lists Image, Video and Extend Video in that order', () => {
-    expect(WORKSPACE_TABS.map((tab) => [tab.id, tab.label])).toEqual([['image', 'Image'], ['video', 'Video'], ['extend', 'Extend Video']]);
+  it('lists Image, Video, Extend Video and Audio in that order', () => {
+    expect(WORKSPACE_TABS.map((tab) => [tab.id, tab.label])).toEqual([['image', 'Image'], ['video', 'Video'], ['extend', 'Extend Video'], ['audio', 'Audio']]);
   });
 });
 
 describe('visibleTabs', () => {
-  const ids = (workflows: readonly Workflow[] | null): string[] => visibleTabs(workflows).map((tab) => tab.id);
+  const ids = (workflows: readonly WorkspaceWorkflow[] | null): string[] => visibleTabs(workflows).map((tab) => tab.id);
 
   it('offers Image and Video before the contract loads', () => {
     expect(ids(null)).toEqual(['image', 'video']);
@@ -21,6 +21,14 @@ describe('visibleTabs', () => {
     expect(ids(['txt2img', 'img2img', 'txt2vid', 'img2vid'])).toEqual(['image', 'video']);
     expect(ids(['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'])).toEqual(['image', 'video', 'extend']);
   });
+
+  it('hides Audio without a music, speech or sound workflow, and shows it, fourth, with any of them', () => {
+    const media: Workflow[] = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
+    expect(ids(media)).not.toContain('audio');
+    expect(ids(null)).not.toContain('audio');
+    expect(ids([...media, 'sound'])).toEqual(['image', 'video', 'extend', 'audio']);
+    expect(ids(['txt2img', 'img2img', 'txt2vid', 'img2vid', 'music', 'speech'])).toEqual(['image', 'video', 'audio']);
+  });
 });
 
 describe('workspaceTab', () => {
@@ -28,6 +36,12 @@ describe('workspaceTab', () => {
     expect(['txt2img', 'img2img'].map((w) => workspaceTab(w as Workflow))).toEqual(['image', 'image']);
     expect(['txt2vid', 'img2vid'].map((w) => workspaceTab(w as Workflow))).toEqual(['video', 'video']);
     expect(workspaceTab('extend')).toBe('extend');
+  });
+
+  it('puts every audio workflow under the Audio tab and never under Image', () => {
+    expect((['music', 'speech', 'sound'] as const).map((w) => workspaceTab(w))).toEqual(['audio', 'audio', 'audio']);
+    expect(isAudioWorkflow('music')).toBe(true);
+    expect(isAudioWorkflow('txt2img')).toBe(false);
   });
 });
 

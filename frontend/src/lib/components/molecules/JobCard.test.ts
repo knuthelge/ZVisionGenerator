@@ -401,4 +401,40 @@ describe('JobCard', () => {
     });
 
   });
+
+  describe('an audio job', () => {
+    const take = (overrides: Partial<ActiveJobState> = {}): Partial<ActiveJobState> => ({
+      workflow: 'music', media_type: 'audio', currentStep: 0, totalSteps: 0, runs: 2, supported_controls: IMAGE_CONTROLS, ...overrides,
+    });
+    const phases = () => Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-phases"] .job-step')).map((step) => [step.dataset.phaseState, Array.from(step.querySelector('.job-step-head')!.children).map((part) => part.textContent?.replace(/\s+/g, ' ').trim()).join(' ')]);
+
+    it('shows the current phase as "token 812 of 1875" with its percentage, and the finished one done', () => {
+      render(take({ audio: { phase: 'Song tokens', step: 812, total: 1875, part: 1, parts: 1 } }));
+
+      expect(phases()).toEqual([
+        ['done', 'Plan Done'],
+        ['current', 'Song tokens · token 812 of 1875 43%'],
+        ['next', 'Synthesis —'],
+        ['next', 'Decode —'],
+      ]);
+      const bar = log().querySelector('[data-testid="audio-phases"] [role="progressbar"]')!;
+      expect(bar.getAttribute('aria-valuenow')).toBe('812');
+      expect(bar.getAttribute('aria-valuemax')).toBe('1875');
+    });
+
+    it('shows an indeterminate bar while the phase has no total', () => {
+      render(take({ audio: { phase: 'Plan', step: 40, total: null, part: 1, parts: 1 } }));
+
+      expect(phases()[0]).toEqual(['current', 'Plan · token 40']);
+      const bar = log().querySelector('[data-testid="audio-phases"] [role="progressbar"]')!;
+      expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+      expect(log().querySelector('[data-testid="audio-phases"] .num')).toBeNull();
+    });
+
+    it('keeps no preview slot for audio', () => {
+      render(take());
+
+      expect(log().querySelector('.job-media')).toBeNull();
+    });
+  });
 });

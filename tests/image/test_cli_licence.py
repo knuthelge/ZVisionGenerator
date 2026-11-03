@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tests._factories import _patch_image_main_dependencies
+from tests._licences import use_licences
 from zvisiongenerator import image_cli
 from zvisiongenerator.downloads import DownloadTarget
 from zvisiongenerator.utils.licences import NOTICE_HEADER
@@ -18,11 +19,16 @@ _CONFIG = {
     "sizes": {"2:3": {"m": {"width": 832, "height": 1216}}},
     "schedulers": {},
     "model_aliases": {"klein9b": "owner/klein9b", "zit": "owner/zit"},
-    "licences": {
-        "flux-nc": {"name": "Test Licence", "supplier": "Test Lab", "summary": "Non-commercial", "url": f"https://example.com/{'a' * 40}/LICENSE", "models": ["klein9b"]},
-        "matte": {"name": "Matte Licence", "supplier": "Matte Lab", "summary": "Research only", "url": f"https://example.com/{'b' * 40}/README.md", "models": ["matte"]},
-    },
 }
+_LICENCES = {
+    "flux-nc": {"name": "Test Licence", "supplier": "Test Lab", "summary": "Non-commercial", "url": f"https://example.com/{'a' * 40}/LICENSE", "models": ["klein9b"]},
+    "matte": {"name": "Matte Licence", "supplier": "Matte Lab", "summary": "Research only", "url": f"https://example.com/{'b' * 40}/README.md", "models": ["matte"]},
+}
+
+
+@pytest.fixture(autouse=True)
+def _licence_records(monkeypatch, tmp_path):
+    use_licences(monkeypatch, tmp_path, _LICENCES)
 
 
 @pytest.fixture

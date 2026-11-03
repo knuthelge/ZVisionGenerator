@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
 import { jobStore } from '$lib/state/job.svelte';
-import type { Workflow } from '$lib/types';
+import type { Workflow, WorkspaceWorkflow } from '$lib/types';
 
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import TopNav from './TopNav.svelte';
@@ -104,6 +104,20 @@ describe('TopNav workflow tabs', () => {
 
     flushSync(() => { props.workflows = [...BASE, 'extend']; });
     expect(workflowTabs()).toEqual(['Image', 'Video', 'Extend Video']);
+  });
+
+  it('marks Audio for every kind and opens it on the kind it was left on', () => {
+    mountNav({ workflows: [...BASE, 'music', 'speech', 'sound'] as WorkspaceWorkflow[] });
+    const pressed = () => Array.from(target.querySelectorAll('nav[aria-label="Workflow"] button[aria-pressed="true"]')).map((tab) => tab.textContent?.trim());
+    const tab = (label: string) => Array.from(target.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workflow"] button')).find((button) => button.textContent?.trim() === label)!;
+    draft.update('audioKind', 'sound');
+
+    flushSync(() => tab('Audio').click());
+    expect(draft.state.workflow).toBe('sound');
+    expect(pressed()).toEqual(['Audio']);
+
+    flushSync(() => draft.update('workflow', 'speech'));
+    expect(pressed()).toEqual(['Audio']);
   });
 
   it('shows Extend Video only when the contract lists it', () => {

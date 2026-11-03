@@ -24,6 +24,10 @@
   import { fly } from 'svelte/transition';
   import AudioTrackPopover from './AudioTrackPopover.svelte';
   import type { AudioTrackView } from './audioTrackView';
+  import { KIND_INFO } from './audioKinds';
+  import { soundRange, type AudioView } from './audioView';
+  import VoicePopover from './VoicePopover.svelte';
+  import { availableKinds } from '$lib/state/audioDraft';
   import ImagesPopover from './ImagesPopover.svelte';
   import type { ImagesView } from './imagesView';
   import type { ChipKey } from './settingsChips';
@@ -36,6 +40,8 @@
     images: ImagesView;
     /** The audio track view of the open tab, computed once by the Workspace. */
     audioTrack: AudioTrackView;
+    /** The Audio tab's view of the open kind, computed once by the Workspace. */
+    audio: AudioView;
     /** The models the workflow can use, with their status. */
     models: ModelOption[];
     /** Quantization choices for the model, or null when it has none. */
@@ -48,7 +54,7 @@
     ondiscover?: () => void;
   }
 
-  let { key, context, busy, images, audioTrack, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
+  let { key, context, busy, images, audioTrack, audio, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -56,12 +62,13 @@
   const TITLES: Record<ChipKey, string> = {
     seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', seed: 'Seed', runs: 'Batch size',
     source: 'Source video', images: 'Images', track: 'Audio track', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', transparent: 'Transparent background', model: 'Model',
+    kind: 'Kind', voice: 'Voice', length: 'Length',
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
   /** The settings a popover's Reset puts back; none for the ones that have no default (model, LoRAs, files). */
   const RESET_KEYS: Partial<Record<ChipKey, SettingKey[]>> = {
-    seconds: ['frameCount'], steps: ['steps'], guidance: ['guidance'], seed: ['seed'], runs: ['runs'],
+    seconds: ['frameCount'], length: ['audioSeconds'], steps: ['steps'], guidance: ['guidance'], seed: ['seed'], runs: ['runs'],
     size: ['ratio', 'size', 'dimensionMode'], audio: ['audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleReview'], upscale: ['upscaleEnabled', 'upscaleFactor', 'upscaleReview'], transparent: ['postprocessTransparent'],
   };
   const resetKeys = $derived(RESET_KEYS[key] ?? []);
@@ -104,6 +111,14 @@
 
   function setSeconds(seconds: number | null): void {
     if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
+  }
+
+  // --- Length of a sound ---
+  const lengthRange = $derived(soundRange(context.audio_models?.find((entry) => entry.id === s.model) ?? null));
+  const kinds = $derived(availableKinds(context));
+
+  function setLength(seconds: number | null): void {
+    if (seconds !== null) draft.update('audioSeconds', Math.min(lengthRange.max, Math.max(lengthRange.min, seconds)));
   }
 
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
@@ -167,6 +182,11 @@
   $effect(() => {
     if (key === 'track' && !audioTrack.visible) onclose();
   });
+  // --- Voice ---
+  // The popover holds the section's rows; on a model that cannot follow a recording it has nothing to show.
+  $effect(() => {
+    if (key === 'voice' && !audio.voice.visible) onclose();
+  });
   const title = $derived(TITLES[key]);
 
   // --- Source video ---
@@ -221,7 +241,7 @@
   }
 </script>
 
-<div class="setting-popover ui-sheet" class:image-pop={key === 'images' || key === 'track'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
+<div class="setting-popover ui-sheet" class:image-pop={key === 'images' || key === 'track' || key === 'voice'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
   <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
   <div class="ui-sheet-head" data-sheet-handle>
     <h3 class="ui-area-label">{title}</h3>
@@ -242,7 +262,7 @@
     {:else if key === 'runs'}
       <InspectorNumber ariaLabel="Batch size" value={s.runs} {...SPEC.runs} stepper size="lg" onchange={(v) => v !== null && draft.update('runs', v)} />
       <input class="ui-range pop-range" type="range" aria-label="Batch size" min={1} max={16} step={1} value={Math.min(s.runs, 16)} style:--fill={rangeFill(Math.min(s.runs, 16), { min: 1, max: 16 })} oninput={(e) => draft.update('runs', Number(e.currentTarget.value))}>
-      <p class="ui-help">{caps.isImageMode ? 'Images' : 'Clips'} per run, each with its own seed.</p>
+      <p class="ui-help">{caps.isAudio ? 'Takes' : caps.isImageMode ? 'Images' : 'Clips'} per run, each with its own seed.</p>
     {:else if key === 'seconds'}
       <InspectorNumber ariaLabel="Clip length in seconds" value={shownSeconds} {...secondsSpec} stepper size="lg" commitOnly onchange={setSeconds} />
       {#if secondsSpec.max !== undefined}
@@ -251,6 +271,22 @@
       <p class="ui-help">{s.frameCount} frames at {timing.fps} fps.</p>
       {#if clipTime}<p class="ui-help">{clipTime}</p>{/if}
       {#if clipNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{clipNote.text}</p>{/if}
+    {:else if key === 'length'}
+      <InspectorNumber ariaLabel="Length in seconds" value={s.audioSeconds} step={1} min={lengthRange.min} max={lengthRange.max} stepper size="lg" commitOnly onchange={setLength} />
+      <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={s.audioSeconds} style:--fill={rangeFill(s.audioSeconds, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
+      <p class="ui-help">From {lengthRange.min} to {lengthRange.max} seconds.</p>
+    {:else if key === 'kind'}
+      <div class="pop-list" role="radiogroup" aria-label="Kind">
+        {#each kinds as kind (kind)}
+          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === s.workflow} onclick={() => { if (kind !== s.workflow) draft.setAudioKind(kind, context); }}>
+            <Icon name={KIND_INFO[kind].icon} size={16} />
+            <span class="pop-item-text">{KIND_INFO[kind].label}</span>
+            <small>{KIND_INFO[kind].description}</small>
+          </button>
+        {/each}
+      </div>
+    {:else if key === 'voice'}
+      <VoicePopover voice={audio.voice} />
     {:else if key === 'extendSeconds'}
       <InspectorNumber ariaLabel="Extend by, in seconds" value={shownExtendSeconds} {...extendSecondsSpec} stepper size="lg" commitOnly disabled={sourceFps === null} onchange={setExtendSeconds} />
       <p class="ui-help">{sourceFps === null ? 'Choose a video to extend first.' : extendLength ? `Total ${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames${s.extendFrames !== null ? ` · +${s.extendFrames} new` : ''}` : ''}</p>
@@ -407,11 +443,14 @@
   .pop-list { display: flex; flex-direction: column; gap: 2px; }
   .pop-model { display: flex; align-items: center; }
   .pop-model > .pop-item { flex: 1; min-width: 0; }
+  /* The line under a kind is words, not a number: it keeps its whole width. */
   .pop-model.has-mark :global(.licence-mark-wrap) { width: 44px; justify-content: center; }
   .pop-item { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 15px; white-space: nowrap; text-align: left; color: var(--color-text-primary); }
   .pop-item:active { background: var(--color-bg-surface-hover); }
   .pop-item[aria-pressed='true'], .pop-item[aria-checked='true'] { background: color-mix(in srgb, var(--color-primary-main) 12%, transparent); color: var(--color-primary-main); }
   .pop-item small { flex: none; max-width: 42%; margin-left: auto; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-muted); }
+  /* The line under a kind is words, not a number: it keeps its whole width. */
+  .pop-item.pop-kind small { max-width: none; font-family: inherit; }
   .pop-item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pop-item-text.muted { color: var(--color-text-muted); }
   .pop-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 15px; }

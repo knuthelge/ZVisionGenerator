@@ -6,8 +6,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.downloads.plans import audio_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
+from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import ltx_mlx_text_encoder_repo_id
 from zvisiongenerator.utils.h3_memory import estimate_h3_cuda_clip_memory, h3_mlx_clip_fit
 from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder
@@ -53,7 +55,7 @@ def describe_model_status(
 
     Args:
         resolved_path: The model's local directory or HuggingFace repo id.
-        kind: ``"image"`` or ``"video"``.
+        kind: ``"image"`` or ``"video"``; an audio model is described by :func:`describe_audio_status`.
         quantize_options: Quantization levels the model supports (empty when it cannot be quantized).
         budget: This machine's memory budget, or ``None`` when this platform is not estimated.
         find_local_dir: Resolver for fully downloaded model directories.
@@ -61,6 +63,9 @@ def describe_model_status(
         app_config: The loaded config: it names the Gemma 3 text encoder and the downloads of a video model, and sets a CUDA video model's quantize level.
         family: A video model's family (``"ltx"`` or ``"h3"``); ``None`` is LTX. LTX and H3 have a memory estimate.
         target_present: Tells whether one download target is fully on disk; MiniMax H3 is downloaded when every target of its plan is.
+
+    Raises:
+        ValueError: If *kind* is ``"audio"``.
 
     Returns:
         ``{"downloaded": bool, "memory_fit": dict | None}``. ``memory_fit`` holds ``kind`` (``"unified"`` on
@@ -70,6 +75,8 @@ def describe_model_status(
         estimate in the same shape plus a ``note``; CUDA video has the same, in the ``discrete`` shape. It is
         ``None`` when the model cannot be estimated (its files are not all on disk, or CUDA video has no level).
     """
+    if kind == "audio":
+        raise ValueError("An audio model has no resolved path; describe it with describe_audio_status.")
     model_dir = find_local_dir(resolved_path)
     text_encoder_dir = None
     ltx_video = kind == "video" and family in (None, "ltx")
@@ -95,6 +102,49 @@ def describe_model_status(
         else:
             memory_fit = _unified_image_memory_fit(model_dir, levels, budget.gpu_bytes)
     return {"downloaded": downloaded, "memory_fit": memory_fit}
+
+
+def describe_audio_status(
+    preset: AudioPreset,
+    platform_key: str,
+    *,
+    budget: MemoryBudget | None,
+    target_present: Callable[[DownloadTarget], bool] = target_present_offline,
+) -> dict[str, Any]:
+    """Return the ``downloaded`` flag and ``memory_fit`` summary of one audio model on this machine.
+
+    The model is downloaded when every repository of its plan on *platform_key* is on disk (judged without the network).
+    ``memory_fit`` compares the peak GPU memory the preset records for the platform (``memory.cuda_gb`` or
+    ``memory.mps_gb``) with the budget: ``fits``, ``tight`` or ``too_large`` as for any model, with the same shape as an
+    image model's (``kind``, ``budget_gb``, ``by_quantize`` holding only ``none``). It is ``None`` without a budget and
+    while the platform's peak is unmeasured (``null`` in the config); it needs no files on disk.
+
+    Args:
+        preset: The audio model.
+        platform_key: The preset's platform key, ``cuda`` or ``mps`` (``backends.audio_platform_key()``).
+        budget: This machine's memory budget, or ``None`` when this platform is not estimated.
+        target_present: Tells whether one download target is fully on disk.
+
+    Raises:
+        ValueError: If the preset has no entry for *platform_key*.
+    """
+    targets = audio_plan(preset, platform_key)
+    return {"downloaded": all(target_present(target) for target in targets), "memory_fit": _audio_memory_fit(preset, platform_key, budget)}
+
+
+def _audio_memory_fit(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None) -> dict[str, Any] | None:
+    """Return the memory fit of an audio model's recorded peak on *platform_key*, or ``None`` without a budget or a measured peak."""
+    peak_gb = getattr(preset.memory, f"{platform_key}_gb", None)
+    if budget is None or peak_gb is None:
+        return None
+    required = round(peak_gb * GIB)
+    if budget.system_bytes is None:
+        return {"kind": UNIFIED_MEMORY, "budget_gb": _to_gb(budget.gpu_bytes), "by_quantize": {NO_QUANTIZE_KEY: _fit(required, budget.gpu_bytes)}}
+    return {
+        "kind": DISCRETE_MEMORY,
+        "budget_gb": _to_gb(budget.gpu_bytes),
+        "by_quantize": {NO_QUANTIZE_KEY: {"status": classify_cuda_memory_fit(CudaMemoryEstimate(required, 0), budget), "required_gb": _to_gb(required)}},
+    }
 
 
 def _video_downloaded(resolved_path: str, family: str, model_name: str | None, app_config: dict[str, Any], target_present: Callable[[DownloadTarget], bool]) -> bool:

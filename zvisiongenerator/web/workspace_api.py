@@ -29,7 +29,7 @@ from zvisiongenerator.utils.config import (
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
-from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, licence_payload
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, licence_payload, load_licences
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.ltx_version import ltx_model_version
 from zvisiongenerator.utils.matte_models import MATTE_DOWNLOAD_SIZE_LABEL, MATTE_LABEL, MATTE_ROW_NAME
@@ -47,6 +47,8 @@ from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label
 from zvisiongenerator.utils.video_extend import extend_step
 from zvisiongenerator.utils.video_model_detect import detect_video_model
+from zvisiongenerator.web.audio_inventory import audio_inventory_rows, audio_repo_ids
+from zvisiongenerator.web.audio_models import audio_model_rows
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, matte_download_needed, row_download_needed
 from zvisiongenerator.web.first_run import first_run_payload
@@ -132,13 +134,14 @@ def build_workspace_response(
     image_entries = {entry.name: entry for entry in web_config.image_inventory}
     video_entries = {entry.name: entry for entry in web_config.video_inventory}
     model_labels = web_config.app_config.get("model_labels") or {}
+    licences = load_licences()
     image_models = [
         {
             "id": name,
             "label": model_display_name(web_config.app_config, name),
             "type": "image",
             "download_size_label": _size_label(model_labels.get(name) or {}),
-            "licences": licence_payload(web_config.app_config, name),
+            "licences": licence_payload(licences, name),
             **status(image_entries.get(name), "image"),
         }
         for name in web_config.image_model_options
@@ -149,11 +152,12 @@ def build_workspace_response(
             "label": model_display_name(web_config.app_config, name),
             "type": "video",
             "version": _video_row_version(web_config.app_config, video_entries.get(name)),
-            "licences": licence_payload(web_config.app_config, name),
+            "licences": licence_payload(licences, name),
             **status(video_entries.get(name), "video"),
         }
         for name in web_config.video_model_options
     ]
+    audio_models = audio_model_rows(web_config.app_config, memory_budget())
     loras = _lora_rows(web_config)
     image_defaults = image_model_defaults_map.get(image_default_model) or _build_image_bootstrap_defaults(image_default_model or "", web_config)
     video_defaults = video_model_defaults_map.get(video_default_model) or _build_video_bootstrap_defaults(video_default_model or "", web_config)
@@ -161,6 +165,7 @@ def build_workspace_response(
     return {
         "image_models": image_models,
         "video_models": video_models,
+        "audio_models": audio_models,
         "loras": loras,
         "history_assets": history_assets,
         "active_job": active_job,
@@ -186,7 +191,7 @@ def build_workspace_response(
         "workflow_contract": workflow_contract,
         "prompt_enhancer": build_prompt_enhancer_contract(web_config),
         "first_run": first_run_payload(web_config.app_config, memory_budget(), web_config.image_model_options),
-        "matte_licences": licence_payload(web_config.app_config, MATTE_LICENCE_MODEL),
+        "matte_licences": licence_payload(load_licences(), MATTE_LICENCE_MODEL),
         "config": {
             "gallery_page_size": web_config.gallery_page_size,
             "startup_view": web_config.startup_view,
@@ -314,16 +319,18 @@ def build_models_response(
         }
         for entry in web_config.video_inventory
     ]
+    licences = load_licences()
     for row in (*image_rows, *video_rows):
         row["download_needed"] = download_needed(KIND_MODEL, row["name"], row["downloaded"])
-        row["licences"] = licence_payload(web_config.app_config, row["name"])
+        row["licences"] = licence_payload(licences, row["name"])
     return {
         "models_dir": web_config.models_dir,
         "loras_dir": web_config.loras_dir,
         "image_models": image_rows,
         "video_models": video_rows,
+        "audio_models": audio_inventory_rows(web_config.app_config, memory_budget()),
         "enhancer_models": _enhancer_model_rows(web_config.app_config),
-        "background_removal": _background_removal_row(web_config.app_config),
+        "background_removal": _background_removal_row(),
         "other_downloads": _other_downloads_payload(web_config),
         "loras": loras,
         "stored_quants_supported": supports_stored_quants(),
@@ -421,11 +428,10 @@ def _enhancer_download_needed(tier: str, repo: str, revision: str | None, unavai
         return False
 
 
-def _background_removal_row(app_config: dict[str, Any], *, present: Callable[[DownloadTarget], bool] = target_present_offline) -> dict[str, Any]:
+def _background_removal_row(*, present: Callable[[DownloadTarget], bool] = target_present_offline) -> dict[str, Any]:
     """Return the Models-page row of the background removal models (BiRefNet and ViTMatte), which are downloaded, listed and deleted together.
 
     Args:
-        app_config: The loaded config, for the row's licence records.
         present: Tells whether a download target is fully on disk without using the network.
     """
     target = matte_delete_target()
@@ -439,7 +445,7 @@ def _background_removal_row(app_config: dict[str, Any], *, present: Callable[[Do
         "download_size_label": MATTE_DOWNLOAD_SIZE_LABEL,
         "deletable": target is not None,
         "download_needed": bool(needed),
-        "licences": licence_payload(app_config, MATTE_LICENCE_MODEL),
+        "licences": licence_payload(load_licences(), MATTE_LICENCE_MODEL),
     }
 
 
@@ -456,12 +462,16 @@ def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = No
     """Return the model repos in the HuggingFace cache that nothing on the Models page uses.
 
     Used means an alias or enhancer tier loads it (with LTX companions, the MLX LTX text encoder, the repos MOSS-Image and
-    Ideogram 4 Instant are built from and, where the SeedVR2 engine downloads through the cache to make its stored copy,
+    Ideogram 4 Instant are built from, the repos of the audio models and, where the SeedVR2 engine downloads through the cache to make its stored copy,
     the SeedVR2 repo), or an installed model links into it.
     """
     cache_dir = cache_dir or huggingface_cache_dir()
     # The MLX LTX text encoder counts as used everywhere; only the macOS backend downloads it.
-    extra = [ltx_mlx_text_encoder_repo_id(web_config.app_config), *([SEEDVR2_REPO] if web_config.seedvr2 is not None and web_config.seedvr2.weights.stores_copy else [])]
+    extra = [
+        ltx_mlx_text_encoder_repo_id(web_config.app_config),
+        *audio_repo_ids(web_config.app_config),
+        *([SEEDVR2_REPO] if web_config.seedvr2 is not None and web_config.seedvr2.weights.stores_copy else []),
+    ]
     used = used_repo_ids((*web_config.image_inventory, *web_config.video_inventory), web_config.app_config, platform_key=sys.platform, extra=extra)
     linked = cache_repos_linked_from(Path(web_config.models_dir), cache_dir)
     return tuple(repo for repo in cached_model_repos(cache_dir) if repo.repo_id.casefold() not in used and repo.path.name not in linked)

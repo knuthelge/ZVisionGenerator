@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { DraftState } from '$lib/types';
 import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
-import { pendingChips, settingsChips, type ChipFacts } from './settingsChips';
+import { audioChips, pendingChips, settingsChips, type AudioChipFacts, type ChipFacts } from './settingsChips';
 
 const imageCaps = {
   isImageMode: true, showFrameCount: false, showExtendLength: false, showSteps: true, showGuidance: true, showI2IStrength: false, showSeed: true,
@@ -173,5 +173,36 @@ describe('settingsChips', () => {
     const chips = settingsChips(facts({ modelDownloaded: false, caps: { ...imageCaps, showFrameCount: true } as WorkspaceCapabilities, seconds: 8, memoryWarn: true }));
     expect(chips.find((chip) => chip.key === 'model')?.warn).toBe(true);
     expect(chips.find((chip) => chip.key === 'seconds')?.warn).toBe(true);
+  });
+});
+
+describe('audioChips', () => {
+  const audioState = { workflow: 'speech', audioSeconds: 10, seed: null, runs: 1 } as DraftState;
+  const voice = { summary: { text: 'Any', tone: 'muted' as const }, recording: false, chip: 'Any' };
+
+  function audioFacts(overrides: Partial<AudioChipFacts> = {}): AudioChipFacts {
+    return { kind: 'speech', state: audioState, modelLabel: 'Higgs TTS 3 4B', modelDownloaded: true, voice, changed: () => false, showLength: false, showSeed: true, showRuns: true, ...overrides };
+  }
+
+  it('lists Kind, Model, Voice, Seed and Batch for Speech, with no preset, size or LoRA', () => {
+    const chips = audioChips(audioFacts());
+
+    expect(chips.map((chip) => chip.key)).toEqual(['kind', 'model', 'voice', 'seed', 'runs']);
+    expect(chips[0]).toMatchObject({ value: 'Speech', icon: 'speech' });
+    expect(chips[2]).toMatchObject({ label: 'Voice', value: 'Any', on: false });
+  });
+
+  it('puts Length in place of Voice for Sound and neither for Music', () => {
+    expect(audioChips(audioFacts({ kind: 'sound', voice: null, showLength: true })).map((chip) => chip.key)).toEqual(['kind', 'model', 'length', 'seed', 'runs']);
+    expect(audioChips(audioFacts({ kind: 'music', voice: null })).map((chip) => chip.key)).toEqual(['kind', 'model', 'seed', 'runs']);
+    expect(audioChips(audioFacts({ kind: 'sound', voice: null, showLength: true })).find((chip) => chip.key === 'length')?.value).toBe('10 s');
+  });
+
+  it('marks a model that is not downloaded, a followed recording, and a recording that is wrong', () => {
+    expect(audioChips(audioFacts({ modelDownloaded: false })).find((chip) => chip.key === 'model')?.warn).toBe(true);
+    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, recording: true, chip: 'me.wav' };
+    expect(audioChips(audioFacts({ voice: cloned })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'me.wav', on: true, warn: false });
+    const wrong = { summary: { text: 'Use a recording of 3 to 30 seconds', tone: 'error' as const }, recording: true, chip: 'me.wav' };
+    expect(audioChips(audioFacts({ voice: wrong })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
   });
 });

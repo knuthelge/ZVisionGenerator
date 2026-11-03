@@ -5,7 +5,7 @@ type EventData = Record<string, unknown> | null | undefined;
 /** Enhancement and model load are both setup: a job that started may still turn out to enhance first. */
 const PHASE_RANK: Record<JobPhase, number> = { queue: 0, enhance: 1, load: 1, generate: 2 };
 const GENERATE_EVENTS: ReadonlySet<string> = new Set([
-  'batch_started', 'prompt_started', 'workflow_started', 'workflow_stage_started', 'step_progress', 'generation_finished',
+  'batch_started', 'prompt_started', 'workflow_started', 'workflow_stage_started', 'step_progress', 'audio_progress', 'generation_finished',
 ]);
 const CONTROL_ACTIONS: ReadonlySet<string> = new Set(['pause', 'resume', 'next', 'repeat', 'approve', 'discard', 'quit']);
 /** Controls whose control_queued event does not become the card's pending label: Resume acts at once, a review decision is the overlay's. */

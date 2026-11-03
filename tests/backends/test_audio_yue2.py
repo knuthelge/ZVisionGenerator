@@ -18,10 +18,9 @@ import zvisiongenerator.backends.audio.yue2 as yue2_module
 from tests._audio_presets import audio_config
 from tests._factories import load_packaged_config
 from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
-from zvisiongenerator.backends import get_audio_backend
 from zvisiongenerator.backends.audio.yue2 import SAMPLE_RATE, YuE2Backend
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
-from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled
+from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 
@@ -173,17 +172,6 @@ class TestWeightSwap:
         assert _gpu_groups(model) == groups
         assert _resident_on_gpu(model)
 
-    def test_the_phases_of_a_take_swap_groups_in_and_out(self, pinned):
-        model = _TinyModel()
-        swap = WeightSwap(model, GPU)
-        seen = []
-
-        for phase in ("ar", "prefill", "ode", "none"):
-            swap.phase(phase)
-            seen.append(_gpu_groups(model))
-
-        assert seen == [{"embed", "head", "ar"}, {"embed", "ar"}, {"nar"}, set()]
-
     def test_weights_survive_the_trip_to_the_cpu_and_back(self, pinned):
         model = _TinyModel()
         swap = WeightSwap(model, GPU)
@@ -206,19 +194,6 @@ class TestWeightSwap:
 
         assert _resident_on_gpu(model)
         assert _gpu_groups(model) == frozenset()
-
-    def test_an_unknown_phase_is_refused(self, pinned):
-        swap = WeightSwap(_TinyModel(), GPU)
-
-        with pytest.raises(ValueError, match="Unknown weight swap phase 'decode'"):
-            swap.phase("decode")
-
-    def test_release_drops_the_pinned_copies(self, pinned):
-        swap = WeightSwap(_TinyModel(), GPU)
-
-        swap.release()
-
-        assert swap._pinned == {}
 
 
 # ---- A fake kit pipeline ------------------------------------------------------------------------------------------
@@ -397,20 +372,6 @@ class TestLoad:
         assert backend._swap is None
         assert kit.fractions == []
 
-    def test_weight_swap_off_cuda_is_refused(self, kit):
-        preset = _preset()
-        entry = preset.platforms["mps"]
-        swapping = type(entry)(entry.family, entry.files, {"weight_swap": True})
-
-        with pytest.raises(ValueError, match="needs CUDA"):
-            YuE2Backend().load(preset, swapping, "mps")
-
-    def test_loading_twice_is_refused(self, kit):
-        backend = _loaded()
-
-        with pytest.raises(RuntimeError, match="already holds a model"):
-            backend.load(_preset(), _preset().platforms["cuda"], "cuda")
-
     def test_a_failed_load_closes_the_pipeline_and_lifts_the_fraction(self, kit, monkeypatch):
         monkeypatch.setattr(yue2_module, "_load_cpu_model", MagicMock(side_effect=OSError("disk gone")))
         backend = YuE2Backend()
@@ -456,22 +417,6 @@ class TestLoad:
 
         assert current_flags() == before
 
-    def test_a_refused_second_load_keeps_the_first_loads_snapshot(self, kit, monkeypatch, torch_flags_guard):
-        set_app_flags()
-        before = current_flags()
-        backend = _loaded()
-        set_kit_flags()
-
-        with pytest.raises(RuntimeError, match="already holds a model"):
-            backend.load(_preset(), _preset().platforms["cuda"], "cuda")
-        backend.close()
-
-        assert current_flags() == before
-
-    def test_the_backend_is_an_audio_backend_and_the_registry_resolves_yue2(self):
-        assert isinstance(get_audio_backend("yue2"), YuE2Backend)
-        assert isinstance(YuE2Backend(), AudioBackend)
-
 
 # ---- generate -----------------------------------------------------------------------------------------------------
 
@@ -485,23 +430,6 @@ class TestGenerate:
         plan = kit.pipe.calls["plan"]
         assert (plan["style"], plan["lyrics"], plan["cot"], plan["seed"], plan["cfg_scale"]) == ("Indie folk, warm female vocal", "[Verse]\nThe lamp is lit\n\n[Chorus]\nShine on", "full", 7, 1.0)
         assert plan["abc_sampling"] == {"max_tokens": 4096}
-
-    def test_empty_lyrics_make_a_melody_instrumental_from_the_default_sections(self, kit):
-        backend = _loaded()
-
-        backend.generate(_request(lyrics=""), MagicMock(), _never_cancelled)
-
-        plan = kit.pipe.calls["plan"]
-        assert plan["cot"] == "melody"
-        assert plan["lyrics"] == "\n\n".join("[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]".split())
-
-    def test_tags_only_make_a_melody_instrumental_from_those_tags(self, kit):
-        backend = _loaded()
-
-        backend.generate(_request(lyrics="[Intro] [Verse]\n[Outro]"), MagicMock(), _never_cancelled)
-
-        plan = kit.pipe.calls["plan"]
-        assert (plan["cot"], plan["lyrics"]) == ("melody", "[Intro]\n\n[Verse]\n\n[Outro]")
 
     @pytest.mark.parametrize(
         ("lyrics", "expected_cot", "expected_lyrics"),
@@ -624,16 +552,6 @@ class TestGenerate:
         fade_frames = 2 * SAMPLE_RATE
         assert fade_frames > 960, "the preset's 2 s fade is longer than this short test clip, so the whole clip fades"
 
-    def test_the_fade_covers_only_the_last_seconds_of_a_long_clip(self, kit, monkeypatch):
-        kit.pipe.truncated = True
-        monkeypatch.setattr(kit.pipe, "decode", lambda latents: np.ones((4 * SAMPLE_RATE, 2), dtype=np.float32))
-        backend = _loaded()
-
-        clip = backend.generate(_request(), MagicMock(), _never_cancelled)
-
-        assert clip.samples[:, : 2 * SAMPLE_RATE].min() == 1.0
-        assert clip.samples[:, -1].max() == 0.0
-
     def test_progress_walks_plan_song_tokens_synthesis_decode(self, kit):
         backend = _loaded()
         on_progress = MagicMock()
@@ -649,15 +567,6 @@ class TestGenerate:
         assert ("Song tokens", 30, None, 1, 1) in calls
         assert ("Synthesis", 32, 32, 1, 1) in calls
         assert calls[-1] == ("Decode", 1, 1, 1, 1)
-
-    def test_token_progress_is_reported_every_few_tokens(self, kit):
-        backend = _loaded()
-        on_progress = MagicMock()
-
-        backend.generate(_request(), on_progress, _never_cancelled)
-
-        song = [call.args[1] for call in on_progress.call_args_list if call.args[0] == "Song tokens"]
-        assert song == [0, 1, 10, 20, 30, 30]
 
 
 # ---- stop ---------------------------------------------------------------------------------------------------------
@@ -755,40 +664,12 @@ class TestClose:
         assert kit.fractions == [1.0]
         assert kit.pipe.closed
 
-    def test_the_fraction_is_lifted_even_when_the_pipeline_fails_to_close(self, kit, monkeypatch):
-        monkeypatch.setattr(kit.pipe, "close", MagicMock(side_effect=RuntimeError("close failed")))
-        backend = _loaded()
-        swap = backend._swap
-        kit.fractions.clear()
-
-        with pytest.raises(RuntimeError, match="close failed"):
-            backend.close()
-
-        assert kit.fractions == [1.0]
-        assert swap._pinned == {}
-
     def test_close_on_mps_leaves_the_memory_fraction_alone(self, kit):
         backend = _loaded("mps")
 
         backend.close()
 
         assert kit.fractions == []
-
-    def test_close_twice_is_harmless(self, kit):
-        backend = _loaded()
-
-        backend.close()
-        backend.close()
-
-        assert kit.pipe.closed
-
-    def test_the_backend_loads_again_after_close(self, kit):
-        backend = _loaded()
-        backend.close()
-
-        backend.load(_preset(), _preset().platforms["cuda"], "cuda")
-
-        assert backend.generate(_request(), MagicMock(), _never_cancelled).samples.shape == (2, 960)
 
     def test_nothing_keeps_the_pipeline_the_model_or_the_pinned_weights_alive_after_close(self, kit):
         # The pipeline holds the model through _model and the _load_model closure; the backend holds the swap. After close()

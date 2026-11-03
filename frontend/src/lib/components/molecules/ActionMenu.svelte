@@ -203,6 +203,8 @@
   .action-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
   .action-menu-label { flex: 1; min-width: 0; }
   .action-menu-hint { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
+  /* An enabled item's hint is short ("Video tab, from 0 s"): the menu grows to hold it whole instead of cutting it. */
+  .action-menu-item:not([aria-disabled='true']) .action-menu-hint { max-width: none; }
   .action-menu-check { display: inline-grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--color-primary-main); }
   .action-menu-group { color: var(--color-text-muted); }
   .action-menu-group-items { padding-left: 12px; }

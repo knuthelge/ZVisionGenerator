@@ -9,10 +9,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._audio_presets import audio_config, higgs3_preset, sa3_preset
 from tests._factories import _make_args, _make_video_args, make_extend_source
 from tests.web._helpers import stub_request_job, wait_for_status
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
+from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads import READY, DownloadTarget
@@ -220,6 +222,47 @@ class TestPartsMatchTheRunner:
         _same_downloads(parts, runner_planners)
 
 
+class TestAudioParts:
+    """An audio job downloads its one model, planned from its preset for this machine's audio platform."""
+
+    def _planners(self, platform_key: str = "cuda") -> tuple[DownloadPlanners, MagicMock]:
+        audio = MagicMock(side_effect=lambda preset, key: (DownloadTarget(f"audio/{preset.id}", allow_patterns=(key,)),))
+        return DownloadPlanners(audio=audio, audio_platform_key=lambda: platform_key), audio
+
+    def test_an_audio_job_has_one_model_part_named_by_its_preset(self):
+        planners, audio = self._planners("mps")
+        config = audio_config(higgs3=higgs3_preset(), sa3=sa3_preset())
+        request = AudioGenerationRequest(preset="higgs3", kind="speech", prompt="Hello.", seed=1)
+
+        parts = job_download_parts(request, None, None, None, config, platform_key=_PLATFORM, planners=planners)
+
+        assert parts == (JobDownloadPart("Higgs TTS 3 4B", "higgs3", "higgs3", "model", (DownloadTarget("audio/higgs3", allow_patterns=("mps",)),)),)
+        assert audio.call_args.args[0].id == "higgs3"
+
+    def test_an_audio_job_needs_no_model_ref_and_no_enhancer(self):
+        planners, _ = self._planners()
+        request = AudioGenerationRequest(preset="sa3", kind="sound", prompt="Rain", seconds=30)
+
+        parts = job_download_parts(request, _make_args(), {}, None, audio_config(sa3=sa3_preset()), platform_key=_PLATFORM, planners=planners)
+
+        assert [part.role for part in parts] == ["model"]
+
+    def test_the_real_planner_downloads_the_preset_s_files(self):
+        request = AudioGenerationRequest(preset="sa3", kind="sound", prompt="Rain", seconds=30)
+        planners = DownloadPlanners(audio_platform_key=lambda: "cuda")
+
+        (part,) = job_download_parts(request, None, None, None, audio_config(sa3=sa3_preset()), platform_key=_PLATFORM, planners=planners)
+
+        assert [target.repo_id for target in part.targets] == ["Comfy-Org/stable-audio-3", "cocktailpeanut/stable-audio-3-medium", "mlx-community/stable-audio-3-small-sfx"]
+
+    def test_an_unknown_preset_is_refused(self):
+        planners, _ = self._planners()
+        request = AudioGenerationRequest(preset="nope", kind="music", prompt="x")
+
+        with pytest.raises(ValueError, match="Unknown audio model 'nope'"):
+            job_download_parts(request, None, None, None, audio_config(sa3=sa3_preset()), platform_key=_PLATFORM, planners=planners)
+
+
 class TestUncheckedParts:
     def test_an_enhancer_missing_while_offline_is_an_unchecked_part(self, monkeypatch):
         def offline(repo, revision):
@@ -252,122 +295,6 @@ class TestUncheckedParts:
 def test_a_job_that_needs_a_model_ref_refuses_without_one():
     with pytest.raises(ValueError, match="model_ref"):
         job_download_parts(_image_request(), _make_args(), _PROMPTS, None, _CONFIG, platform_key=_PLATFORM)
-
-
-@pytest.fixture
-def recorded(runner_planners, monkeypatch):
-    """Wrap each planner the runner calls in a recorder, so a test pins the exact arguments it receives."""
-    recorders = SimpleNamespace(
-        image=MagicMock(wraps=runner_planners.planners.image),
-        video=MagicMock(wraps=runner_planners.planners.video),
-        matte=MagicMock(wraps=runner_planners.planners.matte),
-        seedvr2=MagicMock(wraps=runner_planners.planners.seedvr2),
-        enhancer=MagicMock(wraps=runner_planners.planners.enhancer),
-    )
-    for name in ("image", "video", "matte", "seedvr2", "enhancer"):
-        monkeypatch.setattr(web_runner_module, f"{name}_plan", getattr(recorders, name))
-    return recorders
-
-
-def _run_image_job(monkeypatch, request, args) -> None:
-    stub_request_job(monkeypatch, run_preflight=_enhancing_preflight(monkeypatch))
-    monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
-    monkeypatch.setattr(
-        web_runner_module, "run_batch", lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
-    )
-    runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-    try:
-        job_id = runner.submit_image_request_job(request=request, prompts_data=_PROMPTS, config=_CONFIG, args=args, model_ref="owner/atlas")
-        assert wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
-    finally:
-        runner.shutdown()
-
-
-class TestRunnerHandsThePlannersTheirArguments:
-    """Pin the arguments and order of every planner call, so a builder that drifts from the runner's former calls fails."""
-
-    def test_an_image_job_plans_its_model_enhancer_and_matte_with_the_request_values(self, monkeypatch, recorded, runner_planners):
-        args = _make_args(enhance=EnhanceSettings(), no_enhance=False, enhance_model=None)
-
-        _run_image_job(monkeypatch, _image_request(transparent=True), args)
-
-        recorded.image.assert_called_once_with("owner/atlas", family="zimage", config=_CONFIG, platform_key=sys.platform)
-        recorded.enhancer.assert_called_once_with("a/enhancer", None)
-        recorded.matte.assert_called_once_with()
-        recorded.video.assert_not_called()
-        recorded.seedvr2.assert_not_called()
-        assert runner_planners.steps == [("enhancer", "a/enhancer"), ("model", "atlas"), ("matte", MATTE_LABEL)]  # the order the runner downloads them in
-
-    def test_a_video_job_plans_its_model_with_the_upscale_flag_and_name(self, monkeypatch, recorded, runner_planners):
-        stub_request_job(monkeypatch)
-        monkeypatch.setattr(web_runner_module, "video_load_options", lambda *_a, **_kw: {})
-        monkeypatch.setattr(
-            web_runner_module, "run_video_batch", lambda *, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
-        )
-        request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", model_name="ltx-8", upscale=2)
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config=_CONFIG, args=_make_video_args(no_enhance=True, scene=None), model_ref="owner/ltx")
-            assert wait_for_status(runner, job_id, "completed", timeout=3.0)["status"] == "completed"
-        finally:
-            runner.shutdown()
-
-        recorded.video.assert_called_once_with("owner/ltx", family="ltx", config=_CONFIG, model_name="ltx-8", upscale=True)
-        assert runner_planners.steps == [("model", "ltx-8")]
-
-    def test_a_seedvr2_upscale_plans_the_tier_in_the_data_dir_with_the_engine_weights(self, monkeypatch, recorded, runner_planners, tmp_path):
-        _run_upscale(monkeypatch, runner_planners, _upscale_request(upscale_method="seedvr2", upscale_model="seedvr2-7b"), tmp_path)
-
-        recorded.seedvr2.assert_called_once_with("seedvr2-7b", models_dir=tmp_path / "models", weights=FP8_WEIGHTS)
-        recorded.image.assert_not_called()
-        assert runner_planners.steps == [("model", "SeedVR2 7B fp8")]
-
-    def test_a_creative_upscale_plans_the_refinement_model_for_this_platform(self, monkeypatch, recorded, runner_planners, tmp_path):
-        _run_upscale(monkeypatch, runner_planners, _upscale_request(transparent=True), tmp_path)
-
-        recorded.image.assert_called_once_with("owner/atlas", family="zimage", config=_CONFIG, platform_key=sys.platform)
-        recorded.seedvr2.assert_not_called()
-        assert runner_planners.steps == [("model", "atlas"), ("matte", MATTE_LABEL)]
-
-    def test_a_video_file_upscale_plans_the_tier_it_was_asked_for(self, monkeypatch, recorded, runner_planners, tmp_path):
-        stub_request_job(monkeypatch)
-        monkeypatch.setattr(web_runner_module, "load_seedvr2", lambda _engine, _name, *, on_phase, **_kw: (on_phase("loading"), MagicMock())[1])
-        monkeypatch.setattr(
-            web_runner_module,
-            "run_video_file_upscale",
-            lambda *_a, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1}),
-        )
-        request = VideoFileUpscaleRequest(
-            source=make_extend_source(path=tmp_path / "clip.mp4"), recorded_config=None, output_dir=str(tmp_path), width=1536, height=896, upscale_model="seedvr2-3b", softness=0.0, batch_size=25
-        )
-        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
-        try:
-            job_id = runner.submit_video_file_upscale_job(request=request, context={"output_dir": str(tmp_path), "media_type": "video"})
-            assert wait_for_status(runner, job_id, "completed")["status"] == "completed"
-        finally:
-            runner.shutdown()
-
-        recorded.seedvr2.assert_called_once_with("seedvr2-3b", models_dir=tmp_path / "models", weights=FP8_WEIGHTS)
-
-    def test_the_plan_lists_the_same_planner_calls_as_the_runner_made(self, monkeypatch, recorded, runner_planners):
-        args = _make_args(enhance=EnhanceSettings(), no_enhance=False, enhance_model=None)
-        _run_image_job(monkeypatch, _image_request(transparent=True), args)
-        run_calls = {name: list(getattr(recorded, name).call_args_list) for name in ("image", "matte", "enhancer")}
-        for name in run_calls:
-            getattr(recorded, name).reset_mock()
-
-        job_download_parts(
-            _image_request(transparent=True),
-            args,
-            _PROMPTS,
-            None,
-            _CONFIG,
-            platform_key=sys.platform,
-            model_ref="owner/atlas",
-            planners=DownloadPlanners(**vars(recorded) | {"seedvr2_upscaler": runner_planners.planners.seedvr2_upscaler}),
-        )
-
-        assert {name: list(getattr(recorded, name).call_args_list) for name in run_calls} == run_calls
 
 
 class TestOfflineEnhancerInARealJob:

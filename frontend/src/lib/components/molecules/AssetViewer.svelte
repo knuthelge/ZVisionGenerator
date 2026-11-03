@@ -19,14 +19,16 @@
 </script>
 
 <script lang="ts">
-  import { Icon, ShortcutList } from '$lib/components/atoms';
+  import { Icon, ShortcutList, Waveform } from '$lib/components/atoms';
   import { isTyping } from '$lib/keyboard';
-  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
+  import { canExtend, canUseAsAudioTrack, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
+  import { takeWords, wordBlocks } from '$lib/state/audioAsset';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { GalleryAsset, UpscaleFactor } from '$lib/types';
+  import type { AudioModelOption, GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
-  import { assetMenuEntries, referenceEntries, upscaleEntries } from './assetMenu';
+  import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
+  import AudioPlayer from './AudioPlayer.svelte';
   import { VIEWER_SHORTCUTS, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { sheetDrag } from '$lib/actions/sheetDrag';
@@ -47,6 +49,8 @@
     deletingIds?: ReadonlySet<string>;
     /** What the Use as items show: which targets are disabled, and their hints. */
     useAs?: UseAsState;
+    /** The audio models this machine runs, which name the model of a take; without them the id the file records shows. */
+    audioModels?: readonly AudioModelOption[];
     /** Called when the viewer nears the end of the list, so a paged source can load more. */
     onnearend?: () => void;
     onclose: () => void;
@@ -62,6 +66,7 @@
     setLabel = '',
     deletingIds = new Set<string>(),
     useAs = {},
+    audioModels,
     onnearend,
     onclose,
     onnavigate,
@@ -70,6 +75,7 @@
     onreference,
     onextend,
     onupscale,
+    onuseaudio,
     ondelete,
   }: Props = $props();
 
@@ -111,9 +117,13 @@
     return pushEscapeLayer(() => { helpOpen = false; });
   });
 
+  const isAudio = $derived(asset?.media_type === 'audio');
+  // Use as: an image's start image, reference or frame; an audio take's audio track or voice.
   const referenceItems = $derived<ActionMenuEntry[]>(
-    asset && onreference ? referenceEntries(asset, onreference, useAs) : []
+    !asset ? [] : asset.media_type === 'audio' ? (onuseaudio ? audioUseEntries(asset, onuseaudio, useAs) : []) : onreference ? referenceEntries(asset, onreference, useAs) : []
   );
+  const canUseAs = $derived(asset ? (asset.media_type === 'audio' ? Boolean(onuseaudio) && (canUseAsAudioTrack(asset) || referenceItems.length > 0) : Boolean(onreference) && canUseAsReference(asset)) : false);
+  const words = $derived(asset && isAudio ? wordBlocks(asset) : []);
 
   const upscaleItems = $derived<ActionMenuEntry[]>(
     asset && onupscale ? upscaleEntries(asset, onupscale) : []
@@ -132,13 +142,19 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
   const moreItems = $derived.by<ActionMenuEntry[]>(() => {
     if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, useAs);
-    if (!asset.prompt) return entries;
-    const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(asset.prompt!) };
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs);
+    const copyable = copyableText(asset);
+    if (!copyable) return entries;
+    const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(copyable) };
     // Copy the prompt sits with Reuse at the top, before the first separator.
     if (onreuse) return [entries[0], copy, ...entries.slice(1)];
     return [copy, { kind: 'separator' }, ...entries];
   });
+  /** The text Copy the prompt puts on the clipboard: the prompt of an image or video, the style, text or prompt of a take with settings. */
+  function copyableText(item: GalleryAsset): string {
+    return item.media_type === 'audio' ? takeWords(item) : (item.prompt ?? '');
+  }
+
   // --- Touch and zoom ---
   // A finger, at any width: a swipe moves between assets or (down) closes, a pinch or a double tap zooms an image,
   // and a zoomed image pans under one finger. A mouse click shows an image at its real pixels; a drag then pans it.
@@ -148,7 +164,7 @@
   let zoom = $state<Zoom>(FIT);
   let zoomAnimated = $state(false);
   const zoomed = $derived(zoom.scale > 1);
-  const isImage = $derived(asset?.media_type !== 'video');
+  const isImage = $derived(asset?.media_type === 'image');
   // Real pixels for the shown image; null until it has loaded, or when it already shows at full size.
   let actualScale = $state<number | null>(null);
 
@@ -239,7 +255,7 @@
       measureGap();
       const shown = asset;
       // A video has no still to fly (its thumbnail is the video itself), so it fades in and out instead.
-      const from = reduceMotion() || shown?.media_type === 'video' ? null : originRect();
+      const from = reduceMotion() || shown?.media_type === 'video' || shown?.media_type === 'audio' ? null : originRect();
       const stage = from ? stageContentRect() : null;
       if (!shown || !from || !stage) { phase = 'open'; return; }
       phase = 'opening';
@@ -264,7 +280,7 @@
   /** Close the viewer: the image shrinks back into its own tile first, while that tile is on screen. */
   function close(): void {
     if (phase === 'closing') return;
-    const to = reduceMotion() || phase === 'opening' || asset?.media_type === 'video' ? null : shownTileRect();
+    const to = reduceMotion() || phase === 'opening' || asset?.media_type === 'video' || asset?.media_type === 'audio' ? null : shownTileRect();
     const from = to && asset ? mediaRect() : null;
     if (!to || !from || !asset) { onclose(); return; }
     phase = 'closing';
@@ -358,7 +374,7 @@
 
   function onStageTouchStart(event: TouchEvent): void {
     // A video's own controls take the finger: scrubbing must not step to another asset.
-    if ((event.target as Element).closest('video, .viewer-details-scrim') || settling) { gesture = null; return; }
+    if ((event.target as Element).closest('video, .viewer-details-scrim, [data-own-drag]') || settling || startsInScrollableWords(event.target as Element)) { gesture = null; return; }
     if (event.touches.length === 2 && isImage) {
       gesture = { kind: 'pinch', ...pinchOf(event.touches), from: zoom };
       return;
@@ -370,6 +386,12 @@
     gesture = zoomed
       ? { kind: 'pan', x: touch.clientX, y: touch.clientY, at, from: zoom }
       : { kind: 'swipe', x: touch.clientX, y: touch.clientY, at, axis: null, samples: [{ x: touch.clientX, y: touch.clientY, at }] };
+  }
+
+  /** Whether a touch begins on the words under an audio player that scroll: the finger scrolls them, it does not page or pull. */
+  function startsInScrollableWords(target: Element): boolean {
+    const scroller = target.closest<HTMLElement>('.viewer-audio');
+    return scroller !== null && scroller.scrollHeight > scroller.clientHeight;
   }
 
   function onStageTouchMove(event: TouchEvent): void {
@@ -487,7 +509,7 @@
     if (drag && !drag.moved) toggleZoomAt(event.clientX, event.clientY, 1);
   }
 
-  const sections = $derived(asset ? assetDetailSections(asset) : null);
+  const sections = $derived(asset ? assetDetailSections(asset, audioModels) : null);
   const source = $derived(asset?.details?.source ?? null);
   // A scene-only video carries its scene as its prompt; show it once, and a separate Scene section only when it differs.
   const sceneOnly = $derived(Boolean(asset?.scene) && asset?.scene === asset?.prompt);
@@ -564,10 +586,12 @@
         if (referenceItems.length === 0) return false;
         referenceOpen = true;
         return true;
-      case 'copy':
-        if (!asset.prompt) return false;
-        void copyPrompt(asset.prompt);
+      case 'copy': {
+        const text = copyableText(asset);
+        if (!text) return false;
+        void copyPrompt(text);
         return true;
+      }
       case 'details':
         toggleDetails();
         return true;
@@ -669,7 +693,7 @@
           onclick={() => onreuse(asset)}
         ><Icon name="reuse" size={14} /><span class="viewer-btn-label">Reuse settings</span></button>
       {/if}
-      {#if onreference && canUseAsReference(asset)}
+      {#if canUseAs}
         <button
           type="button"
           bind:this={referenceButton}
@@ -677,7 +701,7 @@
           data-action="reference"
           aria-haspopup="menu"
           aria-expanded={referenceOpen}
-          title="Use as start image or frame (E)"
+          title={isAudio ? 'Use as an audio track or a voice (E)' : 'Use as start image or frame (E)'}
           onclick={() => { referenceOpen = !referenceOpen; }}
         ><Icon name="reference" size={14} /><span class="viewer-btn-label">Use as</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}
@@ -760,7 +784,7 @@
         bind:this={stageEl}
         class="viewer-stage"
         data-touch={touchLayer}
-        use:hold={{ onhold: () => { contextAt = pressAt; moreOpen = true; }, ignore: 'video, button' }}
+        use:hold={{ onhold: () => { contextAt = pressAt; moreOpen = true; }, ignore: 'video, button, [data-own-drag]' }}
         onpointerdown={(event) => { pressAt = { x: event.clientX, y: event.clientY }; }}
         oncontextmenu={onStageContextMenu}
         ontouchstart={onStageTouchStart}
@@ -784,6 +808,21 @@
             <div class="viewer-pane viewer-pane-prev" aria-hidden="true">{@render neighbour(assets[index - 1])}</div>
           {/if}
           <div bind:this={paneEl} class="viewer-pane viewer-pane-current" style:transform={drag?.axis === 'y' ? pullTransform(drag.offset) : undefined}>
+            {#if asset.media_type === 'audio'}
+              <div class="viewer-audio" data-testid="viewer-audio">
+                <AudioPlayer src={asset.url} peaks={asset.peaks ?? []} filename={asset.filename} duration={asset.duration} size="viewer" />
+                {#if words.length > 0}
+                  <div class="viewer-words" data-testid="viewer-words">
+                    {#each words as block (block.label)}
+                      <section>
+                        <h4 class="viewer-h ui-area-label">{block.label}</h4>
+                        <p class="viewer-prompt viewer-words-text">{block.text}</p>
+                      </section>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {:else}
             {#if !mediaLoaded && asset.media_type !== 'video'}
               <!-- The thumbnail stands in until the image has loaded. -->
               <img class="viewer-standin" class:ui-checkerboard={isTransparent(asset)} data-transparent={isTransparent(asset)} src={thumbOf(asset)} alt="" aria-hidden="true">
@@ -814,6 +853,7 @@
                 ontransitionend={() => { zoomAnimated = false; }}
               >
             {/if}
+            {/if}
           </div>
           {#if touchLayer && hasNext}
             <div class="viewer-pane viewer-pane-next" aria-hidden="true">{@render neighbour(assets[index + 1])}</div>
@@ -840,6 +880,7 @@
             </div>
           {/if}
           <div class="viewer-details-body">
+          {#if !isAudio}
           {#if separateScene}
             <section data-testid="viewer-scene">
               <h4 class="viewer-h ui-area-label">Scene</h4>
@@ -869,6 +910,7 @@
               <h4 class="viewer-h ui-area-label">Negative prompt</h4>
               <p class="viewer-prompt">{sections.negativePrompt}</p>
             </section>
+          {/if}
           {/if}
           {#if source}
             <section data-testid="viewer-source">
@@ -914,7 +956,9 @@
             aria-current={itemIndex === index}
             onclick={() => onnavigate(itemIndex)}
           >
-            {#if item.media_type === 'video' && Math.abs(itemIndex - index) > FILM_VIDEO_RADIUS}
+            {#if item.media_type === 'audio'}
+              <span class="film-audio" aria-hidden="true"><Waveform peaks={item.peaks ?? []} /></span>
+            {:else if item.media_type === 'video' && Math.abs(itemIndex - index) > FILM_VIDEO_RADIUS}
               <span class="film-video-placeholder" aria-hidden="true">▶</span>
             {:else if item.media_type === 'video'}
               <video src={item.thumbnail_url || item.url} muted preload="metadata"></video>
@@ -974,7 +1018,9 @@
 
 {#snippet neighbour(item: GalleryAsset)}
   <!-- A neighbour waiting beside the shown asset: its thumbnail, or a video's first frame. -->
-  {#if item.media_type === 'video'}
+  {#if item.media_type === 'audio'}
+    <span class="viewer-neighbour viewer-neighbour-audio" aria-hidden="true"><Waveform peaks={item.peaks ?? []} /></span>
+  {:else if item.media_type === 'video'}
     <video class="viewer-neighbour" src={thumbOf(item)} muted preload="metadata"></video>
   {:else}
     <img class="viewer-neighbour" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)} src={thumbOf(item)} alt="">
@@ -1055,6 +1101,8 @@
   @media (hover: hover) { .viewer-film button:hover { opacity: 0.9; } }
   .viewer-film button[aria-current='true'] { border-color: var(--color-primary-main); opacity: 1; }
   .film-video-placeholder { display: grid; width: 100%; height: 100%; place-items: center; background: var(--color-bg-surface); font-size: var(--text-ui); color: var(--color-text-muted); }
+  /* An audio take in the film strip: the no-content tile at 44px, its waveform in the middle. */
+  .film-audio { display: grid; width: 100%; height: 100%; place-items: center; padding: 14px 6px; background: var(--color-bg-surface-hover); }
   .viewer-film img, .viewer-film video { display: block; width: 100%; height: 100%; object-fit: cover; }
   @media (max-width: 767px) {
     .viewer-bar { flex-wrap: wrap; padding: 8px; }
@@ -1088,6 +1136,12 @@
   .viewer-neighbour[data-transparent='true'] { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: fill; }
   .viewer-standin[data-transparent='true'] { width: auto; height: auto; max-width: 100%; max-height: 100%; margin: auto; object-fit: fill; }
   .viewer-standin { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: var(--radius-xs); pointer-events: none; }
+  .viewer-neighbour-audio { display: block; max-width: 640px; height: 120px; margin: auto; padding: 12px; background: var(--color-bg-surface); border-radius: var(--radius-md); opacity: 0.6; }
+  /* An audio take: the player (200px waveform, max 960) with its words under it, which scroll with the stage. */
+  .viewer-audio { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 960px; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+  .viewer-words { display: flex; flex-direction: column; gap: 12px; padding: 0 4px 8px; }
+  .viewer-words .viewer-prompt { padding: 0; background: none; font-size: var(--text-title); line-height: 1.6; }
+  .asset-viewer[data-compact='true'] .viewer-words .viewer-prompt { font-size: 15px; }
   .viewer-context-anchor { position: fixed; width: 1px; height: 1px; pointer-events: none; }
   /* The flight: the thumbnail fixed over everything, moved by transform alone; the viewer fades in or out under it. */
   .viewer-flight { position: fixed; z-index: calc(var(--z-viewer) + 1); object-fit: cover; border-radius: var(--radius-xs); transform-origin: top left; pointer-events: none; will-change: transform; }

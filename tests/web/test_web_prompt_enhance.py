@@ -190,6 +190,10 @@ class TestEnhanceEndpoint:
         with pytest.raises(ValueError, match=key):
             web_server._validate_enhance_body({"prompt": "a fox", "settings": {"style": "photo"}, key: value})
 
+    def test_audio_is_refused_by_name_and_not_run_as_an_image(self):
+        with pytest.raises(ValueError, match="audio prompts can't be enhanced"):
+            web_server._validate_enhance_body({"prompt": "a fox", "mode": "audio", "settings": {"style": "photo"}})
+
     def test_smart_resolves_the_smart_model(self, monkeypatch):
         monkeypatch.setattr(web_server, "smart_budget_bytes", lambda choice: 64 * 2**30)
         monkeypatch.setattr(web_server, "load_config", lambda: {"prompt_enhancer": {"model": "fast/m", "smart": {"model": "smart/m", "min_memory_gb": 9}}})
@@ -651,7 +655,8 @@ class TestWorkspaceContract:
         from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS
 
         for definition in WORKFLOW_DEFINITIONS.values():
-            assert {"prompt_enhance", "prompt_enhance_auto"} <= set(definition["visible_controls"])
+            offered = {"prompt_enhance", "prompt_enhance_auto"} <= set(definition["visible_controls"])
+            assert offered is (definition["mode"] != "audio")  # the Audio tab has no prompt enhancer
 
 
 # ── Config fields ───────────────────────────────────────────────────────────

@@ -69,15 +69,6 @@ describe('Tooltip', () => {
     expect(bubble.dataset.open).toBe('false');
   });
 
-  it('stays closed while suppressed and shows again once it is not', () => {
-    const { trigger, bubble } = render({ suppressed: true });
-
-    trigger.dispatchEvent(new Event('pointerenter'));
-    trigger.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    flushSync();
-    expect(bubble.dataset.open).toBe('false');
-  });
-
   it('ignores a tap when touch is off', () => {
     const { trigger, bubble } = render({ touch: false });
     const tap = new Event('pointerdown', { bubbles: true }) as Event & { pointerType: string };

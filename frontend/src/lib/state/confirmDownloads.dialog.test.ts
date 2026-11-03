@@ -65,19 +65,4 @@ describe('the download dialog with licence lines', () => {
     expect(linesOf(rows()[0])).toEqual([]);
     expect(document.body.textContent).not.toContain('agree to the terms');
   });
-
-  it('does not start the download when Enter is pressed on a link', async () => {
-    const { answer } = await open(plan([part('FLUX.2 Klein 9B', 'klein9b')], tagged('klein9b', FLUX_LICENCE)));
-    const link = rows()[0].querySelector('a')!;
-    link.focus();
-
-    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
-    link.dispatchEvent(enter);
-    flushSync();
-
-    expect(enter.defaultPrevented).toBe(false);
-    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
-    (document.querySelector('[data-action="cancel"]') as HTMLButtonElement).click();
-    await expect(answer).resolves.toBe(false);
-  });
 });

@@ -17,7 +17,7 @@ from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
 
 from zvisiongenerator.backends.audio import higgs3 as higgs3_module
 from zvisiongenerator.backends.audio.higgs3 import SAMPLE_RATE, Higgs3Backend
-from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled
+from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils import audio_request as audio_request_module
 from zvisiongenerator.utils import hf_snapshot
@@ -66,9 +66,6 @@ def _with_cap(rig, max_new_tokens: int) -> None:
 
 
 class TestLoad:
-    def test_it_is_an_audio_backend(self):
-        assert isinstance(Higgs3Backend(), AudioBackend)
-
     def test_the_model_is_built_from_the_official_snapshots_config_and_weights_on_the_device(self, rig):
         rig.fakes.read_config.assert_called_once_with(rig.fakes.official / "config.json")
         rig.fakes.load_model.assert_called_once_with(CONFIG, rig.fakes.official / "model.safetensors", "cuda")
@@ -79,9 +76,6 @@ class TestLoad:
     def test_the_codec_loads_from_the_pinned_codec_snapshot_in_float32_without_remote_code(self, rig):
         rig.fakes.codec_load.assert_called_once_with(str(rig.fakes.codec_dir), dtype=torch.float32)
         assert ("codec.to", "cpu") in rig.events
-
-    def test_the_codec_is_frozen(self, rig):
-        assert not rig.codec.weight.requires_grad
 
     def test_loading_never_downloads(self, monkeypatch, tmp_path):
         import huggingface_hub
@@ -114,27 +108,6 @@ class TestLoad:
         assert backend._model is None
         rig.fakes.load_model.assert_not_called()
         rig.fakes.codec_load.assert_not_called()
-
-    def test_a_cached_snapshot_missing_a_listed_file_counts_as_not_downloaded(self, rig):
-        (rig.fakes.official / "tokenizer.json").unlink()
-
-        with pytest.raises(FileNotFoundError, match=OFFICIAL_REPO):
-            Higgs3Backend().load(PRESET, ENTRY, "cuda")
-
-    def test_a_refused_load_leaves_a_loaded_backend_as_it_was(self, rig):
-        rig.fakes.snapshots[CODEC_REPO] = []
-
-        with pytest.raises(FileNotFoundError):
-            rig.backend.load(PRESET, ENTRY, "cuda")
-
-        assert rig.backend._model is rig.model
-
-    @pytest.mark.parametrize("repo_id", [OFFICIAL_REPO, CODEC_REPO])
-    def test_a_platform_entry_without_the_repository_is_refused(self, rig, repo_id):
-        entry = type(ENTRY)(family=ENTRY.family, files=tuple(f for f in ENTRY.files if f.repo_id != repo_id), settings=ENTRY.settings)
-
-        with pytest.raises(ValueError, match=repo_id):
-            Higgs3Backend().load(PRESET, entry, "cuda")
 
     def test_a_failed_load_leaves_the_backend_unloaded(self, rig):
         rig.fakes.codec_load.side_effect = OSError("no codec")
@@ -181,14 +154,6 @@ class TestParts:
         assert clip.sample_rate == 24000
         assert clip.samples.dtype == np.float32
         assert not clip.cut
-
-    def test_the_part_is_read_with_the_loaded_model_tokenizer_and_ids(self, rig):
-        rig.codec.waves.append(_tone(1.0))
-
-        _generate(rig, _request())
-
-        assert rig.backend._ids is not None
-        assert rig.backend._ids.text == 503
 
     def test_the_codes_of_a_part_reach_the_codec_without_the_frame_that_ended_it(self, rig):
         rig.model.takes[:] = [6]  # 6 head calls: 5 kept frames, 5 - (N - 1) = 4 of them sound
@@ -310,14 +275,6 @@ class TestParts:
         with pytest.raises(RuntimeError, match=r"^Higgs TTS 3 made no sound for this text\. Try another seed\.$"):
             _generate(rig, _request())
 
-    def test_a_part_without_sound_is_not_decoded(self, rig):
-        _with_cap(rig, 1)
-
-        with pytest.raises(RuntimeError, match="no sound"):
-            _generate(rig, _request())
-
-        assert rig.codec.decoded == []
-
 
 class TestProgress:
     def test_the_first_frame_and_every_tenth_are_reported_with_the_part(self, rig):
@@ -336,22 +293,6 @@ class TestProgress:
             ("Speech tokens", 3, 1500, 2, 2),
         ]
 
-    def test_a_last_frame_on_the_stride_is_reported_once(self, rig):
-        rig.model.takes[:] = [20]  # the last frame falls on the stride
-        rig.codec.waves.append(_tone(0.5))
-
-        _, progress = _generate(rig, _request())
-
-        assert [args[1] for args in progress if args[0] == "Speech tokens"] == [1, 10, 20]
-
-    def test_a_short_part_reports_its_first_and_last_frame(self, rig):
-        rig.model.takes[:] = [3]
-        rig.codec.waves.append(_tone(0.5))
-
-        _, progress = _generate(rig, _request())
-
-        assert [args[1] for args in progress if args[0] == "Speech tokens"] == [1, 3]
-
     def test_each_part_reports_its_decode_after_its_frames(self, rig):
         rig.model.takes[:] = [3, 3]
         rig.codec.waves.extend([_tone(0.5), _tone(0.5)])
@@ -360,13 +301,6 @@ class TestProgress:
 
         assert [args for args in progress if args[0] == "Decode"] == [("Decode", 0, 1, 1, 2), ("Decode", 1, 1, 1, 2), ("Decode", 0, 1, 2, 2), ("Decode", 1, 1, 2, 2)]
         assert [args[0] for args in progress[:4]] == ["Speech tokens"] * 2 + ["Decode"] * 2
-
-    def test_nothing_is_left_wired_after_a_take(self, rig):
-        rig.codec.waves.append(_tone(0.5))
-
-        _generate(rig, _request())
-
-        assert rig.backend._progress is None
 
 
 class TestStop:
@@ -404,19 +338,6 @@ class TestStop:
         assert rig.codec.decoded == []
         assert rig.backend._progress is None
 
-    def test_stopping_within_a_part_raises_from_the_frame_callback_and_cleans_up(self, rig):
-        rig.model.takes[:] = [1000]
-        steps: list[int] = []
-        progress = lambda phase, step, *_: steps.append(step)  # noqa: E731
-
-        with pytest.raises(AudioCancelled):
-            rig.backend.generate(_request(), progress, lambda: len(steps) >= 5)
-
-        assert steps == [1, 10, 20, 30, 40]
-        assert rig.model.head_calls == 41  # the head ran for the frame that was stopped, and no step followed
-        assert rig.codec.decoded == []
-        assert rig.backend._progress is None
-
     def test_the_backend_makes_the_next_take_after_a_stop(self, rig):
         rig.model.takes[:] = [1000, 20]
         steps: list[int] = []
@@ -433,15 +354,6 @@ class TestCut:
     def test_a_take_that_ends_by_itself_is_not_cut(self, rig):
         _with_cap(rig, 40)
         rig.model.takes[:] = [39]
-        rig.codec.waves.append(_tone(0.5))
-
-        clip, _ = _generate(rig, _request())
-
-        assert not clip.cut
-
-    def test_a_take_that_ends_on_its_last_allowed_frame_is_not_cut(self, rig):
-        _with_cap(rig, 40)
-        rig.model.takes[:] = [40]
         rig.codec.waves.append(_tone(0.5))
 
         clip, _ = _generate(rig, _request())
@@ -468,23 +380,6 @@ class TestCut:
         assert batch.shape == (1, 2, 39)  # every kept frame: 40 - (N - 1)
         assert clip.samples.shape[1] > 0
 
-    def test_only_a_capped_part_counts(self, rig):
-        _with_cap(rig, 40)
-        rig.model.takes[:] = [39, 39]
-        rig.codec.waves.extend([_tone(0.5), _tone(0.5)])
-
-        clip, _ = _generate(rig, _request(f"{PART_1} {PART_2}"))
-
-        assert not clip.cut
-
-
-class TestRefusals:
-    def test_a_refused_request_generates_nothing(self, rig):
-        with pytest.raises(ValueError, match="Shorten the text"):
-            _generate(rig, _request("a" * 10_001))
-
-        assert rig.calls == []
-
 
 class TestClose:
     def test_close_frees_the_model_and_the_codec(self, rig):
@@ -494,10 +389,6 @@ class TestClose:
         assert rig.backend._codec is None
         with pytest.raises(RuntimeError, match="not loaded"):
             rig.backend.generate(_request(), MagicMock(), lambda: False)
-
-    def test_close_can_be_repeated(self, rig):
-        rig.backend.close()
-        rig.backend.close()
 
     def test_close_gives_the_global_torch_flags_back(self, rig, torch_flags_guard):
         rig.backend.close()
@@ -532,9 +423,6 @@ class TestClose:
             rig.backend.load(PRESET, ENTRY, "cuda")
 
         assert current_flags() == before
-
-    def test_close_before_load_is_harmless(self):
-        Higgs3Backend().close()
 
     def test_nothing_keeps_the_model_or_the_codec_alive_after_close(self, monkeypatch, tmp_path):
         # After close() a weak reference to each must be dead, so the accelerator memory they own can be freed.

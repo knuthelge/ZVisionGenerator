@@ -355,7 +355,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         label = model_display_name(config, picked_model)
         try:
-            print_licence_notice(config, picked_model, lambda: image_plan(args.model, family=model_info.family, config=config, platform_key=sys.platform), present=target_present_offline)
+            print_licence_notice(picked_model, lambda: image_plan(args.model, family=model_info.family, config=config, platform_key=sys.platform), present=target_present_offline)
             built = ensure_built_model(
                 args.model,
                 config,
@@ -370,7 +370,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         if args.transparent:
             try:
-                print_licence_notice(config, MATTE_LICENCE_MODEL, matte_plan, present=target_present_offline)
+                print_licence_notice(MATTE_LICENCE_MODEL, matte_plan, present=target_present_offline)
                 _fetch_matte_models()
             except Exception as e:  # noqa: BLE001 - the Hub client raises its own error types; any failure stops the run before a model loads
                 logger.exception("Failed to download the background removal models")

@@ -1,4 +1,4 @@
-import type { DraftState, EnhanceRecord, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, PromptFileOption, Workflow, WorkflowMode } from '$lib/types';
+import type { DraftState, EnhanceRecord, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, PromptFileOption, Workflow, WorkflowMode, WorkspaceWorkflow } from '$lib/types';
 
 /** The enhancer a run uses: Smart when chosen and available here, otherwise Fast. */
 export function effectiveTier(state: Pick<DraftState, 'enhanceModel'>, contract: PromptEnhancerContract | undefined | null): EnhancerTier {
@@ -32,8 +32,9 @@ export function entryEnhanceSpec(option: Pick<PromptFileOption, 'enhance' | 'enh
   return (caption ? option.enhance_caption : option.enhance_image) ?? null;
 }
 
-/** Media mode of a canonical workflow. */
-export function workflowMode(workflow: Workflow): WorkflowMode {
+/** Media mode of a canonical workflow: an audio workflow (the kind of the Audio tab) is its own mode. */
+export function workflowMode(workflow: WorkspaceWorkflow): WorkflowMode {
+  if (workflow === 'music' || workflow === 'speech' || workflow === 'sound') return 'audio';
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'video' : 'image';
 }
 
@@ -50,7 +51,7 @@ export const DEFAULT_ENHANCE_SETTINGS: EnhanceSettings = { style: 'keep', mood: 
  * What Rewrite starts as: an extension keeps its scene and writes the next action, and so does Image to Video, whose scene
  * describes the starting image; Text to Video writes both. A blank Scene still means both (see `runParts`).
  */
-export function defaultParts(workflow: Workflow): EnhanceParts {
+export function defaultParts(workflow: WorkspaceWorkflow): EnhanceParts {
   return workflow === 'extend' || workflow === 'img2vid' ? 'action' : 'both';
 }
 
@@ -72,7 +73,7 @@ export function isDefaultEnhanceSettings(settings: EnhanceSettings, defaults: Pa
 }
 
 /** Restore enhance options from their JSON (a queued job's or an asset's); a Rewrite choice is remembered for *workflow*. */
-export function restoredEnhanceSettings(value: string | undefined, workflow: Workflow | undefined): EnhanceSettings | null {
+export function restoredEnhanceSettings(value: string | undefined, workflow: WorkspaceWorkflow | undefined): EnhanceSettings | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<EnhanceSettings>;
@@ -90,7 +91,7 @@ export function restoredEnhanceSettings(value: string | undefined, workflow: Wor
  * What Reuse restores from an asset's `enhance` record (JSON): the options for *workflow*'s mode, the enhancer (Fast or
  * Smart; a custom model leaves the choice alone), the format, and the record kept with the Enhanced text.
  */
-export function reusedEnhance(value: string | undefined, workflow: Workflow): { settings: EnhanceSettings; tier: EnhancerTier | null; format: EnhanceFormat; record: EnhanceRecord } | null {
+export function reusedEnhance(value: string | undefined, workflow: WorkspaceWorkflow): { settings: EnhanceSettings; tier: EnhancerTier | null; format: EnhanceFormat; record: EnhanceRecord } | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as { settings?: Partial<EnhanceSettings>; model?: unknown; tier?: unknown; format?: unknown };
@@ -106,17 +107,17 @@ export function reusedEnhance(value: string | undefined, workflow: Workflow): { 
 }
 
 /** The draft field that holds the enhance options of *workflow*'s mode: images and video remember theirs apart. */
-export function enhanceSettingsKey(workflow: Workflow): 'enhanceSettings' | 'enhanceSettingsVideo' {
+export function enhanceSettingsKey(workflow: WorkspaceWorkflow): 'enhanceSettings' | 'enhanceSettingsVideo' {
   return workflowMode(workflow) === 'video' ? 'enhanceSettingsVideo' : 'enhanceSettings';
 }
 
 /** The Rewrite choice remembered for the current workflow, or that workflow's default. */
 export function rememberedParts(state: Pick<DraftState, 'workflow' | 'enhanceSettingsVideo'>): EnhanceParts {
-  return state.enhanceSettingsVideo?.partsByWorkflow?.[state.workflow] ?? defaultParts(state.workflow);
+  return state.enhanceSettingsVideo?.partsByWorkflow?.[state.workflow as Workflow] ?? defaultParts(state.workflow);
 }
 
 /** Settings with the Rewrite choice for *workflow* remembered in `partsByWorkflow`; the other fields and workflows are kept. */
-export function withRememberedParts(settings: EnhanceSettings, workflow: Workflow, parts: EnhanceParts): EnhanceSettings {
+export function withRememberedParts(settings: EnhanceSettings, workflow: WorkspaceWorkflow, parts: EnhanceParts): EnhanceSettings {
   return { ...settings, partsByWorkflow: { ...settings.partsByWorkflow, [workflow]: parts } };
 }
 

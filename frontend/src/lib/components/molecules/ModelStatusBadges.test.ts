@@ -59,6 +59,18 @@ describe('memoryFitTitle on a discrete GPU', () => {
   });
 });
 
+describe('memoryFitTitle for an audio model on a discrete GPU', () => {
+  // An audio model's fit is the GPU's alone: its estimate has no system-memory part.
+  const AUDIO_FIT: MemoryFit = { kind: 'discrete', budget_gb: 10, by_quantize: { none: { status: 'tight', required_gb: 8.8 } } };
+
+  it('says what the GPU needs and never prints a missing system-memory figure', () => {
+    const title = memoryFitTitle(AUDIO_FIT, AUDIO_FIT.by_quantize.none);
+
+    expect(title.split('\n')[0]).toBe('Needs ~8.8 GB of GPU memory (this GPU has 10 GB).');
+    expect(title).not.toContain('undefined');
+  });
+});
+
 describe('ModelStatusBadges', () => {
   let target: HTMLDivElement;
   let component: Record<string, unknown> | null = null;

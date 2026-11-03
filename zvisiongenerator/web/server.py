@@ -35,6 +35,7 @@ from PIL import Image, UnidentifiedImageError
 
 from zvisiongenerator.backends import (
     accelerator_memory_budget_or_none as memory_budget,
+    audio_platform_key,
     get_backend_name,
     get_prompt_enhancer_session,
     supports_video_audio,
@@ -46,6 +47,7 @@ from zvisiongenerator.backends import (
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu, smart_budget_bytes
 from zvisiongenerator.converters.convert_checkpoint import H3_MODEL_TYPE, LTX_MODEL_TYPES, MODEL_TYPES, VIDEO_MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_local
+from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
@@ -53,6 +55,8 @@ from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, LtxVideo
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils import app_db
+from zvisiongenerator.utils.audio_preset import AudioPreset
+from zvisiongenerator.utils.audio_request import find_runnable_preset
 from zvisiongenerator.utils.audio_track import probe_track_seconds, require_readable_track
 from zvisiongenerator.utils.atomic_write import write_bytes_atomic
 from zvisiongenerator.utils.config import (
@@ -75,6 +79,7 @@ from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.subprocess_env import utf8_child_env
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
+from zvisiongenerator.utils.licences import load_licences
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
@@ -106,6 +111,9 @@ from zvisiongenerator.utils.video_extend import apply_extend_args, extend_step, 
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow, generation_prompt
+from zvisiongenerator.web.audio_models import runnable_audio_models
+from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields, audio_workflow
+from zvisiongenerator.web.planned_upload import is_planned_upload, planned_form, planned_upload_path
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
 from zvisiongenerator.web.config_contract import (
@@ -160,7 +168,17 @@ from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.presets import create_preset, delete_preset, list_presets, rename_preset, update_preset
-from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, enhancer_delete_target, matte_delete_target, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import (
+    DeleteTarget,
+    audio_delete_target,
+    delete_lora,
+    delete_model,
+    delete_scope,
+    enhancer_delete_target,
+    matte_delete_target,
+    model_delete_target,
+    seedvr2_delete_target,
+)
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, generation_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
@@ -176,6 +194,7 @@ from zvisiongenerator.web.workspace_contract import (
     WORKFLOW_DEFINITIONS,
     build_workflow_contract,
     canonicalize_workflow,
+    workflow_mode,
 )
 
 
@@ -578,6 +597,8 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise ValueError("Request body must be a JSON object.")
     mode = body.get("mode", "image")
+    if mode == "audio":
+        raise ValueError("mode must be 'image' or 'video': audio prompts can't be enhanced.")
     if mode not in ("image", "video"):
         raise ValueError("mode must be 'image' or 'video'.")
     prompt = body.get("prompt")
@@ -765,8 +786,22 @@ class ParsedJob:
     supported_controls: tuple[str, ...]
 
 
-_GENERATE_MODES = ("image", "video")
-"""The modes of ``/api/generate`` and ``/api/generate/plan``; the audio modes join here with their parse and queue halves."""
+@dataclass(frozen=True)
+class ParsedAudioJob:
+    """An audio generate form that passed validation: the job it asks for, ready to queue or to plan the downloads of."""
+
+    request: AudioGenerationRequest
+    preset: AudioPreset
+    config: dict[str, Any]
+    runs: int
+    seed: int | None
+    output_dir: str
+    context: dict[str, Any]
+    supported_controls: tuple[str, ...]
+
+
+_GENERATE_MODES = ("image", "video", "audio")
+"""The modes of ``/api/generate`` and ``/api/generate/plan``."""
 
 
 def _generate_mode(form: Any) -> str:
@@ -782,20 +817,31 @@ def _generate_mode(form: Any) -> str:
 
 
 def _generate_plan_from_form(form: Any) -> dict[str, Any]:
-    """Parse a generate form like a submit does and summarise the downloads its job would start; runs off the event loop."""
+    """Parse a generate form like a submit does and summarise the downloads its job would start; runs off the event loop.
+
+    The uploads are never read or saved: each file stands for itself by name (see :mod:`zvisiongenerator.web.planned_upload`),
+    so only the checks on the fields apply. What the files' contents decide (a readable image, a decodable recording, the voice's
+    length and consent) is checked when the form is submitted.
+    """
     web_config = load_web_config()
+    form = planned_form(form)
     try:
-        parsed = _parse_video_job(form, web_config) if _generate_mode(form) == "video" else _parse_image_job(form, web_config)
-        parts = job_download_parts(parsed.request, parsed.args, parsed.prompts_data, parsed.enhance_by_set, parsed.config, platform_key=sys.platform, model_ref=parsed.model_ref)
+        mode = _generate_mode(form)
+        if mode == "audio":
+            audio = _parse_audio_job(form, web_config)
+            parts = job_download_parts(audio.request, None, None, None, audio.config, platform_key=sys.platform)
+        else:
+            parsed = _parse_video_job(form, web_config) if mode == "video" else _parse_image_job(form, web_config)
+            parts = job_download_parts(parsed.request, parsed.args, parsed.prompts_data, parsed.enhance_by_set, parsed.config, platform_key=sys.platform, model_ref=parsed.model_ref)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _summarize_job_parts(parts, web_config.app_config)
+    return _summarize_job_parts(parts)
 
 
-def _summarize_job_parts(parts: tuple[JobDownloadPart, ...], config: dict[str, Any]) -> dict[str, Any]:
+def _summarize_job_parts(parts: tuple[JobDownloadPart, ...]) -> dict[str, Any]:
     """Return the download dialog's plan for a job's *parts* with their licences, leaving out what a running download already fetches."""
     try:
-        return parts_summary(drop_in_flight(parts, download_flights.active()), config=config)
+        return parts_summary(drop_in_flight(parts, download_flights.active()), licences=load_licences())
     except RuntimeError as exc:
         raise HTTPException(status_code=424, detail=str(exc)) from exc
 
@@ -808,6 +854,8 @@ def _generate_from_form(form: Any) -> JSONResponse:
         mode = _generate_mode(form)
         if mode == "video":
             job_context = _submit_video_job(form, web_config)
+        elif mode == "audio":
+            job_context = _submit_audio_job(form, web_config)
         else:
             job_context = _submit_image_job(form, web_config)
     except JobConflictError as exc:
@@ -877,8 +925,8 @@ def _public_job_context(
     prompt: str,
     runs: int,
     meta: str,
-    width: int,
-    height: int,
+    width: int | None,
+    height: int | None,
     output_dir: str,
     uploads: dict[str, str | list[str] | None],
 ) -> dict[str, Any]:
@@ -980,7 +1028,7 @@ def _upscale_plan_from_body(body: Any) -> dict[str, Any]:
         parts = job_download_parts(parsed.request, None, None, None, parsed.config, platform_key=sys.platform, model_ref=parsed.model_ref)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _summarize_job_parts(parts, parsed.config)
+    return _summarize_job_parts(parts)
 
 
 def _upscale_from_body(body: Any) -> JSONResponse:
@@ -1221,7 +1269,7 @@ def _build_workspace_response(web_config: WebUiConfig, history_assets: list[dict
         prompt_sources=list(PROMPT_SOURCE_VALUES),
         default_prompt_source=DEFAULT_PROMPT_SOURCE,
         prompt_file_contract=dict(PROMPT_FILE_CONTRACT),
-        workflow_contract=_build_workflow_contract(),
+        workflow_contract=_build_workflow_contract(web_config.app_config),
         build_bootstrap_view=_build_workspace_bootstrap_view,
     )
 
@@ -1251,13 +1299,22 @@ def _workflow_from_form(value: str | None, *, fallback: str) -> str:
         return fallback
     workflow = _canonicalize_workflow(value)
     if workflow is None:
-        valid = ", ".join(CANONICAL_WORKFLOW_VALUES)
+        valid = ", ".join(name for name in CANONICAL_WORKFLOW_VALUES if workflow_mode(name) != "audio")
         raise ValueError(f"Unknown workflow '{value}'. Valid workflows: {valid}.")
+    if workflow_mode(workflow) == "audio":
+        raise ValueError(f"Workflow '{workflow}' makes audio: send mode=audio.")
     return workflow
 
 
-def _build_workflow_contract() -> dict[str, Any]:
-    return build_workflow_contract(video_audio=supports_video_audio(), video_upscale_review=supports_video_upscale_review(), video_extend=supports_video_extend())
+def _build_workflow_contract(app_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the workflow contract; the audio workflows are listed for the kinds of the models in *app_config* that run on this machine."""
+    audio_models, _platform_key = runnable_audio_models(app_config or {})
+    return build_workflow_contract(
+        video_audio=supports_video_audio(),
+        video_upscale_review=supports_video_upscale_review(),
+        video_extend=supports_video_extend(),
+        audio_kinds={preset.kind for preset in audio_models},
+    )
 
 
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
@@ -1585,7 +1642,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     )
     if refusal is not None:
         raise ValueError(refusal)
-    if audio_track is not None:
+    if audio_track is not None and not is_planned_upload(form.get(_upload_field("audio_track_path"))):
         # An unreadable track is refused here, before the model loads; a short track, or a Start at past its end, is allowed (silence fills the rest).
         require_readable_track(audio_track)
     args.audio_track = audio_track
@@ -1660,6 +1717,127 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         context=context,
         supported_controls=generation_supported_controls(review=review_enabled(args)),
     )
+
+
+def _submit_audio_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
+    """Parse an audio generate form and queue its job."""
+    return _queue_audio_job(_parse_audio_job(form, web_config))
+
+
+def _queue_audio_job(parsed: ParsedAudioJob) -> dict[str, Any]:
+    """Queue the audio job *parsed* describes."""
+    job_id = web_runner.submit_audio_request_job(
+        request=parsed.request,
+        preset=parsed.preset,
+        config=parsed.config,
+        runs=parsed.runs,
+        seed=parsed.seed,
+        output_dir=parsed.output_dir,
+        admission_check=_reject_while_busy,
+        context=parsed.context,
+        supported_controls=parsed.supported_controls,
+    )
+    return {"job_id": job_id, "context": parsed.context, "supported_controls": parsed.supported_controls}
+
+
+_AUDIO_JOB_TYPES = {"music": "Music", "speech": "Speech", "sound": "Sound"}
+
+
+def _parse_audio_job(form: Any, web_config: WebUiConfig) -> ParsedAudioJob:
+    """Validate an audio generate form (music, speech or sound) and describe the job it asks for, without queueing it.
+
+    The fields are the ones Copy CLI reads (``workflow``, ``model``, ``prompt``, ``lyrics``, ``seconds``, ``voice_path`` or the
+    ``voice_file`` upload, ``voice_text``, ``voice_consent``, ``seed`` and ``runs``) and the request is the one ``ziv audio`` builds.
+
+    Raises:
+        ValueError: If the form is invalid: no runnable model, a wrong workflow, a blank prompt, a field the model does not take,
+            a length out of range, a voice without its transcript or consent, or speech over the model's limits.
+    """
+    app_config = web_config.app_config
+    try:
+        platform_key = audio_platform_key()
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    preset = find_runnable_preset(app_config, platform_key, _optional_text(form, "model"), missing="Field 'model' is required")
+    workflow = audio_workflow(_optional_text(form, "workflow"), preset)
+    runs = _optional_int(form, "runs") or 1
+    if runs < 1:
+        raise ValueError("Runs must be at least 1.")
+    output_dir = _resolve_output_dir(web_config.output_dir)
+    fields = AudioFields(
+        prompt=_untrimmed_text(form, "prompt"),
+        lyrics=_untrimmed_text(form, "lyrics"),
+        seconds=_optional_float(form, "seconds"),
+        voice_path=_resolve_voice_file(form, output_dir) if preset.kind == "speech" else None,
+        voice_text=_optional_text(form, "voice_text"),
+        voice_consent=_checkbox(form, "voice_consent"),
+        voice_unread=is_planned_upload(form.get(_upload_field("voice_path"))),
+    )
+    request = audio_request_from_fields(preset, fields)
+    try:
+        require_ffmpeg()
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    context = _public_job_context(
+        form,
+        job_type=_AUDIO_JOB_TYPES[workflow],
+        workflow=workflow,
+        model=preset.id,
+        model_label=preset.label,
+        prompt=request.prompt,
+        runs=runs,
+        meta=_audio_job_meta(request, preset),
+        width=None,
+        height=None,
+        output_dir=output_dir,
+        uploads={"voice_path": request.voice.path if request.voice is not None else None},
+    )
+    context["media_type"] = "audio"
+    # The tick is never saved: the job's recorded settings (job log, Load settings, Retry) come back with it off.
+    context["settings"].pop("voice_consent", None)
+    return ParsedAudioJob(
+        request=request,
+        preset=preset,
+        config=app_config,
+        runs=runs,
+        seed=_optional_int(form, "seed"),
+        output_dir=output_dir,
+        context=context,
+        supported_controls=generation_supported_controls(review=False),
+    )
+
+
+def _audio_job_meta(request: AudioGenerationRequest, preset: AudioPreset) -> str:
+    """Return the one-line summary a queued audio job shows: the model, then the length of a sound or the size of the text and whether it follows a voice."""
+    parts = [preset.label]
+    if request.seconds is not None:
+        parts.append(f"{request.seconds:g} s")
+    if request.kind == "speech":
+        parts.append(f"{len(request.prompt)} characters")
+        if request.voice is not None:
+            parts.append("voice")
+    return " · ".join(parts)
+
+
+def _untrimmed_text(form: Any, key: str) -> str:
+    """Return a text field exactly as submitted (the text of a take keeps its spaces), or an empty string when it is missing."""
+    value = form.get(key)
+    return "" if value is None else str(value)
+
+
+def _resolve_voice_file(form: Any, output_dir: str) -> str | None:
+    """Return the voice recording an audio form carries: an upload (saved under the output folder) wins over a typed path, ``None`` for neither.
+
+    Raises:
+        ValueError: When an upload is not a WAV, MP3, M4A, FLAC or OGG file, or a typed path is a URL or not an existing file.
+    """
+    uploaded_file = form.get(_upload_field("voice_path"))
+    if is_planned_upload(uploaded_file):
+        return planned_upload_path(uploaded_file, output_dir)
+    if _is_uploaded_file(uploaded_file):
+        return _save_upload(uploaded_file, output_dir, audio=True, label="Voice recording")
+    path = _optional_text(form, "voice_path")
+    return None if path is None else _host_local_file(path, "voice_path", resolve=False)
 
 
 def _resolve_prompt_submission_with_enhance(
@@ -1789,6 +1967,8 @@ def _resolve_audio_track_file(form: Any, output_dir: str) -> str | None:
         ValueError: When an upload is not a WAV, MP3, M4A, FLAC or OGG file.
     """
     uploaded_file = form.get(_upload_field("audio_track_path"))
+    if is_planned_upload(uploaded_file):
+        return planned_upload_path(uploaded_file, output_dir)
     if _is_uploaded_file(uploaded_file):
         return _save_upload(uploaded_file, output_dir, audio=True)
     return _optional_text(form, "audio_track_path")
@@ -1873,8 +2053,8 @@ def _optional_path(form: Any, key: str) -> str | None:
     return None if value is None else _host_local_file(value, key)
 
 
-def _host_local_file(value: str, key: str) -> str:
-    """Return the resolved path of the existing file on the Web UI host that *value* names.
+def _host_local_file(value: str, key: str, *, resolve: bool = True) -> str:
+    """Return the path of the existing file on the Web UI host that *value* names, resolved unless *resolve* is false (``~`` is expanded either way).
 
     Raises:
         ValueError: When *value* is a URL or not an existing file; *key* names the field in the message.
@@ -1884,7 +2064,7 @@ def _host_local_file(value: str, key: str) -> str:
     path = Path(value).expanduser()
     if not path.is_file():
         raise ValueError(f"Path '{path}' for '{key}' must be an existing host-local file.")
-    return str(path.resolve())
+    return str(path.resolve() if resolve else path)
 
 
 def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[str, Any]:
@@ -1968,6 +2148,8 @@ def _resolve_reference_image(form: Any, output_dir: str, *, path_key: str = "ima
         path_key: The path field to read; its upload field is derived from it (``end_image_path`` -> ``end_image_file``).
     """
     uploaded_file = form.get(_upload_field(path_key))
+    if is_planned_upload(uploaded_file):
+        return planned_upload_path(uploaded_file, output_dir)
     if _is_uploaded_file(uploaded_file):
         return _save_upload(uploaded_file, output_dir)
     return _optional_path(form, path_key)
@@ -1988,7 +2170,9 @@ def _resolve_reference_images(form: Any, output_dir: str) -> list[str]:
     """
     paths: list[str] = []
     for value in _form_values(form, REFERENCE_FIELD):
-        if _is_uploaded_file(value):
+        if is_planned_upload(value):
+            paths.append(planned_upload_path(value, output_dir))
+        elif _is_uploaded_file(value):
             paths.append(_save_upload(value, output_dir))
         elif isinstance(value, str) and value.strip():
             path = _host_local_file(value.strip(), REFERENCE_FIELD)
@@ -2014,8 +2198,8 @@ def _is_uploaded_file(value: Any) -> bool:
     return bool(getattr(value, "filename", None) and getattr(value, "file", None))
 
 
-def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False) -> str:
-    """Save an uploaded image (or, with *audio*, an audio track) under ``.web_uploads``, keyed by the hash of its content so the same file is saved once.
+def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False, label: str = "Audio track") -> str:
+    """Save an uploaded image (or, with *audio*, an audio file) under ``.web_uploads``, keyed by the hash of its content so the same file is saved once.
 
     An image is saved as ``<hash>.<ext>``. An audio track keeps its own name, so the Web UI can show it later:
     ``<hash>/<name>``, with the name cleaned of anything but letters, digits, spaces and ``._-()``.
@@ -2026,7 +2210,8 @@ def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False) ->
     Args:
         uploaded_file: The uploaded file.
         output_dir: The output folder uploads are saved under.
-        audio: Whether the file is an audio track rather than an image.
+        audio: Whether the file is an audio file (a video's track or a speech voice) rather than an image.
+        label: What an audio file is called in the error message.
 
     Returns:
         The path of the saved file; a file already there (same content, same name) is left as it is.
@@ -2037,7 +2222,7 @@ def _save_upload(uploaded_file: Any, output_dir: str, *, audio: bool = False) ->
     suffix = Path(Path(str(uploaded_file.filename)).name).suffix.lower() or ("" if audio else ".png")
     if audio:
         if suffix not in AUDIO_TRACK_EXTENSIONS:
-            raise ValueError("Audio track must be a WAV, MP3, M4A, FLAC, or OGG file.")
+            raise ValueError(f"{label} must be a WAV, MP3, M4A, FLAC, or OGG file.")
     elif suffix not in IMAGE_EXTENSIONS:
         raise ValueError("Image must be a PNG, JPEG, or WebP file.")
     uploaded_file.file.seek(0)
@@ -2540,7 +2725,7 @@ async def api_models_download_plan(kind: str, name: str) -> dict[str, Any]:
     except RuntimeError as exc:
         raise HTTPException(status_code=424, detail=str(exc)) from exc
     try:
-        return await run_in_threadpool(partial(plan_summary, plan, config=web_config.app_config))
+        return await run_in_threadpool(partial(plan_summary, plan, licences=load_licences()))
     except PlanUnchecked as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -2606,6 +2791,27 @@ def api_delete_model(name: str) -> dict[str, Any]:
     messages = {"installed": f"Deleted model '{name}'.", "copy": f"Deleted the prepared copy of '{name}'."}
     message = messages.get(target.kind, f"Deleted the HuggingFace download of '{target.repo_id}'.")
     return {"status": "ok", "tone": "success", "message": message}
+
+
+@app.delete("/api/audio-models/{name}")
+def api_delete_audio_model(name: str) -> dict[str, Any]:
+    """Delete the downloads of the audio model *name*; its preset stays in config."""
+    _ensure_no_active_job()
+    web_config = load_web_config()
+    presets, platform_key = runnable_audio_models(web_config.app_config)
+    preset = next((item for item in presets if item.id == name), None)
+    target = audio_delete_target(preset, platform_key) if preset is not None and platform_key is not None else None
+    if preset is None or target is None or not target.on_disk:
+        raise HTTPException(status_code=404, detail=f"No downloaded audio model named '{name}'.")
+    # Every repository of the plan counts, also one the running download has not created in the cache yet.
+    _ensure_not_downloading(repo_ids=tuple(files.repo_id for files in preset.platforms[platform_key].files), paths=(target.path,))
+    try:
+        delete_model(target)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Audio model '{name}' has nothing on disk to delete.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete audio model '{name}': {exc}") from exc
+    return {"status": "ok", "tone": "success", "message": f"Deleted the downloads of {preset.label}."}
 
 
 @app.delete("/api/enhancer-models/{tier}")
@@ -2951,7 +3157,7 @@ def api_clear_job_log() -> dict[str, int]:
 
 
 @app.get("/api/recent-prompts")
-def api_recent_prompts(mode: Literal["image", "video"], q: str = "") -> dict[str, Any]:
+def api_recent_prompts(mode: Literal["image", "video", "audio"], q: str = "") -> dict[str, Any]:
     """Return the newest recent prompts of *mode* whose prompt or scene contains *q*, newest first."""
     try:
         return {"entries": recent_prompts.search(q, mode)}
@@ -2960,7 +3166,7 @@ def api_recent_prompts(mode: Literal["image", "video"], q: str = "") -> dict[str
 
 
 @app.delete("/api/recent-prompts")
-def api_clear_recent_prompts(mode: Literal["image", "video"]) -> dict[str, int]:
+def api_clear_recent_prompts(mode: Literal["image", "video", "audio"]) -> dict[str, int]:
     """Remove every recent prompt of *mode* and return how many there were."""
     try:
         return {"deleted_count": recent_prompts.clear(mode)}

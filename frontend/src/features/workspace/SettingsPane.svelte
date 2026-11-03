@@ -15,7 +15,9 @@
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
   import AudioTrackSection from './AudioTrackSection.svelte';
+  import { soundRange, type AudioView } from './audioView';
   import type { AudioTrackView } from './audioTrackView';
+  import VoiceSection from './VoiceSection.svelte';
   import ImagesSection from './ImagesSection.svelte';
   import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
@@ -36,6 +38,8 @@
     images: ImagesView;
     /** The audio track view of the open tab, computed once by the Workspace: Generate waits while an uploaded track is gone. */
     audioTrack: AudioTrackView;
+    /** The Audio tab's view of the open kind, computed once by the Workspace: Generate waits while it has a reason. */
+    audio: AudioView;
     /** Copy the CLI command for the current settings; the button is hidden without it. */
     oncopycli?: () => void;
     /** Off: the footer closes the pane (`ondone`) instead of generating, where another button owns Generate. */
@@ -43,7 +47,7 @@
     ondone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, submitError = null, lastSeed, images, audioTrack, oncopycli, submit = true, ondone }: Props = $props();
+  let { context, busy, jobsActive = false, submitError = null, lastSeed, images, audioTrack, audio, oncopycli, submit = true, ondone }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -70,6 +74,14 @@
 
   function setSeconds(seconds: number | null): void {
     if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
+  }
+
+  // --- Length of a sound: from the shortest sound to the model's longest ---
+  const audioModel = $derived(context.audio_models?.find((entry) => entry.id === s.model) ?? null);
+  const lengthSpec = $derived({ step: 1, ...soundRange(audioModel) });
+
+  function setLength(seconds: number): void {
+    draft.update('audioSeconds', Math.min(lengthSpec.max, Math.max(lengthSpec.min, seconds)));
   }
 
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
@@ -133,6 +145,7 @@
       caps.showDimensions && changed('dimensionMode'),
       caps.showRuns && changed('runs'),
       caps.showFrameCount && changed('frameCount'),
+      caps.showLength && changed('audioSeconds'),
       caps.showExtendLength && extendDefaultFrames !== null && s.extendFrames !== extendDefaultFrames,
       caps.showSteps && changed('steps'),
       caps.showGuidance && changed('guidance'),
@@ -165,6 +178,7 @@
       caps.showSteps ? `${s.steps} steps` : null,
       caps.showGuidance ? `cfg ${s.guidance}` : null,
       caps.showSeed ? (s.seed !== null ? `seed ${s.seed}` : 'random seed') : null,
+      caps.showLength ? `${s.audioSeconds} s` : null,
     ].filter(Boolean).join(' · ')
   );
   const postprocessOn = $derived(
@@ -194,16 +208,18 @@
   }
 
   // --- Footer ---------------------------------------------------------------
-  const promptFileMode = $derived(s.promptSource === 'file');
+  const promptFileMode = $derived(s.promptSource === 'file' && !caps.isAudio);
   const promptChoiceMissing = $derived(promptFileMode && s.promptFileOptionIds.length === 0);
   // A LoRA chip whose file is downloading (or failed) holds Generate back.
   const block = $derived(generateBlock(s.loraString, context.loras));
   const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : null);
   const imageBlock = $derived(images.block);
   const trackBlock = $derived(audioTrack.block);
-  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked);
+  const audioReason = $derived(audio.active ? audio.reason : null);
+  const submitDisabled = $derived(busy || audioReason !== null || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked);
   // One reason at a time, linked to Generate: the source comes first, then the images, the audio track, then the prompt file.
-  const generateReason = $derived(sourceGuard.note ?? imageBlock ?? trackBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
+  // On the Audio tab the one reason is its own, in the order the boxes are read.
+  const generateReason = $derived(audio.active ? audioReason : (sourceGuard.note ?? imageBlock ?? trackBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null)));
 
   function resetAll(): void {
     draft.resetSelections(context);
@@ -280,10 +296,20 @@
       </InspectorSection>
     {/if}
 
+    {#if caps.showVoice}
+      <VoiceSection voice={audio.voice} />
+    {/if}
+
     <InspectorSection id="sampling" title="Sampling" summary={samplingSummary}>
       {#if caps.showRuns}
         <InspectorRow label="Batch size" forId="ws-runs" scrubber={scrubber(s.runs, SPEC.runs, (v) => draft.update('runs', v))} changed={changed('runs')} onreset={() => reset('runs')}>
           <InspectorNumber id="ws-runs" name="runs" value={s.runs} {...SPEC.runs} onchange={(v) => v !== null && draft.update('runs', v)} />
+        </InspectorRow>
+      {/if}
+      {#if caps.showLength}
+        <InspectorRow label="Length (s)" forId="ws-length" scrubber={scrubber(s.audioSeconds, lengthSpec, setLength)} changed={changed('audioSeconds')} onreset={() => reset('audioSeconds')}>
+          <InspectorNumber id="ws-length" value={s.audioSeconds} {...lengthSpec} commitOnly onchange={(v) => v !== null && setLength(v)} />
+          <span class="frame-count" data-testid="length-max">max {lengthSpec.max}</span>
         </InspectorRow>
       {/if}
       {#if caps.showFrameCount}
@@ -583,7 +609,7 @@
         type="button"
         disabled={busy}
         onclick={resetAll}
-        title="Reset settings and images to model defaults (keeps model, LoRAs, quantization and prompt)"
+        title={audio.active ? 'Clear the Audio tab: the text, the voice, the length, the batch and the seed (keeps the kind and the models)' : 'Reset settings and images to model defaults (keeps model, LoRAs, quantization and prompt)'}
         aria-label="Reset settings"
         class="ui-btn"
       >

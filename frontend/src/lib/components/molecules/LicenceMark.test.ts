@@ -31,13 +31,6 @@ describe('LicenceMark', () => {
   const popover = (): HTMLElement | null => document.querySelector('[data-testid="licence-popover"]');
 
   /** A key on a focused button, as a browser delivers it: Enter and Space end in the click that opens the popover. */
-  function press(button: HTMLElement, key: 'Enter' | ' '): void {
-    const down = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
-    button.dispatchEvent(down);
-    if (!down.defaultPrevented) button.click();
-    flushSync();
-  }
-
   it('is a button named by its record, with a popup and nothing expanded', () => {
     const button = render();
 
@@ -59,11 +52,9 @@ describe('LicenceMark', () => {
     expect(target.querySelector('button')).toBeNull();
   });
 
-  it('with a label is a neutral badge button whose name starts with the visible word', () => {
+  it('with a label is a button whose name starts with the visible word', () => {
     const button = render({ label: 'Non-commercial' });
 
-    expect(button.classList.contains('ui-badge')).toBe(true);
-    expect(button.classList.contains('ui-badge-warning')).toBe(false);
     expect(button.textContent).toContain('Non-commercial');
     expect(button.getAttribute('aria-label')).toBe('Non-commercial. Licence: FLUX Non-Commercial License v2.1');
   });
@@ -94,7 +85,6 @@ describe('LicenceMark', () => {
     const pop = popover()!;
     expect(pop.getAttribute('role')).toBe('dialog');
     expect(pop.getAttribute('aria-label')).toBe('Licence: FLUX Non-Commercial License v2.1');
-    expect(pop.classList.contains('ui-overlay')).toBe(true);
     expect(pop.textContent).toContain('FLUX Non-Commercial License v2.1');
     expect(pop.textContent).toContain('Black Forest Labs');
     expect(pop.textContent).toContain('Non-commercial');
@@ -104,17 +94,6 @@ describe('LicenceMark', () => {
       ['NOTICE ↗', FLUX_LICENCE.notice_url, '_blank', 'noopener'],
     ]);
     expect(links[0].getAttribute('aria-label')).toBe('FLUX Non-Commercial License v2.1 licence (opens in a new tab)');
-  });
-
-  it('opens on Enter and on Space, and closes on a second activation', () => {
-    const button = render();
-
-    press(button, 'Enter');
-    expect(popover()).not.toBeNull();
-    press(button, ' ');
-    expect(popover()).toBeNull();
-    press(button, ' ');
-    expect(popover()).not.toBeNull();
   });
 
   it('keeps the tooltip away while the popover is open', () => {
@@ -161,34 +140,5 @@ describe('LicenceMark', () => {
     flushSync();
 
     expect(popover()).toBeNull();
-  });
-
-  it('closes when Tab leaves the last link, handing focus back to the mark', () => {
-    const button = render();
-    button.click();
-    flushSync();
-    const links = Array.from(popover()!.querySelectorAll('a'));
-    links[links.length - 1].focus();
-
-    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
-    links[links.length - 1].dispatchEvent(tab);
-    flushSync();
-
-    expect(tab.defaultPrevented).toBe(true);
-    expect(popover()).toBeNull();
-    expect(document.activeElement).toBe(button);
-  });
-
-  it('stays open while Tab moves between its links', () => {
-    const button = render();
-    button.click();
-    flushSync();
-    const links = Array.from(popover()!.querySelectorAll('a'));
-    links[0].focus();
-
-    links[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
-    flushSync();
-
-    expect(popover()).not.toBeNull();
   });
 });

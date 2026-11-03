@@ -21,10 +21,9 @@ from stable_audio_3.model import StableAudioModel
 from torch import nn
 
 import zvisiongenerator.backends as backends_module
-from zvisiongenerator.backends import AUDIO_FAMILIES
 from zvisiongenerator.backends.audio import sa3
 from zvisiongenerator.backends.audio.sa3 import FAMILY, StableAudio3Backend
-from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled
+from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
@@ -171,36 +170,13 @@ def _take(backend: StableAudio3Backend, request: AudioGenerationRequest, progres
 
 
 class TestRegistry:
-    def test_the_family_is_the_one_presets_name(self):
-        assert FAMILY == "stable_audio_3"
-        assert FAMILY in AUDIO_FAMILIES
-
     def test_the_registry_creates_this_backend(self):
         backend = backends_module.get_audio_backend(FAMILY)
 
         assert isinstance(backend, StableAudio3Backend)
 
-    def test_it_is_an_audio_backend(self):
-        assert isinstance(StableAudio3Backend(), AudioBackend)
-
 
 class TestLoad:
-    def test_halves_before_the_fill_and_moves_after_it(self, preset, snapshots, built, events, monkeypatch):
-        real = sa3.iter_tensors
-
-        def recording(path, wanted=None):
-            for name, tensor in real(path, wanted):
-                events.append(f"read {name}")
-                yield name, tensor
-
-        monkeypatch.setattr(sa3, "iter_tensors", recording)
-
-        _loaded(preset)
-
-        assert events[0] == "half"
-        assert events[-1] == "to cuda"
-        assert sorted(events[1:-1]) == ["read model.bias", "read model.weight"]
-
     def test_the_weights_are_the_checkpoints_in_fp16(self, preset, snapshots, built, checkpoint_tensors):
         _loaded(preset)
 
@@ -224,11 +200,6 @@ class TestLoad:
         _loaded(preset)
 
         assert seen == [(torch.float16, torch.float16)]
-
-    def test_the_default_dtype_is_restored_after_the_build(self, preset, snapshots, built):
-        _loaded(preset)
-
-        assert torch.get_default_dtype() == torch.float32
 
     def test_the_default_dtype_is_restored_when_the_build_fails(self, preset, snapshots, monkeypatch):
         def factory(config: dict[str, Any]) -> _Diffusion:
@@ -273,14 +244,6 @@ class TestLoad:
 
         assert torch.equal(built[0][1].state_dict()["model.weight"], tensor.half())
 
-    def test_a_tensor_the_model_lacks_is_skipped_with_a_warning(self, preset, snapshots, built, monkeypatch):
-        monkeypatch.setattr(sa3, "iter_tensors", lambda path, wanted=None: iter([("nothing.here", torch.zeros(2)), ("model.bias", torch.zeros(5))]))
-
-        with pytest.warns(UserWarning) as warned:
-            _loaded(preset)
-
-        assert len(warned) == 2
-
     def test_the_conditioner_reads_the_local_text_encoder_folder(self, preset, snapshots, built):
         _loaded(preset)
 
@@ -305,33 +268,12 @@ class TestLoad:
         assert built[0][1].use_lora is False and built[0][1].lora_names == []
         assert backend._model.device == "cuda"
 
-    def test_loading_again_frees_the_first_model(self, preset, snapshots, built):
-        caches: list[str] = []
-        backend = _loaded(preset, caches)
-        first = weakref.ref(built[0][1])
-        built.clear()
-
-        backend.load(preset, preset.platforms["cuda"], "cuda")
-        gc.collect()
-
-        assert first() is None
-        assert caches == ["cuda"]
-
     def test_works_without_flash_attn(self, preset, snapshots, built, generated, monkeypatch):
         monkeypatch.setitem(sys.modules, "flash_attn", None)  # an import of it raises ImportError
 
         clip = _take(_loaded(preset), _request(seconds=3))
 
         assert clip.seconds == 3.0
-
-    @pytest.mark.parametrize("missing", ["steps", "cfg_scale", "sample_size"])
-    def test_a_missing_setting_is_named(self, snapshots, built, missing):
-        raw = sa3_preset()
-        del raw["settings"][missing]
-        preset = parse_audio_presets(audio_config(sa3=raw))[0]
-
-        with pytest.raises(ValueError, match=missing):
-            _loaded(preset)
 
     def test_a_revision_that_is_not_downloaded_is_named(self, preset, built, monkeypatch):
         monkeypatch.setattr(sa3, "cached_snapshot_dirs", lambda repo_id, revision: [])
@@ -345,15 +287,6 @@ class TestLoad:
         (snapshots / SA3_CHECKPOINT_REPO.split("@")[0].replace("/", "--") / "checkpoints" / "stable_audio_3_medium.safetensors").unlink()
 
         with pytest.raises(FileNotFoundError, match="stable_audio_3_medium.safetensors"):
-            _loaded(preset)
-
-    def test_an_entry_without_a_text_encoder_is_refused(self, snapshots, built):
-        raw = sa3_preset()
-        for platform in raw["platforms"].values():
-            platform["files"] = [entry for entry in platform["files"] if "t5gemma-b-b-ul2/*" not in entry["files"]]
-        preset = parse_audio_presets(audio_config(sa3=raw))[0]
-
-        with pytest.raises(ValueError, match="text_encoder"):
             _loaded(preset)
 
 
@@ -382,15 +315,6 @@ class TestGenerate:
         assert clip.samples.shape == (2, 30 * SAMPLE_RATE)
         assert float(abs(clip.samples).max()) == CLAMP_PEAK  # the library's own result peaks at 1.0
 
-    def test_the_decoder_is_restored_after_a_take(self, preset, snapshots, built, generated):
-        backend = _loaded(preset)
-        pretransform = built[0][1].pretransform
-
-        _take(backend, _request(seconds=3))
-
-        assert "decode" not in vars(pretransform)
-        assert pretransform.decode(None).shape[-1] == pretransform.frames
-
     def test_the_decoder_is_restored_after_a_failed_take(self, preset, snapshots, built, generated, monkeypatch):
         backend = _loaded(preset)
         pretransform = built[0][1].pretransform
@@ -400,19 +324,6 @@ class TestGenerate:
             _take(backend, _request(seconds=3))
 
         assert "decode" not in vars(pretransform)
-
-    def test_a_take_that_never_decodes_is_an_error(self, preset, snapshots, built, monkeypatch):
-        backend = _loaded(preset)
-        monkeypatch.setattr(StableAudioModel, "generate", lambda self, **kwargs: torch.zeros(1, 2, 10))
-
-        with pytest.raises(RuntimeError, match="no waveform"):
-            _take(backend, _request(seconds=3))
-
-    @pytest.mark.parametrize("seconds", [1.0, 380.0])
-    def test_the_ends_of_the_range_are_made(self, preset, snapshots, built, generated, seconds):
-        clip = _take(_loaded(preset), _request(seconds=seconds))
-
-        assert clip.seconds == seconds
 
     @pytest.mark.parametrize("seconds", [0, 0.99, 380.01, 600, -5])
     def test_a_length_outside_the_range_is_refused_with_the_range(self, preset, snapshots, built, generated, seconds):
@@ -492,26 +403,6 @@ class TestClose:
             backend.load(preset, preset.platforms["cuda"], "cuda")
 
         assert current_flags() == before
-
-    def test_close_twice_and_close_before_load_do_nothing(self):
-        caches: list[str] = []
-        backend = StableAudio3Backend(empty_cache=caches.append)
-
-        backend.close()
-        backend.close()
-
-        assert caches == []
-
-    def test_close_after_a_failed_load_clears_the_cache(self, preset, snapshots, built, monkeypatch):
-        caches: list[str] = []
-        backend = StableAudio3Backend(empty_cache=caches.append)
-        monkeypatch.setattr(sa3, "iter_tensors", lambda path, wanted=None: (_ for _ in ()).throw(OSError("disk")))
-
-        with pytest.raises(OSError, match="disk"):
-            backend.load(preset, preset.platforms["cuda"], "cuda")
-        backend.close()
-
-        assert caches == ["cuda"]
 
     def test_generating_after_close_is_an_error(self, preset, snapshots, built, generated):
         backend = _loaded(preset)

@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { draft } from '$lib/state/draft.svelte';
 import type { AssetUpscaleFactor, DraftState, GalleryAsset } from '$lib/types';
 
+import { AUDIO_MODELS, makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
-import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, workflowLabel } from './assetActions';
+import { assetAspect, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceFits, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -221,6 +222,57 @@ describe('useAsState', () => {
 
     const none = useAsState(context(), state({ workflow: 'txt2img', model: 'ideogram' }));
     expect(none.reference).toEqual({ disabled: true, hint: 'Ideogram 4 takes none' });
+  });
+});
+
+describe('Use as for audio takes', () => {
+  const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, lastImageModel: '', lastVideoModel: '', referenceImagePaths: [], ...overrides });
+  const context = (overrides: Partial<ReturnType<typeof makeContext>> = {}) => makeContext({
+    video_models: [{ id: 'ltx-8', label: 'LTX 2.3', type: 'video' }, { id: 'h3', label: 'MiniMax H3', type: 'video' }],
+    video_model_defaults: { 'ltx-8': makeVideoDefaults(), h3: makeVideoDefaults({ hidden_controls: ['audio_track'] }) },
+    current_video_model: 'ltx-8',
+    audio_models: AUDIO_MODELS,
+    ...overrides,
+  });
+
+  it('offers a take as the audio track and a speech take as a voice, only with a file on the host', () => {
+    expect(canUseAsAudioTrack(makeAudioAsset())).toBe(true);
+    expect(canUseAsAudioTrack(makeAudioAsset({ file_path: undefined }))).toBe(false);
+    expect(canUseAsAudioTrack(makeAudioAsset({ media_type: 'video' }))).toBe(false);
+    expect(canUseAsVoice(makeSpeechAsset())).toBe(true);
+    expect(canUseAsVoice(makeAudioAsset())).toBe(false);
+  });
+
+  it('routes a voice to the Speech tab with its text, and asks for the consent tick only for a cloned take', () => {
+    expect(voiceParams(makeSpeechAsset())).toEqual({ workflow: 'speech', voice_path: '/outputs/out/speech.flac', voice_text: 'Welcome back to the workshop.', use_as: 'voice' });
+    expect(voiceParams(makeSpeechAsset({ has_reference_voice: true }))).toEqual({
+      workflow: 'speech', voice_path: '/outputs/out/speech.flac', voice_text: 'Welcome back to the workshop.', use_as: 'voice', voice_clone: 'true',
+    });
+  });
+
+  it('allows a voice of 30 s or less, or the limit of the speech model', () => {
+    expect(voiceFits(makeSpeechAsset({ duration: 30 }))).toBe(true);
+    expect(voiceFits(makeSpeechAsset({ duration: 30.5 }))).toBe(false);
+    expect(voiceFits(makeSpeechAsset({ duration: null }))).toBe(true);
+    expect(voiceFits(makeSpeechAsset({ duration: 45 }), { voiceMaxSeconds: 60 })).toBe(true);
+    expect(voiceTooLongReason()).toBe('Use a take of 30 s or less as a voice');
+  });
+
+  it('enables the audio track on a video model that follows one, with its hint, and says why on one that cannot', () => {
+    const ok = useAsState(context(), state({ workflow: 'txt2vid', model: 'ltx-8' }));
+    expect(ok.audio_track).toEqual({ disabled: false, hint: 'Video tab, from 0 s' });
+
+    const no = useAsState(context(), state({ workflow: 'txt2vid', model: 'h3' }));
+    expect(no.audio_track).toEqual({ disabled: true, hint: "MiniMax H3 can't follow an audio track" });
+  });
+
+  it('enables the voice with a speech model that clones one, and takes its voice limit', () => {
+    const result = useAsState(context(), state());
+    expect(result.voice).toEqual({ disabled: false, hint: 'Speech, text filled in' });
+    expect(result.voiceMaxSeconds).toBe(30);
+
+    const none = useAsState(context({ audio_models: [AUDIO_MODELS[0]] }), state());
+    expect(none.voice).toEqual({ disabled: true, hint: 'No speech model here can use a voice' });
   });
 });
 

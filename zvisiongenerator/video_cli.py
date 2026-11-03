@@ -597,9 +597,7 @@ def main(*, prog: str = "ziv-video") -> None:
         enhance_by_set = inspection.enhance_by_set
     # The terms of a model that has them are named before anything downloads, the preflight's enhancer included.
     try:
-        print_licence_notice(
-            config, model_name, lambda: video_plan(args.model, family=model_info.family, config=config, model_name=model_name, upscale=bool(args.upscale)), present=target_present_offline
-        )
+        print_licence_notice(model_name, lambda: video_plan(args.model, family=model_info.family, config=config, model_name=model_name, upscale=bool(args.upscale)), present=target_present_offline)
     except ValueError as e:
         parser.error(str(e))
     # The key listener starts after ensure_ffmpeg, whose input() prompt it would compete with, and covers the preflight and

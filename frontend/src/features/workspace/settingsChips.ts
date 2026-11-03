@@ -2,12 +2,16 @@ import { formatTimestamp } from '$lib/state/audioTrack';
 import type { AudioTrackView } from './audioTrackView';
 import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
-import type { DraftState, Workflow } from '$lib/types';
+import type { IconName } from '$lib/components/atoms/Icon.svelte';
+import type { AudioWorkflow, DraftState, Workflow, WorkspaceWorkflow } from '$lib/types';
+import { KIND_INFO } from './audioKinds';
+import type { VoiceView } from './audioView';
 
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
   | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'seed' | 'runs'
-  | 'source' | 'images' | 'track' | 'size' | 'audio' | 'loras' | 'upscale' | 'transparent' | 'model';
+  | 'source' | 'images' | 'track' | 'size' | 'audio' | 'loras' | 'upscale' | 'transparent' | 'model'
+  | 'kind' | 'voice' | 'length';
 
 export interface SettingChip {
   key: ChipKey;
@@ -20,6 +24,8 @@ export interface SettingChip {
   on?: boolean;
   /** Something to look at: a clip that may not fit, a model not downloaded. */
   warn?: boolean;
+  /** A glyph before the label and value (the Audio tab's Kind chip). */
+  icon?: IconName;
   /** The preset chip's applied preset slug, empty when none is applied. */
   applied?: string;
   /** The LoRA chip's files: one is downloading (how far, or null while its size is unknown) or one failed. */
@@ -99,9 +105,47 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
   return chips.filter((chip): chip is SettingChip => chip !== null);
 }
 
+/** What the Audio tab's chips are made from. */
+export interface AudioChipFacts {
+  kind: AudioWorkflow;
+  state: DraftState;
+  modelLabel: string;
+  modelDownloaded: boolean;
+  /** The Speech voice, when the model can follow a recording; null otherwise. */
+  voice: Pick<VoiceView, 'summary' | 'recording' | 'chip'> | null;
+  /** Whether each setting differs from its default, by the keys SettingsPane uses. */
+  changed: (...keys: (keyof DraftState)[]) => boolean;
+  /** The model takes a length (Sound). */
+  showLength: boolean;
+  showSeed: boolean;
+  showRuns: boolean;
+}
+
+/**
+ * The chips of the Audio tab, in the order its settings change in the loop: the Kind and the Model first, then the Voice (Speech)
+ * or the Length (Sound), the Seed and the Batch. Presets, LoRAs and size have none here.
+ */
+export function audioChips(f: AudioChipFacts): SettingChip[] {
+  const { state: s } = f;
+  const chips: (SettingChip | null)[] = [
+    { key: 'kind', label: '', value: KIND_INFO[f.kind].label, changed: false, icon: KIND_INFO[f.kind].icon },
+    { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
+    f.voice ? { key: 'voice', label: 'Voice', value: f.voice.chip, changed: false, on: f.voice.recording && f.voice.summary.tone === 'active', warn: f.voice.summary.tone === 'error' } : null,
+    f.showLength ? { key: 'length', label: 'Length', value: `${fmt(s.audioSeconds)} s`, changed: f.changed('audioSeconds') } : null,
+    f.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
+    f.showRuns ? { key: 'runs', label: 'Batch', value: `×${s.runs}`, changed: f.changed('runs') } : null,
+  ];
+  return chips.filter((chip): chip is SettingChip => chip !== null);
+}
+
 /** The chips the strip shows before the context is known, so the frame is complete from the first frame. */
 const PENDING_IMAGE_CHIPS: [ChipKey, string][] = [['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['runs', 'Batch'], ['images', 'Images'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']];
 const PENDING_VIDEO_CHIPS: [ChipKey, string][] = [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['images', 'Images'], ['track', 'Track'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']];
+const PENDING_AUDIO_CHIPS: Record<AudioWorkflow, [ChipKey, string][]> = {
+  music: [['kind', ''], ['model', ''], ['seed', 'Seed'], ['runs', 'Batch']],
+  speech: [['kind', ''], ['model', ''], ['voice', 'Voice'], ['seed', 'Seed'], ['runs', 'Batch']],
+  sound: [['kind', ''], ['model', ''], ['length', 'Length'], ['seed', 'Seed'], ['runs', 'Batch']],
+};
 const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
   txt2img: PENDING_IMAGE_CHIPS,
   img2img: PENDING_IMAGE_CHIPS,
@@ -114,7 +158,10 @@ const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
  * Placeholder chips for a workflow while the context loads: the usual chips in their usual order with no value, so
  * the strip has its height and width before the request answers and nothing under the stage moves when it does.
  */
-export function pendingChips(workflow: Workflow): SettingChip[] {
+export function pendingChips(workflow: WorkspaceWorkflow): SettingChip[] {
+  if (workflow === 'music' || workflow === 'speech' || workflow === 'sound') {
+    return PENDING_AUDIO_CHIPS[workflow].map(([key, label]) => ({ key, label, value: '—', changed: false }));
+  }
   const keys: [ChipKey, string][] = [['preset', 'Preset'], ...(PENDING_CHIPS[workflow] ?? PENDING_CHIPS.txt2img)];
   return keys.map(([key, label]) => ({ key, label, value: '—', changed: false }));
 }

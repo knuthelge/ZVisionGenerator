@@ -29,6 +29,7 @@ from zvisiongenerator.utils.provenance import (
     UPSCALE_WORKFLOW,
     RecordedSettings,
     image_prompt_text,
+    config_from_probe,
     mp4_config_from_probe,
     optional_float,
     optional_int,
@@ -37,6 +38,7 @@ from zvisiongenerator.utils.provenance import (
     recorded_settings,
 )
 from zvisiongenerator.downloads import video_model_downloaded
+from zvisiongenerator.utils.audio_peaks import read_waveform_peaks
 from zvisiongenerator.utils.config import model_capabilities, model_display_name, model_download_size_label
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
@@ -45,13 +47,15 @@ from zvisiongenerator.utils.video_probe import ffprobe_json, parse_probe
 from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
 from zvisiongenerator.utils.video_upscale import ltx_upscale_problem, ltx_video_option
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
+from zvisiongenerator.web.gallery_audio import audio_asset_facts, audio_asset_json, is_reusable_audio_config
 from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
 from zvisiongenerator.web.upscale_api import ltx_upscale_model
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
 
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
-GALLERY_MEDIA_EXTENSIONS = frozenset(IMAGE_EXTENSIONS) | VIDEO_EXTENSIONS
+AUDIO_EXTENSIONS = frozenset({".flac", ".wav", ".mp3", ".m4a", ".ogg"})
+GALLERY_MEDIA_EXTENSIONS = frozenset(IMAGE_EXTENSIONS) | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 _STAGING_DIR_NAMES = frozenset({".web_uploads"})
 # Scratch names the video tools create beside the finished outputs: the splice's directories (see ``video_splice``),
 # and the hidden temp files of an in-place MP4 rewrite and the video upscale's work folders (see ``ffmpeg.staging_path``).
@@ -118,10 +122,12 @@ class GalleryAsset:
     audio_track_end: float | None = None
     # The references an image was made with, in prompt order.
     reference_images: tuple[str, ...] = ()
+    # An audio take's facts (kind, duration, peaks, voice, ...; see ``gallery_audio.audio_asset_facts``); empty for images and videos.
+    audio: dict[str, Any] = field(default_factory=dict)
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
-    """Scan an output directory for renderable image and video assets.
+    """Scan an output directory for renderable image, video and audio assets.
 
     The walk only stats files; the facts read from each file come from the gallery index, which reads a file again
     only when it is new or changed.
@@ -199,7 +205,7 @@ def _scan_output_root(root: Path) -> tuple[list[ScannedFile], bool]:
 def filter_and_sort_assets(assets: list[GalleryAsset], *, media_filter: str, sort_order: str) -> list[GalleryAsset]:
     """Apply gallery filter and sort controls to a list of assets."""
     normalized_filter = media_filter.strip().lower()
-    if normalized_filter not in {"all", "image", "video"}:
+    if normalized_filter not in {"all", "image", "video", "audio"}:
         normalized_filter = "all"
     normalized_sort = sort_order.strip().lower()
     if normalized_sort not in {"newest", "oldest"}:
@@ -224,6 +230,8 @@ def build_gallery_page_json(assets: list[GalleryAsset], web_config: WebUiConfig,
 
 def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]:
     """Convert one gallery asset to the current SPA JSON shape."""
+    if asset.kind == "audio":
+        return audio_asset_json(asset, web_config)
     created_at = datetime.fromtimestamp(asset.modified_at, tz=timezone.utc).isoformat()
     default_workflow = default_workflow_for_mode(asset.kind)
     # An upscale is regenerated with the workflow that made its source.
@@ -582,6 +590,7 @@ def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -
         source_video=metadata["source_video"],
         extend_frames=metadata["extend_frames"],
         upscaled=metadata["upscaled"],
+        audio={**metadata["audio"], "bytes": file.size} if metadata["audio"] else metadata["audio"],
     )
 
 
@@ -627,7 +636,7 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "audio_track_end": recorded.audio_track_end,
         "reference_images": recorded.reference_images,
         "lora": recorded.lora,
-        "has_reusable_config": bool(config) and not (kind == "video" and _is_orphan_upscale(recorded)),
+        "has_reusable_config": is_reusable_audio_config(config) if kind == "audio" else bool(config) and not (kind == "video" and _is_orphan_upscale(recorded)),
         "negative_prompt": recorded.negative_prompt,
         "scene": recorded.scene,
         "scene_input": recorded.scene_input,
@@ -641,6 +650,7 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "source_video": recorded.source_video,
         "extend_frames": recorded.extend_frames,
         "upscaled": bool(recorded.generation.get("upscale")),
+        "audio": audio_asset_facts(config, facts.get("audio")) if kind == "audio" else {},
     }
 
 
@@ -755,12 +765,14 @@ def _source_with_asset_id(root: Path, source: dict[str, Any] | None) -> dict[str
 
 # Changing what this reads requires bumping ``gallery_index.GALLERY_INDEX_VERSION``.
 def _read_asset_facts(asset_path: Path, kind: str | None) -> FactsRead:
-    """Read the raw facts of a media file: the embedded config, and the size (plus prompt text for an image).
+    """Read the raw facts of a media file: the embedded config, and the size (plus prompt text for an image); an audio file's facts come from :func:`_read_audio_facts`.
 
     The facts are incomplete when a reader failed, so the index does not store them.
     """
     if kind == "video":
         return _read_video_facts(asset_path)
+    if kind == "audio":
+        return _read_audio_facts(asset_path)
     complete = True
     config: dict[str, Any] | None = None
     try:
@@ -800,6 +812,38 @@ def _read_video_facts(asset_path: Path) -> FactsRead:
     except ValueError:
         video = {}
     return FactsRead({"config": config, "image": {}, "video": video}, complete)
+
+
+def _read_audio_facts(asset_path: Path) -> FactsRead:
+    """Read an audio file's embedded config and its ``audio`` facts: ``duration`` (seconds), ``channels``, ``sample_rate`` and 100 waveform ``peaks``.
+
+    One ffprobe call gives the config, the duration, the channels and the rate; one ffmpeg decode gives the peaks. A reader
+    that fails leaves its facts out and marks the read incomplete, so the index reads the file again later.
+    """
+    try:
+        data = ffprobe_json(asset_path, count_packets=False)
+    except Exception:
+        return FactsRead({"config": None, "image": {}, "audio": {}}, False)
+    complete = True
+    config: dict[str, Any] | None = None
+    try:
+        config = config_from_probe(data)
+    except ValueError:
+        complete = False
+    stream = next((item for item in data.get("streams") or [] if isinstance(item, dict) and item.get("codec_type") == "audio"), None)
+    channels = optional_int(stream.get("channels")) if stream else None
+    rate = optional_int(stream.get("sample_rate")) if stream else None
+    audio: dict[str, Any] = {}
+    if not channels or not rate:
+        complete = False  # no audio stream, or one that ffprobe could not make sense of
+    else:
+        duration = optional_float(stream.get("duration")) or optional_float((data.get("format") or {}).get("duration"))
+        audio = {key: value for key, value in {"duration": duration, "channels": channels, "sample_rate": rate}.items() if value is not None}
+        try:
+            audio["peaks"] = read_waveform_peaks(asset_path)
+        except Exception:
+            complete = False
+    return FactsRead({"config": config, "image": {}, "audio": audio}, complete)
 
 
 def _read_scanned_facts(file: ScannedFile) -> FactsRead:
@@ -847,6 +891,8 @@ def _asset_kind(path: Path) -> str | None:
         return "image"
     if suffix in VIDEO_EXTENSIONS:
         return "video"
+    if suffix in AUDIO_EXTENSIONS:
+        return "audio"
     return None
 
 

@@ -1,0 +1,162 @@
+import { flushSync } from 'svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import AssetViewer from './AssetViewer.svelte';
+import { LYRICS, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../../test-utils/audio';
+import { mountComponent } from '../../../test-utils/mount';
+import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
+
+// The touch layer follows the pointer; a test switches it on without a real media query.
+const touchLayer = vi.hoisted(() => ({ coarse: false }));
+vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
+  return { ...actual, layout: new Proxy(actual.layout, { get: (target, key) => (key === 'coarse' && touchLayer.coarse ? true : Reflect.get(target, key)) }) };
+});
+
+/** Dispatch a touch event with one finger at (x, y). */
+function touch(node: Element, type: string, x: number, y: number): TouchEvent {
+  const point = { clientX: x, clientY: y, target: node } as unknown as Touch;
+  const event = new Event(type, { bubbles: true, cancelable: true }) as TouchEvent;
+  Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
+  Object.defineProperty(event, 'changedTouches', { value: [point] });
+  node.dispatchEvent(event);
+  return event;
+}
+
+describe('AssetViewer with audio', () => {
+  let pause: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    localStorage.clear();
+    pause = vi.fn();
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(pause as () => void);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    touchLayer.coarse = false;
+  });
+
+  const song = makeAudioAsset();
+  const talk = makeSpeechAsset();
+
+  function mountViewer(props: Record<string, unknown> = {}): ReturnType<typeof mountComponent> {
+    return mountComponent(AssetViewer, { assets: [song, talk], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn(), onreuse: vi.fn(), onuseaudio: vi.fn(), ondelete: vi.fn(), ...props });
+  }
+
+  const action = (name: string) => document.querySelector<HTMLElement>(`[data-action="${name}"]`);
+
+  it('plays the take in its player with its words under it, and no image', () => {
+    mountViewer();
+
+    expect(document.querySelector('audio')?.getAttribute('src')).toBe('/media/out/song.flac');
+    expect(document.querySelector('[data-testid="viewer-image"]')).toBeNull();
+    const blocks = Array.from(document.querySelectorAll('[data-testid="viewer-words"] section')).map((section) => [section.querySelector('h4')?.textContent, section.querySelector('p')?.textContent]);
+    expect(blocks).toEqual([['Style', 'Dreamy synth-pop, warm analog pads'], ['Lyrics', LYRICS]]);
+  });
+
+  it('shows a file without settings with a player and no words', () => {
+    mountViewer({ assets: [makeImportedAudio()] });
+
+    expect(document.querySelector('audio')).not.toBeNull();
+    expect(document.querySelector('[data-testid="viewer-words"]')).toBeNull();
+  });
+
+  it('keeps the bar to Reuse, Use as, Download, Delete, Details, shortcuts and Close, with no Extend or Upscale for a null upscale and extend', () => {
+    mountViewer();
+
+    expect(['reuse', 'reference', 'download', 'delete', 'details', 'shortcuts'].map((name) => action(name) !== null)).toEqual([true, true, true, true, true, true]);
+    expect(action('extend')).toBeNull();
+    expect(action('upscale')).toBeNull();
+  });
+
+  it('lists the audio track under Use as, and the voice for a speech take', () => {
+    const onuseaudio = vi.fn();
+    mountViewer({ assets: [talk], onuseaudio, useAs: { audio_track: { disabled: false, hint: 'Video tab, from 0 s' }, voice: { disabled: false, hint: 'Speech, text filled in' } } });
+
+    flushSync(() => action('reference')!.click());
+    const items = Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
+    expect(items).toEqual(['Audio track Video tab, from 0 s', 'Voice Speech, text filled in']);
+
+    flushSync(() => (document.querySelector('[role="menu"] [role="menuitem"]:last-child') as HTMLElement).click());
+    expect(onuseaudio).toHaveBeenCalledWith(talk, 'voice');
+  });
+
+  it('shows the Generation and File facts of a take, with the cut at the cap', () => {
+    mountViewer({ assets: [makeAudioAsset({ cut: true, duration: 360, sample_rate: 24000, channels: 1 })] });
+
+    flushSync(() => action('details')!.click());
+    const facts = Object.fromEntries(Array.from(document.querySelectorAll('.viewer-facts > div')).map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
+    expect(facts).toMatchObject({ Kind: 'Music', Model: 'yue2', Length: '6:00 (cut at the cap)', Seed: '4127', Format: 'FLAC · 24 kHz · mono', Size: '1 MB' });
+    expect(Array.from(document.querySelectorAll('.viewer-h')).map((heading) => heading.textContent)).toEqual(expect.arrayContaining(['Generation', 'File']));
+    expect(document.querySelector('[data-testid="viewer-enhance"]')).toBeNull();
+  });
+
+  const voiceOf = (asset: ReturnType<typeof makeSpeechAsset>): string | null | undefined => {
+    mountViewer({ assets: [asset] });
+    flushSync(() => action('details')!.click());
+    return Array.from(document.querySelectorAll('.viewer-facts > div')).find((row) => row.querySelector('dt')?.textContent === 'Voice')?.querySelector('dd')?.textContent;
+  };
+
+  it('names the voice of a cloned take by its recording', () => {
+    const cloned = makeSpeechAsset({ has_reference_voice: true, reuse_workspace_url: '#/workspace?workflow=speech&voice_path=%2Fvoices%2Fmine.wav' });
+
+    expect(voiceOf(cloned)).toBe('mine.wav');
+  });
+
+  it('says Any for a take the model chose the voice of', () => {
+    expect(voiceOf(talk)).toBe('Any');
+  });
+
+  it('pauses the take when the viewer pages to the next one and when it closes', async () => {
+    const props = reactiveProps({ assets: [song, talk], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    const page = mountComponent(AssetViewer, props);
+    pause.mockClear();
+
+    props.currentIndex = 1;
+    flushSync();
+    expect(pause).toHaveBeenCalled();
+    expect(document.querySelector('audio')?.getAttribute('src')).toBe('/media/out/speech.flac');
+
+    pause.mockClear();
+    props.open = false;
+    flushSync();
+    expect(pause).toHaveBeenCalled();
+    await page.unmount();
+  });
+
+  it('does not page to the next take when a finger drags sideways on the waveform', () => {
+    touchLayer.coarse = true;
+    const onnavigate = vi.fn();
+    mountViewer({ onnavigate });
+    const wave = document.querySelector('[data-testid="audio-wave"]')!;
+
+    touch(wave, 'touchstart', 300, 200);
+    touch(wave, 'touchmove', 220, 202);
+    touch(wave, 'touchmove', 40, 204);
+    touch(wave, 'touchend', 40, 204);
+
+    expect(onnavigate).not.toHaveBeenCalled();
+  });
+
+  it('pages on the same drag anywhere else on the stage', () => {
+    touchLayer.coarse = true;
+    const onnavigate = vi.fn();
+    mountViewer({ onnavigate });
+    // The viewer settles after a swipe with an animation; a layout-less test settles it at once.
+    const stage = document.querySelector('.viewer-stage')!;
+
+    touch(stage, 'touchstart', 300, 200);
+    touch(stage, 'touchmove', 220, 202);
+    touch(stage, 'touchmove', 40, 204);
+    touch(stage, 'touchend', 40, 204);
+
+    expect(onnavigate).toHaveBeenCalledWith(1);
+  });
+
+  it('puts an audio take in the film strip as a waveform tile, not an image', () => {
+    mountViewer();
+
+    expect(document.querySelectorAll('.viewer-film .film-audio')).toHaveLength(2);
+    expect(document.querySelector('.viewer-film img')).toBeNull();
+  });
+});

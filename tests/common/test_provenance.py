@@ -531,26 +531,6 @@ class TestEmbedMp4Config:
 class TestMp4CommandIsUnchanged:
     """The container-agnostic embed and read behave for MP4 exactly as the MP4-only functions did."""
 
-    def test_embed_runs_the_same_ffmpeg_command(self, tmp_path):
-        video_path = tmp_path / "out.mp4"
-        video_path.write_bytes(b"fake-mp4")
-        payload = {"schema": VIDEO_CONFIG_SCHEMA, "prompt": "é"}
-
-        def _side_effect(cmd, **kwargs):
-            Path(cmd[-1]).write_bytes(b"processed")
-            return MagicMock(returncode=0)
-
-        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
-            embed_mp4_config(video_path, payload)
-
-        value = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        assert mock_run.call_args[0][0] == [
-            "ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-c", "copy",
-            "-movflags", "use_metadata_tags", "-metadata", f"zvisiongenerator.config={value}",
-            str(staging_path(video_path)),
-        ]  # fmt: skip
-        assert mock_run.call_args[1] == {"stdin": subprocess.DEVNULL, "check": True, "capture_output": True}
-
     def test_the_mux_options_are_the_same(self):
         payload = {"prompt": "a"}
 

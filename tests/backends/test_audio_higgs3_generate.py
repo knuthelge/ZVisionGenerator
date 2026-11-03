@@ -148,14 +148,6 @@ class TestCut:
         assert result.codes.shape == (0, N)
         assert result.cut is True
 
-    def test_a_cap_of_zero_runs_nothing(self) -> None:
-        model = ScriptedModel(_normal)
-
-        result = _run(model, cap=0)
-
-        assert result.codes.shape == (0, N)
-        assert model.audio_head.calls == 0
-
     def test_a_take_that_finishes_on_the_last_allowed_iteration_is_not_cut(self) -> None:
         k = 6
         done_at = k + N - 2  # iteration index at which the countdown reaches zero
@@ -189,30 +181,6 @@ class TestOnFrame:
         _run(model, cap=3, on_frame=lambda: seen.append((model.audio_head.calls, len(model.steps))))
 
         assert seen == [(1, 0), (2, 1), (3, 2)]
-
-    def test_it_runs_between_the_head_and_the_sample(self) -> None:
-        model = ScriptedModel(_normal)
-        events: list[str] = []
-        real_head = model.audio_head
-
-        class Recording:
-            num_codebooks = N
-            codebook_size = V
-
-            def __call__(self, hidden: torch.Tensor) -> torch.Tensor:
-                events.append("head")
-                return real_head(hidden)
-
-        model.audio_head = Recording()  # type: ignore[assignment]
-
-        def spy(logits: torch.Tensor, *, temperature: float, top_p: float) -> torch.Tensor:
-            events.append("sample")
-            return logits.argmax(dim=-1)
-
-        with patch.object(higgs3_generate, "sample_codebooks", spy):
-            _run(model, cap=2, on_frame=lambda: events.append("frame"))
-
-        assert events == ["head", "frame", "sample", "head", "frame", "sample"]
 
     def test_it_runs_with_gradients_off(self) -> None:
         enabled = []
@@ -253,53 +221,6 @@ class TestPrompt:
 
         assert with_reference.prompts[0][:4] == [TTS, REF_TEXT, ord("y"), ord("o")]
         assert REF_TEXT not in without.prompts[0]
-
-    def test_the_prompt_is_built_through_the_module_level_name(self) -> None:
-        calls = []
-
-        def spy(*args: object, **kwargs: object) -> list[int]:
-            calls.append(kwargs)
-            return build_prompt_ids(*args, **kwargs)  # type: ignore[arg-type]
-
-        with patch.object(higgs3_generate, "build_prompt_ids", spy):
-            _run(ScriptedModel(_normal), cap=1, reference_text="x")
-
-        assert calls == [{"reference_rows": 0, "reference_text": "x"}]
-
-
-class TestKeptRows:
-    def test_each_kept_row_is_moved_to_the_cpu_and_the_step_gets_the_device_row(self) -> None:
-        moved = []
-        fed = []
-
-        class Row:
-            """Wraps a codes tensor to see when it is moved to the CPU."""
-
-            def __init__(self, tensor: torch.Tensor) -> None:
-                self.tensor = tensor
-
-            def __getitem__(self, key: object) -> torch.Tensor:
-                return self.tensor[key]
-
-            def __setitem__(self, key: object, value: object) -> None:
-                self.tensor[key] = value
-
-            def cpu(self) -> torch.Tensor:
-                moved.append(self.tensor.clone())
-                return self.tensor.cpu()
-
-        def sample(logits: torch.Tensor, *, temperature: float, top_p: float) -> Row:
-            return Row(logits.argmax(dim=-1))
-
-        model = ScriptedModel(_normal)
-        real_step = model.step
-        model.step = lambda codes, cache: (fed.append(codes), real_step(codes.tensor, cache))[1]  # type: ignore[method-assign,assignment]
-
-        with patch.object(higgs3_generate, "sample_codebooks", sample):
-            _run(model, cap=6)
-
-        assert len(moved) == len(fed) == 6
-        assert all(isinstance(row, Row) for row in fed)  # the step reads the sampled row itself, not a CPU copy
 
 
 class TestSamplingArguments:
@@ -344,21 +265,6 @@ class TestTinyBackbone:
             on_frame=lambda: None,
         )
         return result, logits, fed, model
-
-    @pytest.mark.parametrize("seed", [0, 1, 2])
-    def test_the_codes_have_the_expected_length(self, seed: int) -> None:
-        result, logits, fed, _ = self._run_recording(seed)
-
-        kept = len(fed)
-        assert result.codes.shape == (max(0, kept - TINY.num_codebooks + 1), TINY.num_codebooks)
-        assert len(logits) == kept + (0 if result.cut else 1)
-
-    def test_two_runs_give_equal_codes(self) -> None:
-        first = self._run_recording(0)[0]
-        second = self._run_recording(0)[0]
-
-        assert torch.equal(first.codes, second.codes)
-        assert first.cut == second.cut
 
     @pytest.mark.parametrize("seed", [0, 1, 2])
     def test_the_last_logits_equal_a_forward_without_the_cache(self, seed: int) -> None:

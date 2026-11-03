@@ -1,4 +1,7 @@
-import { canExtend, canUseAsReference, extendReason, plainUpscaleMethod, upscaleFactors, type AssetActionHandlers, type ReferenceTarget, type UseAsState } from '$lib/state/assetActions';
+import {
+  AUDIO_TRACK_HINT, VOICE_HINT, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, extendReason, plainUpscaleMethod, upscaleFactors, voiceFits, voiceTooLongReason,
+  type AssetActionHandlers, type ReferenceTarget, type UseAsState,
+} from '$lib/state/assetActions';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
@@ -15,7 +18,7 @@ export function assetMenuEntries(
   useAs: UseAsState = {}
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
-  const { onreuse, onreference, onextend, onupscale, ondelete } = handlers;
+  const { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete } = handlers;
   if (onreuse) {
     const reusable = asset.has_reusable_config === true;
     entries.push(
@@ -29,6 +32,10 @@ export function assetMenuEntries(
       ...referenceEntries(asset, onreference, useAs),
       { kind: 'separator' }
     );
+  }
+  if (onuseaudio && asset.media_type === 'audio') {
+    const audioItems = audioUseEntries(asset, onuseaudio, useAs);
+    if (audioItems.length > 0) entries.push({ kind: 'heading', label: 'Use as' }, ...audioItems, { kind: 'separator' });
   }
   // A video that offers extending lists it, disabled with the reason when it can't be extended right now.
   if (onextend && asset.media_type === 'video' && asset.extend) {
@@ -123,4 +130,26 @@ export function referenceEntries(
       onselect: () => onreference(asset, target),
     };
   });
+}
+
+/**
+ * Build the "Use as" items of an audio take: the Video tab's audio track, and for a speech take the Speech tab's voice. The hint
+ * shows beside the label; an item the machine can't take is disabled with its reason as the hint and the tooltip. A speech take
+ * longer than the voice limit is disabled with "Use a take of 30 s or less as a voice".
+ */
+export function audioUseEntries(asset: GalleryAsset, onuseaudio: NonNullable<AssetActionHandlers['onuseaudio']>, useAs: UseAsState = {}): ActionMenuEntry[] {
+  const entries: ActionMenuEntry[] = [];
+  if (canUseAsAudioTrack(asset)) {
+    const state = useAs.audio_track;
+    const disabled = state?.disabled === true;
+    const hint = disabled ? state?.hint : (state?.hint ?? AUDIO_TRACK_HINT);
+    entries.push({ kind: 'item', id: 'use-audio-track', label: 'Audio track', hint, disabled, title: disabled ? hint : undefined, onselect: () => onuseaudio(asset, 'audio_track') });
+  }
+  if (canUseAsVoice(asset)) {
+    const state = useAs.voice;
+    const reason = !voiceFits(asset, useAs) ? voiceTooLongReason(useAs) : state?.disabled === true ? state.hint : undefined;
+    const hint = reason ?? state?.hint ?? VOICE_HINT;
+    entries.push({ kind: 'item', id: 'use-voice', label: 'Voice', hint, disabled: reason !== undefined, title: reason, onselect: () => onuseaudio(asset, 'voice') });
+  }
+  return entries;
 }

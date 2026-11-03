@@ -17,11 +17,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_seedvr2_upscaler
+from zvisiongenerator.backends import audio_platform_key, get_seedvr2_upscaler
 from zvisiongenerator.backends import prompt_enhancer_session
+from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
-from zvisiongenerator.downloads import DownloadTarget, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads import DownloadTarget, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
+from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 from zvisiongenerator.utils.config import model_reference, resolve_enhancer_model
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
 from zvisiongenerator.utils.matte_models import MATTE_LABEL
@@ -36,6 +38,7 @@ __all__ = [
     "ROLE_MODEL",
     "DownloadPlanners",
     "JobDownloadPart",
+    "audio_model_part",
     "enhancer_part",
     "image_model_part",
     "job_download_parts",
@@ -85,6 +88,8 @@ class DownloadPlanners:
 
     image: Callable[..., Targets] = image_plan
     video: Callable[..., Targets] = video_plan
+    audio: Callable[[AudioPreset, str], tuple[DownloadTarget, ...]] = audio_plan
+    audio_platform_key: Callable[[], str] = audio_platform_key
     matte: Callable[[], Targets] = matte_plan
     seedvr2: Callable[..., tuple[DownloadTarget, ...]] = seedvr2_plan
     enhancer: Callable[[str, str | None], tuple[DownloadTarget, ...]] = enhancer_plan
@@ -124,6 +129,20 @@ def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, An
     return JobDownloadPart(name, name, name, ROLE_MODEL, targets)
 
 
+def audio_model_part(request: AudioGenerationRequest, config: dict[str, Any], *, planners: DownloadPlanners | None = None) -> JobDownloadPart:
+    """Return the part for the audio model an audio job generates with.
+
+    Raises:
+        ValueError: If the ``audio_model_presets`` config entries are malformed, the request's preset is not one of them,
+            or the preset does not run on this platform.
+    """
+    planners = planners or DownloadPlanners()
+    preset = next((candidate for candidate in parse_audio_presets(config) if candidate.id == request.preset), None)
+    if preset is None:
+        raise ValueError(f"Unknown audio model '{request.preset}'.")
+    return JobDownloadPart(preset.label, preset.id, preset.id, ROLE_MODEL, planners.audio(preset, planners.audio_platform_key()))
+
+
 def matte_part(*, planners: DownloadPlanners | None = None) -> JobDownloadPart:
     """Return the part for the background removal models of a transparent job."""
     planners = planners or DownloadPlanners()
@@ -156,7 +175,7 @@ def enhancer_part(repo: str, revision: str | None, *, planners: DownloadPlanners
 
 
 def job_download_parts(
-    request: ImageGenerationRequest | VideoGenerationRequest | VideoFileUpscaleRequest | LtxVideoUpscaleRequest,
+    request: ImageGenerationRequest | VideoGenerationRequest | VideoFileUpscaleRequest | LtxVideoUpscaleRequest | AudioGenerationRequest,
     args: argparse.Namespace | None,
     prompts_data: Mapping[str, list[tuple[str, str | None]]] | None,
     enhance_by_set: dict[str, list[EnhanceSettings | None]] | None,
@@ -171,7 +190,7 @@ def job_download_parts(
     Image Generate: the enhancer when any prompt is enhanced (preflight fetches it first), the image model, and the
     background removal models when transparent. Video: the enhancer, then the video model (with the upscale's files when it upscales). Image upscale:
     the SeedVR2 tier or the creative model, and the background removal models when the source is transparent. Video-file
-    upscale: the SeedVR2 tier, or on macOS the LTX model that refines the clip. An enhancer that cannot be planned because Hugging Face is offline is a part with
+    upscale: the SeedVR2 tier, or on macOS the LTX model that refines the clip. Audio: the audio model. An enhancer that cannot be planned because Hugging Face is offline is a part with
     ``targets=None``; nothing is downloaded or loaded here.
 
     Args:
@@ -181,7 +200,7 @@ def job_download_parts(
         enhance_by_set: Per-entry prompt-file ``enhance:`` settings aligned with *prompts_data*.
         config: The loaded config.
         platform_key: Platform key such as ``darwin`` or ``win32``.
-        model_ref: The resolved model path or id; required for every job except a video-file upscale.
+        model_ref: The resolved model path or id; required for every job except a video-file upscale and an audio job (which names its preset).
         planners: The planner functions (defaults to the real ones).
 
     Raises:
@@ -192,6 +211,8 @@ def job_download_parts(
         return (seedvr2_part(request.upscale_model, planners=planners),)
     if isinstance(request, LtxVideoUpscaleRequest):
         return (ltx_video_upscale_part(request, config, planners=planners),)
+    if isinstance(request, AudioGenerationRequest):
+        return (audio_model_part(request, config, planners=planners),)
     if model_ref is None:
         raise ValueError("model_ref is required to plan an image or video job.")
     if isinstance(request, VideoGenerationRequest):

@@ -36,6 +36,17 @@ describe('connectJobSSE', () => {
     subscription.close();
   });
 
+  it('calls onAudioProgress with the audio_progress event of an audio take', () => {
+    const onAudioProgress = vi.fn();
+    const subscription = connectJobSSE('test-job', { onAudioProgress });
+    const event = { type: 'audio_progress', job_id: 'test-job', phase: 'Song tokens', step: 812, total: null, part: 1, n_parts: 1 };
+
+    latestEventSource().emit('audio_progress', event);
+
+    expect(onAudioProgress).toHaveBeenCalledExactlyOnceWith(event);
+    subscription.close();
+  });
+
   it('does not close connection on batch_completed for multi-run job', () => {
     const onClose = vi.fn();
     const subscription = connectJobSSE('test-job', { onClose });

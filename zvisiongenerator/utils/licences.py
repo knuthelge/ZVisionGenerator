@@ -1,22 +1,43 @@
-"""Licence records: the terms a model comes with, read from the config's ``licences`` section.
+"""Licence records: the terms a model comes with, read from the packaged ``licences.yaml``.
 
 Each record names a licence and the models it covers. Every URL is pinned to a revision, so the text a user reads is the
-text of the weights the app downloads. The functions here are pure: they read a config ``dict`` and a presence check
-passed in by the caller, and do no I/O.
+text of the weights the app downloads. The records are fixed facts about the models, so they live in their own file,
+read directly and never merged with the user's config. :func:`load_licences` is the one reader (once, cached); every
+other function is pure: it takes the records, the known model ids or a presence check from its caller and does no I/O.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlparse
+
+import yaml
 
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.target import DownloadTarget
 
-__all__ = ["MATTE_LICENCE_MODEL", "NOTICE_HEADER", "LicenceRecord", "licence_notice", "licence_payload", "licence_text", "licences_for", "parse_licences"]
+__all__ = [
+    "DATA_FILE",
+    "MATTE_LICENCE_MODEL",
+    "NOTICE_HEADER",
+    "LicenceRecord",
+    "check_licence_models",
+    "known_model_ids",
+    "licence_notice",
+    "licence_payload",
+    "licence_text",
+    "licences_for",
+    "load_licences",
+    "parse_licences",
+]
+
+DATA_FILE: Final = Path(__file__).with_name("licences.yaml")
+"""The packaged records: a mapping of record id to record."""
 
 MATTE_LICENCE_MODEL: Final = "matte"
 """The model id of the background removal models, which are no alias but have a licence record."""
@@ -36,7 +57,7 @@ class LicenceRecord:
     """One licence and the models it covers.
 
     Attributes:
-        id: The record's key in the ``licences`` section.
+        id: The record's key in ``licences.yaml``.
         name: The licence's name, such as ``FLUX Non-Commercial License v2.1``.
         supplier: Who licenses the model.
         summary: The terms in a short plain-language phrase.
@@ -56,37 +77,76 @@ class LicenceRecord:
     url_label: str = DEFAULT_URL_LABEL
 
 
-def parse_licences(config: Mapping[str, Any]) -> tuple[LicenceRecord, ...]:
-    """Parse and validate the ``licences`` section of *config*, in the order it is written.
+def load_licences() -> tuple[LicenceRecord, ...]:
+    """Read and parse the packaged ``licences.yaml``, in the order it is written; the file is read once.
+
+    Returns:
+        One frozen record per entry. Whether the models they name exist is checked by :func:`check_licence_models`.
+
+    Raises:
+        FileNotFoundError: If the packaged file is missing.
+        ValueError: If the file is not valid YAML or a record is malformed (see :func:`parse_licences`).
+    """
+    return _load(DATA_FILE)
+
+
+@cache
+def _load(path: Path) -> tuple[LicenceRecord, ...]:
+    """Read and parse the records in *path*; cached per path."""
+    with open(path, encoding="utf-8") as f:
+        try:
+            raw = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Failed to parse {path.name}: {e}") from e
+    return parse_licences(raw)
+
+
+def parse_licences(raw: object) -> tuple[LicenceRecord, ...]:
+    """Validate the parsed *raw* records and return them in the order they are written.
 
     Args:
-        config: The loaded config. A missing ``licences`` section means no records.
+        raw: The parsed YAML: a mapping of record id to record. ``None`` (an empty file) means no records.
 
     Returns:
         One frozen record per entry.
 
     Raises:
-        ValueError: If the section or a record is malformed, a URL has no revision, ``models`` is empty or names an
-            unknown model. The model ids that exist are the ``model_aliases`` and ``audio_model_presets`` keys and
-            ``matte``.
+        ValueError: If *raw* or a record is malformed, a URL has no revision or ``models`` is empty or not a list of
+            strings.
     """
-    section = config.get("licences")
-    if section is None:
+    if raw is None:
         return ()
-    if not isinstance(section, Mapping):
-        raise ValueError(f"config 'licences' must be a mapping of record id to record, got {type(section).__name__}.")
-    known = _known_models(config)
-    return tuple(_parse_record(str(record_id), raw, known) for record_id, raw in section.items())
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"Licence records must be a mapping of record id to record, got {type(raw).__name__}.")
+    return tuple(_parse_record(str(record_id), record) for record_id, record in raw.items())
 
 
-def licences_for(config: Mapping[str, Any], model_id: str) -> tuple[LicenceRecord, ...]:
-    """Return the records that cover *model_id*, in config order; empty when it has none."""
-    return tuple(record for record in parse_licences(config) if model_id in record.models)
+def known_model_ids(config: Mapping[str, Any]) -> frozenset[str]:
+    """Return every model id a record may name: the ``model_aliases`` and ``audio_model_presets`` keys of *config* and ``matte``."""
+    ids = {MATTE_LICENCE_MODEL}
+    for key in ("model_aliases", "audio_model_presets"):
+        section = config.get(key)
+        if isinstance(section, Mapping):
+            ids.update(str(model) for model in section)
+    return frozenset(ids)
 
 
-def licence_payload(config: Mapping[str, Any], model_id: str) -> list[dict[str, Any]]:
-    """Return the records that cover *model_id* as JSON-ready dicts (``name``, ``supplier``, ``summary``, ``url``, ``url_label``, ``notice_url``), in config order."""
-    return [{"name": r.name, "supplier": r.supplier, "summary": r.summary, "url": r.url, "url_label": r.url_label, "notice_url": r.notice_url} for r in licences_for(config, model_id)]
+def check_licence_models(records: Sequence[LicenceRecord], known_models: Collection[str]) -> None:
+    """Raise ``ValueError`` if a record names a model that is not in *known_models*."""
+    for record in records:
+        for model in record.models:
+            if model not in known_models:
+                raise ValueError(f"Licence record '{record.id}' names an unknown model {model!r}. Known: a model alias, an audio model preset or '{MATTE_LICENCE_MODEL}'.")
+
+
+def licences_for(records: Sequence[LicenceRecord], model_id: str) -> tuple[LicenceRecord, ...]:
+    """Return the *records* that cover *model_id*, in the order given; empty when it has none."""
+    return tuple(record for record in records if model_id in record.models)
+
+
+def licence_payload(records: Sequence[LicenceRecord], model_id: str) -> list[dict[str, Any]]:
+    """Return the *records* that cover *model_id* as JSON-ready dicts (``name``, ``supplier``, ``summary``, ``url``, ``url_label``, ``notice_url``), in the order given."""
+    return [{"name": r.name, "supplier": r.supplier, "summary": r.summary, "url": r.url, "url_label": r.url_label, "notice_url": r.notice_url} for r in licences_for(records, model_id)]
 
 
 def licence_text(record: LicenceRecord) -> str:
@@ -95,7 +155,7 @@ def licence_text(record: LicenceRecord) -> str:
 
 
 def licence_notice(
-    config: Mapping[str, Any],
+    records: Sequence[LicenceRecord],
     model_id: str,
     targets: Sequence[DownloadTarget] | None,
     present: Callable[[DownloadTarget], bool],
@@ -103,7 +163,7 @@ def licence_notice(
     """Return the lines that name the terms of *model_id* when downloading it is about to start.
 
     Args:
-        config: The loaded config.
+        records: The licence records.
         model_id: The model the user picked.
         targets: The model's downloads, or ``None`` when they cannot be planned offline (counted as missing).
         present: Whether one target is already on disk. Not called when the model has no record.
@@ -112,33 +172,22 @@ def licence_notice(
         The header, then per record its text, ``"  <url>"`` and, if it has one, ``"  NOTICE: <url>"``. Empty when the
         model has no record or every target is present.
     """
-    records = licences_for(config, model_id)
-    if not records:
+    covering = licences_for(records, model_id)
+    if not covering:
         return ()
     if targets is not None and all(present(target) for target in targets):
         return ()
     lines = [NOTICE_HEADER]
-    for record in records:
+    for record in covering:
         lines += [licence_text(record), f"  {record.url}"]
         if record.notice_url is not None:
             lines.append(f"  NOTICE: {record.notice_url}")
     return tuple(lines)
 
 
-def _known_models(config: Mapping[str, Any]) -> frozenset[str]:
-    """Return every model id a record may name: the aliases, the audio presets (when the config has them) and ``matte``."""
-    aliases = config.get("model_aliases")
-    audio = config.get("audio_model_presets")
-    ids = {MATTE_LICENCE_MODEL}
-    for section in (aliases, audio):
-        if isinstance(section, Mapping):
-            ids.update(str(key) for key in section)
-    return frozenset(ids)
-
-
-def _parse_record(record_id: str, raw: object, known: frozenset[str]) -> LicenceRecord:
+def _parse_record(record_id: str, raw: object) -> LicenceRecord:
     """Validate one record and return it."""
-    where = f"config 'licences.{record_id}'"
+    where = f"licence record '{record_id}'"
     if not isinstance(raw, Mapping):
         raise ValueError(f"{where} must be a mapping, got {type(raw).__name__}.")
     for key in (*_REQUIRED_TEXT_KEYS, "models"):
@@ -152,7 +201,7 @@ def _parse_record(record_id: str, raw: object, known: frozenset[str]) -> Licence
         _require_pinned(notice_url, f"{where}.notice_url")
     url_label = raw.get("url_label")
     url_label = DEFAULT_URL_LABEL if url_label is None else _text(url_label, f"{where}.url_label")
-    return LicenceRecord(id=record_id, models=_models(raw["models"], known, f"{where}.models"), notice_url=notice_url, url_label=url_label, **text)
+    return LicenceRecord(id=record_id, models=_models(raw["models"], f"{where}.models"), notice_url=notice_url, url_label=url_label, **text)
 
 
 def _text(value: object, where: str) -> str:
@@ -171,11 +220,8 @@ def _require_pinned(url: str, where: str) -> None:
         raise ValueError(f"{where} must be pinned to a revision (a 40-character commit in the path), got {url!r}.")
 
 
-def _models(value: object, known: frozenset[str], where: str) -> tuple[str, ...]:
-    """Return the model ids in *value*, which must be a non-empty list of known ids."""
-    if not isinstance(value, list) or not value:
+def _models(value: object, where: str) -> tuple[str, ...]:
+    """Return the model ids in *value*, which must be a non-empty list of strings."""
+    if not isinstance(value, list) or not value or not all(isinstance(model, str) for model in value):
         raise ValueError(f"{where} must be a non-empty list of model ids.")
-    for model in value:
-        if not isinstance(model, str) or model not in known:
-            raise ValueError(f"{where} names an unknown model {model!r}. Known: a model alias, an audio model preset or '{MATTE_LICENCE_MODEL}'.")
     return tuple(value)

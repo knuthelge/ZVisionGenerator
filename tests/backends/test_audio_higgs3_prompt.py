@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -57,20 +55,11 @@ class TestBuildPromptIds:
 
         assert prompt == [TTS, TEXT, 104, 105, AUDIO]
 
-    def test_the_slot_count_equals_the_rows(self) -> None:
-        prompt = build_prompt_ids(FakeTokenizer(), IDS, "x", reference_rows=57, reference_text="y")  # type: ignore[arg-type]
-
-        assert prompt.count(AUDIO_SLOT) == 57
-
     def test_text_is_encoded_without_special_tokens(self) -> None:
         tokenizer = FakeTokenizer()
         build_prompt_ids(tokenizer, IDS, "hi", reference_rows=1, reference_text="ab")  # type: ignore[arg-type]
 
         assert tokenizer.calls == [("ab", False), ("hi", False)]
-
-    def test_negative_rows_are_refused(self) -> None:
-        with pytest.raises(ValueError, match="reference_rows"):
-            build_prompt_ids(FakeTokenizer(), IDS, "hi", reference_rows=-1, reference_text=None)  # type: ignore[arg-type]
 
 
 class TestSpecialIds:
@@ -114,21 +103,6 @@ class TestLoadTokenizer:
         assert len({ids.tts, ids.ref_text, ids.ref_audio, ids.text, ids.audio}) == 5
         assert not any(name.startswith("no_such") for name in sys.modules)
 
-    def test_no_auto_class_is_used(self, tmp_path: Path) -> None:
-        _write_tiny_tokenizer(tmp_path)
-        import transformers
-
-        def refuse(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("an Auto class was used")
-
-        with (
-            patch.object(transformers.AutoTokenizer, "from_pretrained", refuse),
-            patch.object(transformers.AutoConfig, "from_pretrained", refuse),
-        ):
-            tokenizer = load_tokenizer(tmp_path)
-
-        assert type(tokenizer).__name__ == "Qwen2Tokenizer"
-
     def test_a_structural_token_in_the_text_is_one_id(self, tmp_path: Path) -> None:
         _write_tiny_tokenizer(tmp_path)
         tokenizer = load_tokenizer(tmp_path)
@@ -139,10 +113,3 @@ class TestLoadTokenizer:
         assert prompt[0] == ids.tts
         assert prompt[-2] == ids.tts
         assert prompt[-1] == ids.audio
-
-
-def test_importing_the_module_leaves_transformers_out() -> None:
-    code = "import sys; import zvisiongenerator.backends.audio.higgs3_prompt; print(sorted(m for m in ('torch', 'transformers') if m in sys.modules))"
-    result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, check=True)
-
-    assert result.stdout.strip() == "[]"

@@ -2,24 +2,30 @@
 
 export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid' | 'extend';
 
-/** Workflow of a job: a Workspace workflow, or an upscale of an existing image. */
-export type JobWorkflow = Workflow | 'upscale';
+/** The workflows of the audio mode, one per kind of audio. The server lists them once an audio model can run. */
+export type AudioWorkflow = 'music' | 'speech' | 'sound';
+
+/** What the Workspace form can run: an image or video workflow, or the kind of the Audio tab. */
+export type WorkspaceWorkflow = Workflow | AudioWorkflow;
+
+/** Workflow of a job: a Workspace workflow, an upscale of an existing image, or the kind of an audio job. */
+export type JobWorkflow = Workflow | 'upscale' | AudioWorkflow;
 
 export type UpscaleFactor = 2 | 4;
 
 /** How an image upscale runs: the SeedVR2 model (macOS), or the image model's creative pass. */
 export type UpscaleMethod = 'seedvr2' | 'creative' | 'ltx';
 
-export type WorkflowMode = 'image' | 'video';
+export type WorkflowMode = 'image' | 'video' | 'audio';
 
 /** What the user picks in the top bar: an image, a video, or the continuation of a video. The workflow follows from it and the tab's images. */
-export type WorkspaceTab = 'image' | 'video' | 'extend';
+export type WorkspaceTab = 'image' | 'video' | 'extend' | 'audio';
 
 export type PromptSource = 'inline' | 'file';
 
 export interface ReuseState {
-  requested_workflow: Workflow;
-  resolved_workflow: Workflow;
+  requested_workflow: Workflow | AudioWorkflow;
+  resolved_workflow: Workflow | AudioWorkflow;
   workflow_available: boolean;
   requested_model: string | null;
   resolved_model: string | null;
@@ -33,7 +39,7 @@ export interface GalleryAsset {
   thumbnail_url: string;
   filename: string;
   created_at: string;
-  workflow: Workflow;
+  workflow: Workflow | AudioWorkflow;
   prompt: string;
   /** A video's recorded scene (who and where, look, camera); null for images and videos made without one. */
   scene?: string | null;
@@ -58,13 +64,32 @@ export interface GalleryAsset {
   steps?: number | null;
   guidance?: number | null;
   lora?: string | null;
-  duration?: number;
+  /** A take's length in seconds, as read from the file. */
+  duration?: number | null;
+  /** An audio take: what it is (`music`, `speech`, `sound`); null for a file without this app's settings. */
+  kind?: AudioWorkflow | null;
+  /** An audio take: 100 values of 0-255, the relative loudness along the take; empty when they could not be read. */
+  peaks?: number[];
+  channels?: number | null;
+  sample_rate?: number | null;
+  /** An audio take: the label of the model's preset, null when no such preset is configured; `model` stays its id. */
+  model_label?: string | null;
+  /** An audio file's size in bytes. */
+  file_bytes?: number | null;
+  /** A speech take made from a recording of a voice (the recording itself is not stored with the take). */
+  has_reference_voice?: boolean;
+  /** A song's lyrics, section lines included; null otherwise. */
+  lyrics?: string | null;
+  /** A song that reached the model's cap and was faded out there. */
+  cut?: boolean;
+  /** The parts a long speech text was split into; null when it was one. */
+  parts?: number | null;
   reuse_workspace_url: string; // hash URL: '#/workspace?workflow=...&prompt=...'
   has_reusable_config?: boolean;
   reuse_state?: ReuseState;
   /** The image was cut out and has a transparent background; absent or false for opaque assets. */
   transparent?: boolean;
-  media_type: 'image' | 'video';
+  media_type: 'image' | 'video' | 'audio';
   /** Recorded settings beyond the reuse fields, shown in the asset viewer. */
   details?: AssetDetails;
   /** How the prompt was enhanced; null when it was not, or the file predates the record. */
@@ -273,10 +298,26 @@ export interface ModelStatusFields {
   memory_fit?: MemoryFit | null;
 }
 
+/** One audio model the Workspace offers (`audio_models` of the workspace payload). */
+export interface AudioModelOption extends ModelStatusFields {
+  id: string;
+  label: string;
+  kind: AudioWorkflow;
+  type: 'audio';
+  capabilities: { lyrics: boolean; duration: boolean; voice_clone: boolean };
+  /** The ceilings the kind has: `max_seconds`, `min_seconds`, `max_text_chars`, `min_voice_seconds`, `max_voice_seconds`. */
+  limits: Record<string, number>;
+  default_seconds: number | null;
+  /** A music model: the `[section]` list an empty Lyrics box stands for; null for the others. */
+  instrumental_sections?: string | null;
+  hidden_controls: string[];
+  licences: ModelLicence[];
+}
+
 export interface ModelOption extends ModelStatusFields {
   id: string;
   label: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'audio';
   /** One-time download size on this platform, e.g. "35 GB"; image models only, null when unknown. */
   download_size_label?: string | null;
   /** An LTX video model's version, as the server read it from the model (alias, repo or folder); null for other models. */
@@ -339,6 +380,8 @@ export interface LoraSource {
 export interface WorkspaceContext {
   image_models: ModelOption[];
   video_models: ModelOption[];
+  /** The audio models that run on this machine, in config order; empty (and the Audio tab hidden) without one. */
+  audio_models?: AudioModelOption[];
   loras: LoraInfo[];
   history_assets: GalleryAsset[];
   active_job: JobSnapshot | null;
@@ -802,8 +845,9 @@ export interface WorkflowContractEntry {
 }
 
 export interface WorkflowContract {
-  values: Workflow[];
-  definitions: Record<Workflow, WorkflowContractEntry>;
+  values: WorkspaceWorkflow[];
+  /** One entry per listed workflow; an audio workflow is listed only while a model of its kind runs on this machine. */
+  definitions: Record<Workflow, WorkflowContractEntry> & Partial<Record<AudioWorkflow, WorkflowContractEntry>>;
   field_precedence: {
     defaults: string[];
     dimensions: string;
@@ -872,7 +916,7 @@ export interface TabText {
 }
 
 export interface DraftState {
-  workflow: Workflow;
+  workflow: WorkspaceWorkflow;
   promptSource: PromptSource;
   prompt: string;
   /** Video scene (who and where, look, camera); the default scene in prompt-file mode. Image workflows ignore it. */
@@ -994,6 +1038,28 @@ export interface DraftState {
   missingSourceVideo: boolean;
   /** Extend: the source whose Scene and Prompt were settled, and the text its prefill put there (to tell edits from prefill). */
   extendPrefill: { path: string; scene: string; prompt: string; audioTrack?: { path: string; start: number } | null } | null;
+  /** Audio tab: the kind last open (Music, Speech or Sound); coming back to the tab restores it. */
+  audioKind: AudioWorkflow;
+  /** Audio tab: the model last chosen for each kind. Empty before one was chosen. */
+  audioModels: Record<AudioWorkflow, string>;
+  /** Audio tab, Music: the Style box. */
+  audioStyle: string;
+  /** Audio tab, Music: the Lyrics box. Empty or only `[section]` tags make an instrumental. */
+  lyrics: string;
+  /** Audio tab, Speech: the Text box. */
+  speechText: string;
+  /** Audio tab, Sound: the Prompt box. */
+  soundPrompt: string;
+  /** Audio tab, Sound: the length in seconds. */
+  audioSeconds: number;
+  /** Audio tab, Speech: whether the model picks the voice (`any`) or follows a recording (`recording`). */
+  voiceMode: 'any' | 'recording';
+  /** Audio tab, Speech: the recording's path on the host; null when none is set or it was uploaded (`voiceUpload`). */
+  voicePath: string | null;
+  /** Audio tab, Speech: the file name of a recording uploaded from this device (its file is in `heldUploads`); null when none. */
+  voiceUpload: string | null;
+  /** Audio tab, Speech: what the recording says. */
+  voiceText: string;
   /** The slug of the settings preset the form started from; null when none. Cleared on a mode switch, Reset, a loaded source's settings and when the preset is deleted. */
   appliedPreset: string | null;
 }
@@ -1005,7 +1071,7 @@ export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'si
 
 // ── Settings presets ──────────────────────────────────────────────────────────
 
-export type PresetMode = 'image' | 'video';
+export type PresetMode = 'image' | 'video' | 'audio';
 
 /** One preset setting: a form field's value, or null for "not set" (off or automatic). */
 export type PresetValue = string | number | boolean | null;
@@ -1037,8 +1103,8 @@ export interface JobContext {
   id?: string;
   job_id: string;
   workflow: JobWorkflow;
-  /** `video` for a job that upscales an existing video file; absent on other jobs. */
-  media_type?: 'image' | 'video';
+  /** `video` for a job that upscales an existing video file, `audio` for an audio job; absent on other jobs. */
+  media_type?: 'image' | 'video' | 'audio';
   /** How a video file upscale runs; absent on other jobs and on jobs from an older server. */
   upscale_method?: UpscaleMethod;
   prompt: string;
@@ -1143,6 +1209,8 @@ export interface ActiveJobState extends JobContext {
   stageSteps?: Record<string, number>;
   /** Backend phase of the last step event, e.g. "image_upscale" or "video_upscale_stage_1". */
   stepPhase?: string;
+  /** An audio take's progress: the phase the model is in and how far it is; null before the first `audio_progress` of a take. */
+  audio?: AudioProgress | null;
   /** A control the server accepted that has not taken effect yet (pause waits for the current image or video). */
   controlQueued?: JobControlAction | null;
   /** 'reconnecting' while the event stream is down and the shown progress may be stale. */
@@ -1151,6 +1219,18 @@ export interface ActiveJobState extends JobContext {
   lastEventAt?: number;
   /** Server clock minus client clock, in seconds, so live phase durations count from server timestamps. */
   serverOffset?: number;
+}
+
+/** Where an audio take is, from its `audio_progress` events. */
+export interface AudioProgress {
+  /** The phase the model is in, as it names it: `Plan`, `Song tokens`, `Synthesis`, `Decode`, `Speech tokens` or `Sampling`. */
+  phase: string;
+  step: number;
+  /** The phase's step count; null while the model cannot say (a song's tokens run until it ends). */
+  total: number | null;
+  /** The part of a long speech text being read (1-based), and how many there are. */
+  part: number;
+  parts: number;
 }
 
 /** Phase of a `model_loading` event. */
@@ -1189,6 +1269,18 @@ export interface StepEvent {
   ran_iterations?: number;
   total_iterations?: number;
   preview_version?: number;
+}
+
+export interface AudioProgressEvent {
+  type: 'audio_progress';
+  job_id: string;
+  phase: string;
+  step: number;
+  total: number | null;
+  part: number;
+  n_parts: number;
+  run_index?: number;
+  total_runs?: number;
 }
 
 export interface GenerationFinishedEvent {
@@ -1282,7 +1374,7 @@ export interface DownloadProgressFields {
 
 export interface ModelDownloadingEvent extends DownloadProgressFields {
   type: 'model_downloading';
-  mode: 'image' | 'video';
+  mode: 'image' | 'video' | 'audio';
   role: 'model' | 'enhancer' | 'matte';
   model: string;
 }
@@ -1295,6 +1387,7 @@ export interface JobDownload extends DownloadProgressFields {
 
 export type SSEEvent =
   | StepEvent
+  | AudioProgressEvent
   | ModelDownloadingEvent
   | GenerationFinishedEvent
   | BatchCompletedEvent
@@ -1433,7 +1526,7 @@ export interface ModelDeleteInfo {
 /** One Models-page download in the downloads lane. */
 export type DownloadItem = {
   id: string;
-  kind: 'model' | 'enhancer' | 'matte' | 'lora';
+  kind: 'model' | 'audio' | 'enhancer' | 'matte' | 'lora';
   name: string;
   label: string;
   state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
@@ -1456,7 +1549,7 @@ export interface DownloadList {
 
 /** What a Models-page download would fetch, from `GET /api/models/download/plan`. */
 export interface DownloadPlan {
-  kind: 'model' | 'enhancer' | 'matte';
+  kind: 'model' | 'audio' | 'enhancer' | 'matte';
   name: string;
   label: string;
   parts: { repo: string; files: number; bytes: number | null }[];
@@ -1552,6 +1645,18 @@ export interface VideoModelEntry extends ModelStatusFields {
   licences?: ModelLicence[];
 }
 
+/** An audio model on the Models page. `name` is the model's id. */
+export interface AudioModelEntry extends ModelStatusFields {
+  name: string;
+  label: string;
+  kind: AudioWorkflow;
+  delete?: ModelDeleteInfo | null;
+  disk_size_label?: string | null;
+  /** Files are missing, so the Models page offers Download. */
+  download_needed: boolean;
+  licences?: ModelLicence[];
+}
+
 /** A prompt-enhancer model configured on this platform: the Fast or Smart tier, or a custom `user_model`. */
 export interface EnhancerModelEntry {
   tier: 'fast' | 'smart' | 'custom';
@@ -1607,6 +1712,8 @@ export interface ModelInventory {
   loras_dir: string;
   image_models: ModelEntry[];
   video_models: VideoModelEntry[];
+  /** The audio models that run on this machine; empty with no audio preset, and then the page shows no panel. */
+  audio_models?: AudioModelEntry[];
   enhancer_models?: EnhancerModelEntry[];
   background_removal?: BackgroundRemovalEntry;
   other_downloads?: OtherDownloads;

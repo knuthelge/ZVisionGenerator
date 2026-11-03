@@ -4,7 +4,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    activeDownload, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, livePreviewNote, loadBody, outcome, outputAspect, phaseRows,
+    activeDownload, audioRows, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isAudioJob, isPaused, isVideo, itemActivity, itemNoun, iterations, jobPhase, livePreviewNote, loadBody, outcome, outputAspect, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, stepUnit, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
   import type { ActiveJobState, JobDownload } from '$lib/types';
@@ -55,7 +55,9 @@
   const previewSrc = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? null) : job.previewUrl);
   // A finished cut-out sits on a checkerboard; the live preview is the opaque render and never does.
   const previewTransparent = $derived(pausedBetween && lastOutput?.transparent === true);
-  const showMedia = $derived(preview && active && generating && !isVideo(job) && !job.review);
+  const audio = $derived(isAudioJob(job));
+  const takeRows = $derived(audioRows(job));
+  const showMedia = $derived(preview && active && generating && !isVideo(job) && !audio && !job.review);
   // Some models render no live preview; once past the first one, say so instead of promising it.
   const previewNote = $derived(livePreviewNote(job));
 
@@ -94,7 +96,31 @@
 
 {#snippet stepBlock()}
   {#if pausedBetween}
-    <p class="ui-help">Resumes with the next {isVideo(job) ? 'video' : 'image'}.</p>
+    <p class="ui-help">Resumes with the next {itemNoun(job)}.</p>
+  {:else if audio}
+    <div class="job-stages" data-testid="audio-phases">
+      {#each takeRows as row (row.phase)}
+        <div class="job-step" data-phase-state={row.state}>
+          <div class="job-step-head">
+            {#if row.state === 'current'}
+              <span>{[row.label, row.part, row.progress || 'Starting…'].filter(Boolean).join(' · ')}</span>{#if row.percent !== null}<span class="num">{row.percent}%</span>{/if}
+            {:else if row.state === 'done'}
+              <span>{[row.label, row.part].filter(Boolean).join(' · ')}</span><span class="job-step-done"><Icon name="check" size={12} />Done</span>
+            {:else}
+              <span>{[row.label, row.part].filter(Boolean).join(' · ')}</span><span>—</span>
+            {/if}
+          </div>
+          {#if row.state === 'current'}
+            {#if row.percent !== null}
+              <StepProgress value={row.value} max={row.max} label="{row.label} progress" live={running} {stepMs} valuetext="{row.progress}, {row.percent}%" />
+            {:else}
+              <!-- The model cannot say how long this phase runs (a song's tokens), so the bar only shows that it works. -->
+              <StepProgress value={0} max={1} label="{row.label} progress" busy={running} indeterminate valuetext={row.progress || 'Starting'} />
+            {/if}
+          {/if}
+        </div>
+      {/each}
+    </div>
   {:else if bars.length}
     <div class="job-stages">
       {#each bars as bar, index (bar.name)}
@@ -142,7 +168,7 @@
         <StepProgress
           value={activity === 'stepping' ? job.currentStep : activity === 'finishing' ? 1 : 0}
           max={activity === 'stepping' ? job.totalSteps : 1}
-          label="Current {isVideo(job) ? 'video' : 'image'}"
+          label="Current {itemNoun(job)}"
           live={running && activity === 'stepping'}
           busy={running && activity !== 'stepping'}
           {stepMs}
@@ -182,12 +208,13 @@
                 <p class="ui-help">{positionLabel(job)}</p>
                 <p class="job-prompt" title={shownPrompt}>{shownPrompt}</p>
               </div>
-              {#if job.enhanceStatus === 'enhanced' || job.enhanceStatus === 'skipped' || job.notices?.length || isVideo(job)}
+              {#if job.enhanceStatus === 'enhanced' || job.enhanceStatus === 'skipped' || job.notices?.length || isVideo(job) || audio}
                 <div class="job-badges">
                   {#if job.enhanceStatus === 'enhanced'}<Badge variant="info"><Icon name="sparkle" size={12} />Enhanced</Badge>{/if}
                   {#if job.enhanceStatus === 'skipped'}<Badge>Not enhanced</Badge>{/if}
                   {#each job.notices ?? [] as notice (notice)}<Badge variant="warning"><Icon name="alert" size={12} />{notice}</Badge>{/each}
                   {#if isVideo(job)}<Badge><Icon name="film" size={12} />No live preview for video</Badge>{/if}
+                  {#if audio}<Badge><Icon name="waveform" size={12} />No live preview for audio</Badge>{/if}
                 </div>
               {/if}
               {@render stepBlock()}
