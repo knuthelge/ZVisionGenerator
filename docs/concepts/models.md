@@ -6,11 +6,11 @@ A model is what turns a prompt into an image or video. The app has built-in mode
 
 | Model | Alias | Download | Steps | Negative prompt | License |
 |---|---|---|---|---|---|
-| FLUX.2 Klein 4B | `klein4b` | 16 GB | 4 | No | See its [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) |
-| FLUX.2 Klein 9B | `klein9b` | 35 GB | 4 | No | See its [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
-| Z-Image Turbo | `zit` | 33 GB | 10 | Yes | See its [model page](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) |
-| Krea 2 Turbo | `krea2` | 36 GB | 8 | No | [Krea 2 Community License](https://huggingface.co/krea/Krea-2-Turbo) |
-| Ideogram 4 Instant | `ideo` | 28 GB (macOS), 24 GB (Windows, Linux) | 8 | No | Ideogram's non-commercial license |
+| FLUX.2 Klein 4B | `klein4b` | 16 GB | 4 | No | Apache-2.0 |
+| FLUX.2 Klein 9B | `klein9b` | 35 GB | 4 | No | FLUX Non-Commercial License v2.1 |
+| Z-Image Turbo | `zit` | 33 GB | 10 | Yes | Apache-2.0 |
+| Krea 2 Turbo | `krea2` | 36 GB | 8 | No | Krea 2 Community License Agreement |
+| Ideogram 4 Instant | `ideo` | 28 GB (macOS), 24 GB (Windows, Linux) | 8 | No | Ideogram Non-Commercial Model Agreement |
 | MOSS-Image Turbo | `moss` | 28 GB | 4 | No | Apache-2.0 |
 | MOSS-Image SFT | `moss-sft` | 27 GB | 50 | Yes | Apache-2.0 |
 
@@ -18,7 +18,7 @@ Klein 4B is the lightest and the first-run pick on machines with less than 32 GB
 
 The download is the one-time size. Memory needs depend on your machine and the [quant](quantization.md); the Web UI's badges show what fits. See [Memory](memory.md).
 
-All built-in models download without a Hugging Face account. Where the original repository needs a login, the alias points to an ungated mirror whose weights match the original.
+The License column names each model's licence; [Licences](#licences) has the terms and links. All built-in models download without a Hugging Face account. Where the original repository needs a login, the alias points to an ungated mirror whose weights match the original.
 
 ### FLUX.2 Klein
 
@@ -63,7 +63,7 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
     - **macOS:** at 1024×1024, unquantized and `q8` peak at about 33 GB and `q4` at about 25 GB, mostly briefly while the image is decoded at the end. On an M5 all three take about 15 s per step at that size; `q4` is faster at smaller sizes.
     - **Windows and Linux:** the transformer streams to the GPU block by block. On a 10 GB GPU with 32 GB of system memory, `q4` and `q8` both take about 3.5 s per step at 1024×1024, about a minute per image (`q8` peaks at about 17 GB of system memory, `q4` at 14 GB). Unquantized it takes about 15 s per step and peaks at about 26 GB, so pick `q4` or `q8`.
 
-    Every source is pinned to a checked revision in the `ideogram4_instant` section of the [configuration](configuration.md), and the folder is rebuilt when a pin changes. The model is under Ideogram's non-commercial license, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
+    Every source is pinned to a checked revision in the `ideogram4_instant` section of the [configuration](configuration.md), and the folder is rebuilt when a pin changes. The model is under the Ideogram Non-Commercial Model Agreement, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
 
 ### MOSS-Image
 
@@ -97,12 +97,12 @@ Start with `moss`. Pick `moss-sft` when you want a negative prompt or the model 
 
 ## Video models
 
-| Model | Alias | Download | Needs | Can do |
-|---|---|---|---|---|
-| LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale |
-| LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same |
-| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same |
-| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS |
+| Model | Alias | Download | Needs | Can do | License |
+|---|---|---|---|---|---|
+| LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale | LTX-2 Community License Agreement and Gemma Terms of Use |
+| LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same | LTX-2 Community License Agreement and Gemma Terms of Use |
+| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same | LTX-2.x Community License Agreement |
+| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS | MiniMax H3 Community License Agreement |
 
 All of them make video with sound, from a prompt or a starting image (with an optional [last frame](video.md#first-and-last-frame)), and can [extend](video.md#extending-a-video) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](video.md).
 
@@ -161,7 +161,26 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
     Longer clips take longer: 10 s at 864×480 took about 9 minutes, 14 s about 13. An upscaled `l` clip is estimated at about 5½ minutes. The estimate leaves out the one-time preparation.
 
-MiniMax H3 is released under the MiniMax H3 Community License, published with the model on Hugging Face (`MiniMaxAI/MiniMax-H3`). It restricts use in some regions and above an annual revenue limit, asks commercial products that show H3 to name it in their interface, and counts LoRAs as derivatives of the model. Read it before you use the model or its output.
+MiniMax H3 is released under the MiniMax H3 Community License Agreement, published with the model on Hugging Face (`MiniMaxAI/MiniMax-H3`). It restricts use in some regions and above an annual revenue limit, requires commercial products to show "MiniMax H3" in their interface, and counts LoRAs as derivatives of the model. Read it before you use the model or its output; see [Licences](#licences).
+
+## Licences
+
+Some models come with terms. The Web UI names them in the download dialog, the model picker and the Models page, and the CLI prints them before a download starts. Downloading a model means you agree to its terms. A model under MIT or Apache-2.0 has no entry here unless something else limits its use.
+
+| Licence | Supplier | Covers | Terms | Links |
+|---|---|---|---|---|
+| FLUX Non-Commercial License v2.1 | Black Forest Labs | `klein9b` | Non-commercial | [Licence](https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/LICENSE.md) · [NOTICE](https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/NOTICE) |
+| Krea 2 Community License Agreement | Krea | `krea2` | Free under $1M revenue | [Licence](https://cdn.jsdelivr.net/gh/krea-ai/krea-2@db3984fbc6e13b34c0064990fc2d95ac64d00058/assets/hf_samples/LICENSE.pdf) |
+| Ideogram Non-Commercial Model Agreement | Ideogram | `ideo` | Non-commercial | [Licence](https://huggingface.co/unsloth/ideogram-4-fp8/blob/6ac1d7a59776f886e5893dfa9a4b7a4374da9365/LICENSE.md) · [NOTICE](https://huggingface.co/unsloth/ideogram-4-fp8/blob/6ac1d7a59776f886e5893dfa9a4b7a4374da9365/NOTICE) |
+| LTX-2 Community License Agreement | Lightricks | `ltx-4`, `ltx-8` | Free under $10M revenue | [Licence](https://github.com/Lightricks/LTX-2/blob/a95ab856bf29407b6b066ede0abe1846050db56c/LICENSE-2) |
+| LTX-2.x Community License Agreement | Lightricks | `ltx25-4` | Free under $10M revenue | [Licence](https://huggingface.co/unsloth/LTX-2.5-FP8/blob/7b40724fc39bbb01d9b4d72638c0d263531c88c2/LICENSE) · [NOTICE](https://huggingface.co/unsloth/LTX-2.5-FP8/blob/7b40724fc39bbb01d9b4d72638c0d263531c88c2/NOTICE) |
+| MiniMax H3 Community License Agreement | MiniMax | `h3` | Not licensed in the EU, UK, South Korea or the USA; written permission needed over $20M revenue; commercial products show "MiniMax H3" | [Licence](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE) |
+| Gemma Terms of Use | Google | `ltx-4`, `ltx-8` | Gemma's use policy applies | [Licence](https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE_GEMMA.md) |
+| BiRefNet (MIT) and ViTMatte (Apache-2.0) | BiRefNet and ViTMatte authors | Background removal | Trained on research datasets that don't allow commercial use | [Model card](https://huggingface.co/hustvl/vitmatte-small-composition-1k/blob/6a58ad7646403c1df626fbd746900aec7361ea1d/README.md) |
+
+LTX-2.3 comes with two licences, its own and Gemma's, because Gemma 3 is its text encoder. LTX-2.5 uses Gemma 4, which is Apache-2.0. The background removal models of [Transparent background](images.md#transparent-background) are licensed MIT and Apache-2.0, but they were trained on research datasets that don't allow commercial use, so treat the result as non-commercial.
+
+**MiniMax H3.** The licence requires commercial products to prominently show "MiniMax H3" in their user interface. A line such as "Powered by MiniMax H3" is encouraged, not required. Read the full licence for the regions and the revenue limit.
 
 ## Your own models
 

@@ -56,10 +56,10 @@ describe('Fast/Smart and Text/JSON', () => {
     ({ matrix: { axes: [], defaults: SETTINGS }, model: 'fast/m', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, smart, error: null }) as PromptEnhancerContract;
 
   it('runs Smart only when chosen and available', () => {
-    const available = contract({ download_size_label: '19 GB', unavailable: null });
+    const available = contract({ downloaded: false, download_size_label: '19 GB', unavailable: null });
     expect(effectiveTier(state({ enhanceModel: 'smart' }), available)).toBe('smart');
     expect(effectiveTier(state({ enhanceModel: 'fast' }), available)).toBe('fast');
-    expect(effectiveTier(state({ enhanceModel: 'smart' }), contract({ download_size_label: null, unavailable: 'Needs about 9 GB of memory.' }))).toBe('fast');
+    expect(effectiveTier(state({ enhanceModel: 'smart' }), contract({ downloaded: false, download_size_label: null, unavailable: 'Needs about 9 GB of memory.' }))).toBe('fast');
     expect(effectiveTier(state({ enhanceModel: 'smart' }), contract(null))).toBe('fast');
   });
 

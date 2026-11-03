@@ -313,7 +313,7 @@ class TestModelsResponse:
         payload = build_models_response(web_config, token_source=None)
 
         row = payload["background_removal"]
-        assert set(row) == {"name", "label", "downloaded", "disk_size_label", "download_size_label", "deletable", "download_needed"}
+        assert set(row) == {"name", "label", "downloaded", "disk_size_label", "download_size_label", "deletable", "download_needed", "licences"}
         assert (row["name"], row["label"], row["download_size_label"]) == (MATTE_ROW_NAME, MATTE_LABEL, MATTE_DOWNLOAD_SIZE_LABEL)
         assert (row["downloaded"], row["deletable"], row["download_needed"], row["disk_size_label"]) == (False, False, True, None)
 
@@ -323,7 +323,7 @@ class TestModelsResponse:
             blob.parent.mkdir(parents=True)
             blob.write_bytes(b"x" * 2048)
 
-        row = workspace_api_module._background_removal_row(present=lambda target: True)
+        row = workspace_api_module._background_removal_row({}, present=lambda target: True)
 
         assert (row["downloaded"], row["deletable"], row["download_needed"]) == (True, True, False)
         assert row["disk_size_label"]
@@ -335,7 +335,7 @@ class TestModelsResponse:
         monkeypatch.setattr(workspace_api_module, "matte_download_needed", _boom)
 
         with pytest.warns(UserWarning, match="background removal"):
-            row = workspace_api_module._background_removal_row()
+            row = workspace_api_module._background_removal_row({})
 
         assert (row["downloaded"], row["download_needed"]) == (None, False)
 
@@ -371,7 +371,22 @@ class TestPlanSummary:
             "parts": [{"repo": "owner/a", "files": 3, "bytes": 1_000}, {"repo": "owner/b", "files": 1, "bytes": 500}],
             "total_bytes": 1_500,
             "space": {"path": str(tmp_path), "needed_bytes": 1_500, "free_bytes": 1_000, "enough": False},
+            "licences": [],
         }
+
+    def test_a_row_s_licences_are_tagged_with_its_name_and_the_matte_row_uses_the_matte_record(self, tmp_path):
+        config = load_packaged_config()
+        target = DownloadTarget("owner/a")
+        kwargs = {"check": lambda t: TargetCheck(1, 10), "present": lambda t: False, "space": MagicMock(return_value=None), "cache_dir": lambda: tmp_path, "config": config}
+
+        klein = plan_summary(RowPlan("model", "klein9b", "FLUX.2 Klein 9B", (target,)), **kwargs)
+        matte = plan_summary(RowPlan("matte", MATTE_ROW_NAME, MATTE_LABEL, (target,)), **kwargs)
+        enhancer = plan_summary(RowPlan("enhancer", "fast", "Fast enhancer model", (target,)), **kwargs)
+        zit = plan_summary(RowPlan("model", "zit", "zit", (target,)), **kwargs)
+
+        assert [(entry["model"], entry["supplier"]) for entry in klein["licences"]] == [("klein9b", "Black Forest Labs")]
+        assert [(entry["model"], entry["url_label"]) for entry in matte["licences"]] == [(MATTE_ROW_NAME, "Model card")]
+        assert enhancer["licences"] == zit["licences"] == []
 
     def test_a_background_removal_plan_sums_both_repos_under_its_kind_and_label(self, env, tmp_path):
         plan = row_plan("matte", MATTE_ROW_NAME, _web_config(env))

@@ -56,13 +56,23 @@ from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.matte_models import MATTE_LABEL
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, seedvr2_tier_label
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
+from zvisiongenerator.web.job_downloads import (
+    DownloadPlanners,
+    JobDownloadPart,
+    enhancer_part,
+    image_model_part,
+    ltx_video_upscale_part,
+    matte_part,
+    seedvr2_part,
+    upscale_model_part,
+    video_model_part,
+)
 from zvisiongenerator.web.job_log import JobLog, build_job_log_entry, is_loggable
 from zvisiongenerator.web.job_contract import (
     CANCELLED_TERMINAL_EVENT,
@@ -801,11 +811,9 @@ class WebRunner:
         )
         if plan.cancelled:
             return
-        if not self._ensure_downloads(
-            image_plan(model_ref, family=request.model_family, config=config, platform_key=sys.platform),
+        if not self._ensure_part(
+            image_model_part(request, model_ref, config, platform_key=sys.platform, planners=_planners()),
             mode="image",
-            role="model",
-            model=request.model_name or model_ref,
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -841,11 +849,9 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             return
-        if not self._ensure_downloads(
-            self._upscale_download_plan(request, model_ref, config),
+        if not self._ensure_part(
+            upscale_model_part(request, model_ref, config, platform_key=sys.platform, planners=_planners()),
             mode="image",
-            role="model",
-            model=self._upscale_model_label(request, model_ref),
             total_iterations=1,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -872,11 +878,9 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
-        if not self._ensure_downloads(
-            self._seedvr2_download_plan(request.upscale_model),
+        if not self._ensure_part(
+            seedvr2_part(request.upscale_model, planners=_planners()),
             mode="video",
-            role="model",
-            model=self._seedvr2_model_label(request.upscale_model),
             total_iterations=1,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -897,11 +901,9 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
-        if not self._ensure_downloads(
-            video_plan(request.model_ref, family="ltx", config=config, model_name=request.model_name, upscale=True),
+        if not self._ensure_part(
+            ltx_video_upscale_part(request, config, planners=_planners()),
             mode="video",
-            role="model",
-            model=request.model_name,
             total_iterations=1,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -950,11 +952,9 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
             return
-        if not self._ensure_downloads(
-            video_plan(model_ref, family=request.model_family, config=config, model_name=request.model_name or model_ref, upscale=bool(request.upscale)),
+        if not self._ensure_part(
+            video_model_part(request, model_ref, config, planners=_planners()),
             mode="video",
-            role="model",
-            model=request.model_name or model_ref,
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -990,30 +990,7 @@ class WebRunner:
     @staticmethod
     def _upscale_download_plan(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any]) -> tuple[DownloadTarget, ...] | None:
         """Return the downloads an upscale job needs: the SeedVR2 tier's files or the creative refinement model's."""
-        if request.upscale_method != UPSCALE_METHOD_SEEDVR2:
-            return image_plan(model_ref, family=request.model_family, config=config, platform_key=sys.platform)
-        return WebRunner._seedvr2_download_plan(request.upscale_model)
-
-    @staticmethod
-    def _upscale_model_label(request: ImageGenerationRequest, model_ref: str) -> str:
-        """Return the model name an upscale job's download events show."""
-        if request.upscale_method != UPSCALE_METHOD_SEEDVR2:
-            return request.model_name or model_ref
-        return WebRunner._seedvr2_model_label(request.upscale_model)
-
-    @staticmethod
-    def _seedvr2_download_plan(model_name: str) -> tuple[DownloadTarget, ...] | None:
-        """Return the files SeedVR2 tier *model_name* needs on this machine, or ``None`` when it has no engine."""
-        upscaler = get_seedvr2_upscaler()
-        if upscaler is None:
-            return None  # the load reports that this platform has no SeedVR2 engine
-        return seedvr2_plan(model_name, models_dir=get_ziv_data_dir() / "models", weights=upscaler.weights)
-
-    @staticmethod
-    def _seedvr2_model_label(model_name: str) -> str:
-        """Return the name of SeedVR2 tier *model_name* that a download event shows."""
-        upscaler = get_seedvr2_upscaler()
-        return seedvr2_tier_label(model_name, upscaler.weights) if upscaler is not None else str(model_name)
+        return upscale_model_part(request, model_ref, config, platform_key=sys.platform, planners=_planners()).targets
 
     def _ensure_matte_downloads(
         self,
@@ -1030,11 +1007,9 @@ class WebRunner:
         """
         if not request.transparent:
             return True
-        return self._ensure_downloads(
-            matte_plan(),
+        return self._ensure_part(
+            matte_part(planners=_planners()),
             mode="image",
-            role="matte",
-            model=MATTE_LABEL,
             total_iterations=total_iterations,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -1057,17 +1032,35 @@ class WebRunner:
         total_iterations = sum(len(prompts) for prompts in prompts_data.values()) * args.runs
 
         def ensure(repo: str, revision: str | None) -> bool:
-            return self._ensure_downloads(
-                enhancer_plan(repo, revision),
+            return self._ensure_part(
+                enhancer_part(repo, revision, planners=_planners()),
                 mode=mode,
-                role="enhancer",
-                model=repo,
                 total_iterations=total_iterations,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
             )
 
         return ensure
+
+    def _ensure_part(
+        self,
+        part: JobDownloadPart,
+        *,
+        mode: str,
+        total_iterations: int,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> bool:
+        """Download what *part* still misses with its role and ``event_model`` in the events; return False when the job was cancelled."""
+        return self._ensure_downloads(
+            part.targets,
+            mode=mode,
+            role=part.role,
+            model=part.event_model,
+            total_iterations=total_iterations,
+            progress_callback=progress_callback,
+            control_signal=control_signal,
+        )
 
     def _ensure_downloads(
         self,
@@ -1317,6 +1310,19 @@ class WebRunner:
         if event.get("type") == "batch_failed":
             return {**event, "type": FAILED_TERMINAL_EVENT}
         return event
+
+
+def _planners() -> DownloadPlanners:
+    """Return the download planners this module binds, looked up when called so a replaced name takes effect."""
+    return DownloadPlanners(
+        image=image_plan,
+        video=video_plan,
+        matte=matte_plan,
+        seedvr2=seedvr2_plan,
+        enhancer=enhancer_plan,
+        seedvr2_upscaler=get_seedvr2_upscaler,
+        data_dir=get_ziv_data_dir,
+    )
 
 
 def _load_image_model_with_progress(

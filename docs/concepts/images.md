@@ -87,7 +87,7 @@ Post-processing is for images only.
 Switch it on with **Transparent** in the Web UI's [Settings](../web-ui/workspace.md#transparent-background), or with `--transparent` on [`ziv-image`](../cli/reference.md#ziv-image).
 
 !!! warning "Non-commercial use only"
-    The cut-out models carry permissive licences, but they were trained on research datasets that don't allow commercial use. Treat the result as for non-commercial use. The Web UI marks the switch with a **Non-commercial** badge.
+    The cut-out models carry permissive licences, but they were trained on research datasets that don't allow commercial use. Treat the result as for non-commercial use. The Web UI marks the switch with a **Non-commercial** button that opens the cut-out models' terms.
 
 ### How it works
 

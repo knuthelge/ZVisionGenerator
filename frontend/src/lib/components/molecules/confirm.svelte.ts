@@ -1,10 +1,12 @@
 import { mount, tick, unmount } from 'svelte';
-import ConfirmDialog from './ConfirmDialog.svelte';
+import ConfirmDialog, { type ConfirmPart } from './ConfirmDialog.svelte';
 
 /** What a confirmation dialog asks; see `ConfirmDialog` for each field. */
 export interface ConfirmRequest {
   question: string;
   info?: string;
+  infoTone?: 'warning';
+  parts?: ConfirmPart[];
   confirmLabel: string;
   cancelLabel?: string;
   danger?: boolean;

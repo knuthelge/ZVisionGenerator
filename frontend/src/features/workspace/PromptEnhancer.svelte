@@ -8,7 +8,11 @@
 
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
+  import { ApiError } from '$lib/api/client';
+  import { getDownloadPlan } from '$lib/api/models';
   import { enhancePrompt } from '$lib/api/promptEnhance';
+  import { confirmDownloads } from '$lib/state/confirmDownloads';
+  import { jobPlanOfRow, uncheckedJobPlan } from '$lib/state/downloadConfirm';
   import { extendEnhanceHint, extendGuard, type ExtendModelSupport } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { pushRewrite } from '$lib/state/rewriteHistory';
@@ -119,13 +123,15 @@
   ];
 
   let panelOpen = $state(false);
+  /** The download plan of the tier about to run is being read, or the dialog about it is open. */
+  let asking = $state(false);
   let toggleEl = $state<HTMLButtonElement | null>(null);
   let phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' | null = null;
   let abort: AbortController | null = null;
 
   const downloadSize = $derived(downloadedTiers.has(tier) ? null : (tier === 'smart' ? contract.smart?.download_size_label : contract.download_size_label) ?? null);
   const fastUndownloaded = $derived(tier === 'fast' && !contract.downloaded && !downloadedTiers.has('fast'));
-  const enhanceDisabled = $derived(busy || jobsActive || enhancing || !available || !canSubmitText(draft.state) || sourceGuard.blocked);
+  const enhanceDisabled = $derived(busy || jobsActive || enhancing || asking || !available || !canSubmitText(draft.state) || sourceGuard.blocked);
   const disabledHint = $derived(
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
       : jobsActive ? 'Available when all jobs have finished.'
@@ -157,9 +163,35 @@
     updateSettings(withRememberedParts(settings, draft.state.workflow, parts));
   }
 
+  /** Whether the model of *runTier* is missing from the disk, so the first enhancement would download it. */
+  function tierMissing(runTier: EnhancerTier): boolean {
+    if (downloadedTiers.has(runTier)) return false;
+    return runTier === 'smart' ? contract.smart?.downloaded === false : !contract.downloaded;
+  }
+
+  /** Ask before the enhancement downloads its model; true when nothing is missing or the user agrees. Says why in the note when the plan can't be read. */
+  async function confirmEnhancerDownload(runTier: EnhancerTier): Promise<boolean> {
+    if (!tierMissing(runTier)) return true;
+    // A custom model (no Fast/Smart choice) is the Models page's `custom` row.
+    const name = runTier === 'smart' ? 'smart' : contract.smart === null ? 'custom' : 'fast';
+    asking = true;
+    try {
+      return await confirmDownloads(jobPlanOfRow(await getDownloadPlan('enhancer', name)));
+    } catch (error) {
+      // Hugging Face can't be reached to size it: still ask, and let the user go ahead.
+      if (error instanceof ApiError && error.status === 503) return await confirmDownloads(uncheckedJobPlan(`${name.charAt(0).toUpperCase()}${name.slice(1)} enhancer model`, name));
+      errorText = error instanceof Error ? error.message : 'Could not check the enhancer model download.';
+      return false;
+    } finally {
+      asking = false;
+    }
+  }
+
   /** Run the enhancer on the current prompt; also used by the prompt box's Re-enhance link. */
   export async function runEnhance(): Promise<void> {
     if (enhanceDisabled) return;
+    errorText = null;
+    if (!(await confirmEnhancerDownload(tier))) return;
     onstart?.();
     const source = enhancedSourceFor(draft.state);
     const requested = runSettings;

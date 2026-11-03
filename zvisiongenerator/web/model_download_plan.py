@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -13,6 +13,7 @@ from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, im
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.space import space_need
 from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, licence_payload
 from zvisiongenerator.utils.matte_models import MATTE_LABEL, MATTE_ROW_NAME
 from zvisiongenerator.utils.model_files import huggingface_cache_dir
 from zvisiongenerator.utils.seedvr2 import seedvr2_row_name
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.downloads.space import SpaceNeed
     from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
     from zvisiongenerator.web.config import WebUiConfig
+    from zvisiongenerator.web.job_downloads import JobDownloadPart
     from zvisiongenerator.web.model_inventory import ImageInventoryEntry
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "RowPlan",
     "enhancer_download_needed",
     "matte_download_needed",
+    "parts_summary",
     "plan_summary",
     "row_download_needed",
     "row_plan",
@@ -152,12 +155,14 @@ def plan_summary(
     present: Callable[[DownloadTarget], bool] = target_present_offline,
     space: Callable[..., SpaceNeed | None] = space_need,
     cache_dir: Callable[[], Path] = huggingface_cache_dir,
+    config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Describe what downloading *plan* would fetch: parts with their file counts and sizes, the total and the free space.
+    """Describe what downloading *plan* would fetch: parts with their file counts and sizes, the total, the free space and the licences.
 
     Targets already on disk are skipped; each other one is dry-run against the Hub. ``parts`` is empty and ``space``
     is ``None`` when nothing is missing; ``total_bytes`` is ``None`` when any part's size is unknown. ``space`` is
-    the main download drive's estimate only.
+    the main download drive's estimate only. ``licences`` holds the records of the row's model (the background removal
+    row's own) for the dialog, each with the row's ``name`` as its ``model``; it is empty without a *config*.
 
     Raises:
         PlanUnchecked: If the plan cannot be made now or a target cannot be checked because the Hub is unreachable.
@@ -183,7 +188,95 @@ def plan_summary(
         "parts": [{"repo": target.repo_id, "files": result.missing_files, "bytes": result.missing_bytes} for target, result in checked],
         "total_bytes": None if any(size is None for size in sizes) else sum(size or 0 for size in sizes),
         "space": None if need is None else {"path": str(need.path), "needed_bytes": need.needed_bytes, "free_bytes": need.free_bytes, "enough": need.enough},
+        "licences": _row_licences(plan, config),
     }
+
+
+def parts_summary(
+    parts: Sequence[JobDownloadPart],
+    *,
+    check: Callable[[DownloadTarget], TargetCheck | None] = check_target,
+    present: Callable[[DownloadTarget], bool] = target_present_offline,
+    space: Callable[..., SpaceNeed | None] = space_need,
+    cache_dir: Callable[[], Path] = huggingface_cache_dir,
+    config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Describe what the downloads of a job's *parts* would fetch, for the download dialog.
+
+    A part is listed when it has files to fetch or when it cannot be sized: its targets cannot be planned now, or the
+    Hub cannot be reached to dry-run one of them. Such a part has ``files`` 0 and ``bytes`` ``None``, and the result
+    is ``unchecked``. A target already on disk is skipped without a Hub call, so nothing missing means no call and no
+    parts. A listed part's ``repo`` is its first target that has files to fetch (or, unchecked, its first target).
+
+    Returns:
+        ``parts`` (``label``, ``model``, ``repo``, ``files``, ``bytes`` each, in the order given), ``total_bytes``
+        (``None`` when any size is unknown), ``space`` (the main drive's estimate of the checked part, or ``None``),
+        ``unchecked`` and ``licences`` (the records of the listed parts' models, each with the ``model`` it covers; empty without a *config*).
+
+    Raises:
+        RuntimeError: If the Hub refused a request (gated, missing repo or revision, server error); the message names the repo.
+    """
+    listed: list[dict[str, Any]] = []
+    checked: list[tuple[DownloadTarget, TargetCheck]] = []
+    unchecked = False
+    for part in parts:
+        entry, part_unchecked, part_checked = _part_entry(part, check=check, present=present)
+        checked.extend(part_checked)
+        unchecked = unchecked or part_unchecked
+        if entry is not None:
+            listed.append(entry)
+    sizes = [entry["bytes"] for entry in listed]
+    need = space(checked, cache_dir=cache_dir()) if checked else None
+    return {
+        "parts": listed,
+        "total_bytes": None if any(size is None for size in sizes) else sum(sizes),
+        "space": None if need is None else {"path": str(need.path), "needed_bytes": need.needed_bytes, "free_bytes": need.free_bytes, "enough": need.enough},
+        "unchecked": unchecked,
+        "licences": [{"model": entry["model"], **record} for entry in listed for record in _licences(config, entry["model"])],
+    }
+
+
+def _licences(config: Mapping[str, Any] | None, model_id: str) -> list[dict[str, Any]]:
+    """Return the licence records of *model_id*; none without a *config*."""
+    return [] if config is None else licence_payload(config, model_id)
+
+
+def _row_licences(plan: RowPlan, config: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Return the licence records of a Models-page row, each tagged with the row's ``name``; only image, video and background removal rows have any."""
+    if plan.kind == KIND_ENHANCER:
+        return []
+    model_id = MATTE_LICENCE_MODEL if plan.kind == KIND_MATTE else plan.name
+    return [{"model": plan.name, **record} for record in _licences(config, model_id)]
+
+
+def _part_entry(
+    part: JobDownloadPart,
+    *,
+    check: Callable[[DownloadTarget], TargetCheck | None],
+    present: Callable[[DownloadTarget], bool],
+) -> tuple[dict[str, Any] | None, bool, list[tuple[DownloadTarget, TargetCheck]]]:
+    """Return a part's dialog entry (``None`` when it has nothing to fetch), whether it is unchecked and its checked targets."""
+    if part.targets is None:
+        return _entry(part, repo="", files=0, size=None), True, []
+    missing: list[tuple[DownloadTarget, TargetCheck]] = []
+    for target in part.targets:
+        if present(target):
+            continue
+        result = check(target)
+        if result is None:
+            return _entry(part, repo=target.repo_id, files=0, size=None), True, missing
+        if result.missing_files > 0:
+            missing.append((target, result))
+    if not missing:
+        return None, False, []
+    sizes = [result.missing_bytes for _, result in missing]
+    size = None if any(item is None for item in sizes) else sum(item or 0 for item in sizes)
+    return _entry(part, repo=missing[0][0].repo_id, files=sum(result.missing_files for _, result in missing), size=size), False, missing
+
+
+def _entry(part: JobDownloadPart, *, repo: str, files: int, size: int | None) -> dict[str, Any]:
+    """Return one part's row in the job download plan."""
+    return {"label": part.label, "model": part.model_id, "repo": repo, "files": files, "bytes": size}
 
 
 def _model_row_plan(name: str, web_config: WebUiConfig) -> RowPlan:

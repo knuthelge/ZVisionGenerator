@@ -1,6 +1,6 @@
 import { api } from './client';
 import { parseQuery } from '$lib/prefillParams';
-import type { WorkspaceContext, JobContext, JobList, JobSnapshot, GalleryPage, PrefillParams } from '$lib/types';
+import type { WorkspaceContext, JobContext, JobDownloadPlan, JobList, JobSnapshot, GalleryPage, PrefillParams } from '$lib/types';
 
 export function getWorkspaceContext(params?: Record<string, string>): Promise<WorkspaceContext> {
   const query = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -13,6 +13,11 @@ export function getWorkspaceCoreContext(): Promise<WorkspaceContext> {
 
 export function submitGenerate(formData: FormData): Promise<JobContext> {
   return api.post<JobContext>('/api/generate', formData);
+}
+
+/** What `submitGenerate` of the same form would download: the missing models, their sizes and the free space. */
+export function planGenerate(formData: FormData): Promise<JobDownloadPlan> {
+  return api.post<JobDownloadPlan>('/api/generate/plan', formData);
 }
 
 export function getJobSnapshot(jobId: string): Promise<JobSnapshot> {

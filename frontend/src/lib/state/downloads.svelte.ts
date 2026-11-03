@@ -5,9 +5,9 @@
 import { cancelDownload, getDownloadPlan, getDownloads, importLoraHF, startDownload } from '$lib/api/models';
 import { startDiscoverDownload, type DiscoverSource } from '$lib/api/discover';
 import { errorText, isRetryable } from '$lib/api/client';
-import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
 import type { DownloadItem } from '$lib/types';
-import { downloadConfirmText } from './downloadConfirm';
+import { confirmDownloads } from './confirmDownloads';
+import { jobPlanOfRow } from './downloadConfirm';
 import { addToast } from './toasts.svelte';
 
 export type DownloadKind = DownloadItem['kind'];
@@ -272,9 +272,7 @@ export const downloadStore = {
         notifyDownloaded();
         return 'present';
       }
-      const { info, confirmLabel } = downloadConfirmText(plan);
-      const approved = await requestConfirm({ question: `Download ${plan.label}?`, info, confirmLabel, danger: false });
-      if (!approved) return 'declined';
+      if (!(await confirmDownloads(jobPlanOfRow(plan)))) return 'declined';
       applyItem(await startDownload(kind, name));
       void refresh();
       return 'queued';

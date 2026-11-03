@@ -1,8 +1,8 @@
 <script lang="ts">
   import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
-  import { Badge, Icon, InspectorNumber, Toggle, Tooltip } from '$lib/components/atoms';
-  import { ActionBar, InspectorRow, InspectorSection, Select } from '$lib/components/molecules';
+  import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
+  import { ActionBar, InspectorRow, InspectorSection, LicenceMark, Select } from '$lib/components/molecules';
   import { extendGuard, extendModelSupport } from '$lib/state/extend';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
@@ -14,7 +14,6 @@
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
-  import { TRANSPARENT_TERMS } from './transparent';
   import AudioTrackSection from './AudioTrackSection.svelte';
   import type { AudioTrackView } from './audioTrackView';
   import ImagesSection from './ImagesSection.svelte';
@@ -432,7 +431,7 @@
           <!-- The row says "Transparent" because the label column is narrow; the switch keeps the full name. -->
           <InspectorRow label="Transparent" forId="ws-pp-transparent" changed={changed('postprocessTransparent')} onreset={() => reset('postprocessTransparent')}>
             <Toggle id="ws-pp-transparent" ariaLabel="Transparent background" checked={s.postprocessTransparent} disabled={busy} onchange={(e) => draft.update('postprocessTransparent', (e.currentTarget as HTMLInputElement).checked)} />
-            <Tooltip text={TRANSPARENT_TERMS} class="terms-badge" testId="transparent-terms"><Badge variant="warning">Non-commercial</Badge></Tooltip>
+            <LicenceMark licences={context.matte_licences ?? []} label="Non-commercial" testId="transparent-terms" class="terms-badge" />
           </InspectorRow>
           <input type="hidden" name="transparent" value={s.postprocessTransparent ? 'true' : 'false'}>
         {/if}

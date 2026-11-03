@@ -635,9 +635,9 @@ class TestWorkspaceContract:
     def test_smart_reports_size_and_availability(self):
         smart = {"model": "big/m", "revision": "s", "download_size_label": {"darwin": "19 GB", "win32": "19 GB", "linux": "19 GB"}, "min_memory_gb": 9}
         contract = workspace_api_module.build_prompt_enhancer_contract(self._config(smart=smart), downloaded=lambda repo, rev: False, budget_bytes=lambda: 6 * 2**30)
-        assert contract["smart"] == {"download_size_label": "19 GB", "unavailable": "Needs about 9 GB of memory; this machine has 6 GB."}
+        assert contract["smart"] == {"downloaded": False, "download_size_label": "19 GB", "unavailable": "Needs about 9 GB of memory; this machine has 6 GB."}
         fits = workspace_api_module.build_prompt_enhancer_contract(self._config(smart=smart), downloaded=lambda repo, rev: True, budget_bytes=lambda: 16 * 2**30)
-        assert fits["smart"] == {"download_size_label": None, "unavailable": None}
+        assert fits["smart"] == {"downloaded": True, "download_size_label": None, "unavailable": None}
 
     def test_custom_model_has_no_tiers(self):
         contract = workspace_api_module.build_prompt_enhancer_contract(self._config(user_model="me/mine"), downloaded=lambda repo, rev: False, budget_bytes=lambda: None)

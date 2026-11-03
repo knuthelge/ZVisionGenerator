@@ -21,6 +21,7 @@ import time
 import warnings
 from collections.abc import Iterator
 from contextlib import ExitStack, asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -48,7 +49,7 @@ from zvisiongenerator.converters.lora_import import import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, SettledSteps, settle_video_steps
-from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, VideoGenerationRequest
+from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils import app_db
@@ -138,7 +139,8 @@ from zvisiongenerator.web.lora_details import describe_installed
 from zvisiongenerator.web.lora_download import LoraInstaller, import_source
 from zvisiongenerator.web.lora_sources import SOURCES, LoraSourcesError
 from zvisiongenerator.web.recent_prompts import RecentPrompts, RecentPromptsError, recent_prompt_entry
-from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
+from zvisiongenerator.web.job_downloads import JobDownloadPart, drop_in_flight, job_download_parts
+from zvisiongenerator.web.model_download_plan import PlanUnchecked, parts_summary, plan_summary, row_plan
 from zvisiongenerator.web.path_browser import (
     AUDIO_TRACK_EXTENSIONS,
     BrowsePlace,
@@ -741,12 +743,69 @@ async def generate(request: Request) -> JSONResponse:
     return await run_in_threadpool(_generate_from_form, form)
 
 
+@app.post("/api/generate/plan")
+async def generate_plan(request: Request) -> dict[str, Any]:
+    """Return what the generate form would download before it runs: the missing parts, their sizes and the free space."""
+    form = await request.form()
+    return await run_in_threadpool(_generate_plan_from_form, form)
+
+
+@dataclass(frozen=True)
+class ParsedJob:
+    """A generate form that passed validation: the job it asks for, ready to queue or to plan the downloads of."""
+
+    request: ImageGenerationRequest | VideoGenerationRequest
+    prompts_data: dict[str, list[tuple[str, str | None]]]
+    config: dict[str, Any]
+    args: argparse.Namespace
+    model_ref: str
+    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None
+    scene_by_set: dict[str, list[str | None]] | None
+    context: dict[str, Any]
+    supported_controls: tuple[str, ...]
+
+
+_GENERATE_MODES = ("image", "video")
+"""The modes of ``/api/generate`` and ``/api/generate/plan``; the audio modes join here with their parse and queue halves."""
+
+
+def _generate_mode(form: Any) -> str:
+    """Return the mode a generate form asks for (``image`` when it names none).
+
+    Raises:
+        ValueError: If the mode is not one of ``_GENERATE_MODES``.
+    """
+    mode = str(form.get("mode", "image")).strip().lower() or "image"
+    if mode not in _GENERATE_MODES:
+        raise ValueError(f"Unknown mode '{mode}'. Use one of: {', '.join(_GENERATE_MODES)}.")
+    return mode
+
+
+def _generate_plan_from_form(form: Any) -> dict[str, Any]:
+    """Parse a generate form like a submit does and summarise the downloads its job would start; runs off the event loop."""
+    web_config = load_web_config()
+    try:
+        parsed = _parse_video_job(form, web_config) if _generate_mode(form) == "video" else _parse_image_job(form, web_config)
+        parts = job_download_parts(parsed.request, parsed.args, parsed.prompts_data, parsed.enhance_by_set, parsed.config, platform_key=sys.platform, model_ref=parsed.model_ref)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _summarize_job_parts(parts, web_config.app_config)
+
+
+def _summarize_job_parts(parts: tuple[JobDownloadPart, ...], config: dict[str, Any]) -> dict[str, Any]:
+    """Return the download dialog's plan for a job's *parts* with their licences, leaving out what a running download already fetches."""
+    try:
+        return parts_summary(drop_in_flight(parts, download_flights.active()), config=config)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=424, detail=str(exc)) from exc
+
+
 def _generate_from_form(form: Any) -> JSONResponse:
     """Validate a parsed generate form and queue the job; runs off the event loop."""
     web_config = load_web_config()
-    mode = str(form.get("mode", "image")).strip().lower() or "image"
 
     try:
+        mode = _generate_mode(form)
         if mode == "video":
             job_context = _submit_video_job(form, web_config)
         else:
@@ -893,8 +952,65 @@ async def upscale(request: Request) -> JSONResponse:
     return await run_in_threadpool(_upscale_from_body, body)
 
 
+@app.post("/api/upscale/plan")
+async def upscale_plan(request: Request) -> dict[str, Any]:
+    """Return what an upscale of a gallery file would download before it runs: the missing parts, their sizes and the free space."""
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    return await run_in_threadpool(_upscale_plan_from_body, body)
+
+
+@dataclass(frozen=True)
+class ParsedUpscale:
+    """An upscale request that passed validation: the job it asks for, ready to queue or to plan the downloads of."""
+
+    request: ImageGenerationRequest | VideoFileUpscaleRequest | LtxVideoUpscaleRequest
+    model_ref: str | None
+    config: dict[str, Any]
+    context: dict[str, Any]
+    workflow: Any  # the workflow an image upscale shows; None for a video file
+
+
+def _upscale_plan_from_body(body: Any) -> dict[str, Any]:
+    """Parse an upscale body like a submit does and summarise the downloads its job would start; runs off the event loop."""
+    parsed = _parse_upscale_body(body)
+    try:
+        parts = job_download_parts(parsed.request, None, None, None, parsed.config, platform_key=sys.platform, model_ref=parsed.model_ref)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _summarize_job_parts(parts, parsed.config)
+
+
 def _upscale_from_body(body: Any) -> JSONResponse:
     """Validate an upscale request, plan the job and submit it; runs off the event loop."""
+    parsed = _parse_upscale_body(body)
+    try:
+        if isinstance(parsed.request, VideoFileUpscaleRequest):
+            job_id = web_runner.submit_video_file_upscale_job(request=parsed.request, admission_check=_reject_while_busy, context=parsed.context)
+        elif isinstance(parsed.request, LtxVideoUpscaleRequest):
+            job_id = web_runner.submit_ltx_video_upscale_job(request=parsed.request, config=parsed.config, admission_check=_reject_while_busy, context=parsed.context)
+        else:
+            job_id = web_runner.submit_upscale_job(
+                request=parsed.request,
+                workflow=parsed.workflow,
+                model_ref=parsed.model_ref,
+                config=parsed.config,
+                admission_check=_reject_while_busy,
+                context=parsed.context,
+            )
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _job_response(job_id, parsed.context, UPSCALE_SUPPORTED_CONTROLS)
+
+
+def _parse_upscale_body(body: Any) -> ParsedUpscale:
+    """Validate an upscale request and describe the job it asks for, without queueing it.
+
+    Raises:
+        HTTPException: With the status that tells why the request was refused.
+    """
     try:
         asset_id, factor, method = upscale_json_request(body)
     except ValueError as exc:
@@ -903,7 +1019,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
     if source_path is None:
         raise HTTPException(status_code=422, detail="The file must be inside the output folder.")
     if source_path.suffix.lower() in VIDEO_EXTENSIONS:
-        return _video_upscale_from_body(source_path, factor, method)
+        return _parse_video_upscale(source_path, factor, method)
     if source_path.suffix.lower() not in IMAGE_EXTENSIONS or not source_path.is_file():
         raise HTTPException(status_code=404, detail=f"Unknown image: {asset_id}")
 
@@ -942,24 +1058,12 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         "output_dir": web_config.output_dir,
         "settings": {},
     }
-    try:
-        job_id = web_runner.submit_upscale_job(
-            request=plan.request,
-            workflow=(
-                build_seedvr2_upscale_workflow(transparent=plan.request.transparent) if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen, transparent=plan.request.transparent)
-            ),
-            model_ref=plan.model_ref,
-            config=web_config.app_config,
-            admission_check=_reject_while_busy,
-            context=context,
-        )
-    except JobConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)
+    workflow = build_seedvr2_upscale_workflow(transparent=plan.request.transparent) if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen, transparent=plan.request.transparent)
+    return ParsedUpscale(request=plan.request, model_ref=plan.model_ref, config=web_config.app_config, context=context, workflow=workflow)
 
 
-def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSONResponse:
-    """Validate an upscale request for a gallery video, plan the job and submit it; runs off the event loop.
+def _parse_video_upscale(source_path: Path, factor: int, method: str) -> ParsedUpscale:
+    """Validate an upscale request for a gallery video and describe the job it asks for, without queueing it.
 
     The method must be this platform's: ``seedvr2`` on Windows and Linux, ``ltx`` on macOS.
     """
@@ -979,7 +1083,7 @@ def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSO
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if method == UPSCALE_METHOD_LTX:
-        return _submit_ltx_video_upscale(source, recorded_config, web_config)
+        return _parse_ltx_video_upscale(source, recorded_config, web_config)
     setup = web_config.seedvr2
     plan = plan_video_upscale(source, recorded_config, setup=setup)
     upscale_model = seedvr2_tier_label(setup.tier.model, setup.weights)
@@ -1000,15 +1104,11 @@ def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSO
         "output_dir": web_config.output_dir,
         "settings": {},
     }
-    try:
-        job_id = web_runner.submit_video_file_upscale_job(request=plan.request, admission_check=_reject_while_busy, context=context)
-    except JobConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)
+    return ParsedUpscale(request=plan.request, model_ref=None, config=web_config.app_config, context=context, workflow=None)
 
 
-def _submit_ltx_video_upscale(source: ExtendSource, recorded_config: dict[str, Any] | None, web_config: WebUiConfig) -> JSONResponse:
-    """Plan the LTX upscale of a checked gallery video and submit it (macOS)."""
+def _parse_ltx_video_upscale(source: ExtendSource, recorded_config: dict[str, Any] | None, web_config: WebUiConfig) -> ParsedUpscale:
+    """Plan the LTX upscale of a checked gallery video and describe the job it asks for, without queueing it (macOS)."""
     try:
         plan = plan_ltx_video_upscale(source, recorded_config, web_config)
     except ValueError as exc:
@@ -1031,11 +1131,7 @@ def _submit_ltx_video_upscale(source: ExtendSource, recorded_config: dict[str, A
         "output_dir": web_config.output_dir,
         "settings": {},
     }
-    try:
-        job_id = web_runner.submit_ltx_video_upscale_job(request=request, config=web_config.app_config, admission_check=_reject_while_busy, context=context)
-    except JobConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)
+    return ParsedUpscale(request=request, model_ref=None, config=web_config.app_config, context=context, workflow=None)
 
 
 @app.post("/jobs/{job_id}/controls/{action}")
@@ -1165,6 +1261,33 @@ def _build_workflow_contract() -> dict[str, Any]:
 
 
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
+    """Parse an image generate form and queue its job."""
+    return _queue_image_job(_parse_image_job(form, web_config))
+
+
+def _queue_image_job(parsed: ParsedJob) -> dict[str, Any]:
+    """Queue the image job *parsed* describes."""
+    job_id = web_runner.submit_image_request_job(
+        request=parsed.request,
+        prompts_data=parsed.prompts_data,
+        config=parsed.config,
+        args=parsed.args,
+        model_ref=parsed.model_ref,
+        quantize=parsed.args.quantize,
+        enhance_by_set=parsed.enhance_by_set,
+        admission_check=_reject_while_busy,
+        context=parsed.context,
+        supported_controls=parsed.supported_controls,
+    )
+    return {"job_id": job_id, "context": parsed.context, "supported_controls": parsed.supported_controls}
+
+
+def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
+    """Validate an image generate form and describe the job it asks for, without queueing it.
+
+    Raises:
+        ValueError: If the form is invalid.
+    """
     app_config = web_config.app_config
     workflow = _workflow_from_form(_optional_text(form, "workflow"), fallback="txt2img")
     model_name = _text_or_default(form, "model", web_config.default_models.image)
@@ -1342,27 +1465,48 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         output_dir=args.output,
         uploads={"image_path": args.image_path, "reference_path": args.reference_paths},
     )
-    supported_controls = generation_supported_controls(review=review_enabled(args))
-    job_id = web_runner.submit_image_request_job(
+    return ParsedJob(
         request=request,
         prompts_data=prompts_data,
         config=app_config,
         args=args,
         model_ref=resolved_model,
-        quantize=args.quantize,
         enhance_by_set=enhance_by_set,
-        admission_check=_reject_while_busy,
+        scene_by_set=None,
         context=context,
-        supported_controls=supported_controls,
+        supported_controls=generation_supported_controls(review=review_enabled(args)),
     )
-    return {
-        "job_id": job_id,
-        "context": context,
-        "supported_controls": supported_controls,
-    }
 
 
 def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
+    """Parse a video generate form (Extend included) and queue its job."""
+    return _queue_video_job(_parse_video_job(form, web_config))
+
+
+def _queue_video_job(parsed: ParsedJob) -> dict[str, Any]:
+    """Queue the video job *parsed* describes."""
+    job_id = web_runner.submit_video_request_job(
+        request=parsed.request,
+        prompts_data=parsed.prompts_data,
+        config=parsed.config,
+        args=parsed.args,
+        model_ref=parsed.model_ref,
+        enhance_by_set=parsed.enhance_by_set,
+        scene_by_set=parsed.scene_by_set,
+        admission_check=_reject_while_busy,
+        context=parsed.context,
+        supported_controls=parsed.supported_controls,
+    )
+    return {"job_id": job_id, "context": parsed.context, "supported_controls": parsed.supported_controls}
+
+
+def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
+    """Validate a video generate form (Extend included) and describe the job it asks for, without queueing it.
+
+    Raises:
+        ValueError: If the form is invalid.
+        HTTPException: With status 400 when review is asked for on a platform without it.
+    """
     app_config = web_config.app_config
     workflow = _workflow_from_form(_optional_text(form, "workflow"), fallback="txt2vid")
     extend = workflow == "extend"
@@ -1505,8 +1649,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         output_dir=args.output,
         uploads={"image_path": image_path, "end_image_path": end_image_path, "audio_track_path": audio_track.path if audio_track is not None else None},
     )
-    supported_controls = generation_supported_controls(review=review_enabled(args))
-    job_id = web_runner.submit_video_request_job(
+    return ParsedJob(
         request=request,
         prompts_data=prompts_data,
         config=app_config,
@@ -1514,15 +1657,9 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         model_ref=resolved_model,
         enhance_by_set=enhance_by_set,
         scene_by_set=scene_by_set,
-        admission_check=_reject_while_busy,
         context=context,
-        supported_controls=supported_controls,
+        supported_controls=generation_supported_controls(review=review_enabled(args)),
     )
-    return {
-        "job_id": job_id,
-        "context": context,
-        "supported_controls": supported_controls,
-    }
 
 
 def _resolve_prompt_submission_with_enhance(
@@ -2403,7 +2540,7 @@ async def api_models_download_plan(kind: str, name: str) -> dict[str, Any]:
     except RuntimeError as exc:
         raise HTTPException(status_code=424, detail=str(exc)) from exc
     try:
-        return await run_in_threadpool(plan_summary, plan)
+        return await run_in_threadpool(partial(plan_summary, plan, config=web_config.app_config))
     except PlanUnchecked as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:

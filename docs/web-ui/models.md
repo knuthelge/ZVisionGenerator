@@ -12,10 +12,12 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 | **Video models** | `ltx-4`, `ltx-8` and converted LTX fine-tunes |
 | **LoRAs** | The files in `~/.ziv/loras/` |
 | **Prompt enhancer** | **Fast**, **Smart** and, when set on the Config page, **Custom** |
-| **Background removal** | The cut-out models of [Transparent background](../concepts/images.md#transparent-background), as one row (548 MB), with a **Non-commercial** badge |
+| **Background removal** | The cut-out models of [Transparent background](../concepts/images.md#transparent-background), as one row (548 MB) |
 | **Other downloads** | Hugging Face downloads that nothing uses any more |
 
 A built-in model shows its name with its alias under it, for example FLUX.2 Klein 9B and `klein9b`. The alias is what you use in the CLI and in prompt files.
+
+A model that comes with terms, and the **Background removal** row, has an **ⓘ** after its name. Hover it, or press it, to read the licence's name, who licenses it and what it allows, with links to the licence text and, where there is one, its NOTICE file. A model with two licences, such as the LTX models with Gemma, shows both. See [Licences](../concepts/models.md#licences).
 
 **Size** is the disk the model uses. For a built-in model that's its Hugging Face download; for a converted model it's its own folder, without the base-model files it links to. Quantized copies count with their model.
 
@@ -23,9 +25,9 @@ A built-in model shows its name with its alias under it, for example FLUX.2 Klei
 
 ## Download ahead of time
 
-A row whose files aren't fully downloaded has a **Download** button. Without it, the first job that needs the model downloads it and shows the progress on its card.
+A row whose files aren't fully downloaded has a **Download** button. Without it, the first job that needs the model asks to download it, with its size and the free space, and then shows the progress on its card.
 
-1. **Download** first shows the download's size and the free space on the drive. When the space looks short, **Download anyway** replaces the button.
+1. **Download** first shows the download's size and the free space on the drive. For a model with terms, the dialog also names them under the model, with links, and says that downloading means you agree to them. When the space looks short, **Download anyway** replaces the button.
 2. Downloads run one at a time, beside your jobs: they don't take a place in the job queue, so you can generate while one runs. Later downloads wait as **Queued**.
 3. **Cancel** on a row stops a running download or removes a queued one. Finished files are kept, so the next Download continues with the rest.
 

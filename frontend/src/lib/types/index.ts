@@ -281,6 +281,8 @@ export interface ModelOption extends ModelStatusFields {
   download_size_label?: string | null;
   /** An LTX video model's version, as the server read it from the model (alias, repo or folder); null for other models. */
   version?: '2.3' | '2.5' | null;
+  /** The licences the model comes with (two for LTX with Gemma); empty for an unrestricted model. */
+  licences?: ModelLicence[];
 }
 
 /** What the first-run dialog needs: whether it was skipped for good and the model it preselects. */
@@ -364,6 +366,8 @@ export interface WorkspaceContext {
   workflow_contract: WorkflowContract;
   prompt_enhancer?: PromptEnhancerContract;
   first_run?: FirstRunContext;
+  /** The licences of the background removal models, which a Transparent job downloads and uses. */
+  matte_licences?: ModelLicence[];
 }
 
 // ── Prompt enhancer ────────────────────────────────────────────────────────────
@@ -462,6 +466,8 @@ export interface PromptEnhancerContract {
 }
 
 export interface SmartEnhancerContract {
+  /** Whether the Smart model is on disk. */
+  downloaded: boolean;
   /** Approximate first-use download size, null once downloaded. */
   download_size_label: string | null;
   /** Why Smart cannot run on this machine, or null when it can. */
@@ -1457,6 +1463,51 @@ export interface DownloadPlan {
   total_bytes: number | null;
   /** Free space on the download drive against the estimate; `null` when it cannot be checked. */
   space: { path: string; needed_bytes: number; free_bytes: number; enough: boolean } | null;
+  /** The licences of the row's model, each tagged with the row's `name` as its `model`. */
+  licences?: JobDownloadLicence[];
+}
+
+/** One model a job would download, from `POST /api/generate/plan` and `POST /api/upscale/plan`. */
+export interface JobDownloadPart {
+  /** The name the dialog shows. */
+  label: string;
+  /** The model's id; the key of its licence records. */
+  model: string;
+  /** The first repo that has files to fetch; empty when the part cannot be planned now. */
+  repo: string;
+  files: number;
+  /** What is missing; `null` when the size is unknown. */
+  bytes: number | null;
+}
+
+/** A licence a model comes with, as the server reads it from the config's `licences` section. */
+export interface ModelLicence {
+  name: string;
+  supplier: string;
+  summary: string;
+  /** The licence text (or the model card), pinned to a revision. */
+  url: string;
+  /** What the link to `url` is called: "Licence" or "Model card". */
+  url_label: string;
+  notice_url: string | null;
+}
+
+/** A licence record that covers a model of a job's plan. */
+export interface JobDownloadLicence extends ModelLicence {
+  /** The id of the plan part's model the record covers. */
+  model: string;
+}
+
+/** What a job would download before it runs: the missing models in the order the job fetches them. Empty `parts` means nothing is to be downloaded. */
+export interface JobDownloadPlan {
+  parts: JobDownloadPart[];
+  /** `null` when any size is unknown. */
+  total_bytes: number | null;
+  /** Free space on the download drive against the estimate; `null` when nothing was checked. */
+  space: { path: string; needed_bytes: number; free_bytes: number; enough: boolean } | null;
+  /** A part could not be sized because Hugging Face could not be reached. */
+  unchecked: boolean;
+  licences: JobDownloadLicence[];
 }
 
 /** A quantized copy of an installed model, used automatically when that quantize level is selected. */
@@ -1481,6 +1532,7 @@ export interface ModelEntry extends ModelStatusFields {
   download_size_label?: string | null;
   /** Files are missing, so the Models page offers Download. */
   download_needed: boolean;
+  licences?: ModelLicence[];
 }
 
 export interface VideoModelEntry extends ModelStatusFields {
@@ -1497,6 +1549,7 @@ export interface VideoModelEntry extends ModelStatusFields {
   disk_size_label?: string | null;
   /** Files are missing, so the Models page offers Download. */
   download_needed: boolean;
+  licences?: ModelLicence[];
 }
 
 /** A prompt-enhancer model configured on this platform: the Fast or Smart tier, or a custom `user_model`. */
@@ -1531,6 +1584,7 @@ export interface BackgroundRemovalEntry {
   deletable: boolean;
   /** Files are missing, so the Models page offers Download. */
   download_needed: boolean;
+  licences?: ModelLicence[];
 }
 
 /** Hugging Face cache content nothing on the Models page uses. */

@@ -7,6 +7,7 @@ zvisiongenerator/
 ├── video_cli.py                   Video CLI entry point (ziv-video)
 ├── cli.py                         Unified CLI entry point (ziv)
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model / --enhance-format CLI handling
+├── licence_cli.py                 Shared licence notice of the image and video CLIs: plans a model's downloads only when it has a licence record, then prints the terms
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── built_models.py                One entry point for the models built on first use: recognise their folders, prepare them, name the step
 ├── ideogram4_instant_builder.py   Build the Ideogram 4 Instant model folder on first use (download, convert, link the base components)
@@ -163,6 +164,7 @@ zvisiongenerator/
 │   ├── image_model_detect.py      Image model type detection
 │   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`), `flatten_alpha` for another backdrop, and the accepted extensions
 │   ├── interactive.py             Keyboard interrupt handling and review state
+│   ├── licences.py                Pure reader of the config's `licences` section: frozen `LicenceRecord`s, lookups by model, the JSON form of a model's records, and the licence notice for a download that is about to start
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
 │   ├── lora_files.py              Give a loader a LoRA under the tensor names its family reads: the tensors renamed, or a temporary renamed copy of the file for loaders that take only a path
@@ -218,6 +220,7 @@ zvisiongenerator/
 │   ├── hub_client.py              Anonymous, size-capped reads of huggingface.co for Discover, with input validators and a short in-memory cache
 │   ├── instances.py               Record running Web UI servers for --background and --background-stop
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── job_downloads.py           Plan one job's downloads as parts (enhancer, model, background removal, SeedVR2 tier) with their targets and event names, shared by the runner and the plan routes; leaves out what a running download already fetches
 │   ├── job_log.py                 Job log component of the app database: entry builder, filters, paging and the `jobs_entries` store
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
 │   ├── listing_filter.py          The content filter: whether Discover lists a Hugging Face repository, by the words in its names
@@ -228,7 +231,7 @@ zvisiongenerator/
 │   ├── lora_fit.py                Size the LoRAs a Web UI memory estimate covers (MiniMax H3 only), resolved as a job resolves them
 │   ├── lora_sources.py            LoRA sources component of the app database: where each downloaded LoRA came from and its trigger
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
-│   ├── model_download_plan.py     Plan a Models-page row's downloads: targets, whether it needs any, sizes and free space
+│   ├── model_download_plan.py     Plan a Models-page row's downloads (targets, whether it needs any, sizes and free space) and size the parts of a job for the download dialog, each plan carrying the licence records of its models
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── path_browser.py            Host folder listings for the in-app path browser
@@ -241,7 +244,7 @@ zvisiongenerator/
 │   ├── video_clip.py              Resolve the model, steps, size and length a video job runs at, shared by the job and its memory estimate
 │   ├── video_conversion.py        Video checkpoint conversion from the Models page (LTX-2.3, LTX-2.5, MiniMax H3): inspect, then convert as a background job with progress
 │   ├── web_runner.py              Background workers for generation batches
-│   ├── workspace_api.py           Shared SPA payloads for workspace and models routes
+│   ├── workspace_api.py           Shared SPA payloads for workspace and models routes; every model option and row carries its licence records
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
 │   └── server.py                  FastAPI route wiring and request parsing
 └── workflows/

@@ -83,6 +83,47 @@ describe('ConfirmDialog', () => {
     expect(onconfirm).not.toHaveBeenCalled();
   });
 
+  it('lists its parts between the question and the information, one block each, with "size unknown" for a missing size', () => {
+    mountDialog({
+      question: 'Download 2 models?',
+      info: '9.0 GB in 2 parts.',
+      parts: [{ label: 'FLUX.2 Klein 9B', size: '35.1 GB', lines: [] }, { label: 'Prompt enhancer', size: null, lines: [] }],
+    });
+
+    const blocks = Array.from(document.querySelectorAll('[data-testid="confirm-part"]'));
+    expect(blocks.map((block) => block.textContent?.replace(/\s+/g, ' ').trim())).toEqual(['FLUX.2 Klein 9B 35.1 GB', 'Prompt enhancer size unknown']);
+    const order = Array.from(document.querySelectorAll('[role="alertdialog"] p, [role="alertdialog"] ul')).map((el) => el.tagName + (el.textContent ?? '').slice(0, 12));
+    expect(order[0]).toContain('Download 2');
+    expect(order.at(-1)).toContain('9.0 GB');
+    expect(document.body.textContent).not.toContain('agree to the terms');
+  });
+
+  it('puts a part\'s licence lines under it with links that open in a new tab, and says once that the terms apply', () => {
+    mountDialog({
+      parts: [{ label: 'FLUX.2 Klein 9B', size: '35.1 GB', lines: [{ text: 'FLUX Non-Commercial License (Black Forest Labs): Non-commercial', links: [{ label: 'Licence ↗', href: 'https://example.org/licence', ariaLabel: 'FLUX Non-Commercial License licence (opens in a new tab)' }] }] }],
+    });
+
+    const block = document.querySelector('[data-testid="confirm-part"]')!;
+    const link = block.querySelector('a')!;
+    expect(link.getAttribute('href')).toBe('https://example.org/licence');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener');
+    expect(link.getAttribute('aria-label')).toBe('FLUX Non-Commercial License licence (opens in a new tab)');
+    expect(block.textContent).toContain('Non-commercial');
+    expect(document.body.textContent?.match(/agree to the terms/g)).toHaveLength(1);
+  });
+
+  it('leaves Enter on a link in the body to the link', () => {
+    const { onconfirm } = mountDialog({
+      parts: [{ label: 'FLUX.2 Klein 9B', size: null, lines: [{ text: 'Terms', links: [{ label: 'Licence ↗', href: 'https://example.org/licence', ariaLabel: 'Terms licence (opens in a new tab)' }] }] }],
+    });
+    const link = document.querySelector('[data-testid="confirm-part"] a') as HTMLAnchorElement;
+    link.focus();
+
+    expect(press('Enter', {}, link).defaultPrevented).toBe(false);
+    expect(onconfirm).not.toHaveBeenCalled();
+  });
+
   it('keeps keys from reaching the page but lets Tab move focus inside the dialog', () => {
     mountDialog();
     const pageKeys = vi.fn();

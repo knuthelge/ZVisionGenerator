@@ -25,7 +25,7 @@ There are two built-in enhancer models. **Fast** is the default. **Smart** is la
 
 Both are uncensored variants of Qwen3.5, because small instruction-tuned models often refuse or tone down ordinary creative prompts, such as a battle scene, a horror shot or a villain's portrait.
 
-Where Smart doesn't fit, the Web UI says why and Fast runs; the CLI warns and uses Fast. A model downloads the first time it's needed, or ahead of time from the [Models page](../web-ui/models.md).
+Where Smart doesn't fit, the Web UI says why and Fast runs; the CLI warns and uses Fast. A model downloads the first time it's needed (the Web UI asks first, with its size) or ahead of time from the [Models page](../web-ui/models.md).
 
 Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of memory.
 

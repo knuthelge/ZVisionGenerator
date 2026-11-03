@@ -17,6 +17,7 @@ export { default as JobPreview } from './JobPreview.svelte';
 export { default as JobBar } from './JobBar.svelte';
 export { default as ReviewStage } from './ReviewStage.svelte';
 export { default as ModelStatusBadges } from './ModelStatusBadges.svelte';
+export { default as LicenceMark } from './LicenceMark.svelte';
 export { default as PathField } from './PathField.svelte';
 export { default as PromptFileField } from './PromptFileField.svelte';
 export { default as InspectorRow } from './InspectorRow.svelte';

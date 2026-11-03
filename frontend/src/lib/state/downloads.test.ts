@@ -204,7 +204,7 @@ describe('downloadStore', () => {
       expect(downloadStore.active('model', 'klein9b')?.id).toBe('d1');
       await advance();
 
-      expect(confirm.requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ question: 'Download Klein 9B?', confirmLabel: 'Download', danger: false }));
+      expect(confirm.requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ question: 'Download Klein 9B?', confirmLabel: 'Download', danger: false, parts: [{ label: 'Klein 9B', size: '34.7 GB', lines: [] }] }));
       expect(api.startDownload).toHaveBeenCalledWith('model', 'klein9b');
       expect(downloadStore.active('model', 'klein9b')?.id).toBe('d1');
       expect(downloadStore.active('enhancer', 'klein9b')).toBeNull();

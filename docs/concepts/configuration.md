@@ -114,6 +114,33 @@ model_labels:
 
 An alias without a label shows its alias.
 
+## `licences`
+
+The terms the built-in models come with. Each entry is a licence record that covers one or more models, so a model can have two (LTX-2.3 has its own licence and Gemma's):
+
+```yaml
+licences:
+  flux-nc:
+    name: "FLUX Non-Commercial License v2.1"
+    supplier: "Black Forest Labs"
+    summary: "Non-commercial"
+    url: "https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/LICENSE.md"
+    notice_url: "https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/NOTICE"
+    models: [klein9b]
+```
+
+| Key | Required | Description |
+|---|---|---|
+| `name` | yes | The licence's name |
+| `supplier` | yes | Who licenses the model |
+| `summary` | yes | The terms in a short, plain phrase |
+| `url` | yes | The licence text, pinned to a revision |
+| `models` | yes | The models it covers, at least one: an alias from `model_aliases`, or `matte` for the [background removal](images.md#transparent-background) models |
+| `notice_url` | no | The licence's NOTICE file, pinned to a revision |
+| `url_label` | no | What the link to `url` is called. Default `Licence` |
+
+A URL is pinned when its path holds a 40-character commit, as in `.../blob/<commit>/LICENSE`, or `owner/repo@<commit>` on jsDelivr. The app refuses to start with a URL that has none, a record without a required key, an empty `models` list or a model that doesn't exist. Models under MIT or Apache-2.0 have no record.
+
 ## `first_run`
 
 The model the Web UI's first-run dialog preselects.

@@ -9,7 +9,7 @@ import { jobStore } from '$lib/state/job.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { JobSnapshot, RecentPrompt, WorkflowMode, WorkspaceContext } from '$lib/types';
-import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
+import { FLUX_LICENCE, makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 
 vi.mock('$lib/state/layoutMode.svelte', () => ({
   layout: { compact: true, mode: 'compact', coarse: true },
@@ -169,7 +169,7 @@ describe('WorkspacePage on a phone', () => {
       expect(chip()).toBeNull();
     });
 
-    it('shows the row and the badge in the All settings sheet', async () => {
+    it('shows the row and the Non-commercial licence mark in the All settings sheet', async () => {
       await mountPhone();
 
       (target.querySelector('[aria-label="All settings"]') as HTMLButtonElement).click();
@@ -177,7 +177,71 @@ describe('WorkspacePage on a phone', () => {
 
       const sheet = document.querySelector('[data-testid="sheet"]')!;
       expect(sheet.querySelector('#ws-pp-transparent')).not.toBeNull();
-      expect(sheet.querySelector('[data-testid="transparent-terms"] .ui-badge')).not.toBeNull();
+      expect(sheet.querySelector('.ui-badge[data-testid="transparent-terms"]')).not.toBeNull();
+    });
+  });
+
+  describe('the licence marks of the model', () => {
+    const chip = () => target.querySelector('[data-chip="model"]') as HTMLButtonElement;
+    const popover = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement | null;
+
+    beforeEach(() => {
+      Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    });
+
+    afterEach(() => {
+      delete (Element.prototype as Partial<Element>).animate;
+    });
+
+    async function mountPhone(): Promise<void> {
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext());
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+    }
+
+    it('ends each restricted row of the Model popover with a mark beside its radio, and leaves the chip bare', async () => {
+      await mountPhone();
+
+      chip().click();
+      await settle();
+
+      const rows = Array.from(popover()!.querySelectorAll('.pop-model'));
+      expect(rows).toHaveLength(2);
+      const [zit, flux] = rows;
+      expect(zit.querySelector('.licence-mark')).toBeNull();
+      const mark = flux.querySelector('.licence-mark') as HTMLButtonElement;
+      expect(mark.getAttribute('aria-label')).toBe(`Licence: ${FLUX_LICENCE.name}`);
+      // A sibling of the radio: a button cannot sit inside a button.
+      expect(mark.closest('[role="radio"]')).toBeNull();
+      expect(flux.querySelector('[role="radio"]')!.contains(mark)).toBe(false);
+      expect(chip().querySelector('.licence-mark, [aria-haspopup="dialog"]')).toBeNull();
+      expect(target.querySelector('[data-testid="settings-strip"] [aria-haspopup="dialog"]')).toBeNull();
+    });
+
+    it('does not change the model when the mark is pressed', async () => {
+      await mountPhone();
+      chip().click();
+      await settle();
+      const before = draft.state.model;
+
+      (popover()!.querySelector('.pop-model .licence-mark') as HTMLButtonElement).click();
+      await settle();
+
+      expect(draft.state.model).toBe(before);
+      expect(document.querySelector('[data-testid="licence-popover"]')).not.toBeNull();
+    });
+
+    it('shows the selected model\'s mark in the toolbar at the head of the All settings sheet, none for zit', async () => {
+      draft.update('model', 'flux-lite');
+      await mountPhone();
+
+      (target.querySelector('[aria-label="All settings"]') as HTMLButtonElement).click();
+      await settle();
+
+      const sheet = document.querySelector('[data-testid="sheet"]')!;
+      const mark = sheet.querySelector('[data-testid="model-licence"]') as HTMLButtonElement;
+      expect(mark.getAttribute('aria-label')).toBe(`Licence: ${FLUX_LICENCE.name}`);
+      expect(sheet.querySelector('#ws-model')!.contains(mark)).toBe(false);
     });
   });
 

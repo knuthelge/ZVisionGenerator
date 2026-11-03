@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- **The download dialog, the Models page and the CLI name the terms of models that have them**, with links to the licence and its NOTICE
+
+### Changed
+- **Generate, Upscale and Enhance now ask before downloading a model**, with its size and free space, as the Models page does
+
 ### Fixed
 - `ziv image -m <owner/repo>` for a model that has an alias now runs as that alias, so it shows the model's licence notice and records the alias as the model name
 

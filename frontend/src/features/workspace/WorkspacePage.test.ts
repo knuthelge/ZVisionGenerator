@@ -66,6 +66,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getWorkspaceContext: mocks.getWorkspaceContext,
     getWorkspaceCoreContext: mocks.getWorkspaceCoreContext,
     submitGenerate: mocks.submitGenerate,
+    planGenerate: mocks.planGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
     checkReferencePaths: mocks.checkReferencePaths,
@@ -99,7 +100,7 @@ vi.mock('$lib/api/presets', async () => (await import('../../test-utils/workspac
 vi.mock('$lib/api/models', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/models')>();
   const { modelApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { ...actual, getDownloads: modelApiMocks.getDownloads };
+  return { ...actual, getDownloads: modelApiMocks.getDownloads, getDownloadPlan: modelApiMocks.getDownloadPlan };
 });
 
 vi.mock('$lib/api/promptFiles', async () => {
@@ -1355,7 +1356,7 @@ describe('WorkspacePage', () => {
       enhanceApiMocks.enhancePrompt.mockResolvedValue();
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: 'Needs about 9 GB of memory; this machine has 6 GB.' }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: 'Needs about 9 GB of memory; this machine has 6 GB.' }));
       const run = await openEnhanceRun();
       const smart = document.querySelector('[data-choice="smart"]') as HTMLButtonElement;
       expect(smart.getAttribute('aria-disabled')).toBe('true');
@@ -1372,7 +1373,7 @@ describe('WorkspacePage', () => {
       enhanceApiMocks.enhancePrompt.mockResolvedValue();
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: null }));
       const run = await openEnhanceRun();
       expect(document.body.textContent).toContain('First use downloads ≈19 GB.');
       run.click();
@@ -1383,7 +1384,7 @@ describe('WorkspacePage', () => {
     it('pins the Enhancer choice and the first-use hint with the run button in the popover footer', async () => {
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: null }));
       const run = await openEnhanceRun();
       const foot = document.querySelector('#ws-enhance-panel .enhance-popover-foot');
       expect(foot?.contains(run)).toBe(true);
@@ -1395,7 +1396,7 @@ describe('WorkspacePage', () => {
     it('keeps the Enhancer choice in a footer without a run button when auto-enhance is on', async () => {
       draft.update('prompt', 'a fox');
       draft.update('enhanceAuto', true);
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: null, unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: null, unavailable: null }));
       await openEnhanceRun();
       const foot = document.querySelector('#ws-enhance-panel .enhance-popover-foot');
       expect(foot?.querySelector('[data-choice="smart"]')).not.toBeNull();
@@ -1406,7 +1407,7 @@ describe('WorkspacePage', () => {
       layoutProbe.compact = true;
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: null }));
       await openEnhanceRun();
       const foot = document.querySelector('.sheet-foot');
       expect(foot?.querySelector('[data-choice="smart"]')).not.toBeNull();
@@ -1419,7 +1420,7 @@ describe('WorkspacePage', () => {
       draft.update('enhanceAuto', true);
       draft.update('enhanceModel', 'smart');
       draft.update('enhanceFormat', 'json');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: null, unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: null, unavailable: null }));
       const submitted = await submitForm(target);
       expect(submitted.get('enhance_model')).toBe('smart');
       expect(submitted.get('enhance_format')).toBe('json');

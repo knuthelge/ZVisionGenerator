@@ -79,6 +79,6 @@ The **Upscale** menu offers:
 - **2×** and **4×**: a plain upscale that enlarges faithfully and adds fine detail. Works for any image.
 - **2× creative** and **4× creative**: the image model redraws the enlarged image with the image's own settings.
 
-Each item shows the output size, for example `2× → 1664×2432`. The job runs in the Workspace, or joins the queue. The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`.
+Each item shows the output size, for example `2× → 1664×2432`. When the upscale needs a model that isn't downloaded, a dialog asks first, with its size and the free space; **Cancel** starts nothing. The job runs in the Workspace, or joins the queue. The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`.
 
 How the two kinds differ, and when an option is unavailable, is in [Upscaling an existing image](../concepts/upscaling.md#upscaling-an-existing-image).

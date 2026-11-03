@@ -11,10 +11,9 @@ import { toasts } from '$lib/state/toasts.svelte';
 import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from '$lib/types';
 
 import WorkspacePage from './WorkspacePage.svelte';
-import { TRANSPARENT_TERMS } from './transparent';
 import { placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
-import { makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
+import { FLUX_LICENCE, GEMMA_LICENCE, LTX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, dragFiles, fakeDebounceTimers, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, configApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, presetApiMocks, videoMemoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
@@ -55,6 +54,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getWorkspaceContext: mocks.getWorkspaceContext,
     getWorkspaceCoreContext: mocks.getWorkspaceCoreContext,
     submitGenerate: mocks.submitGenerate,
+    planGenerate: mocks.planGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
     checkReferencePaths: mocks.checkReferencePaths,
@@ -308,7 +308,7 @@ describe('WorkspacePage Transparent background', () => {
   const toggle = () => target.querySelector('#ws-pp-transparent') as HTMLInputElement;
   const badge = () => target.querySelector('[data-testid="transparent-terms"]') as HTMLElement | null;
 
-  it('renders a labelled switch and the Non-commercial badge in the Post-processing section', async () => {
+  it('renders a labelled switch and the Non-commercial licence mark in the Post-processing section', async () => {
     await mountWorkspace(makeContext());
 
     expect(row()).not.toBeNull();
@@ -316,26 +316,23 @@ describe('WorkspacePage Transparent background', () => {
     expect(toggle().getAttribute('aria-label')).toBe('Transparent background');
     expect(toggle().checked).toBe(false);
     expect(badge()).not.toBeNull();
-    expect(badge()!.querySelector('.ui-badge')).not.toBeNull();
-    // The badge sits outside the switch's label, so tapping it never flips the switch.
+    expect(badge()!.classList.contains('ui-badge')).toBe(true);
+    // The name is the visible word plus the record, and the mark sits outside the switch's label, so tapping it never flips the switch.
+    expect(badge()!.getAttribute('aria-label')).toBe(`Non-commercial. Licence: ${MATTE_LICENCE.name}`);
+    expect(badge()!.getAttribute('aria-haspopup')).toBe('dialog');
     expect(badge()!.closest('label')).toBeNull();
   });
 
-  it('makes the reason reachable by focus: the badge is a tab stop that describes itself with the tooltip', async () => {
+  it('opens the matte record in a popover from the mark', async () => {
     await mountWorkspace(makeContext());
 
-    const trigger = badge()!;
-    expect(trigger.tabIndex).toBe(0);
-    const tooltip = trigger.querySelector('[role="tooltip"]') as HTMLElement;
-    expect(trigger.getAttribute('aria-describedby')).toBe(tooltip.id);
-    expect(tooltip.dataset.open).toBe('false');
+    flushSync(() => badge()!.click());
 
-    flushSync(() => trigger.dispatchEvent(new FocusEvent('focus')));
-    expect(tooltip.dataset.open).toBe('true');
-    expect(tooltip.textContent).toBe(TRANSPARENT_TERMS);
-
-    flushSync(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-    expect(tooltip.dataset.open).toBe('false');
+    const popover = document.querySelector('[data-testid="licence-popover"]')!;
+    expect(badge()!.getAttribute('aria-expanded')).toBe('true');
+    expect(popover.textContent).toContain(MATTE_LICENCE.summary);
+    expect(popover.querySelector('a')!.textContent).toBe('Model card ↗');
+    expect(toggle().checked).toBe(false);
   });
 
   it('turns the draft on and marks the row changed, with a Reset that puts it back', async () => {
@@ -370,6 +367,41 @@ describe('WorkspacePage Transparent background', () => {
     await settle();
 
     expect(toggle()).toBeNull();
+  });
+});
+
+describe('WorkspacePage licence mark beside the Model picker', () => {
+  const mark = () => target.querySelector('[data-testid="model-licence"]') as HTMLButtonElement | null;
+  const select = () => target.querySelector('#ws-model') as HTMLButtonElement;
+
+  it('follows the selected model: none for zit, the record for a restricted one, and gone again after switching back', async () => {
+    await mountWorkspace(makeContext());
+    expect(mark()).toBeNull();
+
+    pickOption(select(), 'flux-lite');
+    await settle();
+    expect(mark()!.getAttribute('aria-label')).toBe(`Licence: ${FLUX_LICENCE.name}`);
+
+    pickOption(select(), 'zit');
+    await settle();
+    expect(mark()).toBeNull();
+  });
+
+  it('is a sibling of the Select, not inside its trigger', async () => {
+    await mountWorkspace(makeContext());
+    pickOption(select(), 'flux-lite');
+    await settle();
+
+    expect(select().contains(mark())).toBe(false);
+    expect(select().closest('[data-testid="model-shell"]')!.contains(mark())).toBe(false);
+    expect(mark()!.closest('.ui-pane-toolbar')).not.toBeNull();
+  });
+
+  it('names both records of an LTX video model', async () => {
+    draft.patch({ workflow: 'txt2vid', model: 'ltx-8' });
+    await mountWorkspace(makeContext());
+
+    expect(mark()!.getAttribute('aria-label')).toBe(`Licences: ${LTX_LICENCE.name} and ${GEMMA_LICENCE.name}`);
   });
 });
 

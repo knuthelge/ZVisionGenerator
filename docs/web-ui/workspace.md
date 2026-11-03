@@ -18,7 +18,9 @@ Each model shows whether it is downloaded and a memory badge:
 
 The badge follows the quant you pick, so you can see whether `q8` or `q4` brings a large model within reach. Hover it for the estimate. See [Memory](../concepts/memory.md) for how it's worked out.
 
-A model that isn't downloaded yet shows *not downloaded*, and downloads by itself when a job first needs it. While it downloads from the [Models](models.md) page, the picker shows its progress, for example *Downloading 42%*.
+A model that comes with terms shows an **ⓘ** right after the model picker. Hover it, or press it, to read the licence and open its text. It follows the model you pick and is missing for a model without terms. On a phone, the **Model** list has an **ⓘ** at the end of each such row, and **All** shows the one beside the picker.
+
+A model that isn't downloaded yet shows *not downloaded*. When a job would download it, **Generate** first asks: the dialog lists each model the job needs to download, such as the model, the prompt enhancer and the background removal models, with its size and the free space on the drive. A model that comes with terms, such as FLUX.2 Klein 9B, shows them under its name, with links to the licence, and the dialog says that downloading means you agree to them (see [Licences](../concepts/models.md#licences)). **Download** starts the job and the download; **Cancel** queues nothing. A model that is already downloading, for example from the [Models](models.md) page, isn't asked about again, and its picker shows its progress, for example *Downloading 42%*. When Hugging Face can't be reached to read the sizes, the dialog says it couldn't check the size and offers **Download anyway**.
 
 The **Add LoRA** menu lists the LoRAs made for the selected model first, with the ones you used with it recently on top, and folds the rest under **Other models (n)**. Its last item, **Discover LoRAs…**, opens [Discover LoRAs](#discover-loras). LoRAs are remembered per model family, and per size for FLUX.2 Klein (4B and 9B keep separate LoRAs): switch to another family and you get the LoRAs you last used with it. See [LoRAs](../concepts/loras.md).
 
@@ -119,9 +121,9 @@ What each setting does is in [Images](../concepts/images.md), [Video](../concept
 
 ### Transparent background
 
-**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). A **Non-commercial** badge sits beside it; hover it for the reason. The job card shows **Downloading background removal** while the cut-out models download and **Removing background…** while the cut-out runs.
+**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). A **Non-commercial** button with an **ⓘ** sits beside it; hover it, or press it, to read the cut-out models' terms and open their model card. The job card shows **Downloading background removal** while the cut-out models download and **Removing background…** while the cut-out runs.
 
-![The Transparent switch in Post-processing, with its Non-commercial badge](../assets/screenshots/placeholder.svg "transparent-background")
+![The Transparent switch in Post-processing, with its Non-commercial button](../assets/screenshots/placeholder.svg "transparent-background")
 
 On a phone, the switch is in the **Post-processing** section of **All**. While it is on, a **Transparent** chip joins the settings strip; its popover, **Transparent background**, holds the switch.
 
@@ -216,7 +218,7 @@ If the job can't start with the current settings, for example because the start 
 
 The **live preview** shows the current image taking shape after every step ([Live preview](../concepts/images.md#live-preview)), so you can skip a bad one early. It has the image's own shape, a custom size included. It is a preview only and never saved.
 
-The **job card** beside it shows the progress, the time left and each phase with its timing. When a model isn't downloaded yet, the load step shows the download first, with its size, speed and time left.
+The **job card** beside it shows the progress, the time left and each phase with its timing. When a model isn't downloaded yet, the load step shows the download first, with its size, speed and time left. Jobs that are already in the queue don't ask; they download when their turn comes.
 
 | Control | Does | Key |
 |---|---|---|

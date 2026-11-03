@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { CuratedList, DownloadItem, GalleryPage, JobContext, JobSnapshot, RecentPrompt, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
+import type { CuratedList, DownloadItem, DownloadPlan, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, RecentPrompt, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
 
 // The API mocks of the Workspace page tests. A test file wires them in with `vi.mock(path, async () => ...)`
 // factories that import this module, because `vi.mock` only hoists inside a test file.
@@ -8,6 +8,7 @@ export const workspaceApiMocks = {
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
   getWorkspaceCoreContext: vi.fn<() => Promise<WorkspaceContext>>(),
   submitGenerate: vi.fn<(formData: FormData) => Promise<JobContext>>(),
+  planGenerate: vi.fn<(formData: FormData) => Promise<JobDownloadPlan>>(),
   getJobSnapshot: vi.fn<(jobId: string) => Promise<JobSnapshot>>(),
   parseUrlPrefill: vi.fn<() => Record<string, string>>(),
   checkReferencePaths: vi.fn<(paths: string[]) => Promise<string[]>>(),
@@ -16,6 +17,9 @@ export const workspaceApiMocks = {
   cancelJob: vi.fn(async () => undefined),
   skipFirstRun: vi.fn(async () => ({ skipped: true })),
 };
+
+/** The plan of a job that downloads nothing: no dialog, the submit goes ahead. */
+export const EMPTY_JOB_PLAN: JobDownloadPlan = { parts: [], total_bytes: 0, space: null, unchecked: false, licences: [] };
 
 /** Lets a test pick the phone layout, or a touch screen at a wide width (`coarse`); the page reads them when it mounts. */
 export const layoutProbe = { compact: false, coarse: false };
@@ -69,6 +73,7 @@ export const recentPromptsApiMocks = {
 
 export const modelApiMocks = {
   getDownloads: vi.fn<() => Promise<{ items: DownloadItem[] }>>(),
+  getDownloadPlan: vi.fn<(kind: string, name: string) => Promise<DownloadPlan>>(),
   deleteLora: vi.fn(),
 };
 

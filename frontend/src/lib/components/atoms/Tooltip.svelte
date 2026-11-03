@@ -9,12 +9,16 @@
     align?: 'start' | 'end';
     /** Make the trigger a tab stop. Turn off when the tooltip only repeats nearby text (e.g. per-row names). */
     focusable?: boolean;
+    /** Keep the tooltip closed (and unable to open), e.g. while a popover from the same trigger is open. */
+    suppressed?: boolean;
+    /** Let a tap open the tooltip. Turn off when a tap on the trigger does something else. */
+    touch?: boolean;
     testId?: string;
     class?: string;
     children?: Snippet;
   }
 
-  let { text, placement = 'top', align = 'start', focusable = true, testId, class: extraClass = '', children }: Props = $props();
+  let { text, placement = 'top', align = 'start', focusable = true, suppressed = false, touch = true, testId, class: extraClass = '', children }: Props = $props();
 
   const GAP_PX = 6;
   const EDGE_PX = 8;
@@ -41,7 +45,10 @@
     position = `top: ${Math.max(0, top)}px; left: ${left}px;`;
   }
 
+  const visible = $derived(open && !suppressed);
+
   function show(): void {
+    if (suppressed) return;
     place();
     open = true;
   }
@@ -61,7 +68,7 @@
   }
 
   function handlePointerDown(event: PointerEvent): void {
-    if (event.pointerType !== 'touch') return;
+    if (event.pointerType !== 'touch' || !touch) return;
     if (open) hide();
     else show();
   }
@@ -72,7 +79,7 @@
 
   // A fixed tooltip would drift from its trigger when any ancestor scrolls, so close it instead.
   $effect(() => {
-    if (!open) return;
+    if (!visible) return;
     window.addEventListener('scroll', hide, true);
     window.addEventListener('resize', hide);
     return () => {
@@ -92,8 +99,8 @@
   onpointerenter={handlePointerEnter}
   onpointerleave={handlePointerLeave}
   onpointerdown={handlePointerDown}
-  onfocus={show}
-  onblur={hide}
+  onfocusin={show}
+  onfocusout={hide}
   onkeydown={handleKeydown}
 >
   {@render children?.()}
@@ -102,7 +109,7 @@
     role="tooltip"
     {id}
     style={position}
-    data-open={open ? 'true' : 'false'}
-    class="ui-overlay pointer-events-none fixed z-50 w-max max-w-64 whitespace-pre-line rounded-sm px-2 py-1 text-meta font-normal normal-case tracking-normal transition-opacity duration-100 {open ? 'opacity-100' : 'opacity-0'}"
+    data-open={visible ? 'true' : 'false'}
+    class="ui-overlay pointer-events-none fixed z-50 w-max max-w-64 whitespace-pre-line rounded-sm px-2 py-1 text-meta font-normal normal-case tracking-normal transition-opacity duration-100 {visible ? 'opacity-100' : 'opacity-0'}"
   >{text}</span>
 </span>

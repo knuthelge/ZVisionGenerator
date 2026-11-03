@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Badge, Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
-  import { ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
+  import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
+  import { LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
@@ -17,7 +17,6 @@
   import type { ModelOption, WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
-  import { TRANSPARENT_TERMS } from './transparent';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
@@ -200,6 +199,7 @@
   }
 
   const selectedModel = $derived(models.find((model) => model.id === s.model) ?? null);
+  const matteSummary = $derived(context.matte_licences?.[0]?.summary ?? '');
 
   /**
    * Publish the room above the popover's anchor as `--pop-room`: the height between the top of the phone's workspace (under
@@ -281,15 +281,19 @@
     {:else if key === 'model'}
       <div class="pop-list" role="radiogroup" aria-label="Model">
         {#each models as model (model.id)}
-          <button type="button" class="pop-item" role="radio" aria-checked={model.id === s.model} onclick={() => { if (model.id !== s.model) onModelChange(model.id); }}>
-            <Icon name="cube" size={16} />
-            <span class="pop-item-text">{model.label}</span>
-            <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.active('model', model.id))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
-          </button>
+          <!-- The mark is the radio's sibling: a button cannot sit inside a button. -->
+          <div class="pop-model" class:has-mark={Boolean(model.licences?.length)}>
+            <button type="button" class="pop-item" role="radio" aria-checked={model.id === s.model} onclick={() => { if (model.id !== s.model) onModelChange(model.id); }}>
+              <Icon name="cube" size={16} />
+              <span class="pop-item-text">{model.label}</span>
+              <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.active('model', model.id))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
+            </button>
+            {#if model.licences?.length}<LicenceMark licences={model.licences} testId="model-licence-{model.id}" />{/if}
+          </div>
         {/each}
       </div>
       {#if selectedModel && selectedModel.downloaded === false && !downloadStore.active('model', selectedModel.id)}
-        <p class="ui-help" data-testid="model-not-downloaded">{selectedModel.label} is not downloaded. The first run downloads it; the Models page shows its size.</p>
+        <p class="ui-help" data-testid="model-not-downloaded">{selectedModel.label} is not downloaded. Generate asks before downloading it; the Models page shows its size.</p>
       {/if}
       {#if quantizeOptions}
         <div class="pop-row"><span>Quantization</span>
@@ -345,7 +349,7 @@
       <p class="ui-help">Denoise, steps, guidance and sharpen for the upscale are under All.</p>
     {:else if key === 'transparent'}
       <label class="pop-row">Transparent background<Toggle ariaLabel="Transparent background" checked={s.postprocessTransparent} disabled={busy} onchange={(e) => draft.update('postprocessTransparent', (e.currentTarget as HTMLInputElement).checked)} /></label>
-      <p class="pop-terms" data-testid="transparent-reason"><Badge variant="warning">Non-commercial</Badge><span>{TRANSPARENT_TERMS}.</span></p>
+      <p class="pop-terms" data-testid="transparent-reason"><LicenceMark licences={context.matte_licences ?? []} label="Non-commercial" testId="transparent-terms" /><span>{matteSummary}.</span></p>
     {:else if key === 'audio'}
       {#if caps.showAudio}
         <label class="pop-row">Audio<Toggle ariaLabel="Audio" checked={s.audio} onchange={(e) => draft.update('audio', (e.currentTarget as HTMLInputElement).checked)} /></label>
@@ -401,6 +405,9 @@
   .pop-dims { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
   .dim-times { font-family: var(--font-mono); color: var(--color-text-muted); }
   .pop-list { display: flex; flex-direction: column; gap: 2px; }
+  .pop-model { display: flex; align-items: center; }
+  .pop-model > .pop-item { flex: 1; min-width: 0; }
+  .pop-model.has-mark :global(.licence-mark-wrap) { width: 44px; justify-content: center; }
   .pop-item { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 15px; white-space: nowrap; text-align: left; color: var(--color-text-primary); }
   .pop-item:active { background: var(--color-bg-surface-hover); }
   .pop-item[aria-pressed='true'], .pop-item[aria-checked='true'] { background: color-mix(in srgb, var(--color-primary-main) 12%, transparent); color: var(--color-primary-main); }

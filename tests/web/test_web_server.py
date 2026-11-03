@@ -927,6 +927,7 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
             "disk_size_label": "2.5 GB",
             "download_size_label": "17.0 GB",
             "download_needed": False,
+            "licences": [],
         }
     ]
 
@@ -2026,6 +2027,7 @@ class TestModelDownloadPlanRoute:
             "parts": [{"repo": "owner/zit", "files": 3, "bytes": 3_000}, {"repo": "owner/vae", "files": 1, "bytes": 500}],
             "total_bytes": 3_500,
             "space": {"path": str(tmp_path / "hub"), "needed_bytes": 3_500, "free_bytes": 1_000, "enough": False},
+            "licences": [],
         }
 
     def test_an_enhancer_row_is_looked_up_by_tier(self, client):

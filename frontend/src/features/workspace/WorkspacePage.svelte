@@ -13,7 +13,8 @@
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
   import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
-  import { checkReferencePaths, getWorkspaceCoreContext, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
+  import { checkReferencePaths, getWorkspaceCoreContext, planGenerate, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
+  import { confirmDownloads } from '$lib/state/confirmDownloads';
   import { updateConfig } from '$lib/api/config';
   import { workspaceMemory } from '$lib/state/pageMemory';
   import { deleteAsset } from '$lib/api/gallery';
@@ -32,7 +33,7 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, ModelStatusBadges, ReviewStage, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
   import { failureToastText, isReviewing } from '$lib/state/jobView';
   import { first, jobSettingsPrefill } from '$lib/state/jobSettings';
@@ -1337,6 +1338,8 @@
 
     try {
       const formData = buildFormData(formEl, run);
+      // A job that downloads a model asks first; Cancel queues nothing.
+      if (!(await confirmDownloads(await planGenerate(formData)))) return;
       const jobCtx = await submitGenerate(formData);
       // The response omits the settings; the review line needs the upscale factor.
       jobStore.jobSubmitted({ ...jobCtx, settings: formSettings(formData) });
@@ -1470,6 +1473,11 @@
             </span>
           {/snippet}
         </Select>
+
+        <!-- The terms of the selected model: a sibling of the Select (a button cannot sit inside its trigger), gone for a model with none. -->
+        {#if authorityReady && selectedModel?.licences?.length}
+          <LicenceMark licences={selectedModel.licences} testId="model-licence" />
+        {/if}
 
         <!-- Quantize selector (image workflows only, when model supports it) -->
         {#if supportsQuantize}

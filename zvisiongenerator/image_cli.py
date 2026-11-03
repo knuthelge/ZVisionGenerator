@@ -25,8 +25,10 @@ from zvisiongenerator.utils.model_files import cached_snapshot_dirs
 from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, model_display_name, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
 from zvisiongenerator.utils.lora import resolve_lora_references
-from zvisiongenerator.downloads import describe_refusal
+from zvisiongenerator.downloads import describe_refusal, image_plan, matte_plan, target_present_offline
+from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.paths import canonical_model_name, get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.prompt_enhance import image_enhance_entries
@@ -353,6 +355,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         label = model_display_name(config, picked_model)
         try:
+            print_licence_notice(config, picked_model, lambda: image_plan(args.model, family=model_info.family, config=config, platform_key=sys.platform), present=target_present_offline)
             built = ensure_built_model(
                 args.model,
                 config,
@@ -367,6 +370,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         if args.transparent:
             try:
+                print_licence_notice(config, MATTE_LICENCE_MODEL, matte_plan, present=target_present_offline)
                 _fetch_matte_models()
             except Exception as e:  # noqa: BLE001 - the Hub client raises its own error types; any failure stops the run before a model loads
                 logger.exception("Failed to download the background removal models")

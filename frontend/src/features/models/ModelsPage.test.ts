@@ -44,7 +44,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 
 import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
-import { TRANSPARENT_TERMS } from '../workspace/transparent';
+import { FLUX_LICENCE, GEMMA_LICENCE, LTX_LICENCE, MATTE_LICENCE } from '../../test-utils/workspace';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { mountComponent, settle } from '../../test-utils/mount';
 import { pickOption } from '../../test-utils/select';
@@ -878,8 +878,37 @@ describe('ModelsPage downloads', () => {
     expect(modelApiMocks.startDownload).toHaveBeenCalledWith('enhancer', 'smart');
   });
 
+  describe('licence marks', () => {
+    const klein = { name: 'klein9b', label: 'FLUX.2 Klein 9B', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null, licences: [FLUX_LICENCE] };
+    const zit = { name: 'zit', label: 'zit', family: 'zimage', downloaded: true, download_needed: false, delete: null, licences: [] };
+    const ltx = { name: 'ltx-4', label: 'LTX distilled model', family: 'ltx', supports_i2v: true, downloaded: false, download_needed: true, delete: null, licences: [LTX_LICENCE, GEMMA_LICENCE] };
+    const markIn = (name: string): HTMLButtonElement | null => {
+      const row = Array.from(target.querySelectorAll('tr')).find((tr) => tr.querySelector('[data-testid="model-name"]')?.textContent === name);
+      return row?.querySelector('[data-testid="licence-mark"]') ?? null;
+    };
+
+    it('puts a mark after the name of each restricted row and none on a row without a record', async () => {
+      await mountPage(inventoryWith({ image_models: [klein, zit], video_models: [ltx] }));
+
+      expect(markIn('FLUX.2 Klein 9B')!.getAttribute('aria-label')).toBe('Licence: FLUX Non-Commercial License v2.1');
+      expect(markIn('LTX distilled model')!.getAttribute('aria-label')).toBe(`Licences: ${LTX_LICENCE.name} and ${GEMMA_LICENCE.name}`);
+      expect(markIn('zit')).toBeNull();
+    });
+
+    it('opens the popover with both records and their links, keeping the row clear of the amber badge', async () => {
+      await mountPage(inventoryWith({ image_models: [klein], video_models: [ltx] }));
+
+      flushSync(() => markIn('LTX distilled model')!.click());
+
+      const popover = document.querySelector('[data-testid="licence-popover"]')!;
+      expect(popover.getAttribute('role')).toBe('dialog');
+      expect(Array.from(popover.querySelectorAll('section')).map((section) => section.querySelector('p')!.textContent)).toEqual([LTX_LICENCE.name, GEMMA_LICENCE.name]);
+      expect(target.querySelector('.ui-badge-warning')).toBeNull();
+    });
+  });
+
   describe('background removal row', () => {
-    const matte = { name: 'background-removal', label: 'Background removal', downloaded: false, disk_size_label: null, download_size_label: '548 MB', deletable: false, download_needed: true };
+    const matte = { name: 'background-removal', label: 'Background removal', downloaded: false, disk_size_label: null, download_size_label: '548 MB', deletable: false, download_needed: true, licences: [MATTE_LICENCE] };
     const matteRow = (): HTMLElement | null => target.querySelector('[data-testid="matte-row"]');
     const matteDownloadButton = (): HTMLButtonElement | null => target.querySelector('[data-testid="matte-row"] [data-testid="download-button"]');
 
@@ -888,15 +917,16 @@ describe('ModelsPage downloads', () => {
       expect(matteRow()).toBeNull();
     });
 
-    it('shows the label, the first-use size, the Non-commercial badge and Download', async () => {
+    it('shows the label, the first-use size, the licence mark and Download', async () => {
       await mountPage(inventoryWith({ background_removal: matte }));
 
       const row = matteRow()!;
       expect(row.querySelector('[data-testid="model-name"]')!.textContent).toBe('Background removal');
       expect(row.querySelector('[data-testid="model-id"]')).toBeNull();
       expect(row.textContent).toContain('≈548 MB');
-      expect(row.querySelector('[data-testid="matte-terms"]')!.textContent).toContain('Non-commercial');
-      expect(row.querySelector('[data-testid="matte-terms"] [role="tooltip"]')!.textContent).toBe(TRANSPARENT_TERMS);
+      const mark = row.querySelector('[data-testid="licence-mark"]')!;
+      expect(mark.getAttribute('aria-label')).toBe(`Licence: ${MATTE_LICENCE.name}`);
+      expect(row.querySelector('.ui-badge-warning')).toBeNull();
       expect(matteDownloadButton()!.getAttribute('aria-label')).toBe('Download the background removal models');
       expect(row.querySelector('[data-testid="delete-button"]')).toBeNull();
     });

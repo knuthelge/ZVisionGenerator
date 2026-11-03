@@ -9,13 +9,12 @@
   import { router } from '$lib/state/router.svelte';
   import { downloadStore, type PlannedKind } from '$lib/state/downloads.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { BackgroundRemovalEntry, ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
+  import type { BackgroundRemovalEntry, ConversionStatus, DownloadItem, EnhancerModelEntry, CheckpointInspection, ModelDeleteInfo, ModelInventory, ModelLicence, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, EmptyState, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
+  import { Alert, ConfirmDialog, EmptyState, FormField, KeyValueList, LicenceMark, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
   import { inventoryMemory } from '$lib/state/pageMemory';
-  import { TRANSPARENT_TERMS } from '../workspace/transparent';
 
   let inventory = $state<ModelInventory | null>(null);
   let loading = $state(true);
@@ -421,9 +420,10 @@
   }
 </script>
 
-{#snippet modelName(m: ModelStatusFields & { name: string; label?: string; family?: string; source?: string; download_size_label?: string | null; download_needed?: boolean })}
+{#snippet modelName(m: ModelStatusFields & { name: string; label?: string; family?: string; source?: string; download_size_label?: string | null; download_needed?: boolean; licences?: ModelLicence[] })}
   {@const downloaded = m.downloaded}
   {@const label = m.label || m.name}
+  <span class="name-line">
   {#if downloaded === true || downloaded === false}
     <Tooltip text={`${label}\n${downloaded ? DOWNLOADED_TOOLTIP : notDownloadedTooltip(m)}`} focusable={false} class="max-w-full items-center gap-1.5">
       {#if downloaded}
@@ -440,6 +440,8 @@
   {:else}
     <span class="block break-words text-text-primary" title={label} data-testid="model-name" data-downloaded="unknown">{label}</span>
   {/if}
+  {#if m.licences?.length}<LicenceMark licences={m.licences} testId="licence-mark" />{/if}
+  </span>
   {#if label !== m.name}
     <span class="ui-help block break-all font-mono font-normal" data-testid="model-id">{m.name}</span>
   {/if}
@@ -722,10 +724,7 @@
                   <tbody>
                     <tr data-testid="matte-row" class:dl-main={downloadStore.active('matte', MATTE_NAME) !== null}>
                       <td>
-                        <span class="matte-name">
-                          {@render modelName({ name: matte.label, label: matte.label, downloaded: matte.downloaded, source: 'matte', download_needed: matte.download_needed })}
-                          <Tooltip text={TRANSPARENT_TERMS} placement="bottom" testId="matte-terms"><Badge variant="warning">Non-commercial</Badge></Tooltip>
-                        </span>
+                        {@render modelName({ name: matte.label, label: matte.label, downloaded: matte.downloaded, source: 'matte', download_needed: matte.download_needed, licences: matte.licences })}
                       </td>
                       <td class="whitespace-nowrap font-mono">
                         {#if matte.disk_size_label}
@@ -1093,7 +1092,7 @@
   .dl-line { min-width: 0; }
   .dl-pct { flex: none; color: var(--color-text-primary); }
   .dl-muted { flex: none; color: var(--color-text-muted); }
-  .matte-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .dl-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; white-space: nowrap; }
   .dl-queued { display: flex; align-items: center; gap: 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
   /* The table scrolls sideways on a phone: the block stays inside the visible width (the scroll box is a size container), so the percentage and the Queued note never scroll out of view. */
