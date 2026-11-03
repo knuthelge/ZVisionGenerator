@@ -106,6 +106,16 @@ def _no_hub_downloads(monkeypatch):
 
 
 @pytest.fixture
+def torch_flags_guard():
+    """Put the process-wide PyTorch flags back after a test that sets them."""
+    from zvisiongenerator.utils.torch_flags import capture_torch_flags, restore_torch_flags
+
+    saved = capture_torch_flags()
+    yield
+    restore_torch_flags(saved)
+
+
+@pytest.fixture
 def hub_offline(monkeypatch):
     """Make ``huggingface_hub``'s download functions report nothing cached and no network (``LocalEntryNotFoundError``), without failing the test."""
     import huggingface_hub

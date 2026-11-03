@@ -6,14 +6,14 @@
 
     - A Mac with Apple Silicon (M1 or newer) and macOS 14 Sonoma or newer.
     - 16 GB of memory runs Z-Image Turbo and FLUX.2 Klein quantized (`q8` or `q4`). 32 GB or more runs FLUX.2 Klein 9B and video at `ltx-8`. See [Memory](concepts/memory.md).
-    - [ffmpeg](https://ffmpeg.org/) for video. `ziv-video` offers to install it with Homebrew or MacPorts if it's missing.
+    - [ffmpeg](https://ffmpeg.org/) for video and audio. `ziv-video` and `ziv-audio` offer to install it with Homebrew or MacPorts if it's missing.
 
 === "Windows and Linux"
 
     - An NVIDIA GPU, RTX 20-series (Turing) or newer, including the RTX 50-series.
     - NVIDIA driver 580 or newer.
     - About 20 GB of system memory for video with `ltx-4`, 21 GB with `ltx25-4`, 27 GB with `ltx-8`, and 18 GB free for MiniMax H3. See [Memory](concepts/memory.md).
-    - [ffmpeg](https://ffmpeg.org/) for video. `ziv-video` offers to install it with `winget` (Windows) or `apt`, `dnf` or `pacman` (Linux) if it's missing.
+    - [ffmpeg](https://ffmpeg.org/) for video and audio. `ziv-video` and `ziv-audio` offer to install it with `winget` (Windows) or `apt`, `dnf` or `pacman` (Linux) if it's missing.
 
     There is no CPU fallback for generation: PyTorch must see a CUDA device.
 

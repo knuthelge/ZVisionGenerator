@@ -39,7 +39,7 @@ def ensure_built_model(
 
     Raises:
         ValueError: If the model's source block in *config* is invalid.
-        RuntimeError: If the model's folder holds something ziv did not build.
+        RuntimeError: If the model's folder holds something ziv did not build, or a pinned file does not match its hash.
     """
     if is_instant_dir(model_path):
         from zvisiongenerator.ideogram4_instant_builder import ensure_instant_model

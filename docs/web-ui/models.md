@@ -10,6 +10,7 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 |---|---|
 | **Image models** | Built-in models such as FLUX.2 Klein 9B, and models you converted |
 | **Video models** | `ltx-4`, `ltx-8` and converted LTX fine-tunes |
+| **Audio models** | YuE2 3B, Higgs TTS 3 4B and Stable Audio 3 Medium, with the kind each makes. See [Audio](../concepts/audio.md) |
 | **LoRAs** | The files in `~/.ziv/loras/` |
 | **Prompt enhancer** | **Fast**, **Smart** and, when set on the Config page, **Custom** |
 | **Background removal** | The cut-out models of [Transparent background](../concepts/images.md#transparent-background), as one row (548 MB) |
@@ -17,7 +18,11 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 
 A built-in model shows its name with its alias under it, for example FLUX.2 Klein 9B and `klein9b`. The alias is what you use in the CLI and in prompt files.
 
-A model that comes with terms, and the **Background removal** row, has an **ⓘ** after its name. Hover it, or press it, to read the licence's name, who licenses it and what it allows, with links to the licence text and, where there is one, its NOTICE file. A model with two licences, such as the LTX models with Gemma, shows both. See [Licences](../concepts/models.md#licences).
+A model that comes with terms, and the **Background removal** row, has an **ⓘ** after its name. All three audio models have one. Hover it, or press it, to read the licence's name, who licenses it and what it allows, with links to the licence text and, where there is one, its NOTICE file. A model with two licences, such as the LTX models with Gemma, shows both. See [Licences](../concepts/models.md#licences).
+
+The **Audio models** table has a **Kind** column, **Music**, **Speech** or **Sound**, and its rows appear only for models that run on this machine.
+
+![The Audio models table with YuE2 3B, Higgs TTS 3 4B and Stable Audio 3 Medium](../assets/screenshots/placeholder.svg "models-audio")
 
 **Size** is the disk the model uses. For a built-in model that's its Hugging Face download; for a converted model it's its own folder, without the base-model files it links to. Quantized copies count with their model.
 
@@ -33,7 +38,7 @@ A row whose files aren't fully downloaded has a **Download** button. Without it,
 
 A job that needs a model being downloaded waits for it and shows its progress. Cancelling that job leaves the download running.
 
-!!! note "Three special rows"
+!!! note "Special rows"
     - **Ideogram 4 Instant** (`ideo`): Download fetches its source files. The first job then builds the model folder from them. See [Ideogram 4 Instant](../concepts/models.md#ideogram-4-instant).
     - **MOSS-Image Turbo** (`moss`) and **MOSS-Image SFT** (`moss-sft`): Download fetches the model files, and the first image builds the model folder from them. Until then the row says *Downloaded. The first image builds it.* The two share the download. See [MOSS-Image](../concepts/models.md#moss-image).
     - **SeedVR2**, the model behind the plain image upscale and, on Windows and Linux, the video upscale: on a Mac, the first plain upscale makes an 8-bit copy and removes the download. See [Upscaling](../concepts/upscaling.md#plain-upscale).
@@ -55,6 +60,7 @@ Each row has a delete button, which appears as soon as any of the model's files 
 | Quantized copy | The stored `q8` or `q4` copy. See [Stored quants](../concepts/quantization.md#stored-quants). |
 | SeedVR2 | Its folder. The next plain upscale downloads it again. |
 | Background removal | Both cut-out models' downloads. The next job with **Transparent** on downloads them again. |
+| Audio model | Its Hugging Face downloads. The next take downloads them again. Takes you made stay in the output folder. |
 
 **Other downloads** lists models in the Hugging Face cache that no model, enhancer or converted model uses, for example a model another tool downloaded, or one left behind by a model you deleted. The size is what deleting it frees. The cache is shared with other apps on your computer, so another app may download a deleted repo again.
 

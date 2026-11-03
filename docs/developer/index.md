@@ -74,7 +74,7 @@ feat(web): save a Workspace prompt to a prompt file
 
 ## Repository rules
 
-- **Vendored packages.** `packages/ltx_*` and `packages/seedvr2_torch` are copies of upstream code. Never edit them by hand; see [Vendored packages](vendored.md).
+- **Vendored packages.** Everything under `packages/` is a copy of upstream code. Never edit them by hand; see [Vendored packages](vendored.md).
 - **The built Web UI is committed.** After any change in `frontend/`, run `make frontend-build` and commit the rebuilt files in `zvisiongenerator/web/static/app/`. `make check` fails when they are out of date.
 - **User-facing changes** get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs.
 - **Releases** are cut by the maintainer. Never push a `v*` tag: it publishes to PyPI. See [Releasing](releasing.md).
@@ -107,7 +107,7 @@ Future work is written up in `proposals/` before it is built: the problem, the e
 | `make run` / `make model` | Run `ziv-image` / `ziv-model` with `ARGS="..."` |
 | `make enhance-bench` | Run the [prompt-enhancer bench](enhancer-bench.md) with `ARGS="..."`; loads a real model |
 | `make check-curated` | Compare the [curated LoRA list](curated-loras.md)'s pinned files with the Hugging Face Hub (network; run before a release) |
-| `make update-ltx` / `make update-seedvr2` / `make update-h3-mlx` | Re-vendor LTX, SeedVR2 or the MiniMax H3 MLX port. See [Vendored packages](vendored.md) |
+| `make update-ltx` / `make update-seedvr2` / `make update-h3-mlx` / `make update-moss` / `make update-birefnet` / `make update-yue2` / `make update-sa3` | Re-vendor LTX, SeedVR2, the MiniMax H3 MLX port, MOSS-Image, BiRefNet, YuE2 or Stable Audio 3. See [Vendored packages](vendored.md) |
 | `make e2e` / `make e2e-image` / `make e2e-video` | Smoke tests that load real models and write tiny outputs to `output/`; not part of `make check` |
 
 ## License

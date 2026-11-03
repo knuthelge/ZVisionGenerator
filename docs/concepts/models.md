@@ -1,6 +1,6 @@
 # Models
 
-A model is what turns a prompt into an image or video. The app has built-in models that download on first use, and you can add your own.
+A model is what turns a prompt into an image, a video or a sound. The app has built-in models that download on first use, and you can add your own.
 
 ## Image models
 
@@ -163,6 +163,16 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
 MiniMax H3 is released under the MiniMax H3 Community License Agreement, published with the model on Hugging Face (`MiniMaxAI/MiniMax-H3`). It restricts use in some regions and above an annual revenue limit, requires commercial products to show "MiniMax H3" in their interface, and counts LoRAs as derivatives of the model. Read it before you use the model or its output; see [Licences](#licences).
 
+## Audio models
+
+| Model | Alias | Makes | Download | License |
+|---|---|---|---|---|
+| YuE2 3B | `yue2` | Songs and instrumentals up to 6:00 | about 8 GB | CC BY-NC 4.0 with individual creator permission |
+| Higgs TTS 3 4B | `higgs3` | Speech of up to about 10 minutes, in a voice the model picks or one that follows a recording | about 10 GB | Boson Higgs TTS 3 Research and Non-Commercial License and Boson Higgs Audio 2 Community License Agreement |
+| Stable Audio 3 Medium | `sa3` | Ambience and sound effects of 1 to 380 s | about 10 GB | Stability AI Community License and Gemma Terms of Use |
+
+The alias is what you pass to `ziv audio -m`. What each kind does, and how long a take can be, is in [Audio](audio.md); what they need is in [Memory](memory.md#audio). All three are restricted in some way, so read their terms in [Licences](#licences) before you use the output.
+
 ## Licences
 
 Some models come with terms. The Web UI names them in the download dialog, the model picker and the Models page, and the CLI prints them before a download starts. Downloading a model means you agree to its terms. A model under MIT or Apache-2.0 has no entry here unless something else limits its use.
@@ -175,12 +185,22 @@ Some models come with terms. The Web UI names them in the download dialog, the m
 | LTX-2 Community License Agreement | Lightricks | `ltx-4`, `ltx-8` | Free under $10M revenue | [Licence](https://github.com/Lightricks/LTX-2/blob/a95ab856bf29407b6b066ede0abe1846050db56c/LICENSE-2) |
 | LTX-2.x Community License Agreement | Lightricks | `ltx25-4` | Free under $10M revenue | [Licence](https://huggingface.co/unsloth/LTX-2.5-FP8/blob/7b40724fc39bbb01d9b4d72638c0d263531c88c2/LICENSE) · [NOTICE](https://huggingface.co/unsloth/LTX-2.5-FP8/blob/7b40724fc39bbb01d9b4d72638c0d263531c88c2/NOTICE) |
 | MiniMax H3 Community License Agreement | MiniMax | `h3` | Not licensed in the EU, UK, South Korea or the USA; written permission needed over $20M revenue; commercial products show "MiniMax H3" | [Licence](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE) |
-| Gemma Terms of Use | Google | `ltx-4`, `ltx-8` | Gemma's use policy applies | [Licence](https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE_GEMMA.md) |
+| CC BY-NC 4.0 with individual creator permission | M-A-P | `yue2` | Non-commercial; individual creators may monetise their outputs, companies need a licence | [Licence](https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE) |
+| Boson Higgs TTS 3 Research and Non-Commercial License | Boson AI | `higgs3` | Non-commercial; creators may publish with credit; the app's Higgs code is "Derived from Higgs TTS 3, licensed from Boson AI USA, Inc." | [Licence](https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE) |
+| Boson Higgs Audio 2 Community License Agreement | Boson AI | `higgs3` | Free up to 100,000 annual active users; products show "Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved" | [Licence](https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE) |
+| Stability AI Community License | Stability AI | `sa3` | Free under $1M revenue | [Licence](https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE.md) · [NOTICE](https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/NOTICE) |
+| Gemma Terms of Use | Google | `ltx-4`, `ltx-8`, `sa3` | Gemma's use policy applies | [Licence](https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE_GEMMA.md) |
 | BiRefNet (MIT) and ViTMatte (Apache-2.0) | BiRefNet and ViTMatte authors | Background removal | Trained on research datasets that don't allow commercial use | [Model card](https://huggingface.co/hustvl/vitmatte-small-composition-1k/blob/6a58ad7646403c1df626fbd746900aec7361ea1d/README.md) |
 
-LTX-2.3 comes with two licences, its own and Gemma's, because Gemma 3 is its text encoder. LTX-2.5 uses Gemma 4, which is Apache-2.0. The background removal models of [Transparent background](images.md#transparent-background) are licensed MIT and Apache-2.0, but they were trained on research datasets that don't allow commercial use, so treat the result as non-commercial.
+LTX-2.3 and Stable Audio 3 Medium each come with two licences, their own and Gemma's, because a Gemma model is their text encoder. Higgs TTS 3 comes with two as well, one for the model and one for the audio codec it uses. LTX-2.5 uses Gemma 4, which is Apache-2.0. The background removal models of [Transparent background](images.md#transparent-background) are licensed MIT and Apache-2.0, but they were trained on research datasets that don't allow commercial use, so treat the result as non-commercial.
 
 **MiniMax H3.** The licence requires commercial products to prominently show "MiniMax H3" in their user interface. A line such as "Powered by MiniMax H3" is encouraged, not required. Read the full licence for the regions and the revenue limit.
+
+**Higgs TTS 3.** Audio you publish with Higgs TTS 3 must acknowledge it, in the audio itself or in the text shown with it, for example "This audio was created with Boson AI's Higgs Audio". An application or demo that other people can use shows "Built with Higgs TTS 3 licensed from Boson AI USA, Inc.". This app's Higgs TTS 3 code is "Derived from Higgs TTS 3, licensed from Boson AI USA, Inc."; the weights it loads stay under Boson's licence. The Higgs TTS 3 licence also forbids cloning a voice without the speaker's consent, and commercial use beyond creators publishing their own content needs a licence from Boson. The audio codec comes under Boson's Higgs Audio 2 Community License Agreement, which builds on the Meta Llama 3 Community License and includes Meta's Acceptable Use Policy. It asks products that use the codec to prominently show "Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved" on a related website, user interface, blogpost, about page or product documentation, and it needs an expanded licence from Boson above 100,000 annual active users.
+
+**Stable Audio 3 Medium.** Using it commercially needs a free registration with Stability AI, and the licence ends once you or your affiliates earn more than $1M a year. Anyone who makes the model, or a product or service built on it, available to others must show "Powered by Stability AI" on a related website, interface or page, and pass on the licence and its NOTICE. Personal and research use needs none of this.
+
+**YuE2.** Individual creators may publish and sell the songs they make. A company that uses the model commercially needs a licence from the model's authors.
 
 ## Your own models
 

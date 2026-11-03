@@ -12,9 +12,9 @@ Recipes for common changes. Each lists where the change goes and what has to mov
 
 ## Add a CLI flag
 
-1. Add the argument in `image_cli._build_parser()` or `video_cli._build_video_parser()`. Flags shared by both, such as the enhance flags, go in `enhance_cli.py`.
+1. Add the argument in `image_cli._build_parser()`, `video_cli._build_video_parser()` or `audio_cli._build_audio_parser()`. Flags shared by both, such as the enhance flags, go in `enhance_cli.py`.
 2. Carry it through to where it's used. If it changes which stages run, see [Add a workflow stage](#add-a-workflow-stage).
-3. If the Web UI has the same setting, keep the two in step: the form, the job arguments in `web/server.py`, and the command the Web UI copies (`frontend/src/lib/state/cliCommand.ts`).
+3. If the Web UI has the same setting, keep the two in step: the form, the job arguments in `web/server.py`, and the command the Web UI copies (`frontend/src/lib/state/cliCommand.ts`). The audio commands are checked against `tests/fixtures/audio_cli_cases.json`, which both the Python and the Vitest tests read.
 4. Test the parser option and the behavior.
 5. Add it to the [command reference](../cli/reference.md), and to a how-to page if it's something people do. A test fails when a flag is missing from the reference.
 

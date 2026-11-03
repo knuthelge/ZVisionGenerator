@@ -22,6 +22,7 @@ import yaml
 from zvisiongenerator.core.video_family import FrameRule, VideoCapabilities, VideoFamily
 from zvisiongenerator.utils.h3_preset import HubFiles, h3_preset
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.licences import parse_licences
 from zvisiongenerator.utils.ltx_converted import LTX_FAMILY_MODEL_TYPE
 from zvisiongenerator.utils.paths import get_ziv_data_dir, parse_huggingface_repo_reference, split_huggingface_revision
@@ -85,6 +86,7 @@ def load_config() -> dict[str, Any]:
         "video_sizes",
         "video_generation",
         "video_model_presets",
+        "audio_model_presets",
         "prompt_enhancer",
     )
     for section in _EXPECTED_DICTS:
@@ -175,6 +177,7 @@ def load_config() -> dict[str, Any]:
     seedvr2_settings(config, MLX_WEIGHTS.tiers_key)
     seedvr2_settings(config, FP8_WEIGHTS.tiers_key)
 
+    parse_audio_presets(config)
     parse_licences(config)
 
     return config

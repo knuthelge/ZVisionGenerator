@@ -1,6 +1,6 @@
 # Workspace
 
-The Workspace is where you make things. Pick **Image**, **Video** or **Extend Video** in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, and **Extend Video** shares the prompt of **Video**, so switching tabs never moves text from one to the other.
+The Workspace is where you make things. Pick **Image**, **Video**, **Extend Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, and **Extend Video** shares the prompt of **Video**, so switching tabs never moves text from one to the other.
 
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
@@ -191,7 +191,7 @@ When you choose another model, the settings you changed are kept and the rest ta
 
 ### Copy as a command
 
-The terminal button in the *Settings* header copies a `ziv image` or `ziv video` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
+The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
 
 !!! note "When the command differs"
     The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path.
@@ -205,6 +205,63 @@ Fields that take a path on the server's machine (prompt files, the output folder
 - Click the path bar or press ++slash++ to type a path.
 
 Typing in a path field suggests matching folders and files: ++tab++ takes the first, the arrow keys and ++enter++ pick another, and ++down++ in an empty field suggests recent paths and the usual folders.
+
+## The Audio tab
+
+**Audio** is the last tab in the top bar. It makes music, speech and sound; what each kind is, the models and the limits are in [Audio](../concepts/audio.md). The tab is hidden on a machine that can't run an audio model.
+
+![The Audio tab on Music, with Style and Lyrics under Compose and the status line saying Song](../assets/screenshots/placeholder.svg "audio-music")
+
+The toolbar reads **Kind**, **Model**, the model's **ⓘ** licence mark and its memory badge. **Kind** is **Music**, **Speech** or **Sound**, and decides what *Compose* and *Settings* show. Presets, **Quant** and LoRAs aren't used. The tab opens on the kind you left it on and remembers the model you picked for each kind. A model that isn't downloaded yet is asked for when you press **Generate**, with its size and licence, as for [images](#model-and-loras).
+
+### Compose
+
+| Kind | Compose | Settings |
+|---|---|---|
+| **Music** | **Style** (required) above **Lyrics** (optional) | **Batch size**, **Seed** |
+| **Speech** | **Text**, with a count against the 10,000 characters it can hold | **Voice**, then **Batch size** and **Seed** |
+| **Sound** | **Prompt**, what you hear | **Length (s)**, from 1 to 380 and 10 to begin with, then **Batch size** and **Seed** |
+
+- **Music:** a line under the boxes says what you will get: *Song · length follows the lyrics*, or *Instrumental · 8 sections · add or remove section tags to change its length*. Write words under `[verse]` and `[chorus]` tags for a song; leave **Lyrics** empty, or write only tags, for an instrumental; `[Instrumental]` and `[Solo]` tags keep vocals out more reliably than `[verse]` and `[chorus]`, and a take can still occasionally carry a voice, so generate again if it does. See [Music](../concepts/audio.md#music).
+- **Speech:** the help under **Text** says that long text is read in parts and joined into one take. Expressive tags such as `<|sfx:laughter|>` are typed into the text; see [Expressive tags](../concepts/audio.md#expressive-tags).
+- **Compose tools:** there is no enhancer, JSON mode or negative prompt, and no steps or guidance to set. The tools row has only **Recent prompts**, one list for the three kinds.
+
+### Voice
+
+**Voice** is the first group in Speech's *Settings*. See [Voices](../concepts/audio.md#voices) for what each choice does.
+
+1. Leave it on **Any** to let the model pick a voice. The help under it points to **Use as** → **Voice** in the [Gallery](gallery.md#use-as) for keeping one.
+2. Or choose **From a recording**. Add a file of 3 to 30 seconds (Browse, upload or drop; its length shows beside its name), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.*
+
+![The Voice section on From a recording, with the file, What it says and the consent tick](../assets/screenshots/placeholder.svg "audio-voice")
+
+The tick is asked again after a new recording, **Reset**, **Reuse settings**, **Use as** or a reload. A take made with **Any** that you use as the voice needs no tick.
+
+A clean, close-miked recording gives the best voice; see [Clone from a clean recording](../concepts/audio.md#voices).
+
+**Reset** works as on Image: it keeps the text you wrote (Style, Lyrics, Text and Prompt) and puts everything else back, including the length, **Batch size**, **Seed** and the voice.
+
+### Why Generate is off
+
+While something is missing, **Generate** is disabled and one reason shows above it, always the first that applies: the style, the text or prompt, the recording, its length, **What it says**, the tick, and then text over the limit (*Shorten the text: it's over 10,000 characters, about 10 minutes of speech.*).
+
+### While a take is made
+
+The job card counts **takes** (*Take 1 of 2*) and lists the model's phases with a progress bar each: Plan, Song tokens, Synthesis and Decode for music; Speech tokens, with *Part 2 of 4* for long text, and Decode for speech; Steps for sound. There is no live preview. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs); Cancel also stops a take that is in progress.
+
+A job that runs out of GPU memory fails with a message that names the model and says to close other apps that use the GPU. For music it also says to shorten the lyrics.
+
+### The result
+
+![A finished take in the player, with its waveform and the browser's audio controls](../assets/screenshots/placeholder.svg "audio-take")
+
+The preview shows the finished take as a **player**: its waveform with a playhead, over the browser's own audio controls. Click or drag the waveform to seek. Nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and the caption gives the words, model, length and seed. A take that reached YuE2's limit carries **⚠ Cut at 6:00**.
+
+Takes appear in the Gallery strip as audio tiles. See [Audio in the Gallery](gallery.md#audio).
+
+### On other screens
+
+On a tablet held upright, *Compose* and *Settings* sit side by side under the player. On a phone, **Audio** is the fourth choice in the top strip's workflow menu, and the strip's chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**. See [Other devices](devices.md#audio-on-a-phone).
 
 ## Generate
 
@@ -262,3 +319,4 @@ Some models change what the Workspace offers:
 
 - **Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no start image or upscale, so the **Images** section is hidden, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../concepts/models.md#ideogram-4-instant).
 - **Video** adds **Duration (s)**, **Audio**, **Low memory** and, on models that follow one, an [**Audio track**](#audio-track).
+- **Audio** replaces the prompt box and settings with those of its [kind](#the-audio-tab).

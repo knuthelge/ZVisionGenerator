@@ -44,7 +44,7 @@ def plan_env(monkeypatch, tmp_path):
     env = SimpleNamespace(present=set(), unreachable=False, enhance=True, hub_calls=[], flights=DownloadFlights(), submitted=[], web_config=make_web_config(), root=tmp_path)
     env.web_config.output_dir = str(tmp_path)
     packaged = load_packaged_config()
-    env.web_config.app_config.update(model_aliases=packaged["model_aliases"], licences=packaged["licences"])
+    env.web_config.app_config.update(model_aliases=packaged["model_aliases"], licences=packaged["licences"], audio_model_presets=packaged["audio_model_presets"])
     monkeypatch.setattr(web_server, "load_web_config", lambda: env.web_config)
     patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="flux2", is_distilled=False, size=None), defaults=make_resolved_image_defaults(), submitted=env.submitted)
     monkeypatch.setattr(web_server.download_flights, "active", env.flights.active)

@@ -221,6 +221,9 @@ class TestPackagedConfig:
             ("ltx-8", ["ltx-2-community", "gemma"]),
             ("ltx25-4", ["ltx-2x-community"]),
             ("h3", ["minimax-h3-community"]),
+            ("yue2", ["yue2-creator-nc"]),
+            ("higgs3", ["higgs3-nc", "higgs-audio2-community"]),
+            ("sa3", ["stability-community", "gemma"]),
             ("matte", ["matte"]),
             ("zit", []),
             ("klein4b", []),
@@ -229,6 +232,43 @@ class TestPackagedConfig:
     )
     def test_the_records_of_each_model(self, packaged_config_shared: dict[str, Any], model: str, expected: list[str]) -> None:
         assert [record.id for record in licences_for(packaged_config_shared, model)] == expected
+
+    def test_the_audio_records_are_the_ones_the_models_page_names(self, packaged_config_shared: dict[str, Any]) -> None:
+        summaries = {model: [(record.name, record.supplier, record.summary) for record in licences_for(packaged_config_shared, model)] for model in ("yue2", "higgs3")}
+
+        assert summaries == {
+            "yue2": [("CC BY-NC 4.0 with individual creator permission", "M-A-P", "Non-commercial; individual creators may monetise their outputs, companies need a licence")],
+            "higgs3": [
+                (
+                    "Boson Higgs TTS 3 Research and Non-Commercial License",
+                    "Boson AI",
+                    'Non-commercial; creators may publish with credit; the app\'s Higgs code is "Derived from Higgs TTS 3, licensed from Boson AI USA, Inc."',
+                ),
+                (
+                    "Boson Higgs Audio 2 Community License Agreement",
+                    "Boson AI",
+                    "Free up to 100,000 annual active users; products credit Boson AI and Meta Llama 3",
+                ),
+            ],
+        }
+
+    def test_only_stable_audio_links_a_notice(self, packaged_config_shared: dict[str, Any]) -> None:
+        notices = {model: [record.notice_url is not None for record in licences_for(packaged_config_shared, model) if record.id != "gemma"] for model in ("yue2", "higgs3", "sa3")}
+
+        assert notices == {"yue2": [False], "higgs3": [False, False], "sa3": [True]}
+
+    def test_the_cli_lines_of_an_audio_model_name_its_terms(self, packaged_config_shared: dict[str, Any]) -> None:
+        lines = licence_notice(packaged_config_shared, "sa3", None, MagicMock())
+
+        assert [line for line in lines if "(" in line] == ["Stability AI Community License (Stability AI): Free under $1M revenue", "Gemma Terms of Use (Google): Gemma's use policy applies"]
+
+    def test_the_cli_lines_of_speech_carry_the_boson_credit_and_the_codec_terms(self, packaged_config_shared: dict[str, Any]) -> None:
+        lines = licence_notice(packaged_config_shared, "higgs3", None, MagicMock())
+
+        assert [line for line in lines if "(" in line] == [
+            'Boson Higgs TTS 3 Research and Non-Commercial License (Boson AI): Non-commercial; creators may publish with credit; the app\'s Higgs code is "Derived from Higgs TTS 3, licensed from Boson AI USA, Inc."',
+            "Boson Higgs Audio 2 Community License Agreement (Boson AI): Free up to 100,000 annual active users; products credit Boson AI and Meta Llama 3",
+        ]
 
     def test_the_matte_record_links_a_model_card(self, packaged_config_shared: dict[str, Any]) -> None:
         (record,) = licences_for(packaged_config_shared, "matte")

@@ -13,6 +13,7 @@ import yaml
 
 from tests._paths import REPO_ROOT
 
+from zvisiongenerator.audio_cli import _build_audio_parser
 from zvisiongenerator.converters.convert_checkpoint import _build_model_parser
 from zvisiongenerator.image_cli import _build_parser as _build_image_parser
 from zvisiongenerator.video_cli import _build_video_parser
@@ -102,6 +103,7 @@ def _cli_cases() -> list[tuple[str, argparse.ArgumentParser]]:
         ("ziv-ui", _build_ui_parser(prog="ziv-ui")),
         ("ziv-image", _build_image_parser(prog="ziv-image")),
         ("ziv-video", _build_video_parser(prog="ziv-video")),
+        ("ziv-audio", _build_audio_parser(prog="ziv-audio")),
     ]
     cases += [(f"ziv-model {name}", sub) for name, sub in _subparsers(_build_model_parser(prog="ziv-model")).items()]
     return cases

@@ -1,0 +1,145 @@
+[
+  {
+    "name": "words under a tag make a song",
+    "lyrics": "[Verse]\nThe lamp is lit",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "full",
+      "lyrics": "[Verse]\nThe lamp is lit",
+      "kind": "song",
+      "section_count": 1
+    }
+  },
+  {
+    "name": "a song keeps its lyrics as given",
+    "lyrics": "\n[Intro]\n\n[Verse]\nSalt on the glass\n\n[Chorus]\nShine on  \n",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "full",
+      "lyrics": "\n[Intro]\n\n[Verse]\nSalt on the glass\n\n[Chorus]\nShine on  \n",
+      "kind": "song",
+      "section_count": 3
+    }
+  },
+  {
+    "name": "words with no tag make a song",
+    "lyrics": "la la la",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "full",
+      "lyrics": "la la la",
+      "kind": "song",
+      "section_count": 0
+    }
+  },
+  {
+    "name": "a word beside a tag on one line makes a song",
+    "lyrics": "[Chorus] oh oh",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "full",
+      "lyrics": "[Chorus] oh oh",
+      "kind": "song",
+      "section_count": 1
+    }
+  },
+  {
+    "name": "an unclosed bracket is a word",
+    "lyrics": "[Verse",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "full",
+      "lyrics": "[Verse",
+      "kind": "song",
+      "section_count": 0
+    }
+  },
+  {
+    "name": "empty lyrics make the default instrumental",
+    "lyrics": "",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[Intro]\n\n[Instrumental]\n\n[Solo]\n\n[Instrumental]\n\n[Solo]\n\n[Bridge]\n\n[Instrumental]\n\n[Outro]",
+      "kind": "instrumental",
+      "section_count": 8
+    }
+  },
+  {
+    "name": "blank lyrics make the default instrumental",
+    "lyrics": " \n\t\n",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[Intro]\n\n[Instrumental]\n\n[Solo]\n\n[Instrumental]\n\n[Solo]\n\n[Bridge]\n\n[Instrumental]\n\n[Outro]",
+      "kind": "instrumental",
+      "section_count": 8
+    }
+  },
+  {
+    "name": "tags only make an instrumental from those tags",
+    "lyrics": "[Intro]\n\n[Verse]\n\n[Outro]",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[Intro]\n\n[Verse]\n\n[Outro]",
+      "kind": "instrumental",
+      "section_count": 3
+    }
+  },
+  {
+    "name": "tags are normalised to one per paragraph",
+    "lyrics": "[Intro] [Verse]\n[Chorus]\n\n\n[Outro]",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[Intro]\n\n[Verse]\n\n[Chorus]\n\n[Outro]",
+      "kind": "instrumental",
+      "section_count": 4
+    }
+  },
+  {
+    "name": "a tag with a space stays whole",
+    "lyrics": "[Verse 1]\n[Pre-Chorus]",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[Verse 1]\n\n[Pre-Chorus]",
+      "kind": "instrumental",
+      "section_count": 2
+    }
+  },
+  {
+    "name": "repeated tags all count",
+    "lyrics": "[Chorus]\n[Chorus]\n[Chorus]",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[Chorus]\n\n[Chorus]\n\n[Chorus]",
+      "kind": "instrumental",
+      "section_count": 3
+    }
+  },
+  {
+    "name": "one tag is an instrumental of one section",
+    "lyrics": "[Intro]",
+    "default_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[Intro]",
+      "kind": "instrumental",
+      "section_count": 1
+    }
+  },
+  {
+    "name": "the default list is the preset's",
+    "lyrics": "",
+    "default_sections": "[intro] [outro]",
+    "expected": {
+      "cot": "melody",
+      "lyrics": "[intro]\n\n[outro]",
+      "kind": "instrumental",
+      "section_count": 2
+    }
+  }
+]

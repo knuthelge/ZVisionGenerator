@@ -10,9 +10,10 @@ Every feature of the app is also a command. The CLI suits batch runs, scripts an
 |---|---|
 | `ziv-image` | Generate images |
 | `ziv-video` | Generate and extend videos |
+| `ziv-audio` | Generate music, speech and sound |
 | `ziv-model` | Convert checkpoints, import LoRAs, list what's installed |
 | `ziv-ui` | Start the [Web UI](../web-ui/index.md) |
-| `ziv` | All of the above as subcommands: `ziv image`, `ziv video`, `ziv model`, `ziv ui` |
+| `ziv` | All of the above as subcommands: `ziv image`, `ziv video`, `ziv audio`, `ziv model`, `ziv ui` |
 
 `ziv` on its own prints help. Add `--help` to any command for its options, or see the [command reference](reference.md).
 
@@ -74,4 +75,4 @@ The terminal button in the Web UI's *Settings* header copies a command with the 
 
 ## Next
 
-[Generate images](images.md){ .md-button .md-button--primary } [Generate videos](video.md){ .md-button } [Command reference](reference.md){ .md-button }
+[Generate images](images.md){ .md-button .md-button--primary } [Generate videos](video.md){ .md-button } [Generate audio](audio.md){ .md-button } [Command reference](reference.md){ .md-button }

@@ -4,14 +4,15 @@ Z-Vision Generator is one Python package with two front ends, the CLI and the We
 
 ```mermaid
 graph TD
-  CLI["CLI<br/>image_cli · video_cli · convert_checkpoint"]
+  CLI["CLI<br/>image_cli · video_cli · audio_cli · convert_checkpoint"]
   WEB["Web UI<br/>web/server.py · web_runner · Svelte SPA"]
   PRE["Preflight<br/>plan seeds and prompts, enhance"]
-  RUN["Runners<br/>image_runner · video_runner · upscale_runner"]
+  RUN["Runners<br/>image_runner · video_runner · audio_runner · upscale_runner"]
   WF["Workflows<br/>stages composed per job"]
   SEL["backends/__init__.py<br/>picks the platform"]
   MAC["backends/mac<br/>mflux · MLX · mlx-lm"]
   CUDA["backends/cuda<br/>diffusers · PyTorch · transformers"]
+  AUD["backends/audio<br/>YuE2 · Higgs TTS 3 · Stable Audio 3<br/>PyTorch on CUDA or MPS"]
   DL["downloads/<br/>plan, check and fetch models"]
   UT["utils/<br/>config, prompts, provenance, paths"]
 
@@ -23,6 +24,7 @@ graph TD
   PRE --> SEL
   SEL --> MAC
   SEL --> CUDA
+  SEL --> AUD
   RUN --> DL
   CLI -.-> UT
   WEB -.-> UT
@@ -30,26 +32,29 @@ graph TD
 
 ## A job, start to finish
 
-1. **An entry point** turns flags or a form into arguments: `image_cli` and `video_cli` for the CLI, `web/server.py` for the Web UI, which hands the job to the single worker thread in `web/web_runner.py`.
+1. **An entry point** turns flags or a form into arguments: `image_cli`, `video_cli` and `audio_cli` for the CLI, `web/server.py` for the Web UI, which hands the job to the single worker thread in `web/web_runner.py`.
 2. **Preflight** plans every iteration (seed, `{a|b}` choices, enhancement), and, if asked, loads the prompt enhancer, rewrites the prompts and unloads it. It returns a frozen `JobPlan`. See [Jobs and workflows](workflows.md#job-phases-preflight-and-generation).
 3. **Downloads** fetch any model files that are missing, as their own step with progress. See [Model downloads](downloads.md).
 4. **The runner** loads the model through the backend, lets the backend prepare the job's prompts (`prepare_prompts`; on macOS this encodes them all and frees the text encoder), then runs the workflow once per iteration of the plan.
 5. **The workflow** is a list of stage functions built for the job: resolve the prompt, generate, review, upscale, sharpen, cut out the background, save. See [Workflow stages](workflows.md#workflow-stages).
-6. **Saving** embeds the settings in the PNG or MP4 (`utils/provenance.py`), which is what the Gallery reads back and **Reuse settings** loads.
+6. **Saving** embeds the settings in the PNG, MP4 or FLAC (`utils/provenance.py`), which is what the Gallery reads back and **Reuse settings** loads.
 
 Only one model is resident at a time: the enhancer is gone before the generation model loads; on macOS an image model's text encoder is freed before the first image. The exception is the [background removal](workflows.md#background-removal) chain, which loads beside the image model.
+
+Audio jobs skip the workflow step. `audio_runner.py` plans the takes (no prompt enhancement), checks a speech request against its limits, releases a resident enhancer, makes sure the model's files are downloaded, then loads the one `AudioBackend` of the preset's family once, calls `generate` per take and closes the backend in a `finally`, also after a failure or a Stop. Each take is levelled when the backend returns a waveform from before the library's clamp (`AudioClip.preclamp`) and its peak is above 1.0, then `utils/audio_save.save_flac` writes it with its settings. A GPU out-of-memory error (`torch.OutOfMemoryError`, or the MPS `RuntimeError`) becomes a message that names the model. Progress goes out as `audio_progress` events (`phase`, `step`, `total`, `part`, `n_parts`) beside the batch events the other runners send. The CLI and the Web UI build the request the same way: `utils/audio_request` holds the checks both share (the runnable model, the fields a model takes, the length of a sound, the text and voice limits of speech), `audio_cli` applies them to flags, and `web/audio_job.py` to a form, so a form and a command cannot disagree. The Web UI queues the job as an exclusive audio job (`WebRunner.submit_audio_request_job`) that calls `run_audio_batch`; the saved FLAC is indexed by the Gallery like any output. See [Web server](web-server.md#audio-jobs) and [Backends](backends.md#audio).
 
 ## Layers
 
 | Layer | Where | Knows about the platform? |
 |---|---|---|
-| Entry points | `image_cli.py`, `video_cli.py`, `cli.py`, `converters/`, `web/` | No |
+| Entry points | `image_cli.py`, `video_cli.py`, `audio_cli.py`, `cli.py`, `converters/`, `web/` | No |
 | Planning | `preflight.py`, `core/job_plan.py` | No |
-| Running | `image_runner.py`, `video_runner.py`, `upscale_runner.py` | No |
+| Running | `image_runner.py`, `video_runner.py`, `audio_runner.py`, `upscale_runner.py` | No |
 | Workflows | `workflows/`, `core/workflow.py` | No |
 | Protocols and value types | `core/` | No |
 | Selection | `backends/__init__.py` | Yes: the only place |
 | Backends | `backends/mac/`, `backends/cuda/` | Yes |
+| Audio backends | `backends/audio/` | No: they run on the device `backends/__init__.py` picks (`cuda` or `mps`) |
 | Helpers | `utils/`, `processing/`, `schedulers/`, `downloads/` | No |
 
 Code above the backends asks capability questions, such as `supports_video_extend()` or `supports_seedvr2()`, instead of checking the platform. See [Backends](backends.md).

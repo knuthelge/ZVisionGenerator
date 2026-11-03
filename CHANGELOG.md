@@ -7,9 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- **Make music, speech and sound on the new Audio tab, and with `ziv audio`.** Songs and instrumentals up to 6 minutes (YuE2 3B), speech of up to about 10 minutes, read in parts, in a voice the model picks or one that follows a recording you confirm you may use (Higgs TTS 3), and ambience and sound effects of up to 380 s (Stable Audio 3 Medium). Takes are saved as FLAC with their settings, play in the Gallery, which can show **Audio only**, and can be reused. **Use as → Audio track** gives one to a video, and **Use as → Voice** keeps a speech voice. The models are non-commercial or have limits, and their terms are named at download. They run on Windows and Linux with a 10 GB GPU, and on macOS
 - **The download dialog, the Models page and the CLI name the terms of models that have them**, with links to the licence and its NOTICE
 
 ### Changed
+- Checkboxes have a clearer outline, and the top bar fits narrower windows by hiding its wordmark
 - **Generate, Upscale and Enhance now ask before downloading a model**, with its size and free space, as the Models page does
 
 ### Fixed

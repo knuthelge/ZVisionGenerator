@@ -135,7 +135,7 @@ licences:
 | `supplier` | yes | Who licenses the model |
 | `summary` | yes | The terms in a short, plain phrase |
 | `url` | yes | The licence text, pinned to a revision |
-| `models` | yes | The models it covers, at least one: an alias from `model_aliases`, or `matte` for the [background removal](images.md#transparent-background) models |
+| `models` | yes | The models it covers, at least one: an alias from `model_aliases`, the id of an `audio_model_presets` entry, or `matte` for the [background removal](images.md#transparent-background) models |
 | `notice_url` | no | The licence's NOTICE file, pinned to a revision |
 | `url_label` | no | What the link to `url` is called. Default `Licence` |
 
@@ -196,6 +196,100 @@ A family can split into variants (`variants.<name>`), such as FLUX.2 Klein disti
 `video_model_presets.ltx.upscale.existing_video_steps` (default `2`, from `1` to `3`) sets the refine steps of [upscaling an existing video](upscaling.md#macos-ltx) on macOS.
 
 You rarely need to change these. They are documented in the packaged `config.yaml`.
+
+## `audio_model_presets`
+
+The audio models: one entry per model, keyed by the model id you pass with `-m`. A model is music, speech or sound, and each entry says what it can do, how long it can run, which files it downloads and how it runs on each platform. The packaged config ships these three models with their pinned sources, and the Audio tab and `ziv audio` offer them on every platform that has an entry:
+
+```yaml
+audio_model_presets:
+  yue2:
+    label: "YuE2 3B"
+    kind: music
+    capabilities: { lyrics: true, duration: false, voice_clone: false }
+    limits: { max_seconds: 360 }
+    settings:
+      cot_song: full
+      cot_instrumental: melody
+      instrumental_sections: "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]"
+      abc_max_tokens: 4096
+      cfg: 1.0
+      ode_steps: 32
+      memory_budget_gib: 24
+      vae_core_frames: 512
+      fade_seconds: 2
+    memory: { cuda_gb: 6.7, mps_gb: null }
+    platforms:
+      cuda:
+        family: yue2
+        files:
+          - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
+            files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
+          - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
+            files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
+        settings: { weight_swap: true }
+      mps:
+        family: yue2
+        files:
+          - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
+            files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
+          - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
+            files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
+        settings: { weight_swap: false }
+  higgs3:
+    label: "Higgs TTS 3 4B"
+    kind: speech
+    capabilities: { lyrics: false, duration: false, voice_clone: true }
+    limits: { max_new_tokens: 1500, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
+    settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
+    memory: { cuda_gb: 8.2, mps_gb: null }
+    platforms:
+      cuda:
+        family: higgs3
+        files:
+          - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
+            files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
+          - repo: "bosonai/higgs-audio-v2-tokenizer@815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
+            files: [config.json, model.safetensors, preprocessor_config.json]
+        settings: { codec_device: cpu }
+      # mps: the same entry with settings: { codec_device: mps }
+  sa3:
+    label: "Stable Audio 3 Medium"
+    kind: sound
+    capabilities: { lyrics: false, duration: true, voice_clone: false }
+    limits: { max_seconds: 380 }
+    settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
+    memory: { cuda_gb: 6.1, mps_gb: null }
+    platforms:
+      cuda:
+        family: stable_audio_3
+        files:
+          - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
+            files: [checkpoints/stable_audio_3_medium.safetensors]
+          - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
+            files: [model_config.json]
+          - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
+            files: ["t5gemma-b-b-ul2/*"]
+      # mps: the same entry
+```
+
+| Key | Required | Description |
+|---|---|---|
+| `label` | yes | The name the Web UI shows |
+| `kind` | yes | `music`, `speech` or `sound`. The Web UI lists a kind's models in the order they are written here |
+| `capabilities.lyrics` | yes | `true` if the model sings lyrics |
+| `capabilities.duration` | yes | `true` if you choose the length in seconds |
+| `capabilities.voice_clone` | yes | `true` if the model can follow a voice recording |
+| `limits` | yes | The model's own ceilings. Music and sound models give `max_seconds`, the longest take. Speech models give `max_new_tokens` (per part), `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
+| `settings` | no | The model's own knobs, shared by every platform. Any keys the model reads, such as `temperature` or `ode_steps` |
+| `memory.cuda_gb` | yes | The GPU memory the model peaks at on a CUDA card, in GiB |
+| `memory.mps_gb` | yes | The same on Apple silicon; `null` while it is unmeasured |
+| `platforms.cuda`, `platforms.mps` | yes, at least one | Where the model runs. A model without an entry for your platform is not offered |
+| `platforms.<platform>.family` | yes | Which engine runs the model: `yue2`, `higgs3` or `stable_audio_3` |
+| `platforms.<platform>.files` | yes | The downloads, in order. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch from it |
+| `platforms.<platform>.settings` | no | Settings for this platform only. They win over the entry's `settings` |
+
+Each limit and capability is required, and the app refuses to start when one is missing, when `kind` is unknown, or when a platform has no `family` or `files`.
 
 ## `ideogram4_instant`
 

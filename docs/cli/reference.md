@@ -1,6 +1,6 @@
 # Command reference
 
-Every command and option. For worked examples, see the how-to pages: [images](images.md), [videos](video.md), [batches](batches.md), [enhancing](enhance.md) and [models](models.md).
+Every command and option. For worked examples, see the how-to pages: [images](images.md), [videos](video.md), [audio](audio.md), [batches](batches.md), [enhancing](enhance.md) and [models](models.md).
 
 ## Commands
 
@@ -10,6 +10,7 @@ Every command and option. For worked examples, see the how-to pages: [images](im
 | `ziv-ui` | `ziv ui` | Starts the Web UI |
 | `ziv-image` | `ziv image` | Generates images |
 | `ziv-video` | `ziv video` | Generates and extends videos |
+| `ziv-audio` | `ziv audio` | Generates music, speech and sound |
 | `ziv-model` | `ziv model` | Converts checkpoints, imports LoRAs, lists assets |
 
 `ziv` with no subcommand prints help and starts nothing. `ziv --version` prints the version. `ziv <command> --help` lists a command's options.
@@ -109,6 +110,26 @@ With `--extend`, these are refused because the extension keeps the source's size
 MiniMax H3 extends only 24 fps sources whose width and height are multiples of 32. It prints its estimated time when a job starts; the estimate leaves out the one-time preparation of the first run.
 
 `ziv-video` needs [ffmpeg](https://ffmpeg.org/). If it's missing, `ziv-video` offers to install it with Homebrew or MacPorts (macOS), `winget` (Windows), or `apt`, `dnf` or `pacman` (Linux), and asks before running anything. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion.
+
+## `ziv-audio`
+
+| Option | Default | Description |
+|---|---|---|
+| `-m`, `--model` | *(required)* | The audio model: an id from the `audio_model_presets` section of the [config](../concepts/configuration.md#audio_model_presets). The model decides what is made (music, speech or sound) and which of the options below it takes |
+| `--prompt` | *(required)* | The style of a song, the text to read (up to 10,000 characters, read in parts), or the description of a sound |
+| `--lyrics` | none | The lyrics of a song, with `[verse]` and `[chorus]` tags. Without lyrics, or with only `[section]` tags, the take is an instrumental, and the tags set its length. Music models only |
+| `--lyrics-file PATH` | none | Read the lyrics from a text file. Can't be combined with `--lyrics` |
+| `--seconds` | `10` | Length of a sound, from 1 second up to the model's limit. Models that set their own length refuse it |
+| `--voice PATH` | none | A recording of the voice to follow, 3 to 30 seconds long. Speech models that clone a voice only. Needs `--voice-text`. Without it the model reads in its own voice |
+| `--voice-text` | none | What the `--voice` recording says |
+| `--voice-consent` | off | Confirms the speaker of the `--voice` recording allows cloning their voice. Needed with `--voice`, except for a speech take made in the model's own voice, which anyone may follow |
+| `-r`, `--runs` | `1` | How many takes to make. They share one model load |
+| `--seed` | random | Seed, for repeatable takes. Every take of a run uses it; omit it for a new random seed per take |
+| `-o`, `--output` | `.` | Output folder. Takes are saved as FLAC files named `<kind>_<date>_<time>.flac`, with their settings inside |
+
+An option the chosen model doesn't take is refused with the reason, for example `YuE2 3B sets the length from the lyrics; drop --seconds`. Before a model's first download, `ziv-audio` prints the terms it comes with.
+
+`ziv-audio` needs [ffmpeg](https://ffmpeg.org/), which it offers to install like `ziv-video` does.
 
 ## `ziv-model model`
 

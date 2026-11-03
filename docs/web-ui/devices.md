@@ -72,6 +72,16 @@ A missing image is marked in red in its group, and the chip shows a warning mark
 
 A **Track** chip after **Images** (after **Source** in **Extend Video**) opens the [audio track](workspace.md#audio-track) in a popover. It reads *none*, *on*, or the **Start at** time. A voice memo from your phone works as a file.
 
+### Audio on a phone
+
+**Audio** is the fourth choice in the workflow menu in the top strip. The chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**; see [The Audio tab](workspace.md#the-audio-tab) for what each does.
+
+- **Kind** opens a list of the three kinds with a line about each.
+- **Model** lists the kind's models. A model with terms has an **ⓘ** at the end of its row, and **All** shows it beside the picker.
+- **Voice** holds the choice between **Any** and **From a recording**, the file, **What it says** and the consent tick.
+- The composer shows **Style** and **Lyrics**, **Text** or **Prompt**, and the reason **Generate** is off sits above its row.
+- The finished take is a player on the preview. Its **⋯** button opens the same menu as an image's, with **Use as** → **Audio track** and **Voice**.
+
 ### The viewer on a phone
 
 Tapping an image grows it out of its tile into the viewer, which fills the screen.

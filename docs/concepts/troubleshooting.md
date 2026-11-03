@@ -114,7 +114,7 @@ Check that the LoRA was made for this model family. Only standard LoRAs and LyCO
 
 ### ffmpeg is missing
 
-`ziv-video` offers to install it and asks first. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion.
+`ziv-video` and `ziv-audio` offer to install it and ask first. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion.
 
 ### "Could not detect video model family"
 

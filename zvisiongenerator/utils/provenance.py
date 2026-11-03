@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from PIL.PngImagePlugin import PngInfo
 
+from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
@@ -19,8 +20,12 @@ from zvisiongenerator.utils.paths import collapse_home, display_stem, expand_hom
 
 IMAGE_CONFIG_SCHEMA = "zvisiongenerator.config.v1"
 VIDEO_CONFIG_SCHEMA = IMAGE_CONFIG_SCHEMA
+AUDIO_CONFIG_SCHEMA = IMAGE_CONFIG_SCHEMA
 _PNG_CONFIG_KEY = "zvisiongenerator.config"
-_MP4_CONFIG_KEY = "zvisiongenerator.config"
+# The container tag every video and audio file carries its config under.
+_CONFIG_KEY = "zvisiongenerator.config"
+# ffmpeg's output option that lets MP4 keep a custom tag.
+_MP4_TAG_OPTIONS = ("-movflags", "use_metadata_tags")
 # EXIF ImageDescription tag, where saved images also carry the rendered prompt.
 EXIF_IMAGE_DESCRIPTION = 0x010E
 # The recorded ``generation.upscale.method`` values: refine with the image model, or upscale with SeedVR2.
@@ -130,6 +135,40 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
         payload["extend_frames"] = extend.frames
     payload.update(_enhance_fields(request.enhance_record))
     return _drop_unserializable(payload)
+
+
+def build_audio_config_payload(request: AudioGenerationRequest, clip: AudioClip, *, parts: int | None, generation_time: float) -> dict[str, Any]:
+    """Build the config payload embedded in a saved audio take.
+
+    The top-level keys are the reusable settings: ``workflow`` and ``kind`` (``music``, ``speech`` or ``sound``), the
+    ``model``, the ``prompt`` (the song's style, the user's full text or the sound's description, never the parts a long
+    text was read in), the ``lyrics`` (music), the requested ``seconds`` (sound), the ``voice_path`` and ``voice_text``
+    of a cloned voice, and the ``seed``. A take read in the model's own voice has no voice keys. The speaker's consent
+    is never recorded. ``generation`` records how the file was made: the ``time`` it took, the actual ``duration`` in
+    seconds, the number of ``parts`` of a speech take, and ``cut`` when the model reached its length limit.
+    """
+    voice = request.voice
+    payload = {
+        "schema": AUDIO_CONFIG_SCHEMA,
+        "workflow": request.kind,
+        "kind": request.kind,
+        "model": request.preset,
+        "prompt": request.prompt,
+        "lyrics": request.lyrics or None,
+        "seconds": request.seconds,
+        "voice_path": _portable_path(voice.path) if voice is not None else None,
+        "voice_text": voice.text if voice is not None else None,
+        "seed": request.seed,
+        "generation": _drop_empty(
+            {
+                "time": _round_seconds(generation_time),
+                "duration": round(clip.seconds, 2),
+                "parts": parts,
+                "cut": True if clip.cut else None,
+            }
+        ),
+    }
+    return _drop_unserializable(_drop_empty(payload))
 
 
 def _audio_track_fields(request: VideoGenerationRequest) -> dict[str, Any]:
@@ -275,54 +314,94 @@ def _video_scene_fields(request: VideoGenerationRequest, artifacts: VideoWorking
     return {key: text for key, value in fields.items() if (text := optional_text(value)) is not None}
 
 
+def config_args(payload: dict[str, Any]) -> list[str]:
+    """Return the ffmpeg output options that store a config payload as JSON in a container tag under zvisiongenerator.config.
+
+    The tag is the same in every container ffmpeg writes tags to; MP4 also needs the extra option :func:`mp4_config_args` adds.
+    """
+    value = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return ["-metadata", f"{_CONFIG_KEY}={value}"]
+
+
 def mp4_config_args(payload: dict[str, Any]) -> list[str]:
     """Return the ffmpeg output options that store a config payload as JSON in MP4 metadata under zvisiongenerator.config."""
-    value = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-    return ["-movflags", "use_metadata_tags", "-metadata", f"{_MP4_CONFIG_KEY}={value}"]
+    return [*_MP4_TAG_OPTIONS, *config_args(payload)]
 
 
-def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
-    """Embed a config payload as JSON in MP4 container metadata under zvisiongenerator.config.
+def embed_config(path: str | Path, payload: dict[str, Any], *, output_options: Sequence[str] = ()) -> None:
+    """Embed a config payload as JSON in a media file's container metadata under zvisiongenerator.config.
 
-    Uses ffmpeg to copy streams and attach the metadata key, replacing the original file.
+    Uses ffmpeg to copy the streams and attach the tag, replacing the original file.
+
+    Args:
+        path: The media file, in any container ffmpeg writes tags to.
+        payload: The config payload.
+        output_options: Extra ffmpeg output options the container needs to keep the tag.
 
     Raises:
         subprocess.CalledProcessError: If ffmpeg exits with a non-zero status.
     """
-    video_path = Path(video_path)
-    tmp = staging_path(video_path)
+    path = Path(path)
+    tmp = staging_path(path)
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-c", "copy", *mp4_config_args(payload), str(tmp)],
+            ["ffmpeg", "-y", "-v", "error", "-i", str(path), "-c", "copy", *output_options, *config_args(payload), str(tmp)],
             stdin=subprocess.DEVNULL,
             check=True,
             capture_output=True,
         )
-        tmp.replace(video_path)
+        tmp.replace(path)
     except BaseException:
         if tmp.exists():
             tmp.unlink()
         raise
 
 
-def read_mp4_config(video_path: str | Path) -> dict[str, Any] | None:
-    """Read the zvisiongenerator.config payload from MP4 container metadata, or None if absent."""
+def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
+    """Embed a config payload as JSON in MP4 container metadata under zvisiongenerator.config.
+
+    Raises:
+        subprocess.CalledProcessError: If ffmpeg exits with a non-zero status.
+    """
+    embed_config(video_path, payload, output_options=_MP4_TAG_OPTIONS)
+
+
+def read_config(path: str | Path) -> dict[str, Any] | None:
+    """Read the zvisiongenerator.config payload from a media file's container metadata, or None if absent.
+
+    Raises:
+        subprocess.CalledProcessError: If ffprobe cannot read the file.
+    """
     result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(video_path)],
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(path)],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         check=True,
     )
-    return mp4_config_from_probe(json.loads(result.stdout))
+    return config_from_probe(json.loads(result.stdout))
 
 
-def mp4_config_from_probe(data: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the zvisiongenerator.config payload in ffprobe's JSON for a file (its ``format`` block), or None if absent."""
-    raw = data.get("format", {}).get("tags", {}).get(_MP4_CONFIG_KEY)
+def read_mp4_config(video_path: str | Path) -> dict[str, Any] | None:
+    """Read the zvisiongenerator.config payload from MP4 container metadata, or None if absent."""
+    return read_config(video_path)
+
+
+def config_from_probe(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the zvisiongenerator.config payload in ffprobe's JSON for a file (its ``format`` block), or None if absent.
+
+    The tag name is matched without regard to case, because some tag editors change the case of tag names.
+    """
+    tags = data.get("format", {}).get("tags", {})
+    raw = next((value for key, value in tags.items() if key.lower() == _CONFIG_KEY), None)
     if raw is None:
         return None
     return json.loads(raw)
+
+
+def mp4_config_from_probe(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the zvisiongenerator.config payload in ffprobe's JSON for an MP4 file (its ``format`` block), or None if absent."""
+    return config_from_probe(data)
 
 
 def embed_png_config(png_info: PngInfo, payload: dict[str, Any]) -> None:

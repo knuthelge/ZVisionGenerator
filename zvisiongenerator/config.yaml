@@ -265,12 +265,37 @@ licences:
     summary: "Not licensed in the EU, UK, South Korea or the USA; written permission needed over $20M revenue; commercial products show \"MiniMax H3\""
     url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE"
     models: [h3]
+  yue2-creator-nc:
+    name: "CC BY-NC 4.0 with individual creator permission"
+    supplier: "M-A-P"
+    summary: "Non-commercial; individual creators may monetise their outputs, companies need a licence"
+    url: "https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE"
+    models: [yue2]
+  higgs3-nc:
+    name: "Boson Higgs TTS 3 Research and Non-Commercial License"
+    supplier: "Boson AI"
+    summary: "Non-commercial; creators may publish with credit; the app's Higgs code is \"Derived from Higgs TTS 3, licensed from Boson AI USA, Inc.\""
+    url: "https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE"
+    models: [higgs3]
+  higgs-audio2-community:
+    name: "Boson Higgs Audio 2 Community License Agreement"
+    supplier: "Boson AI"
+    summary: "Free up to 100,000 annual active users; products credit Boson AI and Meta Llama 3"
+    url: "https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE"
+    models: [higgs3]
+  stability-community:
+    name: "Stability AI Community License"
+    supplier: "Stability AI"
+    summary: "Free under $1M revenue"
+    url: "https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE.md"
+    notice_url: "https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/NOTICE"
+    models: [sa3]
   gemma:
     name: "Gemma Terms of Use"
     supplier: "Google"
     summary: "Gemma's use policy applies"
     url: "https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE_GEMMA.md"
-    models: [ltx-4, ltx-8]
+    models: [ltx-4, ltx-8, sa3]
   matte:
     name: "BiRefNet (MIT) and ViTMatte (Apache-2.0)"
     supplier: "BiRefNet and ViTMatte authors"
@@ -613,6 +638,94 @@ video_model_presets:
       text_encoder: { bits: 4, group_size: 64, layers: 50 }
 
 # --- Prompt enhancer (local LLM) ---
+
+# Audio models (music, speech, sound), keyed by model id. Each preset has a label, a kind (music | speech | sound),
+# capabilities, limits, settings, memory and, per platform (cuda | mps), a backend family, the pinned files to download
+# and the settings it overrides. docs/concepts/configuration.md describes every key.
+audio_model_presets:
+  yue2:
+    label: "YuE2 3B"
+    kind: music
+    capabilities: { lyrics: true, duration: false, voice_clone: false }
+    limits: { max_seconds: 360 }
+    settings:
+      cot_song: full
+      cot_instrumental: melody
+      instrumental_sections: "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]"
+      abc_max_tokens: 4096
+      cfg: 1.0
+      ode_steps: 32
+      memory_budget_gib: 24
+      vae_core_frames: 512
+      fade_seconds: 2
+    memory: { cuda_gb: 6.7, mps_gb: null }
+    platforms:
+      cuda:
+        family: yue2
+        files:
+          - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
+            files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
+          - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
+            files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
+        settings: { weight_swap: true }
+      mps:
+        family: yue2
+        files:
+          - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
+            files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
+          - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
+            files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
+        settings: { weight_swap: false }
+  higgs3:
+    label: "Higgs TTS 3 4B"
+    kind: speech
+    capabilities: { lyrics: false, duration: false, voice_clone: true }
+    limits: { max_new_tokens: 1500, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
+    settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
+    memory: { cuda_gb: 8.2, mps_gb: null }
+    platforms:
+      cuda:
+        family: higgs3
+        files:
+          - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
+            files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
+          - repo: "bosonai/higgs-audio-v2-tokenizer@815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
+            files: [config.json, model.safetensors, preprocessor_config.json]
+        settings: { codec_device: cpu }
+      mps:
+        family: higgs3
+        files:
+          - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
+            files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
+          - repo: "bosonai/higgs-audio-v2-tokenizer@815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
+            files: [config.json, model.safetensors, preprocessor_config.json]
+        settings: { codec_device: mps }
+  sa3:
+    label: "Stable Audio 3 Medium"
+    kind: sound
+    capabilities: { lyrics: false, duration: true, voice_clone: false }
+    limits: { max_seconds: 380 }
+    settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
+    memory: { cuda_gb: 6.1, mps_gb: null }
+    platforms:
+      cuda:
+        family: stable_audio_3
+        files:
+          - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
+            files: [checkpoints/stable_audio_3_medium.safetensors]
+          - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
+            files: [model_config.json]
+          - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
+            files: ["t5gemma-b-b-ul2/*"]
+      mps:
+        family: stable_audio_3
+        files:
+          - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
+            files: [checkpoints/stable_audio_3_medium.safetensors]
+          - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
+            files: [model_config.json]
+          - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
+            files: ["t5gemma-b-b-ul2/*"]
 
 prompt_enhancer:
   # Public Hugging Face repos, pinned. The model below is the default Fast choice; `smart` holds the larger one.

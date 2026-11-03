@@ -1,17 +1,38 @@
 # Gallery and viewer
 
-The **Gallery** (++g++ ++g++) shows every image and video in your output folder, including ones the CLI made there. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
+The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the CLI made there. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
 
 ![The Gallery page with a grid of images](../assets/screenshots/gallery-page.webp)
 
 ## Browse
 
-- **Filter** with **All media**, **Images only** or **Videos only**, and sort **Newest first** or **Oldest first**.
+- **Filter** with **All media**, **Images only**, **Videos only** or **Audio only**, and sort **Newest first** or **Oldest first**.
 - Scroll down and more load in.
 - Click a tile, or press ++enter++ on it, to open the viewer.
 - Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu.
 - When you come back to the Gallery, it shows what it had, scrolled to the same place, and fetches anything new.
 - Transparent images show over a checkerboard. It is only a display aid; the file holds real transparency.
+
+## Audio
+
+An audio take is a tile that shows, top to bottom, an icon for its kind, the words of the take and a thin waveform, with its length in the corner. The words are a song's style and lyric lines, the text of speech, or a sound's prompt. A tile doesn't play; open it for that.
+
+![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/placeholder.svg "gallery-audio")
+
+An audio file without this app's settings, such as one you copied into the output folder, shows a larger icon and waveform and *audio · no settings*. It plays, but **Reuse settings** is greyed. The Gallery lists FLAC, WAV, MP3, M4A and OGG files.
+
+The viewer shows the player, larger, with the words under it. The player is the take's waveform over the browser's own audio controls: click or drag the waveform to seek, and use the controls to play, pause and set the volume. Playback stops when you step to another file or close the viewer. **Details** lists the kind, model, voice, length (*cut at the cap* for a take that hit its limit), seed and the file's format, sample rate and channels.
+
+**Reuse settings** on a take opens the **Audio** tab on its kind with the model, words, length, seed and, for a cloned voice, its recording and what it says. The consent tick is never saved, so a cloned voice asks for it again. See [Takes and files](../concepts/audio.md#takes-and-files).
+
+**Download** and **Delete** work as for other files. **Upscale** and **Extend** aren't offered.
+
+### Use as an audio track or a voice
+
+**Use as** on an audio take offers:
+
+- **Audio track** opens **Video** with the file as the clip's [audio track](workspace.md#audio-track), from 0 s. It is greyed, with the reason, when the video model that **Video** opens on can't follow a track.
+- **Voice** (speech takes) opens **Audio** on Speech with the take as the recording and its text as **What it says**. It is greyed, with the reason, for a take longer than 30 seconds. This is how to keep one voice across separate takes: make takes with **Any** until one fits, then use it. A take made with **Any** needs no consent tick. A take that was itself cloned from a recording does. See [Voices](../concepts/audio.md#voices).
 
 ## Select and delete
 
@@ -33,7 +54,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 |---|---|---|
 | **Details** | Shows the settings the file was made with | ++i++ |
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
-| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video | ++e++ |
+| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track or a speech voice | ++e++ |
 | **Extend** | Opens a video in Extend Video | ++e++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
 | **Download** | Saves the file to this device | ++d++ |
