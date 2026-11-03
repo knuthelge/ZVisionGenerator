@@ -146,7 +146,7 @@ def snapshots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checkpoint_tensor
         folder = root / repo_id.replace("/", "--")
         return [folder] if folder.is_dir() else []
 
-    monkeypatch.setattr(sa3, "cached_snapshot_dirs", snapshot_dirs)
+    monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", snapshot_dirs)
     return root
 
 
@@ -276,17 +276,17 @@ class TestLoad:
         assert clip.seconds == 3.0
 
     def test_a_revision_that_is_not_downloaded_is_named(self, preset, built, monkeypatch):
-        monkeypatch.setattr(sa3, "cached_snapshot_dirs", lambda repo_id, revision: [])
+        monkeypatch.setattr("zvisiongenerator.utils.hf_snapshot.cached_snapshot_dirs", lambda repo_id, revision: [])
 
         with pytest.raises(FileNotFoundError, match="not downloaded"):
             _loaded(preset)
 
         assert built == []
 
-    def test_a_file_missing_from_the_snapshot_is_named(self, preset, snapshots, built):
+    def test_a_file_missing_from_the_snapshot_names_its_repository(self, preset, snapshots, built):
         (snapshots / SA3_CHECKPOINT_REPO.split("@")[0].replace("/", "--") / "checkpoints" / "stable_audio_3_medium.safetensors").unlink()
 
-        with pytest.raises(FileNotFoundError, match="stable_audio_3_medium.safetensors"):
+        with pytest.raises(FileNotFoundError, match="Comfy-Org/stable-audio-3 at [0-9a-f]{40} is not downloaded"):
             _loaded(preset)
 
 
@@ -325,27 +325,26 @@ class TestGenerate:
 
         assert "decode" not in vars(pretransform)
 
-    @pytest.mark.parametrize("seconds", [0, 0.99, 380.01, 600, -5])
-    def test_a_length_outside_the_range_is_refused_with_the_range(self, preset, snapshots, built, generated, seconds):
-        with pytest.raises(ValueError, match=r"1 to 380 seconds"):
-            _take(_loaded(preset), _request(seconds=seconds))
-
-        assert generated == []
-
-    def test_a_missing_length_is_refused_with_the_range(self, preset, snapshots, built, generated):
-        with pytest.raises(ValueError, match=r"1 to 380 seconds"):
-            _take(_loaded(preset), _request(seconds=None))
-
-    def test_generating_before_loading_is_an_error(self):
-        with pytest.raises(RuntimeError, match="not loaded"):
-            _take(StableAudio3Backend(), _request())
-
     def test_progress_counts_the_sampling_steps_of_one_part(self, preset, snapshots, built, generated):
         progress: list[tuple] = []
 
         _take(_loaded(preset), _request(seconds=3), progress)
 
-        assert progress == [("Sampling", step, 8, 1, 1) for step in range(9)]
+        assert progress[:9] == [("Sampling", step, 8, 1, 1) for step in range(9)]
+
+    def test_the_decode_after_the_last_step_is_reported_as_its_own_phase(self, preset, snapshots, built, generated):
+        progress: list[tuple] = []
+
+        _take(_loaded(preset), _request(seconds=3), progress)
+
+        assert progress[9:] == [("Decode", 0, 1, 1, 1), ("Decode", 1, 1, 1, 1)]
+
+    def test_the_decode_starts_after_the_last_step_not_before_it(self, preset, snapshots, built, generated):
+        progress: list[tuple] = []
+
+        _take(_loaded(preset), _request(seconds=3), progress)
+
+        assert [args[0] for args in progress].index("Decode") == 9
 
     def test_a_stop_between_steps_raises_and_ends_the_take(self, preset, snapshots, built, generated):
         progress: list[tuple] = []
@@ -403,11 +402,3 @@ class TestClose:
             backend.load(preset, preset.platforms["cuda"], "cuda")
 
         assert current_flags() == before
-
-    def test_generating_after_close_is_an_error(self, preset, snapshots, built, generated):
-        backend = _loaded(preset)
-
-        backend.close()
-
-        with pytest.raises(RuntimeError, match="not loaded"):
-            _take(backend, _request())

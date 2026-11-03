@@ -104,12 +104,16 @@ const FALLBACK_REASON_TEXT: Record<string, string> = {
   extend_unavailable: 'Extending a video is not available here; reuse starts a text-to-video run instead.',
 };
 
-/** Return the workspace prefill params carried by an asset's reuse URL; a name that repeats (`reference_path`) is a list, in order. */
+/**
+ * Return the workspace prefill params carried by an asset's reuse URL; a name that repeats (`reference_path`) is a list, in order.
+ *
+ * `reuse` marks the params as a Reuse, which the Workspace applies exactly: what the asset did not record takes its default.
+ * Like `use_as`, it is not a draft field.
+ */
 export function reuseParams(asset: GalleryAsset): PrefillParams {
   const query = (asset.reuse_workspace_url ?? '').replace(/^#\/[^?]*\??/, '');
   const params = parseQuery(query);
-  // A reused image has exactly its source's references, none included: a blank name clears the ones already chosen.
-  if (query) params.reference_path ??= '';
+  if (query) params.reuse = 'true';
   return params;
 }
 

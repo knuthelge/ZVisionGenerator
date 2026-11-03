@@ -10,14 +10,6 @@ export interface WorkspaceCapabilities {
   isAudio: boolean;
   /** The kind the Audio tab shows (its workflow), or null on any other tab. */
   audioKind: AudioWorkflow | null;
-  /** Music: the Style box. */
-  showMusicStyle: boolean;
-  /** Music, on a model that sings lyrics: the Lyrics box. */
-  showLyrics: boolean;
-  /** Speech: the Text box. */
-  showSpeechText: boolean;
-  /** Sound: the Prompt box. */
-  showSoundPrompt: boolean;
   /** Sound, on a model that takes a length: the Length (s) row. */
   showLength: boolean;
   /** Speech, on a model that can follow a recording: the Voice section. */
@@ -113,10 +105,6 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     isImageMode,
     isAudio,
     audioKind: isAudio && isAudioWorkflow(state.workflow) ? state.workflow : null,
-    showMusicStyle: visible.has('music_style'),
-    showLyrics: visible.has('lyrics'),
-    showSpeechText: visible.has('speech_text'),
-    showSoundPrompt: visible.has('sound_prompt'),
     showLength: visible.has('length'),
     showVoice: visible.has('voice') && visible.has('voice_path') && visible.has('voice_text'),
     supportsNegativePrompt,

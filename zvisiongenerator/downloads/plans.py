@@ -140,15 +140,9 @@ def audio_plan(preset: AudioPreset, platform_key: str) -> tuple[DownloadTarget, 
 
     Args:
         preset: The audio preset.
-        platform_key: The preset's platform key, ``cuda`` or ``mps`` (``backends.audio_platform_key()``).
-
-    Raises:
-        ValueError: If the preset has no entry for *platform_key*.
+        platform_key: One of the preset's platform keys, ``cuda`` or ``mps`` (``backends.audio_platform_key()``).
     """
-    platform = preset.platforms.get(platform_key)
-    if platform is None:
-        raise ValueError(f"Audio model '{preset.id}' does not run on '{platform_key}'. It runs on: {', '.join(preset.platforms)}.")
-    return tuple(DownloadTarget(files.repo_id, files.revision, files.patterns) for files in platform.files)
+    return tuple(DownloadTarget(files.repo_id, files.revision, files.patterns) for files in preset.platforms[platform_key].files)
 
 
 def video_model_downloaded(

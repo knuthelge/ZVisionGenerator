@@ -190,8 +190,8 @@ class TestEnhanceEndpoint:
         with pytest.raises(ValueError, match=key):
             web_server._validate_enhance_body({"prompt": "a fox", "settings": {"style": "photo"}, key: value})
 
-    def test_audio_is_refused_by_name_and_not_run_as_an_image(self):
-        with pytest.raises(ValueError, match="audio prompts can't be enhanced"):
+    def test_audio_is_refused_and_not_run_as_an_image(self):
+        with pytest.raises(ValueError, match="mode"):
             web_server._validate_enhance_body({"prompt": "a fox", "mode": "audio", "settings": {"style": "photo"}})
 
     def test_smart_resolves_the_smart_model(self, monkeypatch):

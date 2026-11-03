@@ -2,6 +2,7 @@
   import { Waveform } from '$lib/components/atoms';
   import { seekFraction } from '$lib/state/audioAsset';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { claimPlayback, releasePlayback } from '$lib/state/nowPlaying';
 
   interface Props {
     /** Where the browser loads the take from. */
@@ -65,7 +66,11 @@
     const element = audio;
     void src;
     played = 0;
-    return () => element?.pause();
+    return () => {
+      if (!element) return;
+      element.pause();
+      releasePlayback(element);
+    };
   });
 </script>
 
@@ -93,6 +98,7 @@
     controls
     preload="metadata"
     aria-label="Play {filename}"
+    onplay={() => audio && claimPlayback(audio)}
     ontimeupdate={sync}
     onseeked={sync}
     onloadedmetadata={sync}

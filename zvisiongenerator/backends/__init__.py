@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import importlib
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, replace
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
 __all__ = [
     "AUDIO_FAMILIES",
     "accelerator_free_bytes",
-    "audio_device",
     "audio_platform_key",
     "convert_h3_checkpoint",
     "convert_ltx_checkpoint",
@@ -342,35 +342,15 @@ def create_matte_chain() -> "MatteChain":
     return TorchMatteChain(device, download=snapshot_download, release_memory=release_accelerator_memory, after_cut_out=after_cut_out)
 
 
-AUDIO_FAMILIES: Final = ("yue2", "higgs3", "stable_audio_3")
-"""The audio model families a preset can name in its platform entry."""
-
-
-def _yue2_backend() -> "AudioBackend":
-    from zvisiongenerator.backends.audio.yue2 import YuE2Backend
-
-    return YuE2Backend()
-
-
-def _higgs3_backend() -> "AudioBackend":
-    from zvisiongenerator.backends.audio.higgs3 import Higgs3Backend
-
-    return Higgs3Backend()
-
-
-def _stable_audio_3_backend() -> "AudioBackend":
-    from zvisiongenerator.backends.audio.sa3 import StableAudio3Backend
-
-    return StableAudio3Backend()
-
-
-# The audio backend factory of each model family. Each factory imports its backend module on call, so listing a family
-# costs nothing until it is used.
-_AUDIO_BACKEND_FACTORIES: dict[str, Callable[[], "AudioBackend"]] = {
-    "yue2": _yue2_backend,
-    "higgs3": _higgs3_backend,
-    "stable_audio_3": _stable_audio_3_backend,
+_AUDIO_BACKENDS: Final = {
+    "yue2": ("zvisiongenerator.backends.audio.yue2", "YuE2Backend"),
+    "higgs3": ("zvisiongenerator.backends.audio.higgs3", "Higgs3Backend"),
+    "stable_audio_3": ("zvisiongenerator.backends.audio.sa3", "StableAudio3Backend"),
 }
+"""The module and class of each audio model family's backend, imported only when the family is used."""
+
+AUDIO_FAMILIES: Final = tuple(_AUDIO_BACKENDS)
+"""The audio model families a preset can name in its platform entry."""
 
 
 def audio_platform_key() -> str:
@@ -386,15 +366,6 @@ def audio_platform_key() -> str:
     raise RuntimeError(f"Audio generation needs CUDA or Apple MPS; platform '{sys.platform}' has neither.")
 
 
-def audio_device() -> str:
-    """Return the torch device the audio models run on: ``cuda`` on Windows and Linux, ``mps`` on macOS.
-
-    Raises:
-        RuntimeError: On a platform with neither.
-    """
-    return audio_platform_key()
-
-
 def get_audio_backend(family: str) -> "AudioBackend":
     """Create the audio backend of a model family.
 
@@ -407,10 +378,10 @@ def get_audio_backend(family: str) -> "AudioBackend":
     Raises:
         RuntimeError: If no backend is registered for the family; the message lists the known families.
     """
-    factory = _AUDIO_BACKEND_FACTORIES.get(family)
-    if factory is None:
+    if family not in _AUDIO_BACKENDS:
         raise RuntimeError(f"No audio backend for model family '{family}'. Known: {list(AUDIO_FAMILIES)}")
-    return factory()
+    module, name = _AUDIO_BACKENDS[family]
+    return getattr(importlib.import_module(module), name)()
 
 
 def get_accelerator_memory_budget() -> MemoryBudget | None:

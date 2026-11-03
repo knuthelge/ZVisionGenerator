@@ -26,8 +26,14 @@ def test_every_licence_record_is_listed_in_the_licences_section() -> None:
     assert [record.name for record in records if record.name not in section] == []
 
 
-def test_every_licence_record_links_its_licence_and_notice() -> None:
+def test_every_licence_record_links_its_licence() -> None:
     section = _licences_section()
     records = load_licences()
 
-    assert [record.id for record in records if record.url not in section or (record.notice_url is not None and record.notice_url not in section)] == []
+    assert [record.id for record in records if record.url not in section] == []
+
+
+def test_every_attribution_is_in_the_licences_section() -> None:
+    section = _licences_section()
+
+    assert [record.id for record in load_licences() if record.attribution and record.attribution not in section] == []

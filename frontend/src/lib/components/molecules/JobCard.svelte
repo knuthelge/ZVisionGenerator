@@ -6,9 +6,10 @@
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
   import {
-    downloadLabel, etaLabel, finishingText, formatClock, headline, isActive, isAudioJob, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
+    downloadLabel, etaLabel, finishingText, headline, isActive, isAudioJob, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
     stageBars, type JobTone
   } from '$lib/state/jobView';
+  import { formatClock } from '$lib/state/clock';
   import { trackStepTiming, type StepTiming } from '$lib/state/stepTiming';
   import type { ActiveJobState, JobControlAction } from '$lib/types';
   import Alert from './Alert.svelte';

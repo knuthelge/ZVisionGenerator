@@ -27,7 +27,7 @@ from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
 from zvisiongenerator.utils.lora import resolve_lora_references
-from zvisiongenerator.downloads import describe_refusal, image_plan, matte_plan, target_present_offline
+from zvisiongenerator.downloads import describe_refusal, image_plan, matte_plan
 from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.paths import canonical_model_name, get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
@@ -355,7 +355,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         label = model_display_name(config, picked_model)
         try:
-            print_licence_notice(picked_model, lambda: image_plan(args.model, family=model_info.family, config=config, platform_key=sys.platform), present=target_present_offline)
+            print_licence_notice(picked_model, lambda: image_plan(args.model, family=model_info.family, config=config, platform_key=sys.platform))
             built = ensure_built_model(
                 args.model,
                 config,
@@ -370,7 +370,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         if args.transparent:
             try:
-                print_licence_notice(MATTE_LICENCE_MODEL, matte_plan, present=target_present_offline)
+                print_licence_notice(MATTE_LICENCE_MODEL, matte_plan)
                 _fetch_matte_models()
             except Exception as e:  # noqa: BLE001 - the Hub client raises its own error types; any failure stops the run before a model loads
                 logger.exception("Failed to download the background removal models")

@@ -15,7 +15,6 @@ from tests._paths import REPO_ROOT
 
 from zvisiongenerator.utils import config as config_module
 from zvisiongenerator.utils.audio_preset import AudioCapabilities, AudioLimits, parse_audio_presets, runnable_audio_presets
-from zvisiongenerator.utils.licences import known_model_ids
 
 
 def _parse_one(**changes):
@@ -91,7 +90,7 @@ class TestRunnable:
 
 
 class TestRefusals:
-    @pytest.mark.parametrize("key", ["label", "kind", "capabilities", "limits", "memory", "platforms"])
+    @pytest.mark.parametrize("key", ["label", "kind", "capabilities", "limits", "platforms"])
     def test_a_missing_required_key(self, key):
         with pytest.raises(ValueError, match=f"missing the required key '{key}'"):
             _parse_one(**{key: None})
@@ -145,7 +144,6 @@ class TestLoadConfig:
             kind: video
             capabilities: {lyrics: false, duration: false, voice_clone: false}
             limits: {max_seconds: 10}
-            memory: {cuda_gb: 1, mps_gb: null}
             platforms: {}
         """
         with pytest.raises(ValueError, match="kind must be one of"):
@@ -159,14 +157,12 @@ class TestLoadConfig:
             kind: sound
             capabilities: {{lyrics: false, duration: true, voice_clone: false}}
             limits: {{max_seconds: 10}}
-            memory: {{cuda_gb: 1, mps_gb: null}}
             platforms:
-              cuda: {{family: stable_audio_3, files: [{{repo: "{HIGGS_CODEC_REPO}", files: [config.json]}}]}}
+              cuda: {{family: stable_audio_3, memory_gb: 1, files: [{{repo: "{HIGGS_CODEC_REPO}", files: [config.json]}}]}}
         """
         config = self._load_with_user_config(monkeypatch, tmp_path, text)
 
         assert [preset.id for preset in runnable_audio_presets(config, "cuda")] == ["yue2", "higgs3", "sa3", "demo"]
-        assert "demo" in known_model_ids(config)
 
 
 class TestConfigurationDocExample:
@@ -190,7 +186,7 @@ class TestConfigurationDocExample:
 
         for model_id, preset in expected.items():
             documented = example[model_id]
-            for key in ("label", "kind", "capabilities", "limits", "settings", "memory"):
+            for key in ("label", "kind", "capabilities", "limits", "settings"):
                 assert documented[key] == preset[key], f"{model_id}.{key}"
             assert documented["platforms"]["cuda"] == preset["platforms"]["cuda"], f"{model_id}.platforms.cuda"
 

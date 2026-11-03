@@ -4,8 +4,7 @@ import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
 import type { IconName } from '$lib/components/atoms/Icon.svelte';
 import type { AudioWorkflow, DraftState, VideoKind, Workflow, WorkspaceWorkflow } from '$lib/types';
-import { KIND_INFO } from './audioKinds';
-import { VIDEO_KIND_INFO } from './kindInfo';
+import { AUDIO_KIND_INFO, VIDEO_KIND_INFO } from './kindInfo';
 import type { VoiceView } from './audioView';
 
 /** The settings a phone shows as chips, each opening one control. */
@@ -36,8 +35,8 @@ export interface SettingChip {
 export interface ChipFacts {
   caps: WorkspaceCapabilities;
   state: DraftState;
-  /** Whether each setting differs from its default, by the keys SettingsPane uses. */
-  changed: (...keys: (keyof DraftState)[]) => boolean;
+  /** Whether a chip's settings differ from their defaults (`SETTING_ROWS` decides which settings are the chip's). */
+  changed: (chip: ChipKey) => boolean;
   /** The dimensions the run submits (a preset's, or the custom ones). */
   width: number;
   height: number;
@@ -45,7 +44,6 @@ export interface ChipFacts {
   seconds: number | null;
   /** Extend: the seconds added; null until a source is known. */
   extendSeconds: number | null;
-  extendChanged: boolean;
   /** The LoRA names in use. */
   loraNames: string[];
   /** What the LoRA files are doing, when a download is on its way or failed. */
@@ -84,26 +82,26 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
   const chips: (SettingChip | null)[] = [
     f.videoKind ? { key: 'kind', label: '', value: VIDEO_KIND_INFO[f.videoKind].label, changed: false, icon: VIDEO_KIND_INFO[f.videoKind].icon } : null,
     { key: 'preset', label: 'Preset', value: f.presetName ?? 'none', changed: f.presetChanged, on: f.presetName !== null, applied: f.presetSlug ?? '' },
-    caps.showFrameCount && f.seconds !== null ? { key: 'seconds', label: 'Length', value: `${fmt(f.seconds)} s`, changed: f.changed('frameCount'), warn: f.memoryWarn } : null,
+    caps.showFrameCount && f.seconds !== null ? { key: 'seconds', label: 'Length', value: `${fmt(f.seconds)} s`, changed: f.changed('seconds'), warn: f.memoryWarn } : null,
     // The Kind chip already says Extend, so the length chip reads Length in both kinds.
-    caps.showExtendLength ? { key: 'extendSeconds', label: 'Length', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.extendChanged, warn: f.memoryWarn } : null,
+    caps.showExtendLength ? { key: 'extendSeconds', label: 'Length', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.changed('extendSeconds'), warn: f.memoryWarn } : null,
     caps.showSteps ? { key: 'steps', label: 'Steps', value: fmt(s.steps), changed: f.changed('steps') } : null,
     caps.showGuidance ? { key: 'guidance', label: 'Guidance', value: fmt(s.guidance), changed: f.changed('guidance') } : null,
     caps.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
     caps.showRuns ? { key: 'runs', label: 'Batch', value: `×${s.runs}`, changed: f.changed('runs') } : null,
     // One chip for every image the tab takes; its value is the section's summary, and its dot shows a Strength off its default.
-    f.images ? { key: 'images', label: 'Images', value: f.images.text, changed: s.workflow === 'img2img' && caps.showI2IStrength && f.changed('referenceImageStrength'), on: f.images.tone === 'active', warn: f.images.tone === 'error' } : null,
+    f.images ? { key: 'images', label: 'Images', value: f.images.text, changed: f.changed('images'), on: f.images.tone === 'active', warn: f.images.tone === 'error' } : null,
     caps.showSourceVideo ? { key: 'source', label: 'Source', value: f.sourceName ?? 'none', changed: false, on: f.sourceName !== null, warn: s.missingSourceVideo } : null,
     // One chip for the audio track; its value is where in the track the clip starts when that isn't the beginning.
     f.track ? { key: 'track', label: 'Track', value: !f.track.set ? 'none' : f.track.start > 0 ? formatTimestamp(f.track.start) : 'on', changed: false, on: f.track.set, warn: f.track.gone } : null,
-    caps.showDimensions ? { key: 'size', label: '', value: `${f.width}×${f.height}`, changed: f.changed('ratio', 'size', 'dimensionMode') } : null,
+    caps.showDimensions ? { key: 'size', label: '', value: `${f.width}×${f.height}`, changed: f.changed('size') } : null,
     caps.showAudio || caps.showLowMemory || caps.showVideoUpscale
-      ? { key: 'audio', label: 'Audio', value: caps.showAudio ? (s.audio ? 'on' : 'off') : s.lowMemory ? 'low mem' : 'off', changed: f.changed('audio', 'lowMemory', 'videoUpscaleEnabled'), on: caps.showAudio ? s.audio : s.lowMemory }
+      ? { key: 'audio', label: 'Audio', value: caps.showAudio ? (s.audio ? 'on' : 'off') : s.lowMemory ? 'low mem' : 'off', changed: f.changed('audio'), on: caps.showAudio ? s.audio : s.lowMemory }
       : null,
     { key: 'loras', label: 'LoRA', value: f.loraNames.length ? f.loraNames.join(', ') : 'none', changed: false, on: f.loraNames.length > 0, download: f.loraDownload },
-    caps.showImageUpscale ? { key: 'upscale', label: 'Upscale', value: s.upscaleEnabled ? `${s.upscaleFactor}×` : 'off', changed: f.changed('upscaleEnabled', 'upscaleFactor'), on: s.upscaleEnabled } : null,
+    caps.showImageUpscale ? { key: 'upscale', label: 'Upscale', value: s.upscaleEnabled ? `${s.upscaleFactor}×` : 'off', changed: f.changed('upscale'), on: s.upscaleEnabled } : null,
     caps.showPostprocessTransparent && (s.postprocessTransparent || f.openKey === 'transparent')
-      ? { key: 'transparent', label: 'Transparent', value: s.postprocessTransparent ? 'on' : 'off', changed: f.changed('postprocessTransparent'), on: s.postprocessTransparent }
+      ? { key: 'transparent', label: 'Transparent', value: s.postprocessTransparent ? 'on' : 'off', changed: f.changed('transparent'), on: s.postprocessTransparent }
       : null,
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
   ];
@@ -118,8 +116,8 @@ export interface AudioChipFacts {
   modelDownloaded: boolean;
   /** The Speech voice, when the model can follow a recording; null otherwise. */
   voice: Pick<VoiceView, 'summary' | 'recording' | 'chip'> | null;
-  /** Whether each setting differs from its default, by the keys SettingsPane uses. */
-  changed: (...keys: (keyof DraftState)[]) => boolean;
+  /** Whether a chip's settings differ from their defaults (`SETTING_ROWS` decides which settings are the chip's). */
+  changed: (chip: ChipKey) => boolean;
   /** The model takes a length (Sound). */
   showLength: boolean;
   showSeed: boolean;
@@ -133,10 +131,10 @@ export interface AudioChipFacts {
 export function audioChips(f: AudioChipFacts): SettingChip[] {
   const { state: s } = f;
   const chips: (SettingChip | null)[] = [
-    { key: 'kind', label: '', value: KIND_INFO[f.kind].label, changed: false, icon: KIND_INFO[f.kind].icon },
+    { key: 'kind', label: '', value: AUDIO_KIND_INFO[f.kind].label, changed: false, icon: AUDIO_KIND_INFO[f.kind].icon },
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
     f.voice ? { key: 'voice', label: 'Voice', value: f.voice.chip, changed: false, on: f.voice.recording && f.voice.summary.tone === 'active', warn: f.voice.summary.tone === 'error' } : null,
-    f.showLength ? { key: 'length', label: 'Length', value: `${fmt(s.audioSeconds)} s`, changed: f.changed('audioSeconds') } : null,
+    f.showLength ? { key: 'length', label: 'Length', value: `${fmt(s.audioSeconds)} s`, changed: f.changed('length') } : null,
     f.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
     f.showRuns ? { key: 'runs', label: 'Batch', value: `×${s.runs}`, changed: f.changed('runs') } : null,
   ];

@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { CuratedList, DownloadItem, DownloadPlan, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, RecentPrompt, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
+import type { AudioWorkflow, CuratedList, DownloadItem, GalleryPage, JobContext, JobDownloadPlan, JobSnapshot, RecentMode, RecentPrompt, RowDownloadPlan, SettingsPreset, WorkflowMode, WorkspaceContext } from '$lib/types';
 
 // The API mocks of the Workspace page tests. A test file wires them in with `vi.mock(path, async () => ...)`
 // factories that import this module, because `vi.mock` only hoists inside a test file.
@@ -67,13 +67,13 @@ export const presetApiMocks = {
 };
 
 export const recentPromptsApiMocks = {
-  getRecentPrompts: vi.fn<(query: string, mode: WorkflowMode) => Promise<{ entries: RecentPrompt[] }>>(),
-  clearRecentPrompts: vi.fn<(mode: WorkflowMode) => Promise<{ deleted_count: number }>>(),
+  getRecentPrompts: vi.fn<(query: string, mode: RecentMode) => Promise<{ entries: RecentPrompt[] }>>(),
+  clearRecentPrompts: vi.fn<(mode: RecentMode) => Promise<{ deleted_count: number }>>(),
 };
 
 export const modelApiMocks = {
   getDownloads: vi.fn<() => Promise<{ items: DownloadItem[] }>>(),
-  getDownloadPlan: vi.fn<(kind: string, name: string) => Promise<DownloadPlan>>(),
+  getDownloadPlan: vi.fn<(kind: string, name: string) => Promise<RowDownloadPlan>>(),
   deleteLora: vi.fn(),
 };
 

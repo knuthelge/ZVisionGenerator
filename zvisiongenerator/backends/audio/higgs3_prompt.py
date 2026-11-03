@@ -54,15 +54,8 @@ def load_tokenizer(folder: Path) -> Qwen2Tokenizer:
 
 
 def special_ids(tokenizer: Qwen2Tokenizer) -> SpecialIds:
-    """Return the ids of the structural tokens from *tokenizer*'s added vocabulary.
-
-    Raises:
-        ValueError: If a token is missing; the message names it.
-    """
+    """Return the ids of the structural tokens from *tokenizer*'s added vocabulary."""
     vocab = tokenizer.get_added_vocab()
-    missing = [token for token in (_TTS, _REF_TEXT, _REF_AUDIO, _TEXT, _AUDIO) if token not in vocab]
-    if missing:
-        raise ValueError(f"The tokenizer is missing Higgs TTS 3 tokens: {', '.join(missing)}.")
     return SpecialIds(tts=vocab[_TTS], ref_text=vocab[_REF_TEXT], ref_audio=vocab[_REF_AUDIO], text=vocab[_TEXT], audio=vocab[_AUDIO])
 
 
@@ -82,12 +75,7 @@ def build_prompt_ids(tokenizer: Qwen2Tokenizer, ids: SpecialIds, text: str, *, r
         text: The text to read.
         reference_rows: The number of delayed reference rows, each replaced by one :data:`AUDIO_SLOT`; 0 for no reference.
         reference_text: The transcript of the reference recording.
-
-    Raises:
-        ValueError: If *reference_rows* is negative.
     """
-    if reference_rows < 0:
-        raise ValueError(f"reference_rows must be 0 or more, got {reference_rows}")
     prompt = [ids.tts]
     if reference_rows > 0 and reference_text:
         prompt.append(ids.ref_text)

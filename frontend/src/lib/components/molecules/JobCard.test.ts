@@ -406,29 +406,46 @@ describe('JobCard', () => {
     const take = (overrides: Partial<ActiveJobState> = {}): Partial<ActiveJobState> => ({
       workflow: 'music', media_type: 'audio', currentStep: 0, totalSteps: 0, runs: 2, supported_controls: IMAGE_CONTROLS, ...overrides,
     });
-    const phases = () => Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-phases"] .job-step')).map((step) => [step.dataset.phaseState, Array.from(step.querySelector('.job-step-head')!.children).map((part) => part.textContent?.replace(/\s+/g, ' ').trim()).join(' ')]);
+    const phases = () => Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-phases"] .job-step')).map((step) => step.dataset.phaseState);
+    const bars = () => Array.from(log().querySelectorAll('[data-testid="audio-phases"] [role="progressbar"]'));
 
-    it('shows the current phase as "token 812 of 1875" with its percentage, and the finished one done', () => {
-      render(take({ audio: { phase: 'Song tokens', step: 812, total: 1875, part: 1, parts: 1 } }));
+    it('shows a song as four rows: the finished one done, the current one with a bar, the rest waiting', () => {
+      render(take({ audio: { phase: 'Song tokens', step: 1875, total: null, part: 1, parts: 1 } }));
 
-      expect(phases()).toEqual([
-        ['done', 'Plan Done'],
-        ['current', 'Song tokens · token 812 of 1875 43%'],
-        ['next', 'Synthesis —'],
-        ['next', 'Decode —'],
-      ]);
-      const bar = log().querySelector('[data-testid="audio-phases"] [role="progressbar"]')!;
-      expect(bar.getAttribute('aria-valuenow')).toBe('812');
-      expect(bar.getAttribute('aria-valuemax')).toBe('1875');
+      expect(phases()).toEqual(['done', 'current', 'next', 'next']);
+      expect(log().querySelectorAll('[data-testid="audio-phases"] .job-step-done')).toHaveLength(1);
+      const [current, ...waiting] = bars();
+      expect(current.hasAttribute('aria-valuenow')).toBe(false);
+      expect(waiting).toHaveLength(2);
+      for (const bar of waiting) expect(bar.getAttribute('aria-valuenow')).toBe('0');
     });
 
-    it('shows an indeterminate bar while the phase has no total', () => {
-      render(take({ audio: { phase: 'Plan', step: 40, total: null, part: 1, parts: 1 } }));
+    it('gives a phase with a total a percentage and a determinate bar', () => {
+      render(take({ audio: { phase: 'Synthesis', step: 5, total: 8, part: 1, parts: 1 } }));
 
-      expect(phases()[0]).toEqual(['current', 'Plan · token 40']);
-      const bar = log().querySelector('[data-testid="audio-phases"] [role="progressbar"]')!;
-      expect(bar.hasAttribute('aria-valuenow')).toBe(false);
-      expect(log().querySelector('[data-testid="audio-phases"] .num')).toBeNull();
+      expect(phases()).toEqual(['done', 'done', 'current', 'next']);
+      const bar = bars()[0];
+      expect(bar.getAttribute('aria-valuenow')).toBe('63');
+      expect(bar.getAttribute('aria-valuemax')).toBe('100');
+      expect(log().querySelector('[data-testid="audio-phases"] .num')?.textContent).toBe('63%');
+    });
+
+    it('shows speech as one row whose bar is the take\'s progress', () => {
+      render(take({ workflow: 'speech', audio: { phase: 'Speech tokens', step: 250, total: 500, part: 2, parts: 4 } }));
+
+      expect(phases()).toEqual(['current']);
+      const bar = bars()[0];
+      const percent = Math.round(Number(bar.getAttribute('aria-valuenow')) / Number(bar.getAttribute('aria-valuemax')) * 100);
+      expect(log().querySelector('[data-testid="audio-phases"] .num')?.textContent).toBe(`${percent}%`);
+      expect(percent).toBeGreaterThan(25);
+    });
+
+    it('shows a sound as one step line', () => {
+      render(take({ workflow: 'sound', audio: { phase: 'Sampling', step: 5, total: 8, part: 1, parts: 1 } }));
+
+      expect(phases()).toEqual(['current']);
+      expect(bars()[0].getAttribute('aria-valuenow')).toBe('63');
+      expect(bars()[0].getAttribute('aria-valuemax')).toBe('100');
     });
 
     it('keeps no preview slot for audio', () => {

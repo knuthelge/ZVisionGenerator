@@ -40,11 +40,9 @@ def _web_config(config: dict | None = None) -> SimpleNamespace:
 # ---------------------------------------------------------------------------
 
 
-def test_each_mode_has_its_own_default_workflow_and_an_unknown_mode_has_none() -> None:
-    assert [default_workflow_for_mode(mode) for mode in ("image", "video", "audio")] == ["txt2img", "txt2vid", AUDIO_WORKFLOW_VALUES[0]]
-    assert workflow_mode(default_workflow_for_mode("audio")) == "audio"
-    with pytest.raises(ValueError, match="Unknown mode 'hologram'"):
-        default_workflow_for_mode("hologram")
+def test_image_and_video_have_their_own_default_workflow() -> None:
+    assert [default_workflow_for_mode(mode) for mode in ("image", "video")] == ["txt2img", "txt2vid"]
+    assert workflow_mode(AUDIO_WORKFLOW_VALUES[0]) == "audio"
 
 
 # ---------------------------------------------------------------------------

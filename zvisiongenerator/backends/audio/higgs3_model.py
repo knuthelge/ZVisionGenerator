@@ -110,19 +110,12 @@ class Higgs3Model(nn.Module):
         Args:
             prompt_ids: The prompt, with ``AUDIO_SLOT`` where a reference row goes.
             reference_rows: The delayed reference codes ``[R, N]``, one row per slot; ``None`` when the prompt has no slots.
-
-        Raises:
-            ValueError: If the number of slots is not the number of reference rows.
         """
         device = self.audio_embedding.weight.device
         ids = torch.tensor(prompt_ids, dtype=torch.long, device=device)
         slots = ids == AUDIO_SLOT
         embeds = self.backbone.embed_tokens(torch.where(slots, torch.zeros_like(ids), ids))
-        wanted = int(slots.sum().item())
-        rows = 0 if reference_rows is None else reference_rows.shape[0]
-        if wanted != rows:
-            raise ValueError(f"The prompt has {wanted} audio slots but {rows} reference rows were given.")
-        if reference_rows is not None and wanted:
+        if reference_rows is not None:
             audio = self.audio_embedding(reference_rows.to(device))
             embeds[slots] = audio.to(embeds.dtype)
         return embeds.unsqueeze(0)

@@ -23,7 +23,7 @@ describe('the speaker\'s consent across a reload', () => {
     // A voice that is an Any take (exempt), already ticked as well, and saved as the draft is.
     first.draft.patch({ workflow: 'speech', speechText: 'Hello there.', voiceMode: 'recording', voicePath: '/outputs/any.flac', voiceText: 'A take.' });
     first.voiceConsent.reset(true);
-    first.voiceConsent.set(true);
+    first.voiceConsent.ticked = true;
     first.draft.saveDraft();
 
     const second = await reload();
@@ -47,7 +47,7 @@ describe('the speaker\'s consent across a reload', () => {
   it('leaves nothing of the consent in the saved draft', async () => {
     const first = await reload();
     first.draft.patch({ workflow: 'speech', voiceMode: 'recording', voicePath: '/voices/me.wav' });
-    first.voiceConsent.set(true);
+    first.voiceConsent.ticked = true;
     first.draft.saveDraft();
 
     const saved = JSON.parse(localStorage.getItem('ziv-workspace-draft-v1') ?? '{}') as Record<string, unknown>;

@@ -51,7 +51,7 @@ def run(monkeypatch, capsys):
         monkeypatch.setattr(image_cli, "resolve_model_path", lambda model, **kwargs: _CONFIG["model_aliases"].get(model, model))
         monkeypatch.setattr(image_cli, "image_plan", plans)
         monkeypatch.setattr(image_cli, "matte_plan", matte_plans)
-        monkeypatch.setattr(image_cli, "target_present_offline", lambda target: present)
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: present)
         monkeypatch.setattr(image_cli, "ensure_built_model", stage("ensure_built_model"))
         monkeypatch.setattr(image_cli, "_fetch_matte_models", stage("fetch_matte_models"))
         monkeypatch.setattr(sys, "argv", ["ziv-image", "--prompt", "a cat", *argv])

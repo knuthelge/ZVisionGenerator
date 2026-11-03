@@ -354,5 +354,18 @@ describe('WorkspacePage audio track', () => {
 
       expect(draft.state).toMatchObject({ workflow: 'extend', extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackStart: 6.65, audioTrackPath: '/audio/video.mp3' });
     });
+
+    it('Load settings takes the default of what the job did not record, not what the form held', async () => {
+      const context = trackContext();
+      draft.reset();
+      draft.patch({ workflow: 'txt2img', model: 'zit', quantize: 4, runs: 3, negativePrompt: 'blurry', firstSigma: 0.3 });
+      app = await mountWorkspacePage(context, target);
+      await settle();
+
+      requestJobSettings({ mode: 'image', workflow: 'txt2img', model: 'zit', prompt: 'a fox' });
+      await settle();
+
+      expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'a fox', quantize: null, runs: 1, negativePrompt: '', firstSigma: null });
+    });
   });
 });

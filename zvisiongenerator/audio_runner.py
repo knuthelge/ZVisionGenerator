@@ -9,12 +9,13 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import audio_device, audio_platform_key, get_audio_backend, prompt_enhancer_session
+from zvisiongenerator.backends import audio_platform_key, get_audio_backend, prompt_enhancer_session
 from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_generation_finished, emit_progress
@@ -23,7 +24,6 @@ from zvisiongenerator.job_controls import announce_repeat, pause_until_resumed, 
 from zvisiongenerator.preflight import plan_iterations
 from zvisiongenerator.utils.audio_level import limit_peak, peak_of
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.audio_request import check_speech_request
 from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.utils.filename import generate_filename, unique_output_path
 from zvisiongenerator.utils.interactive import SkipSignal
@@ -65,12 +65,14 @@ def run_audio_batch(
 ) -> list[Path]:
     """Make *runs* takes of *request* with one load of the model and save each as a FLAC file with its settings.
 
-    Steps: plan the takes (no prompt enhancement), check a speech request against the limits, release a resident prompt
-    enhancer, make sure the model's files are downloaded, load the backend once, make each
+    The caller has checked the request against the preset's limits (``check_speech_request``) and *runs*.
+
+    Steps: plan the takes (no prompt enhancement), release a resident prompt enhancer, make sure the model's files are downloaded, load the backend once, make each
     take, close the backend. A take whose peak is above 1.0 and that carries a waveform from before the library's
     clamp (``AudioClip.preclamp``) is scaled to -1 dBFS before saving; other takes are saved as they are.
 
-    Events sent to *progress_callback* (all with ``mode="audio"``): ``batch_started``, ``prompt_started``,
+    Events sent to *progress_callback* (all with ``mode="audio"``): ``model_loading`` (once the files are downloaded, before the load), ``batch_started``
+    (once the model is loaded), ``prompt_started``,
     ``generation_started``, ``audio_progress`` (``phase``, ``step``, ``total``, ``part``, ``n_parts``),
     ``generation_finished`` (status ``success`` or ``skipped``), and ``batch_completed`` or ``batch_cancelled``.
     A take that fails raises; the web job then reports the failure.
@@ -91,20 +93,12 @@ def run_audio_batch(
         The saved files, in the order they were made.
 
     Raises:
-        ValueError: For a request that does not fit the preset or its limits (text too long, voice outside its length, a
-            model that does not run on this platform).
         FileNotFoundError: If a file the backend loads is missing from the cache.
         RuntimeError: When the GPU runs out of memory (the message names the model and what to do), or a backend fails.
     """
-    if request.preset != preset.id or request.kind != preset.kind:
-        raise ValueError(f"The request is for {request.kind} model '{request.preset}', not {preset.kind} model '{preset.id}'.")
-    if runs < 1:
-        raise ValueError("runs must be at least 1")
     platform_key = audio_platform_key()
-    targets = audio_plan(preset, platform_key)  # raises when the model does not run on this platform
     platform = preset.platforms[platform_key]
-    if preset.kind == "speech":
-        check_speech_request(request, preset.limits)
+    targets = audio_plan(preset, platform_key)
 
     seed_min, seed_max = seed_range(config)
     iterations = plan_iterations(
@@ -120,7 +114,6 @@ def run_audio_batch(
     )
     total = len(iterations)
     skip = skip_signal or SkipSignal()
-    emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=total, total_runs=runs)
     started = time.time()
 
     prompt_enhancer_session.release_resident_enhancer()
@@ -132,7 +125,10 @@ def run_audio_batch(
     outcome = _Outcome()
     try:
         print(f"Loading {preset.label}...", flush=True)
-        _guarded(lambda: backend.load(preset, platform, audio_device()), preset)
+        emit_progress(progress_callback, "model_loading", mode="audio", model=preset.id)
+        with _friendly_oom(preset):
+            backend.load(preset, platform, platform_key)
+        emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=total, total_runs=runs)
         outcome = _make_takes(backend, request, preset, iterations, output_dir=output_dir, skip=skip, progress_callback=progress_callback, seed_range_=(seed_min, seed_max), runs=runs)
     finally:
         backend.close()
@@ -229,7 +225,8 @@ def _make_takes(
             print(f"  seed={seed}")
             began = time.monotonic()
             try:
-                clip = backend.generate(take, _progress_reporter(progress_callback, context), skip.check)
+                with _friendly_oom(preset):
+                    clip = backend.generate(take, _progress_reporter(progress_callback, context), skip.check)
             except AudioCancelled:
                 if skip.consume() == "quit":
                     outcome.cancelled = True
@@ -238,11 +235,6 @@ def _make_takes(
                 outcome.skipped += 1
                 emit_generation_finished(progress_callback, event_context={**context, "seed": seed}, status="skipped")
                 break
-            except Exception as exc:
-                friendly = _out_of_memory_error(exc, preset)
-                if friendly is None:
-                    raise
-                raise friendly from exc
             elapsed = time.monotonic() - began
             path = _save(clip, take, parts, elapsed, output_dir)
             outcome.saved.append(path)
@@ -297,10 +289,13 @@ def _speech_parts(request: AudioGenerationRequest, preset: AudioPreset) -> int |
     return len(split_speech_text(request.prompt, int(preset.limits.part_chars), max_text_chars=int(preset.limits.max_text_chars)))
 
 
-def _guarded(action: Callable[[], None], preset: AudioPreset) -> None:
-    """Run *action*, turning an out-of-memory error into the model's message."""
+@contextmanager
+def _friendly_oom(preset: AudioPreset) -> Iterator[None]:
+    """Turn an out-of-memory error raised inside the block into the model's message."""
     try:
-        action()
+        yield
+    except AudioCancelled:
+        raise
     except Exception as exc:
         friendly = _out_of_memory_error(exc, preset)
         if friendly is None:

@@ -9,7 +9,7 @@
   import type { WorkspaceContext } from '$lib/types';
   import ComposePane from './ComposePane.svelte';
   import type { AudioTrackView } from './audioTrackView';
-  import { currentAudioView, type AudioView } from './audioView';
+  import type { AudioView } from './audioView';
   import type { ImagesView } from './imagesView';
   import SettingsPane from './SettingsPane.svelte';
 
@@ -28,8 +28,8 @@
     images: ImagesView | null;
     /** The audio track view of the open tab, computed once by the Workspace; null before the context answers. */
     audioTrack: AudioTrackView | null;
-    /** The Audio tab's view of the open kind, computed once by the Workspace; read here when it is not passed. */
-    audio?: AudioView | null;
+    /** The Audio tab's view of the open kind, computed once by the Workspace; null before the context answers. */
+    audio: AudioView | null;
     /** Copy the CLI command for the current settings. */
     oncopycli?: () => void;
     /** Portrait tablet: Compose and Settings sit side by side under the stage, and the sidebar never collapses. */
@@ -41,18 +41,17 @@
     onsettingsdone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, lastSeed = null, images, audioTrack, audio: audioProp = null, oncopycli, tall = false, panes = 'both', settingsSubmit = true, onsettingsdone }: Props = $props();
+  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, lastSeed = null, images, audioTrack, audio, oncopycli, tall = false, panes = 'both', settingsSubmit = true, onsettingsdone }: Props = $props();
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   // The panes wait for the held uploads to be read back, as the page does: a lost upload cannot be told from one still coming.
   const authorityReady = $derived(context !== null && draft.authorityReady && heldUploads.restored);
   const collapsed = $derived(draft.state.sidebarCollapsed && !tall);
-  const block = $derived(generateBlock(draft.state.loraString, context?.loras ?? []));
+  const block = $derived(generateBlock(draft.state, context?.loras ?? []));
   // An extension waits for a source it can read; the strip's Generate follows the same rule as the footer's.
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath), extendModelSupport(context, draft.state.model)));
   const imageBlock = $derived(images?.block ?? null);
   const trackBlock = $derived(audioTrack?.block ?? null);
-  const audio = $derived(audioProp ?? (context ? currentAudioView(context) : null));
-  const audioReason = $derived(audio?.active ? audio.reason : null);
+  const audioReason = $derived(audio?.reason ?? null);
   const blockNote = $derived(audioReason ?? sourceGuard.note ?? imageBlock ?? trackBlock);
   const stripTitle = $derived(block.waiting ? `Waiting for ${block.waiting.name}` : block.failures[0] ? `${generateLabel}: ${block.failures[0].name} didn't download` : blockNote ? `${generateLabel}: ${blockNote.charAt(0).toLowerCase()}${blockNote.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
 

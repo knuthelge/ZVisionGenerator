@@ -15,7 +15,7 @@ from tests._media import REAL, ffmpeg, first_frame, numbered_frames, rotated_cop
 
 from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource
 from zvisiongenerator.utils import video_splice
-from zvisiongenerator.utils.provenance import mp4_config_args, read_mp4_config
+from zvisiongenerator.utils.provenance import mp4_config_args, read_config
 from zvisiongenerator.utils.video_extend import build_extend_source, cut_window_audio
 from zvisiongenerator.utils.video_probe import probe_video
 from zvisiongenerator.utils.video_splice import (
@@ -629,7 +629,7 @@ class TestRealFinalMux:
 
         run_ffmpeg(build_final_mux_command(video, audio, output, video_offset=0.0, metadata=mp4_config_args(payload)))
 
-        assert read_mp4_config(output) == payload
+        assert read_config(output) == payload
         assert probe_video(output).has_audio
 
 

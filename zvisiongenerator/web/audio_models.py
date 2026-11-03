@@ -10,13 +10,13 @@ from zvisiongenerator.backends import audio_platform_key
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.audio_preset import AudioPreset, runnable_audio_presets
-from zvisiongenerator.utils.audio_request import DEFAULT_SOUND_SECONDS, MIN_SOUND_SECONDS
+from zvisiongenerator.utils.audio_request import MIN_SOUND_SECONDS, find_runnable_preset
 from zvisiongenerator.utils.licences import LicenceRecord, licence_payload, load_licences
 from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.web.model_status import describe_audio_status
 from zvisiongenerator.web.workspace_contract import hidden_audio_controls
 
-__all__ = ["audio_model_rows", "runnable_audio_models"]
+__all__ = ["audio_model_rows", "find_audio_model", "runnable_audio_models"]
 
 # The limits the Workspace reads, by name: the length of a sound, the size of the text, and the recordings a voice may be.
 _LIMITS = ("max_seconds", "max_text_chars", "min_voice_seconds", "max_voice_seconds")
@@ -34,25 +34,27 @@ def runnable_audio_models(config: Mapping[str, Any]) -> tuple[tuple[AudioPreset,
     return runnable_audio_presets(config, platform_key), platform_key
 
 
+def find_audio_model(config: Mapping[str, Any], model: str | None) -> tuple[AudioPreset, str]:
+    """Return the audio preset *model* names among those that run on this machine, with the platform key it runs under.
+
+    Raises:
+        ValueError: If this machine runs no audio models, *model* is ``None`` (a form without its ``model`` field), or it
+            names no runnable preset; the message lists the runnable ids.
+    """
+    try:
+        platform_key = audio_platform_key()
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    return find_runnable_preset(config, platform_key, model, missing="Field 'model' is required"), platform_key
+
+
 def audio_model_rows(
     config: Mapping[str, Any],
     budget: MemoryBudget | None,
     *,
     target_present: Callable[[DownloadTarget], bool] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return one Workspace row per audio model that runs on this machine, in config order.
-
-    A row holds the model's ``id``, ``label``, ``kind`` (``music``, ``speech`` or ``sound``), ``type`` (``audio``),
-    ``capabilities``, ``limits`` (the ones the Workspace reads, for the kind), ``default_seconds`` (the length of a sound
-    when none is chosen; ``None`` for a model that sets its own), ``instrumental_sections`` (the section list an empty Lyrics box
-    stands for, for a music model; ``None`` for the others), ``hidden_controls`` (the workflow controls the model's
-    capabilities hide), ``licences``, ``downloaded`` and ``memory_fit`` (see :func:`describe_audio_status`).
-
-    Args:
-        config: The loaded config.
-        budget: This machine's memory budget, or ``None`` when it is not estimated.
-        target_present: Tells whether one download target is fully on disk; the offline cache check by default.
-    """
+    """Return one Workspace row per audio model that runs on this machine, in config order; *target_present* defaults to the offline check."""
     presets, platform_key = runnable_audio_models(config)
     if platform_key is None:
         return []
@@ -74,7 +76,6 @@ def _row(licences: Sequence[LicenceRecord], preset: AudioPreset, platform_key: s
         "type": "audio",
         "capabilities": {"lyrics": caps.lyrics, "duration": caps.duration, "voice_clone": caps.voice_clone},
         "limits": limits,
-        "default_seconds": DEFAULT_SOUND_SECONDS if caps.duration else None,
         "instrumental_sections": _instrumental_sections(preset),
         "hidden_controls": hidden_audio_controls(caps),
         "licences": licence_payload(licences, preset.id),

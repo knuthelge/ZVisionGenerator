@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DownloadPlan, JobDownloadPlan } from '$lib/types';
+import type { JobDownloadPlan } from '$lib/types';
 
 const requestConfirm = vi.hoisted(() => vi.fn());
 vi.mock('$lib/components/molecules/confirm.svelte', () => ({ requestConfirm }));
 
 import { confirmDownloads } from './confirmDownloads';
-import { jobPlanOfRow, uncheckedJobPlan } from './downloadConfirm';
+import { uncheckedJobPlan } from './downloadConfirm';
 
-const klein = { label: 'FLUX.2 Klein 9B', model: 'klein9b', repo: 'org/klein', files: 4, bytes: 35.1e9 };
-const enhancer = { label: 'Prompt enhancer (Smart)', model: 'org/enhancer', repo: 'org/enhancer', files: 2, bytes: 9e9 };
+const klein = { label: 'FLUX.2 Klein 9B', model: 'klein9b', bytes: 35.1e9 };
+const enhancer = { label: 'Prompt enhancer (Smart)', model: 'org/enhancer', bytes: 9e9 };
 const SPACE = { path: '/data', needed_bytes: 44.1e9, free_bytes: 812e9, enough: true };
 
 function plan(overrides: Partial<JobDownloadPlan> = {}): JobDownloadPlan {
@@ -70,32 +70,5 @@ describe('confirmDownloads', () => {
       }),
     );
     expect(requestConfirm.mock.calls[0][0].info).toContain("Couldn't check the size");
-  });
-});
-
-describe('jobPlanOfRow', () => {
-  const row: DownloadPlan = {
-    kind: 'matte',
-    name: 'background-removal',
-    label: 'Background removal models',
-    parts: [{ repo: 'org/birefnet', files: 3, bytes: 1e9 }, { repo: 'org/vitmatte', files: 1, bytes: 0.1e9 }],
-    total_bytes: 1.1e9,
-    space: SPACE,
-  };
-
-  it('makes one part of a row, whatever number of repos it has', () => {
-    expect(jobPlanOfRow(row)).toEqual({
-      parts: [{ label: 'Background removal models', model: 'background-removal', repo: 'org/birefnet', files: 4, bytes: 1.1e9 }],
-      total_bytes: 1.1e9,
-      space: SPACE,
-      unchecked: false,
-      licences: [],
-    });
-  });
-
-  it('carries the row\'s licences into the job plan', () => {
-    const licences = [{ model: 'background-removal', name: 'Matte', supplier: 'Authors', summary: 'Research only', url: 'https://x', url_label: 'Model card', notice_url: null }];
-
-    expect(jobPlanOfRow({ ...row, licences }).licences).toEqual(licences);
   });
 });

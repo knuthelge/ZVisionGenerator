@@ -34,12 +34,11 @@ describe('the download dialog with licence lines', () => {
 
     expect(document.body.textContent?.match(/By downloading you agree to the terms shown under each model\./g)).toHaveLength(1);
     const [klein, enhancer] = rows();
-    expect(linesOf(klein).map(squash)).toEqual(['FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial · Licence ↗ · NOTICE ↗']);
+    expect(linesOf(klein).map(squash)).toEqual(['FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial · Model page ↗']);
     expect(linesOf(enhancer)).toEqual([]);
     const links = Array.from(klein.querySelectorAll('a'));
     expect(links.map((link) => [link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel'), link.getAttribute('aria-label')])).toEqual([
-      [FLUX_LICENCE.url, '_blank', 'noopener', 'FLUX Non-Commercial License v2.1 licence (opens in a new tab)'],
-      [FLUX_LICENCE.notice_url, '_blank', 'noopener', 'FLUX Non-Commercial License v2.1 NOTICE (opens in a new tab)'],
+      [FLUX_LICENCE.url, '_blank', 'noopener', 'FLUX Non-Commercial License v2.1 model page (opens in a new tab)'],
     ]);
   });
 
@@ -50,6 +49,18 @@ describe('the download dialog with licence lines', () => {
       'LTX-2 Community License Agreement (Lightricks): Free under $10M revenue · Licence ↗',
       "Gemma Terms of Use (Google): Gemma's use policy applies · Licence ↗",
     ]);
+  });
+
+  it('puts a record\'s credit line under its own line, with no link', async () => {
+    const credited = { ...FLUX_LICENCE, attribution: 'Powered by Example' };
+    await open(plan([part('FLUX.2 Klein 9B', 'klein9b')], tagged('klein9b', credited, LTX_LICENCE)));
+
+    expect(linesOf(rows()[0]).map(squash)).toEqual([
+      'FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial · Model page ↗',
+      'Powered by Example',
+      'LTX-2 Community License Agreement (Lightricks): Free under $10M revenue · Licence ↗',
+    ]);
+    expect(linesOf(rows()[0])[1].querySelector('a')).toBeNull();
   });
 
   it('calls the matte link a model card', async () => {

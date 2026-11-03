@@ -4,7 +4,9 @@
   /** What a take whose peaks could not be read draws: a low, even line. */
   const FLAT_PEAK = 16;
   const BAR_SLOT = 4;
-  const BAR_WIDTH = 2.6;
+  /** A bar's width in the 400×100 box, and the radius of its rounded ends. */
+  export const BAR_WIDTH = 2.6;
+  export const BAR_RADIUS = 1.3;
   const HEIGHT = 100;
   const MIN_BAR = 3;
   const MAX_BAR = 96;
@@ -49,7 +51,7 @@
 
 <svg class="wave-svg {extraClass}" class:player={played !== null} viewBox="0 0 {width} {HEIGHT}" preserveAspectRatio="none" aria-hidden="true">
   {#each bars as bar, index (index)}
-    <rect class="bar" class:played={index < playedCount} x={bar.x} y={bar.y} width={BAR_WIDTH} height={bar.height} rx="1.3" />
+    <rect class="bar" class:played={index < playedCount} x={bar.x} y={bar.y} width={BAR_WIDTH} height={bar.height} rx={BAR_RADIUS} />
   {/each}
 </svg>
 

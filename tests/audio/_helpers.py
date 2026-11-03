@@ -70,9 +70,8 @@ def patch_runner(monkeypatch, backend: Any, *, ensure_outcome: str = "ready") ->
 
     ensure = MagicMock(return_value=ensure_outcome)
     session = MagicMock()
-    monkeypatch.setattr(audio_runner, "audio_platform_key", lambda: "cuda")
     monkeypatch.setattr(audio_cli, "audio_platform_key", lambda: "cuda")
-    monkeypatch.setattr(audio_runner, "audio_device", lambda: "cuda")
+    monkeypatch.setattr(audio_runner, "audio_platform_key", lambda: "cuda")
     monkeypatch.setattr(audio_runner, "get_audio_backend", MagicMock(return_value=backend))
     monkeypatch.setattr(audio_runner, "ensure_downloaded", ensure)
     monkeypatch.setattr(audio_runner, "prompt_enhancer_session", session)

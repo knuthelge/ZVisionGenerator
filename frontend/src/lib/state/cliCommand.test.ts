@@ -347,13 +347,6 @@ describe('cliCommand for audio', () => {
     expect(cliCommand(cloned).command).not.toContain('--voice-consent');
   });
 
-  it('adds --voice-consent to a command copied from a job, whose settings carry no tick', () => {
-    const job = { mode: 'audio', workflow: 'speech', model: 'higgs3', prompt: 'Hi', voice_path: '/v/me.wav', voice_text: 'Hello' };
-
-    expect(cliCommand(job, { voiceConsent: true }).command).toBe("ziv audio --model higgs3 --prompt Hi --voice /v/me.wav --voice-text Hello --voice-consent");
-    expect(cliCommand({ ...job, voice_path: undefined, voice_text: undefined } as unknown as JobSettings, { voiceConsent: true }).command).not.toContain('--voice-consent');
-  });
-
   it('sends lyrics with music, the length with sound and a voice with speech only', () => {
     const extras = { lyrics: '[verse]', seconds: '12', voice_path: '/v/me.wav', voice_text: 'Hello', voice_consent: 'on' };
 

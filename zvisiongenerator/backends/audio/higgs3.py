@@ -24,11 +24,9 @@ from zvisiongenerator.backends.audio.higgs3_prompt import load_tokenizer, specia
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.core.video_types import AudioTrack
-from zvisiongenerator.utils.audio_request import check_speech_request
 from zvisiongenerator.utils.audio_resample import resample_audio
 from zvisiongenerator.utils.audio_track import probe_track_seconds, read_track
-from zvisiongenerator.utils.h3_preset import HubFiles
-from zvisiongenerator.utils.hf_snapshot import cached_snapshot
+from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.utils.speech_join import join_speech_parts
 from zvisiongenerator.utils.speech_text import split_speech_text
 from zvisiongenerator.utils.torch_flags import TorchFlags, capture_torch_flags, restore_torch_flags
@@ -37,7 +35,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.audio_backend import CancelCheck, ProgressCallback
     from zvisiongenerator.backends.audio.higgs3_prompt import SpecialIds
     from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
-    from zvisiongenerator.utils.audio_preset import AudioFiles, AudioLimits, AudioPlatform, AudioPreset
+    from zvisiongenerator.utils.audio_preset import AudioLimits, AudioPlatform, AudioPreset
 
 __all__ = ["SAMPLE_RATE", "Higgs3Backend"]
 
@@ -50,12 +48,36 @@ DECODE_PHASE = "Decode"
 _FRAME_STRIDE = 10
 """Report every this many frames (about 2.5 a second at the codec's 25 frames a second), so a long take does not flood the progress events."""
 
-_OFFICIAL_REPO = "bosonai/higgs-tts-3-4b"
-_CODEC_REPO = "bosonai/higgs-audio-v2-tokenizer"
+_FRAMES_PER_SECOND = 25
+"""The codec's frame rate: frames of speech codes per second of sound."""
+
+_CHARS_PER_SECOND = 16.5
+"""How many characters of text the model speaks a second, in the middle of the 16 to 18 measured over real takes."""
+
+_FRAMES_PER_CHAR = _FRAMES_PER_SECOND / _CHARS_PER_SECOND
+"""How many frames a character of text takes to read, which turns a part's length into the frames it should need."""
 
 # A recording is read at twice the model's rate and then polyphase-resampled to it, which matched the model's own
 # resampling in level and word error rate.
 _READ_RATE = 2 * SAMPLE_RATE
+
+
+def _estimate_part_frames(text: str, max_new_tokens: int) -> int:
+    """Return how many frames reading *text* should take, at least 1 and at most *max_new_tokens*.
+
+    The estimate is the text's length at the model's usual speaking rate; a part with more pauses or a slower voice
+    needs more, which :func:`_part_total` allows for.
+    """
+    return max(1, min(max_new_tokens, round(len(text) * _FRAMES_PER_CHAR)))
+
+
+def _part_total(estimate: int, step: int, max_new_tokens: int) -> int:
+    """Return the total to report at frame *step* of a part expected to take *estimate* frames.
+
+    It is the estimate until the part runs past it; after that it stays one stride ahead, so the bar waits near the end
+    instead of overflowing. It never exceeds *max_new_tokens*, which ends a part.
+    """
+    return min(max_new_tokens, max(estimate, step + _FRAME_STRIDE))
 
 
 @dataclass
@@ -67,6 +89,7 @@ class _Progress:
     max_new_tokens: int
     n_parts: int
     part: int = 1
+    estimate: int = 1
     step: int = 0
     reported: int = 0
 
@@ -98,14 +121,13 @@ class Higgs3Backend:
             device: ``cuda`` or ``mps``.
 
         Raises:
-            ValueError: If the platform entry does not list the files of the model or the codec.
             FileNotFoundError: If a repository is not in the cache with every listed file.
         """
-        official = _cached_folder(_entry_files(preset, platform_entry, _OFFICIAL_REPO))
-        codec_dir = _cached_folder(_entry_files(preset, platform_entry, _CODEC_REPO))
+        model_files, codec_files = platform_entry.files
+        official, codec_dir = snapshot_dir(model_files), snapshot_dir(codec_files)
         self.close()
         self._limits = preset.limits
-        self._settings = {**preset.settings, **platform_entry.settings}
+        self._settings = preset.settings_for(device)
         self._device = device
         self._codec_device = str(self._settings.get("codec_device", "cpu"))
         self._flags = capture_torch_flags()  # model code may set global numerics flags; close() puts them back
@@ -125,8 +147,10 @@ class Higgs3Backend:
 
         Args:
             request: The take to make.
-            on_progress: Called as ``on_progress("Speech tokens", step, max_new_tokens, part, n_parts)`` for the first
-                frame of a part, every ``_FRAME_STRIDE`` frames after it and the last frame, and with phase ``Decode`` around each part's decode.
+            on_progress: Called as ``on_progress("Speech tokens", step, total, part, n_parts)`` for the first frame of a
+                part, every ``_FRAME_STRIDE`` frames after it and the last frame, and with phase ``Decode`` around each
+                part's decode. ``total`` is the frames the part's text should need (``_estimate_part_frames``); the last
+                frame reports the frames the part took as its total, so a part's bar ends full.
             cancelled: Checked before each part and on every frame; ``True`` stops the take.
 
         Returns:
@@ -134,13 +158,9 @@ class Higgs3Backend:
 
         Raises:
             AudioCancelled: If ``cancelled`` returned ``True``.
-            ValueError: If the request is refused by :func:`~zvisiongenerator.utils.audio_request.check_speech_request`.
-            RuntimeError: If the backend is not loaded, or the model made no sound.
+            RuntimeError: If the model made no sound.
         """
-        if self._model is None or self._limits is None:
-            raise RuntimeError("Higgs TTS 3 is not loaded; call load() first.")
         limits = self._limits
-        check_speech_request(request, limits)
         parts = split_speech_text(request.prompt, int(limits.part_chars), max_text_chars=int(limits.max_text_chars))
         max_new_tokens = int(limits.max_new_tokens)
         reference = self._voice_reference(request.voice) if request.voice is not None else None  # for part 1 only
@@ -153,6 +173,7 @@ class Higgs3Backend:
                 if cancelled():
                     raise AudioCancelled
                 progress.part, progress.step, progress.reported = index + 1, 0, 0
+                progress.estimate = _estimate_part_frames(text, max_new_tokens)
                 wave, part_cut = self._read_part(text, request.seed + index, reference, max_new_tokens)
                 cut = cut or part_cut
                 if index == 0 and len(parts) > 1:
@@ -230,10 +251,14 @@ class Higgs3Backend:
             self._report_frames(progress)
 
     @staticmethod
-    def _report_frames(progress: _Progress) -> None:
-        """Report the frame count of the part being made and remember that it was reported."""
+    def _report_frames(progress: _Progress, *, finished: bool = False) -> None:
+        """Report the frame count of the part being made against its estimated total, and remember that it was reported.
+
+        A *finished* part reports the frames it took as its total, so its bar is full.
+        """
         progress.reported = progress.step
-        progress.on_progress(SPEECH_PHASE, progress.step, progress.max_new_tokens, progress.part, progress.n_parts)
+        total = progress.step if finished else _part_total(progress.estimate, progress.step, progress.max_new_tokens)
+        progress.on_progress(SPEECH_PHASE, progress.step, total, progress.part, progress.n_parts)
 
     def _read_part(self, text: str, seed: int, reference: tuple[Any, str | None] | None, max_new_tokens: int) -> tuple[np.ndarray, bool]:
         """Return the 24 kHz mono waveform of one part and whether it was cut, generated with *seed* and following *reference* (codes and transcript) when given."""
@@ -249,13 +274,13 @@ class Higgs3Backend:
             reference_codes=codes,
             reference_text=transcript,
             max_new_tokens=max_new_tokens,
-            temperature=self._setting("temperature"),
-            top_p=self._setting("top_p"),
+            temperature=self._settings["temperature"],
+            top_p=self._settings["top_p"],
             on_frame=self._count_frame,
         )
         progress = self._progress
-        if progress is not None and progress.reported != progress.step:  # the last frame of a part is always reported
-            self._report_frames(progress)
+        if progress is not None and progress.step:  # the last frame of a part is always reported, with the frames it took as the total
+            self._report_frames(progress, finished=True)
         wave = self._decode(result.codes) if result.codes.shape[0] else np.zeros(0, dtype=np.float32)  # no decode is reported for a part without sound
         return wave, result.cut
 
@@ -276,36 +301,6 @@ class Higgs3Backend:
         with torch.no_grad():
             codes = self._codec.encode(batch).audio_codes
         return codes.squeeze(0).transpose(0, 1).to(torch.long).cpu()
-
-    def _setting(self, name: str) -> Any:
-        """Return the preset setting *name*, or raise ``ValueError`` naming it."""
-        if name not in self._settings:
-            raise ValueError(f"The Higgs TTS 3 preset needs the setting '{name}'.")
-        return self._settings[name]
-
-
-def _entry_files(preset: AudioPreset, platform_entry: AudioPlatform, repo_id: str) -> AudioFiles:
-    """Return the files the platform entry lists for *repo_id*.
-
-    Raises:
-        ValueError: If the entry lists none.
-    """
-    files = next((files for files in platform_entry.files if files.repo_id == repo_id), None)
-    if files is None:
-        raise ValueError(f"The platform entry of '{preset.id}' must list the files of {repo_id}.")
-    return files
-
-
-def _cached_folder(files: AudioFiles) -> Path:
-    """Return the cached snapshot folder that holds every listed file of *files*; never download.
-
-    Raises:
-        FileNotFoundError: If the revision is not in the cache or lacks a listed file.
-    """
-    folder = cached_snapshot(HubFiles(files.repo_id, files.revision, files.patterns))
-    if folder is None:
-        raise FileNotFoundError(f"Higgs TTS 3 needs {files.repo_id}@{files.revision}, which is not downloaded.")
-    return folder
 
 
 def _empty_cache(device: str) -> None:

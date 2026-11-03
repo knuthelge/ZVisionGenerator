@@ -112,6 +112,23 @@ describe('SettingPopover model list', () => {
 
       expect(target.querySelector('[data-testid="model-not-downloaded"]')).toBeNull();
     });
+
+    it('reads an audio model\'s download under the audio kind', () => {
+      const audio: ModelOption[] = [{ id: 'yue2', label: 'YuE2 3B', type: 'audio', downloaded: false }];
+      vi.spyOn(downloadStore, 'active').mockImplementation((kind, name) => (
+        kind === 'audio' && name === 'yue2' ? { id: 'd1', kind: 'audio', name: 'yue2', label: 'YuE2 3B', state: 'running', message: null } : null
+      ));
+      app = flushSync(() => mount(SettingPopover, {
+        target,
+        props: {
+          key: 'model', context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false, models: audio, quantizeOptions: null, lastSeed: null,
+          onModelChange: vi.fn(), onclose: vi.fn(),
+        },
+      }));
+
+      expect(target.querySelector('[data-testid="model-not-downloaded"]')).toBeNull();
+      expect(target.querySelector('[data-testid="model-download-status"]')).not.toBeNull();
+    });
   });
 });
 

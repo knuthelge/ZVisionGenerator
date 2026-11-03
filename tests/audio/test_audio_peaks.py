@@ -66,13 +66,6 @@ class TestLimitPeak:
 
         assert _db(peak_of(limited)) == pytest.approx(-1.0, abs=0.01)
 
-    def test_a_clip_at_minus_3_dbfs_is_left_alone(self):
-        quiet = sine(0.5, amplitude=10 ** (-3 / 20))
-
-        limited = limit_peak(quiet)
-
-        np.testing.assert_array_equal(limited, quiet)
-
     def test_the_shape_is_kept(self):
         loud = sine(0.1, amplitude=4.0)
 

@@ -552,7 +552,7 @@ video_model_presets:
       # The text encoder is converted once to this 4-bit form and kept next to the model as <name>@mlx-te4.
       text_encoder: { bits: 4, group_size: 64, layers: 50 }
 
-# --- Prompt enhancer (local LLM) ---
+# --- Audio models ---
 
 # Audio models (music, speech, sound), keyed by model id. Each preset has a label, a kind (music | speech | sound),
 # capabilities, limits, settings, memory and, per platform (cuda | mps), a backend family, the pinned files to download
@@ -564,8 +564,6 @@ audio_model_presets:
     capabilities: { lyrics: true, duration: false, voice_clone: false }
     limits: { max_seconds: 360 }
     settings:
-      cot_song: full
-      cot_instrumental: melody
       instrumental_sections: "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]"
       abc_max_tokens: 4096
       cfg: 1.0
@@ -573,10 +571,10 @@ audio_model_presets:
       memory_budget_gib: 24
       vae_core_frames: 512
       fade_seconds: 2
-    memory: { cuda_gb: 6.7, mps_gb: null }
     platforms:
       cuda:
         family: yue2
+        memory_gb: 6.7
         files:
           - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
             files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
@@ -585,6 +583,7 @@ audio_model_presets:
         settings: { weight_swap: true }
       mps:
         family: yue2
+        memory_gb: null
         files:
           - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
             files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
@@ -597,10 +596,10 @@ audio_model_presets:
     capabilities: { lyrics: false, duration: false, voice_clone: true }
     limits: { max_new_tokens: 1500, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
     settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
-    memory: { cuda_gb: 8.2, mps_gb: null }
     platforms:
       cuda:
         family: higgs3
+        memory_gb: 8.2
         files:
           - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
             files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
@@ -609,6 +608,7 @@ audio_model_presets:
         settings: { codec_device: cpu }
       mps:
         family: higgs3
+        memory_gb: null
         files:
           - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
             files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
@@ -621,10 +621,10 @@ audio_model_presets:
     capabilities: { lyrics: false, duration: true, voice_clone: false }
     limits: { max_seconds: 380 }
     settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
-    memory: { cuda_gb: 6.1, mps_gb: null }
     platforms:
       cuda:
         family: stable_audio_3
+        memory_gb: 6.1
         files:
           - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
             files: [checkpoints/stable_audio_3_medium.safetensors]
@@ -634,6 +634,7 @@ audio_model_presets:
             files: ["t5gemma-b-b-ul2/*"]
       mps:
         family: stable_audio_3
+        memory_gb: null
         files:
           - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
             files: [checkpoints/stable_audio_3_medium.safetensors]
@@ -641,6 +642,8 @@ audio_model_presets:
             files: [model_config.json]
           - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
             files: ["t5gemma-b-b-ul2/*"]
+
+# --- Prompt enhancer (local LLM) ---
 
 prompt_enhancer:
   # Public Hugging Face repos, pinned. The model below is the default Fast choice; `smart` holds the larger one.

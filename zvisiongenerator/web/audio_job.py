@@ -14,9 +14,8 @@ from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.audio_request import check_speech_request, check_supported_fields, resolve_sound_seconds
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
-from zvisiongenerator.web.workspace_contract import AUDIO_WORKFLOW_VALUES
 
-__all__ = ["AudioFields", "audio_request_from_fields", "audio_workflow"]
+__all__ = ["AudioFields", "audio_request_from_fields"]
 
 _PROMPT_REQUIRED = {
     "music": "Write a style first.",
@@ -50,19 +49,6 @@ class AudioFields:
     voice_text: str | None = None
     voice_consent: bool = False
     voice_unread: bool = False
-
-
-def audio_workflow(workflow: str | None, preset: AudioPreset) -> str:
-    """Return the workflow of a job for *preset*: its kind, after checking that the form's workflow, if any, says the same.
-
-    Raises:
-        ValueError: If *workflow* is not an audio workflow, or names another kind than the model makes.
-    """
-    if workflow is None or workflow == preset.kind:
-        return preset.kind
-    if workflow not in AUDIO_WORKFLOW_VALUES:
-        raise ValueError(f"Unknown audio workflow '{workflow}'. Valid workflows: {', '.join(AUDIO_WORKFLOW_VALUES)}.")
-    raise ValueError(f"{preset.label} makes {preset.kind}, not {workflow}.")
 
 
 def audio_request_from_fields(preset: AudioPreset, fields: AudioFields) -> AudioGenerationRequest:

@@ -30,7 +30,6 @@ from zvisiongenerator.utils.provenance import (
     RecordedSettings,
     image_prompt_text,
     config_from_probe,
-    mp4_config_from_probe,
     optional_float,
     optional_int,
     optional_text,
@@ -803,7 +802,7 @@ def _read_video_facts(asset_path: Path) -> FactsRead:
     complete = True
     config: dict[str, Any] | None = None
     try:
-        config = mp4_config_from_probe(data) if asset_path.suffix.lower() == ".mp4" else None
+        config = config_from_probe(data) if asset_path.suffix.lower() == ".mp4" else None
     except ValueError:
         complete = False
     try:

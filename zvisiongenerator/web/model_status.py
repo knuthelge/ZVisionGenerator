@@ -64,9 +64,6 @@ def describe_model_status(
         family: A video model's family (``"ltx"`` or ``"h3"``); ``None`` is LTX. LTX and H3 have a memory estimate.
         target_present: Tells whether one download target is fully on disk; MiniMax H3 is downloaded when every target of its plan is.
 
-    Raises:
-        ValueError: If *kind* is ``"audio"``.
-
     Returns:
         ``{"downloaded": bool, "memory_fit": dict | None}``. ``memory_fit`` holds ``kind`` (``"unified"`` on
         Apple Silicon, ``"discrete"`` on CUDA), ``budget_gb`` (the GPU budget) and ``by_quantize`` (``"none"``
@@ -75,8 +72,6 @@ def describe_model_status(
         estimate in the same shape plus a ``note``; CUDA video has the same, in the ``discrete`` shape. It is
         ``None`` when the model cannot be estimated (its files are not all on disk, or CUDA video has no level).
     """
-    if kind == "audio":
-        raise ValueError("An audio model has no resolved path; describe it with describe_audio_status.")
     model_dir = find_local_dir(resolved_path)
     text_encoder_dir = None
     ltx_video = kind == "video" and family in (None, "ltx")
@@ -113,20 +108,8 @@ def describe_audio_status(
 ) -> dict[str, Any]:
     """Return the ``downloaded`` flag and ``memory_fit`` summary of one audio model on this machine.
 
-    The model is downloaded when every repository of its plan on *platform_key* is on disk (judged without the network).
-    ``memory_fit`` compares the peak GPU memory the preset records for the platform (``memory.cuda_gb`` or
-    ``memory.mps_gb``) with the budget: ``fits``, ``tight`` or ``too_large`` as for any model, with the same shape as an
-    image model's (``kind``, ``budget_gb``, ``by_quantize`` holding only ``none``). It is ``None`` without a budget and
-    while the platform's peak is unmeasured (``null`` in the config); it needs no files on disk.
-
-    Args:
-        preset: The audio model.
-        platform_key: The preset's platform key, ``cuda`` or ``mps`` (``backends.audio_platform_key()``).
-        budget: This machine's memory budget, or ``None`` when this platform is not estimated.
-        target_present: Tells whether one download target is fully on disk.
-
-    Raises:
-        ValueError: If the preset has no entry for *platform_key*.
+    It is downloaded when every repository of its plan is on disk. ``memory_fit`` compares the preset's measured peak
+    for *platform_key*, one of the preset's platforms, with *budget*, in an image model's shape; ``None`` without a budget or a measured peak.
     """
     targets = audio_plan(preset, platform_key)
     return {"downloaded": all(target_present(target) for target in targets), "memory_fit": _audio_memory_fit(preset, platform_key, budget)}
@@ -134,7 +117,7 @@ def describe_audio_status(
 
 def _audio_memory_fit(preset: AudioPreset, platform_key: str, budget: MemoryBudget | None) -> dict[str, Any] | None:
     """Return the memory fit of an audio model's recorded peak on *platform_key*, or ``None`` without a budget or a measured peak."""
-    peak_gb = getattr(preset.memory, f"{platform_key}_gb", None)
+    peak_gb = preset.platforms[platform_key].memory_gb
     if budget is None or peak_gb is None:
         return None
     required = round(peak_gb * GIB)

@@ -140,7 +140,7 @@ class TestAssetJson:
         assert (payload["media_type"], payload["kind"], payload["workflow"], payload["filename"]) == ("audio", "music", "music", "song.flac")
         assert payload["duration"] == pytest.approx(2.0, abs=0.05) and (payload["channels"], payload["sample_rate"]) == (1, 48000)
         assert len(payload["peaks"]) == 100 and all(0 <= peak <= 255 for peak in payload["peaks"])
-        assert (payload["has_reference_voice"], payload["lyrics"], payload["cut"], payload["parts"]) == (False, "[verse]\nHello there", False, None)
+        assert (payload["has_reference_voice"], payload["lyrics"], payload["cut"]) == (False, "[verse]\nHello there", False)
         assert (payload["prompt"], payload["model"], payload["seed"], payload["has_reusable_config"]) == ("upbeat synth-pop", "yue2", 7, True)
         assert payload["url"] == "/media/song.flac" and payload["file_path"] == str(tmp_path / "song.flac")
         assert _params(payload) == {"workflow": "music", "model": "yue2", "prompt": "upbeat synth-pop", "lyrics": "[verse]\nHello there", "seed": "7"}
@@ -159,8 +159,7 @@ class TestAssetJson:
 
         payload = _json(tmp_path, "song.flac")
 
-        assert payload["upscale"] is None and payload["extend"] is None and payload["enhance"] is None
-        assert (payload["width"], payload["height"], payload["frame_count"], payload["image_path"]) == (None, None, None, None)
+        assert not {"upscale", "extend", "enhance", "width", "height", "frame_count", "image_path"} & payload.keys()
 
     def test_a_take_in_the_models_own_voice_has_no_reference_voice(self, tmp_path):
         _take(tmp_path, "any.flac", _ANY)

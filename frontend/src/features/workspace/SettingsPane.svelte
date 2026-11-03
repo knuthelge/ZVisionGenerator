@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { defaultsFor, draft, extendStepFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection, LicenceMark, Select } from '$lib/components/molecules';
@@ -13,16 +13,18 @@
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
+  import { changedRowCount, rowChanged, rowDefaults, type RowId } from './settingRows';
   import { randomSeed } from './seed';
   import AudioTrackSection from './AudioTrackSection.svelte';
-  import { soundRange, type AudioView } from './audioView';
+  import type { AudioView } from './audioView';
+  import { clampSeconds, secondsRange } from '$lib/state/audioDraft';
   import type { AudioTrackView } from './audioTrackView';
   import VoiceSection from './VoiceSection.svelte';
   import ImagesSection from './ImagesSection.svelte';
   import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
   import WaitingLabel from './WaitingLabel.svelte';
-  import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import { durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
 
   interface Props {
     context: WorkspaceContext;
@@ -51,10 +53,9 @@
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
-  // Narrow dependencies, so typing in the prompt does not re-resolve the defaults.
   const workflow = $derived(s.workflow);
   const model = $derived(s.model);
-  const defaults = $derived(settingDefaultsFor(context, { workflow, model }));
+  const defaults = $derived(defaultsFor(context, s, draft.extendSource));
 
   // --- Dimensions -----------------------------------------------------------
   const dimensionMode = $derived(s.dimensionMode);
@@ -77,11 +78,10 @@
   }
 
   // --- Length of a sound: from the shortest sound to the model's longest ---
-  const audioModel = $derived(context.audio_models?.find((entry) => entry.id === s.model) ?? null);
-  const lengthSpec = $derived({ step: 1, ...soundRange(audioModel) });
+  const lengthSpec = $derived({ step: 1, ...secondsRange(audio.model) });
 
   function setLength(seconds: number): void {
-    draft.update('audioSeconds', Math.min(lengthSpec.max, Math.max(lengthSpec.min, seconds)));
+    draft.update('audioSeconds', clampSeconds(seconds, audio.model));
   }
 
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
@@ -102,7 +102,6 @@
   const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, { alignment: extendStep }) : { step: 0.1, min: 0.1 });
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
-  const extendDefaultFrames = $derived(sourceFps ? defaultExtendFrames(sourceFps, extendStep) : null);
   const memoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
   const clipNote = $derived(memoryFitNote(clipMemory.fit, 'clip'));
   const clipTime = $derived(clipTimeNote(clipMemory.fit));
@@ -130,45 +129,9 @@
   }
 
   // --- Changes from defaults ------------------------------------------------
-  function changed(...keys: SettingKey[]): boolean {
-    return keys.some((key) => s[key] !== defaults[key]);
-  }
-
-  function reset(...keys: SettingKey[]): void {
-    draft.patch(Object.fromEntries(keys.map((key) => [key, defaults[key]])));
-  }
-
-  const changedRows = $derived(
-    [
-      caps.showDimensions && changed('ratio'),
-      caps.showDimensions && changed('size'),
-      caps.showDimensions && changed('dimensionMode'),
-      caps.showRuns && changed('runs'),
-      caps.showFrameCount && changed('frameCount'),
-      caps.showLength && changed('audioSeconds'),
-      caps.showExtendLength && extendDefaultFrames !== null && s.extendFrames !== extendDefaultFrames,
-      caps.showSteps && changed('steps'),
-      caps.showGuidance && changed('guidance'),
-      caps.showI2IStrength && changed('referenceImageStrength'),
-      caps.showSeed && changed('seed'),
-      caps.showScheduler && changed('scheduler'),
-      caps.supportsFirstSigma && changed('firstSigma'),
-      caps.showPostprocessSharpen && changed('postprocessSharpenEnabled', 'postprocessSharpenAmount'),
-      caps.showPostprocessContrast && changed('postprocessContrastEnabled', 'postprocessContrastAmount'),
-      caps.showPostprocessSaturation && changed('postprocessSaturationEnabled', 'postprocessSaturationAmount'),
-      caps.showPostprocessTransparent && changed('postprocessTransparent'),
-      caps.showImageUpscale && changed('upscaleEnabled', 'upscaleFactor'),
-      caps.showUpscaleReview && s.upscaleEnabled && changed('upscaleReview'),
-      caps.showUpscaleDenoise && s.upscaleEnabled && changed('upscaleDenoise'),
-      caps.showUpscaleSteps && s.upscaleEnabled && changed('upscaleSteps'),
-      caps.showUpscaleGuidance && s.upscaleEnabled && changed('upscaleGuidance'),
-      caps.showUpscaleSharpen && s.upscaleEnabled && changed('upscaleSharpen'),
-      caps.showAudio && changed('audio'),
-      caps.showLowMemory && changed('lowMemory'),
-      caps.showVideoUpscale && changed('videoUpscaleEnabled', 'videoUpscaleFactor'),
-      caps.showVideoUpscaleReview && s.videoUpscaleEnabled && changed('videoUpscaleReview'),
-    ].filter(Boolean).length
-  );
+  const isChanged = (id: RowId): boolean => rowChanged(id, s, defaults);
+  const resetRow = (id: RowId): void => draft.patch(rowDefaults(id, defaults));
+  const changedRows = $derived(changedRowCount(caps, s, defaults));
 
   // --- Section summaries ----------------------------------------------------
   const sizeSummary = $derived(`${shownWidth} × ${shownHeight}${dimensionMode === 'custom' ? ' · custom' : ''}`);
@@ -211,15 +174,14 @@
   const promptFileMode = $derived(s.promptSource === 'file' && !caps.isAudio);
   const promptChoiceMissing = $derived(promptFileMode && s.promptFileOptionIds.length === 0);
   // A LoRA chip whose file is downloading (or failed) holds Generate back.
-  const block = $derived(generateBlock(s.loraString, context.loras));
+  const block = $derived(generateBlock(s, context.loras));
   const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : null);
   const imageBlock = $derived(images.block);
   const trackBlock = $derived(audioTrack.block);
-  const audioReason = $derived(audio.active ? audio.reason : null);
-  const submitDisabled = $derived(busy || audioReason !== null || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked);
+  const submitDisabled = $derived(busy || audio.reason !== null || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked);
   // One reason at a time, linked to Generate: the source comes first, then the images, the audio track, then the prompt file.
   // On the Audio tab the one reason is its own, in the order the boxes are read.
-  const generateReason = $derived(audio.active ? audioReason : (sourceGuard.note ?? imageBlock ?? trackBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null)));
+  const generateReason = $derived(audio.active ? audio.reason : (sourceGuard.note ?? imageBlock ?? trackBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null)));
 
   function resetAll(): void {
     draft.resetSelections(context);
@@ -270,21 +232,21 @@
 
     {#if caps.showDimensions}
       <InspectorSection id="size" title="Size" summary={sizeSummary}>
-        <InspectorRow label="Ratio" changed={changed('ratio')} onreset={() => reset('ratio', 'size', 'dimensionMode')}>
+        <InspectorRow label="Ratio" changed={isChanged('size')} onreset={() => resetRow('size')}>
           <div class="ui-segmented ui-segmented-sm ui-segmented-mono mini-seg" role="group" aria-label="Aspect ratio">
             {#each ratios as ratio (ratio)}
               <button type="button" aria-pressed={dimensionMode === 'ratio' && s.ratio === ratio} onclick={() => pickRatio(ratio)}>{ratio}</button>
             {/each}
           </div>
         </InspectorRow>
-        <InspectorRow label="Resolution" changed={changed('size')} onreset={() => reset('size', 'dimensionMode')}>
+        <InspectorRow label="Resolution" changed={isChanged('size')} onreset={() => resetRow('size')}>
           <div class="ui-segmented ui-segmented-sm ui-segmented-mono mini-seg" role="group" aria-label="Resolution">
             {#each sizeOptions as size (size)}
               <button type="button" aria-pressed={dimensionMode === 'ratio' && s.size === size} aria-label="Resolution {size}" onclick={() => pickSize(size)}>{size.toUpperCase()}</button>
             {/each}
           </div>
         </InspectorRow>
-        <InspectorRow label="W × H" forId="ws-width" changed={changed('dimensionMode')} onreset={() => reset('ratio', 'size', 'dimensionMode')}>
+        <InspectorRow label="W × H" forId="ws-width" changed={isChanged('size')} onreset={() => resetRow('size')}>
           <InspectorNumber id="ws-width" name={dimensionMode === 'custom' ? 'width' : undefined} ariaLabel="Width" value={shownWidth} {...dimensionSpec} stepper={false} onchange={(v) => setDimension('width', v)} />
           <span class="dim-times" aria-hidden="true">×</span>
           <InspectorNumber id="ws-height" name={dimensionMode === 'custom' ? 'height' : undefined} ariaLabel="Height" value={shownHeight} {...dimensionSpec} stepper={false} onchange={(v) => setDimension('height', v)} />
@@ -302,18 +264,18 @@
 
     <InspectorSection id="sampling" title="Sampling" summary={samplingSummary}>
       {#if caps.showRuns}
-        <InspectorRow label="Batch size" forId="ws-runs" scrubber={scrubber(s.runs, SPEC.runs, (v) => draft.update('runs', v))} changed={changed('runs')} onreset={() => reset('runs')}>
+        <InspectorRow label="Batch size" forId="ws-runs" scrubber={scrubber(s.runs, SPEC.runs, (v) => draft.update('runs', v))} changed={isChanged('runs')} onreset={() => resetRow('runs')}>
           <InspectorNumber id="ws-runs" name="runs" value={s.runs} {...SPEC.runs} onchange={(v) => v !== null && draft.update('runs', v)} />
         </InspectorRow>
       {/if}
       {#if caps.showLength}
-        <InspectorRow label="Length (s)" forId="ws-length" scrubber={scrubber(s.audioSeconds, lengthSpec, setLength)} changed={changed('audioSeconds')} onreset={() => reset('audioSeconds')}>
+        <InspectorRow label="Length (s)" forId="ws-length" scrubber={scrubber(s.audioSeconds, lengthSpec, setLength)} changed={isChanged('length')} onreset={() => resetRow('length')}>
           <InspectorNumber id="ws-length" value={s.audioSeconds} {...lengthSpec} commitOnly onchange={(v) => v !== null && setLength(v)} />
           <span class="frame-count" data-testid="length-max">max {lengthSpec.max}</span>
         </InspectorRow>
       {/if}
       {#if caps.showFrameCount}
-        <InspectorRow label="Duration (s)" forId="ws-duration" scrubber={scrubber(shownSeconds, secondsSpec, setSeconds)} changed={changed('frameCount')} onreset={() => reset('frameCount')}>
+        <InspectorRow label="Duration (s)" forId="ws-duration" scrubber={scrubber(shownSeconds, secondsSpec, setSeconds)} changed={isChanged('duration')} onreset={() => resetRow('duration')}>
           <InspectorNumber id="ws-duration" value={shownSeconds} {...secondsSpec} commitOnly onchange={setSeconds} />
           <span class="frame-count">{s.frameCount} frames</span>
           <input type="hidden" name="frames" value={s.frameCount}>
@@ -328,8 +290,8 @@
           label="Extend by (s)"
           forId="ws-extend-seconds"
           scrubber={scrubber(shownExtendSeconds, extendSecondsSpec, setExtendSeconds, sourceFps === null)}
-          changed={extendDefaultFrames !== null && s.extendFrames !== extendDefaultFrames}
-          onreset={() => extendDefaultFrames !== null && draft.update('extendFrames', extendDefaultFrames)}
+          changed={isChanged('extendLength')}
+          onreset={() => resetRow('extendLength')}
         >
           <InspectorNumber id="ws-extend-seconds" value={shownExtendSeconds} {...extendSecondsSpec} disabled={sourceFps === null} title={sourceFps === null ? 'Choose a video to extend first.' : undefined} commitOnly onchange={setExtendSeconds} />
           <span class="frame-count" data-testid="extend-frames">{sourceFps !== null && s.extendFrames !== null ? `+${s.extendFrames} frames` : '—'}</span>
@@ -344,19 +306,19 @@
         </div>
       {/if}
       {#if caps.showSteps}
-        <InspectorRow label="Steps" forId="ws-steps" scrubber={scrubber(s.steps, stepsRange, setSteps)} changed={changed('steps')} onreset={() => reset('steps')}>
+        <InspectorRow label="Steps" forId="ws-steps" scrubber={scrubber(s.steps, stepsRange, setSteps)} changed={isChanged('steps')} onreset={() => resetRow('steps')}>
           <InspectorNumber id="ws-steps" name="steps" value={s.steps} {...stepsRange} onchange={(v) => v !== null && setSteps(v)} />
           <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...stepsRange} value={s.steps} style:--fill={rangeFill(s.steps, stepsRange)} oninput={(e) => setSteps(Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showGuidance}
-        <InspectorRow label="Guidance" forId="ws-guidance" scrubber={scrubber(s.guidance, SPEC.guidance, (v) => draft.update('guidance', v))} changed={changed('guidance')} onreset={() => reset('guidance')}>
+        <InspectorRow label="Guidance" forId="ws-guidance" scrubber={scrubber(s.guidance, SPEC.guidance, (v) => draft.update('guidance', v))} changed={isChanged('guidance')} onreset={() => resetRow('guidance')}>
           <InspectorNumber id="ws-guidance" name="guidance" value={s.guidance} {...SPEC.guidance} onchange={(v) => v !== null && draft.update('guidance', v)} />
           <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...SPEC.guidance} value={s.guidance} style:--fill={rangeFill(s.guidance, SPEC.guidance)} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showSeed}
-        <InspectorRow label="Seed" forId="ws-seed" changed={changed('seed')} onreset={() => reset('seed')}>
+        <InspectorRow label="Seed" forId="ws-seed" changed={isChanged('seed')} onreset={() => resetRow('seed')}>
           <InspectorNumber id="ws-seed" name="seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" stepper={false} onchange={(v) => draft.update('seed', v)} />
           <button
             type="button"
@@ -372,7 +334,7 @@
         </InspectorRow>
       {/if}
       {#if caps.showScheduler}
-        <InspectorRow label="Scheduler" forId="ws-scheduler" changed={changed('scheduler')} onreset={() => reset('scheduler')}>
+        <InspectorRow label="Scheduler" forId="ws-scheduler" changed={isChanged('scheduler')} onreset={() => resetRow('scheduler')}>
           <Select
             id="ws-scheduler"
             name="scheduler"
@@ -387,7 +349,7 @@
         </InspectorRow>
       {/if}
       {#if caps.supportsFirstSigma}
-        <InspectorRow label="First sigma" forId="ws-first-sigma" scrubber={scrubber(s.firstSigma, SPEC.firstSigma, (v) => draft.update('firstSigma', v))} changed={changed('firstSigma')} onreset={() => reset('firstSigma')}>
+        <InspectorRow label="First sigma" forId="ws-first-sigma" scrubber={scrubber(s.firstSigma, SPEC.firstSigma, (v) => draft.update('firstSigma', v))} changed={isChanged('firstSigma')} onreset={() => resetRow('firstSigma')}>
           <InspectorNumber id="ws-first-sigma" value={s.firstSigma} {...SPEC.firstSigma} nullable placeholder="1.004" onchange={(v) => draft.update('firstSigma', v)} />
           {#if s.firstSigma !== null}
             <input type="hidden" name="first_sigma" value={String(s.firstSigma)}>
@@ -410,8 +372,8 @@
             label="Sharpen"
             forId="ws-pp-sharpen-amount"
             scrubber={scrubber(s.postprocessSharpenAmount, SPEC.sharpen, (v) => draft.update('postprocessSharpenAmount', v), !s.postprocessSharpenEnabled)}
-            changed={changed('postprocessSharpenEnabled', 'postprocessSharpenAmount')}
-            onreset={() => reset('postprocessSharpenEnabled', 'postprocessSharpenAmount')}
+            changed={isChanged('sharpen')}
+            onreset={() => resetRow('sharpen')}
           >
             <Toggle id="ws-pp-sharpen" ariaLabel="Sharpen" checked={s.postprocessSharpenEnabled} disabled={busy} onchange={(e) => draft.update('postprocessSharpenEnabled', (e.currentTarget as HTMLInputElement).checked)} />
             <InspectorNumber id="ws-pp-sharpen-amount" ariaLabel="Sharpen amount" value={s.postprocessSharpenAmount} {...SPEC.sharpen} nullable placeholder="auto" disabled={!s.postprocessSharpenEnabled} onchange={(v) => draft.update('postprocessSharpenAmount', v)} />
@@ -426,8 +388,8 @@
             label="Contrast"
             forId="ws-pp-contrast-amount"
             scrubber={scrubber(s.postprocessContrastAmount, SPEC.contrast, (v) => draft.update('postprocessContrastAmount', v), !s.postprocessContrastEnabled)}
-            changed={changed('postprocessContrastEnabled', 'postprocessContrastAmount')}
-            onreset={() => reset('postprocessContrastEnabled', 'postprocessContrastAmount')}
+            changed={isChanged('contrast')}
+            onreset={() => resetRow('contrast')}
           >
             <Toggle id="ws-pp-contrast" ariaLabel="Contrast" checked={s.postprocessContrastEnabled} disabled={busy} onchange={(e) => draft.update('postprocessContrastEnabled', (e.currentTarget as HTMLInputElement).checked)} />
             <InspectorNumber id="ws-pp-contrast-amount" ariaLabel="Contrast amount" value={s.postprocessContrastAmount} {...SPEC.contrast} disabled={!s.postprocessContrastEnabled} onchange={(v) => v !== null && draft.update('postprocessContrastAmount', v)} />
@@ -442,8 +404,8 @@
             label="Saturation"
             forId="ws-pp-saturation-amount"
             scrubber={scrubber(s.postprocessSaturationAmount, SPEC.saturation, (v) => draft.update('postprocessSaturationAmount', v), !s.postprocessSaturationEnabled)}
-            changed={changed('postprocessSaturationEnabled', 'postprocessSaturationAmount')}
-            onreset={() => reset('postprocessSaturationEnabled', 'postprocessSaturationAmount')}
+            changed={isChanged('saturation')}
+            onreset={() => resetRow('saturation')}
           >
             <Toggle id="ws-pp-saturation" ariaLabel="Saturation" checked={s.postprocessSaturationEnabled} disabled={busy} onchange={(e) => draft.update('postprocessSaturationEnabled', (e.currentTarget as HTMLInputElement).checked)} />
             <InspectorNumber id="ws-pp-saturation-amount" ariaLabel="Saturation amount" value={s.postprocessSaturationAmount} {...SPEC.saturation} disabled={!s.postprocessSaturationEnabled} onchange={(v) => v !== null && draft.update('postprocessSaturationAmount', v)} />
@@ -455,7 +417,7 @@
         {/if}
         {#if caps.showPostprocessTransparent}
           <!-- The row says "Transparent" because the label column is narrow; the switch keeps the full name. -->
-          <InspectorRow label="Transparent" forId="ws-pp-transparent" changed={changed('postprocessTransparent')} onreset={() => reset('postprocessTransparent')}>
+          <InspectorRow label="Transparent" forId="ws-pp-transparent" changed={isChanged('transparent')} onreset={() => resetRow('transparent')}>
             <Toggle id="ws-pp-transparent" ariaLabel="Transparent background" checked={s.postprocessTransparent} disabled={busy} onchange={(e) => draft.update('postprocessTransparent', (e.currentTarget as HTMLInputElement).checked)} />
             <LicenceMark licences={context.matte_licences ?? []} label="Non-commercial" testId="transparent-terms" class="terms-badge" />
           </InspectorRow>
@@ -466,7 +428,7 @@
 
     {#if caps.showImageUpscale}
       <InspectorSection id="upscale" title="Upscale" summary={upscaleSummary} active={s.upscaleEnabled}>
-        <InspectorRow label="Upscale" changed={changed('upscaleEnabled', 'upscaleFactor')} onreset={() => reset('upscaleEnabled', 'upscaleFactor')}>
+        <InspectorRow label="Upscale" changed={isChanged('upscale')} onreset={() => resetRow('upscale')}>
           <Toggle id="ws-upscale-enabled" ariaLabel="Enable upscale" checked={s.upscaleEnabled} disabled={busy} onchange={(e) => draft.update('upscaleEnabled', (e.currentTarget as HTMLInputElement).checked)} />
           <div class="ui-segmented ui-segmented-sm ui-segmented-mono mini-seg factor" role="group" aria-label="Upscale factor">
             {#each [2, 4] as factor (factor)}
@@ -479,7 +441,7 @@
         </InspectorRow>
         {#if s.upscaleEnabled}
           {#if caps.showUpscaleReview}
-            <InspectorRow sub label="Review" changed={changed('upscaleReview')} onreset={() => reset('upscaleReview')}>
+            <InspectorRow sub label="Review" changed={isChanged('upscaleReview')} onreset={() => resetRow('upscaleReview')}>
               <Toggle
                 id="ws-upscale-review"
                 ariaLabel="Review before upscaling"
@@ -494,22 +456,22 @@
             </InspectorRow>
           {/if}
           {#if caps.showUpscaleDenoise}
-            <InspectorRow sub label="Denoise" forId="ws-upscale-denoise" scrubber={scrubber(s.upscaleDenoise, SPEC.upscaleDenoise, (v) => draft.update('upscaleDenoise', v))} changed={changed('upscaleDenoise')} onreset={() => reset('upscaleDenoise')}>
+            <InspectorRow sub label="Denoise" forId="ws-upscale-denoise" scrubber={scrubber(s.upscaleDenoise, SPEC.upscaleDenoise, (v) => draft.update('upscaleDenoise', v))} changed={isChanged('upscaleDenoise')} onreset={() => resetRow('upscaleDenoise')}>
               <InspectorNumber id="ws-upscale-denoise" name="upscale_denoise" value={s.upscaleDenoise} {...SPEC.upscaleDenoise} nullable placeholder="auto" onchange={(v) => draft.update('upscaleDenoise', v)} />
             </InspectorRow>
           {/if}
           {#if caps.showUpscaleSteps}
-            <InspectorRow sub label="Steps" forId="ws-upscale-steps" scrubber={scrubber(s.upscaleSteps, SPEC.upscaleSteps, (v) => draft.update('upscaleSteps', v))} changed={changed('upscaleSteps')} onreset={() => reset('upscaleSteps')}>
+            <InspectorRow sub label="Steps" forId="ws-upscale-steps" scrubber={scrubber(s.upscaleSteps, SPEC.upscaleSteps, (v) => draft.update('upscaleSteps', v))} changed={isChanged('upscaleSteps')} onreset={() => resetRow('upscaleSteps')}>
               <InspectorNumber id="ws-upscale-steps" name="upscale_steps" value={s.upscaleSteps} {...SPEC.upscaleSteps} nullable placeholder="auto" onchange={(v) => draft.update('upscaleSteps', v)} />
             </InspectorRow>
           {/if}
           {#if caps.showUpscaleGuidance}
-            <InspectorRow sub label="Guidance" forId="ws-upscale-guidance" scrubber={scrubber(s.upscaleGuidance, SPEC.upscaleGuidance, (v) => draft.update('upscaleGuidance', v))} changed={changed('upscaleGuidance')} onreset={() => reset('upscaleGuidance')}>
+            <InspectorRow sub label="Guidance" forId="ws-upscale-guidance" scrubber={scrubber(s.upscaleGuidance, SPEC.upscaleGuidance, (v) => draft.update('upscaleGuidance', v))} changed={isChanged('upscaleGuidance')} onreset={() => resetRow('upscaleGuidance')}>
               <InspectorNumber id="ws-upscale-guidance" name="upscale_guidance" value={s.upscaleGuidance} {...SPEC.upscaleGuidance} nullable placeholder="auto" onchange={(v) => draft.update('upscaleGuidance', v)} />
             </InspectorRow>
           {/if}
           {#if caps.showUpscaleSharpen}
-            <InspectorRow sub label="Sharpen" changed={changed('upscaleSharpen')} onreset={() => reset('upscaleSharpen')}>
+            <InspectorRow sub label="Sharpen" changed={isChanged('upscaleSharpen')} onreset={() => resetRow('upscaleSharpen')}>
               <Toggle id="ws-upscale-sharpen" ariaLabel="Upscale sharpen" checked={s.upscaleSharpen} disabled={busy} onchange={(e) => draft.update('upscaleSharpen', (e.currentTarget as HTMLInputElement).checked)} />
               <input type="hidden" name="upscale_sharpen" value={s.upscaleSharpen ? 'true' : 'false'}>
             </InspectorRow>
@@ -521,7 +483,7 @@
     {#if showVideo}
       <InspectorSection id="video" title="Video" summary={videoSummary} active={videoSummary !== 'Off'}>
         {#if caps.showAudio}
-          <InspectorRow label="Audio" changed={changed('audio')} onreset={() => reset('audio')}>
+          <InspectorRow label="Audio" changed={isChanged('audio')} onreset={() => resetRow('audio')}>
             <!-- A silent source gives a silent clip; the preference is kept and audio=false is what gets submitted. -->
             <Toggle
               id="ws-audio"
@@ -537,13 +499,13 @@
           </InspectorRow>
         {/if}
         {#if caps.showLowMemory}
-          <InspectorRow label="Low memory" changed={changed('lowMemory')} onreset={() => reset('lowMemory')}>
+          <InspectorRow label="Low memory" changed={isChanged('lowMemory')} onreset={() => resetRow('lowMemory')}>
             <Toggle id="ws-low-memory" name="low_memory" ariaLabel="Low memory mode" checked={s.lowMemory} onchange={(e) => draft.update('lowMemory', (e.currentTarget as HTMLInputElement).checked)} />
             <input type="hidden" name="low_memory" value="false">
           </InspectorRow>
         {/if}
         {#if caps.showVideoUpscale}
-          <InspectorRow label="Upscale" changed={changed('videoUpscaleEnabled', 'videoUpscaleFactor')} onreset={() => reset('videoUpscaleEnabled', 'videoUpscaleFactor')}>
+          <InspectorRow label="Upscale" changed={isChanged('videoUpscale')} onreset={() => resetRow('videoUpscale')}>
             <Toggle id="ws-video-upscale" ariaLabel="Video upscale" checked={s.videoUpscaleEnabled} disabled={busy} onchange={(e) => draft.update('videoUpscaleEnabled', (e.currentTarget as HTMLInputElement).checked)} />
             {#if s.videoUpscaleEnabled}
               {#if caps.showVideoUpscaleFactor}
@@ -563,7 +525,7 @@
             {/if}
           </InspectorRow>
           {#if s.videoUpscaleEnabled && caps.showVideoUpscaleReview}
-            <InspectorRow sub label="Review" changed={changed('videoUpscaleReview')} onreset={() => reset('videoUpscaleReview')}>
+            <InspectorRow sub label="Review" changed={isChanged('videoUpscaleReview')} onreset={() => resetRow('videoUpscaleReview')}>
               <Toggle
                 id="ws-video-upscale-review"
                 ariaLabel="Review before upscaling"
@@ -609,7 +571,7 @@
         type="button"
         disabled={busy}
         onclick={resetAll}
-        title={audio.active ? 'Clear the Audio tab: the text, the voice, the length, the batch and the seed (keeps the kind and the models)' : 'Reset settings and images to model defaults (keeps model, LoRAs, quantization and prompt)'}
+        title={audio.active ? 'Put back the Audio tab\'s length, voice, batch and seed (keeps the kind, the models and the text)' : 'Reset settings and images to model defaults (keeps model, LoRAs, quantization and prompt)'}
         aria-label="Reset settings"
         class="ui-btn"
       >

@@ -13,7 +13,7 @@ from tests._audio_presets import HIGGS_CODEC_REPO, HIGGS_REPO, YUE2_REPO, audio_
 from tests._factories import load_packaged_config
 from tests._licences import use_licences
 
-from zvisiongenerator.backends.audio.higgs3 import _cached_folder
+from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
@@ -29,7 +29,7 @@ from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.audio_inventory import audio_inventory_rows, audio_repo_ids
 from zvisiongenerator.web.model_delete import audio_delete_target, delete_model
-from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_download_needed, row_plan
+from zvisiongenerator.web.model_download_plan import parts_summary, row_plan
 
 _BUDGET = MemoryBudget(10 * GIB, system_bytes=64 * GIB)
 _LICENCES = {
@@ -101,7 +101,7 @@ class TestInventoryRows:
                     "summary": "Non-commercial; individual creators may monetise their outputs, companies need a licence",
                     "url": _LICENCES["yue2-nc"]["url"],
                     "url_label": "Licence",
-                    "notice_url": None,
+                    "attribution": None,
                 }
             ],
             "downloaded": True,
@@ -220,7 +220,7 @@ class TestHiggs:
 
         assert all(target_present_offline(target) for target in targets)
         assert all(cached_snapshot(HubFiles(item.repo_id, item.revision, item.patterns)) is not None for item in files)
-        assert [_cached_folder(item).name for item in files] == [item.revision for item in files]
+        assert [snapshot_dir(item).name for item in files] == [item.revision for item in files]
         assert _rows(env, config)["higgs3"]["downloaded"] is True
 
     @pytest.mark.parametrize("index", [0, 1])
@@ -236,7 +236,7 @@ class TestHiggs:
         assert target_present_offline(target) is False
         assert cached_snapshot(HubFiles(broken.repo_id, broken.revision, broken.patterns)) is None
         with pytest.raises(FileNotFoundError, match=broken.repo_id):
-            _cached_folder(broken)
+            snapshot_dir(broken)
         assert _rows(env, config)["higgs3"]["downloaded"] is False
 
     def test_the_size_is_the_sum_of_both_repositories(self, env):
@@ -253,31 +253,21 @@ class TestDownloadPlan:
     def test_the_plan_is_the_presets_pinned_repositories(self, env):
         plan = row_plan("audio", "yue2", _web_config(env))
 
-        assert (plan.kind, plan.name, plan.label) == ("audio", "yue2", "YuE2 3B")
+        assert (plan.model_id, plan.label) == ("yue2", "YuE2 3B")
         assert [(target.repo_id, target.revision) for target in plan.targets] == [
             ("m-a-p/YuE2-3B", "8f24312f187763b9854adeec87e437e2b03bbff1"),
             ("m-a-p/YuE2-Vae", "152733a19ad43aa67e367f9b5503ef8075bb5126"),
         ]
 
     def test_a_model_that_is_not_an_audio_row_is_refused(self, env):
-        with pytest.raises(ValueError, match="No audio model named 'zit'"):
+        with pytest.raises(ValueError, match="Unknown audio model 'zit'"):
             row_plan("audio", "zit", _web_config(env))
 
-    def test_a_download_is_needed_while_any_repository_is_missing(self, env):
-        web_config = _web_config(env)
-        present = {"m-a-p/YuE2-3B"}
-
-        needed = row_download_needed("audio", "yue2", web_config, downloaded=False, present=lambda target: target.repo_id in present)
-        present.add("m-a-p/YuE2-Vae")
-        after = row_download_needed("audio", "yue2", web_config, downloaded=False, present=lambda target: target.repo_id in present)
-
-        assert (needed, after) == (True, False)
-
-    def test_the_summary_lists_the_missing_parts_with_the_licence_lines_of_the_model(self, env):
+    def test_the_summary_lists_the_missing_model_with_the_licence_lines_of_the_model(self, env):
         plan = row_plan("audio", "yue2", _web_config(env))
 
-        summary = plan_summary(
-            plan,
+        summary = parts_summary(
+            (plan,),
             check=lambda target: TargetCheck(missing_files=2, missing_bytes=5_000_000_000 if target.repo_id.endswith("3B") else 100),
             present=lambda _target: False,
             space=lambda *_a, **_k: None,
@@ -285,15 +275,14 @@ class TestDownloadPlan:
             licences=load_licences(),
         )
 
-        assert [(part["repo"], part["bytes"]) for part in summary["parts"]] == [("m-a-p/YuE2-3B", 5_000_000_000), ("m-a-p/YuE2-Vae", 100)]
+        assert summary["parts"] == [{"label": "YuE2 3B", "model": "yue2", "bytes": 5_000_000_100}]
         assert summary["total_bytes"] == 5_000_000_100
         assert [(record["model"], record["name"]) for record in summary["licences"]] == [("yue2", "CC BY-NC 4.0 with individual creator permission")]
 
     def test_an_unreachable_hub_leaves_the_plan_unchecked(self, env):
         plan = row_plan("audio", "sa3", _web_config(env))
 
-        with pytest.raises(PlanUnchecked):
-            plan_summary(plan, check=lambda _target: None, present=lambda _target: False, cache_dir=lambda: env.hub)
+        assert parts_summary((plan,), check=lambda _target: None, present=lambda _target: False, cache_dir=lambda: env.hub)["unchecked"] is True
 
 
 class TestDeleteRoute:

@@ -23,7 +23,6 @@ from zvisiongenerator.core.video_family import FrameRule, VideoCapabilities, Vid
 from zvisiongenerator.utils.h3_preset import HubFiles, h3_preset
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
-from zvisiongenerator.utils.licences import check_licence_models, known_model_ids, load_licences
 from zvisiongenerator.utils.ltx_converted import LTX_FAMILY_MODEL_TYPE
 from zvisiongenerator.utils.paths import get_ziv_data_dir, parse_huggingface_repo_reference, split_huggingface_revision
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
@@ -177,7 +176,6 @@ def load_config() -> dict[str, Any]:
     seedvr2_settings(config, FP8_WEIGHTS.tiers_key)
 
     parse_audio_presets(config)
-    check_licence_models(load_licences(), known_model_ids(config))
 
     return config
 

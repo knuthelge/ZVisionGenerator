@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AUDIO_MODELS } from '../../test-utils/audio';
 import type { DraftState } from '$lib/types';
-import { audioView, characterCount, type AudioViewInput } from './audioView';
+import { audioView, type AudioViewInput } from './audioView';
 
 const YUE2 = AUDIO_MODELS[0];
 const HIGGS = AUDIO_MODELS[1];
@@ -45,7 +45,7 @@ describe('audioView reasons', () => {
   });
 
   it('counts a character outside the BMP once, as Python does', () => {
-    expect(characterCount('a😀b')).toBe(3);
+    expect(view({ workflow: 'speech', speechText: 'a😀b' }).characters).toBe(3);
     expect(view({ workflow: 'speech', speechText: '😀'.repeat(10_000) }).reason).toBeNull();
   });
 

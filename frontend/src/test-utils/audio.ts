@@ -27,7 +27,6 @@ export function makeAudioAsset(overrides: Partial<GalleryAsset> = {}): GalleryAs
     has_reference_voice: false,
     lyrics: LYRICS,
     cut: false,
-    parts: null,
     file_path: '/outputs/out/song.flac',
     has_reusable_config: true,
     reuse_workspace_url: '#/workspace?workflow=music&model=yue2&prompt=Dreamy',
@@ -78,15 +77,15 @@ export function makeImportedAudio(overrides: Partial<GalleryAsset> = {}): Galler
 
 /** The audio models of a machine that runs all three kinds. */
 export const AUDIO_MODELS: AudioModelOption[] = [
-  { id: 'yue2', label: 'YuE2 3B', kind: 'music', type: 'audio', capabilities: { lyrics: true, duration: false, voice_clone: false }, limits: { max_seconds: 360 }, default_seconds: null, instrumental_sections: '[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]', hidden_controls: ['length', 'voice', 'voice_consent', 'voice_path', 'voice_text'], licences: [] },
-  { id: 'higgs3', label: 'Higgs TTS 3', kind: 'speech', type: 'audio', capabilities: { lyrics: false, duration: false, voice_clone: true }, limits: { max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }, default_seconds: null, hidden_controls: ['length', 'lyrics'], licences: [] },
-  { id: 'sa3', label: 'Stable Audio 3 Medium', kind: 'sound', type: 'audio', capabilities: { lyrics: false, duration: true, voice_clone: false }, limits: { max_seconds: 380, min_seconds: 1 }, default_seconds: 10, hidden_controls: ['lyrics', 'voice', 'voice_consent', 'voice_path', 'voice_text'], licences: [] },
+  { id: 'yue2', label: 'YuE2 3B', kind: 'music', type: 'audio', capabilities: { lyrics: true, duration: false, voice_clone: false }, limits: { max_seconds: 360 }, instrumental_sections: '[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]', hidden_controls: ['length', 'voice', 'voice_consent', 'voice_path', 'voice_text'], licences: [] },
+  { id: 'higgs3', label: 'Higgs TTS 3', kind: 'speech', type: 'audio', capabilities: { lyrics: false, duration: false, voice_clone: true }, limits: { max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }, hidden_controls: ['length', 'lyrics'], licences: [] },
+  { id: 'sa3', label: 'Stable Audio 3 Medium', kind: 'sound', type: 'audio', capabilities: { lyrics: false, duration: true, voice_clone: false }, limits: { max_seconds: 380, min_seconds: 1 }, hidden_controls: ['lyrics', 'voice', 'voice_consent', 'voice_path', 'voice_text'], licences: [] },
 ];
 
 /** The licence records of the audio models the packaged config ships, as the server lists them. */
-export const YUE2_LICENCE: ModelLicence = { name: 'CC BY-NC 4.0 with individual creator permission', supplier: 'M-A-P', summary: 'Non-commercial; individual creators may monetise their outputs, companies need a licence', url: 'https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE', url_label: 'Licence', notice_url: null };
-export const SA3_LICENCE: ModelLicence = { name: 'Stability AI Community License', supplier: 'Stability AI', summary: 'Free under $1M revenue', url: 'https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE.md', url_label: 'Licence', notice_url: 'https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/NOTICE' };
-export const GEMMA_AUDIO_LICENCE: ModelLicence = { name: 'Gemma Terms of Use', supplier: 'Google', summary: "Gemma's use policy applies", url: 'https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE_GEMMA.md', url_label: 'Licence', notice_url: null };
+export const YUE2_LICENCE: ModelLicence = { name: 'CC BY-NC 4.0 with individual creator permission', supplier: 'M-A-P', summary: 'Non-commercial; individual creators may monetise their outputs, companies need a licence', url: 'https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE', url_label: 'Licence', attribution: null };
+export const SA3_LICENCE: ModelLicence = { name: 'Stability AI Community License', supplier: 'Stability AI', summary: 'Free under $1M revenue; commercial use needs a free registration', url: 'https://huggingface.co/stabilityai/stable-audio-3-medium', url_label: 'Model page', attribution: 'Powered by Stability AI' };
+export const GEMMA_AUDIO_LICENCE: ModelLicence = { name: 'Gemma Terms of Use', supplier: 'Google', summary: "Gemma's use policy applies", url: 'https://huggingface.co/google/gemma-3-12b-it', url_label: 'Model page', attribution: null };
 
 const AUDIO_CONTROLS = ['workflow', 'model', 'runs', 'seed'];
 const AUDIO_ENTRY: Omit<WorkflowContractEntry, 'visible_controls'> = { mode: 'audio', model_kind: 'audio', requires_reference_image: false, requires_source_video: false, clear_fields: [] };

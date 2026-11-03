@@ -18,7 +18,7 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 
 A built-in model shows its name with its alias under it, for example FLUX.2 Klein 9B and `klein9b`. The alias is what you use in the CLI and in prompt files.
 
-A model that comes with terms, and the **Background removal** row, has an **ⓘ** after its name. All three audio models have one. Hover it, or press it, to read the licence's name, who licenses it and what it allows, with links to the licence text and, where there is one, its NOTICE file. A model with two licences, such as the LTX models with Gemma, shows both. See [Licences](../concepts/models.md#licences).
+A model that comes with terms, and the **Background removal** row, has an **ⓘ** after its name. All three audio models have one. Hover it, or press it, to read the licence's name, who licenses it and what it allows, with a link to the licence text or the model's original page and, where the licence asks for one, its credit line. A model with two licences, such as the LTX models with Gemma, shows both. See [Licences](../concepts/models.md#licences).
 
 The **Audio models** table has a **Kind** column, **Music**, **Speech** or **Sound**, and its rows appear only for models that run on this machine.
 

@@ -264,9 +264,3 @@ class TestModelMethods:
         embeds = model.embed_prompt([3, 4, 5], None)
 
         assert torch.equal(embeds[0], model.backbone.embed_tokens.weight[[3, 4, 5]])
-
-    def test_embed_prompt_refuses_rows_that_do_not_match_the_slots(self, model: Higgs3Model) -> None:
-        with pytest.raises(ValueError, match="2 audio slots but 1 reference rows"):
-            model.embed_prompt([AUDIO_SLOT, AUDIO_SLOT], torch.zeros(1, 3, dtype=torch.long))
-        with pytest.raises(ValueError, match="0 audio slots but 1 reference rows"):
-            model.embed_prompt([1, 2], torch.zeros(1, 3, dtype=torch.long))

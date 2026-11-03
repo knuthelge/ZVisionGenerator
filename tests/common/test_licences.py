@@ -1,29 +1,23 @@
-"""Tests for the licence records: parsing, the known-model check ``load_config`` runs, the packaged file and the download notice."""
+"""Tests for the licence records: the loader, the packaged file's contract, the lookups and the download notice."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
+from urllib.parse import urlparse
 
 import pytest
 
 from tests._licences import use_licences
-from zvisiongenerator.utils.licences import (
-    LicenceRecord,
-    check_licence_models,
-    known_model_ids,
-    licence_notice,
-    licence_payload,
-    licence_text,
-    licences_for,
-    load_licences,
-    parse_licences,
-)
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL, LicenceRecord, licence_notice, licence_payload, licence_text, licences_for, load_licences
 
 _SHA = "455f1273c2f08f1fc93d725c2e6f1d7fc681cd94"
 _URL = f"https://huggingface.co/owner/repo/blob/{_SHA}/LICENSE.md"
-_NOTICE_URL = f"https://huggingface.co/owner/repo/blob/{_SHA}/NOTICE"
+_ATTRIBUTION = "Powered by Acme"
+_MODEL_PAGE = re.compile(r"^/[^/]+/[^/]+$")
+_PINNED_PATH = re.compile(r"(?:^|[/@])[0-9a-f]{40}(?:[/?#]|$)")
 
 
 def _record(**overrides: Any) -> dict[str, Any]:
@@ -32,143 +26,56 @@ def _record(**overrides: Any) -> dict[str, Any]:
     return record
 
 
-def _records(**records: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return records or {"test": _record()}
+def _records(**records: dict[str, Any]) -> tuple[LicenceRecord, ...]:
+    """Build records the way the loader does, without a file."""
+    raw = records or {"test": _record()}
+    return tuple(
+        LicenceRecord(
+            id=key, name=r["name"], supplier=r["supplier"], summary=r["summary"], url=r["url"], models=tuple(r["models"]), url_label=r.get("url_label", "Licence"), attribution=r.get("attribution")
+        )
+        for key, r in raw.items()
+    )
 
 
-def _parsed(**records: dict[str, Any]) -> tuple[LicenceRecord, ...]:
-    return parse_licences(_records(**records))
+def _plan(targets: list[str] | None) -> Any:
+    return lambda: targets
 
 
-def test_parses_a_record_with_defaults() -> None:
-    (record,) = _parsed()
+def test_loads_records_with_defaults_and_optional_keys(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    use_licences(monkeypatch, tmp_path, {"plain": _record(), "full": _record(attribution=_ATTRIBUTION, url_label="Model card")})
 
-    assert record == LicenceRecord(id="test", name="Test License", supplier="Acme", summary="Non-commercial", url=_URL, models=("alpha",), notice_url=None, url_label="Licence")
+    records = {record.id: record for record in load_licences()}
+    plain, full = records["plain"], records["full"]
 
-
-def test_parses_the_optional_keys() -> None:
-    (record,) = _parsed(test=_record(notice_url=_NOTICE_URL, url_label="Model card"))
-
-    assert record.notice_url == _NOTICE_URL
-    assert record.url_label == "Model card"
-
-
-def test_records_keep_the_order_they_are_written_in() -> None:
-    assert [record.id for record in _parsed(b=_record(), a=_record(), c=_record())] == ["b", "a", "c"]
-
-
-@pytest.mark.parametrize("key", ["name", "supplier", "summary", "url", "models"])
-def test_refuses_a_missing_required_key(key: str) -> None:
-    record = _record()
-    del record[key]
-
-    with pytest.raises(ValueError, match=key):
-        _parsed(test=record)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://huggingface.co/owner/repo/blob/main/LICENSE.md",
-        "https://cdn.jsdelivr.net/gh/owner/repo@main/LICENSE.pdf",
-        "https://github.com/owner/repo/blob/master/LICENSE",
-        f"http://huggingface.co/owner/repo/blob/{_SHA}/LICENSE.md",
-    ],
-)
-@pytest.mark.parametrize("key", ["url", "notice_url"])
-def test_refuses_a_url_without_a_revision(key: str, url: str) -> None:
-    with pytest.raises(ValueError, match=key):
-        _parsed(test=_record(**{key: url}))
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        f"https://huggingface.co/owner/repo/blob/{_SHA}/LICENSE.md",
-        f"https://github.com/owner/repo/blob/{_SHA}/LICENSE",
-        f"https://raw.githubusercontent.com/owner/repo/{_SHA}/LICENSE",
-        f"https://cdn.jsdelivr.net/gh/owner/repo@{_SHA}/assets/LICENSE.pdf",
-    ],
-)
-def test_accepts_a_pinned_url(url: str) -> None:
-    (record,) = _parsed(test=_record(url=url))
-
-    assert record.url == url
-
-
-@pytest.mark.parametrize("models", [[], "alpha", None, [3]])
-def test_refuses_an_empty_or_malformed_models_list(models: object) -> None:
-    with pytest.raises(ValueError, match="models"):
-        _parsed(test=_record(models=models))
-
-
-_CONFIG = {"model_aliases": {"alpha": "o/alpha", "beta": "o/beta"}, "audio_model_presets": {"song": {}}}
-
-
-def test_the_known_models_are_the_aliases_the_audio_presets_and_matte() -> None:
-    assert known_model_ids(_CONFIG) == {"alpha", "beta", "song", "matte"}
-
-
-def test_a_config_without_model_sections_knows_only_matte() -> None:
-    assert known_model_ids({}) == {"matte"}
-
-
-def test_a_record_may_name_aliases_audio_presets_and_matte() -> None:
-    records = _parsed(test=_record(models=["alpha", "matte", "song"]))
-
-    check_licence_models(records, known_model_ids(_CONFIG))
-
-
-def test_refuses_an_unknown_model() -> None:
-    records = _parsed(test=_record(models=["alpha", "nope"]))
-
-    with pytest.raises(ValueError, match="'test' names an unknown model 'nope'"):
-        check_licence_models(records, known_model_ids(_CONFIG))
-
-
-def test_an_audio_preset_is_unknown_while_the_config_has_no_audio_section() -> None:
-    records = _parsed(test=_record(models=["song"]))
-
-    with pytest.raises(ValueError, match="unknown model 'song'"):
-        check_licence_models(records, known_model_ids({"model_aliases": {"alpha": "o/alpha"}}))
+    assert plain == LicenceRecord(id="plain", name="Test License", supplier="Acme", summary="Non-commercial", url=_URL, models=("alpha",))
+    assert (full.id, full.attribution, full.url_label) == ("full", _ATTRIBUTION, "Model card")
 
 
 def test_a_model_may_be_in_two_records() -> None:
-    records = _parsed(first=_record(name="First"), second=_record(name="Second", models=["alpha", "beta"]))
+    records = _records(first=_record(name="First"), second=_record(name="Second", models=["alpha", "beta"]))
 
     assert [record.name for record in licences_for(records, "alpha")] == ["First", "Second"]
     assert [record.name for record in licences_for(records, "beta")] == ["Second"]
-
-
-def test_licences_for_a_model_without_a_record_is_empty() -> None:
-    assert licences_for(_parsed(), "gamma") == ()
+    assert licences_for(records, "gamma") == ()
 
 
 def test_the_payload_is_the_json_form_of_the_records_of_a_model() -> None:
-    records = _parsed(test=_record(notice_url=_NOTICE_URL, url_label="Model card"))
+    records = _records(test=_record(attribution=_ATTRIBUTION, url_label="Model card"))
 
-    assert licence_payload(records, "alpha") == [{"name": "Test License", "supplier": "Acme", "summary": "Non-commercial", "url": _URL, "url_label": "Model card", "notice_url": _NOTICE_URL}]
+    assert licence_payload(records, "alpha") == [{"name": "Test License", "supplier": "Acme", "summary": "Non-commercial", "url": _URL, "url_label": "Model card", "attribution": _ATTRIBUTION}]
     assert licence_payload(records, "gamma") == []
 
 
 def test_licence_text_names_the_licence_its_supplier_and_summary() -> None:
-    (record,) = _parsed()
+    (record,) = _records()
 
     assert licence_text(record) == "Test License (Acme): Non-commercial"
 
 
-def test_notice_for_a_missing_target() -> None:
-    records = _parsed(test=_record(notice_url=_NOTICE_URL))
+def test_notice_lists_every_record_of_a_missing_model() -> None:
+    records = _records(first=_record(name="First"), second=_record(name="Second", attribution=_ATTRIBUTION))
 
-    lines = licence_notice(records, "alpha", ["target"], lambda target: False)  # type: ignore[list-item]
-
-    assert lines == ("By downloading you agree to these terms:", "Test License (Acme): Non-commercial", f"  {_URL}", f"  NOTICE: {_NOTICE_URL}")
-
-
-def test_notice_lists_every_record_of_a_model() -> None:
-    records = _parsed(first=_record(name="First"), second=_record(name="Second", notice_url=_NOTICE_URL))
-
-    lines = licence_notice(records, "alpha", None, MagicMock())
+    lines = licence_notice(records, "alpha", _plan(["target"]), lambda target: False)
 
     assert lines == (
         "By downloading you agree to these terms:",
@@ -176,46 +83,57 @@ def test_notice_lists_every_record_of_a_model() -> None:
         f"  {_URL}",
         "Second (Acme): Non-commercial",
         f"  {_URL}",
-        f"  NOTICE: {_NOTICE_URL}",
+        f"  {_ATTRIBUTION}",
     )
 
 
 def test_notice_for_unplannable_targets_does_not_call_present() -> None:
     present = MagicMock(return_value=True)
 
-    lines = licence_notice(_parsed(), "alpha", None, present)
-
-    assert lines
+    assert licence_notice(_records(), "alpha", _plan(None), present)
     present.assert_not_called()
 
 
-def test_notice_is_empty_when_every_target_is_present() -> None:
-    present = MagicMock(return_value=True)
-
-    assert licence_notice(_parsed(), "alpha", ["a", "b"], present) == ()  # type: ignore[list-item]
-    assert present.call_count == 2
+def test_notice_is_empty_when_every_target_is_present_and_shown_when_one_is_missing() -> None:
+    assert licence_notice(_records(), "alpha", _plan(["a", "b"]), lambda target: True) == ()
+    assert licence_notice(_records(), "alpha", _plan(["a", "b"]), lambda target: target == "a")
 
 
-def test_notice_appears_when_any_target_is_missing() -> None:
-    assert licence_notice(_parsed(), "alpha", ["a", "b"], lambda target: target == "a")  # type: ignore[list-item]
+def test_a_model_without_a_record_is_never_planned() -> None:
+    plan = MagicMock()
 
-
-def test_notice_is_empty_for_a_model_without_a_record_and_never_calls_present() -> None:
-    present = MagicMock()
-
-    assert licence_notice(_parsed(), "gamma", ["a"], present) == ()  # type: ignore[list-item]
-    assert licence_notice(_parsed(), "gamma", None, present) == ()
-    present.assert_not_called()
+    assert licence_notice(_records(), "gamma", plan) == ()
+    plan.assert_not_called()
 
 
 class TestPackagedRecords:
-    """The records the packaged ``licences.yaml`` ships."""
+    """The records the packaged ``licences.yaml`` ships: pinned, naming known models."""
 
-    def test_every_record_parses_is_pinned_and_names_known_models(self, packaged_config_shared: dict[str, Any]) -> None:
+    def test_every_url_is_https_and_pinned_to_a_commit_or_a_model_page(self) -> None:
         records = load_licences()
 
         assert records
-        check_licence_models(records, known_model_ids(packaged_config_shared))
+        for url in [r.url for r in records]:
+            parsed = urlparse(url)
+            model_page = parsed.netloc == "huggingface.co" and _MODEL_PAGE.match(parsed.path)
+            assert parsed.scheme == "https" and (_PINNED_PATH.search(parsed.path) or model_page), url
+
+    def test_no_link_points_to_a_mirror_the_app_downloads_from(self) -> None:
+        mirrors = ("unsloth/", "cocktailpeanut/", "Comfy-Org/", "mlx-community/", "Hippotes/")
+
+        assert [r.id for r in load_licences() if any(mirror in r.url for mirror in mirrors)] == []
+
+    def test_only_the_stability_and_higgs_audio_records_carry_an_attribution(self) -> None:
+        carrying = {r.id: r.attribution for r in load_licences() if r.attribution}
+
+        assert set(carrying) == {"stability-community", "higgs-audio2-community"}
+        assert carrying["stability-community"] == "Powered by Stability AI"
+
+    def test_every_record_names_known_models(self, packaged_config_shared: dict[str, Any]) -> None:
+        known = {MATTE_LICENCE_MODEL, *packaged_config_shared["model_aliases"], *packaged_config_shared["audio_model_presets"]}
+
+        for record in load_licences():
+            assert record.models and set(record.models) <= known, record.id
 
     @pytest.mark.parametrize(
         ("model", "expected"),
@@ -239,35 +157,15 @@ class TestPackagedRecords:
     def test_the_records_of_each_model(self, model: str, expected: list[str]) -> None:
         assert [record.id for record in licences_for(load_licences(), model)] == expected
 
-    def test_only_stable_audio_links_a_notice(self) -> None:
-        records = load_licences()
-        notices = {model: [record.notice_url is not None for record in licences_for(records, model) if record.id != "gemma"] for model in ("yue2", "higgs3", "sa3")}
 
-        assert notices == {"yue2": [False], "higgs3": [False, False], "sa3": [True]}
+def test_a_licences_key_in_the_user_config_has_no_effect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from zvisiongenerator.utils.config import load_config
 
+    (tmp_path / "config.yaml").write_text(f"licences:\n  flux-nc:\n    name: Mine\n    supplier: Me\n    summary: Free\n    url: {_URL}\n    models: [zit]\n", encoding="utf-8")
+    monkeypatch.setattr("zvisiongenerator.utils.config.get_ziv_data_dir", lambda: tmp_path)
+    before = load_licences()
 
-class TestLoadConfig:
-    """``load_config`` checks the records against the merged config's models and ignores any ``licences`` key of the user's."""
+    load_config()
 
-    @staticmethod
-    def _load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> dict[str, Any]:
-        from zvisiongenerator.utils.config import load_config
-
-        (tmp_path / "config.yaml").write_text(text, encoding="utf-8")
-        monkeypatch.setattr("zvisiongenerator.utils.config.get_ziv_data_dir", lambda: tmp_path)
-        return load_config()
-
-    def test_a_licences_key_in_the_user_config_has_no_effect(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        text = f"licences:\n  flux-nc:\n    name: Mine\n    supplier: Me\n    summary: Free\n    url: {_URL}\n    models: [zit]\n"
-        before = load_licences()
-
-        self._load(tmp_path, monkeypatch, text)
-
-        assert load_licences() == before
-        assert licences_for(load_licences(), "zit") == ()
-
-    def test_a_user_config_that_removes_a_licensed_model_is_refused(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        use_licences(monkeypatch, tmp_path, _records(mine=_record(models=["not-a-model"])))
-
-        with pytest.raises(ValueError, match="unknown model 'not-a-model'"):
-            self._load(tmp_path, monkeypatch, "generation: {}\n")
+    assert load_licences() == before
+    assert licences_for(load_licences(), "zit") == ()

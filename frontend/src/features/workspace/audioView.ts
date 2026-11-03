@@ -1,5 +1,5 @@
 import { fileName } from '$lib/components/molecules/assetDetails';
-import { audioModelById, secondsRange } from '$lib/state/audioDraft';
+import { AUDIO_TEXT_KEYS, audioModelById } from '$lib/state/audioDraft';
 import { formatTimestamp } from '$lib/state/audioTrack';
 import { trackKey, trackLengths } from '$lib/state/audioTrackLength.svelte';
 import { draft } from '$lib/state/draft.svelte';
@@ -12,9 +12,6 @@ import { workspaceCapabilities, type WorkspaceCapabilities } from './capabilitie
 
 /** The voice the Speech tab follows: a recording and its transcript, or none (the model picks a voice). */
 export interface VoiceView {
-  /** The model can follow a recording, so the Voice section is offered. */
-  visible: boolean;
-  mode: 'any' | 'recording';
   /** The voice follows a recording: *From a recording* is chosen on a model that can. */
   recording: boolean;
   /** A recording is chosen, as a path or as an upload. */
@@ -30,11 +27,7 @@ export interface VoiceView {
   gone: boolean;
   /** What is wrong with the recording itself (its length, or a file that did not come back), shown under its slot; null when nothing. */
   error: string | null;
-  /** The recordings the model follows, in seconds. */
-  range: { min: number; max: number };
   text: string;
-  /** The recording is chosen and says nothing yet. */
-  textMissing: boolean;
   /** The speaker's consent is asked for: a recording is chosen and it is not a take the model chose the voice of. */
   needsConsent: boolean;
   ticked: boolean;
@@ -82,30 +75,19 @@ export interface AudioViewInput {
 }
 
 const NO_VOICE: VoiceView = {
-  visible: false, mode: 'any', recording: false, set: false, path: null, file: null, name: '', length: null, gone: false, error: null,
-  range: { min: 3, max: 30 }, text: '', textMissing: false, needsConsent: false, ticked: false, sent: null, summary: { text: 'Any', tone: 'muted' }, chip: 'Any',
+  recording: false, set: false, path: null, file: null, name: '', length: null, gone: false, error: null,
+  text: '', needsConsent: false, ticked: false, sent: null, summary: { text: 'Any', tone: 'muted' }, chip: 'Any',
 };
-
-/** Characters of a text, counted as Python's `len` does (a character outside the BMP is one). */
-export function characterCount(text: string): number {
-  let count = 0;
-  for (const _ of text) count += 1;
-  return count;
-}
-
-/** The text of the open kind in the draft. */
-function textOf(state: DraftState, kind: AudioWorkflow): string {
-  return kind === 'music' ? state.audioStyle : kind === 'speech' ? state.speechText : state.soundPrompt;
-}
 
 /** Format a range of seconds for a message: "3 to 30 seconds". */
 function rangeText(range: { min: number; max: number }): string {
   return `${range.min} to ${range.max} seconds`;
 }
 
-function voiceView(input: AudioViewInput): VoiceView {
+/** The voice, and the reason (in reading order) a recording blocks Generate, or null. */
+function voiceView(input: AudioViewInput): { voice: VoiceView; reason: string | null } {
   const { state, caps, model, file, restored, lengthOf, consent } = input;
-  if (!caps.showVoice) return NO_VOICE;
+  if (!caps.showVoice) return { voice: NO_VOICE, reason: null };
   const range = { min: model?.limits.min_voice_seconds ?? 3, max: model?.limits.max_voice_seconds ?? 30 };
   const path = hasPath(state.voicePath) ? state.voicePath : null;
   const set = path !== null || state.voiceUpload !== null;
@@ -121,30 +103,34 @@ function voiceView(input: AudioViewInput): VoiceView {
   const sent = recording && (file !== null || sentPath !== null) ? { path: sentPath, file, text } : null;
   const summary: VoiceView['summary'] = !recording ? { text: 'Any', tone: 'muted' } : error !== null ? { text: error.split('.')[0], tone: 'error' } : set ? { text: name, tone: 'active' } : { text: 'Choose a recording', tone: 'muted' };
   const chip = !recording ? 'Any' : set ? name : 'none';
-  return { visible: true, mode: state.voiceMode, recording, set, path, file, name, length, gone, error, range, text, textMissing: recording && set && text.trim() === '', needsConsent, ticked: consent.ticked, sent, summary, chip };
+  const reason = !recording ? null
+    : !set ? 'Choose a recording to clone.'
+    : gone ? error
+    : error !== null ? `Use a recording of ${rangeText(range)}.`
+    : text.trim() === '' ? 'Type what the recording says.'
+    : needsConsent && !consent.ticked ? 'Tick the box to confirm you may clone this voice.'
+    : null;
+  return { voice: { recording, set, path, file, name, length, gone, error, text, needsConsent, ticked: consent.ticked, sent, summary, chip }, reason };
 }
 
 /** Derive what the open Audio tab sends and the one reason, if any, that Generate is off. Reasons come in the order the boxes are read. */
 export function audioView(input: AudioViewInput): AudioView {
   const { state, caps, model } = input;
   const kind = caps.audioKind;
-  const voice = voiceView(input);
+  const { voice, reason: voiceReason } = voiceView(input);
   if (!caps.isAudio || kind === null) {
     return { active: false, kind: null, model, text: '', music: null, characters: 0, maxCharacters: null, overLimit: false, voice, reason: null };
   }
-  const text = textOf(state, kind);
+  const text = state[AUDIO_TEXT_KEYS[kind]];
   const maxCharacters = kind === 'speech' ? (model?.limits.max_text_chars ?? null) : null;
-  const characters = kind === 'speech' ? characterCount(text) : 0;
+  // Counted as Python's len counts: a character outside the BMP is one.
+  const characters = kind === 'speech' ? [...text].length : 0;
   const overLimit = maxCharacters !== null && characters > maxCharacters;
   const music = kind === 'music' && model?.instrumental_sections ? musicMode(state.lyrics, model.instrumental_sections) : null;
   const minutes = maxCharacters === null ? 0 : Math.round(maxCharacters / 1000);
   const reason =
     text.trim() === '' ? { music: 'Write the style.', speech: 'Write the text to speak.', sound: 'Describe the sound.' }[kind]
-    : voice.recording && !voice.set ? 'Choose a recording to clone.'
-    : voice.recording && voice.gone ? voice.error
-    : voice.recording && voice.error !== null ? `Use a recording of ${rangeText(voice.range)}.`
-    : voice.recording && voice.textMissing ? 'Type what the recording says.'
-    : voice.recording && voice.needsConsent && !voice.ticked ? 'Tick the box to confirm you may clone this voice.'
+    : voiceReason !== null ? voiceReason
     : overLimit ? `Shorten the text: it's over ${maxCharacters!.toLocaleString('en-US')} characters, about ${minutes} minutes of speech.`
     : null;
   return { active: true, kind, model, text, music, characters, maxCharacters, overLimit, voice, reason };
@@ -165,19 +151,14 @@ export function currentAudioView(context: WorkspaceContext): AudioView {
   });
 }
 
-/** The length range of a sound on the open model, for the Length row. */
-export function soundRange(model: AudioModelOption | null): { min: number; max: number } {
-  return secondsRange(model);
-}
-
 /**
  * The fields an audio Generate sends: the ones Copy CLI reads, and only those of the open kind. The tick goes as
  * `voice_consent` (a hidden "false" first, "on" when ticked), so an unticked box sends nothing true; the recording goes as
  * `voice_file` (an upload, which wins) or `voice_path`.
  */
-export function audioFormData(view: AudioView, state: DraftState, runs: number, seed: number | null): FormData {
+export function audioFormData(view: AudioView, state: DraftState): FormData {
   const form = new FormData();
-  const kind = view.kind ?? 'music';
+  const kind = view.kind!;
   form.set('mode', 'audio');
   form.set('workflow', kind);
   form.set('model', state.model);
@@ -193,7 +174,15 @@ export function audioFormData(view: AudioView, state: DraftState, runs: number, 
     form.append('voice_consent', 'false');
     if (view.voice.ticked) form.append('voice_consent', 'on');
   }
-  form.set('runs', String(runs));
-  if (seed !== null) form.set('seed', String(seed));
+  form.set('runs', String(state.runs));
+  if (state.seed !== null) form.set('seed', String(state.seed));
   return form;
 }
+
+/** The Voice section's and popover's shared words: the two modes, the Any hint, the transcript's placeholder and the consent line. */
+export const VOICE_WORDS = {
+  modes: [{ value: 'any', label: 'Any' }, { value: 'recording', label: 'From a recording' }] as { value: 'any' | 'recording'; label: string }[],
+  anyHint: 'The model picks a voice, and it changes from take to take. To keep one, use a take as the voice: Gallery, Use as → Voice.',
+  placeholder: 'The words spoken in the recording',
+  consent: "This is my voice, or I have the speaker's permission to clone it.",
+};

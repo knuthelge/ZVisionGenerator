@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import { draft } from '$lib/state/draft.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { DownloadPlan, JobContext, JobDownloadPlan, WorkspaceContext } from '$lib/types';
+import type { JobContext, JobDownloadPlan, RowDownloadPlan, WorkspaceContext } from '$lib/types';
 
 import { makeContext, withEnhancer } from '../../test-utils/workspace';
 import { answerConfirm, createHost, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, settle, submitForm } from '../../test-utils/workspaceHarness';
@@ -112,8 +112,8 @@ async function mountWorkspace(context: WorkspaceContext = makeContext()): Promis
   app = await mountWorkspacePage(context, target);
 }
 
-const KLEIN = { label: 'FLUX.2 Klein 9B', model: 'klein9b', repo: 'org/klein', files: 4, bytes: 35.1e9 };
-const ENHANCER = { label: 'Prompt enhancer', model: 'org/llm', repo: 'org/llm', files: 2, bytes: 2.4e9 };
+const KLEIN = { label: 'FLUX.2 Klein 9B', model: 'klein9b', bytes: 35.1e9 };
+const ENHANCER = { label: 'Prompt enhancer', model: 'org/llm', bytes: 2.4e9 };
 const SPACE = { path: '/data', needed_bytes: 37.5e9, free_bytes: 812e9, enough: true };
 const plan = (...parts: JobDownloadPlan['parts']): JobDownloadPlan => ({ parts, total_bytes: parts.reduce((sum, part) => sum + (part.bytes ?? 0), 0), space: SPACE, unchecked: false, licences: [] });
 
@@ -244,13 +244,13 @@ describe('Generate asks before a job downloads', () => {
 });
 
 describe('Enhance asks before it downloads its model', () => {
-  const rowPlan = (overrides: Partial<DownloadPlan> = {}): DownloadPlan => ({
-    kind: 'enhancer',
-    name: 'fast',
+  const rowPlan = (overrides: Partial<RowDownloadPlan> = {}): RowDownloadPlan => ({
     label: 'Fast enhancer model',
-    parts: [{ repo: 'org/llm', files: 2, bytes: 2.4e9 }],
+    parts: [{ label: 'Fast enhancer model', model: 'fast', bytes: 2.4e9 }],
     total_bytes: 2.4e9,
     space: SPACE,
+    unchecked: false,
+    licences: [],
     ...overrides,
   });
 
@@ -294,7 +294,7 @@ describe('Enhance asks before it downloads its model', () => {
   });
 
   it('asks about the Smart model when Smart is chosen', async () => {
-    modelApiMocks.getDownloadPlan.mockResolvedValue(rowPlan({ name: 'smart', label: 'Smart enhancer model' }));
+    modelApiMocks.getDownloadPlan.mockResolvedValue(rowPlan({ label: 'Smart enhancer model' }));
     draft.update('enhanceModel', 'smart');
     await mountWorkspace(enhancerContext((contract) => { contract.smart = { downloaded: false, download_size_label: '19 GB', unavailable: null }; }));
 

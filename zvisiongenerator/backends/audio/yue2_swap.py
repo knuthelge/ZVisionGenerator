@@ -7,15 +7,12 @@ Everything small (norms, embedders, projections, buffers) stays on the GPU the w
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from torch import Tensor, nn
 
-__all__ = ["PHASES", "WeightSwap"]
-
-PHASES: Final = ("ar", "prefill", "ode", "none")
-"""The phases of a take, in order: AR tokens, the NAR prefill, the NAR ODE solve and the VAE decode."""
+__all__ = ["WeightSwap"]
 
 
 class WeightSwap:
@@ -53,19 +50,17 @@ class WeightSwap:
     def restore_resident(self) -> None:
         """Move the resident parameters and the buffers back to the device, wherever they are now."""
         for parameter in self._resident:
-            if parameter.device.type != _device_type(self.device):
+            if parameter.device.type != self.device:
                 parameter.data = parameter.data.to(self.device)
         for buffer in self.model.buffers():
-            if buffer.device.type != _device_type(self.device):
+            if buffer.device.type != self.device:
                 buffer.data = buffer.data.to(self.device)
 
     def phase(self, name: str) -> None:
         """Put the group *name* needs on the device and every other group in CPU memory.
 
-        ``ar`` needs the AR group, ``prefill`` the AR group without ``lm_head``, ``ode`` the NAR group and ``none`` no group.
-
-        Raises:
-            ValueError: If *name* is not one of :data:`PHASES`.
+        The phases of a take, in order: ``ar`` (AR tokens) needs the AR group, ``prefill`` (the NAR prefill) the AR group
+        without ``lm_head``, ``ode`` (the NAR ODE solve) the NAR group and ``none`` (the VAE decode) no group.
         """
         import torch
 
@@ -74,9 +69,7 @@ class WeightSwap:
             "prefill": self._embed + self._ar_layers,
             "ode": self._nar_layers,
             "none": [],
-        }.get(name)
-        if wanted is None:
-            raise ValueError(f"Unknown weight swap phase '{name}'. Known: {', '.join(PHASES)}.")
+        }[name]
         keep = {id(module) for module in wanted}
         self._place([module for module in self._groups if id(module) not in keep], on_device=False)
         torch.cuda.empty_cache()
@@ -98,8 +91,3 @@ class WeightSwap:
                 pinned = self._pinned[id(parameter)]
                 parameter.data = pinned.to(self.device, non_blocking=True) if on_device else pinned
             self._on_device[id(module)] = on_device
-
-
-def _device_type(device: str) -> str:
-    """Return the type of a torch device name, ``cuda`` for ``cuda:0``."""
-    return device.split(":", 1)[0]

@@ -94,7 +94,7 @@ The first part follows the recording, and each later part follows the first, so 
 !!! tip "Clone from a clean recording"
     Use a clean, close-miked recording without background noise. A phone, radio or old recording makes the cloned voice hiss, and more so in long text that is split into parts. It also sounds less like the speaker.
 
-**The consent is never saved.** It is not in the file, the Gallery or the browser. A new recording, **Reset**, **Reuse settings**, **Use as** and a reload all clear the tick, and it is asked again. The CLI asks for it as `--voice-consent`. A take made with **Any** is the model's own voice, so using it as a voice needs no tick; a take that was itself cloned from a recording still does.
+**The consent is never saved.** It is not in the file, the Gallery or the browser. A new recording, **Reset**, a reload, and a **Reuse settings**, **Load settings** or **Use as** that replaces the voice all clear the tick, and it is asked again. The CLI asks for it as `--voice-consent`. A take made with **Any** is the model's own voice, so using it as a voice needs no tick; a take that was itself cloned from a recording still does.
 
 ## Sound
 

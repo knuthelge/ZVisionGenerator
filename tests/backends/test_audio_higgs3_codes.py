@@ -41,12 +41,6 @@ class TestDelay:
 
         assert undelay_codes(rows).tolist() == [[0, 4, 8], [3, 7, 11], [6, 10, 14]]
 
-    def test_a_tensor_that_is_not_two_dimensional_is_refused(self) -> None:
-        with pytest.raises(ValueError, match="2-D"):
-            delay_codes(torch.zeros(3), BOC, EOC)
-        with pytest.raises(ValueError, match="2-D"):
-            undelay_codes(torch.zeros(3))
-
 
 class TestSampling:
     def test_top_p_keeps_exactly_the_nucleus_and_always_the_top_code(self) -> None:

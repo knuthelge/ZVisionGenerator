@@ -20,22 +20,20 @@ from zvisiongenerator.utils.provenance import embed_png_config
 from zvisiongenerator.web import model_download_plan as plan_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import upscale_api
-from zvisiongenerator.web.job_downloads import DownloadPlanners, job_download_parts
+from zvisiongenerator.web import job_downloads as job_downloads_module
 
 _KLEIN = "unsloth/FLUX.2-klein-9B"
 _ENHANCER = "owner/enhancer"
 _GIB = 1024**3
 
 
-def _fake_planners(enhance: bool) -> DownloadPlanners:
-    """Return planners that name one target per model and (when *enhance*) plan the enhancer without the Hub."""
-    return DownloadPlanners(
-        image=lambda model_ref, *, family, config, platform_key: (DownloadTarget(_KLEIN if model_ref == "klein9b" else f"owner/{model_ref}"),),
-        video=lambda model_ref, *, family, config, model_name, upscale: (DownloadTarget(f"owner/{model_ref}"),),
-        matte=lambda: (DownloadTarget("owner/matte"),),
-        enhancer=lambda repo, revision: (DownloadTarget(repo, revision),),
-        plan_enhancer=lambda *_a, **_kw: (_ENHANCER, None) if enhance else None,
-    )
+def _use_fake_planners(monkeypatch, env) -> None:
+    """Plan one target per model and (when ``env.enhance``) the enhancer, without the Hub."""
+    monkeypatch.setattr(job_downloads_module, "image_plan", lambda model_ref, *, family, config, platform_key: (DownloadTarget(_KLEIN if model_ref == "klein9b" else f"owner/{model_ref}"),))
+    monkeypatch.setattr(job_downloads_module, "video_plan", lambda model_ref, *, family, config, model_name, upscale: (DownloadTarget(f"owner/{model_ref}"),))
+    monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: (DownloadTarget("owner/matte"),))
+    monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda repo, revision: (DownloadTarget(repo, revision),))
+    monkeypatch.setattr(job_downloads_module.prompt_enhancer_session, "plan_job_enhancer", lambda *_a, **_kw: (_ENHANCER, None) if env.enhance else None)
 
 
 @pytest.fixture
@@ -49,8 +47,7 @@ def plan_env(monkeypatch, tmp_path):
     patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="flux2", is_distilled=False, size=None), defaults=make_resolved_image_defaults(), submitted=env.submitted)
     monkeypatch.setattr(web_server.download_flights, "active", env.flights.active)
 
-    real_parts = job_download_parts
-    monkeypatch.setattr(web_server, "job_download_parts", lambda *args, **kwargs: real_parts(*args, planners=_fake_planners(env.enhance), **kwargs))
+    _use_fake_planners(monkeypatch, env)
 
     def check(target):
         env.hub_calls.append(target.repo_id)
@@ -84,9 +81,9 @@ class TestGeneratePlan:
 
         assert response.status_code == 200
         plan = response.json()
-        assert [(part["label"], part["model"], part["repo"], part["files"], part["bytes"]) for part in plan["parts"]] == [
-            (_ENHANCER, _ENHANCER, _ENHANCER, 3, 2 * _GIB),
-            ("klein9b", "klein9b", _KLEIN, 3, 2 * _GIB),
+        assert [(part["label"], part["model"], part["bytes"]) for part in plan["parts"]] == [
+            (_ENHANCER, _ENHANCER, 2 * _GIB),
+            ("klein9b", "klein9b", 2 * _GIB),
         ]
         assert plan["total_bytes"] == 4 * _GIB
         assert plan["space"]["enough"] is True
@@ -99,8 +96,9 @@ class TestGeneratePlan:
         licences = plan_env.client.post("/api/generate/plan", data=_form()).json()["licences"]
 
         assert [(entry["model"], entry["name"], entry["supplier"], entry["summary"]) for entry in licences] == [("klein9b", "FLUX Non-Commercial License v2.1", "Black Forest Labs", "Non-commercial")]
-        assert licences[0]["url_label"] == "Licence"
-        assert licences[0]["url"].startswith("https://") and licences[0]["notice_url"].startswith("https://")
+        assert licences[0]["url_label"] == "Model page"
+        assert licences[0]["url"] == "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B"
+        assert licences[0]["attribution"] is None
 
     def test_a_model_without_a_record_has_no_licences(self, plan_env):
         plan_env.enhance = False
@@ -167,15 +165,16 @@ class TestGeneratePlan:
         plan = response.json()
         assert plan["unchecked"] is True
         assert plan["total_bytes"] is None
-        assert [(part["model"], part["files"], part["bytes"]) for part in plan["parts"]] == [("klein9b", 0, None)]
+        assert [(part["model"], part["bytes"]) for part in plan["parts"]] == [("klein9b", None)]
 
     def test_a_part_that_cannot_be_planned_is_unchecked(self, plan_env, monkeypatch):
-        monkeypatch.setattr(web_server, "job_download_parts", lambda *args, **kwargs: job_download_parts(*args, planners=DownloadPlanners(image=lambda *_a, **_kw: None), **kwargs))
+        plan_env.enhance = False
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: None)
 
         plan = plan_env.client.post("/api/generate/plan", data=_form(model="zit")).json()
 
         assert plan["unchecked"] is True
-        assert plan["parts"] == [{"label": "zit", "model": "zit", "repo": "", "files": 0, "bytes": None}]
+        assert plan["parts"] == [{"label": "zit", "model": "zit", "bytes": None}]
 
     def test_a_refusal_by_the_hub_is_a_424_with_its_message(self, plan_env, monkeypatch):
         def refuse(_parts, **_kwargs):
@@ -227,7 +226,7 @@ class TestGeneratePlan:
     def test_a_submit_and_its_plan_parse_the_same_request(self, plan_env, monkeypatch):
         seen = []
         real_parts = web_server.job_download_parts
-        monkeypatch.setattr(web_server, "job_download_parts", lambda request, args, *rest, **kwargs: seen.append((request, args)) or real_parts(request, args, *rest, **kwargs))
+        monkeypatch.setattr(web_server, "job_download_parts", lambda request, *rest, **kwargs: seen.append((request, kwargs.get("args"))) or real_parts(request, *rest, **kwargs))
         form = _form(seed="7", runs="2", steps="6", ratio="2:3", size="l", transparent="on")
 
         plan_env.client.post("/api/generate/plan", data=form)
@@ -250,7 +249,7 @@ class TestGeneratePlan:
         submitted = stub_video_submission(monkeypatch, plan_env.root)
         seen = []
         real_parts = web_server.job_download_parts
-        monkeypatch.setattr(web_server, "job_download_parts", lambda request, args, *rest, **kwargs: seen.append((request, args)) or real_parts(request, args, *rest, **kwargs))
+        monkeypatch.setattr(web_server, "job_download_parts", lambda request, *rest, **kwargs: seen.append((request, kwargs.get("args"))) or real_parts(request, *rest, **kwargs))
         form = {"mode": "video", "model": "ltx-8", "prompt": "a lake", "seed": "5", "steps": "6"}
 
         assert plan_env.client.post("/api/generate/plan", data=form).status_code == 200
@@ -403,7 +402,7 @@ class TestUpscalePlan:
         response = upscale_env.client.post("/api/upscale/plan", json={"asset_id": "a.png", "factor": 2})
 
         assert response.status_code == 200
-        assert [(part["model"], part["repo"]) for part in response.json()["parts"]] == [("zit", "owner/zit")]
+        assert [part["model"] for part in response.json()["parts"]] == ["zit"]
 
     def test_nothing_is_listed_when_the_model_is_present(self, upscale_env):
         upscale_env.present = {"owner/zit"}

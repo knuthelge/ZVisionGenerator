@@ -64,17 +64,6 @@ class AudioClip:
     cut: bool = False
     preclamp: bool = False
 
-    def __post_init__(self) -> None:
-        """Reject samples that are not a float32 ``(channels, frames)`` array, or a non-positive rate.
-
-        Raises:
-            ValueError: If the samples or the rate are invalid.
-        """
-        if getattr(self.samples, "ndim", None) != 2 or str(getattr(self.samples, "dtype", "")) != "float32":
-            raise ValueError("AudioClip.samples must be a float32 array shaped (channels, frames).")
-        if self.sample_rate < 1:
-            raise ValueError("AudioClip.sample_rate must be at least 1.")
-
     @property
     def seconds(self) -> float:
         """The clip's length in seconds."""

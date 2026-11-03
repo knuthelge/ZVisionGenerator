@@ -17,7 +17,7 @@ const state = {
 
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
   return {
-    caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null, extendChanged: false,
+    caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null,
     loraNames: [], videoKind: null, modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
     presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
@@ -112,13 +112,9 @@ describe('settingsChips', () => {
       expect(images({ images: summary({ tone: 'error' }) })).toMatchObject({ on: false, warn: true });
     });
 
-    it('carries the changed flag of Strength while an image-to-image run offers it', () => {
-      const caps = { ...imageCaps, showI2IStrength: true } as WorkspaceCapabilities;
-      const changed = (...keys: string[]) => keys.includes('referenceImageStrength');
-
-      expect(images({ images: summary(), caps, state: { ...state, workflow: 'img2img' } as DraftState, changed })?.changed).toBe(true);
-      expect(images({ images: summary(), caps, state: { ...state, workflow: 'txt2img' } as DraftState, changed })?.changed).toBe(false);
-      expect(images({ images: summary(), caps: imageCaps, state: { ...state, workflow: 'img2img' } as DraftState, changed })?.changed).toBe(false);
+    it('carries the changed flag of Strength', () => {
+      expect(images({ images: summary(), changed: (chip) => chip === 'images' })?.changed).toBe(true);
+      expect(images({ images: summary(), changed: () => false })?.changed).toBe(false);
     });
 
     it('replaces the old per-image chips', () => {
@@ -144,7 +140,7 @@ describe('settingsChips', () => {
   });
 
   it('shows values, the changed flag and the on state', () => {
-    const chips = settingsChips(facts({ state: { ...state, seed: 4242, upscaleEnabled: true, upscaleFactor: 4 }, changed: (...keys) => keys.includes('seed'), loraNames: ['detail-tweaker'] }));
+    const chips = settingsChips(facts({ state: { ...state, seed: 4242, upscaleEnabled: true, upscaleFactor: 4 }, changed: (chip) => chip === 'seed', loraNames: ['detail-tweaker'] }));
     const byKey = Object.fromEntries(chips.map((chip) => [chip.key, chip]));
     expect(byKey.seed).toMatchObject({ value: '4242', changed: true, on: true });
     expect(byKey.upscale).toMatchObject({ value: '4×', on: true });
@@ -171,7 +167,7 @@ describe('settingsChips', () => {
 
     it('carries the changed flag', () => {
       const on = { ...state, postprocessTransparent: true } as DraftState;
-      expect(transparent({ state: on, changed: (...keys) => keys.includes('postprocessTransparent') })?.changed).toBe(true);
+      expect(transparent({ state: on, changed: (chip) => chip === 'transparent' })?.changed).toBe(true);
     });
 
     it('is never offered where the workflow has no Transparent control, even when the draft has it on', () => {

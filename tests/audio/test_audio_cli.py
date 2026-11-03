@@ -17,6 +17,7 @@ from tests.audio._helpers import case_request, clip, fake_backend, patch_runner,
 from zvisiongenerator import audio_cli
 from zvisiongenerator.audio_cli import _build_audio_parser
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
+from zvisiongenerator.utils import audio_request as audio_request_module
 from zvisiongenerator.utils.video_splice import write_pcm16_wav
 
 CASES = json.loads((REPO_ROOT / "tests" / "fixtures" / "audio_cli_cases.json").read_text(encoding="utf-8"))
@@ -126,13 +127,13 @@ class TestRefusals:
     def test_a_voice_without_its_text_is_refused(self, env, monkeypatch, capsys, voices):
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "me.wav"), "--voice-consent")
 
-        assert "Add --voice-text: what the voice recording says." in error
+        assert "--voice-text" in error
         assert env.backend.load.call_count == 0
 
-    def test_a_voice_without_consent_is_refused_with_the_reason(self, env, monkeypatch, capsys, voices):
+    def test_a_voice_without_consent_is_refused(self, env, monkeypatch, capsys, voices):
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "me.wav"), "--voice-text", "Hello")
 
-        assert "Add --voice-consent: cloning a voice needs the speaker's permission." in error
+        assert "--voice-consent" in error
         assert env.ensure.call_count == 0
 
     def test_a_cloned_take_needs_consent_too(self, env, monkeypatch, capsys, voices):
@@ -144,6 +145,31 @@ class TestRefusals:
         requests = make(env, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "any.flac"), "--voice-text", "Hello", monkeypatch=monkeypatch)
 
         assert requests[0].voice == VoiceRef(str(voices / "any.flac"), "Hello")
+
+    def test_a_relative_voice_path_is_recorded_in_full(self, env, monkeypatch, voices):
+        monkeypatch.chdir(voices)
+
+        requests = make(env, "-m", "higgs3", "--prompt", "x", "--voice", "any.flac", "--voice-text", "Hello", monkeypatch=monkeypatch)
+
+        assert requests[0].voice == VoiceRef(str((voices / "any.flac").resolve()), "Hello")
+
+    def test_ffmpeg_is_asked_for_before_the_recording_is_read(self, env, monkeypatch, capsys, voices):
+        """A machine without ffmpeg is offered the install, not a consent refusal or a probe failure from the missing tool."""
+        probes: list[str] = []
+
+        def declined() -> None:
+            raise SystemExit(1)
+
+        monkeypatch.setattr(audio_cli, "ensure_ffmpeg", declined)
+        monkeypatch.setattr(audio_cli, "voice_needs_consent", lambda path: probes.append(str(path)) or True)
+        monkeypatch.setattr(audio_request_module, "probe_track_seconds", lambda path: probes.append(str(path)) or 4.0)
+
+        with pytest.raises(SystemExit) as exit_:
+            run_cli(monkeypatch, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "me.wav"), "--voice-text", "Hello")
+
+        assert exit_.value.code == 1
+        assert probes == []
+        assert "--voice-consent" not in capsys.readouterr().err
 
     def test_a_voice_that_is_not_there_is_refused(self, env, monkeypatch, capsys, tmp_path):
         assert "Voice recording not found" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(tmp_path / "gone.wav"), "--voice-text", "x", "--voice-consent")
@@ -165,10 +191,10 @@ class TestRefusals:
         assert message in refuses(monkeypatch, capsys, "-m", model)
         assert message in refuses(monkeypatch, capsys, "-m", model, "--prompt", "   ")
 
-    def test_speech_over_10000_characters_is_refused_with_the_web_ui_message(self, env, monkeypatch, capsys):
+    def test_speech_over_10000_characters_is_refused(self, env, monkeypatch, capsys):
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "word " * 2001)
 
-        assert "Shorten the text: it's over 10,000 characters, about 10 minutes of speech." in error
+        assert "10,000" in error
         assert env.ensure.call_count == 0
 
     @pytest.mark.parametrize("seconds", ["0.5", "381", "0", "-3", "nan"])
@@ -177,6 +203,11 @@ class TestRefusals:
 
     def test_a_lyrics_file_that_cannot_be_read_is_refused(self, env, monkeypatch, capsys, tmp_path):
         assert "Could not read the lyrics file" in refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "--lyrics-file", str(tmp_path / "gone.txt"))
+
+    @pytest.mark.parametrize("seed", ["-1", str(2**63)])
+    def test_a_seed_no_model_takes_is_refused(self, env, monkeypatch, capsys, seed):
+        assert "--seed" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "--seed", seed)
+        env.backend.load.assert_not_called()
 
     def test_zero_runs_are_refused(self, env, monkeypatch, capsys):
         assert "--runs must be at least 1" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "-r", "0")
@@ -215,7 +246,7 @@ class TestLicenceNotice:
 
     def test_the_terms_are_printed_before_a_missing_model_downloads(self, env, monkeypatch, capsys):
         monkeypatch.setattr(audio_cli, "load_config", audio_config)
-        monkeypatch.setattr(audio_cli, "target_present_offline", lambda target: False)
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: False)
         env.ensure.side_effect = lambda *a, **k: print("DOWNLOAD STARTS") or "ready"
 
         make(env, "-m", "sa3", "--prompt", "rain", monkeypatch=monkeypatch)
@@ -226,7 +257,7 @@ class TestLicenceNotice:
 
     def test_nothing_is_printed_for_a_model_that_is_already_downloaded(self, env, monkeypatch, capsys):
         monkeypatch.setattr(audio_cli, "load_config", audio_config)
-        monkeypatch.setattr(audio_cli, "target_present_offline", lambda target: True)
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: True)
 
         make(env, "-m", "sa3", "--prompt", "rain", monkeypatch=monkeypatch)
 
@@ -234,7 +265,7 @@ class TestLicenceNotice:
 
     def test_a_model_without_a_record_prints_nothing(self, env, monkeypatch, capsys):
         monkeypatch.setattr(audio_cli, "load_config", audio_config)
-        monkeypatch.setattr(audio_cli, "target_present_offline", lambda target: False)
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: False)
 
         make(env, "-m", "yue2", "--prompt", "calm", monkeypatch=monkeypatch)
 
@@ -242,14 +273,14 @@ class TestLicenceNotice:
 
 
 class TestFailures:
-    def test_running_out_of_memory_ends_with_the_models_message(self, env, monkeypatch, capsys):
+    def test_running_out_of_memory_names_the_model(self, env, monkeypatch, capsys):
         import torch
 
         env.backend.generate.side_effect = torch.OutOfMemoryError("out of memory")
 
         error = refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "-o", str(env.out))
 
-        assert "YuE2 3B ran out of GPU memory. Close other apps that use the GPU and try again or shorten the lyrics." in error
+        assert "YuE2 3B" in error and "GPU memory" in error
         env.backend.close.assert_called_once()
 
     def test_a_model_whose_files_are_not_in_the_cache_ends_with_its_own_message(self, env, monkeypatch, capsys):

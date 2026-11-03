@@ -33,11 +33,6 @@ export interface CliCommandOptions {
   extendSource?: Pick<ExtendSourceInfo, 'scene' | 'legacy'> | null;
   /** The model's default for pre-sharpening before an upscale's refine pass; the CLI applies it when no flag is given. */
   upscaleSharpenDefault?: boolean;
-  /**
-   * Audio only: the person running the command consents to the voice, as a form's tick says. Settings recorded by a job
-   * carry no tick, so a command copied from a job sets this to name `--voice-consent` whenever it follows a voice.
-   */
-  voiceConsent?: boolean;
 }
 
 const SAFE_ARG = /^[A-Za-z0-9_\-+=.,:/@%]+$/;
@@ -305,7 +300,7 @@ function audioCliCommand(settings: JobSettings, options: CliCommandOptions): Cli
       if (transcript === undefined) throw new Error('Write what the recording says first.');
       if (upload !== undefined) caveats.push('uploaded_voice');
       args.push('--voice', voice, '--voice-text', transcript);
-      if (options.voiceConsent || checked(settings, 'voice_consent')) args.push('--voice-consent');
+      if (checked(settings, 'voice_consent')) args.push('--voice-consent');
     }
   }
 

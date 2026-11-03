@@ -2,16 +2,16 @@ import { isAudioWorkflow } from './workspaceTab';
 import type { AudioModelOption, AudioWorkflow, DraftState, WorkspaceContext, WorkspacePrefill } from '$lib/types';
 
 /** The kinds of the Audio tab, in the order the Kind control lists them. */
-export const AUDIO_KINDS: readonly AudioWorkflow[] = ['music', 'speech', 'sound'];
+const AUDIO_KINDS: readonly AudioWorkflow[] = ['music', 'speech', 'sound'];
 
 /** The length of a sound when none is chosen, and the shortest one a model makes (the server's `DEFAULT_SOUND_SECONDS` and `MIN_SOUND_SECONDS`). */
-export const DEFAULT_SOUND_SECONDS = 10;
-export const MIN_SOUND_SECONDS = 1;
+const DEFAULT_SOUND_SECONDS = 10;
+const MIN_SOUND_SECONDS = 1;
 
-/** The text fields of the Audio tab: the Music style and lyrics, the Speech text and the Sound prompt. A Reset keeps them. */
+/** The text fields of the Audio tab: the Music style and lyrics, the Speech text and the Sound prompt. */
 const AUDIO_TEXT_DEFAULTS = { audioStyle: '', lyrics: '', speechText: '', soundPrompt: '' } as const satisfies Partial<DraftState>;
 
-/** The other fields the Audio tab keeps in the draft, and a Reset puts back: the length and the voice. */
+/** The other fields the Audio tab keeps in the draft: the length and the voice. */
 const AUDIO_SETTING_DEFAULTS = {
   audioSeconds: DEFAULT_SOUND_SECONDS,
   voiceMode: 'any',
@@ -22,9 +22,6 @@ const AUDIO_SETTING_DEFAULTS = {
 
 /** The fields the Audio tab keeps in the draft. The kind and the model of each kind are kept apart. */
 export const AUDIO_FIELD_DEFAULTS = { ...AUDIO_TEXT_DEFAULTS, ...AUDIO_SETTING_DEFAULTS } as const satisfies Partial<DraftState>;
-
-/** What a Reset puts back on the Audio tab: the length, the voice, Batch and Seed. The text of every kind stays, like the prompt on the Image tab. */
-export const AUDIO_RESET = { ...AUDIO_SETTING_DEFAULTS, runs: 1, seed: null } as const satisfies Partial<DraftState>;
 
 /** The draft field the text box of each kind writes to. */
 export const AUDIO_TEXT_KEYS = { music: 'audioStyle', speech: 'speechText', sound: 'soundPrompt' } as const satisfies Record<AudioWorkflow, keyof DraftState>;
@@ -92,7 +89,7 @@ export function replacesVoice(params: Record<string, string | undefined>, kind: 
 }
 
 /** What a prefill's audio params change in the draft, and what they say about the voice's consent. */
-export interface AudioPrefill {
+interface AudioPrefill {
   patch: WorkspacePrefill;
   /** The voice was replaced: the tick is cleared, and the voice needs none when it is a take the model chose the voice of. */
   voice: { exempt: boolean } | null;

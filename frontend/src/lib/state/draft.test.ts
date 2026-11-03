@@ -789,6 +789,28 @@ describe('draft store – saved drafts', () => {
   });
 });
 
+describe('draft store – voice recording', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('asks for a new transcript when a different recording is chosen', () => {
+    draft.setVoice({ path: '/voices/a.wav' });
+    draft.update('voiceText', 'what recording a says');
+
+    draft.setVoice({ path: '/voices/a.wav' });
+    expect(draft.state.voiceText).toBe('what recording a says');
+
+    draft.setVoice({ path: '/voices/b.wav' });
+    expect(draft.state.voiceText).toBe('');
+
+    draft.update('voiceText', 'what recording b says');
+    draft.setVoice({ file: new File(['x'], 'c.wav', { type: 'audio/wav' }) });
+    expect(draft.state.voiceText).toBe('');
+  });
+});
+
 describe('draft store – prompt enhancer fields', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -1107,7 +1129,7 @@ describe('draft store – prompt enhancer fields', () => {
     expect(draft.state.enhancedPrompt).toBe('Kept');
   });
 
-  it('resetSelections keeps the Enhanced prompt but resets enhancement options', () => {
+  it('resetSelections keeps the Enhanced prompt and the auto choice but resets the mode\'s enhancement options', () => {
     const ctx = makeContext();
     draft.hydrateFromContext(ctx, null);
     draft.update('enhancedPrompt', 'A fox in snow.');
@@ -1117,7 +1139,7 @@ describe('draft store – prompt enhancer fields', () => {
     draft.resetSelections(ctx);
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
     expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', scene: '', mode: 'image' });
-    expect(draft.state.enhanceAuto).toBe(false);
+    expect(draft.state.enhanceAuto).toBe(true);
     expect(draft.state.enhanceSettings).toBeNull();
   });
 });
@@ -2205,7 +2227,7 @@ describe('applyPreset', () => {
 
     const after = draft.state;
     expect(after).toMatchObject(IMAGE_PRESET_DRAFT);
-    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'lastImageModel', 'lastVideoModel', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
+    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'lastImageModel', 'lastVideoModel', 'lastImageQuantize', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
     // Every key is either marked above or a preset key, so a new draft key must be classified here.
     const unclassified = Object.keys(after).filter((key) => !(key in MARKED) && !presetOwned.has(key) && key !== 'version');
     expect(unclassified).toEqual([]);

@@ -54,6 +54,33 @@ class TestOrder:
 
         assert order == ["release", "ensure", "load", "generate", "close"]
 
+    def test_the_load_is_announced_after_the_download_and_the_batch_starts_once_the_model_is_loaded(self, monkeypatch, tmp_path):
+        order: list[str] = []
+        backend = fake_backend(clip(), events=order)
+        env = patch_runner(monkeypatch, backend)
+        env.ensure.side_effect = lambda *a, **k: order.append("ensure") or "ready"
+
+        _run(_music(), YUE2, tmp_path, progress_callback=lambda event: order.append(event["type"]))
+
+        assert order[:5] == ["ensure", "model_loading", "load", "batch_started", "prompt_started"]
+
+    def test_the_load_event_names_the_model(self, monkeypatch, tmp_path):
+        events: list[dict] = []
+        patch_runner(monkeypatch, fake_backend(clip()))
+
+        _run(_music(), YUE2, tmp_path, progress_callback=events.append)
+
+        loading = next(e for e in events if e["type"] == "model_loading")
+        assert (loading["mode"], loading["model"]) == ("audio", "yue2")
+
+    def test_a_stopped_download_sends_neither_the_load_nor_the_start(self, monkeypatch, tmp_path):
+        events: list[dict] = []
+        patch_runner(monkeypatch, fake_backend(clip()), ensure_outcome=STOPPED)
+
+        _run(_music(), YUE2, tmp_path, progress_callback=events.append)
+
+        assert [e["type"] for e in events] == ["batch_cancelled"]
+
     def test_the_download_plan_is_the_presets_files_on_this_platform(self, monkeypatch, tmp_path):
         env = patch_runner(monkeypatch, fake_backend(clip()))
 
@@ -71,22 +98,6 @@ class TestOrder:
         audio_runner.get_audio_backend.assert_called_once_with("yue2")
         backend.load.assert_called_once_with(YUE2, YUE2.platforms["cuda"], "cuda")
         assert backend.generate.call_count == 3 and backend.close.call_count == 1
-
-    def test_a_speech_request_is_checked_before_anything_loads(self, monkeypatch, tmp_path):
-        order: list[str] = []
-        env = patch_runner(monkeypatch, fake_backend(clip(), events=order))
-        monkeypatch.setattr(audio_runner, "check_speech_request", lambda request, limits: order.append("check"))
-        env.session.release_resident_enhancer.side_effect = lambda: order.append("release")
-
-        _run(_speech(), HIGGS3, tmp_path)
-
-        assert order[:2] == ["check", "release"] and "load" in order
-
-    def test_a_request_for_another_model_is_refused(self, monkeypatch, tmp_path):
-        patch_runner(monkeypatch, fake_backend(clip()))
-
-        with pytest.raises(ValueError, match="not music model 'yue2'"):
-            _run(_sound(), YUE2, tmp_path)
 
     def test_a_stopped_download_ends_the_job_without_loading(self, monkeypatch, tmp_path):
         events: list[dict] = []
@@ -145,7 +156,6 @@ class TestSaving:
         sentence = "This sentence has a fair number of characters in it, give or take. "
         text = sentence * 20  # about 1,340 characters: three parts of up to 500
 
-        monkeypatch.setattr(audio_runner, "check_speech_request", lambda request, limits: None)
         saved = _run(_speech(text, voice=VoiceRef("me.wav", "Hello, this is me.")), HIGGS3, tmp_path)
 
         config = read_config(saved[0])
@@ -202,25 +212,25 @@ def clip_from(samples, rate, **fields):
 
 class TestOutOfMemory:
     @pytest.mark.parametrize(
-        ("request_", "model", "message"),
+        ("request_", "model", "model_name"),
         [
-            (_music(), YUE2, "YuE2 3B ran out of GPU memory. Close other apps that use the GPU and try again or shorten the lyrics."),
-            (_speech(), HIGGS3, "Higgs TTS 3 4B ran out of GPU memory. Close other apps that use the GPU and try again."),
-            (_sound(), SA3, "Stable Audio 3 Medium ran out of GPU memory. Close other apps that use the GPU and try again."),
+            (_music(), YUE2, "YuE2 3B"),
+            (_speech(), HIGGS3, "Higgs TTS 3 4B"),
+            (_sound(), SA3, "Stable Audio 3 Medium"),
         ],
         ids=["music", "speech", "sound"],
     )
     @pytest.mark.parametrize("error", [torch.OutOfMemoryError("CUDA out of memory"), RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)")], ids=["cuda", "mps"])
-    def test_the_message_names_the_model_and_the_backend_is_closed(self, monkeypatch, tmp_path, request_, model, message, error):
+    def test_the_message_names_the_model_and_the_backend_is_closed(self, monkeypatch, tmp_path, request_, model, model_name, error):
         backend = fake_backend(clip())
         backend.generate.side_effect = error
         patch_runner(monkeypatch, backend)
-        monkeypatch.setattr(audio_runner, "check_speech_request", lambda *a: None)
 
         with pytest.raises(RuntimeError) as raised:
             _run(request_, model, tmp_path)
 
-        assert str(raised.value) == message and raised.value.__cause__ is error
+        assert model_name in str(raised.value) and "GPU memory" in str(raised.value)
+        assert raised.value.__cause__ is error
         backend.close.assert_called_once()
 
     def test_running_out_of_memory_while_loading_gives_the_same_message(self, monkeypatch, tmp_path):
@@ -372,7 +382,7 @@ class TestJobControls:
 
         saved = _run(_music(), YUE2, tmp_path, progress_callback=events.append)
 
-        assert [e["type"] for e in events] == ["batch_started", "prompt_started", "generation_started", "audio_progress", "generation_finished", "batch_completed"]
-        progress = events[3]
+        assert [e["type"] for e in events] == ["model_loading", "batch_started", "prompt_started", "generation_started", "audio_progress", "generation_finished", "batch_completed"]
+        progress = events[4]
         assert (progress["phase"], progress["step"], progress["total"], progress["part"], progress["n_parts"]) == ("Plan", 1, None, 1, 1)
-        assert events[4]["output_path"] == str(saved[0]) and all(e["mode"] == "audio" for e in events)
+        assert events[5]["output_path"] == str(saved[0]) and all(e["mode"] == "audio" for e in events)

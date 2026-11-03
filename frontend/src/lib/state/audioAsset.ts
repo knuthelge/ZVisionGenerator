@@ -1,21 +1,8 @@
 import type { AudioModelOption, GalleryAsset } from '$lib/types';
+import { formatClock } from './clock';
 
 /** The longest recording the Speech tab takes as a voice, when no speech model says otherwise (seconds). */
 export const VOICE_MAX_SECONDS = 30;
-
-/** Whether a gallery asset is an audio take or file. */
-export function isAudio(asset: Pick<GalleryAsset, 'media_type'>): boolean {
-  return asset.media_type === 'audio';
-}
-
-/** Format a take's length as `m:ss` (or `h:mm:ss`), in whole seconds: 120 is "2:00", 20.6 is "0:21". */
-export function lengthLabel(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const rest = String(total % 60).padStart(2, '0');
-  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
-}
 
 /** Whether a lyric line only names a section: `[verse]`, `[chorus 2]`. */
 function isSectionLine(line: string): boolean {
@@ -42,11 +29,6 @@ export function takeWords(asset: GalleryAsset): string {
   return asset.kind == null ? '' : (asset.prompt ?? '').trim();
 }
 
-/** The name of the kind in the foot of a tile: `music`, `speech`, `sound`, or `audio` for a file without this app's settings. */
-export function kindNoun(asset: GalleryAsset): string {
-  return asset.kind ?? 'audio';
-}
-
 /** The foot's second line: `music · 01/11/2026`, or `audio · no settings` for a file this app did not make. */
 export function audioFoot(asset: GalleryAsset, date: string): string {
   return asset.kind == null ? 'audio · no settings' : `${asset.kind} · ${date}`;
@@ -63,7 +45,7 @@ export function audioModelLabel(asset: Pick<GalleryAsset, 'model' | 'model_label
 }
 
 /** What a cut take's badge and tooltip say. */
-export interface CutNote {
+interface CutNote {
   text: string;
   tip: string;
 }
@@ -77,14 +59,14 @@ export function cutNote(asset: GalleryAsset, models: readonly AudioModelOption[]
   const model = models?.find((item) => item.id === asset.model);
   const cap = model?.limits.max_seconds ?? asset.duration ?? null;
   if (cap === null) return null;
-  const at = lengthLabel(cap);
+  const at = formatClock(cap);
   return { text: `⚠ Cut at ${at}`, tip: `${audioModelLabel(asset, models)} stops at ${at}. Remove sections to hear its ending.` };
 }
 
 /** The viewer's length fact: `2:00`, with "(cut at the cap)" for a take that was cut. */
 export function lengthFact(asset: GalleryAsset): string {
   if (asset.duration == null) return '—';
-  return `${lengthLabel(asset.duration)}${asset.cut === true ? ' (cut at the cap)' : ''}`;
+  return `${formatClock(asset.duration)}${asset.cut === true ? ' (cut at the cap)' : ''}`;
 }
 
 /** The viewer's File fact: `FLAC · 24 kHz · mono`; a part that is not known is left out. */
@@ -109,7 +91,7 @@ export function seekFraction(clientX: number, box: { left: number; width: number
 }
 
 /** One labelled block of a take's words under the viewer's player. */
-export interface WordBlock {
+interface WordBlock {
   label: string;
   text: string;
 }

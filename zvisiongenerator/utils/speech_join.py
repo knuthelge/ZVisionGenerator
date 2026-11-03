@@ -37,12 +37,12 @@ def join_speech_parts(parts: Sequence[np.ndarray], rate: int, settings: Mapping[
         The take as a float32 waveform shaped ``(samples,)``: the trimmed parts and ``len(parts) - 1`` pauses.
 
     Raises:
-        ValueError: If a setting is missing, or no part holds samples.
+        ValueError: If no part holds samples.
     """
-    pause = _samples(_setting(settings, "join_pause_ms"), rate)
-    fade = _samples(_setting(settings, "join_fade_ms"), rate)
-    edge = _samples(_setting(settings, "edge_silence_max_ms"), rate)
-    cap_db = float(_setting(settings, "part_level_match_db"))
+    pause = _samples(settings["join_pause_ms"], rate)
+    fade = _samples(settings["join_fade_ms"], rate)
+    edge = _samples(settings["edge_silence_max_ms"], rate)
+    cap_db = float(settings["part_level_match_db"])
     waves = [np.asarray(part, dtype=np.float32) for part in parts if len(part)]
     if not waves:
         raise ValueError("There is no speech to join.")
@@ -59,13 +59,6 @@ def join_speech_parts(parts: Sequence[np.ndarray], rate: int, settings: Mapping[
         if index < len(waves) - 1:
             pieces.append(np.zeros(pause, dtype=np.float32))
     return np.concatenate(pieces).astype(np.float32, copy=False)
-
-
-def _setting(settings: Mapping[str, Any], key: str) -> Any:
-    """Return the setting *key*, or raise ``ValueError`` naming it."""
-    if key not in settings:
-        raise ValueError(f"The speech join needs the setting '{key}'.")
-    return settings[key]
 
 
 def _samples(milliseconds: float, rate: int) -> int:

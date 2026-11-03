@@ -328,6 +328,16 @@ This file serves as the NOTICE file the Boson license asks for:
 
 The Higgs TTS 3 code of this application is "Derived from Higgs TTS 3, licensed from Boson AI USA, Inc."
 
+## Stable Audio 3 models (downloaded at runtime, not bundled)
+
+The Stable Audio 3 Medium weights are downloaded from Hugging Face on first use and are not distributed with this package: the checkpoint from [`Comfy-Org/stable-audio-3`](https://huggingface.co/Comfy-Org/stable-audio-3), its model configuration from [`cocktailpeanut/stable-audio-3-medium`](https://huggingface.co/cocktailpeanut/stable-audio-3-medium) and the T5Gemma text encoder from [`mlx-community/stable-audio-3-small-sfx`](https://huggingface.co/mlx-community/stable-audio-3-small-sfx). The model is released by Stability AI in [`stabilityai/stable-audio-3-medium`](https://huggingface.co/stabilityai/stable-audio-3-medium) under the Stability AI Community License, which allows free use below $1M of annual revenue and asks for a free registration for commercial use. It requires this notice to accompany the model:
+
+> This Stability AI Model is licensed under the Stability AI Community License, Copyright © Stability AI Ltd. All Rights Reserved
+
+and the credit "Powered by Stability AI" on a related website, user interface or product page. The text encoder is a Gemma model, provided under and subject to the [Gemma Terms of Use](https://ai.google.dev/gemma/terms):
+
+> Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms
+
 ## SeedVR2 models (downloaded at runtime, not bundled)
 
 The SeedVR2 upscale models are downloaded from Hugging Face on first use and are not distributed with this package: [`numz/SeedVR2_comfyUI`](https://huggingface.co/numz/SeedVR2_comfyUI) and [`AInVFX/SeedVR2_comfyUI`](https://huggingface.co/AInVFX/SeedVR2_comfyUI), both derived from [`ByteDance-Seed/SeedVR2-3B`](https://huggingface.co/ByteDance-Seed/SeedVR2-3B) and [`ByteDance-Seed/SeedVR2-7B`](https://huggingface.co/ByteDance-Seed/SeedVR2-7B) and licensed under the Apache License 2.0.

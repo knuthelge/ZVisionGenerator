@@ -3,31 +3,31 @@
 A take runs the kit stage by stage: ``plan`` (the ABC score) and ``generate_semantic`` (the song tokens) are the
 autoregressive phases, ``CachedNAR`` prefills and solves the acoustic latents, and ``decode`` turns them into a stereo
 48 kHz waveform. With ``weight_swap`` (CUDA) the model is held in pinned CPU memory by :class:`WeightSwap`, which puts
-only the running phase's weights on the GPU. Without it (MPS) the kit's own ``synthesize`` runs the acoustic part.
+only the running phase's weights on the GPU. Without it (MPS) the whole model sits on the device. Either way the weights are
+streamed in tensor by tensor (see :mod:`yue2_load`) and the acoustic part runs in one loop with the same progress.
 """
 
 from __future__ import annotations
 
 import gc
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 
+from zvisiongenerator.backends.audio import snapshot_dir
+from zvisiongenerator.backends.audio.yue2_load import load_model, size_checked_weights
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.utils.audio_fade import fade_out
-from zvisiongenerator.utils.hf_snapshot import snapshot_download, snapshot_with
-from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.music_mode import INSTRUMENTAL, music_mode
 from zvisiongenerator.utils.torch_flags import TorchFlags, capture_torch_flags, restore_torch_flags
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.audio_backend import CancelCheck, ProgressCallback
     from zvisiongenerator.core.audio_types import AudioGenerationRequest
-    from zvisiongenerator.utils.audio_preset import AudioFiles, AudioPlatform, AudioPreset
+    from zvisiongenerator.utils.audio_preset import AudioPlatform, AudioPreset
 
 __all__ = ["SAMPLE_RATE", "YuE2Backend"]
 
@@ -39,21 +39,6 @@ _TOKENS_PER_SECOND: Final = 25
 
 _TOKEN_STRIDE: Final = 10
 """Report every this many tokens, so a long song does not flood the progress callback."""
-
-
-@dataclass(frozen=True)
-class _PipeInputs:
-    """What one take hands the pipeline's ``plan``.
-
-    Attributes:
-        style: The style tags.
-        lyrics: The lyrics, or the section list of an instrumental.
-        cot: The planning mode (``full`` or ``melody``).
-    """
-
-    style: str
-    lyrics: str
-    cot: str
 
 
 class _CancelProbe:
@@ -89,39 +74,29 @@ class YuE2Backend:
     def load(self, preset: AudioPreset, platform_entry: AudioPlatform, device: str) -> None:
         """Load YuE2 for *preset* on *device*.
 
-        With the ``weight_swap`` setting the model is loaded on the CPU, wrapped in a :class:`WeightSwap` and handed to
-        the pipeline; the process memory fraction the kit caps is set back to 1.0 on CUDA either way.
+        The model is streamed in and handed to the pipeline. With the ``weight_swap`` setting it is pinned in CPU memory and
+        wrapped in a :class:`WeightSwap`; without it, it is placed on *device*. The process memory fraction the kit caps is
+        set back to 1.0 on CUDA either way.
 
         Args:
             preset: The ``yue2`` preset: its limits and shared settings.
             platform_entry: The preset's entry for *device*: the model and VAE files and the platform's settings.
             device: ``cuda`` or ``mps``.
 
-        Raises:
-            RuntimeError: If a model is already loaded.
-            ValueError: If the preset has no ``max_seconds`` limit, the entry does not list the model and the VAE, or
-                ``weight_swap`` is set off CUDA.
         """
-        if self._pipe is not None:
-            raise RuntimeError("The YuE2 backend already holds a model; close it before loading another.")
-        settings = {**preset.settings, **platform_entry.settings}
+        settings = preset.settings_for(device)
         weight_swap = bool(settings["weight_swap"])
-        if weight_swap and device != "cuda":
-            raise ValueError(f"YuE2 weight_swap needs CUDA; the device is '{device}'.")
-        if preset.limits.max_seconds is None:
-            raise ValueError("The YuE2 preset must set limits.max_seconds.")
-        if len(platform_entry.files) != 2:
-            raise ValueError("The YuE2 platform entry must list two repositories: the model, then the VAE.")
         model_files, vae_files = platform_entry.files
         self._device = device
         self._flags = capture_torch_flags()  # the kit sets global numerics flags; close() puts them back
+        if weight_swap and device == "cuda":
+            _stop_pin_rounding()
         try:
-            pipe = _build_pipeline(_snapshot_dir(model_files), _snapshot_dir(vae_files), device, settings)
+            pipe = _build_pipeline(str(snapshot_dir(model_files)), str(snapshot_dir(vae_files)), device, settings)
             self._pipe = pipe
             if device == "cuda":
                 _lift_memory_fraction()
-            if weight_swap:
-                self._swap = _install_swap(pipe, device)
+            self._swap = _install_model(pipe, device, weight_swap=weight_swap)
             self._settings = settings
             self._max_seconds = float(preset.limits.max_seconds)
         except BaseException:
@@ -140,22 +115,16 @@ class YuE2Backend:
             A stereo 48 kHz clip. A take that reached the length limit ends in a fade-out and is marked ``cut``.
 
         Raises:
-            RuntimeError: If no model is loaded.
-            ValueError: If the request is not a music take.
             AudioCancelled: If *cancelled* returned ``True``.
         """
-        if self._pipe is None:
-            raise RuntimeError("The YuE2 backend has no model loaded.")
-        if request.kind != "music":
-            raise ValueError(f"The YuE2 backend makes music, not '{request.kind}'.")
         settings = self._settings
-        cot, lyrics, kind, _ = music_mode(request.lyrics, settings["instrumental_sections"], cot_song=settings["cot_song"], cot_instrumental=settings["cot_instrumental"])
-        inputs = _instrumental_inputs(request.prompt, lyrics, cot) if kind == INSTRUMENTAL else _song_inputs(request.prompt, lyrics, cot)
+        lyrics, kind, _ = music_mode(request.lyrics, settings["instrumental_sections"])
+        cot = "melody" if kind == INSTRUMENTAL else "full"
         if self._swap is not None:
             self._swap.restore_resident()
         stop = _CancelProbe(cancelled)
         try:
-            return self._take(inputs, request.seed, on_progress, stop)
+            return self._take(request.prompt, lyrics, cot, request.seed, on_progress, stop)
         except InterruptedError as error:
             if stop.requested:
                 raise AudioCancelled(str(error)) from error
@@ -185,15 +154,15 @@ class YuE2Backend:
                 if flags is not None:
                     restore_torch_flags(flags)
 
-    def _take(self, inputs: _PipeInputs, seed: int, on_progress: ProgressCallback, stop: _CancelProbe) -> AudioClip:
+    def _take(self, style: str, lyrics: str, cot: str, seed: int, on_progress: ProgressCallback, stop: _CancelProbe) -> AudioClip:
         pipe, swap, settings = self._pipe, self._swap, self._settings
         if swap is not None:
             swap.phase("ar")
         on_progress("Plan", 0, None, 1, 1)
         plan = pipe.plan(
-            inputs.style,
-            inputs.lyrics,
-            cot=inputs.cot,
+            style,
+            lyrics,
+            cot=cot,
             seed=seed,
             cfg_scale=settings["cfg"],
             abc_sampling={"max_tokens": settings["abc_max_tokens"]},
@@ -205,11 +174,7 @@ class YuE2Backend:
         cap = {"max_tokens": int(round(_TOKENS_PER_SECOND * self._max_seconds))}
         semantic = pipe.generate_semantic(plan, sampling=cap, cancelled=stop, on_token=_count_tokens("Song tokens", on_progress))
         on_progress("Song tokens", len(semantic.tokens), None, 1, 1)
-        if swap is None:
-            on_progress("Synthesis", 0, None, 1, 1)
-            latents = pipe.synthesize(semantic, cancelled=stop)
-        else:
-            latents = _synthesize_swapped(pipe, swap, semantic, on_progress, stop)
+        latents = _synthesize(pipe, swap, semantic, on_progress, stop)
         stop.raise_if_requested()
         on_progress("Decode", 0, 1, 1, 1)
         if swap is not None:
@@ -220,16 +185,6 @@ class YuE2Backend:
         if semantic.truncated:
             return AudioClip(fade_out(samples, SAMPLE_RATE, float(settings["fade_seconds"])), SAMPLE_RATE, cut=True)
         return AudioClip(samples, SAMPLE_RATE)
-
-
-def _song_inputs(style: str, lyrics: str, cot: str) -> _PipeInputs:
-    """Return the pipeline inputs of a song: the style and the lyrics as given."""
-    return _PipeInputs(style, lyrics, cot)
-
-
-def _instrumental_inputs(style: str, section_list: str, cot: str) -> _PipeInputs:
-    """Return the pipeline inputs of an instrumental: the style and the section list that sets its length."""
-    return _PipeInputs(style, section_list, cot)
 
 
 def _count_tokens(label: str, on_progress: ProgressCallback) -> Callable[[str, int], None]:
@@ -245,8 +200,11 @@ def _count_tokens(label: str, on_progress: ProgressCallback) -> Callable[[str, i
     return on_token
 
 
-def _synthesize_swapped(pipe: Any, swap: WeightSwap, semantic: Any, on_progress: ProgressCallback, stop: _CancelProbe) -> Any:
-    """Run the kit's ``synthesize`` loop with the prefill and the ODE solve in their own swap phases; return the latents."""
+def _synthesize(pipe: Any, swap: WeightSwap | None, semantic: Any, on_progress: ProgressCallback, stop: _CancelProbe) -> Any:
+    """Run the kit's ``synthesize`` loop chunk by chunk, reporting every ODE step; return the latents.
+
+    With a *swap*, the prefill and the ODE solve each run in their own swap phase.
+    """
     import torch
 
     from yue2.nar import CachedNAR, song_chunks
@@ -258,24 +216,23 @@ def _synthesize_swapped(pipe: Any, swap: WeightSwap, semantic: Any, on_progress:
     on_progress("Synthesis", 0, total, 1, 1)
     outputs = []
     with torch.inference_mode():
+        model = pipe._load_model(for_nar=True)
         for index, chunk in enumerate(chunks):
             stop.raise_if_requested()
-            swap.phase("prefill")
-            engine = CachedNAR(pipe._model, chunk, "sdpa", None)
+            if swap is not None:
+                swap.phase("prefill")
+            engine = CachedNAR(model, chunk, "sdpa", None)
             try:
-                swap.phase("ode")
+                if swap is not None:
+                    swap.phase("ode")
                 done_before = index * steps
                 outputs.append(engine.solve(steps, stop, on_progress=lambda done, _total, base=done_before: on_progress("Synthesis", base + done, total, 1, 1)))
             finally:
                 engine.close()
             del engine
-            torch.cuda.empty_cache()
+            if swap is not None:
+                torch.cuda.empty_cache()
     return torch.cat(outputs, dim=0).detach().float().cpu().numpy()
-
-
-def _snapshot_dir(files: AudioFiles) -> str:
-    """Return the folder of the pinned snapshot that holds *files* (the download step has already fetched it)."""
-    return str(snapshot_with(HubFiles(files.repo_id, files.revision, files.patterns), snapshot_download))
 
 
 def _build_pipeline(model_dir: str, vae_dir: str, device: str, settings: dict[str, Any]) -> Any:
@@ -283,34 +240,46 @@ def _build_pipeline(model_dir: str, vae_dir: str, device: str, settings: dict[st
     from yue2 import YuE2Pipeline
     from yue2.protocol import GenerationConfig
 
-    return YuE2Pipeline.from_pretrained(
-        model_dir,
-        vae=vae_dir,
-        device=device,
-        progress=False,
-        memory_budget_gib=settings["memory_budget_gib"],
-        vae_core_frames=settings["vae_core_frames"],
-        generation_config=GenerationConfig(ode_steps=settings["ode_steps"]),
-    )
+    with size_checked_weights():  # the kit would sha256-hash about 8 GB of weights on every build
+        return YuE2Pipeline.from_pretrained(
+            model_dir,
+            vae=vae_dir,
+            device=device,
+            progress=False,
+            memory_budget_gib=settings["memory_budget_gib"],
+            vae_core_frames=settings["vae_core_frames"],
+            generation_config=GenerationConfig(ode_steps=settings["ode_steps"]),
+        )
 
 
-def _install_swap(pipe: Any, device: str) -> WeightSwap:
-    """Load the model on the CPU, wrap it in a :class:`WeightSwap` and make the pipeline use it as its model."""
-    model = _load_cpu_model(pipe.model_dir)
-    swap = WeightSwap(model, device)
+def _install_model(pipe: Any, device: str, *, weight_swap: bool) -> WeightSwap | None:
+    """Stream the model in and make the pipeline use it; return the :class:`WeightSwap` that owns its placement, if any.
+
+    With *weight_swap* the tensors are pinned in CPU memory as they are read, so the swap has nothing left to copy.
+    Without it the model moves to *device* parameter by parameter, each CPU copy freed as it goes.
+    """
+    model = load_model(pipe.model_dir, pin=weight_swap)
     pipe._model = model
-    # The stock loader would move the whole model to the GPU; the swap owns placement.
-    pipe._load_model = lambda for_nar=False: model
-    return swap
+    if weight_swap:
+        swap = WeightSwap(model, device)
+        # The stock loader would move the whole model to the GPU; the swap owns placement.
+        pipe._load_model = lambda for_nar=False: model
+        return swap
+    model.to(device)
+    # The kit's decode moves the model to the CPU to make room for the VAE; bring it back for the next take.
+    pipe._load_model = lambda for_nar=False: model.to(device)
+    return None
 
 
-def _load_cpu_model(model_dir: Any) -> Any:
-    """Load ``YuE2ForCausalLM`` from *model_dir* on the CPU in bf16, as the kit's own loader does before it moves it."""
-    import torch
+def _stop_pin_rounding() -> None:
+    """Keep PyTorch from rounding the pinned weights up to powers of two, which would add about a third to their size.
 
-    from yue2.modeling_yue2 import YuE2ForCausalLM
+    PyTorch reads the allocator options when CUDA first starts, so this only helps when nothing in the process has used
+    CUDA yet; the other CUDA backends make the same call at their start.
+    """
+    from zvisiongenerator.backends.cuda.memory import configure_allocator
 
-    return YuE2ForCausalLM.from_pretrained(model_dir, local_files_only=True, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True).eval()
+    configure_allocator()
 
 
 def _lift_memory_fraction() -> None:

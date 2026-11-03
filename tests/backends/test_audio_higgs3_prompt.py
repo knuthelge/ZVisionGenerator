@@ -6,7 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 
 from zvisiongenerator.backends.audio.higgs3_prompt import AUDIO_SLOT, SpecialIds, build_prompt_ids, load_tokenizer, special_ids
 
@@ -65,13 +64,6 @@ class TestBuildPromptIds:
 class TestSpecialIds:
     def test_the_ids_come_from_the_added_vocabulary(self) -> None:
         assert special_ids(FakeTokenizer()) == IDS  # type: ignore[arg-type]
-
-    @pytest.mark.parametrize("missing", SPECIALS)
-    def test_a_missing_token_is_refused_naming_it(self, missing: str) -> None:
-        added = {token: index for index, token in enumerate(SPECIALS) if token != missing}
-
-        with pytest.raises(ValueError, match=missing.replace("|", r"\|")):
-            special_ids(FakeTokenizer(added))  # type: ignore[arg-type]
 
 
 def _write_tiny_tokenizer(folder: Path) -> None:

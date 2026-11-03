@@ -13,6 +13,10 @@ SETTINGS = {"join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, 
 TAG = "<|sfx:laughter|>"
 
 
+def _split(text, max_chars=500, *, max_text_chars=10_000):
+    return split_speech_text(text, max_chars, max_text_chars=max_text_chars)
+
+
 def _sentence(length: int, letter: str) -> str:
     """Return one sentence of exactly *length* characters (words of one letter, a full stop)."""
     body = " ".join([letter * 9] * length)[: length - 1].rstrip()
@@ -23,13 +27,13 @@ class TestSplit:
     def test_whole_sentences_are_packed_up_to_the_limit(self):
         sentences = [_sentence(200, letter) for letter in "abcde"]
 
-        parts = split_speech_text(" ".join(sentences))
+        parts = _split(" ".join(sentences))
 
         assert parts == (f"{sentences[0]} {sentences[1]}", f"{sentences[2]} {sentences[3]}", sentences[4])
         assert all(len(part) <= 500 for part in parts)
 
     def test_short_text_is_one_part(self):
-        assert split_speech_text("Hello there. How are you?") == ("Hello there. How are you?",)
+        assert _split("Hello there. How are you?") == ("Hello there. How are you?",)
 
     def test_a_long_sentence_is_cut_into_clauses_packed_with_the_sentence_before(self):
         short = _sentence(100, "s")
@@ -37,7 +41,7 @@ class TestSplit:
         long_sentence = " ".join(clauses)
         assert len(long_sentence) > 500
 
-        parts = split_speech_text(f"{short} {long_sentence}")
+        parts = _split(f"{short} {long_sentence}")
 
         assert parts == (f"{short} {clauses[0]}", f"{clauses[1]} {clauses[2]}")
 
@@ -45,45 +49,45 @@ class TestSplit:
     def test_every_clause_mark_ends_a_clause(self, mark):
         first, second = "a" * 300 + mark, "b" * 300 + "."
 
-        assert split_speech_text(f"{first} {second}") == (first, second)
+        assert _split(f"{first} {second}") == (first, second)
 
     def test_a_clause_without_marks_is_cut_at_the_last_space_before_the_limit(self):
         text = " ".join(["word"] * 300)
 
-        parts = split_speech_text(text)
+        parts = _split(text)
 
         assert len(parts) == 3
         assert all(len(part) <= 500 for part in parts)
         assert " ".join(parts) == text
 
     def test_a_clause_without_spaces_is_cut_at_the_limit(self):
-        assert [len(part) for part in split_speech_text("a" * 1100)] == [500, 500, 100]
+        assert [len(part) for part in _split("a" * 1100)] == [500, 500, 100]
 
     def test_a_tag_is_never_cut_by_the_limit(self):
         text = "x" * 495 + TAG + "y" * 100
 
-        assert split_speech_text(text) == ("x" * 495, TAG + "y" * 100)
+        assert _split(text) == ("x" * 495, TAG + "y" * 100)
 
     def test_a_tag_is_not_split_at_its_punctuation(self):
         text = f"Hello {TAG} world <|speed:0.8|> again."
 
-        assert split_speech_text(text) == (text,)
-        parts = split_speech_text(text, max_chars=20)
+        assert _split(text) == (text,)
+        parts = _split(text, max_chars=20)
         assert len(parts) > 1
         assert all(part.count("<|") == part.count("|>") for part in parts)
         assert " ".join(parts) == text
 
     def test_line_breaks_end_a_sentence(self):
-        assert split_speech_text("One\nTwo", max_chars=5) == ("One", "Two")
+        assert _split("One\nTwo", max_chars=5) == ("One", "Two")
 
     def test_full_width_stops_need_no_space(self):
-        assert split_speech_text("你好。再见。", max_chars=3) == ("你好。", "再见。")
+        assert _split("你好。再见。", max_chars=3) == ("你好。", "再见。")
 
     def test_a_decimal_point_is_not_a_sentence_end(self):
-        assert split_speech_text("Pi is 3.14. Done.", max_chars=11) == ("Pi is 3.14.", "Done.")
+        assert _split("Pi is 3.14. Done.", max_chars=11) == ("Pi is 3.14.", "Done.")
 
     def test_blank_text_has_no_parts(self):
-        assert split_speech_text(" \n ") == ()
+        assert _split(" \n ") == ()
 
 
 def _tone(seconds: float, amplitude: float = 0.4) -> np.ndarray:

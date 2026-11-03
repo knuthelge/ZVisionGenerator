@@ -253,7 +253,7 @@ describe('GalleryPage regressions', () => {
       prompt: 'Reuse me',
       model: 'zit',
       seed: '9876',
-      reference_path: '',
+      reuse: 'true',
     });
   });
 

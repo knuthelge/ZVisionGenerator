@@ -9,13 +9,7 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["DEFAULT_MAX_TEXT_CHARS", "DEFAULT_PART_CHARS", "split_speech_text"]
-
-DEFAULT_PART_CHARS = 500
-"""The most characters one part holds."""
-
-DEFAULT_MAX_TEXT_CHARS = 10_000
-"""The most characters a take reads, about ten minutes of speech."""
+__all__ = ["split_speech_text"]
 
 # A sentence ends at one of these followed by a space, a line end or a closing quote; the full-width marks need no space.
 _SENTENCE_MARKS = frozenset(".!?…。！？")
@@ -28,7 +22,7 @@ _TAG = re.compile(r"<\|.*?\|>")
 _PRIVATE_USE_START = 0xE000
 
 
-def split_speech_text(text: str, max_chars: int = DEFAULT_PART_CHARS, *, max_text_chars: int = DEFAULT_MAX_TEXT_CHARS) -> tuple[str, ...]:
+def split_speech_text(text: str, max_chars: int, *, max_text_chars: int) -> tuple[str, ...]:
     """Split *text* into parts of at most *max_chars* characters, in reading order.
 
     Whole sentences are packed into a part while they fit. A sentence longer than *max_chars* is cut into clauses

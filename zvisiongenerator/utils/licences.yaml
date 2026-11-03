@@ -3,16 +3,19 @@
 #
 # A record covers one or more models (a model_aliases key, an audio_model_presets key, or matte, the background removal
 # models), and a model may be in two records. Required: name, supplier, summary (short, plain language), url and models.
-# Optional: notice_url and url_label (default "Licence"). Every URL is pinned to a commit, so the text linked is the text
-# of the weights the app downloads; loading refuses a URL without one, and load_config refuses an unknown model.
+# Optional: url_label (default "Licence") and attribution (a credit line the licence requires, shown only beside the
+# model it belongs to). Links point to the licensor's original repository, never to a mirror the app downloads from.
+# A gated repository's model page shows its terms and its access form, so that page is the link (url_label "Model page");
+# a repository that is not gated links its licence file, pinned to a commit. A contract test refuses any other URL and
+# any record that names an unknown model.
 # Models under MIT or Apache-2.0 have no record. Gemma 3 is the text encoder of ltx-4 and ltx-8 on every platform;
 # ltx25-4 uses Gemma 4, which is Apache-2.0.
 flux-nc:
   name: "FLUX Non-Commercial License v2.1"
   supplier: "Black Forest Labs"
   summary: "Non-commercial"
-  url: "https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/LICENSE.md"
-  notice_url: "https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/NOTICE"
+  url_label: "Model page"
+  url: "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B"
   models: [klein9b]
 krea-2-community:
   name: "Krea 2 Community License Agreement"
@@ -24,8 +27,8 @@ ideogram-4-nc:
   name: "Ideogram Non-Commercial Model Agreement"
   supplier: "Ideogram"
   summary: "Non-commercial"
-  url: "https://huggingface.co/unsloth/ideogram-4-fp8/blob/6ac1d7a59776f886e5893dfa9a4b7a4374da9365/LICENSE.md"
-  notice_url: "https://huggingface.co/unsloth/ideogram-4-fp8/blob/6ac1d7a59776f886e5893dfa9a4b7a4374da9365/NOTICE"
+  url_label: "Model page"
+  url: "https://huggingface.co/ideogram-ai/ideogram-4-fp8"
   models: [ideo]
 ltx-2-community:
   name: "LTX-2 Community License Agreement"
@@ -37,8 +40,8 @@ ltx-2x-community:
   name: "LTX-2.x Community License Agreement"
   supplier: "Lightricks"
   summary: "Free under $10M revenue"
-  url: "https://huggingface.co/unsloth/LTX-2.5-FP8/blob/7b40724fc39bbb01d9b4d72638c0d263531c88c2/LICENSE"
-  notice_url: "https://huggingface.co/unsloth/LTX-2.5-FP8/blob/7b40724fc39bbb01d9b4d72638c0d263531c88c2/NOTICE"
+  url_label: "Model page"
+  url: "https://huggingface.co/Lightricks/LTX-2.5"
   models: [ltx25-4]
 minimax-h3-community:
   name: "MiniMax H3 Community License Agreement"
@@ -62,20 +65,23 @@ higgs-audio2-community:
   name: "Boson Higgs Audio 2 Community License Agreement"
   supplier: "Boson AI"
   summary: "Free up to 100,000 annual active users; products credit Boson AI and Meta Llama 3"
+  attribution: "Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved"
   url: "https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE"
   models: [higgs3]
 stability-community:
   name: "Stability AI Community License"
   supplier: "Stability AI"
-  summary: "Free under $1M revenue"
-  url: "https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE.md"
-  notice_url: "https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/NOTICE"
+  summary: "Free under $1M revenue; commercial use needs a free registration"
+  url_label: "Model page"
+  url: "https://huggingface.co/stabilityai/stable-audio-3-medium"
+  attribution: "Powered by Stability AI"
   models: [sa3]
 gemma:
   name: "Gemma Terms of Use"
   supplier: "Google"
   summary: "Gemma's use policy applies"
-  url: "https://huggingface.co/cocktailpeanut/stable-audio-3-medium/blob/a30034d70bd58f6e6f967ef28ecaa6c52c185d6c/LICENSE_GEMMA.md"
+  url_label: "Model page"
+  url: "https://huggingface.co/google/gemma-3-12b-it"
   models: [ltx-4, ltx-8, sa3]
 matte:
   name: "BiRefNet (MIT) and ViTMatte (Apache-2.0)"

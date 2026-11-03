@@ -34,6 +34,7 @@ from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 from zvisiongenerator.web import server as web_server
+from zvisiongenerator.web import job_downloads as job_downloads_module
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web.job_log import JobLog
 from zvisiongenerator.workflows import build_video_workflow
@@ -173,6 +174,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
         monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
         start = threading.Event()
@@ -333,6 +335,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
         monkeypatch.setattr(web_runner_module, "run_upscale", _fake_run_upscale)
         request = ImageGenerationRequest(
@@ -364,6 +367,7 @@ class TestWebRunner:
         backend = stub_request_job(monkeypatch)
         backend.prepare_prompts.side_effect = lambda *_a, **_kw: order.append("prepare_prompts")
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (model, MagicMock(name="model_info")))
         monkeypatch.setattr(web_runner_module, "run_upscale", _fake_run_upscale)
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", resolved_prompt="rendered", model_name="zit", upscale_factor=2, upscale_source="/out/a.png", width=1664, height=2432)
@@ -395,6 +399,7 @@ class TestWebRunner:
 
         backend.prepare_prompts.side_effect = _prepare
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="model_info")))
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_name="zit", upscale_factor=2, upscale_source=str(tmp_path / "a.png"))
         workflow = MagicMock(name="workflow")
@@ -415,6 +420,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         backend = stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
 
         def _build_cancelled(*_a, **_kw):
             control.queue_action("quit")
@@ -459,7 +465,9 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: upscaler)
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", lambda: upscaler)
         monkeypatch.setattr(web_runner_module, "load_seedvr2", _fake_load)
         monkeypatch.setattr(web_runner_module, "load_image_model", _no_image_loader)
         monkeypatch.setattr(web_runner_module, "run_upscale", _fake_run_upscale)
@@ -484,7 +492,9 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: None)
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", lambda: None)
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source="/out/a.png", upscale_method="seedvr2", upscale_model="seedvr2-7b")
 
         try:
@@ -507,7 +517,9 @@ class TestWebRunner:
 
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: MagicMock(name="upscaler"))
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", lambda: MagicMock(name="upscaler"))
         monkeypatch.setattr(web_runner_module, "load_seedvr2", _quitting_load)
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source=str(tmp_path / "a.png"), upscale_method="seedvr2", upscale_model="seedvr2-3b")
 
@@ -543,14 +555,16 @@ class TestWebRunner:
             runs.append((engine, loaded, request))
             progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
 
-        def _fake_ensure(self, planned, **kwargs):
-            downloads.append((planned, kwargs["mode"], kwargs["role"], kwargs["model"]))
+        def _fake_ensure(self, part, **kwargs):
+            downloads.append((part.targets, kwargs["mode"], part.role, part.event_model))
             return True
 
-        monkeypatch.setattr(web_runner_module, "seedvr2_plan", lambda name, **kwargs: plans.append((name, kwargs["weights"])) or targets)
+        monkeypatch.setattr(job_downloads_module, "seedvr2_plan", lambda name, **kwargs: plans.append((name, kwargs["weights"])) or targets)
         monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", _fake_ensure)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: upscaler)
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", lambda: upscaler)
         monkeypatch.setattr(web_runner_module, "load_seedvr2", _fake_load)
         monkeypatch.setattr(web_runner_module, "run_video_file_upscale", _fake_run)
         request = self._video_file_request(tmp_path)
@@ -577,6 +591,7 @@ class TestWebRunner:
         events: list = []
         monkeypatch.setattr(web_runner_module, "run_video_file_upscale", MagicMock(side_effect=AssertionError("must not run")))
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", MagicMock(side_effect=AssertionError("must not load")))
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", MagicMock(side_effect=AssertionError("must not load")))
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
@@ -591,6 +606,7 @@ class TestWebRunner:
         monkeypatch.setattr(web_runner_module, "run_video_file_upscale", MagicMock(side_effect=AssertionError("must not run")))
         monkeypatch.setattr(web_runner_module, "load_seedvr2", MagicMock(side_effect=AssertionError("must not load")))
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: MagicMock(name="upscaler"))
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", lambda: MagicMock(name="upscaler"))
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
@@ -621,15 +637,15 @@ class TestWebRunner:
         runs: list = []
         config = {"video_model_presets": {}}
 
-        def _fake_ensure(self, planned, **kwargs):
-            downloads.append((planned, kwargs["mode"], kwargs["role"], kwargs["model"]))
+        def _fake_ensure(self, part, **kwargs):
+            downloads.append((part.targets, kwargs["mode"], part.role, part.event_model))
             return True
 
         def _fake_run(engine, model, request, *, progress_callback, skip_signal):
             runs.append((engine, model, request))
             progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
 
-        monkeypatch.setattr(web_runner_module, "video_plan", lambda ref, **kwargs: plans.append((ref, kwargs)) or ("targets",))
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda ref, **kwargs: plans.append((ref, kwargs)) or ("targets",))
         monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", _fake_ensure)
         monkeypatch.setattr(web_runner_module, "get_video_backend", lambda family: backend if family == "ltx" else pytest.fail(family))
         monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, upscale, quiet: {"upscale": upscale, "mlx_packs": {}})
@@ -654,7 +670,7 @@ class TestWebRunner:
     def test_an_ltx_video_upscale_loads_the_requests_loras(self, tmp_path, monkeypatch):
         backend = MagicMock(name="ltx_backend")
         backend.load_model.return_value = ("handle", "info")
-        monkeypatch.setattr(web_runner_module, "video_plan", lambda ref, **kwargs: ())
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda ref, **kwargs: ())
         monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", lambda self, planned, **kwargs: True)
         monkeypatch.setattr(web_runner_module, "get_video_backend", lambda family: backend)
         monkeypatch.setattr(web_runner_module, "video_load_options", lambda family, cfg, name, *, upscale, quiet: {})
@@ -685,7 +701,7 @@ class TestWebRunner:
         assert events == [{"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1}]
 
     def test_a_stopped_ltx_download_ends_the_job_without_loading(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "video_plan", lambda *_a, **_kw: ("targets",))
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda *_a, **_kw: ("targets",))
         monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", lambda self, *_a, **_kw: False)
         monkeypatch.setattr(web_runner_module, "get_video_backend", MagicMock(side_effect=AssertionError("must not load")))
         monkeypatch.setattr(web_runner_module, "run_ltx_video_upscale", MagicMock(side_effect=AssertionError("must not run")))
@@ -702,6 +718,7 @@ class TestWebRunner:
         monkeypatch.setattr(web_runner_module, "run_upscale", lambda *_a, **_kw: None)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_name="zit", upscale_factor=2, upscale_source="/out/a.png", quantize=8)
 
         try:

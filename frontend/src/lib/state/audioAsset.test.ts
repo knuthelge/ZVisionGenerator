@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { AUDIO_MODELS, LYRICS, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../test-utils/audio';
-import { audioModelLabel, cutNote, hasNoWords, lengthLabel, lyricLines, seekFraction, takeWords, tileWords, wordBlocks } from './audioAsset';
-
-describe('lengthLabel', () => {
-  it.each([[120, '2:00'], [21, '0:21'], [20.6, '0:21'], [0, '0:00'], [360, '6:00'], [3725, '1:02:05']])('formats %s s as %s', (seconds, label) => {
-    expect(lengthLabel(seconds)).toBe(label);
-  });
-});
+import { audioModelLabel, cutNote, hasNoWords, lyricLines, seekFraction, takeWords, tileWords, wordBlocks } from './audioAsset';
 
 describe('the words of a take', () => {
   it('leaves the [section] lines out of a song\'s lyrics', () => {

@@ -38,14 +38,8 @@ from zvisiongenerator.downloads import (
     STOPPED,
     DownloadFlights,
     DownloadReport,
-    DownloadTarget,
     describe_refusal,
-    enhancer_plan,
     ensure_downloaded,
-    image_plan,
-    matte_plan,
-    seedvr2_plan,
-    video_plan,
 )
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
@@ -67,7 +61,6 @@ from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
 from zvisiongenerator.web.job_downloads import (
     ROLE_MODEL,
-    DownloadPlanners,
     JobDownloadPart,
     enhancer_part,
     image_model_part,
@@ -849,12 +842,12 @@ class WebRunner:
             enhance_by_set=enhance_by_set,
             control=control_signal,
             progress_callback=progress_callback,
-            ensure_downloads=self._enhancer_download_hook(mode="image", prompts_data=prompts_data, args=args, progress_callback=progress_callback, control_signal=control_signal),
+            ensure_downloads=self._enhancer_download_hook(mode="image", prompts_data=prompts_data, args=args, config=config, progress_callback=progress_callback, control_signal=control_signal),
         )
         if plan.cancelled:
             return
-        if not self._ensure_part(
-            image_model_part(request, model_ref, config, platform_key=sys.platform, planners=_planners()),
+        if not self._ensure_downloads(
+            image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=sys.platform),
             mode="image",
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
@@ -891,8 +884,8 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             return
-        if not self._ensure_part(
-            upscale_model_part(request, model_ref, config, platform_key=sys.platform, planners=_planners()),
+        if not self._ensure_downloads(
+            upscale_model_part(request, model_ref, config, platform_key=sys.platform),
             mode="image",
             total_iterations=1,
             progress_callback=progress_callback,
@@ -920,8 +913,8 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
-        if not self._ensure_part(
-            seedvr2_part(request.upscale_model, planners=_planners()),
+        if not self._ensure_downloads(
+            seedvr2_part(request.upscale_model),
             mode="video",
             total_iterations=1,
             progress_callback=progress_callback,
@@ -943,8 +936,8 @@ class WebRunner:
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
-        if not self._ensure_part(
-            ltx_video_upscale_part(request, config, planners=_planners()),
+        if not self._ensure_downloads(
+            ltx_video_upscale_part(request, config),
             mode="video",
             total_iterations=1,
             progress_callback=progress_callback,
@@ -1017,15 +1010,15 @@ class WebRunner:
             scene_by_set=scene_by_set,
             control=control_signal,
             progress_callback=progress_callback,
-            ensure_downloads=self._enhancer_download_hook(mode="video", prompts_data=prompts_data, args=args, progress_callback=progress_callback, control_signal=control_signal),
+            ensure_downloads=self._enhancer_download_hook(mode="video", prompts_data=prompts_data, args=args, config=config, progress_callback=progress_callback, control_signal=control_signal),
         )
         if plan.cancelled:
             return
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
             return
-        if not self._ensure_part(
-            video_model_part(request, model_ref, config, planners=_planners()),
+        if not self._ensure_downloads(
+            video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, upscale=bool(request.upscale)),
             mode="video",
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
@@ -1074,8 +1067,8 @@ class WebRunner:
         """
         if not request.transparent:
             return True
-        return self._ensure_part(
-            matte_part(planners=_planners()),
+        return self._ensure_downloads(
+            matte_part(),
             mode="image",
             total_iterations=total_iterations,
             progress_callback=progress_callback,
@@ -1088,6 +1081,7 @@ class WebRunner:
         mode: str,
         prompts_data: dict[str, list[tuple[str, str | None]]],
         args: argparse.Namespace,
+        config: dict[str, Any],
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
     ) -> Callable[[str, str | None], bool]:
@@ -1099,8 +1093,8 @@ class WebRunner:
         total_iterations = sum(len(prompts) for prompts in prompts_data.values()) * args.runs
 
         def ensure(repo: str, revision: str | None) -> bool:
-            return self._ensure_part(
-                enhancer_part(repo, revision, planners=_planners()),
+            return self._ensure_downloads(
+                enhancer_part(repo, revision, config, platform_key=sys.platform),
                 mode=mode,
                 total_iterations=total_iterations,
                 progress_callback=progress_callback,
@@ -1109,7 +1103,7 @@ class WebRunner:
 
         return ensure
 
-    def _ensure_part(
+    def _ensure_downloads(
         self,
         part: JobDownloadPart,
         *,
@@ -1118,44 +1112,22 @@ class WebRunner:
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
     ) -> bool:
-        """Download what *part* still misses with its role and ``event_model`` in the events; return False when the job was cancelled."""
-        return self._ensure_downloads(
-            part.targets,
-            mode=mode,
-            role=part.role,
-            model=part.event_model,
-            total_iterations=total_iterations,
-            progress_callback=progress_callback,
-            control_signal=control_signal,
-        )
+        """Download what *part* still misses, publishing ``model_downloading`` events; return False when the job was cancelled.
 
-    def _ensure_downloads(
-        self,
-        targets: tuple[DownloadTarget, ...] | None,
-        *,
-        mode: str,
-        role: str,
-        model: str,
-        total_iterations: int,
-        progress_callback: Callable[[EventPayload], None],
-        control_signal: SkipSignal,
-    ) -> bool:
-        """Download what *targets* still miss, publishing ``model_downloading`` events; return False when the job was cancelled.
-
-        ``None`` (the plan could not be made) and no targets skip the step. A Stop while this job owns the download
+        A part with ``None`` targets (the plan could not be made) or none skips the step. A Stop while this job owns the download
         ends the job with ``download: "stopped"``; a Stop while it only waits on another download, with
         ``download: "detached"`` (the other download continues).
 
         Raises:
             RuntimeError: If a download fails; the message names the repo.
         """
-        if not targets:
+        if not part.targets:
             return True
 
         def report(update: DownloadReport) -> None:
-            progress_callback(_download_event(update, mode=mode, role=role, model=model))
+            progress_callback(_download_event(update, mode=mode, role=part.role, model=part.event_model))
 
-        outcome = ensure_downloaded(targets, flights=self._download_flights, report=report, cancelled=lambda: control_signal.pending() == "quit")
+        outcome = ensure_downloaded(part.targets, flights=self._download_flights, report=report, cancelled=lambda: control_signal.pending() == "quit")
         if outcome in (STOPPED, DETACHED):
             progress_callback({"type": "batch_cancelled", "mode": mode, "completed_iterations": 0, "total_iterations": total_iterations, "download": outcome})
             return False
@@ -1380,19 +1352,6 @@ def _download_event(update: DownloadReport, *, mode: str, role: str, model: str)
         "download_eta_secs": update.progress.eta_secs,
         "shared": update.shared,
     }
-
-
-def _planners() -> DownloadPlanners:
-    """Return the download planners this module binds, looked up when called so a replaced name takes effect."""
-    return DownloadPlanners(
-        image=image_plan,
-        video=video_plan,
-        matte=matte_plan,
-        seedvr2=seedvr2_plan,
-        enhancer=enhancer_plan,
-        seedvr2_upscaler=get_seedvr2_upscaler,
-        data_dir=get_ziv_data_dir,
-    )
 
 
 def _load_image_model_with_progress(

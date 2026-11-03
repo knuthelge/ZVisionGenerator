@@ -2,7 +2,7 @@
   import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
   import { LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { defaultsFor, draft, extendStepFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { downloadStore } from '$lib/state/downloads.svelte';
   import { galleryStore } from '$lib/state/gallery.svelte';
@@ -13,9 +13,10 @@
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
   import { extendGuard, extendModelSupport, extendSourceFacts } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import { durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
   import type { ModelOption, WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
+  import { chipKeys } from './settingRows';
   import { randomSeed } from './seed';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
@@ -24,11 +25,11 @@
   import { fly } from 'svelte/transition';
   import AudioTrackPopover from './AudioTrackPopover.svelte';
   import type { AudioTrackView } from './audioTrackView';
-  import { KIND_INFO } from './audioKinds';
-  import { VIDEO_KIND_INFO } from './kindInfo';
-  import { soundRange, type AudioView } from './audioView';
+  import { AUDIO_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
+  import type { AudioView } from './audioView';
+  import type { AudioWorkflow, VideoKind } from '$lib/types';
   import VoicePopover from './VoicePopover.svelte';
-  import { availableKinds } from '$lib/state/audioDraft';
+  import { availableKinds, clampSeconds, secondsRange } from '$lib/state/audioDraft';
   import { videoKinds } from '$lib/state/workspaceTab';
   import ImagesPopover from './ImagesPopover.svelte';
   import type { ImagesView } from './imagesView';
@@ -60,7 +61,7 @@
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
-  const defaults = $derived(settingDefaultsFor(context, { workflow: s.workflow, model: s.model }));
+  const defaults = $derived(defaultsFor(context, s, draft.extendSource));
   const TITLES: Record<ChipKey, string> = {
     seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', seed: 'Seed', runs: 'Batch size',
     source: 'Source video', images: 'Images', track: 'Audio track', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', transparent: 'Transparent background', model: 'Model',
@@ -68,13 +69,9 @@
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
-  /** The settings a popover's Reset puts back; none for the ones that have no default (model, LoRAs, files). */
-  const RESET_KEYS: Partial<Record<ChipKey, SettingKey[]>> = {
-    seconds: ['frameCount'], length: ['audioSeconds'], steps: ['steps'], guidance: ['guidance'], seed: ['seed'], runs: ['runs'],
-    size: ['ratio', 'size', 'dimensionMode'], audio: ['audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleReview'], upscale: ['upscaleEnabled', 'upscaleFactor', 'upscaleReview'], transparent: ['postprocessTransparent'],
-  };
-  const resetKeys = $derived(RESET_KEYS[key] ?? []);
-  const canReset = $derived(resetKeys.some((k) => s[k] !== defaults[k]));
+  /** The settings a popover's Reset puts back: those of its chip's rows in `SETTING_ROWS`; none for the ones that have no default (model, LoRAs, files). */
+  const resetKeys = $derived(chipKeys(key, caps, s));
+  const canReset = $derived(resetKeys.some((k) => !Object.is(s[k], defaults[k])));
 
   function reset(): void {
     draft.patch(Object.fromEntries(resetKeys.map((k) => [k, defaults[k]])));
@@ -116,13 +113,15 @@
   }
 
   // --- Length of a sound ---
-  const lengthRange = $derived(soundRange(context.audio_models?.find((entry) => entry.id === s.model) ?? null));
-  const kinds = $derived(availableKinds(context));
-  const videoKindOptions = $derived(videoKinds(context.workflow_contract.values));
-  const videoKind = $derived(s.workflow === 'extend' ? 'extend' : 'new');
+  const lengthRange = $derived(secondsRange(audio.model));
+  const kindChoice = $derived<KindChoice>(
+    caps.isAudio
+      ? { kinds: availableKinds(context), info: AUDIO_KIND_INFO, value: s.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
+      : { kinds: videoKinds(context.workflow_contract.values), info: VIDEO_KIND_INFO, value: s.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) },
+  );
 
   function setLength(seconds: number | null): void {
-    if (seconds !== null) draft.update('audioSeconds', Math.min(lengthRange.max, Math.max(lengthRange.min, seconds)));
+    if (seconds !== null) draft.update('audioSeconds', clampSeconds(seconds, audio.model));
   }
 
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
@@ -140,7 +139,6 @@
   const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, { alignment: extendStep }) : { step: 0.1, min: 0.1 });
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
-  const extendDefault = $derived(sourceFps ? defaultExtendFrames(sourceFps, extendStep) : null);
   const extendMemoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
   const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
   const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath), extendModelSupport(context, s.model)));
@@ -189,7 +187,7 @@
   // --- Voice ---
   // The popover holds the section's rows; on a model that cannot follow a recording it has nothing to show.
   $effect(() => {
-    if (key === 'voice' && !audio.voice.visible) onclose();
+    if (key === 'voice' && !caps.showVoice) onclose();
   });
   const title = $derived(TITLES[key]);
 
@@ -279,23 +277,13 @@
       <InspectorNumber ariaLabel="Length in seconds" value={s.audioSeconds} step={1} min={lengthRange.min} max={lengthRange.max} stepper size="lg" commitOnly onchange={setLength} />
       <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={s.audioSeconds} style:--fill={rangeFill(s.audioSeconds, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
       <p class="ui-help">From {lengthRange.min} to {lengthRange.max} seconds.</p>
-    {:else if key === 'kind' && !caps.isAudio}
-      <div class="pop-list" role="radiogroup" aria-label="Kind">
-        {#each videoKindOptions as kind (kind)}
-          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === videoKind} onclick={() => { if (kind !== videoKind) draft.setVideoKind(kind, context); }}>
-            <Icon name={VIDEO_KIND_INFO[kind].icon} size={16} />
-            <span class="pop-item-text">{VIDEO_KIND_INFO[kind].label}</span>
-            <small>{VIDEO_KIND_INFO[kind].description}</small>
-          </button>
-        {/each}
-      </div>
     {:else if key === 'kind'}
       <div class="pop-list" role="radiogroup" aria-label="Kind">
-        {#each kinds as kind (kind)}
-          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === s.workflow} onclick={() => { if (kind !== s.workflow) draft.setAudioKind(kind, context); }}>
-            <Icon name={KIND_INFO[kind].icon} size={16} />
-            <span class="pop-item-text">{KIND_INFO[kind].label}</span>
-            <small>{KIND_INFO[kind].description}</small>
+        {#each kindChoice.kinds as kind (kind)}
+          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === kindChoice.value} onclick={() => { if (kind !== kindChoice.value) kindChoice.pick(kind); }}>
+            <Icon name={kindChoice.info[kind].icon} size={16} />
+            <span class="pop-item-text">{kindChoice.info[kind].label}</span>
+            <small>{kindChoice.info[kind].description}</small>
           </button>
         {/each}
       </div>
@@ -306,9 +294,6 @@
       <p class="ui-help">{sourceFps === null ? 'Choose a video to extend first.' : extendLength ? `Total ${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames${s.extendFrames !== null ? ` · +${s.extendFrames} new` : ''}` : ''}</p>
       {#if extendTime}<p class="ui-help">{extendTime}</p>{/if}
       {#if extendMemoryNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{extendMemoryNote.text}</p>{/if}
-      {#if extendDefault !== null && s.extendFrames !== extendDefault}
-        <button type="button" class="ui-btn" onclick={() => draft.update('extendFrames', extendDefault)}>Back to the default length</button>
-      {/if}
     {:else if key === 'seed'}
       <InspectorNumber ariaLabel="Seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" stepper={false} size="lg" onchange={(v) => draft.update('seed', v)} />
       <div class="pop-list">
@@ -336,13 +321,13 @@
             <button type="button" class="pop-item" role="radio" aria-checked={model.id === s.model} onclick={() => { if (model.id !== s.model) onModelChange(model.id); }}>
               <Icon name="cube" size={16} />
               <span class="pop-item-text">{model.label}</span>
-              <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.active('model', model.id))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
+              <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.activeModel(model))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
             </button>
             {#if model.licences?.length}<LicenceMark licences={model.licences} testId="model-licence-{model.id}" />{/if}
           </div>
         {/each}
       </div>
-      {#if selectedModel && selectedModel.downloaded === false && !downloadStore.active('model', selectedModel.id)}
+      {#if selectedModel && selectedModel.downloaded === false && !downloadStore.activeModel(selectedModel)}
         <p class="ui-help" data-testid="model-not-downloaded">{selectedModel.label} is not downloaded. Generate asks before downloading it; the Models page shows its size.</p>
       {/if}
       {#if quantizeOptions}

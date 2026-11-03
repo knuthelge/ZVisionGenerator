@@ -311,31 +311,23 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+def _audio_definition(*controls: str) -> dict[str, Any]:
+    """Return the definition of an audio workflow that shows *controls* between the model and the run controls."""
+    return {
+        "mode": "audio",
+        "model_kind": "audio",
+        "visible_controls": ["workflow", "model", *controls, "runs", "seed"],
+        "requires_reference_image": False,
+        "requires_source_video": False,
+        "clear_fields": [],
+    }
+
+
 AUDIO_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
-    "music": {
-        "mode": "audio",
-        "model_kind": "audio",
-        "visible_controls": ["workflow", "model", "music_style", "lyrics", "runs", "seed"],
-        "requires_reference_image": False,
-        "requires_source_video": False,
-        "clear_fields": [],
-    },
-    "speech": {
-        "mode": "audio",
-        "model_kind": "audio",
-        "visible_controls": ["workflow", "model", "speech_text", *VOICE_CONTROLS, "runs", "seed"],
-        "requires_reference_image": False,
-        "requires_source_video": False,
-        "clear_fields": [],
-    },
-    "sound": {
-        "mode": "audio",
-        "model_kind": "audio",
-        "visible_controls": ["workflow", "model", "sound_prompt", "length", "runs", "seed"],
-        "requires_reference_image": False,
-        "requires_source_video": False,
-        "clear_fields": [],
-    },
+    "music": _audio_definition("music_style", "lyrics"),
+    "speech": _audio_definition("speech_text", *VOICE_CONTROLS),
+    "sound": _audio_definition("sound_prompt", "length"),
 }
 WORKFLOW_DEFINITIONS.update(AUDIO_WORKFLOW_DEFINITIONS)
 
@@ -358,30 +350,19 @@ _CONTROLS_WITHOUT_CAPABILITY = {
 }
 
 
+def _hidden_controls(capabilities: object, table: dict[str, tuple[str, ...]]) -> list[str]:
+    """Return the control ids in *table* whose capability *capabilities* lacks, sorted."""
+    return sorted({control for name, controls in table.items() if not getattr(capabilities, name) for control in controls})
+
+
 def hidden_video_controls(capabilities: VideoCapabilities) -> list[str]:
-    """Return the workflow controls a video model does not have, sorted, from what it cannot do.
-
-    Args:
-        capabilities: What the family can do on this platform.
-
-    Returns:
-        Control ids as they appear in ``visible_controls``; empty when the family can do everything.
-    """
-    hidden = {control for name, controls in _CONTROLS_WITHOUT_CAPABILITY.items() if not getattr(capabilities, name) for control in controls}
-    return sorted(hidden)
+    """Return the workflow controls a video model does not have, sorted, from what it cannot do on this platform."""
+    return _hidden_controls(capabilities, _CONTROLS_WITHOUT_CAPABILITY)
 
 
 def hidden_audio_controls(capabilities: AudioCapabilities) -> list[str]:
-    """Return the workflow controls an audio model does not have, sorted, from what it cannot do.
-
-    Args:
-        capabilities: What the model can do (the preset's ``capabilities``).
-
-    Returns:
-        Control ids as they appear in ``visible_controls``; empty when the model can do everything.
-    """
-    hidden = {control for name, controls in _AUDIO_CONTROLS_WITHOUT_CAPABILITY.items() if not getattr(capabilities, name) for control in controls}
-    return sorted(hidden)
+    """Return the workflow controls an audio model does not have, sorted, from its preset's ``capabilities``."""
+    return _hidden_controls(capabilities, _AUDIO_CONTROLS_WITHOUT_CAPABILITY)
 
 
 def canonicalize_workflow(value: Any, *, fallback: str | None = None) -> str | None:
@@ -393,18 +374,8 @@ def canonicalize_workflow(value: Any, *, fallback: str | None = None) -> str | N
 
 
 def default_workflow_for_mode(mode: str) -> str:
-    """Return the default workflow for a submission mode (``image``, ``video`` or ``audio``).
-
-    Raises:
-        ValueError: If *mode* is not one of those.
-    """
-    if mode == "image":
-        return "txt2img"
-    if mode == "video":
-        return "txt2vid"
-    if mode == "audio":
-        return AUDIO_WORKFLOW_VALUES[0]
-    raise ValueError(f"Unknown mode '{mode}'. Use one of: image, video, audio.")
+    """Return the default workflow for an image/video submission mode."""
+    return "txt2vid" if mode == "video" else "txt2img"
 
 
 def workflow_mode(workflow: str) -> str:

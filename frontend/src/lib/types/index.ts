@@ -86,8 +86,6 @@ export interface GalleryAsset {
   lyrics?: string | null;
   /** A song that reached the model's cap and was faded out there. */
   cut?: boolean;
-  /** The parts a long speech text was split into; null when it was one. */
-  parts?: number | null;
   reuse_workspace_url: string; // hash URL: '#/workspace?workflow=...&prompt=...'
   has_reusable_config?: boolean;
   reuse_state?: ReuseState;
@@ -311,7 +309,6 @@ export interface AudioModelOption extends ModelStatusFields {
   capabilities: { lyrics: boolean; duration: boolean; voice_clone: boolean };
   /** The ceilings the kind has: `max_seconds`, `min_seconds`, `max_text_chars`, `min_voice_seconds`, `max_voice_seconds`. */
   limits: Record<string, number>;
-  default_seconds: number | null;
   /** A music model: the `[section]` list an empty Lyrics box stands for; null for the others. */
   instrumental_sections?: string | null;
   hidden_controls: string[];
@@ -951,6 +948,8 @@ export interface DraftState {
   lastImageModel: string;
   /** The video model last chosen in a video workflow; coming back from an image workflow restores it. Empty before one was chosen. */
   lastVideoModel: string;
+  /** The quantization the image model last ran with; coming back from a video workflow (which has none) restores it. */
+  lastImageQuantize: number | null;
   /** Image tab: the start image's path on the host; null when none is set or it was uploaded (`referenceImageUpload`). */
   referenceImagePath: string | null;
   /** Image tab: the file name of a start image uploaded from this device (its file is in `heldUploads` and the upload store); null when none. */
@@ -1232,7 +1231,7 @@ export interface AudioProgress {
   /** The phase the model is in, as it names it: `Plan`, `Song tokens`, `Synthesis`, `Decode`, `Speech tokens` or `Sampling`. */
   phase: string;
   step: number;
-  /** The phase's step count; null while the model cannot say (a song's tokens run until it ends). */
+  /** The phase's step count; null while the model cannot say (a song's tokens run until it ends). Speech tokens count against the frames the part's text should need, and a finished part reports the frames it took. */
   total: number | null;
   /** The part of a long speech text being read (1-based), and how many there are. */
   part: number;
@@ -1553,28 +1552,12 @@ export interface DownloadList {
   items: DownloadItem[];
 }
 
-/** What a Models-page download would fetch, from `GET /api/models/download/plan`. */
-export interface DownloadPlan {
-  kind: 'model' | 'audio' | 'enhancer' | 'matte';
-  name: string;
-  label: string;
-  parts: { repo: string; files: number; bytes: number | null }[];
-  total_bytes: number | null;
-  /** Free space on the download drive against the estimate; `null` when it cannot be checked. */
-  space: { path: string; needed_bytes: number; free_bytes: number; enough: boolean } | null;
-  /** The licences of the row's model, each tagged with the row's `name` as its `model`. */
-  licences?: JobDownloadLicence[];
-}
-
-/** One model a job would download, from `POST /api/generate/plan` and `POST /api/upscale/plan`. */
+/** One model a job or a Models-page row would download, from the plan routes. */
 export interface JobDownloadPart {
   /** The name the dialog shows. */
   label: string;
   /** The model's id; the key of its licence records. */
   model: string;
-  /** The first repo that has files to fetch; empty when the part cannot be planned now. */
-  repo: string;
-  files: number;
   /** What is missing; `null` when the size is unknown. */
   bytes: number | null;
 }
@@ -1584,11 +1567,12 @@ export interface ModelLicence {
   name: string;
   supplier: string;
   summary: string;
-  /** The licence text (or the model card), pinned to a revision. */
+  /** The licence text pinned to a revision, or the model page of the licensor's original repository. */
   url: string;
-  /** What the link to `url` is called: "Licence" or "Model card". */
+  /** What the link to `url` is called: "Licence", "Model page" or "Model card". */
   url_label: string;
-  notice_url: string | null;
+  /** The credit line the licence requires beside the model, such as "Powered by Stability AI"; null for most. */
+  attribution: string | null;
 }
 
 /** A licence record that covers a model of a job's plan. */
@@ -1597,7 +1581,10 @@ export interface JobDownloadLicence extends ModelLicence {
   model: string;
 }
 
-/** What a job would download before it runs: the missing models in the order the job fetches them. Empty `parts` means nothing is to be downloaded. */
+/**
+ * What a job would download before it runs (`POST /api/generate/plan`, `POST /api/upscale/plan`): the missing models in
+ * the order the job fetches them. Empty `parts` means nothing is to be downloaded.
+ */
 export interface JobDownloadPlan {
   parts: JobDownloadPart[];
   /** `null` when any size is unknown. */
@@ -1607,6 +1594,11 @@ export interface JobDownloadPlan {
   /** A part could not be sized because Hugging Face could not be reached. */
   unchecked: boolean;
   licences: JobDownloadLicence[];
+}
+
+/** What a Models-page row would download, from `GET /api/models/download/plan`: one part, and the row's label. */
+export interface RowDownloadPlan extends JobDownloadPlan {
+  label: string;
 }
 
 /** A quantized copy of an installed model, used automatically when that quantize level is selected. */
@@ -1730,15 +1722,19 @@ export interface ModelInventory {
   huggingface_token_source: string | null;
 }
 
+/** A list of recent prompts: one per Workspace mode, and one per audio kind. */
+export type RecentMode = Exclude<WorkflowMode, 'audio'> | AudioWorkflow;
+
 /** One prompt the server accepted, as the recent prompts list returns it. */
 export interface RecentPrompt {
   format: EnhanceFormat;
   /** The prompt, or the JSON caption text when *format* is `json`. */
   prompt: string;
-  /** The video scene; empty otherwise. */
+  /** The video scene, or the lyrics of a music prompt; empty otherwise. */
   scene: string;
   negative_prompt: string;
-  mode: WorkflowMode;
+  /** The list the entry is kept in. */
+  mode: RecentMode;
   /** Server time of the submit, in epoch seconds. */
   used_at: number;
 }

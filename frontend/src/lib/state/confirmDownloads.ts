@@ -3,18 +3,16 @@ import type { ConfirmPart } from '$lib/components/molecules/ConfirmDialog.svelte
 import type { JobDownloadLicence, JobDownloadPlan } from '$lib/types';
 import { downloadConfirmText, UNCHECKED_TEXT } from './downloadConfirm';
 import { sizeLabel } from './downloadProgress';
+import { licenceLinks } from './licenceLinks';
 
-/** The lines under a part: one per licence record that covers its model, each ending in its links. */
+/** The lines under a part: one per licence record that covers its model, ending in its link, then the record's credit line if it has one. */
 function licenceLines(licences: JobDownloadLicence[], model: string): ConfirmPart['lines'] {
   return licences
     .filter((licence) => licence.model === model)
-    .map((licence) => ({
-      text: `${licence.name} (${licence.supplier}): ${licence.summary}`,
-      links: [
-        { label: `${licence.url_label} ↗`, href: licence.url, ariaLabel: `${licence.name} ${licence.url_label.toLowerCase()} (opens in a new tab)` },
-        ...(licence.notice_url ? [{ label: 'NOTICE ↗', href: licence.notice_url, ariaLabel: `${licence.name} NOTICE (opens in a new tab)` }] : []),
-      ],
-    }));
+    .flatMap((licence) => [
+      { text: `${licence.name} (${licence.supplier}): ${licence.summary}`, links: licenceLinks(licence) },
+      ...(licence.attribution ? [{ text: licence.attribution, links: [] }] : []),
+    ]);
 }
 
 /**

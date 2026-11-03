@@ -10,11 +10,11 @@ from typing import Any
 from zvisiongenerator.audio_runner import run_audio_batch
 from zvisiongenerator.backends import audio_platform_key
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
-from zvisiongenerator.downloads import audio_plan, describe_refusal, target_present_offline
+from zvisiongenerator.downloads import audio_plan, describe_refusal
 from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.audio_request import DEFAULT_SOUND_SECONDS, check_speech_request, check_supported_fields, find_runnable_preset, resolve_sound_seconds
+from zvisiongenerator.utils.audio_request import DEFAULT_SOUND_SECONDS, check_seed, check_speech_request, check_supported_fields, find_runnable_preset, resolve_sound_seconds
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
@@ -105,7 +105,7 @@ def _resolve_voice(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     """Return the voice to follow, after checking the recording exists, says what it says, and is allowed to be cloned."""
     if args.voice is None:
         return None
-    path = Path(args.voice).expanduser()
+    path = Path(args.voice).expanduser().resolve()  # recorded in the take's settings, so it must work from any folder
     if not path.is_file():
         parser.error(f"Voice recording not found: {path}")
     if args.voice_text is None or not args.voice_text.strip():
@@ -129,7 +129,7 @@ def _announce_music(request: AudioGenerationRequest, preset: AudioPreset) -> Non
     sections = settings.get("instrumental_sections")
     if preset.kind != "music" or not sections:
         return
-    _, _, kind, count = music_mode(request.lyrics, sections, cot_song=settings.get("cot_song", "full"), cot_instrumental=settings.get("cot_instrumental", "melody"))
+    _, kind, count = music_mode(request.lyrics, sections)
     print(f"Making an instrumental of {count} sections." if kind == INSTRUMENTAL else "Making a song from the lyrics.", flush=True)
 
 
@@ -142,6 +142,10 @@ def main(*, prog: str = "ziv-audio") -> None:
     if args.runs < 1:
         parser.error("--runs must be at least 1")
     try:
+        check_seed(args.seed)
+    except ValueError as e:
+        parser.error(f"--seed: {e}")
+    try:
         config = load_config()
     except ValueError as e:
         parser.error(str(e))
@@ -151,6 +155,8 @@ def main(*, prog: str = "ziv-audio") -> None:
         parser.error(_PROMPT_HELP[preset.kind])
     _check_flags(parser, args, preset)
     lyrics = _read_lyrics(parser, args)
+    # Before anything reads a recording: ffmpeg is what reads it, and a machine without it is offered the install first.
+    ensure_ffmpeg()
     voice = _resolve_voice(parser, args)
     request = AudioGenerationRequest(
         preset=preset.id,
@@ -165,14 +171,13 @@ def main(*, prog: str = "ziv-audio") -> None:
             check_speech_request(request, preset.limits)
         except ValueError as e:
             parser.error(str(e))
-    ensure_ffmpeg()
     output = str(Path(args.output).expanduser())
     _announce_music(request, preset)
 
     # The terms of a model that has them are named before its files download.
     platform_key = audio_platform_key()
     try:
-        print_licence_notice(preset.id, lambda: audio_plan(preset, platform_key), present=target_present_offline)
+        print_licence_notice(preset.id, lambda: audio_plan(preset, platform_key))
     except ValueError as e:
         parser.error(str(e))
 

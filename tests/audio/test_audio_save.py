@@ -19,7 +19,6 @@ from zvisiongenerator.utils.provenance import (
     AUDIO_CONFIG_SCHEMA,
     build_audio_config_payload,
     config_from_probe,
-    embed_config,
     read_config,
 )
 from zvisiongenerator.utils.video_probe import ffprobe_json
@@ -86,20 +85,6 @@ class TestFlacRoundTrip:
 class TestConfigInAnyContainer:
     def test_the_tag_is_found_whatever_its_case(self):
         assert config_from_probe({"format": {"tags": {"ZVISIONGENERATOR.CONFIG": json.dumps({"a": 1})}}}) == {"a": 1}
-
-    @REAL
-    def test_embed_config_adds_the_settings_to_a_flac_without_changing_its_audio(self, tmp_path):
-        path = tmp_path / "plain.flac"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=0.2", "-c:a", "flac", str(path)], check=True)
-        assert read_config(path) is None
-        before, _ = decode(path)
-
-        embed_config(path, {"kind": "sound", "seed": 4})
-
-        after, _ = decode(path)
-        np.testing.assert_array_equal(before, after)
-        assert read_config(path) == {"kind": "sound", "seed": 4}
-        assert [item.name for item in tmp_path.iterdir()] == ["plain.flac"]
 
 
 class TestPayload:

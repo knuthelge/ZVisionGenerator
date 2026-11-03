@@ -35,12 +35,13 @@ zvisiongenerator/
 │   ├── audio/                     Audio models on a torch device (CUDA or MPS), one backend module per family
 │   │   ├── higgs3.py              Higgs TTS 3 backend: loads from the cache only, transformers' own codec, long text read in parts and joined, an optional voice to follow
 │   │   ├── higgs3_codes.py        The delay pattern, the sampler and the rule that ends a take (pure torch)
-│   │   ├── higgs3_config.py       Read the official config.json into the numbers the model needs, and refuse anything else (no torch)
+│   │   ├── higgs3_config.py       Read the official config.json into the numbers the model needs (no torch)
 │   │   ├── higgs3_generate.py     The generation loop: one prompt in, the codes of one take out, with a callback per frame
 │   │   ├── higgs3_model.py        The network (Qwen3 backbone, fused codebook embedding and head) and its strict weight loader
 │   │   ├── higgs3_prompt.py       The tokenizer and the prompt, with the reference voice's slots
 │   │   ├── sa3.py                 Stable Audio 3 Medium: built in fp16 and filled tensor by tensor, with the output kept from before the library's clamp
 │   │   ├── yue2.py                YuE2: the vendored kit run stage by stage, with song or instrumental from the Lyrics and a fade on a take that hit the limit
+│   │   ├── yue2_load.py           Stream YuE2's weights in tensor by tensor, and size-check the weight files instead of hashing them
 │   │   └── yue2_swap.py           Keep YuE2's weight groups in pinned CPU memory and put only the running phase's group on the GPU
 │   ├── cuda/                      Windows and Linux (diffusers/CUDA); what image and video share sits here
 │   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
@@ -287,7 +288,7 @@ zvisiongenerator/
 
 | Path | Holds |
 |---|---|
-| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is `src/features/workspace/` (`AudioCompose`, `KindControl`, `VoiceSection`, `VoicePopover`, `audioView.ts`, `audioKinds.ts`) with its state in `src/lib/state/` (`audioDraft.ts`, `musicMode.ts`, `voiceConsent.svelte.ts`) |
+| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is `src/features/workspace/` (`AudioCompose`, `VoiceSection`, `VoicePopover`, `audioView.ts`, `kindInfo.ts`) with its state in `src/lib/state/` (`audioDraft.ts`, `musicMode.ts`, `voiceConsent.svelte.ts`) |
 | `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`), `audio/` and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
 | `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image, BiRefNet, YuE2 and Stable Audio 3 code |

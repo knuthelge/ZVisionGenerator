@@ -83,6 +83,23 @@ describe('Mascot moods', () => {
     expect(target.querySelector('.tool-clapper')).not.toBeNull();
   });
 
+  it('takes the audio tool', () => {
+    const { target } = mountComponent(Mascot, { tool: 'audio' });
+
+    expect(mood(target).dataset.tool).toBe('audio');
+  });
+
+  it('does not say it is creating an image while it makes audio', () => {
+    const image = mood(mountComponent(Mascot, { mood: 'creating', tool: 'brush' }).target).getAttribute('aria-label');
+    const audio = mood(mountComponent(Mascot, { mood: 'creating', tool: 'audio' }).target).getAttribute('aria-label');
+
+    expect(audio).not.toBe(image);
+    expect(audio?.startsWith('Z-Vision mascot')).toBe(true);
+    expect(mood(mountComponent(Mascot, { mood: 'sad', tool: 'audio' }).target).getAttribute('aria-label')).toBe(
+      mood(mountComponent(Mascot, { mood: 'sad', tool: 'brush' }).target).getAttribute('aria-label'),
+    );
+  });
+
   it('draws a simpler form below 48 px', () => {
     expect(mood(mountComponent(Mascot, { size: 24 }).target).hasAttribute('data-simple')).toBe(true);
     expect(mood(mountComponent(Mascot, { size: 120 }).target).hasAttribute('data-simple')).toBe(false);

@@ -44,7 +44,7 @@ from zvisiongenerator.utils.model_files import (
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
-from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label
+from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label, seedvr2_tier_label
 from zvisiongenerator.utils.video_extend import extend_step
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.audio_inventory import audio_inventory_rows, audio_repo_ids
@@ -369,7 +369,7 @@ def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[di
     return [
         {
             "name": seedvr2_row_name(model, setup.weights),
-            "label": seedvr2_row_name(model, setup.weights),
+            "label": seedvr2_tier_label(model, setup.weights),
             "family": "seedvr2",
             "size_label": model.removeprefix("seedvr2-"),
             "source": "seedvr2",

@@ -1,16 +1,7 @@
-<script lang="ts" module>
-  import type { ModelLicence } from '$lib/types';
-
-  /** The mark's accessible name: "Licence: <name>", or "Licences: <a> and <b>" when a model has several records. */
-  export function licenceMarkName(licences: readonly ModelLicence[]): string {
-    const names = licences.map((licence) => licence.name);
-    if (names.length <= 1) return `Licence: ${names[0] ?? ''}`;
-    return `Licences: ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  }
-</script>
-
 <script lang="ts">
+  import type { ModelLicence } from '$lib/types';
   import { popover } from '$lib/actions/popover';
+  import { licenceLinks } from '$lib/state/licenceLinks';
   import { layout } from '$lib/state/layoutMode.svelte';
   import Icon from '../atoms/Icon.svelte';
   import Tooltip from '../atoms/Tooltip.svelte';
@@ -30,7 +21,9 @@
   let button = $state<HTMLButtonElement>();
   let pop = $state<HTMLDivElement>();
 
-  const name = $derived(licenceMarkName(licences));
+  // "Licence: <name>", or "Licences: <a> and <b>" when a model has several records.
+  const names = $derived(licences.map((licence) => licence.name));
+  const name = $derived(names.length <= 1 ? `Licence: ${names[0] ?? ''}` : `Licences: ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
   const accessibleName = $derived(label ? `${label}. ${name}` : name);
   const tip = $derived(licences.map((licence) => `${licence.name}: ${licence.summary}`).join('\n'));
 
@@ -89,11 +82,11 @@
           <p class="licence-name">{licence.name}</p>
           <p class="licence-supplier">{licence.supplier}</p>
           <p class="licence-summary">{licence.summary}</p>
+          {#if licence.attribution}<p class="licence-attribution" data-testid="licence-attribution">{licence.attribution}</p>{/if}
           <p class="licence-links">
-            <a class="ui-btn ui-btn-sm" href={licence.url} target="_blank" rel="noopener" aria-label="{licence.name} {licence.url_label.toLowerCase()} (opens in a new tab)">{licence.url_label} ↗</a>
-            {#if licence.notice_url}
-              <a class="ui-btn ui-btn-sm" href={licence.notice_url} target="_blank" rel="noopener" aria-label="{licence.name} NOTICE (opens in a new tab)">NOTICE ↗</a>
-            {/if}
+            {#each licenceLinks(licence) as link (link.href)}
+              <a class="ui-btn ui-btn-sm" href={link.href} target="_blank" rel="noopener" aria-label={link.ariaLabel}>{link.label}</a>
+            {/each}
           </p>
         </section>
       {/each}
@@ -130,6 +123,7 @@
   .licence-name { font-weight: 600; color: var(--color-text-primary); overflow-wrap: anywhere; }
   .licence-supplier { font-size: var(--text-meta); color: var(--color-text-muted); }
   .licence-summary { margin-top: 4px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+  .licence-attribution { margin-top: 4px; font-size: var(--text-meta); color: var(--color-text-muted); overflow-wrap: anywhere; }
   .licence-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   @media (pointer: coarse) { .licence-links :global(.ui-btn) { min-height: 44px; } }
 </style>

@@ -14,21 +14,9 @@ CASES = json.loads((REPO_ROOT / "tests" / "audio" / "music_mode_cases.json").rea
 
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 def test_the_shared_cases(case):
-    cot, lyrics, kind, count = music_mode(case["lyrics"], case["default_sections"])
+    lyrics, kind, count = music_mode(case["lyrics"], case["default_sections"])
 
-    assert {"cot": cot, "lyrics": lyrics, "kind": kind, "section_count": count} == case["expected"]
-
-
-def test_the_presets_planning_modes_are_used():
-    assert music_mode("words", "[intro]", cot_song="off", cot_instrumental="full")[0] == "off"
-    assert music_mode("", "[intro]", cot_song="off", cot_instrumental="full")[0] == "full"
-
-
-def test_a_default_list_without_tags_is_refused_only_when_it_is_needed():
-    assert music_mode("words", "no tags here")[2] == "song"
-    assert music_mode("[Verse]", "no tags here")[2] == "instrumental"
-    with pytest.raises(ValueError, match="no \\[section\\] tag"):
-        music_mode("", "no tags here")
+    assert {"lyrics": lyrics, "kind": kind, "section_count": count} == {key: case["expected"][key] for key in ("lyrics", "kind", "section_count")}
 
 
 def test_section_tags_keep_their_order_and_spelling():

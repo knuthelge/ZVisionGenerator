@@ -18,7 +18,7 @@ import { startUpscale } from './upscale';
 const asset = { id: 'out/a.png', filename: 'a.png' } as GalleryAsset;
 const NOTHING: JobDownloadPlan = { parts: [], total_bytes: 0, space: null, unchecked: false, licences: [] };
 const SEEDVR2: JobDownloadPlan = {
-  parts: [{ label: 'SeedVR2 7B fp8', model: 'seedvr2-7b', repo: 'org/seedvr2', files: 2, bytes: 9e9 }],
+  parts: [{ label: 'SeedVR2 7B fp8', model: 'seedvr2-7b', bytes: 9e9 }],
   total_bytes: 9e9,
   space: { path: '/hub', needed_bytes: 9e9, free_bytes: 512e9, enough: true },
   unchecked: false,

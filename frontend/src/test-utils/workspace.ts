@@ -92,9 +92,9 @@ export const FLUX_LICENCE: ModelLicence = {
   name: 'FLUX Non-Commercial License v2.1',
   supplier: 'Black Forest Labs',
   summary: 'Non-commercial',
-  url: 'https://example.org/flux/LICENSE.md',
-  url_label: 'Licence',
-  notice_url: 'https://example.org/flux/NOTICE',
+  url: 'https://example.org/flux/model',
+  url_label: 'Model page',
+  attribution: null,
 };
 export const LTX_LICENCE: ModelLicence = {
   name: 'LTX-2 Community License Agreement',
@@ -102,7 +102,7 @@ export const LTX_LICENCE: ModelLicence = {
   summary: 'Free under $10M revenue',
   url: 'https://example.org/ltx/LICENSE',
   url_label: 'Licence',
-  notice_url: null,
+  attribution: null,
 };
 export const GEMMA_LICENCE: ModelLicence = {
   name: 'Gemma Terms of Use',
@@ -110,7 +110,7 @@ export const GEMMA_LICENCE: ModelLicence = {
   summary: "Gemma's use policy applies",
   url: 'https://example.org/gemma/LICENSE',
   url_label: 'Licence',
-  notice_url: null,
+  attribution: null,
 };
 export const MATTE_LICENCE: ModelLicence = {
   name: 'BiRefNet (MIT) and ViTMatte (Apache-2.0)',
@@ -118,7 +118,7 @@ export const MATTE_LICENCE: ModelLicence = {
   summary: "Trained on research datasets that don't allow commercial use",
   url: 'https://example.org/matte/README.md',
   url_label: 'Model card',
-  notice_url: null,
+  attribution: null,
 };
 
 export function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {

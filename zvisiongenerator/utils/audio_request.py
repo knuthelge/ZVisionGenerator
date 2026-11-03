@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.audio_types import AudioGenerationRequest
     from zvisiongenerator.utils.audio_preset import AudioLimits, AudioPreset
 
-__all__ = ["DEFAULT_SOUND_SECONDS", "MIN_SOUND_SECONDS", "check_speech_request", "check_supported_fields", "find_runnable_preset", "resolve_sound_seconds"]
+__all__ = ["DEFAULT_SOUND_SECONDS", "MAX_SEED", "MIN_SOUND_SECONDS", "check_seed", "check_speech_request", "check_supported_fields", "find_runnable_preset", "resolve_sound_seconds"]
 
 DEFAULT_SOUND_SECONDS = 10.0
 """The length of a sound when none is given."""
@@ -26,11 +26,24 @@ DEFAULT_SOUND_SECONDS = 10.0
 MIN_SOUND_SECONDS = 1.0
 """The shortest sound a model makes, in seconds."""
 
+MAX_SEED = 2**63 - 1
+"""The largest seed every audio model takes (YuE2's generator needs one below 2**63)."""
+
 _NO_SECONDS_REASON = {
     "music": "sets the length from the lyrics",
     "speech": "reads the whole text",
     "sound": "sets its own length",
 }
+
+
+def check_seed(seed: int | None) -> None:
+    """Refuse a seed no audio model takes, before anything loads; ``None`` (a random seed per take) passes.
+
+    Raises:
+        ValueError: If *seed* is below 0 or above :data:`MAX_SEED`.
+    """
+    if seed is not None and not 0 <= seed <= MAX_SEED:
+        raise ValueError(f"The seed must be from 0 to {MAX_SEED}.")
 
 
 def find_runnable_preset(config: Mapping[str, Any], platform_key: str, model: str | None, *, missing: str) -> AudioPreset:

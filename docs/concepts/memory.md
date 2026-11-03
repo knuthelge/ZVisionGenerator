@@ -87,7 +87,7 @@ The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux. The figures a
 
 Speech memory depends on the part, not the whole text, because a long text is read one part at a time.
 
-System memory matters too. YuE2 peaks at about 17 GiB of system memory while it loads or runs, so a computer with 16 GB of RAM may run out. Stable Audio 3 needs about 5.5 GiB of system memory while it loads. Higgs TTS 3 adds about 0.8 GB of system memory when it loads.
+System memory matters too. On Windows and Linux, YuE2 peaks at about 11 GiB of system memory while it loads or runs, which leaves a computer with 16 GB of RAM little to spare. Stable Audio 3 needs about 5.5 GiB of system memory while it loads. Higgs TTS 3 adds about 0.8 GB of system memory when it loads.
 
 === "macOS"
 

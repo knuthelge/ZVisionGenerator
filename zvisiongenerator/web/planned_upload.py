@@ -14,7 +14,7 @@ from typing import Any
 
 from starlette.datastructures import FormData
 
-__all__ = ["PlannedUpload", "is_planned_upload", "planned_form", "planned_upload_path"]
+__all__ = ["PlannedUpload", "planned_form", "planned_upload_path"]
 
 _PLANNED_DIR = Path(".web_uploads") / "planned"
 
@@ -28,11 +28,6 @@ class PlannedUpload:
     """
 
     filename: str
-
-
-def is_planned_upload(value: Any) -> bool:
-    """Return whether *value* is a :class:`PlannedUpload`."""
-    return isinstance(value, PlannedUpload)
 
 
 def planned_upload_path(upload: PlannedUpload, output_dir: str) -> str:

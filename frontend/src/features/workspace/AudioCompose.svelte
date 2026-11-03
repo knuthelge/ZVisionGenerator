@@ -3,6 +3,7 @@
   import { Icon } from '$lib/components/atoms';
   import { draft } from '$lib/state/draft.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { AUDIO_TEXT_KEYS } from '$lib/state/audioDraft';
   import { musicStatus } from '$lib/state/musicMode';
   import type { RecentPrompt } from '$lib/types';
   import type { AudioView } from './audioView';
@@ -24,8 +25,7 @@
 
   const STYLE_PLACEHOLDER = 'Genre, mood, instruments, singer.';
   const LYRICS_PLACEHOLDER = '[verse]\nThe words of the first verse…\n[chorus]\n… — or only tags such as [Intro] [Instrumental] [Solo] [Outro] for an instrumental; more sections, longer piece';
-  const TEXT_PLACEHOLDER = 'What to say. Tags such as <|sfx:laughter|> work here.';
-  const SOUND_PLACEHOLDER = 'What you hear: rain on a window, a crowd in a hall, a door slam…';
+  const PLACEHOLDERS = { speech: 'What to say. Tags such as <|sfx:laughter|> work here.', sound: 'What you hear: rain on a window, a crowd in a hall, a door slam…' };
   const PARTS_HELP = 'Long text is read in parts of about 500 characters and joined into one take.';
 
   const countWords = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
@@ -33,10 +33,10 @@
   const status = $derived(kind === 'music' ? musicStatus(view.music) : '');
   const characters = $derived(`${view.characters.toLocaleString('en-US')} / ${(view.maxCharacters ?? 0).toLocaleString('en-US')} characters`);
 
-  /** Bring a recent prompt back into the open kind's text box. */
+  /** Bring a recent prompt back into the open kind's text box; a song's lyrics come back with its style (when the model takes lyrics). */
   function pickRecent(entry: RecentPrompt): void {
-    const key = kind === 'music' ? 'audioStyle' : kind === 'speech' ? 'speechText' : 'soundPrompt';
-    draft.update(key, entry.prompt);
+    draft.update(AUDIO_TEXT_KEYS[kind], entry.prompt);
+    if (kind === 'music' && view.model?.capabilities.lyrics !== false) draft.update('lyrics', entry.scene);
     recentsOpen = false;
     // A finger would raise the keyboard over the result.
     if (!layout.coarse) document.getElementById(kind === 'music' ? 'ws-audio-style' : 'ws-prompt')?.focus();
@@ -66,7 +66,7 @@
       title="Recent prompts (Alt+↑ in an empty box)"
       onclick={() => { recentsReturn = null; recentsOpen = !recentsOpen; }}
     ><Icon name="history" size={14} /></button>
-    <RecentPromptsMenu open={recentsOpen} anchor={recentsButton} returnFocus={recentsReturn ?? recentsButton} mode="audio" jsonCapable={false} onpick={pickRecent} onclose={() => { recentsOpen = false; }} />
+    <RecentPromptsMenu open={recentsOpen} anchor={recentsButton} returnFocus={recentsReturn ?? recentsButton} mode={kind} jsonCapable={false} onpick={pickRecent} onclose={() => { recentsOpen = false; }} />
   </div>
 {/snippet}
 
@@ -115,57 +115,39 @@
     <span id="ws-music-status" class="statusline-msg" role="status">{status}</span>
     <span class="word-count">{wordCount} words</span>
   </div>
-{:else if kind === 'speech'}
-  <div class="field" data-testid="audio-compose" data-kind="speech">
-    <div class="label-row">
-      <label class="ui-label" for="ws-prompt">Text</label>
-      <span class="label-extras">required</span>
-    </div>
-    <div class="ui-prompt-box">
-      <textarea
-        id="ws-prompt"
-        class="prompt-text"
-        placeholder={TEXT_PLACEHOLDER}
-        aria-required="true"
-        aria-describedby="ws-speech-help"
-        aria-invalid={view.overLimit ? 'true' : undefined}
-        value={s.speechText}
-        use:autogrow={s.speechText}
-        onkeydown={onKeydown}
-        oninput={(e) => draft.update('speechText', e.currentTarget.value)}
-      ></textarea>
-      {@render tools()}
-    </div>
-  </div>
-  <div class="prompt-statusline" data-testid="prompt-statusline">
-    <span class="statusline-msg"></span>
-    <span class="word-count" class:over={view.overLimit} data-testid="speech-count">{characters}</span>
-  </div>
-  <p id="ws-speech-help" class="ui-help">{PARTS_HELP}</p>
 {:else}
-  <div class="field" data-testid="audio-compose" data-kind="sound">
+  {@const speech = kind === 'speech'}
+  {@const key = AUDIO_TEXT_KEYS[kind]}
+  <div class="field" data-testid="audio-compose" data-kind={kind}>
     <div class="label-row">
-      <label class="ui-label" for="ws-prompt">Prompt</label>
+      <label class="ui-label" for="ws-prompt">{speech ? 'Text' : 'Prompt'}</label>
       <span class="label-extras">required</span>
     </div>
     <div class="ui-prompt-box">
       <textarea
         id="ws-prompt"
         class="prompt-text"
-        placeholder={SOUND_PLACEHOLDER}
+        placeholder={PLACEHOLDERS[kind]}
         aria-required="true"
-        value={s.soundPrompt}
-        use:autogrow={s.soundPrompt}
+        aria-describedby={speech ? 'ws-speech-help' : undefined}
+        aria-invalid={speech && view.overLimit ? 'true' : undefined}
+        value={s[key]}
+        use:autogrow={s[key]}
         onkeydown={onKeydown}
-        oninput={(e) => draft.update('soundPrompt', e.currentTarget.value)}
+        oninput={(e) => draft.update(key, e.currentTarget.value)}
       ></textarea>
       {@render tools()}
     </div>
   </div>
   <div class="prompt-statusline" data-testid="prompt-statusline">
     <span class="statusline-msg"></span>
-    <span class="word-count">{wordCount} words</span>
+    {#if speech}
+      <span class="word-count" class:over={view.overLimit} data-testid="speech-count">{characters}</span>
+    {:else}
+      <span class="word-count">{wordCount} words</span>
+    {/if}
   </div>
+  {#if speech}<p id="ws-speech-help" class="ui-help">{PARTS_HELP}</p>{/if}
 {/if}
 
 <style>

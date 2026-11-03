@@ -21,31 +21,19 @@ def section_tags(text: str) -> list[str]:
     return _TAG.findall(text)
 
 
-def music_mode(lyrics: str, default_sections: str, *, cot_song: str = "full", cot_instrumental: str = "melody") -> tuple[str, str, str, int]:
-    """Decide whether *lyrics* make a song or an instrumental, and what the model is given.
+def music_mode(lyrics: str, default_sections: str) -> tuple[str, str, int]:
+    """Decide whether *lyrics* make a song or an instrumental, and what lyrics the model is given.
 
-    Words outside ``[tags]`` make a song: *cot_song* and the lyrics as given. Empty lyrics make an instrumental from
-    *default_sections*, and lyrics of only tags make one from those tags; both use *cot_instrumental*, and the section
-    list (one tag per paragraph) is what the model is given as lyrics, since the list sets the piece's length.
-
-    Args:
-        lyrics: The Lyrics box.
-        default_sections: The section list an empty Lyrics box stands for, such as ``"[intro] [verse] [chorus]"``.
-        cot_song: The planning mode of a song.
-        cot_instrumental: The planning mode of an instrumental.
+    Words outside ``[tags]`` make a song from the lyrics as given. Empty lyrics make an instrumental from
+    *default_sections*, and lyrics of only tags make one from those tags; the section list (one tag per paragraph) is
+    what the model is given, since the list sets the piece's length.
 
     Returns:
-        ``(cot, lyrics, kind, section_count)``: the planning mode, the lyrics to give the model, ``song`` or
-        ``instrumental``, and the number of ``[section]`` tags in those lyrics.
-
-    Raises:
-        ValueError: If the lyrics are empty and *default_sections* holds no ``[section]`` tag.
+        ``(lyrics, kind, section_count)``: the lyrics to give the model, ``song`` or ``instrumental``, and the number of
+        ``[section]`` tags in those lyrics.
     """
     tags = section_tags(lyrics)
     if _TAG.sub("", lyrics).strip():
-        return cot_song, lyrics, SONG, len(tags)
-    if not tags:
-        tags = section_tags(default_sections)
-        if not tags:
-            raise ValueError("The default instrumental section list holds no [section] tag.")
-    return cot_instrumental, "\n\n".join(tags), INSTRUMENTAL, len(tags)
+        return lyrics, SONG, len(tags)
+    tags = tags or section_tags(default_sections)
+    return "\n\n".join(tags), INSTRUMENTAL, len(tags)

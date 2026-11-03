@@ -31,7 +31,6 @@ _VIDEO_AND_IMAGE = ["txt2img", "img2img", "txt2vid", "img2vid", "extend"]
 
 def _on(monkeypatch, key: str) -> None:
     """Make this machine ``cuda`` or ``mps`` for the contract and the model rows."""
-    monkeypatch.setattr(web_server, "audio_platform_key", lambda: key)
     monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: key)
 
 
@@ -126,7 +125,9 @@ class TestMemoryAndDownloadStatus:
         assert fit == {"kind": "discrete", "budget_gb": round(budget_gb, 1), "by_quantize": {"none": {"status": status, "required_gb": 6.7}}}
 
     def test_a_mac_compares_the_mps_peak_with_the_recommended_working_set(self):
-        preset = _presets(yue2={**yue2_preset(), "memory": {"cuda_gb": 6.7, "mps_gb": 12.0}})["yue2"]
+        raw = yue2_preset()
+        raw["platforms"]["mps"]["memory_gb"] = 12.0
+        preset = _presets(yue2=raw)["yue2"]
 
         fit = describe_audio_status(preset, "mps", budget=MemoryBudget(16 * GIB), target_present=lambda _t: True)["memory_fit"]
 
@@ -135,7 +136,7 @@ class TestMemoryAndDownloadStatus:
         assert small["by_quantize"]["none"]["status"] == "too_large"
 
     def test_an_unmeasured_mac_peak_or_an_unknown_budget_gives_no_estimate(self):
-        preset = _presets()["yue2"]  # mps_gb is null until the Mac gate fills it in
+        preset = _presets()["yue2"]  # the Mac peak is null until the Mac gate fills it in
 
         assert describe_audio_status(preset, "mps", budget=MemoryBudget(16 * GIB), target_present=lambda _t: True)["memory_fit"] is None
         assert describe_audio_status(preset, "cuda", budget=None, target_present=lambda _t: True)["memory_fit"] is None
@@ -217,7 +218,6 @@ class TestWorkspacePayload:
             "type": "audio",
             "capabilities": {"lyrics": True, "duration": False, "voice_clone": False},
             "limits": {"max_seconds": 360},
-            "default_seconds": None,
             "instrumental_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
             "hidden_controls": ["length", "voice", "voice_consent", "voice_path", "voice_text"],
             "licences": [
@@ -227,7 +227,7 @@ class TestWorkspacePayload:
                     "summary": "Non-commercial; individual creators may monetise their outputs, companies need a licence",
                     "url": "https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE",
                     "url_label": "Licence",
-                    "notice_url": None,
+                    "attribution": None,
                 }
             ],
             "downloaded": True,
@@ -235,7 +235,7 @@ class TestWorkspacePayload:
         }
         assert rows["higgs3"]["limits"] == {"max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30}
         assert rows["higgs3"]["capabilities"]["voice_clone"] is True and rows["higgs3"]["hidden_controls"] == ["length", "lyrics"]
-        assert rows["sa3"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0} and rows["sa3"]["default_seconds"] == 10.0
+        assert rows["sa3"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0}
         assert rows["higgs3"]["instrumental_sections"] is None and rows["sa3"]["instrumental_sections"] is None
         assert rows["sa3"]["downloaded"] is False  # none of its repositories is under m-a-p/
         assert rows["sa3"]["licences"] == []

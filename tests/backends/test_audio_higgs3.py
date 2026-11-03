@@ -100,7 +100,7 @@ class TestLoad:
         rig.fakes.snapshots[repo_id] = []
         backend = Higgs3Backend()
 
-        with pytest.raises(FileNotFoundError, match=f"{repo_id}@[0-9a-f]{{40}}, which is not downloaded"):
+        with pytest.raises(FileNotFoundError, match=f"{repo_id} at [0-9a-f]{{40}} is not downloaded"):
             backend.load(PRESET, ENTRY, "cuda")
 
         rig.fakes.load_model.reset_mock()
@@ -116,8 +116,7 @@ class TestLoad:
         with pytest.raises(OSError, match="no codec"):
             backend.load(PRESET, ENTRY, "cuda")
 
-        with pytest.raises(RuntimeError, match="not loaded"):
-            backend.generate(_request(), MagicMock(), lambda: False)
+        assert backend._model is None
 
     def test_the_codec_decodes_on_its_own_device_and_drops_the_marker_codes(self, rig):
         rig.codec.waves.append(_tone(0.1))
@@ -132,7 +131,7 @@ class TestLoad:
         assert wave.dtype == np.float32
 
     def test_a_platform_can_put_the_codec_on_another_device(self, rig):
-        entry = type(ENTRY)(family=ENTRY.family, files=ENTRY.files, settings={"codec_device": "mps"})
+        entry = type(ENTRY)(family=ENTRY.family, files=ENTRY.files, memory_gb=None, settings={"codec_device": "mps"})
 
         Higgs3Backend().load(PRESET, entry, "mps")
 
@@ -284,14 +283,40 @@ class TestProgress:
         _, progress = _generate(rig, _request(f"{PART_1} {PART_2}"))
 
         speech = [args for args in progress if args[0] == "Speech tokens"]
-        assert speech == [
-            ("Speech tokens", 1, 1500, 1, 2),
-            ("Speech tokens", 10, 1500, 1, 2),
-            ("Speech tokens", 20, 1500, 1, 2),
-            ("Speech tokens", 26, 1500, 1, 2),  # the last frame of the part
-            ("Speech tokens", 1, 1500, 2, 2),
-            ("Speech tokens", 3, 1500, 2, 2),
-        ]
+        assert [(step, part) for _, step, _, part, _ in speech] == [(1, 1), (10, 1), (20, 1), (26, 1), (1, 2), (3, 2)]
+        assert {n_parts for *_, n_parts in speech} == {2}
+
+    def test_a_part_reports_the_frames_its_text_should_need_not_the_cap(self, rig):
+        rig.model.takes[:] = [26]
+        rig.codec.waves.append(_tone(0.5))
+
+        _, progress = _generate(rig, _request(PART_1))
+
+        expected = higgs3_module._estimate_part_frames(PART_1, 1500)
+        speech = [args for args in progress if args[0] == "Speech tokens"]
+        assert 0 < expected < 1500
+        assert [total for _, _, total, *_ in speech[:-1]] == [expected] * (len(speech) - 1)
+
+    def test_a_finished_part_ends_with_its_own_frame_count_as_the_total(self, rig):
+        rig.model.takes[:] = [26, 20]
+        rig.codec.waves.extend([_tone(0.5), _tone(0.5)])
+
+        _, progress = _generate(rig, _request(f"{PART_1} {PART_2}"))
+
+        speech = [args for args in progress if args[0] == "Speech tokens"]
+        assert [args for args in speech if args[3] == 1][-1][1:3] == (26, 26)
+        assert [args for args in speech if args[3] == 2][-1][1:3] == (20, 20)
+
+    def test_a_part_that_runs_past_its_estimate_keeps_the_bar_just_short_of_full(self, rig):
+        _with_cap(rig, 600)
+        rig.model.takes[:] = [500]
+        rig.codec.waves.append(_tone(0.5))
+
+        _, progress = _generate(rig, _request("short text"))
+
+        running = [(step, total) for phase, step, total, *_ in progress if phase == "Speech tokens"][:-1]
+        assert len(running) > 3
+        assert all(step < total <= 600 for step, total in running)
 
     def test_each_part_reports_its_decode_after_its_frames(self, rig):
         rig.model.takes[:] = [3, 3]
@@ -301,6 +326,20 @@ class TestProgress:
 
         assert [args for args in progress if args[0] == "Decode"] == [("Decode", 0, 1, 1, 2), ("Decode", 1, 1, 1, 2), ("Decode", 0, 1, 2, 2), ("Decode", 1, 1, 2, 2)]
         assert [args[0] for args in progress[:4]] == ["Speech tokens"] * 2 + ["Decode"] * 2
+
+
+class TestEstimate:
+    def test_it_grows_with_the_length_of_the_text(self):
+        short, long = (higgs3_module._estimate_part_frames("a" * length, 1500) for length in (100, 400))
+
+        assert 0 < short < long < 1500
+
+    def test_a_five_hundred_character_part_is_in_the_range_measured_on_real_takes(self):
+        assert 650 <= higgs3_module._estimate_part_frames("a" * 500, 1500) <= 800
+
+    def test_it_is_never_below_one_frame_or_above_the_cap(self):
+        assert higgs3_module._estimate_part_frames("", 1500) == 1
+        assert higgs3_module._estimate_part_frames("a" * 5000, 1500) == 1500
 
 
 class TestStop:
@@ -387,8 +426,6 @@ class TestClose:
 
         assert rig.backend._model is None
         assert rig.backend._codec is None
-        with pytest.raises(RuntimeError, match="not loaded"):
-            rig.backend.generate(_request(), MagicMock(), lambda: False)
 
     def test_close_gives_the_global_torch_flags_back(self, rig, torch_flags_guard):
         rig.backend.close()

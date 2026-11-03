@@ -12,19 +12,8 @@ class VoiceConsent {
   /** The voice is an *Any* take: it is nobody's voice, so no tick is asked for. */
   exempt = $state(false);
 
-  /** Tick or untick the box. */
-  set(ticked: boolean): void {
-    this.ticked = ticked;
-  }
-
-  /** Forget the tick and the exemption: the voice is new, and its consent is not known. */
-  clear(): void {
-    this.ticked = false;
-    this.exempt = false;
-  }
-
   /** Forget the tick, and record whether the new voice needs none (a take made in the model's own voice). */
-  reset(exempt: boolean): void {
+  reset(exempt = false): void {
     this.ticked = false;
     this.exempt = exempt;
   }

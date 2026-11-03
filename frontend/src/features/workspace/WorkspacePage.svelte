@@ -20,7 +20,8 @@
   import { workspaceMemory } from '$lib/state/pageMemory';
   import { deleteAsset } from '$lib/api/gallery';
   import { audioTrackParams, canExtend, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
-  import { audioModelLabel, cutNote, lengthLabel } from '$lib/state/audioAsset';
+  import { audioModelLabel, cutNote } from '$lib/state/audioAsset';
+  import { formatClock } from '$lib/state/clock';
   import { Badge, Icon, MascotSpot, Tooltip } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
@@ -35,7 +36,7 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, LicenceMark, ModelStatusBadges, ReviewStage, Segmented, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
   import { failureToastText, isReviewing } from '$lib/state/jobView';
   import { first, jobSettingsPrefill } from '$lib/state/jobSettings';
@@ -70,18 +71,16 @@
   import { imagesSummary } from './imagesSummary';
   import { currentAudioTrackView } from './audioTrackView';
   import { audioFormData, currentAudioView } from './audioView';
-  import { audioModelsOf, availableKinds } from '$lib/state/audioDraft';
-  import { replacesVoice } from '$lib/state/audioDraft';
+  import { AUDIO_TEXT_KEYS, audioModelsOf, availableKinds, replacesVoice } from '$lib/state/audioDraft';
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
-  import KindControl from './KindControl.svelte';
-  import { KIND_INFO } from './audioKinds';
-  import { VIDEO_KIND_INFO } from './kindInfo';
+  import { AUDIO_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
   import { currentImagesView } from './imagesView';
   import PresetMenu from './PresetMenu.svelte';
   import { audioChips, pendingChips, settingsChips, type ChipKey } from './settingsChips';
   import { Sheet } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { settingDefaultsFor, stepOptionsFor } from '$lib/state/draft.svelte';
+  import { defaultsFor, settingDefaultsFor, stepOptionsFor } from '$lib/state/draft.svelte';
+  import { changedRowCount, chipChanged } from './settingRows';
   import { framesToSeconds, roundSeconds } from '$lib/state/videoDuration';
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
@@ -95,7 +94,7 @@
   import { heldUploads } from '$lib/state/heldUploads.svelte';
   import { isAudioWorkflow, videoKinds, workspaceTab } from '$lib/state/workspaceTab';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow, WorkspaceWorkflow, AudioWorkflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, PrefillParams, UpscaleFactor, UpscaleMethod, WorkspaceContext, WorkspaceTab, Workflow, WorkspaceWorkflow, AudioWorkflow, VideoKind } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
@@ -311,7 +310,7 @@
   const trackBlock = $derived(audioTrack?.block ?? null);
   // What the Audio tab sends and why Generate is off on it: the kind's text, the voice and the speaker's tick.
   const audio = $derived(context === null ? null : currentAudioView(context));
-  const audioReason = $derived(audio?.active ? audio.reason : null);
+  const audioReason = $derived(audio?.reason ?? null);
   // A voice recording's length is read once it is chosen: it must be within what the model follows.
   $effect(() => {
     if (audio?.voice.recording && audio.voice.set) trackLengths.ensure(audio.voice.path, audio.voice.file);
@@ -372,6 +371,13 @@
   // The Video tab's kinds (New, and Extend where the machine can extend). With one kind there is nothing to choose, so no Kind control.
   const videoKindOptions = $derived(videoKinds(context?.workflow_contract.values ?? null));
   const showVideoKind = $derived(!isAudio && !isImageMode && videoKindOptions.length > 1);
+  const kindChoice = $derived<KindChoice | null>(
+    isAudio
+      ? { kinds: audioKinds, info: AUDIO_KIND_INFO, value: draft.state.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
+      : showVideoKind
+        ? { kinds: videoKindOptions, info: VIDEO_KIND_INFO, value: draft.state.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) }
+        : null,
+  );
   const currentModels = $derived<ModelOption[]>(isAudio && context ? audioModelsOf(context, draft.state.workflow as AudioWorkflow) : isImageMode ? imageModels : videoModels);
   const modelOptions = $derived(currentModels.map((m) => ({ value: m.id, label: modelOptionText(m) })));
   // Matches the toolbar label, which falls back to the first model when the draft has none.
@@ -399,7 +405,7 @@
   // Active lora chips parsed from draft.state.loraString; reused settings record paths, shown by LoRA name.
   const loraChips = $derived<LoraChip[]>(parseLoraString(draft.state.loraString, loraOptions));
   // What the chips hold Generate back for: a download on its way, or one that failed.
-  const block = $derived(generateBlock(draft.state.loraString, loraOptions));
+  const block = $derived(generateBlock(draft.state, loraOptions));
   const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : undefined);
   // The error slot names a failed LoRA download; while it is on screen, its toast would say the same thing again.
   const failureSlotShown = $derived(compact || tall || !draft.state.sidebarCollapsed);
@@ -415,21 +421,20 @@
     if (!context || !authorityReady) return pendingChips(draft.state.workflow);
     const s = draft.state;
     const caps = workspaceCapabilities(context, s);
+    const defaults = defaultsFor(context, s, draft.extendSource);
     if (caps.isAudio && caps.audioKind && audio) {
-      const audioDefaults = settingDefaultsFor(context, { workflow: s.workflow, model: s.model }) as Partial<DraftState>;
       return audioChips({
         kind: caps.audioKind,
         state: s,
         modelLabel: selectedModel?.label ?? s.model,
         modelDownloaded: selectedModel?.downloaded !== false,
         voice: caps.showVoice ? audio.voice : null,
-        changed: (...keys) => keys.some((key) => key in audioDefaults && s[key] !== audioDefaults[key]),
+        changed: (chip) => chipChanged(chip, caps, s, defaults),
         showLength: caps.showLength,
         showSeed: caps.showSeed,
         showRuns: caps.showRuns,
       });
     }
-    const defaults = settingDefaultsFor(context, { workflow: s.workflow, model: s.model }) as Partial<DraftState>;
     const presets = (caps.isImageMode ? context.image_size_dimensions : (context.video_size_dimensions ?? {}))[s.ratio]?.[s.size] ?? [s.width, s.height];
     const timing = videoTimingFor(context, s.model);
     const sourceFps = draft.extendSource?.fps ?? null;
@@ -438,12 +443,11 @@
       caps,
       state: s,
       videoKind: showVideoKind ? (s.workflow === 'extend' ? 'extend' : 'new') : null,
-      changed: (...keys) => keys.some((key) => key in defaults && s[key] !== defaults[key]),
+      changed: (chip) => chipChanged(chip, caps, s, defaults),
       width: s.dimensionMode === 'custom' ? s.width : presets[0],
       height: s.dimensionMode === 'custom' ? s.height : presets[1],
       seconds: caps.showFrameCount ? roundSeconds(framesToSeconds(s.frameCount, timing.fps)) : null,
       extendSeconds: sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null,
-      extendChanged: false,
       loraNames: loraChips.map((chip) => loraLabel(chip.name)),
       loraDownload: block.failures.length > 0 ? { kind: 'failed' } : block.waiting ? { kind: 'downloading', percent: block.waiting.percent } : undefined,
       modelLabel: selectedModel?.label ?? s.model,
@@ -458,16 +462,17 @@
       openKey: activeChip,
     });
   });
-  // The preset chip is left out: it says where the settings started, and counts none of them.
-  const changedCount = $derived(chips.filter((chip) => chip.changed && chip.key !== 'preset').length);
+  // The same count as the Reset badge: the rows of the Settings pane that differ from their defaults. The preset counts none of them.
+  const changedCount = $derived(context && authorityReady ? changedRowCount(workspaceCapabilities(context, draft.state), draft.state, defaultsFor(context, draft.state, draft.extendSource)) : 0);
   // What the folded composer reads: the prompt file and its count, the Enhanced text, or the prompt.
   const composerSummary = $derived.by(() => {
     const s = draft.state;
     if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} ${s.promptFileOptionIds.length === 1 ? 'prompt' : 'prompts'}` : 'Choose a prompt file', empty: !s.promptFilePath };
     // The Audio tab's composer reads the open kind's own text.
     if (isAudioWorkflow(s.workflow)) {
-      const kind = { music: { label: 'Style · Lyrics', text: s.audioStyle, empty: 'Describe the style…' }, speech: { label: 'Text', text: s.speechText, empty: 'What to say…' }, sound: { label: 'Prompt', text: s.soundPrompt, empty: 'Describe the sound…' } }[s.workflow];
-      return { label: kind.label, text: kind.text || kind.empty, empty: !kind.text };
+      const kind = { music: { label: 'Style · Lyrics', empty: 'Describe the style…' }, speech: { label: 'Text', empty: 'What to say…' }, sound: { label: 'Prompt', empty: 'Describe the sound…' } }[s.workflow];
+      const text = s[AUDIO_TEXT_KEYS[s.workflow]];
+      return { label: kind.label, text: text || kind.empty, empty: !text };
     }
     const video = s.workflow === 'img2vid' || s.workflow === 'txt2vid' || s.workflow === 'extend';
     const enhanced = anyEnhancedUsed(s);
@@ -670,7 +675,8 @@
     getWorkspaceCoreContext()
       .then((fresh) => {
         if (request !== modelStatusRequest || !context) return;
-        context = { ...context, image_models: fresh.image_models, video_models: fresh.video_models, loras: fresh.loras };
+        // The core fetch leaves the history out, so it is the one field to keep.
+        context = { ...fresh, history_assets: context.history_assets };
         workspaceMemory.set(context);
       })
       .catch(() => undefined);
@@ -679,7 +685,7 @@
   /** A picker option's text: the model's label, plus its download state when its files are not all there. */
   function modelOptionText(model: ModelOption): string {
     if (model.downloaded !== false) return model.label;
-    const status = downloadStatusText(downloadStore.active(model.type === 'audio' ? 'audio' : 'model', model.id));
+    const status = downloadStatusText(downloadStore.activeModel(model));
     return `${model.label} (${status ? status.toLowerCase() : 'not downloaded'})`;
   }
 
@@ -755,7 +761,8 @@
     if (params.workflow) draft.loadFromUrl({ workflow: params.workflow }, context);
     draft.hydrateFromContext(context, typeof params.model === 'string' ? params.model : null, options);
     // A prefill that is not a Use as sets every slot of its tab, an unnamed one emptied; the workflow follows from the images.
-    draft.loadFromUrl(params, context, { replaceSlots: !params.use_as });
+    // A Reuse or a Load settings (`reuse`) also takes the default of every setting it does not name.
+    draft.loadFromUrl(params, context, { replaceSlots: !params.use_as, exact: params.reuse === 'true' });
     dropHeldUploads(params);
     // Recorded image paths may have moved since; flag those slots, as a page load does.
     if (options.recheck !== false) void recheckImages();
@@ -769,7 +776,7 @@
   function loadJobSettings(settings: JobSettings, message: string): void {
     const step = context ? extendStepFor(context, first(settings, 'model') ?? draft.state.model) : undefined;
     const { params, patch } = jobSettingsPrefill(settings, draft.state.enhanceSettingsVideo?.partsByWorkflow, step);
-    applyPrefill(params);
+    applyPrefill({ ...params, reuse: 'true' });
     draft.patch(patch);
     addToast(message, 'success');
   }
@@ -1233,7 +1240,7 @@
   /** Collect the fields Generate submits; with `run`, that one prompt-file prompt replaces the form's prompt. */
   function buildFormData(form: HTMLFormElement, run: PendingPromptRun | null): FormData {
     // The Audio tab sends the fields of its open kind, built from the draft: the same ones Copy CLI reads.
-    if (audio?.active) return audioFormData(audio, draft.state, draft.state.runs, draft.state.seed);
+    if (audio?.active) return audioFormData(audio, draft.state);
     const formData = new FormData(form);
     // Send canonical workflow directly; backend accepts and normalises it.
     formData.set('mode', isImageMode ? 'image' : 'video');
@@ -1505,7 +1512,7 @@
     <p class="latest-meta latest-meta-audio" data-testid="audio-caption">
       <span class="latest-words truncate" title={asset.prompt}>{asset.kind == null ? asset.filename : (asset.prompt || asset.filename)}</span>
       {#if asset.kind != null && asset.model}<b>{audioModelLabel(asset, context?.audio_models)}</b>{/if}
-      {#if asset.duration != null}<b>{lengthLabel(asset.duration)}</b>{/if}
+      {#if asset.duration != null}<b>{formatClock(asset.duration)}</b>{/if}
       {#if asset.seed != null}<b>seed {asset.seed}</b>{/if}
       {#if cut}
         <Tooltip text={cut.tip} testId="audio-cut-tip" class="cut-note"><Badge variant="warning" class="whitespace-nowrap">{cut.text}</Badge></Tooltip>
@@ -1538,21 +1545,15 @@
   <div class="ui-pane-toolbar z-10 shrink-0" class:toolbar-stacked={stacked}>
     <div class="flex items-center px-3 py-2 gap-3 {stacked ? 'flex-col items-stretch' : 'flex-wrap'}">
 
-      {#if isAudio}
-        <!-- Audio: the Kind first, then the model of that kind. No presets, quantization or LoRAs. -->
+      {#if kindChoice}
+        <!-- The Kind first: Music, Speech or Sound on Audio; New or Extend on Video. On a tablet the words Kind and Model give way to Video's row. -->
         <div class="flex items-center gap-2 min-w-0 {stacked ? 'justify-between' : ''}">
-          <span class="ui-label" id="ws-kind-label">Kind</span>
-          <KindControl kinds={audioKinds} info={KIND_INFO} value={(draft.state.workflow as AudioWorkflow)} disabled={!authorityReady} onchange={(kind) => draft.setAudioKind(kind, context)} />
-        </div>
-      {:else}
-      {#if showVideoKind}
-        <!-- Video: the Kind first (a new clip or an extension), then the preset and the model. On a tablet the words Kind and Model give way to the row. -->
-        <div class="flex items-center gap-2 min-w-0 {stacked ? 'justify-between' : ''}">
-          <span class="ui-label {tall && !stacked ? 'sr-only' : ''}" id="ws-kind-label">Kind</span>
-          <KindControl kinds={videoKindOptions} info={VIDEO_KIND_INFO} value={draft.state.workflow === 'extend' ? 'extend' : 'new'} disabled={!authorityReady} onchange={(kind) => draft.setVideoKind(kind, context)} />
+          <span class="ui-label {!isAudio && tall && !stacked ? 'sr-only' : ''}" id="ws-kind-label">Kind</span>
+          <Segmented label="Kind" testId="kind-control" value={kindChoice.value} disabled={!authorityReady} options={kindChoice.kinds.map((kind) => ({ value: kind, label: kindChoice.info[kind].label, icon: kindChoice.info[kind].icon, title: kindChoice.info[kind].title }))} onchange={kindChoice.pick} />
         </div>
       {/if}
-      <!-- Settings presets -->
+      {#if !isAudio}
+      <!-- Settings presets; Audio has none -->
       <PresetMenu {context} {stacked} applied={activePreset} changed={presetChanged} />
       {/if}
 
@@ -1603,7 +1604,7 @@
         {#if authorityReady && selectedModel}
           <ModelStatusBadges
             downloaded={selectedModel.downloaded}
-            downloadStatus={downloadStatusText(downloadStore.active(isAudio ? 'audio' : 'model', selectedModel.id))}
+            downloadStatus={downloadStatusText(downloadStore.activeModel(selectedModel))}
             memoryFit={selectedModel.memory_fit}
             quantize={supportsQuantize ? draft.state.quantize : null}
             lowMemory={isAudio || !visibleControls.has('low_memory') || draft.state.lowMemory}

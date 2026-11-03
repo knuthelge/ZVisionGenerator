@@ -4,9 +4,10 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    activeDownload, audioRows, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isAudioJob, isPaused, isVideo, itemActivity, itemNoun, iterations, jobPhase, livePreviewNote, loadBody, outcome, outputAspect, phaseRows,
+    activeDownload, audioRows, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, isActive, isAudioJob, isPaused, isVideo, itemActivity, itemNoun, iterations, jobPhase, livePreviewNote, loadBody, outcome, outputAspect, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, stepUnit, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
+  import { formatClock } from '$lib/state/clock';
   import type { ActiveJobState, JobDownload } from '$lib/types';
 
   interface Props {
@@ -99,24 +100,27 @@
     <p class="ui-help">Resumes with the next {itemNoun(job)}.</p>
   {:else if audio}
     <div class="job-stages" data-testid="audio-phases">
-      {#each takeRows as row (row.phase)}
+      {#each takeRows as row (row.key)}
         <div class="job-step" data-phase-state={row.state}>
           <div class="job-step-head">
+            <span>{row.text}</span>
             {#if row.state === 'current'}
-              <span>{[row.label, row.part, row.progress || 'Starting…'].filter(Boolean).join(' · ')}</span>{#if row.percent !== null}<span class="num">{row.percent}%</span>{/if}
+              {#if row.percent !== null}<span class="num">{row.percent}%</span>{/if}
             {:else if row.state === 'done'}
-              <span>{[row.label, row.part].filter(Boolean).join(' · ')}</span><span class="job-step-done"><Icon name="check" size={12} />Done</span>
+              <span class="job-step-done"><Icon name="check" size={12} />Done</span>
             {:else}
-              <span>{[row.label, row.part].filter(Boolean).join(' · ')}</span><span>—</span>
+              <span>Next</span>
             {/if}
           </div>
           {#if row.state === 'current'}
             {#if row.percent !== null}
-              <StepProgress value={row.value} max={row.max} label="{row.label} progress" live={running} {stepMs} valuetext="{row.progress}, {row.percent}%" />
+              <StepProgress value={row.percent} max={100} label="Take progress" live={running} {stepMs} valuetext="{row.text}, {row.percent}%" />
             {:else}
-              <!-- The model cannot say how long this phase runs (a song's tokens), so the bar only shows that it works. -->
-              <StepProgress value={0} max={1} label="{row.label} progress" busy={running} indeterminate valuetext={row.progress || 'Starting'} />
+              <!-- The model cannot say how long this stretch runs (a song's tokens), so the bar only shows that it works. -->
+              <StepProgress value={0} max={1} label="Take progress" busy={running} indeterminate valuetext={row.text} />
             {/if}
+          {:else if row.state === 'next'}
+            <StepProgress value={0} max={1} label="{row.text} progress" />
           {/if}
         </div>
       {/each}
@@ -208,13 +212,12 @@
                 <p class="ui-help">{positionLabel(job)}</p>
                 <p class="job-prompt" title={shownPrompt}>{shownPrompt}</p>
               </div>
-              {#if job.enhanceStatus === 'enhanced' || job.enhanceStatus === 'skipped' || job.notices?.length || isVideo(job) || audio}
+              {#if job.enhanceStatus === 'enhanced' || job.enhanceStatus === 'skipped' || job.notices?.length || isVideo(job)}
                 <div class="job-badges">
                   {#if job.enhanceStatus === 'enhanced'}<Badge variant="info"><Icon name="sparkle" size={12} />Enhanced</Badge>{/if}
                   {#if job.enhanceStatus === 'skipped'}<Badge>Not enhanced</Badge>{/if}
                   {#each job.notices ?? [] as notice (notice)}<Badge variant="warning"><Icon name="alert" size={12} />{notice}</Badge>{/each}
                   {#if isVideo(job)}<Badge><Icon name="film" size={12} />No live preview for video</Badge>{/if}
-                  {#if audio}<Badge><Icon name="waveform" size={12} />No live preview for audio</Badge>{/if}
                 </div>
               {/if}
               {@render stepBlock()}

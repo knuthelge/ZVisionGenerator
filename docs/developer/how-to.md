@@ -45,7 +45,7 @@ No stage loads the prompt enhancer: work that must happen before the model loads
 1. Add the alias to `model_aliases` in `config.yaml`: a repo, or a map per platform. Point at the upstream repo when it is ungated, otherwise at a mirror whose weights match upstream's sha256.
 2. Add `model_labels.<alias>.name`, and for an image model `download_size_label` per platform, read from a dry-run download plan against an empty cache.
 3. For a repo whose family can't be detected offline, add it to `model_alias_families`.
-4. If the model comes with terms (anything but MIT or Apache-2.0), add a record to `zvisiongenerator/utils/licences.yaml`, or add the alias to the `models` of the record that covers it. Every URL is pinned to a commit. The records are separate from `config.yaml` and are never merged with the user's config; `make check` fails on a record that names a model that does not exist or a URL without a commit.
+4. If the model comes with terms (anything but MIT or Apache-2.0), add a record to `zvisiongenerator/utils/licences.yaml`, or add the alias to the `models` of the record that covers it. A URL points to the licensor's original repository: a licence file pinned to a commit, or for a gated repository its model page. Optional `attribution` holds a credit line the licence requires. The records are separate from `config.yaml` and are never merged with the user's config; `make check` fails on a record that names a model that does not exist or a URL that is neither pinned nor a model page.
 5. Update the [Models](../concepts/models.md) page (its Licences table lists every record), and `CHANGELOG.md`.
 
 ## Add a model family

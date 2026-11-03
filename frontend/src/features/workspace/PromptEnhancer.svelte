@@ -12,7 +12,7 @@
   import { getDownloadPlan } from '$lib/api/models';
   import { enhancePrompt } from '$lib/api/promptEnhance';
   import { confirmDownloads } from '$lib/state/confirmDownloads';
-  import { jobPlanOfRow, uncheckedJobPlan } from '$lib/state/downloadConfirm';
+  import { uncheckedJobPlan } from '$lib/state/downloadConfirm';
   import { extendEnhanceHint, extendGuard, type ExtendModelSupport } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { pushRewrite } from '$lib/state/rewriteHistory';
@@ -176,7 +176,7 @@
     const name = runTier === 'smart' ? 'smart' : contract.smart === null ? 'custom' : 'fast';
     asking = true;
     try {
-      return await confirmDownloads(jobPlanOfRow(await getDownloadPlan('enhancer', name)));
+      return await confirmDownloads(await getDownloadPlan('enhancer', name));
     } catch (error) {
       // Hugging Face can't be reached to size it: still ask, and let the user go ahead.
       if (error instanceof ApiError && error.status === 503) return await confirmDownloads(uncheckedJobPlan(`${name.charAt(0).toUpperCase()}${name.slice(1)} enhancer model`, name));

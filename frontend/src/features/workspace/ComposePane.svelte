@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts, workflowMode } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts } from '$lib/state/promptEnhance';
   import { extendModelSupport, isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
@@ -471,7 +471,7 @@
       title="Recent prompts (Alt+↑ in an empty prompt)"
       onclick={() => { recentsReturn = null; recentsOpen = !recentsOpen; }}
     ><Icon name="history" size={14} /></button>
-    <RecentPromptsMenu open={recentsOpen} anchor={recentsButton} returnFocus={recentsReturn ?? recentsButton} mode={workflowMode(s.workflow)} jsonCapable={caps.supportsJsonPrompt} onpick={pickRecent} onclose={() => { recentsOpen = false; }} />
+    <RecentPromptsMenu open={recentsOpen} anchor={recentsButton} returnFocus={recentsReturn ?? recentsButton} mode={caps.isImageMode ? 'image' : 'video'} jsonCapable={caps.supportsJsonPrompt} onpick={pickRecent} onclose={() => { recentsOpen = false; }} />
     {#if !jsonMode}
       <SavePromptMenu selection={saveSelection} workspaceFile={s.promptFilePath} enhancedView={showingEnhanced} />
     {/if}

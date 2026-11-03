@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
-import type { DownloadItem, DownloadPlan } from '$lib/types';
+import type { DownloadItem, RowDownloadPlan } from '$lib/types';
 
 const api = vi.hoisted(() => ({
   getDownloadPlan: vi.fn(),
@@ -22,13 +22,13 @@ vi.mock('./toasts.svelte', () => toasts);
 import { downloadStore } from './downloads.svelte';
 import { chipDownload } from './loraDownloads';
 
-const plan = (overrides: Partial<DownloadPlan> = {}): DownloadPlan => ({
-  kind: 'model',
-  name: 'klein9b',
+const plan = (overrides: Partial<RowDownloadPlan> = {}): RowDownloadPlan => ({
   label: 'klein9b',
-  parts: [{ repo: 'org/klein', files: 4, bytes: 34.7e9 }],
+  parts: [{ label: 'klein9b', model: 'klein9b', bytes: 34.7e9 }],
   total_bytes: 34.7e9,
   space: { path: '/hub', needed_bytes: 34.7e9, free_bytes: 512e9, enough: true },
+  unchecked: false,
+  licences: [],
   ...overrides,
 });
 const item = (overrides: Partial<DownloadItem> = {}): DownloadItem => ({ id: 'd1', kind: 'model', name: 'klein9b', label: 'klein9b', state: 'queued', message: null, ...overrides });
@@ -195,7 +195,7 @@ describe('downloadStore', () => {
     });
 
     it('confirms with the plan label, then queues the download and exposes it as active', async () => {
-      api.getDownloadPlan.mockResolvedValue(plan({ label: 'Klein 9B' }));
+      api.getDownloadPlan.mockResolvedValue(plan({ label: 'Klein 9B', parts: [{ label: 'Klein 9B', model: 'klein9b', bytes: 34.7e9 }] }));
       confirm.requestConfirm.mockResolvedValue(true);
       api.startDownload.mockResolvedValue(item());
       api.getDownloads.mockResolvedValue({ items: [item()] });
@@ -211,7 +211,7 @@ describe('downloadStore', () => {
     });
 
     it('marks the row busy while the plan is read', async () => {
-      let resolvePlan: (value: DownloadPlan) => void = () => undefined;
+      let resolvePlan: (value: RowDownloadPlan) => void = () => undefined;
       api.getDownloadPlan.mockReturnValue(new Promise((resolve) => { resolvePlan = resolve; }));
       confirm.requestConfirm.mockResolvedValue(false);
 

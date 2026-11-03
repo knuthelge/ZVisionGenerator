@@ -4,7 +4,7 @@
   import { formatTimestamp } from '$lib/state/audioTrack';
   import { draft } from '$lib/state/draft.svelte';
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
-  import type { VoiceView } from './audioView';
+  import { VOICE_WORDS, type VoiceView } from './audioView';
   import ReferenceSlot from './ReferenceSlot.svelte';
 
   interface Props {
@@ -13,66 +13,63 @@
   }
 
   let { voice }: Props = $props();
-
-  const consentLabel = "This is my voice, or I have the speaker's permission to clone it.";
 </script>
 
-{#if voice.visible}
-  <InspectorSection id="voice" title="Voice" summary={voice.summary.text} active={voice.summary.tone === 'active'} error={voice.summary.tone === 'error'}>
-    <InspectorRow label="Voice">
-      <Segmented
-        size="sm"
-        label="Voice"
-        class="voice-mode"
-        value={voice.mode}
-        options={[{ value: 'any', label: 'Any' }, { value: 'recording', label: 'From a recording' }]}
-        onchange={(mode) => draft.update('voiceMode', mode)}
-      />
-    </InspectorRow>
-    {#if !voice.recording}
-      <p class="row-hint" data-testid="voice-any-hint">The model picks a voice, and it changes from take to take. To keep one, use a take as the voice: Gallery, Use as → Voice.</p>
-    {:else}
-      <ReferenceSlot
-        idBase="ws-voice"
-        kind="audio"
-        label="Recording"
-        names={{ browse: 'Browse for a voice recording', upload: 'Upload a voice recording from this device', clear: 'Clear the voice recording', preview: 'Voice recording' }}
-        emptyText="Browse or drop"
-        clearable={voice.set}
-        path={voice.path}
-        file={voice.file}
-        previewUrl={null}
-        name={voice.name}
-        detail={voice.length === null ? '' : formatTimestamp(voice.length)}
-        dropText={voice.set ? 'Drop to replace' : 'Drop an audio file'}
-        missing={voice.gone}
-        error={voice.error ?? undefined}
-        onfilechange={(file) => { if (file !== null) draft.setVoice({ file }); }}
-        onpathchange={(path) => draft.setVoice(path === null ? null : { path })}
-      />
-      <div class="voice-text">
-        <label class="ui-label" for="ws-voice-text">What it says <span class="voice-required">required</span></label>
-        <textarea
-          id="ws-voice-text"
-          class="ui-field voice-field"
-          rows="2"
-          aria-required="true"
-          aria-invalid={voice.set && voice.text.trim() === '' ? 'true' : undefined}
-          placeholder="The words spoken in the recording"
-          value={voice.text}
-          use:autogrow={voice.text}
-          oninput={(e) => draft.update('voiceText', e.currentTarget.value)}
-        ></textarea>
-      </div>
-      {#if voice.needsConsent}
-        <label class="voice-consent" class:ticked={voice.ticked}>
-          <input type="checkbox" class="ui-checkbox" id="ws-voice-consent" checked={voice.ticked} onchange={(e) => voiceConsent.set(e.currentTarget.checked)}>
-          <span>{consentLabel}</span>
-        </label>
-      {/if}
+<InspectorSection id="voice" title="Voice" summary={voice.summary.text} active={voice.summary.tone === 'active'} error={voice.summary.tone === 'error'}>
+  <InspectorRow label="Voice">
+    <Segmented
+      size="sm"
+      label="Voice"
+      class="voice-mode"
+      value={voice.recording ? 'recording' : 'any'}
+      options={VOICE_WORDS.modes}
+      onchange={(mode) => draft.update('voiceMode', mode)}
+    />
+  </InspectorRow>
+  {#if !voice.recording}
+    <p class="row-hint" data-testid="voice-any-hint">{VOICE_WORDS.anyHint}</p>
+  {:else}
+    <ReferenceSlot
+      idBase="ws-voice"
+      kind="audio"
+      label="Recording"
+      names={{ browse: 'Browse for a voice recording', upload: 'Upload a voice recording from this device', clear: 'Clear the voice recording', preview: 'Voice recording' }}
+      emptyText="Browse or drop"
+      clearable={voice.set}
+      path={voice.path}
+      file={voice.file}
+      previewUrl={null}
+      name={voice.name}
+      detail={voice.length === null ? '' : formatTimestamp(voice.length)}
+      dropText={voice.set ? 'Drop to replace' : 'Drop an audio file'}
+      missing={voice.gone}
+      error={voice.error ?? undefined}
+      onfilechange={(file) => { if (file !== null) draft.setVoice({ file }); }}
+      onpathchange={(path) => draft.setVoice(path === null ? null : { path })}
+    />
+    <div class="voice-text">
+      <label class="ui-label" for="ws-voice-text">What it says <span class="voice-required">required</span></label>
+      <textarea
+        id="ws-voice-text"
+        class="ui-field voice-field"
+        rows="2"
+        aria-required="true"
+        aria-invalid={voice.set && voice.text.trim() === '' ? 'true' : undefined}
+        placeholder={VOICE_WORDS.placeholder}
+        value={voice.text}
+        use:autogrow={voice.text}
+        oninput={(e) => draft.update('voiceText', e.currentTarget.value)}
+      ></textarea>
+    </div>
+    {#if voice.needsConsent}
+      <label class="voice-consent" class:ticked={voice.ticked}>
+        <input type="checkbox" class="ui-checkbox" id="ws-voice-consent" checked={voice.ticked} onchange={(e) => (voiceConsent.ticked = e.currentTarget.checked)}>
+        <span>{VOICE_WORDS.consent}</span>
+      </label>
     {/if}
-  </InspectorSection>
-{/if}
+  {/if}
+</InspectorSection>
+
 
 <style>
   :global(.voice-mode) { flex: 1; min-width: 0; }

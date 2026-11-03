@@ -93,6 +93,7 @@ class _TinyModel:
         self.lm_head = _Module("head")
         self.vae2llm = _Module("vae2llm")
         self.inv_freq = _Slot("inv_freq")
+        self.moved_to: list[str] = []
 
     def _modules(self) -> list[_Module]:
         layers = self.model.layers
@@ -104,6 +105,10 @@ class _TinyModel:
 
     def buffers(self):
         return iter([self.inv_freq])
+
+    def to(self, device: str) -> _TinyModel:
+        self.moved_to.append(device)
+        return self
 
 
 def _on_gpu(module: _Module) -> bool:
@@ -236,11 +241,6 @@ class _FakePipe:
             on_token("semantic", token)
         return SimpleNamespace(plan=plan, tokens=list(range(self.semantic_tokens)), truncated=self.truncated)
 
-    def synthesize(self, semantic, *, cancelled):
-        self._record("synthesize")
-        self.calls["synthesize"] = {"cancelled": cancelled}
-        return np.zeros((len(semantic.tokens), 64), dtype=np.float32)
-
     def decode(self, latents):
         self._record("decode")
         if isinstance(self._model, _TinyModel):
@@ -282,15 +282,20 @@ class _FakeNar:
 @pytest.fixture
 def kit(monkeypatch, pinned):
     """Wire the backend to a fake pipeline, a tiny model, a recording memory fraction and the fake NAR."""
-    state = SimpleNamespace(pipe=_FakePipe(), model=_TinyModel(), fractions=[], build=[], nars=[])
-    monkeypatch.setattr(yue2_module, "_snapshot_dir", lambda files: f"/models/{files.repo_id}")
+    state = SimpleNamespace(pipe=_FakePipe(), model=_TinyModel(), fractions=[], build=[], nars=[], loads=[])
+    monkeypatch.setattr(yue2_module, "snapshot_dir", lambda files: f"/models/{files.repo_id}")
 
     def build(model_dir, vae_dir, device, settings):
         state.build.append((model_dir, vae_dir, device, settings))
         return state.pipe
 
     monkeypatch.setattr(yue2_module, "_build_pipeline", build)
-    monkeypatch.setattr(yue2_module, "_load_cpu_model", lambda model_dir: state.model)
+
+    def load_model(model_dir, *, pin):
+        state.loads.append((model_dir, pin))
+        return state.model
+
+    monkeypatch.setattr(yue2_module, "load_model", load_model)
     monkeypatch.setattr(yue2_module, "WeightSwap", lambda model, device: WeightSwap(model, GPU))
     monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction", lambda fraction, *args: state.fractions.append(fraction))
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
@@ -363,17 +368,42 @@ class TestLoad:
         assert _gpu_groups(kit.model) == frozenset()
         assert _resident_on_gpu(kit.model)
 
-    def test_no_swap_is_built_with_weight_swap_off(self, kit, monkeypatch):
-        monkeypatch.setattr(yue2_module, "_install_swap", MagicMock(side_effect=AssertionError("no swap expected")))
+    def test_the_swap_gets_the_model_streamed_in_pinned(self, kit):
+        _loaded()
+
+        assert kit.loads == [("/models/yue2", True)]
+
+    def test_no_swap_is_built_with_weight_swap_off_and_the_model_goes_to_the_device(self, kit, monkeypatch):
+        monkeypatch.setattr(yue2_module, "WeightSwap", MagicMock(side_effect=AssertionError("no swap expected")))
 
         backend = _loaded("mps")
 
-        assert kit.pipe._model is None
+        assert kit.loads == [("/models/yue2", False)]
+        assert kit.pipe._model is kit.model
+        assert kit.model.moved_to == ["mps"]
         assert backend._swap is None
         assert kit.fractions == []
 
+    def test_without_the_swap_the_loader_brings_the_model_back_to_the_device_for_each_take(self, kit):
+        _loaded("mps")
+
+        assert kit.pipe._load_model(for_nar=True) is kit.model
+        assert kit.model.moved_to == ["mps", "mps"]
+
+    def test_the_kits_pipeline_is_built_with_the_size_check_in_place_of_the_hashing(self, monkeypatch):
+        import yue2.pipeline as kit_pipeline
+
+        seen = []
+        original = kit_pipeline.model_identity
+        monkeypatch.setattr("yue2.YuE2Pipeline.from_pretrained", lambda *args, **kwargs: seen.append(kit_pipeline.model_identity))
+
+        yue2_module._build_pipeline("/m", "/v", "mps", {"memory_budget_gib": 24, "vae_core_frames": 512, "ode_steps": 16})
+
+        assert seen and seen[0] is not original
+        assert kit_pipeline.model_identity is original
+
     def test_a_failed_load_closes_the_pipeline_and_lifts_the_fraction(self, kit, monkeypatch):
-        monkeypatch.setattr(yue2_module, "_load_cpu_model", MagicMock(side_effect=OSError("disk gone")))
+        monkeypatch.setattr(yue2_module, "load_model", MagicMock(side_effect=OSError("disk gone")))
         backend = YuE2Backend()
 
         with pytest.raises(OSError, match="disk gone"):
@@ -381,8 +411,6 @@ class TestLoad:
 
         assert kit.pipe.closed
         assert kit.fractions[-1] == 1.0
-        with pytest.raises(RuntimeError, match="no model loaded"):
-            backend.generate(_request(), MagicMock(), _never_cancelled)
 
     def test_close_gives_the_global_torch_flags_back(self, kit, monkeypatch, torch_flags_guard):
         set_app_flags()
@@ -469,16 +497,6 @@ class TestGenerate:
         assert clip.cut is False
         assert clip.samples.min() == 1.0
 
-    def test_a_request_that_is_not_music_is_refused(self, kit):
-        backend = _loaded()
-
-        with pytest.raises(ValueError, match="makes music, not 'speech'"):
-            backend.generate(_request(kind="speech"), MagicMock(), _never_cancelled)
-
-    def test_generating_before_loading_is_refused(self):
-        with pytest.raises(RuntimeError, match="no model loaded"):
-            YuE2Backend().generate(_request(), MagicMock(), _never_cancelled)
-
     def test_the_swap_runs_ar_then_prefill_then_ode_then_none_with_only_the_active_group_on_the_gpu(self, kit):
         backend = _loaded()
 
@@ -516,14 +534,26 @@ class TestGenerate:
 
         assert torch.equal(kit.nars[0].chunk.noise, expected)
 
-    def test_without_the_swap_the_kits_synthesize_runs_the_acoustic_part(self, kit):
+    def test_without_the_swap_the_same_loop_runs_the_acoustic_part_on_the_pipelines_model(self, kit):
         backend = _loaded("mps")
 
         backend.generate(_request(), MagicMock(), _never_cancelled)
 
-        assert [stage for stage, _, _ in kit.pipe.events] == ["plan", "semantic", "synthesize", "decode"]
-        assert kit.nars == []
-        assert kit.pipe.calls["synthesize"]["cancelled"] is kit.pipe.calls["plan"]["cancelled"]
+        assert [stage for stage, _, _ in kit.pipe.events if stage != "nar-close"] == ["plan", "semantic", "prefill", "ode", "decode"]
+        assert kit.model.moved_to == ["mps", "mps"], "the model was placed at load and asked for again by the acoustic loop"
+        (nar,) = kit.nars
+        assert nar.model is kit.model
+        assert nar.closed
+
+    @pytest.mark.parametrize("platform", ["cuda", "mps"])
+    def test_synthesis_progress_counts_every_ode_step_on_both_platforms(self, kit, platform):
+        backend = _loaded(platform)
+        on_progress = MagicMock()
+
+        backend.generate(_request(), on_progress, _never_cancelled)
+
+        synthesis = [call.args[1:3] for call in on_progress.call_args_list if call.args[0] == "Synthesis"]
+        assert synthesis == [(step, 32) for step in range(33)]
 
     def test_two_takes_in_one_batch_the_second_starts_with_the_resident_tensors_back_on_the_gpu(self, kit):
         backend = _loaded()
@@ -603,37 +633,37 @@ class TestCancel:
 
         assert kit.nars[0].closed
 
-    def test_a_stop_without_the_swap_raises_audio_cancelled_too(self, kit):
-        def synthesize(semantic, *, cancelled):
-            assert cancelled()
-            raise InterruptedError("Cancelled before acoustic prefill")
+    @pytest.mark.parametrize("platform", ["cuda", "mps"])
+    def test_a_stop_before_the_acoustic_part_raises_audio_cancelled_without_building_the_engine(self, kit, platform):
+        backend = _loaded(platform)
+        stops = iter([False, True])  # the song tokens ask once; the loop asks next
 
-        kit.pipe.synthesize = synthesize
-        backend = _loaded("mps")
-        stops = iter([False, True])
-
-        with pytest.raises(AudioCancelled, match="before acoustic prefill"):
+        with pytest.raises(AudioCancelled):
             backend.generate(_request(), MagicMock(), lambda: next(stops, True))
 
-    def test_a_stop_after_the_acoustic_part_skips_the_decode(self, kit):
-        backend = _loaded("mps")
-        calls = []
-        kit.pipe.synthesize = lambda semantic, *, cancelled: calls.append(1) or np.zeros((3, 64), dtype=np.float32)
+        assert kit.nars == []
+
+    @pytest.mark.parametrize("platform", ["cuda", "mps"])
+    def test_a_stop_after_the_acoustic_part_skips_the_decode(self, kit, platform):
+        backend = _loaded(platform)
 
         def cancelled() -> bool:
-            return bool(calls)
+            return bool(kit.nars) and kit.nars[0].closed
 
         with pytest.raises(AudioCancelled):
             backend.generate(_request(), MagicMock(), cancelled)
 
         assert "decode" not in kit.pipe.calls
 
-    def test_an_interrupted_error_the_user_did_not_ask_for_is_not_a_stop(self, kit, monkeypatch):
-        monkeypatch.setattr(kit.pipe, "synthesize", MagicMock(side_effect=InterruptedError("a system call was interrupted")))
-        backend = _loaded("mps")
+    @pytest.mark.parametrize("platform", ["cuda", "mps"])
+    def test_an_interrupted_error_the_user_did_not_ask_for_is_not_a_stop(self, kit, monkeypatch, platform):
+        monkeypatch.setattr(_FakeNar, "solve", MagicMock(side_effect=InterruptedError("a system call was interrupted")))
+        backend = _loaded(platform)
 
         with pytest.raises(InterruptedError, match="system call"):
             backend.generate(_request(), MagicMock(), _never_cancelled)
+
+        assert kit.nars[0].closed
 
 
 # ---- close --------------------------------------------------------------------------------------------------------

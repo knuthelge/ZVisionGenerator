@@ -88,4 +88,41 @@ describe('AudioPlayer', () => {
     await page.unmount();
     expect(pause).toHaveBeenCalledTimes(2);
   });
+  describe('with another player', () => {
+    function mountTwo(): { first: HTMLAudioElement; second: HTMLAudioElement; paused: HTMLAudioElement[] } {
+      const paused: HTMLAudioElement[] = [];
+      vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { paused.push(this as HTMLAudioElement); });
+      const a = mountComponent(AudioPlayer, { src: '/media/out/a.flac', peaks: PEAKS, filename: 'a.flac', duration: 100 });
+      const b = mountComponent(AudioPlayer, { src: '/media/out/b.flac', peaks: PEAKS, filename: 'b.flac', duration: 100 });
+      const first = a.target.querySelector<HTMLAudioElement>('audio')!;
+      const second = b.target.querySelector<HTMLAudioElement>('audio')!;
+      paused.length = 0;
+      return { first, second, paused };
+    }
+
+    it('pauses the one that was playing when another starts', () => {
+      const { first, second, paused } = mountTwo();
+
+      first.dispatchEvent(new Event('play'));
+      expect(paused).toEqual([]);
+      second.dispatchEvent(new Event('play'));
+
+      expect(paused).toEqual([first]);
+    });
+
+    it('does not pause a player that has left when another starts', async () => {
+      const paused: HTMLAudioElement[] = [];
+      vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { paused.push(this as HTMLAudioElement); });
+      const a = mountComponent(AudioPlayer, { src: '/media/out/a.flac', peaks: PEAKS, filename: 'a.flac', duration: 100 });
+      const b = mountComponent(AudioPlayer, { src: '/media/out/b.flac', peaks: PEAKS, filename: 'b.flac', duration: 100 });
+      const first = a.target.querySelector<HTMLAudioElement>('audio')!;
+      first.dispatchEvent(new Event('play'));
+      await a.unmount();
+      paused.length = 0;
+
+      b.target.querySelector('audio')!.dispatchEvent(new Event('play'));
+
+      expect(paused).toEqual([]);
+    });
+  });
 });

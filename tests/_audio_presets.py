@@ -51,8 +51,6 @@ def yue2_preset() -> dict[str, Any]:
         "capabilities": {"lyrics": True, "duration": False, "voice_clone": False},
         "limits": {"max_seconds": 360},
         "settings": {
-            "cot_song": "full",
-            "cot_instrumental": "melody",
             "instrumental_sections": INSTRUMENTAL_SECTIONS,
             "abc_max_tokens": 4096,
             "cfg": 1.0,
@@ -61,10 +59,9 @@ def yue2_preset() -> dict[str, Any]:
             "vae_core_frames": 512,
             "fade_seconds": 2,
         },
-        "memory": {"cuda_gb": 6.7, "mps_gb": None},
         "platforms": {
-            "cuda": {"family": "yue2", "files": yue2_files(), "settings": {"weight_swap": True}},
-            "mps": {"family": "yue2", "files": yue2_files(), "settings": {"weight_swap": False}},
+            "cuda": {"family": "yue2", "files": yue2_files(), "memory_gb": 6.7, "settings": {"weight_swap": True}},
+            "mps": {"family": "yue2", "files": yue2_files(), "memory_gb": None, "settings": {"weight_swap": False}},
         },
     }
 
@@ -77,10 +74,9 @@ def higgs3_preset() -> dict[str, Any]:
         "capabilities": {"lyrics": False, "duration": False, "voice_clone": True},
         "limits": {"max_new_tokens": 1500, "part_chars": 500, "max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30},
         "settings": {"temperature": 0.7, "top_p": 0.95, "join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, "edge_silence_max_ms": 150},
-        "memory": {"cuda_gb": 8.2, "mps_gb": None},
         "platforms": {
-            "cuda": {"family": "higgs3", "files": higgs3_files(), "settings": {"codec_device": "cpu"}},
-            "mps": {"family": "higgs3", "files": higgs3_files(), "settings": {"codec_device": "mps"}},
+            "cuda": {"family": "higgs3", "files": higgs3_files(), "memory_gb": 8.2, "settings": {"codec_device": "cpu"}},
+            "mps": {"family": "higgs3", "files": higgs3_files(), "memory_gb": None, "settings": {"codec_device": "mps"}},
         },
     }
 
@@ -93,10 +89,9 @@ def sa3_preset() -> dict[str, Any]:
         "capabilities": {"lyrics": False, "duration": True, "voice_clone": False},
         "limits": {"max_seconds": 380},
         "settings": {"steps": 8, "cfg_scale": 1.0, "sample_size": 16777216},
-        "memory": {"cuda_gb": 6.1, "mps_gb": None},
         "platforms": {
-            "cuda": {"family": "stable_audio_3", "files": sa3_files()},
-            "mps": {"family": "stable_audio_3", "files": sa3_files()},
+            "cuda": {"family": "stable_audio_3", "files": sa3_files(), "memory_gb": 6.1},
+            "mps": {"family": "stable_audio_3", "files": sa3_files(), "memory_gb": None},
         },
     }
 

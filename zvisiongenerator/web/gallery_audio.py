@@ -15,7 +15,7 @@ from zvisiongenerator.utils.audio_preset import AUDIO_KINDS, parse_audio_presets
 from zvisiongenerator.utils.paths import expand_home
 from zvisiongenerator.utils.provenance import optional_float, optional_int, optional_text
 from zvisiongenerator.web.audio_models import runnable_audio_models
-from zvisiongenerator.web.workspace_contract import default_workflow_for_mode
+from zvisiongenerator.web.workspace_contract import AUDIO_WORKFLOW_VALUES
 
 if TYPE_CHECKING:
     from zvisiongenerator.web.config import WebUiConfig
@@ -59,14 +59,9 @@ def audio_asset_facts(config: Mapping[str, Any] | None, facts: Mapping[str, Any]
 
 
 def audio_asset_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]:
-    """Convert an audio gallery asset to the SPA JSON shape.
+    """Convert an audio gallery asset to the SPA JSON shape: the common keys, ``media_type: "audio"``, ``model_label`` and the audio facts.
 
-    The shape is the common one (``id``, ``url``, ``filename``, ``prompt``, ``model``, ``seed``, ``reuse_state``,
-    ``reuse_workspace_url`` ...) with ``media_type: "audio"``, ``model_label`` (the preset's label, ``None`` when no preset of that id is configured; ``model`` stays the id Reuse compares) and the audio facts (``kind``, ``duration``, ``peaks``,
-    ``channels``, ``sample_rate``, ``file_bytes``, ``has_reference_voice``, ``lyrics``, ``cut``, ``parts``). The size fields and the
-    ``upscale`` and ``extend`` blocks are empty. ``reuse_workspace_url`` restores the recorded workflow, model, prompt,
-    lyrics, length, voice and seed, and never the speaker's consent; a file without this app's settings gets the bare
-    workflow, and ``has_reusable_config`` is ``False``.
+    ``reuse_workspace_url`` restores the recorded settings and never the speaker's consent.
     """
     audio = asset.audio
     reuse = _reuse_state(asset, web_config)
@@ -78,28 +73,10 @@ def audio_asset_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, 
         "created_at": datetime.fromtimestamp(asset.modified_at, tz=timezone.utc).isoformat(),
         "workflow": reuse["state"]["requested_workflow"],
         "prompt": asset.prompt,
-        "scene": None,
         "model": asset.model_label,
         "model_label": _model_label(asset.model_label, web_config),
-        "width": None,
-        "height": None,
-        "ratio": None,
-        "size": None,
-        "frame_count": None,
-        "source_video": None,
-        "extend_frames": None,
-        "image_path": None,
-        "end_image_path": None,
-        "audio_track_path": None,
-        "audio_track_start": None,
-        "audio_track_end": None,
-        "reference_images": [],
         "file_path": asset.filesystem_path,
         "seed": asset.seed,
-        "steps": None,
-        "guidance": None,
-        "lora": None,
-        "transparent": False,
         "media_type": "audio",
         "kind": audio["kind"],
         "duration": audio["duration"],
@@ -110,24 +87,16 @@ def audio_asset_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, 
         "has_reference_voice": audio["has_reference_voice"],
         "lyrics": audio["lyrics"],
         "cut": audio["cut"],
-        "parts": audio["parts"],
         "has_reusable_config": asset.has_reusable_config,
         "reuse_state": reuse["state"],
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse['params'])}",
         "details": {"recorded_workflow": asset.workflow, "generation": _generation(audio)},
-        "enhance": None,
-        "upscale": None,
-        "extend": None,
     }
 
 
 def _model_label(model_id: str, web_config: WebUiConfig) -> str | None:
-    """Return the label of the configured audio preset *model_id*, or ``None`` when there is no such preset (or the presets cannot be read)."""
-    try:
-        presets = parse_audio_presets(web_config.app_config)
-    except ValueError:
-        return None
-    return next((preset.label for preset in presets if preset.id == model_id), None)
+    """Return the label of the configured audio preset *model_id*, or ``None`` when there is no such preset."""
+    return next((preset.label for preset in parse_audio_presets(web_config.app_config) if preset.id == model_id), None)
 
 
 def _generation(audio: Mapping[str, Any]) -> dict[str, Any]:
@@ -145,7 +114,7 @@ def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]
     is carried only when it still runs on this machine, and the workflow is unavailable when no model of its kind does.
     """
     kind = asset.audio["kind"]
-    workflow = kind or default_workflow_for_mode("audio")
+    workflow = kind or AUDIO_WORKFLOW_VALUES[0]
     runnable, _platform_key = runnable_audio_models(web_config.app_config)
     model_available = any(preset.id == asset.model_label for preset in runnable)
     requested_model = None if asset.model_label == "Unavailable" else asset.model_label

@@ -22,7 +22,6 @@ __all__ = [
     "AudioCapabilities",
     "AudioFiles",
     "AudioLimits",
-    "AudioMemory",
     "AudioPlatform",
     "AudioPreset",
     "parse_audio_presets",
@@ -83,19 +82,6 @@ class AudioLimits:
 
 
 @dataclass(frozen=True)
-class AudioMemory:
-    """The GPU memory a model needs, in GiB.
-
-    Attributes:
-        cuda_gb: The peak on a CUDA card.
-        mps_gb: The peak on Apple MPS, or ``None`` while unmeasured.
-    """
-
-    cuda_gb: float
-    mps_gb: float | None
-
-
-@dataclass(frozen=True)
 class AudioFiles:
     """The files of one Hugging Face repository at a pinned commit.
 
@@ -117,11 +103,13 @@ class AudioPlatform:
     Attributes:
         family: The backend family, such as ``yue2`` (``get_audio_backend`` resolves it).
         files: The pinned files to download, in order.
+        memory_gb: The GPU memory the model peaks at on this platform, in GiB, or ``None`` while unmeasured.
         settings: The settings this platform overrides; see :meth:`AudioPreset.settings_for`.
     """
 
     family: str
     files: tuple[AudioFiles, ...]
+    memory_gb: float | None
     settings: Mapping[str, Any]
 
 
@@ -136,7 +124,6 @@ class AudioPreset:
         capabilities: What the model can do.
         limits: The model's ceilings.
         settings: The model knobs every platform shares, an open mapping.
-        memory: The GPU memory it needs.
         platforms: The platform keys (``cuda``, ``mps``) the model runs on, with how.
     """
 
@@ -146,19 +133,11 @@ class AudioPreset:
     capabilities: AudioCapabilities
     limits: AudioLimits
     settings: Mapping[str, Any]
-    memory: AudioMemory
     platforms: Mapping[str, AudioPlatform]
 
     def settings_for(self, platform_key: str) -> dict[str, Any]:
-        """Return the settings that apply on *platform_key*: the shared ones, overridden by the platform's.
-
-        Raises:
-            ValueError: If the preset does not run on *platform_key*.
-        """
-        platform = self.platforms.get(platform_key)
-        if platform is None:
-            raise ValueError(f"Audio model '{self.id}' does not run on '{platform_key}'. It runs on: {', '.join(self.platforms)}.")
-        return {**copy.deepcopy(dict(self.settings)), **copy.deepcopy(dict(platform.settings))}
+        """Return the settings that apply on *platform_key*, one of the preset's platforms: the shared ones, overridden by the platform's."""
+        return {**copy.deepcopy(dict(self.settings)), **copy.deepcopy(dict(self.platforms[platform_key].settings))}
 
 
 def parse_audio_presets(config: Mapping[str, Any]) -> tuple[AudioPreset, ...]:
@@ -191,7 +170,7 @@ def _parse_preset(model_id: str, raw: object) -> AudioPreset:
     """Validate one preset and return it."""
     where = f"config '{_SECTION}.{model_id}'"
     mapping = _mapping(raw, where)
-    for key in ("label", "kind", "capabilities", "limits", "memory", "platforms"):
+    for key in ("label", "kind", "capabilities", "limits", "platforms"):
         if key not in mapping:
             raise ValueError(f"{where} is missing the required key '{key}'.")
     kind = mapping["kind"]
@@ -204,7 +183,6 @@ def _parse_preset(model_id: str, raw: object) -> AudioPreset:
         capabilities=_capabilities(mapping["capabilities"], f"{where}.capabilities"),
         limits=_limits(mapping["limits"], kind, f"{where}.limits"),
         settings=_settings(mapping.get("settings"), f"{where}.settings"),
-        memory=_memory(mapping["memory"], f"{where}.memory"),
         platforms=MappingProxyType({key: _platform(value, f"{where}.platforms.{key}") for key, value in _platform_entries(mapping["platforms"], f"{where}.platforms")}),
     )
 
@@ -271,17 +249,6 @@ def _settings(value: object, where: str) -> Mapping[str, Any]:
     return MappingProxyType(copy.deepcopy(dict(_mapping(value, where))))
 
 
-def _memory(value: object, where: str) -> AudioMemory:
-    """Parse a ``memory`` mapping: ``cuda_gb`` and ``mps_gb`` (``null`` while unmeasured)."""
-    memory = _mapping(value, where)
-    _only_keys(memory, ("cuda_gb", "mps_gb"), where)
-    for key in ("cuda_gb", "mps_gb"):
-        if key not in memory:
-            raise ValueError(f"{where}.{key} is required (use null for an unmeasured mps_gb).")
-    mps = memory["mps_gb"]
-    return AudioMemory(float(_number(memory["cuda_gb"], f"{where}.cuda_gb")), None if mps is None else float(_number(mps, f"{where}.mps_gb")))
-
-
 def _platform_entries(value: object, where: str) -> list[tuple[str, Any]]:
     """Return the entries of a ``platforms`` mapping: at least one, each keyed by a known platform."""
     platforms = _mapping(value, where)
@@ -292,18 +259,19 @@ def _platform_entries(value: object, where: str) -> list[tuple[str, Any]]:
 
 
 def _platform(value: object, where: str) -> AudioPlatform:
-    """Parse one platform entry: a backend ``family``, the pinned ``files`` and the ``settings`` it overrides."""
+    """Parse one platform entry: a backend ``family``, the pinned ``files``, the ``memory_gb`` peak and the ``settings`` it overrides."""
     entry = _mapping(value, where)
-    _only_keys(entry, ("family", "files", "settings"), where)
-    for key in ("family", "files"):
+    _only_keys(entry, ("family", "files", "memory_gb", "settings"), where)
+    for key in ("family", "files", "memory_gb"):
         if key not in entry:
-            raise ValueError(f"{where} is missing the required key '{key}'.")
+            raise ValueError(f"{where} is missing the required key '{key}' (use null for an unmeasured memory_gb).")
     files = entry["files"]
     if not isinstance(files, list) or not files:
         raise ValueError(f"{where}.files must be a non-empty list of {{repo, files}} entries.")
     return AudioPlatform(
         family=_text(entry["family"], f"{where}.family"),
         files=tuple(_files(item, f"{where}.files[{index}]") for index, item in enumerate(files)),
+        memory_gb=None if entry["memory_gb"] is None else float(_number(entry["memory_gb"], f"{where}.memory_gb")),
         settings=_settings(entry.get("settings"), f"{where}.settings"),
     )
 

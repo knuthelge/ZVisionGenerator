@@ -36,7 +36,6 @@ _GIB = 1024**3
 
 def _set_platform(monkeypatch, key: str) -> None:
     """Make this machine ``cuda`` or ``mps`` for the form's checks and the contract."""
-    monkeypatch.setattr(web_server, "audio_platform_key", lambda: key)
     monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: key)
 
 
@@ -103,6 +102,20 @@ class TestSubmit:
         monkeypatch.setattr(web_server.web_runner, "submit_audio_request_job", busy)
 
         assert env.post(model="sa3", prompt="rain").status_code == 409
+
+
+class TestRecentPrompts:
+    def test_each_kind_is_remembered_under_its_own_list_and_a_song_keeps_its_lyrics(self, env):
+        env.post(model="yue2", prompt="  synth-pop ", lyrics="[verse]\r\nLa la")
+        env.post(model="higgs3", prompt="Welcome back.")
+        env.post(model="sa3", prompt="rain on a roof")
+
+        def remembered(kind: str) -> list[tuple[str, str]]:
+            return [(entry["prompt"], entry["scene"]) for entry in web_server.recent_prompts.search("", kind)]
+
+        assert remembered("music") == [("synth-pop", "[verse]\nLa la")]
+        assert remembered("speech") == [("Welcome back.", "")]
+        assert remembered("sound") == [("rain on a roof", "")]
 
 
 class TestNormalisation:
@@ -187,9 +200,10 @@ class TestRefusals:
 
         _refused(env.post(model="yue2", prompt="x"), "No audio models are configured", "audio_model_presets")
 
-    def test_a_workflow_of_another_kind_than_the_model_is_refused(self, env):
-        _refused(env.post(workflow="speech", model="yue2", prompt="x"), "YuE2 3B makes music, not speech")
-        _refused(env.post(workflow="txt2img", model="yue2", prompt="x"), "Unknown audio workflow 'txt2img'")
+    @pytest.mark.parametrize("seed", ["-1", str(2**63)])
+    def test_a_seed_no_model_takes_is_refused_before_anything_loads(self, env, seed):
+        _refused(env.post(model="sa3", prompt="x", seed=seed), "seed")
+        assert env.submitted == []
 
     def test_runs_below_one_are_refused(self, env):
         _refused(env.post(model="sa3", prompt="x", runs="-1"), "Runs must be at least 1")
@@ -310,7 +324,7 @@ class TestVoice:
         saved = run_audio_batch(job["request"], job["preset"], job["config"], runs=1, seed=3, output_dir=str(env.root / "takes"))
 
         assert "consent" not in json.dumps(job["context"]).lower()
-        remembered = web_server.recent_prompts.search("", "audio")
+        remembered = web_server.recent_prompts.search("", "speech")
         assert [entry["prompt"] for entry in remembered] == ["More words."] and "consent" not in json.dumps(remembered).lower()
         assert not any("consent" in key for key in read_config(saved[0]))
 
@@ -319,6 +333,31 @@ class TestVoice:
         settings = env.submitted[0]["context"]["settings"]
 
         _refused(env.post(**settings), "permission")
+
+
+class TestMissingFfmpeg:
+    """Without ffmpeg a recording cannot be read, so the form is refused with the ffmpeg message before it is judged on the recording."""
+
+    @pytest.fixture
+    def no_ffmpeg(self, env, monkeypatch, tmp_path):
+        def missing() -> None:
+            raise RuntimeError("ffmpeg is required but was not found on PATH.")
+
+        monkeypatch.setattr(web_server, "require_ffmpeg", missing)
+        env.voices = voice_folder(tmp_path)
+        return env
+
+    @pytest.mark.parametrize("path", ["/api/generate", "/api/generate/plan"])
+    def test_a_recording_form_gets_the_ffmpeg_message_not_a_consent_refusal(self, no_ffmpeg, path):
+        response = no_ffmpeg.post(path, model="higgs3", prompt="More words.", voice_path=str(no_ffmpeg.voices / "me.wav"), voice_text="Hello, this is me.")
+
+        detail = _refused(response, "ffmpeg")
+        assert "permission" not in detail
+        assert no_ffmpeg.submitted == []
+
+    @pytest.mark.parametrize("path", ["/api/generate", "/api/generate/plan"])
+    def test_a_form_with_no_recording_is_refused_the_same_way(self, no_ffmpeg, path):
+        _refused(no_ffmpeg.post(path, model="sa3", prompt="rain"), "ffmpeg")
 
 
 class TestPlan:
@@ -348,7 +387,7 @@ class TestPlan:
         assert response.status_code == 200
         plan = response.json()
         # One part for the model, summing its two repositories (the model and the VAE).
-        assert [(part["label"], part["model"], part["repo"], part["files"], part["bytes"]) for part in plan["parts"]] == [("YuE2 3B", "yue2", "m-a-p/YuE2-3B", 4, 6 * _GIB)]
+        assert [(part["label"], part["model"], part["bytes"]) for part in plan["parts"]] == [("YuE2 3B", "yue2", 6 * _GIB)]
         assert plan["total_bytes"] == 6 * _GIB
         assert plan_env.submitted == []
 
@@ -473,6 +512,7 @@ class TestRunner:
         assert [event["type"] for event in events if event["type"] not in ("audio_progress", "model_downloading")] == [
             "job_submitted",
             "job_started",
+            "model_loading",
             "batch_started",
             "prompt_started",
             "generation_started",

@@ -48,13 +48,12 @@ ziv-video -m ltx-4 --image photo.jpg --prompt "The camera slowly zooms in"
 
 ## Model licences
 
-Some models come with terms, such as the non-commercial licence of `klein9b`. Before a download of such a model starts, the command prints its licence, who licenses it, what it allows and the links to the licence and its NOTICE file, and then goes on without asking:
+Some models come with terms, such as the non-commercial licence of `klein9b`. Before a download of such a model starts, the command prints its licence, who licenses it, what it allows, the link to the model's original repository and any credit line the licence asks for, and then goes on without asking:
 
 ```text
 By downloading you agree to these terms:
 FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial
-  https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/LICENSE.md
-  NOTICE: https://huggingface.co/unsloth/FLUX.2-klein-9B/blob/455f1273c2f08f1fc93d725c2e6f1d7fc681cd94/NOTICE
+  https://huggingface.co/black-forest-labs/FLUX.2-klein-9B
 ```
 
 Nothing is printed for a model that is already downloaded or has no special terms. `--transparent` prints the terms of the background removal models before it downloads them. See [Licences](../concepts/models.md#licences) for every model's terms.

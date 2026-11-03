@@ -91,7 +91,7 @@ The 🕘 button in the tools row lists the prompts you generated in the current 
 
 - **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text is dropped. A JSON caption turns on **{ } JSON** and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and tab don't change.
 - **From the keyboard:** press ++alt+up++ in an empty prompt to open the list with the filter ready. ++up++ and ++down++ move, ++enter++ picks and ++esc++ closes and puts the cursor back in the prompt box (or on the button, if you opened the list with it).
-- **Clear recents** at the bottom of the list removes the prompts of the mode you are in, after asking. The other mode's prompts stay.
+- **Clear recents** at the bottom of the list removes the prompts of the list you are in, after asking. Every other list stays.
 
 ![Recent prompts menu open over the prompt box](../assets/screenshots/placeholder.svg "recent-prompts")
 
@@ -116,7 +116,7 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 Groups and rows only show when the model and tab use them.
 
 - **Change a number** by typing it, or by dragging its label sideways. On a touch screen, numbers have − and + buttons instead (hold to repeat).
-- **Put one setting back** with the reset mark next to it. **Reset** in the *Settings* header puts all settings back to the model's defaults, and keeps the model, LoRAs, quant and the prompts.
+- **Put one setting back** with the reset mark next to it. **Reset** in the *Settings* header puts the open tab [back to its defaults](#reset). The number beside it counts the settings that differ from their defaults, and a phone shows the same number on its *All* sheet.
 - **Seed** is random for every run unless you type one. The dice button picks a new one.
 
 What each setting does is in [Images](../concepts/images.md), [Video](../concepts/video.md) and [Upscaling](../concepts/upscaling.md).
@@ -154,7 +154,7 @@ Folded, the header's summary says what **Generate** will use: in Image *None*, *
 - An image stays until you press its × or **Reset**, including after you reload the page and including images uploaded from your device.
 - **Image** and **Video** each keep their own images. Adding a first frame in Video doesn't put it into Image, and switching between **Image** and **Video**, between its kinds, or changing the model, clears none of them.
 - **Reuse settings** and **Load settings** replace the images of the tab they open with the ones the job used. A job made from text leaves that tab's images empty.
-- **Reset** in the *Settings* header clears the open tab's images along with the other settings: in Image the start image, the references and **Strength**, in Video the first and last frame. In the **Extend** kind it clears no images. The other tab keeps its images.
+- **Reset** in the *Settings* header clears the open tab's images along with its other settings; the other tab keeps its images. What it clears on each tab is in [Reset](#reset).
 
 **Images a model can't use**
 
@@ -179,7 +179,7 @@ When the model takes [references](../concepts/images.md#references), the **Image
 
 The **Audio track** section comes after **Images** in **Video**, and after **Source video** in the **Extend** kind. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
 
-In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. **Reset** clears the track, except one the source filled in.
+In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. [Reset](#reset) clears the track, except one the source filled in.
 
 A server file that can't be read is refused at **Generate** with *Can't read the audio track*. An upload lost on reload blocks **Generate** with *Choose the audio track again.* On a phone, the **Track** chip opens the same rows in a popover.
 
@@ -189,7 +189,22 @@ Your settings stay in the browser between visits, as long as the Web UI starts o
 
 When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset, and a custom size is scaled to fit its limits, keeping its shape. Changing the quant changes nothing else.
 
-**Reset**, **Reuse settings**, **Load settings** and **Extend** apply the model's defaults instead, and use exactly the LoRAs the source was made with.
+**Reuse settings** and **Load settings** apply a take's settings exactly. What the take did not record takes its default instead of what the form held: a take made without LoRAs, a negative prompt or a seed comes back without them, and a size the model doesn't offer becomes its largest preset. They replace the open tab's settings, images, prompts, LoRAs, quant and *Enhance* options, and leave the other tabs, the prompts file and your enhancer choices as they are. **Extend** brings the LoRAs the source was made with, and **Use as** and a link change only what they name.
+
+### Reset
+
+**Reset** in the *Settings* header puts the open tab back to its defaults. It touches that tab only: nothing on another tab, and nothing in the other mode, changes.
+
+| Tab | Reset puts back |
+|---|---|
+| Image | The settings at the model's defaults; the start image, the references and **Strength**; Image's *Enhance* options |
+| Video, New | The settings at the model's defaults; the first and last frame and the audio track; Video's *Enhance* options |
+| Video, Extend | The settings at the model's defaults; the length of the extension, to the source's default; the audio track, to the one the source filled in; Video's *Enhance* options |
+| Audio | The length, the voice (the recording, what it says, *Any* or *From a recording*, and the tick), **Batch size** and **Seed** |
+
+**Batch size** and **Seed** are shared by every tab, so each Reset puts them back. The applied preset is deselected.
+
+Reset keeps the model, LoRAs and quant, the prompts and the prompt file (the Enhanced text included), the Extend source, the Video kind that is open, the *Enhance* choices of enhancer, format and auto-enhance, and the Audio tab's kind, models and text. Image and Video each have their own *Enhance* options, so a Reset on one leaves the other's.
 
 ### Copy as a command
 
@@ -226,22 +241,22 @@ The toolbar reads **Kind**, **Model**, the model's **ⓘ** licence mark and its 
 
 - **Music:** a line under the boxes says what you will get: *Song · length follows the lyrics*, or *Instrumental · 8 sections · add or remove section tags to change its length*. Write words under `[verse]` and `[chorus]` tags for a song; leave **Lyrics** empty, or write only tags, for an instrumental; `[Instrumental]` and `[Solo]` tags keep vocals out more reliably than `[verse]` and `[chorus]`, and a take can still occasionally carry a voice, so generate again if it does. See [Music](../concepts/audio.md#music).
 - **Speech:** the help under **Text** says that long text is read in parts and joined into one take. Expressive tags such as `<|sfx:laughter|>` are typed into the text; see [Expressive tags](../concepts/audio.md#expressive-tags).
-- **Compose tools:** there is no enhancer, JSON mode or negative prompt, and no steps or guidance to set. The tools row has only **Recent prompts**, one list for the three kinds.
+- **Compose tools:** there is no enhancer, JSON mode or negative prompt, and no steps or guidance to set. The tools row has only **Recent prompts**: music, speech and sound each keep their own list, a song's recent prompt brings its lyrics back with its style, and **Clear recents** clears only the open kind's list.
 
 ### Voice
 
 **Voice** is the first group in Speech's *Settings*. See [Voices](../concepts/audio.md#voices) for what each choice does.
 
-1. Leave it on **Any** to let the model pick a voice. The help under it points to **Use as** → **Voice** in the [Gallery](gallery.md#use-as) for keeping one.
+1. Leave it on **Any** to let the model pick a voice. The help under it points to **Use as** → **Voice** in the [Gallery](gallery.md#use-as-an-audio-track-or-a-voice) for keeping one.
 2. Or choose **From a recording**. Add a file of 3 to 30 seconds (Browse, upload or drop; its length shows beside its name), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.*
 
 ![The Voice section on From a recording, with the file, What it says and the consent tick](../assets/screenshots/placeholder.svg "audio-voice")
 
-The tick is asked again after a new recording, **Reset**, **Reuse settings**, **Use as** or a reload. A take made with **Any** that you use as the voice needs no tick.
+The tick is asked again after a new recording, **Reset**, a reload, or a **Reuse settings**, **Load settings** or **Use as** that replaces the voice. Reusing a song or a sound leaves the voice and its tick as they are. A take made with **Any** that you use as the voice needs no tick.
 
 A clean, close-miked recording gives the best voice; see [Clone from a clean recording](../concepts/audio.md#voices).
 
-**Reset** works as on Image: it keeps the text you wrote (Style, Lyrics, Text and Prompt) and puts everything else back, including the length, **Batch size**, **Seed** and the voice.
+**Reset** keeps the kind, the models and the text you wrote (Style, Lyrics, Text and Prompt), and puts back the length, **Batch size**, **Seed** and the voice. See [Reset](#reset).
 
 ### Why Generate is off
 
@@ -249,7 +264,15 @@ While something is missing, **Generate** is disabled and one reason shows above 
 
 ### While a take is made
 
-The job card counts **takes** (*Take 1 of 2*) and lists the model's phases with a progress bar each: Plan, Song tokens, Synthesis and Decode for music; Speech tokens, with *Part 2 of 4* for long text, and Decode for speech; Steps for sound. There is no live preview. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs); Cancel also stops a take that is in progress.
+The job card counts **takes** (*Take 1 of 2*) and puts the text of the take under **Style** (music), **Text** (speech) or **Prompt** (sound). Its rows use the same words as the preview strip:
+
+- **Music** has four rows: *Planning*, *Writing the song*, *Rendering* and *Finishing*. The row at work shows how much of the song is written so far (*Writing the song · 1:15 so far*) and then the steps of the render; rows still to come read *Next*.
+- **Speech** has one row, *Reading part 2 of 4 · 0:16*, which reads *Finishing part 2 of 4* while that part is decoded. Text in one part reads *Reading · 0:16*.
+- **Sound** has one step line as an image does, *Step 5 of 8*, and then *Finishing up…*.
+
+The bar in the card's header is the whole take's progress, the same as the strip's: it keeps moving while a song is written, it never goes back between the parts of a speech, and a sound's reaches full as its last step ends. When a job is paused between takes, the card says which comes next (*Next: take 2 of 3*).
+
+The preview strip shows slow, drifting ribbons of light over a faint starfield. The part of the take already made glows and the rest stays faint. Music is amber, teal and coral bands, speech a coral ribbon that swells with the words, and sound a wide teal mist that brightens with each step. The sky changes with each stage: a haze while the model loads, stars coming out while a song is planned, a glow along the bottom that rises as the take is written, a faint far layer of ribbons while a song is rendered, and a clear sky with one line down the middle while the take is decoded (speech does this for each part). When the take is ready, the ribbons settle into its waveform, captioned *Last finished take* with its length; the same waveform and caption stay between takes and while paused. A job that fails or is stopped keeps the waveform of the last take it saved. With reduced motion turned on in your system, the strip only changes when the job reports progress, and shows the waveform at once when the take is ready. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs); Cancel also stops a take that is in progress.
 
 A job that runs out of GPU memory fails with a message that names the model and says to close other apps that use the GPU. For music it also says to shorten the lyrics.
 

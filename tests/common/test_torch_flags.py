@@ -30,7 +30,7 @@ def test_a_mixed_legacy_and_new_state_is_restored_exactly(torch_flags_guard):
     with pytest.raises(RuntimeError):
         torch.get_float32_matmul_precision()
     mixed = capture_torch_flags()
-    assert mixed.float32_matmul_precision is None
+    assert mixed["float32_matmul_precision"] is None
     set_kit_flags()
 
     restore_torch_flags(mixed)

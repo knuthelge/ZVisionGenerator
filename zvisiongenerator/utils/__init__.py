@@ -39,7 +39,7 @@ from .provenance import (
     optional_float,
     optional_int,
     optional_text,
-    read_mp4_config,
+    read_config,
     read_png_config,
     recorded_settings,
 )
@@ -101,7 +101,7 @@ __all__ = [
     "parse_enhance_spec",
     "parse_lora_arg",
     "probe_video",
-    "read_mp4_config",
+    "read_config",
     "read_png_config",
     "recorded_settings",
     "resolve_alias",

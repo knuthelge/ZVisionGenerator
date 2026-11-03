@@ -1,16 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DownloadPlan } from '$lib/types';
+import type { JobDownloadPlan } from '$lib/types';
 import { downloadConfirmText } from './downloadConfirm';
 
-function plan(overrides: Partial<DownloadPlan> = {}): DownloadPlan {
+function plan(overrides: Partial<JobDownloadPlan> = {}): JobDownloadPlan {
   return {
-    kind: 'model',
-    name: 'klein9b',
-    label: 'klein9b',
-    parts: [{ repo: 'org/a', files: 3, bytes: 30e9 }, { repo: 'org/b', files: 1, bytes: 4.7e9 }],
+    parts: [{ label: 'Klein 9B', model: 'klein9b', bytes: 30e9 }, { label: 'Prompt enhancer', model: 'org/llm', bytes: 4.7e9 }],
     total_bytes: 34.7e9,
     space: { path: '/hub', needed_bytes: 34.7e9, free_bytes: 512e9, enough: true },
+    unchecked: false,
+    licences: [],
     ...overrides,
   };
 }
@@ -23,7 +22,7 @@ describe('downloadConfirmText', () => {
   });
 
   it('leaves out the part count for one part', () => {
-    const single = downloadConfirmText(plan({ parts: [{ repo: 'org/a', files: 1, bytes: 34.7e9 }] })).info;
+    const single = downloadConfirmText(plan({ parts: [{ label: 'Klein 9B', model: 'klein9b', bytes: 34.7e9 }] })).info;
     expect(single).not.toContain('parts');
     expect(downloadConfirmText(plan()).info).toContain('2 parts');
   });

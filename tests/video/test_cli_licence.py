@@ -44,7 +44,7 @@ def run(monkeypatch, capsys):
         monkeypatch.setattr(video_cli, "load_config", lambda: _CONFIG)
         monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **kwargs: _CONFIG["model_aliases"].get(model, model))
         monkeypatch.setattr(video_cli, "video_plan", plans)
-        monkeypatch.setattr(video_cli, "target_present_offline", lambda target: present)
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: present)
         monkeypatch.setattr(video_cli, "run_preflight", preflight)
         monkeypatch.setattr(sys, "argv", ["ziv-video", "--prompt", "a dog", *argv])
         video_cli.main()

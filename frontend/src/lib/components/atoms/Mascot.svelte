@@ -14,8 +14,8 @@
     | 'surprised'
     | 'nodding';
 
-  /** What the mascot holds: a paintbrush for images, a clapperboard for video. */
-  export type MascotTool = 'brush' | 'clapper';
+  /** What the mascot holds or wears: a paintbrush for images, a clapperboard for video, headphones for audio. */
+  export type MascotTool = 'brush' | 'clapper' | 'audio';
 
   /** Report whether the user asked the system to reduce motion. */
   export function prefersReducedMotion(): boolean {
@@ -26,7 +26,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { FINISHING_FRACTION } from '$lib/state/mascot';
-  import { BODY_PATH, bubbleCells, confettiPieces, TILE_CELLS, TILE_STEP_COUNT, tileCells, tileStep, zGlyphs } from './mascotArt';
+  import { BODY_PATH, bubbleCells, confettiPieces, noteConfetti, notePixels, risingNotes, TILE_CELLS, TILE_STEP_COUNT, tileCells, tileStep, zGlyphs } from './mascotArt';
 
   interface Props {
     mood?: MascotMood;
@@ -89,7 +89,8 @@
 
   const confetti = confettiPieces();
   const zs = zGlyphs();
-  const bubble = bubbleCells();
+  const rising = risingNotes();
+  const noteBits = noteConfetti();
   const veilCells = tileCells(6);
   const finishedCells = tileCells(null);
 
@@ -102,6 +103,7 @@
   let heldStep = $state(0);
 
   const simple = $derived(size < SIMPLE_BELOW_PX);
+  const bubble = $derived(bubbleCells(tool === 'audio' ? 'note' : 'picture'));
   const tile = $derived(tileCells(mood === 'finishing' ? null : heldStep));
   const dotsLit = $derived(mood === 'finishing' ? TILE_STEP_COUNT : heldStep + 1);
 
@@ -222,7 +224,7 @@
   height={size}
   viewBox="-14 -18 228 218"
   role={decorative ? undefined : 'img'}
-  aria-label={decorative ? undefined : labels[mood]}
+  aria-label={decorative ? undefined : tool === 'audio' && mood === 'creating' ? 'Z-Vision mascot is making a take' : labels[mood]}
   aria-hidden={decorative ? 'true' : undefined}
 >
   <defs>
@@ -274,11 +276,39 @@
     {/each}
   </g>
 
+  <!-- Audio, creating: pixel notes that rise from behind his head -->
+  <g class="fx fx-notes" shape-rendering="crispEdges">
+    {#each rising as note, ni (ni)}
+      <g class="note" style:--nd="{note.delay}s" style:--rx="{note.rest.x}px" style:--ry="{note.rest.y}px" fill={note.fill}>
+        <g class="note-tick">
+          {#each note.pixels as pixel, i (i)}
+            <rect x={pixel.x} y={pixel.y} width={note.cell + 0.06} height={note.cell + 0.06} />
+          {/each}
+        </g>
+      </g>
+    {/each}
+  </g>
+
+  <!-- Audio, sad: a grey note sinks behind his shoulder -->
+  <g class="fx fx-sadnote" shape-rendering="crispEdges">
+    <g class="sad-note" fill="#8f939a">
+      {#each notePixels('eighth', 148, 28, 3.8) as pixel, i (i)}
+        <rect x={pixel.x} y={pixel.y} width="3.86" height="3.86" />
+      {/each}
+    </g>
+  </g>
+
   <!-- Paused: pause badge -->
   <g class="fx fx-paused">
     <g class="pause-badge" fill="#b0b5ba">
       <rect x="170" y="4" width="8" height="26" rx="4" />
       <rect x="184" y="4" width="8" height="26" rx="4" />
+    </g>
+    <!-- Audio: the note the music stopped on -->
+    <g class="held-note" fill="#b0b5ba" shape-rendering="crispEdges">
+      {#each notePixels('eighth', 146, 4, 3.8) as pixel, i (i)}
+        <rect x={pixel.x} y={pixel.y} width="3.86" height="3.86" />
+      {/each}
     </g>
   </g>
 
@@ -342,6 +372,35 @@
         <g class="detail">
           <ellipse cx="56" cy="104" rx="10" ry="18" transform="rotate(28 56 104)" fill="#fff" opacity=".28" />
           <circle cx="64" cy="86" r="3.4" fill="#fff" opacity=".8" />
+        </g>
+      </g>
+
+      <!-- Audio: headphones in front of the body, behind the beret (a bolder form for small sizes) -->
+      <g class="phones">
+        <g class="phones-full">
+          <path d="M31,100 C24,30 177,22 170,100" fill="none" stroke="#5b5f66" stroke-width="7.5" stroke-linecap="round" />
+          <path d="M33,92 C30,40 172,32 168,92" fill="none" stroke="#c9ccd1" stroke-width="2" stroke-linecap="round" opacity=".75" />
+          <g class="cup-l">
+            <g class="cup">
+              <ellipse cx="38" cy="113" rx="4.5" ry="13.5" fill="#2c2e33" />
+              <ellipse cx="29" cy="113" rx="10.5" ry="17" fill="url(#{uid}-beret)" />
+              <ellipse class="detail" cx="25" cy="105" rx="3" ry="6.5" fill="#fff" opacity=".42" />
+              <circle class="detail" cx="28" cy="116" r="3.2" fill="#fbbf24" />
+            </g>
+          </g>
+          <g class="cup-r-hinge">
+            <g class="cup">
+              <ellipse cx="162" cy="113" rx="4.5" ry="13.5" fill="#2c2e33" />
+              <ellipse cx="171" cy="113" rx="10.5" ry="17" fill="url(#{uid}-beret)" />
+              <ellipse class="detail" cx="167" cy="105" rx="3" ry="6.5" fill="#fff" opacity=".42" />
+              <circle class="detail" cx="172" cy="116" r="3.2" fill="#fbbf24" />
+            </g>
+          </g>
+        </g>
+        <g class="phones-simple">
+          <path d="M30,104 C22,24 178,16 170,104" fill="none" stroke="#b4b6bc" stroke-width="13" stroke-linecap="round" />
+          <ellipse cx="27" cy="114" rx="15" ry="22" fill="#fb8f7c" />
+          <ellipse cx="173" cy="114" rx="15" ry="22" fill="#fb8f7c" />
         </g>
       </g>
 
@@ -418,6 +477,11 @@
         <path d="M91,143 Q101,162 111,143 Z" fill="#0b3b37" stroke="#0b3b37" stroke-width="3" stroke-linejoin="round" />
         <ellipse class="detail" cx="101" cy="153.5" rx="4.5" ry="2.5" fill="#f472b6" />
       </g>
+      <!-- Audio: humming mouth, opening on each beat -->
+      <g class="mouth m-sing">
+        <ellipse cx="101" cy="149" rx="5" ry="5.6" fill="#0b3b37" />
+        <ellipse class="detail" cx="101" cy="152.2" rx="3" ry="1.8" fill="#f472b6" />
+      </g>
     </g>
   </g>
 
@@ -441,6 +505,20 @@
       <rect class="scan-line" x={TILE.x} y={TILE.y - 1} width={TILE.size} height="3" fill="#ccfbf1" />
       <rect class="flash" x={TILE.x} y={TILE.y} width={TILE.size} height={TILE.size} fill="#fff" />
     </g>
+    <g class="tile-dots">
+      {#each { length: TILE_STEP_COUNT } as _, i (i)}
+        <rect x={TILE.x + i * 5 + 0.8} y={TILE.y + TILE.size + 5} width="3.4" height="4.4" rx="1" fill={i < dotsLit ? '#2dd4bf' : '#393c42'} />
+      {/each}
+    </g>
+  </g>
+
+  <!-- Finishing: the brackets and sparks that frame the snap, and for audio the note that locks in -->
+  <g class="fx fx-snap">
+    <g class="note-big" fill="#fbbf24" shape-rendering="crispEdges">
+      {#each notePixels('beamed', 173.3, 9.4, 4.2) as pixel, i (i)}
+        <rect x={pixel.x} y={pixel.y} width="4.26" height="4.26" />
+      {/each}
+    </g>
     <g class="brackets" stroke="#2dd4bf" stroke-width="3" fill="none" stroke-linecap="square">
       <path d="M164,-2 V4 M164,-2 H170" />
       <path d="M212,-2 V4 M212,-2 H206" />
@@ -451,23 +529,28 @@
     <rect class="spark" style:--sx="1" style:--sy="-1" x="209" y="-4" width="5" height="5" fill="#fff" />
     <rect class="spark" style:--sx="1" style:--sy="1" x="209" y="43" width="5" height="5" fill="#fb8f7c" />
     <rect class="spark" style:--sx="-1" style:--sy="1" x="162" y="43" width="5" height="5" fill="#2dd4bf" />
-    <g class="tile-dots">
-      {#each { length: TILE_STEP_COUNT } as _, i (i)}
-        <rect x={TILE.x + i * 5 + 0.8} y={TILE.y + TILE.size + 5} width="3.4" height="4.4" rx="1" fill={i < dotsLit ? '#2dd4bf' : '#393c42'} />
-      {/each}
-    </g>
   </g>
 
   <!-- Cheerful: pixel confetti -->
   <g class="fx fx-cheerful">
     {#each confetti as piece, i (i)}
-      <g class="confetti" style:--d="{piece.delay}s" style:--sway="{piece.sway}px" style:--ry="{piece.restY}px">
+      <g class="confetti{i % 2 === 1 ? ' sq-alt' : ''}" style:--d="{piece.delay}s" style:--sway="{piece.sway}px" style:--ry="{piece.restY}px">
         <rect x={piece.x} y="0" width={piece.size} height={piece.size} fill={piece.fill} />
         {#if piece.pair}
           <rect x={piece.x + piece.size} y="0" width={piece.size} height={piece.size} fill={piece.pair} />
         {/if}
       </g>
     {/each}
+    <!-- Audio: half the confetti are pixel notes -->
+    <g class="note-confetti" shape-rendering="crispEdges">
+      {#each noteBits as piece, ni (ni)}
+        <g class="note-c" style:--d="{piece.delay}s" style:--sway="{piece.sway}px" style:--ry="{piece.restY}px" fill={piece.fill}>
+          {#each piece.pixels as pixel, i (i)}
+            <rect x={pixel.x} y={pixel.y} width={piece.cell + 0.06} height={piece.cell + 0.06} />
+          {/each}
+        </g>
+      {/each}
+    </g>
   </g>
 </svg>
 
@@ -520,12 +603,20 @@
   [data-simple][data-mood='paused'] .eye { transform: scaleY(0.72); }
   [data-simple][data-mood='sad'] .eye { transform: scaleY(0.85); }
 
-  /* Tool: a brush for images, a clapperboard for video */
+  /* Tool: a brush for images, a clapperboard for video, headphones for audio */
   .tool-brush,
   .tool-clapper { transition: opacity 250ms ease; }
   .tool-clapper,
-  [data-tool='clapper'] .tool-brush { opacity: 0; }
+  [data-tool='clapper'] .tool-brush,
+  [data-tool='audio'] .tool-brush { opacity: 0; }
   [data-tool='clapper'] .tool-clapper { opacity: 1; }
+  .phones { opacity: 0; transition: opacity 250ms ease; transform-origin: 100px 104px; }
+  [data-tool='audio'] .phones { opacity: 1; }
+  .phones-simple { display: none; }
+  [data-simple] .phones-full { display: none; }
+  [data-simple] .phones-simple { display: inline; }
+  .cup { transform-box: fill-box; transform-origin: center; }
+  .cup-r-hinge { transform-origin: 170px 98px; }
 
   /* Mood-dependent visibility */
   .mouth,
@@ -547,6 +638,7 @@
   [data-mood='creating'] .brow,
   [data-mood='finishing'] .m-creating,
   [data-mood='finishing'] .fx-tile,
+  [data-mood='finishing'] .fx-snap,
   [data-mood='finishing'] .brow,
   [data-mood='nodding'] .m-smile,
   [data-mood='nodding'] .eye-happy,
@@ -693,6 +785,72 @@
   [data-mood='surprised'] .exclaim { animation: exclaim 0.9s ease-out 1 both; }
   [data-mood='surprised'] .tool { transform: rotate(-40deg); }
   [data-mood='surprised'] .brow { transform: translateY(-9px); }
+
+  /*
+   * Audio: Blob wears headphones. The image tile never shows (the live preview is the picture), and every effect is
+   * a transform or an opacity. The beat is 120 BPM, 0.5 s.
+   */
+  [data-tool='audio'] .fx-tile { display: none; }
+  .m-sing { transform-origin: 101px 145px; }
+  .note,
+  .note-c,
+  .note-big,
+  .sad-note,
+  .held-note { opacity: 0; }
+  .note-tick { transform-box: fill-box; transform-origin: 50% 80%; }
+  .note-c,
+  .sad-note,
+  .note-big { transform-box: fill-box; transform-origin: center; }
+  .note-confetti { display: none; }
+  [data-tool='audio'] .note-confetti { display: inline; }
+  [data-tool='audio'] .confetti.sq-alt { display: none; }
+
+  [data-tool='audio'][data-mood='creating'] .fx-notes,
+  [data-tool='audio'][data-mood='sad'] .fx-sadnote,
+  [data-tool='audio'][data-mood='paused'] .held-note,
+  [data-tool='audio'][data-mood='creating'] .m-sing,
+  [data-tool='audio'][data-mood='creating'] .eye-happy { opacity: 1; }
+  [data-tool='audio'][data-mood='creating'] .eye,
+  [data-tool='audio'][data-mood='creating'] .m-creating,
+  [data-tool='audio'][data-mood='creating'] .brow { opacity: 0; }
+  [data-tool='audio'][data-mood='creating'] .blush { opacity: 0.8; }
+
+  /* Creating: he grooves, eyes closed in the music and humming, and a note rises every two beats */
+  [data-tool='audio'][data-mood='creating'] .root { animation: groove 1s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='creating'] .beret { animation: beret-bob 0.5s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='creating'] .m-sing { animation: sing 0.5s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='creating'] .note { animation: note-rise 3s linear infinite; animation-delay: var(--nd); }
+  [data-tool='audio'][data-mood='creating'] .note-tick { animation: note-tick 1s linear infinite; }
+  [data-tool='audio'][data-mood='creating'] .cup,
+  [data-tool='audio'][data-mood='finishing'] .cup { animation: cup-pump 0.5s ease-out infinite; }
+  [data-tool='audio'][data-mood='creating'] .hand-r { animation: hand-tap 0.5s ease-in-out infinite; }
+
+  /* Finishing: the focused face of the image, on the beat; the notes gather into one that locks into the brackets */
+  [data-tool='audio'][data-mood='finishing'] .root { animation: beat-bob 0.5s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='finishing'] .note-big { animation: note-lock 1.1s ease-out infinite; }
+
+  /* Cheerful: a side-step dance, both hands up, and half the confetti are notes */
+  [data-tool='audio'][data-mood='cheerful'] .root { animation: boogie 1s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='cheerful'] .shadow { animation: shadow-boogie 1s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='cheerful'] .beret { animation: beret 0.5s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='cheerful'] .hand-l { animation: hand-wave 0.5s ease-in-out infinite alternate; }
+  [data-tool='audio'][data-mood='cheerful'] .hand-r { animation: hand-pump 0.5s ease-in-out infinite alternate; }
+  [data-tool='audio'][data-mood='cheerful'] .note-c {
+    animation: confetti-fall 1.6s linear infinite, note-wobble 0.5s steps(1) infinite;
+    animation-delay: var(--d), 0s;
+  }
+
+  /* Paused: the music stops mid-note and one cup lifts off to listen */
+  [data-tool='audio'][data-mood='paused'] .held-note { animation: pulse 2.4s ease-in-out infinite; }
+  [data-tool='audio'][data-mood='paused'] .cup-r-hinge { transform: rotate(-26deg); }
+
+  /* Sad: a grey note sinks behind his shoulder and the headphones slip */
+  [data-tool='audio'][data-mood='sad'] .sad-note { animation: note-sink 3.2s ease-in infinite; }
+  [data-tool='audio'][data-mood='sad'] .phones { transform: rotate(5deg) translateY(3px); }
+
+  /* The other moods keep their motion; only the headphones find a pose */
+  [data-tool='audio'][data-mood='sleeping'] .phones { transform: rotate(-4deg) translateY(3px); }
+  [data-tool='audio'][data-mood='surprised'] .phones { animation: phones-pop 0.6s ease-out 1 forwards; }
 
   @keyframes float { 50% { transform: translateY(-5px); } }
   @keyframes shadow-float { 50% { transform: scaleX(0.9); } }
@@ -857,6 +1015,81 @@
     100% { transform: scale(1); opacity: 1; }
   }
 
+  @keyframes groove {
+    0%, 100% { transform: translateY(0) rotate(-2deg); }
+    14% { transform: translateY(3.5px) rotate(-3.5deg) scale(1.03, 0.96); }
+    50% { transform: translateY(0) rotate(2deg); }
+    64% { transform: translateY(3.5px) rotate(3.5deg) scale(1.03, 0.96); }
+  }
+  @keyframes beat-bob {
+    0%, 100% { transform: translateY(0) rotate(1deg); }
+    18% { transform: translateY(3px) rotate(2deg) scale(1.02, 0.97); }
+  }
+  @keyframes beret-bob {
+    0%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-2.5px) rotate(-3deg); }
+  }
+  @keyframes sing {
+    0%, 100% { transform: scaleY(0.45); }
+    35% { transform: scaleY(1); }
+  }
+  @keyframes cup-pump {
+    0%, 100% { scale: 1; }
+    12% { scale: 1.08; }
+  }
+  @keyframes hand-tap {
+    0%, 100% { transform: translateY(0); }
+    15% { transform: translateY(-5px); }
+    35% { transform: translateY(1px); }
+  }
+  @keyframes hand-pump {
+    from { transform: translate(-2px, -40px); }
+    to { transform: translate(5px, -48px); }
+  }
+  @keyframes note-rise {
+    0% { translate: 0 8px; opacity: 0; }
+    10% { opacity: 1; }
+    40% { translate: -5px -22px; }
+    75% { opacity: 1; }
+    100% { translate: 16px -64px; opacity: 0; }
+  }
+  @keyframes note-tick {
+    0%, 49.9% { rotate: -12deg; }
+    50%, 100% { rotate: 12deg; }
+  }
+  @keyframes note-wobble {
+    0% { rotate: -14deg; }
+    50% { rotate: 14deg; }
+  }
+  @keyframes note-lock {
+    0% { opacity: 0; scale: 0.55; }
+    44% { opacity: 0.45; scale: 0.85; }
+    52% { opacity: 1; scale: 1.14; }
+    62%, 86% { opacity: 1; scale: 1; }
+    100% { opacity: 0; scale: 1; }
+  }
+  @keyframes note-sink {
+    0% { translate: 0 -6px; rotate: 0deg; opacity: 0; }
+    15% { opacity: 0.9; }
+    70% { opacity: 0.8; }
+    100% { translate: 6px 34px; rotate: 28deg; opacity: 0; }
+  }
+  @keyframes boogie {
+    0%, 100% { transform: translateY(0) rotate(-5deg) scale(1.05, 0.95); }
+    25% { transform: translateY(-14px) rotate(0deg) scale(0.97, 1.04); }
+    50% { transform: translateY(0) rotate(5deg) scale(1.05, 0.95); }
+    75% { transform: translateY(-14px) rotate(0deg) scale(0.97, 1.04); }
+  }
+  @keyframes shadow-boogie {
+    0%, 50%, 100% { transform: scaleX(1); opacity: 0.32; }
+    25%, 75% { transform: scaleX(0.74); opacity: 0.2; }
+  }
+  @keyframes phones-pop {
+    0% { transform: translateY(0); }
+    40% { transform: translateY(-10px) rotate(4deg); }
+    100% { transform: translateY(-2px) rotate(2deg); }
+  }
+
   /* Reduced motion: no loops, and each effect holds a still frame. */
   @media (prefers-reduced-motion: reduce) {
     .mascot * { animation: none !important; }
@@ -876,5 +1109,14 @@
     [data-mood='reading'] .root { transform: rotate(-5deg); }
     [data-mood='sleeping'] .z { opacity: 1; }
     [data-mood='sad'] .tear { opacity: 1; }
+    [data-tool='audio'][data-mood='creating'] .note { opacity: 1; translate: var(--rx) var(--ry); }
+    [data-tool='audio'][data-mood='creating'] .root { transform: rotate(-2deg); }
+    [data-tool='audio'][data-mood='creating'] .m-sing { transform: scaleY(0.8); }
+    [data-tool='audio'][data-mood='finishing'] .note-big { opacity: 1; }
+    [data-tool='audio'][data-mood='cheerful'] .note-c { opacity: 1; translate: 0 var(--ry); }
+    [data-tool='audio'][data-mood='cheerful'] .hand-l { transform: translate(-1px, -42px); }
+    [data-tool='audio'][data-mood='cheerful'] .hand-r { transform: translate(-2px, -40px); }
+    [data-tool='audio'][data-mood='paused'] .held-note { opacity: 0.6; }
+    [data-tool='audio'][data-mood='sad'] .sad-note { opacity: 0.8; translate: 3px 12px; rotate: 14deg; }
   }
 </style>

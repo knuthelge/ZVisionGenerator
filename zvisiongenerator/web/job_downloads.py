@@ -1,42 +1,32 @@
-"""Plan the downloads of one Web UI job: the parts a job fetches before it loads, with their event names and targets.
-
-A part is one model the job needs (the generation model, the prompt enhancer, the background removal models, a SeedVR2
-tier). The runner downloads each part with the targets and ``event_model`` given here, and the plan routes show the same
-parts to the user, so what a job downloads and what the user is told it downloads come from one place.
-
-The builders are pure: they read their inputs and the planners passed in and download nothing. The planners default to
-the real ones; the runner passes the ones it binds so a test can replace them in one place.
-"""
+"""Plan the downloads of one Web UI job: the parts the runner fetches and the plan routes show, from one place."""
 
 from __future__ import annotations
 
 import argparse
 import warnings
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import audio_platform_key, get_seedvr2_upscaler
+from zvisiongenerator.backends import get_seedvr2_upscaler
 from zvisiongenerator.backends import prompt_enhancer_session
-from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads import DownloadTarget, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
-from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
-from zvisiongenerator.utils.config import model_reference, resolve_enhancer_model
+from zvisiongenerator.utils.audio_preset import AudioPreset
+from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name, model_reference, resolve_enhancer_model
 from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
 from zvisiongenerator.utils.matte_models import MATTE_LABEL
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
-from zvisiongenerator.utils.seedvr2 import seedvr2_tier_label
+from zvisiongenerator.utils.seedvr2 import SeedVR2Weights, seedvr2_tier_label
 
 __all__ = [
     "ROLE_ENHANCER",
     "ROLE_MATTE",
     "ROLE_MODEL",
-    "DownloadPlanners",
     "JobDownloadPart",
     "audio_model_part",
     "enhancer_part",
@@ -46,6 +36,7 @@ __all__ = [
     "drop_in_flight",
     "matte_part",
     "seedvr2_part",
+    "seedvr2_tier_part",
     "upscale_model_part",
     "video_model_part",
 ]
@@ -82,145 +73,105 @@ class JobDownloadPart:
     targets: Targets
 
 
-@dataclass(frozen=True)
-class DownloadPlanners:
-    """The functions that turn a model into download targets, passed in so the builders stay pure and testable."""
-
-    image: Callable[..., Targets] = image_plan
-    video: Callable[..., Targets] = video_plan
-    audio: Callable[[AudioPreset, str], tuple[DownloadTarget, ...]] = audio_plan
-    audio_platform_key: Callable[[], str] = audio_platform_key
-    matte: Callable[[], Targets] = matte_plan
-    seedvr2: Callable[..., tuple[DownloadTarget, ...]] = seedvr2_plan
-    enhancer: Callable[[str, str | None], tuple[DownloadTarget, ...]] = enhancer_plan
-    plan_enhancer: Callable[..., tuple[str, str | None] | None] = prompt_enhancer_session.plan_job_enhancer
-    seedvr2_upscaler: Callable[[], Any] = get_seedvr2_upscaler
-    data_dir: Callable[[], Path] = get_ziv_data_dir
+def image_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], platform_key: str) -> JobDownloadPart:
+    """Return the part for the image model *name* (an alias or a path) that loads from *model_ref*, labelled as the Web UI names it."""
+    label = model_display_name(config, name)
+    return JobDownloadPart(label, label, name, ROLE_MODEL, image_plan(model_ref, family=family, config=config, platform_key=platform_key))
 
 
-def image_model_part(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any], *, platform_key: str, planners: DownloadPlanners | None = None) -> JobDownloadPart:
-    """Return the part for the image model an image job generates with."""
-    planners = planners or DownloadPlanners()
-    name = request.model_name or model_ref
-    return JobDownloadPart(name, name, name, ROLE_MODEL, planners.image(model_ref, family=request.model_family, config=config, platform_key=platform_key))
-
-
-def video_model_part(request: VideoGenerationRequest, model_ref: str, config: dict[str, Any], *, planners: DownloadPlanners | None = None) -> JobDownloadPart:
-    """Return the part for the video model a video job generates with (with the upscale's files when it upscales).
+def video_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], upscale: bool) -> JobDownloadPart:
+    """Return the part for the video model *name* that loads from *model_ref* (with the upscale's files when it *upscale*s).
 
     Raises:
         ValueError: If the ``video_model_presets`` config entries of the family are malformed.
     """
-    planners = planners or DownloadPlanners()
-    name = request.model_name or model_ref
-    targets = planners.video(model_ref, family=request.model_family, config=config, model_name=name, upscale=bool(request.upscale))
-    return JobDownloadPart(name, name, name, ROLE_MODEL, targets)
+    label = model_display_name(config, name)
+    return JobDownloadPart(label, label, name, ROLE_MODEL, video_plan(model_ref, family=family, config=config, model_name=name, upscale=upscale))
 
 
-def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, Any], *, planners: DownloadPlanners | None = None) -> JobDownloadPart:
+def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, Any]) -> JobDownloadPart:
     """Return the part for the LTX model that refines an upscale of a video file, with the upscale's files.
 
     Raises:
         ValueError: If the ``video_model_presets`` config entries of the family are malformed.
     """
-    planners = planners or DownloadPlanners()
-    name = request.model_name
-    targets = planners.video(request.model_ref, family="ltx", config=config, model_name=name, upscale=True)
-    return JobDownloadPart(name, name, name, ROLE_MODEL, targets)
+    return video_model_part(request.model_name, request.model_ref, family="ltx", config=config, upscale=True)
 
 
-def audio_model_part(request: AudioGenerationRequest, config: dict[str, Any], *, planners: DownloadPlanners | None = None) -> JobDownloadPart:
-    """Return the part for the audio model an audio job generates with.
-
-    Raises:
-        ValueError: If the ``audio_model_presets`` config entries are malformed, the request's preset is not one of them,
-            or the preset does not run on this platform.
-    """
-    planners = planners or DownloadPlanners()
-    preset = next((candidate for candidate in parse_audio_presets(config) if candidate.id == request.preset), None)
-    if preset is None:
-        raise ValueError(f"Unknown audio model '{request.preset}'.")
-    return JobDownloadPart(preset.label, preset.id, preset.id, ROLE_MODEL, planners.audio(preset, planners.audio_platform_key()))
+def audio_model_part(preset: AudioPreset, platform_key: str) -> JobDownloadPart:
+    """Return the part for the audio model *preset* an audio job generates with on the platform *platform_key*."""
+    return JobDownloadPart(preset.label, preset.id, preset.id, ROLE_MODEL, audio_plan(preset, platform_key))
 
 
-def matte_part(*, planners: DownloadPlanners | None = None) -> JobDownloadPart:
+def matte_part() -> JobDownloadPart:
     """Return the part for the background removal models of a transparent job."""
-    planners = planners or DownloadPlanners()
-    return JobDownloadPart(MATTE_LABEL, MATTE_LABEL, MATTE_LICENCE_MODEL, ROLE_MATTE, planners.matte())
+    return JobDownloadPart(MATTE_LABEL, MATTE_LABEL, MATTE_LICENCE_MODEL, ROLE_MATTE, matte_plan())
 
 
-def seedvr2_part(model_name: str | None, *, planners: DownloadPlanners | None = None) -> JobDownloadPart:
+def seedvr2_tier_part(model_name: str, weights: SeedVR2Weights, models_dir: Path) -> JobDownloadPart:
+    """Return the part for SeedVR2 tier *model_name* as *weights* run it, with its files under *models_dir*."""
+    label = seedvr2_tier_label(model_name, weights)
+    return JobDownloadPart(label, label, model_name, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
+
+
+def seedvr2_part(model_name: str | None) -> JobDownloadPart:
     """Return the part for SeedVR2 tier *model_name*; its targets are ``None`` when this platform has no SeedVR2 engine."""
-    planners = planners or DownloadPlanners()
-    upscaler = planners.seedvr2_upscaler()
+    upscaler = get_seedvr2_upscaler()
     if upscaler is None:
         # The load reports that this platform has no SeedVR2 engine.
         return JobDownloadPart(str(model_name), str(model_name), str(model_name), ROLE_MODEL, None)
-    label = seedvr2_tier_label(model_name, upscaler.weights)
-    targets = planners.seedvr2(model_name, models_dir=planners.data_dir() / "models", weights=upscaler.weights)
-    return JobDownloadPart(label, label, str(model_name), ROLE_MODEL, targets)
+    return seedvr2_tier_part(str(model_name), upscaler.weights, get_ziv_data_dir() / "models")
 
 
-def upscale_model_part(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any], *, platform_key: str, planners: DownloadPlanners | None = None) -> JobDownloadPart:
+def upscale_model_part(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any], *, platform_key: str) -> JobDownloadPart:
     """Return the part for the model an image upscale loads: the SeedVR2 tier or the creative refinement model."""
     if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
-        return seedvr2_part(request.upscale_model, planners=planners)
-    return image_model_part(request, model_ref, config, platform_key=platform_key, planners=planners)
+        return seedvr2_part(request.upscale_model)
+    return image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=platform_key)
 
 
-def enhancer_part(repo: str, revision: str | None, *, planners: DownloadPlanners | None = None) -> JobDownloadPart:
-    """Return the part for the prompt enhancer ``(repo, revision)`` (no targets for a local folder)."""
-    planners = planners or DownloadPlanners()
-    return JobDownloadPart(model_reference(repo, revision), repo, model_reference(repo, revision), ROLE_ENHANCER, planners.enhancer(repo, revision))
+def enhancer_part(repo: str, revision: str | None, config: dict[str, Any], *, platform_key: str, tier: str | None = None) -> JobDownloadPart:
+    """Return the part for the prompt enhancer ``(repo, revision)`` (no targets for a local folder).
+
+    The label is the tier's ("Smart enhancer model"): *tier* (``fast``, ``smart`` or ``custom``) when given, else the
+    configured tier whose model this is. A model no tier names is labelled by its ``repo[@revision]``.
+    """
+    return _enhancer_part(repo, revision, tier or _enhancer_tier(config, platform_key, repo, revision), enhancer_plan(repo, revision))
 
 
 def job_download_parts(
-    request: ImageGenerationRequest | VideoGenerationRequest | VideoFileUpscaleRequest | LtxVideoUpscaleRequest | AudioGenerationRequest,
-    args: argparse.Namespace | None,
-    prompts_data: Mapping[str, list[tuple[str, str | None]]] | None,
-    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None,
+    request: ImageGenerationRequest | VideoGenerationRequest | VideoFileUpscaleRequest | LtxVideoUpscaleRequest,
     config: dict[str, Any],
     *,
     platform_key: str,
     model_ref: str | None = None,
-    planners: DownloadPlanners | None = None,
+    args: argparse.Namespace | None = None,
+    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
 ) -> tuple[JobDownloadPart, ...]:
     """Return every part the job for *request* downloads before it loads, in the order the job downloads them.
 
-    Image Generate: the enhancer when any prompt is enhanced (preflight fetches it first), the image model, and the
-    background removal models when transparent. Video: the enhancer, then the video model (with the upscale's files when it upscales). Image upscale:
-    the SeedVR2 tier or the creative model, and the background removal models when the source is transparent. Video-file
-    upscale: the SeedVR2 tier, or on macOS the LTX model that refines the clip. Audio: the audio model. An enhancer that cannot be planned because Hugging Face is offline is a part with
-    ``targets=None``; nothing is downloaded or loaded here.
-
-    Args:
-        request: The job's request; its type selects the job.
-        args: The job's arguments, read for the enhancer (``no_enhance``, ``enhance``, ``enhance_model``); unused by upscales.
-        prompts_data: The job's prompts; unused today, taken so every job type shares one signature.
-        enhance_by_set: Per-entry prompt-file ``enhance:`` settings aligned with *prompts_data*.
-        config: The loaded config.
-        platform_key: Platform key such as ``darwin`` or ``win32``.
-        model_ref: The resolved model path or id; required for every job except a video-file upscale and an audio job (which names its preset).
-        planners: The planner functions (defaults to the real ones).
+    *args* and *enhance_by_set* decide the enhancer part; *model_ref* is required except for a video-file upscale. An enhancer
+    that cannot be planned offline is a part with ``targets=None``. An audio job has one part, :func:`audio_model_part`.
 
     Raises:
         ValueError: If *model_ref* is missing for a job that needs it, no enhancer is configured, or a video preset is malformed.
     """
-    planners = planners or DownloadPlanners()
     if isinstance(request, VideoFileUpscaleRequest):
-        return (seedvr2_part(request.upscale_model, planners=planners),)
+        return (seedvr2_part(request.upscale_model),)
     if isinstance(request, LtxVideoUpscaleRequest):
-        return (ltx_video_upscale_part(request, config, planners=planners),)
-    if isinstance(request, AudioGenerationRequest):
-        return (audio_model_part(request, config, planners=planners),)
+        return (ltx_video_upscale_part(request, config),)
     if model_ref is None:
         raise ValueError("model_ref is required to plan an image or video job.")
     if isinstance(request, VideoGenerationRequest):
-        return (*_enhancer_parts(args, enhance_by_set, config, platform_key, planners), video_model_part(request, model_ref, config, planners=planners))
-    matte = (matte_part(planners=planners),) if request.transparent else ()
+        return (
+            *_enhancer_parts(args, enhance_by_set, config, platform_key),
+            video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, upscale=bool(request.upscale)),
+        )
+    matte = (matte_part(),) if request.transparent else ()
     if request.upscale_source is not None:
-        return (upscale_model_part(request, model_ref, config, platform_key=platform_key, planners=planners), *matte)
-    return (*_enhancer_parts(args, enhance_by_set, config, platform_key, planners), image_model_part(request, model_ref, config, platform_key=platform_key, planners=planners), *matte)
+        return (upscale_model_part(request, model_ref, config, platform_key=platform_key), *matte)
+    image = image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=platform_key)
+    return (*_enhancer_parts(args, enhance_by_set, config, platform_key), image, *matte)
 
 
 def drop_in_flight(parts: Sequence[JobDownloadPart], active: Iterable[DownloadTarget]) -> tuple[JobDownloadPart, ...]:
@@ -244,14 +195,12 @@ def drop_in_flight(parts: Sequence[JobDownloadPart], active: Iterable[DownloadTa
     return tuple(kept)
 
 
-def _enhancer_parts(
-    args: argparse.Namespace | None, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None, config: dict[str, Any], platform_key: str, planners: DownloadPlanners
-) -> tuple[JobDownloadPart, ...]:
+def _enhancer_parts(args: argparse.Namespace | None, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None, config: dict[str, Any], platform_key: str) -> tuple[JobDownloadPart, ...]:
     """Return the enhancer part of a job that enhances (the inputs of ``run_preflight``), else nothing; unchecked when offline."""
     cli_model = getattr(args, "enhance_model", None)
     budget_bytes = prompt_enhancer_session.smart_budget_bytes(cli_model)
     try:
-        reference = planners.plan_enhancer(
+        reference = prompt_enhancer_session.plan_job_enhancer(
             config,
             platform_key=platform_key,
             disabled=bool(getattr(args, "no_enhance", False)),
@@ -265,7 +214,7 @@ def _enhancer_parts(
         return (_unchecked_enhancer(config, platform_key, cli_model, budget_bytes),)
     if reference is None:
         return ()
-    return (enhancer_part(*reference, planners=planners),)
+    return (enhancer_part(*reference, config, platform_key=platform_key),)
 
 
 def _unchecked_enhancer(config: dict[str, Any], platform_key: str, cli_model: str | None, budget_bytes: int | None) -> JobDownloadPart:
@@ -273,5 +222,16 @@ def _unchecked_enhancer(config: dict[str, Any], platform_key: str, cli_model: st
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the Smart-unavailable warning was already issued by the planning attempt
         repo, revision = resolve_enhancer_model(config, platform_key=platform_key, cli_model=cli_model, budget_bytes=budget_bytes)
+    return _enhancer_part(repo, revision, _enhancer_tier(config, platform_key, repo, revision), None)
+
+
+def _enhancer_part(repo: str, revision: str | None, tier: str | None, targets: Targets) -> JobDownloadPart:
+    """Return an enhancer part labelled "Smart enhancer model" for its *tier*, or by its reference when it has none."""
     reference = model_reference(repo, revision)
-    return JobDownloadPart(reference, repo, reference, ROLE_ENHANCER, None)
+    label = f"{tier.capitalize()} enhancer model" if tier else reference
+    return JobDownloadPart(label, label, reference, ROLE_ENHANCER, targets)
+
+
+def _enhancer_tier(config: dict[str, Any], platform_key: str, repo: str, revision: str | None) -> str | None:
+    """Return the configured enhancer tier whose model is ``(repo, revision)``, or ``None`` for a model no tier names."""
+    return next((tier for tier, model in enhancer_tier_models(config, platform_key=platform_key).items() if model == (repo, revision)), None)

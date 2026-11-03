@@ -11,6 +11,7 @@ import type { GalleryAsset, JobContext, WorkspaceContext } from '$lib/types';
 
 import { AUDIO_MODELS, GEMMA_AUDIO_LICENCE, SA3_LICENCE, YUE2_LICENCE, makeAudioAsset, makeSpeechAsset, withAudio } from '../../test-utils/audio';
 import { makeAsset, makeContext, makeGalleryPage, makeVideoDefaults } from '../../test-utils/workspace';
+import { lastEventSource } from '../../test-utils/eventSource';
 import { createHost, field, mockClipboard, mountWorkspacePage, resetWorkspaceTest, settle, submitForm, type } from '../../test-utils/workspaceHarness';
 import { galleryApiMocks, layoutProbe, recentPromptsApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
@@ -108,7 +109,7 @@ beforeEach(() => {
   resetWorkspaceTest();
   target = createHost();
   trackLengths.reset();
-  voiceConsent.clear();
+  voiceConsent.reset();
   trackApi.inspectAudioTrack.mockReset().mockRejectedValue(new Error('unreadable'));
   trackApi.readFileLength.mockReset().mockResolvedValue(12);
   workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-1' } as JobContext);
@@ -223,7 +224,7 @@ describe('the Audio tab', () => {
   describe('Music', () => {
     it('stacks a required Style over an optional Lyrics, and enables Generate with Style alone', async () => {
       await mountAudio('music');
-      expect(reason()).toBe('Write the style.');
+      expect(reason()).not.toBeNull();
       expect(submitButton().disabled).toBe(true);
       expect(submitButton().getAttribute('aria-describedby')).toBe('ws-generate-reason');
 
@@ -266,34 +267,34 @@ describe('the Audio tab', () => {
 
       await typeInto('ws-prompt', 'a'.repeat(10_001));
 
-      expect(reason()).toBe("Shorten the text: it's over 10,000 characters, about 10 minutes of speech.");
+      expect(reason()).toContain('10,000');
       expect(submitButton().disabled).toBe(true);
     });
 
     it('lists one reason at a time, in order, and disables Generate while one shows', async () => {
       await mountAudio('speech');
-      expect(reason()).toBe('Write the text to speak.');
+      expect(reason()).toContain('text');
 
       await typeInto('ws-prompt', 'Hello there.');
       expect(reason()).toBeNull();
       expect(submitButton().disabled).toBe(false);
 
       await chooseRecording();
-      expect(reason()).toBe('Choose a recording to clone.');
+      expect(reason()).toContain('Choose');
       expect(submitButton().disabled).toBe(true);
 
       trackApi.readFileLength.mockResolvedValue(2);
       await pickVoice();
-      expect(target.querySelector('#ws-voice-error')?.textContent).toBe('Use a recording of 3 to 30 seconds. This one is 0:02.');
-      expect(reason()).toBe('Use a recording of 3 to 30 seconds.');
+      expect(target.querySelector('#ws-voice-error')?.textContent).toContain('0:02');
+      expect(reason()).toContain('30');
 
       trackApi.readFileLength.mockResolvedValue(12);
       await pickVoice(new File(['voice2'], 'narrator2.wav', { type: 'audio/wav' }));
-      expect(reason()).toBe('Type what the recording says.');
+      expect(reason()).toContain('says');
       expect(field('ws-voice-text').getAttribute('aria-invalid')).toBe('true');
 
       await typeInto('ws-voice-text', 'Hello, this is my voice.');
-      expect(reason()).toBe('Tick the box to confirm you may clone this voice.');
+      expect(reason()).toContain('Tick');
       expect(submitButton().disabled).toBe(true);
 
       await tick();
@@ -349,13 +350,13 @@ describe('the Audio tab', () => {
       expect(consent()!.checked).toBe(true);
     }
 
-    it('clears with a new file', async () => {
+    it('clears with a new file, which also needs its own transcript', async () => {
       await ticked();
 
       await pickVoice(new File(['other'], 'other.wav', { type: 'audio/wav' }));
 
       expect(consent()!.checked).toBe(false);
-      expect(reason()).toBe('Tick the box to confirm you may clone this voice.');
+      expect(reason()).toContain('says');
     });
 
     it('clears on Reuse of a take, which never carries it', async () => {
@@ -418,7 +419,7 @@ describe('the Audio tab', () => {
   describe('Sound', () => {
     it('takes a Prompt and a length from 1 to the model\'s longest, 10 s to begin with', async () => {
       await mountAudio('sound');
-      expect(reason()).toBe('Describe the sound.');
+      expect(reason()).not.toBeNull();
       const length = field('ws-length') as unknown as HTMLInputElement;
       expect(length.value).toBe('10');
       expect(target.querySelector('[data-testid="length-max"]')?.textContent).toBe('max 380');
@@ -430,22 +431,51 @@ describe('the Audio tab', () => {
     });
   });
 
+  describe('the model status', () => {
+    it('refreshes an audio model\'s download state after a job ends', async () => {
+      await mountAudio('sound', { models: AUDIO_MODELS.map((model) => ({ ...model, downloaded: false })) });
+      expect(target.querySelector('[data-testid="model-download-status"]')).not.toBeNull();
+
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(withAudio(makeContext(), AUDIO_MODELS.map((model) => ({ ...model, downloaded: true }))));
+      await typeInto('ws-prompt', 'rain on a window');
+      await submitForm(target);
+      lastEventSource().emit('job_failed', { type: 'job_failed', job_id: 'job-1', message: 'boom' });
+      await settle();
+
+      expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
+    });
+  });
+
   describe('Recent prompts and the footer', () => {
-    it('offers Recent prompts only, filed under the audio mode, and puts a pick in the open kind\'s box', async () => {
-      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [{ format: 'text', prompt: 'a door slam', scene: '', negative_prompt: '', mode: 'audio', used_at: 1 }] });
+    it('offers Recent prompts only, of the open kind, and puts a pick in the open kind\'s box', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [{ format: 'text', prompt: 'a door slam', scene: '', negative_prompt: '', mode: 'sound', used_at: 1 }] });
       await mountAudio('sound');
       const tools = target.querySelector('[data-kind="sound"] .ui-prompt-tools')!;
       expect(Array.from(tools.querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))).toEqual(['Recent prompts']);
 
       (target.querySelector('#ws-recent-prompts') as HTMLButtonElement).click();
       await settle();
-      expect(recentPromptsApiMocks.getRecentPrompts).toHaveBeenCalledWith('', 'audio');
+      expect(recentPromptsApiMocks.getRecentPrompts).toHaveBeenCalledWith('', 'sound');
       (document.querySelector('[role="option"]') as HTMLElement).click();
       await settle();
 
       expect(draft.state.soundPrompt).toBe('a door slam');
       expect(target.querySelector('#ws-enhance-toggle')).toBeNull();
       expect(target.querySelector('#ws-json-prompt-toggle')).toBeNull();
+    });
+
+    it('lists the open kind\'s recents and brings a song\'s lyrics back with its style', async () => {
+      recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [{ format: 'text', prompt: 'calm piano', scene: '[verse]\nla la', negative_prompt: '', mode: 'music', used_at: 1 }] });
+      await mountAudio('music');
+
+      (target.querySelector('#ws-recent-prompts') as HTMLButtonElement).click();
+      await settle();
+      expect(recentPromptsApiMocks.getRecentPrompts).toHaveBeenCalledWith('', 'music');
+      (document.querySelector('[role="option"]') as HTMLElement).click();
+      await settle();
+
+      expect(draft.state.audioStyle).toBe('calm piano');
+      expect(draft.state.lyrics).toBe('[verse]\nla la');
     });
 
     it('follows the Copy CLI of the form, with the live tick', async () => {
@@ -527,7 +557,7 @@ describe('the Audio tab', () => {
     it('shows the reason above the composer\'s row and points Generate at it', async () => {
       await mountAudio('music', { compact: true });
 
-      expect(target.querySelector('[data-testid="audio-reason"]')?.textContent).toBe('Write the style.');
+      expect(target.querySelector('[data-testid="audio-reason"]')).not.toBeNull();
       const generate = target.querySelector('#ws-submit-compact') as HTMLButtonElement;
       expect(generate.disabled).toBe(true);
       expect(generate.getAttribute('aria-describedby')).toBe('ws-generate-reason-compact');

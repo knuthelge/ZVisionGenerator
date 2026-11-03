@@ -26,14 +26,14 @@ function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
 
 describe('asset actions', () => {
   it('parses reuse params from the reuse URL', () => {
-    expect(reuseParams(makeAsset())).toEqual({ workflow: 'txt2img', prompt: 'a fox', seed: '42', reference_path: '' });
+    expect(reuseParams(makeAsset())).toEqual({ workflow: 'txt2img', prompt: 'a fox', seed: '42', reuse: 'true' });
     expect(reuseParams(makeAsset({ reuse_workspace_url: '' }))).toEqual({});
   });
 
   it('reads a repeated parameter as a list in order', () => {
     const url = '#/workspace?workflow=img2img&reference_path=%2Fin%2Fa.png&reference_path=%2Fin%2Fb.png';
 
-    expect(reuseParams(makeAsset({ reuse_workspace_url: url }))).toEqual({ workflow: 'img2img', reference_path: ['/in/a.png', '/in/b.png'] });
+    expect(reuseParams(makeAsset({ reuse_workspace_url: url }))).toEqual({ workflow: 'img2img', reference_path: ['/in/a.png', '/in/b.png'], reuse: 'true' });
   });
 
   it('offers images with a host path as references, never videos', () => {

@@ -9,7 +9,7 @@
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { RecentPrompt, WorkflowMode } from '$lib/types';
+  import type { RecentMode, RecentPrompt } from '$lib/types';
 
   interface Props {
     open: boolean;
@@ -17,8 +17,8 @@
     anchor: HTMLElement | null;
     /** Where focus goes when the menu closes without a pick: the button, or the prompt box after Alt+↑. */
     returnFocus: HTMLElement | null;
-    /** The workflow's mode; the menu lists and clears only the prompts of this mode. */
-    mode: WorkflowMode;
+    /** The list the menu shows and clears: the workflow's mode, or the audio kind (a style, a text to read and a sound description are kept apart). */
+    mode: RecentMode;
     /** The current model takes JSON captions, so JSON rows can be picked. */
     jsonCapable: boolean;
     onpick: (entry: RecentPrompt) => void;
@@ -28,13 +28,16 @@
   let { open, anchor, returnFocus, mode, jsonCapable, onpick, onclose }: Props = $props();
 
   const JSON_REASON = 'Needs a model that takes JSON captions';
-  /** What the confirmation says stays when a mode's prompts are cleared, and what its empty list tells. */
-  const OTHER_MODES: Record<WorkflowMode, string> = { image: 'video and audio', video: 'image and audio', audio: 'image and video' };
-  const EMPTY_NOTES: Record<WorkflowMode, string> = {
+  /** What its empty list tells. */
+  const EMPTY_NOTES: Record<RecentMode, string> = {
     image: 'Every image prompt you generate is kept here.',
     video: 'Every scene and action you generate is kept here.',
-    audio: 'Every style, text and sound description you generate is kept here.',
+    music: 'Every music style you generate is kept here, with its lyrics.',
+    speech: 'Every text you have read aloud is kept here.',
+    sound: 'Every sound description you generate is kept here.',
   };
+  /** What a row's second field is: the lyrics of a song, the scene of a video. */
+  const sceneLabel = $derived(mode === 'music' ? 'Lyrics' : 'Scene');
 
   type Phase = 'loading' | 'error' | 'empty' | 'nomatch' | 'rows';
 
@@ -76,7 +79,7 @@
   /** The hover text: the whole prompt, with the scene and the negative prompt on lines of their own. */
   function rowTitle(entry: RecentPrompt): string {
     const lines = [entry.prompt.trim()];
-    if (entry.prompt && entry.scene) lines.push(`Scene: ${entry.scene.trim()}`);
+    if (entry.prompt && entry.scene) lines.push(`${sceneLabel}: ${entry.scene.trim()}`);
     else if (!entry.prompt && entry.scene) lines.push(entry.scene.trim());
     if (entry.negative_prompt) lines.push(`Negative: ${entry.negative_prompt.trim()}`);
     return lines.filter(Boolean).join('\n');
@@ -84,7 +87,7 @@
 
   function rowSub(entry: RecentPrompt): string {
     if (isDisabled(entry)) return JSON_REASON;
-    if (entry.prompt && entry.scene) return `Scene: ${promptFirstLine(entry.scene)}`;
+    if (entry.prompt && entry.scene) return `${sceneLabel}: ${promptFirstLine(entry.scene)}`;
     if (entry.negative_prompt) return `Negative: ${promptFirstLine(entry.negative_prompt)}`;
     return '';
   }
@@ -190,7 +193,7 @@
     onclose();
     const approved = await requestConfirm({
       question: `Clear all recent ${mode} prompts?`,
-      info: `Every ${mode} prompt kept for the Recent prompts list is removed, on every device. Your ${OTHER_MODES[mode]} prompts, job log and files stay.`,
+      info: `Every ${mode} prompt kept for the Recent prompts list is removed, on every device. Your other prompts, job log and files stay.`,
       confirmLabel: 'Clear recents',
       cancelLabel: 'Keep',
       danger: true,

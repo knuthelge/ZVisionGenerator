@@ -5,7 +5,7 @@
   import { formatTimestamp, takeAudioFiles } from '$lib/state/audioTrack';
   import { draft } from '$lib/state/draft.svelte';
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
-  import type { VoiceView } from './audioView';
+  import { VOICE_WORDS, type VoiceView } from './audioView';
   import ImageSources from './ImageSources.svelte';
 
   interface Props {
@@ -24,12 +24,12 @@
   <Segmented
     label="Voice"
     class="pop-seg"
-    value={voice.mode}
-    options={[{ value: 'any', label: 'Any' }, { value: 'recording', label: 'From a recording' }]}
+    value={voice.recording ? 'recording' : 'any'}
+    options={VOICE_WORDS.modes}
     onchange={(mode) => draft.update('voiceMode', mode)}
   />
   {#if !voice.recording}
-    <p class="ui-help">The model picks a voice, and it changes from take to take. To keep one, use a take as the voice: Gallery, Use as → Voice.</p>
+    <p class="ui-help">{VOICE_WORDS.anyHint}</p>
   {:else}
     <div class="pop-group" role="group" aria-labelledby="pop-voice-group">
       <h4 id="pop-voice-group" class="ui-area-label pop-group-label">Recording</h4>
@@ -50,7 +50,7 @@
         rows="2"
         aria-required="true"
         aria-invalid={voice.set && voice.text.trim() === '' ? 'true' : undefined}
-        placeholder="The words spoken in the recording"
+        placeholder={VOICE_WORDS.placeholder}
         value={voice.text}
         use:autogrow={voice.text}
         oninput={(e) => draft.update('voiceText', e.currentTarget.value)}
@@ -58,8 +58,8 @@
     </div>
     {#if voice.needsConsent}
       <label class="voice-consent" class:ticked={voice.ticked}>
-        <input type="checkbox" class="ui-checkbox" checked={voice.ticked} onchange={(e) => voiceConsent.set(e.currentTarget.checked)}>
-        <span>This is my voice, or I have the speaker's permission to clone it.</span>
+        <input type="checkbox" class="ui-checkbox" checked={voice.ticked} onchange={(e) => (voiceConsent.ticked = e.currentTarget.checked)}>
+        <span>{VOICE_WORDS.consent}</span>
       </label>
     {/if}
   {/if}

@@ -175,14 +175,8 @@ def audio_delete_target(preset: AudioPreset, platform_key: str) -> DeleteTarget 
 
     The target is the model's repositories in the Hugging Face cache (a partial download counts, so an interrupted first
     use can be cleared too). No other model loads an audio model's repositories, so none is kept.
-
-    Raises:
-        ValueError: If the preset has no entry for *platform_key*.
     """
-    platform = preset.platforms.get(platform_key)
-    if platform is None:
-        raise ValueError(f"Audio model '{preset.id}' does not run on '{platform_key}'. It runs on: {', '.join(preset.platforms)}.")
-    repos = tuple(dict.fromkeys(files.repo_id for files in platform.files if huggingface_cache_repo_dir(files.repo_id).is_dir()))
+    repos = tuple(dict.fromkeys(files.repo_id for files in preset.platforms[platform_key].files if huggingface_cache_repo_dir(files.repo_id).is_dir()))
     if not repos:
         return None
     return DeleteTarget("huggingface", huggingface_cache_repo_dir(repos[0]), repo_id=repos[0], companion_repos=repos[1:])

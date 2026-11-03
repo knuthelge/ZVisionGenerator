@@ -18,24 +18,10 @@ def peak_of(samples: NDArray[np.float32]) -> float:
 
 
 def limit_peak(samples: NDArray[np.float32], ceiling_db: float = -1.0) -> NDArray[np.float32]:
-    """Return *samples* scaled down so their peak is *ceiling_db* dBFS, or unchanged when the peak is already at or below it.
+    """Return *samples* scaled by one gain so their peak is *ceiling_db* dBFS; nothing is clipped or compressed.
 
-    One gain is applied to the whole clip, so the shape of the sound is kept; nothing is clipped or compressed.
-
-    Args:
-        samples: Float32 samples in any shape, where 1.0 is full scale.
-        ceiling_db: The loudest peak to allow, in dBFS (0 or below).
-
-    Returns:
-        A new float32 array of the same shape.
-
-    Raises:
-        ValueError: If *ceiling_db* is above 0 dBFS.
+    The runner calls it only for a clip that peaks above full scale.
     """
-    if ceiling_db > 0:
-        raise ValueError("limit_peak needs a ceiling of 0 dBFS or lower.")
     ceiling = 10 ** (ceiling_db / 20)
     peak = peak_of(samples)
-    if peak <= ceiling:
-        return np.array(samples, dtype=np.float32, copy=True)
     return (samples * np.float32(ceiling / peak)).astype(np.float32, copy=False)

@@ -2,7 +2,8 @@
   import { Icon, Waveform } from '$lib/components/atoms';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import type { AssetActionHandlers, UseAsState } from '$lib/state/assetActions';
-  import { audioFoot, hasNoWords, lengthLabel, tileWords } from '$lib/state/audioAsset';
+  import { audioFoot, hasNoWords, tileWords } from '$lib/state/audioAsset';
+  import { formatClock } from '$lib/state/clock';
   import type { GalleryAsset } from '$lib/types';
   import { hold } from '$lib/actions/hold';
   import ActionMenu from './ActionMenu.svelte';
@@ -54,7 +55,7 @@
   // A tile with nothing to read, and every strip tile, shows only its icon and waveform.
   const bare = $derived(isAudio && (density === 'compact' || hasNoWords(asset)));
   const kindIcon = $derived<IconName>(asset.kind === 'speech' ? 'speech' : asset.kind === 'sound' ? 'waveform' : 'music');
-  const length = $derived(asset.duration != null ? lengthLabel(asset.duration) : null);
+  const length = $derived(asset.duration != null ? formatClock(asset.duration) : null);
   const transparent = $derived(asset.transparent === true && !isVideo);
   const canReuse = $derived(asset.has_reusable_config === true);
   const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs));

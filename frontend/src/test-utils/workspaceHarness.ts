@@ -53,7 +53,7 @@ export function resetWorkspaceTest(): void {
   modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
   modelApiMocks.deleteLora.mockReset();
   modelApiMocks.getDownloadPlan.mockReset();
-  modelApiMocks.getDownloadPlan.mockResolvedValue({ kind: 'enhancer', name: 'fast', label: 'Fast enhancer model', parts: [], total_bytes: 0, space: null });
+  modelApiMocks.getDownloadPlan.mockResolvedValue({ label: 'Fast enhancer model', parts: [], total_bytes: 0, space: null, unchecked: false, licences: [] });
   toasts.splice(0, toasts.length);
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.planGenerate, workspaceApiMocks.getJobSnapshot,

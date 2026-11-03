@@ -6,7 +6,7 @@ import io
 
 from starlette.datastructures import FormData, UploadFile
 
-from zvisiongenerator.web.planned_upload import PlannedUpload, is_planned_upload, planned_form, planned_upload_path
+from zvisiongenerator.web.planned_upload import PlannedUpload, planned_form, planned_upload_path
 
 
 def _upload(name: str | None, body: bytes = b"data") -> UploadFile:
@@ -29,7 +29,7 @@ def test_a_file_part_without_a_name_is_left_alone():
     planned = planned_form(FormData([("image_file", empty)]))
 
     assert planned.get("image_file") is empty
-    assert not is_planned_upload(planned.get("image_file"))
+    assert not isinstance(planned.get("image_file"), PlannedUpload)
 
 
 def test_a_plain_mapping_is_accepted():

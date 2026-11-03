@@ -12,7 +12,7 @@
 
     - An NVIDIA GPU, RTX 20-series (Turing) or newer, including the RTX 50-series.
     - NVIDIA driver 580 or newer.
-    - About 20 GB of system memory for video with `ltx-4`, 21 GB with `ltx25-4`, 27 GB with `ltx-8`, and 18 GB free for MiniMax H3. See [Memory](concepts/memory.md).
+    - About 20 GB of system memory for video with `ltx-4`, 21 GB with `ltx25-4`, 27 GB with `ltx-8`, 18 GB free for MiniMax H3, and about 11 GB for YuE2 music. See [Memory](concepts/memory.md).
     - [ffmpeg](https://ffmpeg.org/) for video and audio. `ziv-video` and `ziv-audio` offer to install it with `winget` (Windows) or `apt`, `dnf` or `pacman` (Linux) if it's missing.
 
     There is no CPU fallback for generation: PyTorch must see a CUDA device.
@@ -21,7 +21,7 @@ On every platform:
 
 - Python 3.14 or newer.
 - [uv](https://docs.astral.sh/uv/). Every command here uses it, and a checkout needs it: uv's resolver is what picks the CUDA build of PyTorch there.
-- Disk space for models: an image model is a 16–36 GB download, and a video model up to about 107 GB (MiniMax H3 on macOS). The [Models](concepts/models.md) page lists each one's size.
+- Disk space for models: an image model is a 16–36 GB download, a video model up to about 107 GB (MiniMax H3 on macOS) and an audio model 8–10 GB. The [Models](concepts/models.md) page lists each one's size.
 
 ## Install
 
@@ -29,7 +29,7 @@ On every platform:
 uv tool install z-vision-generator
 ```
 
-This puts the commands on your path: `ziv`, `ziv-ui`, `ziv-image`, `ziv-video` and `ziv-model`.
+This puts the commands on your path: `ziv`, `ziv-ui`, `ziv-image`, `ziv-video`, `ziv-audio` and `ziv-model`.
 
 !!! warning "Windows: add PyTorch's CUDA index"
 

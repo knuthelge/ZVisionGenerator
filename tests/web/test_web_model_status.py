@@ -340,10 +340,6 @@ class TestDescribeModelStatus:
 
         assert status == {"downloaded": True, "memory_fit": None}
 
-    def test_an_audio_model_is_never_read_as_an_image_model(self, tmp_path):
-        with pytest.raises(ValueError, match="describe_audio_status"):
-            describe_model_status("owner/repo", kind="audio", budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({"owner/repo": tmp_path}), app_config={})
-
     @pytest.mark.usefixtures("darwin")
     def test_ltx_mlx_video_needs_the_separate_text_encoder(self, tmp_path, monkeypatch):
         model_dir = tmp_path / "ltx"

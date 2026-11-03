@@ -17,108 +17,41 @@ import json
 import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip
-from zvisiongenerator.utils.audio_request import MIN_SOUND_SECONDS
-from zvisiongenerator.utils.model_files import cached_snapshot_dirs
+from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.utils.safetensors_stream import iter_tensors
 from zvisiongenerator.utils.torch_flags import TorchFlags, capture_torch_flags, restore_torch_flags
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.audio_backend import CancelCheck, ProgressCallback
     from zvisiongenerator.core.audio_types import AudioGenerationRequest
-    from zvisiongenerator.utils.audio_preset import AudioFiles, AudioPlatform, AudioPreset
+    from zvisiongenerator.utils.audio_preset import AudioPlatform, AudioPreset
 
-__all__ = ["FAMILY", "MIN_SECONDS", "StableAudio3Backend"]
+__all__ = ["FAMILY", "StableAudio3Backend"]
 
 FAMILY = "stable_audio_3"
 """The model family this backend serves: the name ``backends.get_audio_backend`` resolves."""
 
-MIN_SECONDS = MIN_SOUND_SECONDS
-"""The shortest sound the model makes, in seconds (the one length rule the CLI and the Web UI also check)."""
-
 PHASE = "Sampling"
 """The progress phase of a take: the diffusion steps."""
 
-_CONFIG_FILE = "model_config.json"
+DECODE_PHASE = "Decode"
+"""The progress phase after the last step: the decoder turns the latents into the waveform (up to 6 s on the first take after a load)."""
+
 _TEXT_ENCODER_DIR = "t5gemma-b-b-ul2"
-_SETTINGS = ("steps", "cfg_scale", "sample_size")
-
-
-@dataclass(frozen=True)
-class _SoundFiles:
-    """Where the model's three inputs are on disk.
-
-    Attributes:
-        config: The model config JSON.
-        checkpoint: The fp32 safetensors checkpoint.
-        text_encoder: The folder of the T5Gemma text encoder.
-    """
-
-    config: Path
-    checkpoint: Path
-    text_encoder: Path
-
-
-def _snapshot(files: AudioFiles) -> Path:
-    """Return the cache snapshot of *files*' repository at its pinned commit.
-
-    Raises:
-        FileNotFoundError: If that revision is not downloaded.
-    """
-    snapshots = cached_snapshot_dirs(files.repo_id, files.revision)
-    if not snapshots:
-        raise FileNotFoundError(f"Stable Audio 3 needs {files.repo_id} at {files.revision}, which is not downloaded.")
-    return snapshots[0]
-
-
-def _locate_files(platform_entry: AudioPlatform) -> _SoundFiles:
-    """Return the config, checkpoint and text encoder folder named by the platform entry's file lists.
-
-    The config is the entry that lists ``model_config.json``, the checkpoint its one literal ``.safetensors`` path and
-    the text encoder the entry that lists a ``t5gemma-b-b-ul2/`` folder.
-
-    Raises:
-        ValueError: If the entry lists none of the three.
-        FileNotFoundError: If a revision or a file is not downloaded.
-    """
-    found: dict[str, Path] = {}
-    for files in platform_entry.files:
-        for pattern in files.patterns:
-            if pattern == _CONFIG_FILE:
-                found.setdefault("config", _snapshot(files) / pattern)
-            elif pattern.startswith(f"{_TEXT_ENCODER_DIR}/"):
-                found.setdefault("text_encoder", _snapshot(files) / _TEXT_ENCODER_DIR)
-            elif pattern.endswith(".safetensors") and "*" not in pattern:
-                found.setdefault("checkpoint", _snapshot(files) / pattern)
-    missing = [name for name in ("config", "checkpoint", "text_encoder") if name not in found]
-    if missing:
-        raise ValueError(f"The Stable Audio 3 platform entry lists no file for: {', '.join(missing)}.")
-    for path in (found["config"], found["checkpoint"]):
-        if not path.is_file():
-            raise FileNotFoundError(f"Stable Audio 3 file {path} is not downloaded.")
-    if not found["text_encoder"].is_dir():
-        raise FileNotFoundError(f"Stable Audio 3 text encoder folder {found['text_encoder']} is not downloaded.")
-    return _SoundFiles(found["config"], found["checkpoint"], found["text_encoder"])
 
 
 def _model_config(config_path: Path, text_encoder: Path) -> dict[str, Any]:
     """Return the model config with its T5Gemma conditioner pointed at the local *text_encoder* folder.
 
     The Hub reference (``repo_id`` and ``subfolder``) is dropped, so the conditioner reads the folder and never the Hub.
-
-    Raises:
-        ValueError: If the config has no T5Gemma conditioner.
     """
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    conditioners = [entry["config"] for entry in config["model"]["conditioning"]["configs"] if entry.get("type") == "t5gemma"]
-    if not conditioners:
-        raise ValueError(f"{config_path} has no t5gemma conditioner.")
-    for conditioner in conditioners:
+    for conditioner in (entry["config"] for entry in config["model"]["conditioning"]["configs"] if entry.get("type") == "t5gemma"):
         conditioner.pop("repo_id", None)
         conditioner.pop("subfolder", None)
         conditioner["model_path"] = str(text_encoder)
@@ -177,19 +110,27 @@ def _build_fp16(config: dict[str, Any], checkpoint: Path, device: str) -> Any:
 
 
 @contextmanager
-def _keep_decoded(pretransform: Any) -> Iterator[list[Any]]:
+def _keep_decoded(pretransform: Any, on_decode: Callable[[int], None] | None = None) -> Iterator[list[Any]]:
     """Wrap ``pretransform.decode`` so each waveform it returns is appended to the yielded list; restore it on exit.
 
     The library calls the decoder from ``sample_diffusion`` and clamps what comes out. The wrapper sits on the instance
     only, for the length of the block, so the package is not edited and no other use of the model sees it.
+
+    Args:
+        pretransform: The model's pretransform, whose ``decode`` is wrapped.
+        on_decode: Called with 0 when a decode starts and with 1 when it ends, which is how the Decode phase is reported.
     """
     original = pretransform.decode
     had_own = "decode" in vars(pretransform)
     kept: list[Any] = []
 
     def decode(*args: Any, **kwargs: Any) -> Any:
+        if on_decode is not None:
+            on_decode(0)
         waveform = original(*args, **kwargs)
         kept.append(waveform.detach())
+        if on_decode is not None:
+            on_decode(1)
         return waveform
 
     pretransform.decode = decode
@@ -200,19 +141,6 @@ def _keep_decoded(pretransform: Any) -> Iterator[list[Any]]:
             pretransform.decode = original
         else:
             del pretransform.decode
-
-
-def _check_seconds(seconds: float | None, max_seconds: float) -> float:
-    """Return the requested length, or raise when it is missing or outside ``MIN_SECONDS`` to *max_seconds*.
-
-    Raises:
-        ValueError: If *seconds* is ``None`` or outside the range the model makes.
-    """
-    if seconds is None:
-        raise ValueError(f"Stable Audio 3 needs a length of {MIN_SECONDS:g} to {max_seconds:g} seconds.")
-    if not MIN_SECONDS <= seconds <= max_seconds:
-        raise ValueError(f"Stable Audio 3 makes sounds of {MIN_SECONDS:g} to {max_seconds:g} seconds; {seconds:g} seconds is outside that.")
-    return float(seconds)
 
 
 def _empty_cache(device: str) -> None:
@@ -235,7 +163,6 @@ class StableAudio3Backend:
         self._empty_cache = empty_cache
         self._model: Any = None
         self._device = ""
-        self._max_seconds = 0.0
         self._settings: dict[str, Any] = {}
         self._flags: TorchFlags | None = None
 
@@ -243,31 +170,25 @@ class StableAudio3Backend:
         """Load the model of *preset* onto *device*, filling it tensor by tensor in fp16.
 
         Args:
-            preset: The ``sa3`` preset; its settings must give ``steps``, ``cfg_scale`` and ``sample_size``.
-            platform_entry: The preset's entry for this platform: the config, the checkpoint and the text encoder.
+            preset: The ``sa3`` preset; its settings give ``steps``, ``cfg_scale`` and ``sample_size``.
+            platform_entry: The preset's entry for this platform: the checkpoint, the config and the text encoder, in
+                that order.
             device: ``cuda`` or ``mps``.
 
         Raises:
-            ValueError: If a setting or a file entry is missing.
             FileNotFoundError: If a file is not downloaded.
         """
         from stable_audio_3.model import StableAudioModel
 
         self.close()
-        settings = preset.settings_for(device)
-        missing = [key for key in _SETTINGS if key not in settings]
-        if missing:
-            raise ValueError(f"Audio model '{preset.id}' has no setting for: {', '.join(missing)}.")
-        if preset.limits.max_seconds is None:
-            raise ValueError(f"Audio model '{preset.id}' has no max_seconds limit.")
-        files = _locate_files(platform_entry)
-        config = _model_config(files.config, files.text_encoder)
+        checkpoint_files, config_files, encoder_files = platform_entry.files
+        checkpoint = snapshot_dir(checkpoint_files) / checkpoint_files.patterns[0]
+        config = _model_config(snapshot_dir(config_files) / config_files.patterns[0], snapshot_dir(encoder_files) / _TEXT_ENCODER_DIR)
         self._device = device  # set first, so close() frees the device's cache after a failed load too
         self._flags = capture_torch_flags()  # StableAudioModel sets global numerics flags; close() puts them back
         try:
-            self._model = StableAudioModel(_build_fp16(config, files.checkpoint, device), config, device, True)
-            self._max_seconds = float(preset.limits.max_seconds)
-            self._settings = {key: settings[key] for key in _SETTINGS}
+            self._model = StableAudioModel(_build_fp16(config, checkpoint, device), config, device, True)
+            self._settings = preset.settings_for(device)
         except BaseException:
             self.close()
             raise
@@ -280,20 +201,17 @@ class StableAudio3Backend:
 
         Args:
             request: The sound to make; ``seconds`` is required.
-            on_progress: Called as ``on_progress("Sampling", step, steps, 1, 1)``.
+            on_progress: Called as ``on_progress("Sampling", step, steps, 1, 1)``, then ``on_progress("Decode", 0, 1, 1, 1)`` and
+                ``on_progress("Decode", 1, 1, 1, 1)`` around the decoder that follows the last step.
             cancelled: Called between steps; ``True`` stops the take.
 
         Returns:
             A stereo 44.1 kHz clip with ``preclamp`` set: it may peak above 1.0.
 
         Raises:
-            RuntimeError: If no model is loaded.
-            ValueError: If the length is missing or outside the range the model makes.
             AudioCancelled: If ``cancelled`` returned ``True``.
         """
-        if self._model is None:
-            raise RuntimeError("Stable Audio 3 is not loaded.")
-        seconds = _check_seconds(request.seconds, self._max_seconds)
+        seconds = float(request.seconds)
         steps = int(self._settings["steps"])
         if cancelled():
             raise AudioCancelled
@@ -304,8 +222,11 @@ class StableAudio3Backend:
             if cancelled():
                 raise AudioCancelled
 
+        def on_decode(done: int) -> None:
+            on_progress(DECODE_PHASE, done, 1, 1, 1)
+
         sound = self._model
-        with _keep_decoded(sound.model.pretransform) as decoded:
+        with _keep_decoded(sound.model.pretransform, on_decode) as decoded:
             sound.generate(
                 prompt=request.prompt,
                 duration=seconds,
@@ -316,8 +237,6 @@ class StableAudio3Backend:
                 callback=on_step,
                 disable_tqdm=True,
             )
-        if not decoded:
-            raise RuntimeError("Stable Audio 3 did not decode through the pretransform, so there is no waveform to return.")
         frames = int(seconds * sound.model.sample_rate)
         samples = decoded[-1][0, :, :frames].float().cpu().contiguous().numpy()
         return AudioClip(samples=samples, sample_rate=int(sound.model.sample_rate), preclamp=True)

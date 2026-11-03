@@ -37,14 +37,9 @@ def delay_codes(codes: torch.Tensor, boc: int, eoc: int) -> torch.Tensor:
     Returns:
         The delayed codes, ``[T + N - 1, N]``: row ``r`` of codebook ``c`` is *boc* for ``r < c``, ``codes[r - c, c]`` for
         ``c <= r < c + T`` and *eoc* after that.
-
-    Raises:
-        ValueError: If *codes* is not two-dimensional.
     """
     import torch
 
-    if codes.ndim != 2:
-        raise ValueError(f"codes must be 2-D [T, N], got shape {tuple(codes.shape)}")
     length, num_codebooks = codes.shape
     out = torch.full((length + num_codebooks - 1, num_codebooks), eoc, device=codes.device, dtype=codes.dtype)
     rows = torch.arange(length + num_codebooks - 1, device=codes.device)
@@ -62,12 +57,7 @@ def undelay_codes(rows: torch.Tensor) -> torch.Tensor:
 
     Returns:
         The raw codes, ``[L - N + 1, N]``, or ``[0, N]`` when *rows* is shorter than ``N``.
-
-    Raises:
-        ValueError: If *rows* is not two-dimensional.
     """
-    if rows.ndim != 2:
-        raise ValueError(f"rows must be 2-D [L, N], got shape {tuple(rows.shape)}")
     length, num_codebooks = rows.shape
     kept = length - (num_codebooks - 1)
     if kept <= 0:

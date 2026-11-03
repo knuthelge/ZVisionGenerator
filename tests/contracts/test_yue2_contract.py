@@ -246,6 +246,28 @@ def test_the_process_memory_fraction_is_capped_in_the_constructor() -> None:
     assert budget == ["min((self.memory_budget_gib - 2) * 2 ** 30, total - 2 * 2 ** 30)"]
 
 
+def test_the_constructor_gets_the_weight_identity_from_the_module_level_model_identity() -> None:
+    """The backend replaces ``pipeline.model_identity`` with a size check while the pipeline is built, so the constructor must look it up there."""
+    tree = _tree("pipeline.py")
+    init = _function(_class(tree, "YuE2Pipeline"), "__init__")
+    assert len(_calls_to(init, "model_identity")) == 2
+    imported = [alias.name for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "storage" for alias in node.names]
+    assert "model_identity" in imported
+
+
+def test_the_weight_identity_has_the_shape_the_size_check_returns() -> None:
+    """The size check stands in for ``storage.model_identity``: the same folder in, the same record out, with the manifest's ``files`` and ``bytes``."""
+    identity = _function(_tree("storage.py"), "model_identity")
+    assert list(_parameters(identity)) == ["path", "verify"]
+    returned = next(node.value for node in ast.walk(identity) if isinstance(node, ast.Return))
+    assert isinstance(returned, ast.Dict)
+    assert [ast.literal_eval(key) for key in returned.keys if key is not None] == ["files", "config_sha256"]
+    sources = ast.unparse(identity)
+    assert "weights_manifest.json" in sources
+    assert "'bytes'" in sources
+    assert "'sha256'" in sources
+
+
 def test_chunk_fields() -> None:
     chunk = _class(_tree("nar.py"), "Chunk")
     fields = [node.target.id for node in chunk.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)]

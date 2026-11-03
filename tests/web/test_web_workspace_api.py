@@ -481,10 +481,10 @@ def test_workspace_options_and_the_models_page_carry_each_model_s_licence_record
 
     options = {entry["id"]: entry["licences"] for entry in [*workspace["image_models"], *workspace["video_models"]]}
     assert [record["name"] for record in options["klein9b"]] == ["FLUX Non-Commercial License v2.1"]
-    assert set(options["klein9b"][0]) == {"name", "supplier", "summary", "url", "url_label", "notice_url"}
+    assert set(options["klein9b"][0]) == {"name", "supplier", "summary", "url", "url_label", "attribution"}
     assert [record["supplier"] for record in options["ltx-4"]] == ["Lightricks", "Google"]
     assert options["zit"] == []
     rows = {row["name"]: row["licences"] for row in [*models["image_models"], *models["video_models"]]}
     assert rows == options
     assert [(record["name"], record["url_label"]) for record in workspace["matte_licences"]] == [("BiRefNet (MIT) and ViTMatte (Apache-2.0)", "Model card")]
-    assert [(record["url_label"], record["notice_url"]) for record in models["background_removal"]["licences"]] == [("Model card", None)]
+    assert [(record["url_label"], record["attribution"]) for record in models["background_removal"]["licences"]] == [("Model card", None)]

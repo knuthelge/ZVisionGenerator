@@ -262,7 +262,7 @@ def probed(monkeypatch):
         return state["config"]
 
     monkeypatch.setattr(video_extend, "probe_video", MagicMock(side_effect=lambda _path: state["probe"]))
-    monkeypatch.setattr(video_extend, "read_mp4_config", read_config)
+    monkeypatch.setattr(video_extend, "read_config", read_config)
     monkeypatch.setattr(video_extend, "audio_decodes", MagicMock(side_effect=lambda *_a, **_k: state["audio_ok"]))
     return state
 

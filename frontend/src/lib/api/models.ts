@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { LoraImportResult, ConversionStatus, DownloadItem, DownloadList, DownloadPlan, CheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
+import type { LoraImportResult, ConversionStatus, DownloadItem, DownloadList, RowDownloadPlan, CheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
 
 export function getModelInventory(): Promise<ModelInventory> {
   return api.get<ModelInventory>('/api/models');
@@ -75,8 +75,8 @@ export function deleteLora(name: string): Promise<ModelOperationResult> {
 }
 
 /** What downloading a model or enhancer would fetch: parts, sizes and free space. */
-export function getDownloadPlan(kind: 'model' | 'audio' | 'enhancer' | 'matte', name: string): Promise<DownloadPlan> {
-  return api.get<DownloadPlan>(`/api/models/download/plan?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`);
+export function getDownloadPlan(kind: 'model' | 'audio' | 'enhancer' | 'matte', name: string): Promise<RowDownloadPlan> {
+  return api.get<RowDownloadPlan>(`/api/models/download/plan?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`);
 }
 
 /** Queue a Models-page download; an already queued or running one for the same row is returned. */

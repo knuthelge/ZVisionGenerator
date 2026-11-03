@@ -65,14 +65,11 @@ _GENERATION = {"default_steps": 10, "default_guidance": 3.5}
 
 
 def _load_packaged(tmp_path, data, *, user_dir=None):
-    """Load ``data`` as the packaged config, with no user override unless ``user_dir`` has one.
-
-    The licence records are left out: they name the real models, which a stub config does not have.
-    """
+    """Load ``data`` as the packaged config, with no user override unless ``user_dir`` has one."""
     from unittest.mock import patch
 
     config_file = _write_packaged_config(tmp_path, data)
-    with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir, patch("zvisiongenerator.utils.config.load_licences", return_value=()):
+    with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
         mock_dir.return_value = user_dir or tmp_path / "no-user-config"
         mock_files.return_value.joinpath.return_value = config_file
         return load_config()

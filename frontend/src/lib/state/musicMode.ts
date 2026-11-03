@@ -1,5 +1,5 @@
 /** What a music take's Lyrics box makes: a song with words, or an instrumental made from `[section]` tags. */
-export type MusicKind = 'song' | 'instrumental';
+type MusicKind = 'song' | 'instrumental';
 
 /** The result of `musicMode`: what the model is given, and how many sections that is. */
 export interface MusicMode {

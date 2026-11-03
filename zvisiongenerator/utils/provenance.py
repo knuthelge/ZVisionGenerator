@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -328,42 +328,28 @@ def mp4_config_args(payload: dict[str, Any]) -> list[str]:
     return [*_MP4_TAG_OPTIONS, *config_args(payload)]
 
 
-def embed_config(path: str | Path, payload: dict[str, Any], *, output_options: Sequence[str] = ()) -> None:
-    """Embed a config payload as JSON in a media file's container metadata under zvisiongenerator.config.
+def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
+    """Embed a config payload as JSON in MP4 container metadata under zvisiongenerator.config.
 
-    Uses ffmpeg to copy the streams and attach the tag, replacing the original file.
-
-    Args:
-        path: The media file, in any container ffmpeg writes tags to.
-        payload: The config payload.
-        output_options: Extra ffmpeg output options the container needs to keep the tag.
+    Uses ffmpeg to copy streams and attach the metadata key, replacing the original file.
 
     Raises:
         subprocess.CalledProcessError: If ffmpeg exits with a non-zero status.
     """
-    path = Path(path)
-    tmp = staging_path(path)
+    video_path = Path(video_path)
+    tmp = staging_path(video_path)
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-i", str(path), "-c", "copy", *output_options, *config_args(payload), str(tmp)],
+            ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-c", "copy", *mp4_config_args(payload), str(tmp)],
             stdin=subprocess.DEVNULL,
             check=True,
             capture_output=True,
         )
-        tmp.replace(path)
+        tmp.replace(video_path)
     except BaseException:
         if tmp.exists():
             tmp.unlink()
         raise
-
-
-def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
-    """Embed a config payload as JSON in MP4 container metadata under zvisiongenerator.config.
-
-    Raises:
-        subprocess.CalledProcessError: If ffmpeg exits with a non-zero status.
-    """
-    embed_config(video_path, payload, output_options=_MP4_TAG_OPTIONS)
 
 
 def read_config(path: str | Path) -> dict[str, Any] | None:
@@ -382,11 +368,6 @@ def read_config(path: str | Path) -> dict[str, Any] | None:
     return config_from_probe(json.loads(result.stdout))
 
 
-def read_mp4_config(video_path: str | Path) -> dict[str, Any] | None:
-    """Read the zvisiongenerator.config payload from MP4 container metadata, or None if absent."""
-    return read_config(video_path)
-
-
 def config_from_probe(data: dict[str, Any]) -> dict[str, Any] | None:
     """Return the zvisiongenerator.config payload in ffprobe's JSON for a file (its ``format`` block), or None if absent.
 
@@ -397,11 +378,6 @@ def config_from_probe(data: dict[str, Any]) -> dict[str, Any] | None:
     if raw is None:
         return None
     return json.loads(raw)
-
-
-def mp4_config_from_probe(data: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the zvisiongenerator.config payload in ffprobe's JSON for an MP4 file (its ``format`` block), or None if absent."""
-    return config_from_probe(data)
 
 
 def embed_png_config(png_info: PngInfo, payload: dict[str, Any]) -> None:

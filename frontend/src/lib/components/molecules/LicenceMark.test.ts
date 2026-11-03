@@ -90,10 +90,18 @@ describe('LicenceMark', () => {
     expect(pop.textContent).toContain('Non-commercial');
     const links = Array.from(pop.querySelectorAll('a'));
     expect(links.map((link) => [link.textContent, link.getAttribute('href'), link.target, link.rel])).toEqual([
-      ['Licence ↗', FLUX_LICENCE.url, '_blank', 'noopener'],
-      ['NOTICE ↗', FLUX_LICENCE.notice_url, '_blank', 'noopener'],
+      ['Model page ↗', FLUX_LICENCE.url, '_blank', 'noopener'],
     ]);
-    expect(links[0].getAttribute('aria-label')).toBe('FLUX Non-Commercial License v2.1 licence (opens in a new tab)');
+    expect(links[0].getAttribute('aria-label')).toBe('FLUX Non-Commercial License v2.1 model page (opens in a new tab)');
+  });
+
+  it('shows a record\'s credit line in the popover, and nothing for a record without one', () => {
+    const button = render({ licences: [{ ...FLUX_LICENCE, attribution: 'Powered by Example' }, LTX_LICENCE] });
+
+    button.click();
+    flushSync();
+
+    expect(Array.from(popover()!.querySelectorAll('[data-testid="licence-attribution"]')).map((line) => line.textContent)).toEqual(['Powered by Example']);
   });
 
   it('keeps the tooltip away while the popover is open', () => {
