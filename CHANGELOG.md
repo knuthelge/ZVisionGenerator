@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+- `ziv image -m <owner/repo>` for a model that has an alias now runs as that alias, so it shows the model's licence notice and records the alias as the model name
+
 ## [0.14.0b4] - 2026-11-02
 
 ### Added

@@ -27,7 +27,7 @@ from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.downloads import describe_refusal
-from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
+from zvisiongenerator.utils.paths import canonical_model_name, get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.prompt_enhance import image_enhance_entries
 from zvisiongenerator.utils.references import check_reference_count, check_reference_files, parse_reference_paths
@@ -221,8 +221,9 @@ def main(*, prog: str = "ziv-image") -> None:
 
     if args.model is None:
         parser.error("--model is required. Provide a model name, path, or HuggingFace repo ID.")
-    picked_model = args.model
-    args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    # A repo id that is an alias's repo runs as that alias: it gets the alias's licence notice and is recorded under its name.
+    picked_model = canonical_model_name(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    args.model = resolve_model_path(picked_model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
 
     lora_paths, lora_weights = None, None
     if args.lora is not None:
