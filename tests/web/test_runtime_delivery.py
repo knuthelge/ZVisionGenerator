@@ -13,7 +13,7 @@ from tests._paths import REPO_ROOT
 from zvisiongenerator.web.workspace_contract import build_workflow_contract, canonicalize_workflow, workflow_mode
 
 
-LICENSE_FILES = ("LICENSE", "THIRD_PARTY_LICENSES.md")
+LICENSE_FILES = ("LICENSE", "THIRD_PARTY_LICENSES.md", "licenses/boson-higgs-tts-3.txt")
 LICENSE_EXPRESSION = "AGPL-3.0-or-later"
 VENDORED_PACKAGES = ("ltx_core_mlx", "ltx_pipelines_mlx", "minimax_h3_mlx", "seedvr2_torch", "moss_image")
 

@@ -138,6 +138,45 @@ update-birefnet: ## Update vendored birefnet model code (background removal)
 	printf '"""BiRefNet model code vendored from ZhengPeng7/BiRefNet at revision %s."""\n' $(BIREFNET_REVISION) > packages/birefnet/__init__.py
 	@echo "✓ Vendored birefnet updated to $(BIREFNET_REVISION)"
 
+YUE2_REPO   ?= https://github.com/multimodal-art-projection/YuE.git
+# main (2026-09-29); src/yue2 is byte-identical to the yue2-infer 0.1.5 wheel except its version string and cli.py
+YUE2_COMMIT ?= 3acdec8cf1b97603bb696e4c6c4560348ffbb0b7
+
+.PHONY: update-yue2
+
+update-yue2: ## Update vendored yue2 inference kit (YuE2 music)
+	$(eval TMP := $(shell mktemp -d))
+	git clone --quiet $(YUE2_REPO) $(TMP)
+	cd $(TMP) && git checkout --quiet $(YUE2_COMMIT)
+	rm -rf packages/yue2
+	cp -r $(TMP)/src/yue2 packages/yue2
+	rm -f packages/yue2/cli.py packages/yue2/fast.py
+	cp $(TMP)/LICENSE $(TMP)/THIRD_PARTY_NOTICES.md packages/yue2/
+	cp -r $(TMP)/licenses packages/yue2/licenses
+	printf '%s\n' $(YUE2_COMMIT) > packages/yue2/UPSTREAM_COMMIT
+	find packages/yue2 -name __pycache__ -type d -prune -exec rm -rf {} +
+	rm -rf $(TMP)
+	@echo "✓ Vendored yue2 updated to $(YUE2_COMMIT)"
+
+SA3_REPO   ?= https://github.com/Stability-AI/stable-audio-3.git
+# main (2026-10-30)
+SA3_COMMIT ?= 5f5e6ac21ae9ff78a6e8847eb7a1dcbe969ffb84
+
+.PHONY: update-sa3
+
+update-sa3: ## Update vendored stable_audio_3 inference package (Stable Audio 3)
+	$(eval TMP := $(shell mktemp -d))
+	git clone --quiet $(SA3_REPO) $(TMP)
+	cd $(TMP) && git checkout --quiet $(SA3_COMMIT)
+	rm -rf packages/stable_audio_3
+	cp -r $(TMP)/stable_audio_3 packages/stable_audio_3
+	rm -rf packages/stable_audio_3/training packages/stable_audio_3/interface packages/stable_audio_3/data/dataset.py packages/stable_audio_3/cli.py
+	cp $(TMP)/LICENSE packages/stable_audio_3/LICENSE
+	printf '%s\n' $(SA3_COMMIT) > packages/stable_audio_3/UPSTREAM_COMMIT
+	find packages/stable_audio_3 -name __pycache__ -type d -prune -exec rm -rf {} +
+	rm -rf $(TMP)
+	@echo "✓ Vendored stable_audio_3 updated to $(SA3_COMMIT)"
+
 # ——— Frontend ————————————————————————————————————————————
 
 .PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-hover-check frontend-test frontend-dev
