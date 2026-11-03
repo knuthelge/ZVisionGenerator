@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import count
 from typing import TYPE_CHECKING, Any
@@ -39,6 +39,7 @@ class _Item:
     finalize: Callable[[], None] | None = None
     cleanup: Callable[[], None] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    targets: tuple[DownloadTarget, ...] = ()
     state: str = _QUEUED
     message: str | None = None
     report: DownloadReport | None = None
@@ -98,6 +99,7 @@ class DownloadLane:
         finalize: Callable[[], None] | None = None,
         cleanup: Callable[[], None] | None = None,
         extra: Mapping[str, Any] | None = None,
+        targets: Sequence[DownloadTarget] = (),
     ) -> dict[str, Any]:
         """Queue the download of the row *name* of *kind*, or return its queued or running item.
 
@@ -113,6 +115,8 @@ class DownloadLane:
                 it removes what the item staged. Its errors are ignored.
             extra: Fixed keys merged into the item's JSON (for a LoRA: ``curated_id``, ``source_repo``, ``source_file``,
                 ``size_bytes``).
+            targets: What the caller already planned, so :meth:`committed_targets` knows it while the item waits; the
+                plan made when the item starts replaces it.
 
         Returns:
             The item as JSON.
@@ -126,7 +130,7 @@ class DownloadLane:
             existing = next((item for item in self._live_items() if (item.kind, item.name) == (kind, name)), None)
             if existing is not None:
                 return self._item_json(existing)
-            item = _Item(id=f"dl-{next(self._ids)}", kind=kind, name=name, label=label, plan=plan, finalize=finalize, cleanup=cleanup, extra=dict(extra or {}))
+            item = _Item(id=f"dl-{next(self._ids)}", kind=kind, name=name, label=label, plan=plan, finalize=finalize, cleanup=cleanup, extra=dict(extra or {}), targets=tuple(targets))
             self._items[item.id] = item
             self._queue.append(item)
             if self._thread is None:
@@ -161,6 +165,11 @@ class DownloadLane:
         with self._cond:
             ordered = [*([self._running] if self._running is not None else []), *self._queue]
             return [self._item_json(item) for item in ordered if item.kind == kind and item.state in (_QUEUED, _RUNNING)]
+
+    def committed_targets(self) -> tuple[DownloadTarget, ...]:
+        """Return the targets of the queued and running items, which are on their way to the disk."""
+        with self._cond:
+            return tuple(target for item in self._live_items() for target in item.targets)
 
     def snapshot(self) -> dict[str, Any]:
         """Return the running item, the queued ones in order and the recently finished ones (newest first)."""
@@ -221,6 +230,8 @@ class DownloadLane:
             targets = item.plan()
             if targets is None:
                 return _FAILED, unreachable
+            with self._cond:
+                item.targets = tuple(targets)
             outcome = self._ensure(targets, flights=self._flights, report=lambda report: self._record(item, report), cancelled=item.cancel.is_set)
             if outcome == READY and item.finalize is not None:
                 item.finalize()

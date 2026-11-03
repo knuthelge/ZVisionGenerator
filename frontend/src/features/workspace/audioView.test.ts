@@ -36,6 +36,14 @@ const RECORDING = { workflow: 'speech' as const, speechText: 'Hello there.', voi
 
 describe('audioView reasons', () => {
 
+  it('tells a reason of the voice from one of the text', () => {
+    expect(view({ ...RECORDING, voiceText: '' }).reasonFromVoice).toBe(true);
+    expect(view(RECORDING).reasonFromVoice).toBe(true);
+    expect(view({ ...RECORDING, speechText: '' }).reasonFromVoice).toBe(false);
+    expect(view({ ...RECORDING, speechText: 'a'.repeat(10_001) }, { consent: { ticked: true, exempt: false } }).reasonFromVoice).toBe(false);
+    expect(view({ workflow: 'speech', speechText: 'Hello there.' }).reasonFromVoice).toBe(false);
+  });
+
   it('puts the over-long text last, with its own words', () => {
     const long = 'a'.repeat(10_001);
 

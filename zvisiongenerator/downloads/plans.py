@@ -133,16 +133,12 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
     )
 
 
-def audio_plan(preset: AudioPreset, platform_key: str) -> tuple[DownloadTarget, ...]:
-    """Return one target per repository the audio *preset* loads on *platform_key*, at the pinned commit, in the order the preset lists them.
+def audio_plan(preset: AudioPreset) -> tuple[DownloadTarget, ...]:
+    """Return one target per repository the audio *preset* loads, at the pinned commit, in the order the preset lists them.
 
     The plan comes from the config alone, so it needs no connection and is never ``None``.
-
-    Args:
-        preset: The audio preset.
-        platform_key: One of the preset's platform keys, ``cuda`` or ``mps`` (``backends.audio_platform_key()``).
     """
-    return tuple(DownloadTarget(files.repo_id, files.revision, files.patterns) for files in preset.platforms[platform_key].files)
+    return tuple(DownloadTarget(files.repo_id, files.revision, files.patterns) for files in preset.files)
 
 
 def video_model_downloaded(

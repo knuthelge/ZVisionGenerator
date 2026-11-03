@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
-    from zvisiongenerator.utils.audio_preset import AudioPlatform, AudioPreset
+    from zvisiongenerator.utils.audio_preset import AudioPreset
 
-__all__ = ["AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback"]
+__all__ = ["DECODE_PHASE", "AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback"]
+
+DECODE_PHASE = "Decode"
+"""The progress phase after the last step, when the decoder turns what was made into the waveform; it has no count of its own worth showing."""
 
 type ProgressCallback = Callable[[str, int, int | None, int, int], None]
 """Reports progress of a take, called as ``on_progress(phase, step, total, part, n_parts)``.
@@ -40,17 +43,16 @@ class AudioBackend(Protocol):
     """Platform-specific audio inference engine for one model family.
 
     Required interface:
-    - load(): load the model for a preset, from the platform entry's files
+    - load(): load the model for a preset, from the preset's files
     - generate(): make one take
     - close(): free everything the backend holds, also after a failed take
     """
 
-    def load(self, preset: AudioPreset, platform_entry: AudioPlatform, device: str) -> None:
+    def load(self, preset: AudioPreset, device: str) -> None:
         """Load the model of *preset* onto *device* (``cuda`` or ``mps``).
 
         Args:
-            preset: The audio preset, whose limits and shared settings apply.
-            platform_entry: The preset's entry for this platform: the family, the files to load and the settings it overrides.
+            preset: The audio preset: its files, limits and settings (``preset.settings_for(device)``).
             device: ``cuda`` or ``mps``.
         """
         ...

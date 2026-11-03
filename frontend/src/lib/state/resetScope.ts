@@ -121,6 +121,7 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   lastImageModel: 'memory',
   lastVideoModel: 'memory',
   lastImageQuantize: 'memory',
+  settingsModel: 'memory',
   savedText: 'memory',
   enhanceAuto: 'memory',
   enhanceModel: 'memory',

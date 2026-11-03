@@ -21,6 +21,7 @@ export const SETTING_ROWS = [
   { id: 'runs', keys: ['runs'], chip: 'runs', visible: (caps) => caps.showRuns },
   { id: 'duration', keys: ['frameCount'], chip: 'seconds', visible: (caps) => caps.showFrameCount },
   { id: 'length', keys: ['audioSeconds'], chip: 'length', visible: (caps) => caps.showLength },
+  { id: 'voice', keys: ['voiceMode', 'voicePath', 'voiceUpload', 'voiceText'], chip: 'voice', visible: (caps) => caps.showVoice },
   { id: 'extendLength', keys: ['extendFrames'], chip: 'extendSeconds', visible: (caps) => caps.showExtendLength },
   { id: 'steps', keys: ['steps'], chip: 'steps', visible: (caps) => caps.showSteps },
   { id: 'guidance', keys: ['guidance'], chip: 'guidance', visible: (caps) => caps.showGuidance },

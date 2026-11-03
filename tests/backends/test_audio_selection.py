@@ -6,13 +6,10 @@ from __future__ import annotations
 import pytest
 
 import zvisiongenerator.backends as backends_module
-from zvisiongenerator.backends import AUDIO_FAMILIES, audio_platform_key, get_audio_backend
+from zvisiongenerator.backends import audio_platform_key, get_audio_backend
 
 
 class TestFamilies:
-    def test_the_known_families(self):
-        assert AUDIO_FAMILIES == ("yue2", "higgs3", "stable_audio_3")
-
     @pytest.mark.parametrize("family", ["ace_step", ""])
     def test_a_family_without_a_backend_is_refused_with_the_known_ones(self, family):
         with pytest.raises(RuntimeError, match=r"No audio backend for model family '.*'\. Known: \['yue2', 'higgs3', 'stable_audio_3'\]"):

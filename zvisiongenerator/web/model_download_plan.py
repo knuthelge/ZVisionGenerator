@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +17,7 @@ from zvisiongenerator.utils.matte_models import MATTE_ROW_NAME
 from zvisiongenerator.utils.model_files import huggingface_cache_dir
 from zvisiongenerator.utils.seedvr2 import seedvr2_row_name
 from zvisiongenerator.web.audio_models import find_audio_model
-from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, enhancer_part, image_model_part, matte_part, seedvr2_tier_part, video_model_part
+from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, enhancer_part, image_model_part, is_committed, matte_part, missing_targets, seedvr2_tier_part, video_model_part
 
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.space import SpaceNeed
@@ -56,7 +56,7 @@ def row_plan(kind: str, name: str, web_config: WebUiConfig) -> JobDownloadPart:
     if kind == KIND_MODEL:
         return _model_row_plan(name, web_config)
     if kind == KIND_AUDIO:
-        return audio_model_part(*find_audio_model(web_config.app_config, name))
+        return audio_model_part(find_audio_model(web_config.app_config, name))
     if kind == KIND_ENHANCER:
         repo, revision = _enhancer_model(name, web_config.app_config)
         return enhancer_part(repo, revision, web_config.app_config, platform_key=sys.platform, tier=name)
@@ -135,6 +135,7 @@ def matte_download_needed(*, present: Callable[[DownloadTarget], bool] = target_
 def parts_summary(
     parts: Sequence[JobDownloadPart],
     *,
+    committed: Iterable[DownloadTarget] = (),
     check: Callable[[DownloadTarget], TargetCheck | None] = check_target,
     present: Callable[[DownloadTarget], bool] = target_present_offline,
     space: Callable[..., SpaceNeed | None] = space_need,
@@ -144,7 +145,8 @@ def parts_summary(
     """Describe what the downloads of *parts* (a job's, or a Models-page row's one part) would fetch, for the download dialog.
 
     A part is listed when it has files to fetch, or with ``bytes`` ``None`` (and the result ``unchecked``) when it
-    cannot be planned or the Hub cannot be reached. Targets already on disk are skipped without a Hub call.
+    cannot be planned or the Hub cannot be reached. Targets already on disk are skipped without a Hub call. Parts the user
+    was already asked about are left out: see :func:`~zvisiongenerator.web.job_downloads.is_committed` for *committed*.
 
     Raises:
         RuntimeError: If the Hub refused a request (gated, missing repo or revision, server error); the message names the repo.
@@ -152,8 +154,12 @@ def parts_summary(
     listed: list[dict[str, Any]] = []
     checked: list[tuple[DownloadTarget, TargetCheck]] = []
     unchecked = False
+    on_their_way = tuple(committed)
     for part in parts:
-        entry, part_unchecked, part_checked = _part_entry(part, check=check, present=present)
+        missing = missing_targets(part, present)
+        if is_committed(missing, on_their_way):
+            continue
+        entry, part_unchecked, part_checked = _part_entry(part, missing, check=check)
         checked.extend(part_checked)
         unchecked = unchecked or part_unchecked
         if entry is not None:
@@ -171,27 +177,28 @@ def parts_summary(
 
 def _part_entry(
     part: JobDownloadPart,
+    missing: Sequence[DownloadTarget] | None,
     *,
     check: Callable[[DownloadTarget], TargetCheck | None],
-    present: Callable[[DownloadTarget], bool],
 ) -> tuple[dict[str, Any] | None, bool, list[tuple[DownloadTarget, TargetCheck]]]:
-    """Return a part's dialog entry (``None`` when it has nothing to fetch), whether it is unchecked and its checked targets."""
-    if part.targets is None:
+    """Return a part's dialog entry (``None`` when it has nothing to fetch), whether it is unchecked and its checked targets.
+
+    *missing* is the part's targets that are not on disk (``None`` for an unchecked part): only those are checked against the Hub.
+    """
+    if missing is None:
         return _entry(part, None), True, []
-    missing: list[tuple[DownloadTarget, TargetCheck]] = []
-    for target in part.targets:
-        if present(target):
-            continue
+    to_fetch: list[tuple[DownloadTarget, TargetCheck]] = []
+    for target in missing:
         result = check(target)
         if result is None:
-            return _entry(part, None), True, missing
+            return _entry(part, None), True, to_fetch
         if result.missing_files > 0:
-            missing.append((target, result))
-    if not missing:
+            to_fetch.append((target, result))
+    if not to_fetch:
         return None, False, []
-    sizes = [result.missing_bytes for _, result in missing]
+    sizes = [result.missing_bytes for _, result in to_fetch]
     size = None if any(item is None for item in sizes) else sum(item or 0 for item in sizes)
-    return _entry(part, size), False, missing
+    return _entry(part, size), False, to_fetch
 
 
 def _entry(part: JobDownloadPart, size: int | None) -> dict[str, Any]:

@@ -48,7 +48,8 @@ def yue2_preset() -> dict[str, Any]:
     return {
         "label": "YuE2 3B",
         "kind": "music",
-        "capabilities": {"lyrics": True, "duration": False, "voice_clone": False},
+        "family": "yue2",
+        "files": yue2_files(),
         "limits": {"max_seconds": 360},
         "settings": {
             "instrumental_sections": INSTRUMENTAL_SECTIONS,
@@ -59,25 +60,20 @@ def yue2_preset() -> dict[str, Any]:
             "vae_core_frames": 512,
             "fade_seconds": 2,
         },
-        "platforms": {
-            "cuda": {"family": "yue2", "files": yue2_files(), "memory_gb": 6.7, "settings": {"weight_swap": True}},
-            "mps": {"family": "yue2", "files": yue2_files(), "memory_gb": None, "settings": {"weight_swap": False}},
-        },
+        "platforms": {"cuda": {"memory_gb": 6.7}},
     }
 
 
 def higgs3_preset() -> dict[str, Any]:
-    """Return the ``higgs3`` preset (speech, voice cloning, parts of 500 characters, the codec on the CPU on CUDA)."""
+    """Return the ``higgs3`` preset (speech, voice cloning, parts of 500 characters)."""
     return {
         "label": "Higgs TTS 3 4B",
         "kind": "speech",
-        "capabilities": {"lyrics": False, "duration": False, "voice_clone": True},
+        "family": "higgs3",
+        "files": higgs3_files(),
         "limits": {"max_new_tokens": 1500, "part_chars": 500, "max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30},
         "settings": {"temperature": 0.7, "top_p": 0.95, "join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, "edge_silence_max_ms": 150},
-        "platforms": {
-            "cuda": {"family": "higgs3", "files": higgs3_files(), "memory_gb": 8.2, "settings": {"codec_device": "cpu"}},
-            "mps": {"family": "higgs3", "files": higgs3_files(), "memory_gb": None, "settings": {"codec_device": "mps"}},
-        },
+        "platforms": {"cuda": {"memory_gb": 8.2}},
     }
 
 
@@ -86,13 +82,11 @@ def sa3_preset() -> dict[str, Any]:
     return {
         "label": "Stable Audio 3 Medium",
         "kind": "sound",
-        "capabilities": {"lyrics": False, "duration": True, "voice_clone": False},
+        "family": "stable_audio_3",
+        "files": sa3_files(),
         "limits": {"max_seconds": 380},
         "settings": {"steps": 8, "cfg_scale": 1.0, "sample_size": 16777216},
-        "platforms": {
-            "cuda": {"family": "stable_audio_3", "files": sa3_files(), "memory_gb": 6.1},
-            "mps": {"family": "stable_audio_3", "files": sa3_files(), "memory_gb": None},
-        },
+        "platforms": {"cuda": {"memory_gb": 6.1}},
     }
 
 

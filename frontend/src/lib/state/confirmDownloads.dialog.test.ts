@@ -34,7 +34,7 @@ describe('the download dialog with licence lines', () => {
 
     expect(document.body.textContent?.match(/By downloading you agree to the terms shown under each model\./g)).toHaveLength(1);
     const [klein, enhancer] = rows();
-    expect(linesOf(klein).map(squash)).toEqual(['FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial · Model page ↗']);
+    expect(linesOf(klein).map(squash)).toEqual(['FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial use of the model; images may be used commercially · Model page ↗']);
     expect(linesOf(enhancer)).toEqual([]);
     const links = Array.from(klein.querySelectorAll('a'));
     expect(links.map((link) => [link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel'), link.getAttribute('aria-label')])).toEqual([
@@ -47,7 +47,7 @@ describe('the download dialog with licence lines', () => {
 
     expect(linesOf(rows()[0]).map(squash)).toEqual([
       'LTX-2 Community License Agreement (Lightricks): Free under $10M revenue · Licence ↗',
-      "Gemma Terms of Use (Google): Gemma's use policy applies · Licence ↗",
+      "Gemma Terms of Use (Google): Free to use, also commercially; Gemma's prohibited use policy applies · Model page ↗",
     ]);
   });
 
@@ -56,22 +56,22 @@ describe('the download dialog with licence lines', () => {
     await open(plan([part('FLUX.2 Klein 9B', 'klein9b')], tagged('klein9b', credited, LTX_LICENCE)));
 
     expect(linesOf(rows()[0]).map(squash)).toEqual([
-      'FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial · Model page ↗',
+      'FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial use of the model; images may be used commercially · Model page ↗',
       'Powered by Example',
       'LTX-2 Community License Agreement (Lightricks): Free under $10M revenue · Licence ↗',
     ]);
     expect(linesOf(rows()[0])[1].querySelector('a')).toBeNull();
   });
 
-  it('calls the matte link a model card', async () => {
+  it('names a link by the label of its record', async () => {
     await open(plan([part('Background removal', 'matte')], tagged('matte', MATTE_LICENCE)));
 
-    expect(squash(linesOf(rows()[0])[0])).toContain('· Model card ↗');
-    expect(rows()[0].querySelector('a')!.getAttribute('aria-label')).toBe('BiRefNet (MIT) and ViTMatte (Apache-2.0) model card (opens in a new tab)');
+    expect(squash(linesOf(rows()[0])[0])).toContain('· Dataset terms ↗');
+    expect(rows()[0].querySelector('a')!.getAttribute('aria-label')).toBe('Research-only training data dataset terms (opens in a new tab)');
   });
 
-  it('has no licence line and no agreement sentence for zit', async () => {
-    await open(plan([part('zit', 'zit')], []));
+  it('has no licence line and no agreement sentence for a part without records', async () => {
+    await open(plan([part('Prompt enhancer (Fast)', 'org/enhancer')], []));
 
     expect(linesOf(rows()[0])).toEqual([]);
     expect(document.body.textContent).not.toContain('agree to the terms');

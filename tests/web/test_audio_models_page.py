@@ -23,7 +23,6 @@ from zvisiongenerator.utils.hf_cache import repo_disk_bytes
 from zvisiongenerator.utils.licences import load_licences
 from zvisiongenerator.utils.model_files import disk_size_label
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
-from zvisiongenerator.web import audio_inventory as audio_inventory_module
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -129,10 +128,10 @@ class TestInventoryRows:
                 raise OSError("cache unreadable")
             return True
 
-        with pytest.warns(UserWarning, match="Could not describe audio model 'yue2'"):
+        with pytest.warns(UserWarning, match="Could not determine status for audio model 'yue2'"):
             rows = _rows(env, target_present=broken)
 
-        assert (rows["yue2"]["downloaded"], rows["yue2"]["memory_fit"], rows["yue2"]["delete"]) == (None, None, None)
+        assert (rows["yue2"]["downloaded"], rows["yue2"]["memory_fit"]) == (None, None)
         assert rows["yue2"]["download_needed"] is False
         assert rows["sa3"]["downloaded"] is True
 
@@ -145,7 +144,7 @@ class TestInventoryRows:
         assert [row["name"] for row in rows] == ["yue2", "higgs3", "sa3"]
 
     def test_the_models_payload_lists_the_rows_after_the_video_models(self, env, monkeypatch):
-        monkeypatch.setattr(audio_inventory_module, "target_present_offline", lambda _target: True)
+        monkeypatch.setattr(audio_models_module, "target_present_offline", lambda _target: True)
         monkeypatch.setattr(workspace_api_module, "find_other_downloads", lambda *_a, **_k: ())
 
         models = workspace_api_module.build_models_response(_web_config(env), token_source=None, image_defaults_for=lambda *_a: {})
@@ -182,7 +181,7 @@ class TestHiggs:
             _cache(env.hub, repo.split("@")[0])
         preset = {item.id: item for item in parse_audio_presets(audio_config())}["higgs3"]
 
-        target = audio_delete_target(preset, "cuda")
+        target = audio_delete_target(preset)
 
         assert target.kind == "huggingface"
         assert target.repo_ids == ("bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer")
@@ -208,7 +207,7 @@ class TestHiggs:
         """The row, the offline presence check and the backend's cache lookup all read the same file list."""
         config = load_packaged_config()
         preset = {item.id: item for item in parse_audio_presets(config)}["higgs3"]
-        files = preset.platforms["cuda"].files
+        files = preset.files
         targets = row_plan("audio", "higgs3", _web_config(env, config)).targets
 
         assert [item.repo_id for item in files] == [target.repo_id for target in targets] == ["bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer"]
@@ -227,7 +226,7 @@ class TestHiggs:
     def test_a_listed_file_missing_from_either_repository_fails_all_three_alike(self, env, index):
         config = load_packaged_config()
         preset = {item.id: item for item in parse_audio_presets(config)}["higgs3"]
-        files = preset.platforms["cuda"].files
+        files = preset.files
         self._snapshot_every_listed_file(env, files)
         broken = files[index]
         (env.hub / f"models--{broken.repo_id.replace('/', '--')}" / "snapshots" / broken.revision / broken.patterns[-1]).unlink()

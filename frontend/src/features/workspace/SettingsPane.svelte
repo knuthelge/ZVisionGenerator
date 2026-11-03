@@ -78,7 +78,10 @@
   }
 
   // --- Length of a sound: from the shortest sound to the model's longest ---
-  const lengthSpec = $derived({ step: 1, ...secondsRange(audio.model) });
+  const lengthSpec = $derived.by(() => {
+    const range = secondsRange(audio.model);
+    return range && { step: 1, ...range };
+  });
 
   function setLength(seconds: number): void {
     draft.update('audioSeconds', clampSeconds(seconds, audio.model));
@@ -268,7 +271,7 @@
           <InspectorNumber id="ws-runs" name="runs" value={s.runs} {...SPEC.runs} onchange={(v) => v !== null && draft.update('runs', v)} />
         </InspectorRow>
       {/if}
-      {#if caps.showLength}
+      {#if caps.showLength && lengthSpec}
         <InspectorRow label="Length (s)" forId="ws-length" scrubber={scrubber(s.audioSeconds, lengthSpec, setLength)} changed={isChanged('length')} onreset={() => resetRow('length')}>
           <InspectorNumber id="ws-length" value={s.audioSeconds} {...lengthSpec} commitOnly onchange={(v) => v !== null && setLength(v)} />
           <span class="frame-count" data-testid="length-max">max {lengthSpec.max}</span>

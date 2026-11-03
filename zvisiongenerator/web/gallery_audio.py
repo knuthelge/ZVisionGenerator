@@ -115,7 +115,7 @@ def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]
     """
     kind = asset.audio["kind"]
     workflow = kind or AUDIO_WORKFLOW_VALUES[0]
-    runnable, _platform_key = runnable_audio_models(web_config.app_config)
+    runnable = runnable_audio_models(web_config.app_config)
     model_available = any(preset.id == asset.model_label for preset in runnable)
     requested_model = None if asset.model_label == "Unavailable" else asset.model_label
     resolved_model = requested_model if model_available else None

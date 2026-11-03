@@ -3,26 +3,23 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any
 
-from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 from zvisiongenerator.utils.hf_cache import repo_disk_bytes
-from zvisiongenerator.utils.licences import LicenceRecord, licence_payload, load_licences
 from zvisiongenerator.utils.model_files import disk_size_label, huggingface_cache_repo_dir
 from zvisiongenerator.utils.model_memory import MemoryBudget
-from zvisiongenerator.web.audio_models import runnable_audio_models
+from zvisiongenerator.web.audio_models import audio_rows
 from zvisiongenerator.web.model_delete import audio_delete_target
-from zvisiongenerator.web.model_status import describe_audio_status
 
 __all__ = ["audio_inventory_rows", "audio_repo_ids"]
 
 
 def audio_repo_ids(config: Mapping[str, Any]) -> frozenset[str]:
-    """Return every repository any audio preset of *config* loads on any platform, so the cache listing never offers them as unused."""
-    return frozenset(files.repo_id for preset in parse_audio_presets(config) for platform in preset.platforms.values() for files in platform.files)
+    """Return every repository any audio preset of *config* loads, so the cache listing never offers them as unused."""
+    return frozenset(files.repo_id for preset in parse_audio_presets(config) for files in preset.files)
 
 
 def audio_inventory_rows(
@@ -32,31 +29,21 @@ def audio_inventory_rows(
     target_present: Callable[[DownloadTarget], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Return one Models-page row per audio model that runs on this machine, in config order; *target_present* defaults to the offline check."""
-    presets, platform_key = runnable_audio_models(config)
-    if platform_key is None:
-        return []
-    present = target_present or target_present_offline
-    licences = load_licences()
-    return [_row(licences, preset, platform_key, budget, present) for preset in presets]
+    return audio_rows(config, budget, _inventory_fields, target_present=target_present)
 
 
-def _row(licences: Sequence[LicenceRecord], preset: AudioPreset, platform_key: str, budget: MemoryBudget | None, present: Callable[[DownloadTarget], bool]) -> dict[str, Any]:
-    """Build the Models-page row of one audio model; one unreadable model warns and reads as unknown instead of breaking the listing."""
-    row: dict[str, Any] = {"name": preset.id, "label": preset.label, "kind": preset.kind, "licences": licence_payload(licences, preset.id)}
+def _inventory_fields(preset: AudioPreset, shared: dict[str, Any]) -> dict[str, Any]:
+    """Return the keys only the Models-page row has: the name, whether a download is needed and what deleting removes.
+
+    One unreadable model warns and reads as unknown instead of breaking the listing.
+    """
+    fields: dict[str, Any] = {"name": preset.id, "download_needed": shared["downloaded"] is False}
     try:
-        status = describe_audio_status(preset, platform_key, budget=budget, target_present=present)
-        target = audio_delete_target(preset, platform_key)
-        return {
-            **row,
-            "downloaded": status["downloaded"],
-            "download_needed": not status["downloaded"],
-            "memory_fit": status["memory_fit"],
-            "delete": _delete_info(target),
-            "disk_size_label": _disk_size_label(target),
-        }
+        target = audio_delete_target(preset)
+        return {**fields, "delete": _delete_info(target), "disk_size_label": _disk_size_label(target)}
     except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
         warnings.warn(f"Could not describe audio model '{preset.id}': {exc}", stacklevel=2)
-        return {**row, "downloaded": None, "download_needed": False, "memory_fit": None, "delete": None, "disk_size_label": None}
+        return {**fields, "delete": None, "disk_size_label": None}
 
 
 def _delete_info(target: Any) -> dict[str, Any] | None:

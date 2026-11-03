@@ -52,6 +52,7 @@ const DEFAULT_DRAFT: DraftState = {
   lastImageModel: '',
   lastVideoModel: '',
   lastImageQuantize: null,
+  settingsModel: '',
   referenceImagePath: null,
   referenceImageUpload: null,
   firstFramePath: null,
@@ -339,12 +340,12 @@ function _isVideoWorkflow(workflow: WorkspaceWorkflow): boolean {
 }
 
 /**
- * Remember the state's model as the last one used in its own mode (image or video), whichever workflow is open. An image model
- * also remembers its quantization, which the video workflows clear.
+ * Remember the state's model as the last one used in its own mode (image or video), whichever workflow is open, and as the one the
+ * settings belong to. An image model also remembers its quantization, which the video workflows clear.
  */
 function _rememberModel(ctx: WorkspaceContext, state: DraftState): DraftState {
-  if (ctx.video_models.some((model) => model.id === state.model)) return { ...state, lastVideoModel: state.model };
-  if (ctx.image_models.some((model) => model.id === state.model)) return { ...state, lastImageModel: state.model, lastImageQuantize: state.quantize };
+  if (ctx.video_models.some((model) => model.id === state.model)) return { ...state, lastVideoModel: state.model, settingsModel: state.model };
+  if (ctx.image_models.some((model) => model.id === state.model)) return { ...state, lastImageModel: state.model, lastImageQuantize: state.quantize, settingsModel: state.model };
   return state;
 }
 
@@ -598,8 +599,8 @@ const _TEXT_WORKFLOW: Record<MediaTab, Workflow> = { image: 'txt2img', video: 't
 /**
  * Return the defaults of every field for the tab the state has open, resolved in three layers: the static defaults, then the
  * model's (with the workflow's cleared fields and the capability gates), then the values derived from what the draft holds
- * (the Extend length from its source's frame rate, the Extend track the source brought, a sound's length within the model's
- * range). Only the fields of the open tab's scopes are meaningful; a Reset picks them with `RESET_SCOPE`.
+ * (the Extend length from its source's frame rate, the Extend track the source brought, a sound model's default length).
+ * Only the fields of the open tab's scopes are meaningful; a Reset picks them with `RESET_SCOPE`.
  *
  * @param extendSource What the server reported about the chosen extend source, or null.
  */
@@ -892,7 +893,9 @@ export const draft = {
       ?? validModels[0]?.id
       ?? '';
 
-    const sameModel = model === _draft.model;
+    // The Audio tab leaves the settings of the model it came from in the draft: they still belong to that model.
+    const comingFromAudio = audioModelById(ctx, _draft.model) !== null;
+    const sameModel = model === (comingFromAudio ? _draft.settingsModel : _draft.model);
     const keepSettings = options.keepSettings === true && sameModel;
     const keepChanged = options.keepChangedSettings === true;
     const keepsPromptSource = (keepSettings || keepChanged) && ctx.prompt_sources.includes(_draft.promptSource);
@@ -911,6 +914,8 @@ export const draft = {
     } else if (keepChanged) {
       nextState = _fitToModel(ctx, { ...nextState, ..._changedSinceOldDefaults(ctx, _draft) });
     }
+    // Settings of a model of the other mode (or none) were not set by the applied preset's: it no longer describes them.
+    if (comingFromAudio && !sameModel) nextState = { ...nextState, appliedPreset: null };
     nextState = _rememberModel(ctx, _applyCapabilityGates(ctx, nextState));
 
     // The workflow follows from the tab and its images, whatever the model: one it cannot start from an image runs from text.
@@ -922,7 +927,7 @@ export const draft = {
   /**
    * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind, the Video tab's the kind it was
    * left on). When the tab is of the other mode (image or video) the
-   * applied preset is forgotten and the text swaps to what that mode kept. The model and defaults follow when the Workspace calls `onTabChange` with its context.
+   * applied preset is forgotten and the text swaps to what that mode kept; the Audio tab in between keeps both settings and preset. The model and defaults follow when the Workspace calls `onTabChange` with its context.
    * Without a context the model's capabilities are unknown, so the tab's start image is assumed to be usable.
    */
   setTab(tab: NavTab): void {
@@ -932,7 +937,8 @@ export const draft = {
     const videoKind = left ?? _draft.videoKind;
     // The Audio tab opens on the kind it was left on, the Video tab on its kind.
     const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && videoKind === 'extend' ? 'extend' : workflowFor(tab, _draft, true);
-    const leavesMode = workflowMode(workflow) !== workflowMode(_draft.workflow);
+    // The Audio tab sits between the modes without taking the settings: only Image to Video (or back) forgets the preset.
+    const leavesMode = [workflow, _draft.workflow].every((w) => !isAudioWorkflow(w)) && workflowMode(workflow) !== workflowMode(_draft.workflow);
     _draft = { ..._withTextOfMode(_draft, workflow), workflow, videoKind, ...(leavesMode ? { appliedPreset: null } : {}) };
     this.saveDraft();
   },
@@ -999,16 +1005,14 @@ export const draft = {
 
   /**
    * Set or clear the recording the Speech tab's voice follows: the draft holds its path or the upload's file name and the
-   * file is held for Generate. A new recording is a new voice, so the speaker's tick and its transcript are cleared with
-   * it (choosing the same path again keeps the transcript). Choosing one switches the voice to *From a recording*.
+   * file is held for Generate. A new recording is a new voice, so the speaker's tick is cleared with it; the transcript the
+   * person typed stays, whatever the recording does. Choosing one switches the voice to *From a recording*.
    */
   setVoice(value: SlotValue): void {
     heldUploads.setVoice(value !== null && 'file' in value ? value.file : null);
     voiceConsent.reset();
-    const samePath = value !== null && 'path' in value && value.path === _draft.voicePath;
     _draft = {
       ..._draft,
-      voiceText: samePath ? _draft.voiceText : '',
       voicePath: value !== null && 'path' in value ? value.path : null,
       voiceUpload: value !== null && 'file' in value ? value.file.name : null,
       voiceMode: value === null ? _draft.voiceMode : 'recording',

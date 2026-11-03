@@ -6,6 +6,7 @@ import io
 import json
 import threading
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -79,6 +80,12 @@ class TestSubmit:
         assert (job["preset"].id, job["runs"], job["seed"], job["output_dir"]) == ("yue2", 2, 7, str(env.root / "out"))
         assert job["config"] is env.web_config.app_config
         assert job["context"]["settings"]["prompt"] == "  upbeat synth-pop  "  # Load settings restores the form as it was sent
+
+    def test_the_queued_job_keeps_the_models_download_targets_for_the_next_plan(self, env):
+        env.post(workflow="music", model="yue2", prompt="synth-pop")
+
+        (job,) = env.submitted
+        assert [target.repo_id for target in job["planned_targets"]] == ["m-a-p/YuE2-3B", "m-a-p/YuE2-Vae"]
 
     def test_the_workflow_follows_the_model_when_the_form_names_none(self, env):
         assert env.post(model="sa3", prompt="rain").json()["workflow"] == "sound"
@@ -431,15 +438,24 @@ class TestPlan:
         assert bare.json()["parts"]
         assert not (plan_env.root / "out" / ".web_uploads").exists()
 
-    def test_the_plan_leaves_the_voice_file_to_the_submit(self, plan_env):
+    def test_the_plan_refuses_the_voice_file_type_the_submit_refuses(self, plan_env):
         data = {"mode": "audio", "model": "higgs3", "prompt": "Hello there.", "voice_text": "Welcome back."}
-        notes = {"voice_file": ("notes.txt", b"", "text/plain")}
 
-        planned = plan_env.client.post("/api/generate/plan", data=data, files=notes)
+        planned = plan_env.client.post("/api/generate/plan", data=data, files={"voice_file": ("notes.txt", b"", "text/plain")})
         submitted = plan_env.client.post("/api/generate", data=data, files={"voice_file": ("notes.txt", b"hi", "text/plain")})
 
-        assert planned.status_code == 200  # no consent tick, no readable recording and a wrong file type: all checked on the file, at submit
-        _refused(submitted, "Voice recording must be a WAV, MP3, M4A, FLAC, or OGG file.")
+        assert planned.status_code == submitted.status_code == 422
+        assert planned.json() == submitted.json()
+
+    def test_the_plan_leaves_the_content_of_the_voice_file_to_the_submit(self, plan_env):
+        data = {"mode": "audio", "model": "higgs3", "prompt": "Hello there.", "voice_text": "Welcome back."}
+        voice = {"voice_file": ("me.wav", b"", "audio/wav")}
+
+        planned = plan_env.client.post("/api/generate/plan", data=data, files=voice)
+        submitted = plan_env.client.post("/api/generate", data=data, files={"voice_file": ("me.wav", b"hi", "audio/wav")})
+
+        assert planned.status_code == 200  # no consent tick and no readable recording: both checked on the file, at submit
+        assert submitted.status_code == 422
 
     def test_the_voice_fields_are_still_checked_by_the_plan(self, plan_env):
         files = {"voice_file": ("me.wav", b"", "audio/wav")}
@@ -469,6 +485,8 @@ class TestRunner:
         monkeypatch.setattr(web_runner_module, "load_web_config", lambda: web_config)  # the gallery JSON of a saved take reads only the config
         _set_platform(monkeypatch, "cuda")
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, download_flights=DownloadFlights())
+        runner.ensure = MagicMock(side_effect=_ready)  # the downloads: one report, then ready
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", runner.ensure)
         yield runner
         runner.shutdown()
 
@@ -501,8 +519,7 @@ class TestRunner:
             return clip(0.3, rate=44100, channels=2)
 
         backend.generate.side_effect = generate
-        patched = patch_runner(monkeypatch, backend)
-        patched.ensure.side_effect = _ready
+        patch_runner(monkeypatch, backend)
 
         job_id = self.submit(runner, tmp_path)
         snapshot = wait_for_status(runner, job_id, "completed", timeout=10)
@@ -530,14 +547,14 @@ class TestRunner:
         assert (download["mode"], download["role"], download["model"], download["repo"], download["part"], download["parts"], download["bytes_done"], download["bytes_total"]) == (
             "audio",
             "model",
-            "sa3",
+            "Stable Audio 3 Medium",
             "m-a-p/YuE2-3B",
             1,
             2,
             10,
             100,
         )
-        assert patched.ensure.call_args.kwargs["flights"] is runner.download_flights
+        assert runner.ensure.call_args.kwargs["flights"] is runner.download_flights
         finished = [event for event in events if event["type"] == "generation_finished"]
         assert [event["status"] for event in finished] == ["success", "success"]
         assert all(event["asset"]["media_type"] == "audio" and event["asset"]["kind"] == "sound" and event["asset"]["has_reusable_config"] for event in finished)
@@ -556,7 +573,7 @@ class TestRunner:
             return take
 
         backend.generate.side_effect = generate
-        patch_runner(monkeypatch, backend).ensure.side_effect = _ready
+        patch_runner(monkeypatch, backend)
 
         job_id = self.submit(runner, tmp_path)
         snapshot = wait_for_status(runner, job_id, "failed", timeout=10)
@@ -570,14 +587,8 @@ class TestRunner:
 
     def test_a_stop_before_the_model_loads_ends_the_job_cancelled(self, runner, monkeypatch, tmp_path):
         backend = fake_backend(clip(0.3))
-        patched = patch_runner(monkeypatch, backend)
-        started = threading.Event()
-
-        def stopped(targets, *, flights, report, cancelled):
-            started.set()
-            return "stopped"
-
-        patched.ensure.side_effect = stopped
+        patch_runner(monkeypatch, backend)
+        runner.ensure.side_effect = lambda targets, *, flights, report, cancelled: "stopped"
 
         job_id = self.submit(runner, tmp_path)
         snapshot = wait_for_status(runner, job_id, "cancelled", timeout=10)
@@ -610,4 +621,4 @@ class TestRunner:
         kwargs = seen["kwargs"]
         assert (request.prompt, preset.id) == ("rain on a roof", "sa3") and config == audio_config()
         assert (kwargs["runs"], kwargs["seed"], kwargs["output_dir"]) == (2, 5, str(tmp_path))
-        assert kwargs["flights"] is runner.download_flights and kwargs["skip_signal"] is runner._get_job(job_id).control_signal
+        assert kwargs["skip_signal"] is runner._get_job(job_id).control_signal

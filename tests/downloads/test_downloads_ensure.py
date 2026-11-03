@@ -12,7 +12,7 @@ import pytest
 
 import zvisiongenerator.downloads as downloads
 from zvisiongenerator.downloads.child import ChildResult
-from zvisiongenerator.downloads.ensure import DETACHED, READY, STOPPED, UNCHECKED, DownloadReport, ensure_downloaded
+from zvisiongenerator.downloads.ensure import DETACHED, READY, STOPPED, UNCHECKED, DownloadReport, ensure_downloaded, require_checked
 from zvisiongenerator.downloads.flights import DownloadFlights, Flight
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 
@@ -582,3 +582,16 @@ def test_waiter_rechecks_presence_and_downloads_when_still_absent_after_done() -
     assert runs == ["run"]
     assert [f[1] for f in flights.finished] == ["done", "done"]
     assert flights.active() == ()
+
+
+class TestRequireChecked:
+    def test_an_unchecked_outcome_with_a_missing_target_blames_the_connection(self) -> None:
+        with pytest.raises(RuntimeError, match="Could not reach Hugging Face to download Model X"):
+            require_checked(UNCHECKED, [_target()], "Model X", present=lambda t: False)
+
+    @pytest.mark.parametrize("outcome", [READY, STOPPED, DETACHED])
+    def test_any_other_outcome_is_left_to_the_caller(self, outcome) -> None:
+        require_checked(outcome, [_target()], "Model X", present=lambda t: False)
+
+    def test_an_unchecked_outcome_with_every_target_on_disk_goes_on(self) -> None:
+        require_checked(UNCHECKED, [_target()], "Model X", present=lambda t: True)

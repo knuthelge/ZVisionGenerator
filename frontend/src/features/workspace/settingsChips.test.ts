@@ -194,7 +194,7 @@ describe('audioChips', () => {
   const voice = { summary: { text: 'Any', tone: 'muted' as const }, recording: false, chip: 'Any' };
 
   function audioFacts(overrides: Partial<AudioChipFacts> = {}): AudioChipFacts {
-    return { kind: 'speech', state: audioState, modelLabel: 'Higgs TTS 3 4B', modelDownloaded: true, voice, changed: () => false, showLength: false, showSeed: true, showRuns: true, ...overrides };
+    return { kind: 'speech', state: audioState, modelLabel: 'Higgs TTS 3 4B', modelDownloaded: true, voice, voiceBlocks: false, changed: () => false, showLength: false, showSeed: true, showRuns: true, ...overrides };
   }
 
   it('lists Kind, Model, Voice, Seed and Batch for Speech, with no preset, size or LoRA', () => {
@@ -217,5 +217,18 @@ describe('audioChips', () => {
     expect(audioChips(audioFacts({ voice: cloned })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'me.wav', on: true, warn: false });
     const wrong = { summary: { text: 'Use a recording of 3 to 30 seconds', tone: 'error' as const }, recording: true, chip: 'me.wav' };
     expect(audioChips(audioFacts({ voice: wrong })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
+  });
+
+  it('marks the Voice chip changed when the voice differs from its default', () => {
+    const chip = (changedKeys: string[]) => audioChips(audioFacts({ changed: (key) => changedKeys.includes(key) })).find((item) => item.key === 'voice');
+
+    expect(chip(['voice'])?.changed).toBe(true);
+    expect(chip([])?.changed).toBe(false);
+  });
+
+  it('warns on the Voice chip while the voice holds Generate back', () => {
+    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, recording: true, chip: 'me.wav' };
+
+    expect(audioChips(audioFacts({ voice: cloned, voiceBlocks: true })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
   });
 });

@@ -13,8 +13,6 @@ This module imports torch and transformers at module level, so the backend impor
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +24,7 @@ from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
 
 from zvisiongenerator.backends.audio.higgs3_prompt import AUDIO_SLOT
 from zvisiongenerator.utils.safetensors_stream import iter_tensors
+from zvisiongenerator.utils.torch_flags import default_dtype
 
 if TYPE_CHECKING:
     from transformers import Cache
@@ -168,17 +167,6 @@ def checkpoint_target(name: str) -> str | None:
     raise ValueError(f"The checkpoint holds a tensor this model has no place for: {name}")
 
 
-@contextmanager
-def _bf16_default() -> Iterator[None]:
-    """Make new floating-point parameters bf16 for the length of the block, then restore the previous default dtype."""
-    previous = torch.get_default_dtype()
-    torch.set_default_dtype(torch.bfloat16)
-    try:
-        yield
-    finally:
-        torch.set_default_dtype(previous)
-
-
 def load_higgs3_model(config: Higgs3Config, checkpoint: Path, device: str) -> Higgs3Model:
     """Return the network for *config* on *device*, filled from the official safetensors file *checkpoint*, in bf16 and ready to run.
 
@@ -192,16 +180,16 @@ def load_higgs3_model(config: Higgs3Config, checkpoint: Path, device: str) -> Hi
 
     Raises:
         ValueError: If a checkpoint tensor has no place in the model, or its shape or dtype is not the model's.
-        RuntimeError: If a parameter is filled twice or never, or a buffer is missing, extra or never written.
+        RuntimeError: If a parameter is filled twice or never, or a buffer is missing or extra.
     """
-    with torch.device("meta"), _bf16_default():
+    with torch.device("meta"), default_dtype(torch.bfloat16):
         model = Higgs3Model(config)
     model.to_empty(device=device)
     with torch.no_grad():
         _fill_parameters(model, checkpoint)
         model.audio_head.weight = model.audio_embedding.weight
-        written = _write_rotary_buffers(model)
-    _check_buffers(model, written)
+        _write_rotary_buffers(model)
+    _check_buffers(model)
     wrong = [name for name, parameter in model.named_parameters() if parameter.dtype != torch.bfloat16]
     if wrong:
         raise RuntimeError(f"These parameters are not bf16: {', '.join(wrong)}")
@@ -228,22 +216,21 @@ def _fill_parameters(model: Higgs3Model, checkpoint: Path) -> None:
         raise RuntimeError(f"The checkpoint has no tensor for: {', '.join(missing)}")
 
 
-def _write_rotary_buffers(model: Higgs3Model) -> set[str]:
-    """Compute the rotary frequencies on the CPU, as transformers does at construction, copy them into the backbone's two buffers, and return the buffer names written."""
+def _write_rotary_buffers(model: Higgs3Model) -> None:
+    """Compute the rotary frequencies on the CPU, as transformers does at construction, and copy them into the backbone's two buffers."""
     rotary = model.backbone.rotary_emb
     inv_freq, _ = Qwen3RotaryEmbedding.compute_default_rope_parameters(rotary.config)
     rotary.inv_freq.copy_(inv_freq)
     rotary.original_inv_freq.copy_(inv_freq)
-    return {"backbone.rotary_emb.inv_freq", "backbone.rotary_emb.original_inv_freq"}
 
 
-def _check_buffers(model: nn.Module, written: set[str]) -> None:
-    """Check that the buffers of *model* are exactly the two rotary buffers, and that both are in *written*.
+def _check_buffers(model: nn.Module) -> None:
+    """Check that the buffers of *model* are exactly the two rotary buffers, which the loader writes.
 
     A buffer left over from ``to_empty`` holds garbage rather than failing loudly, so every buffer must be accounted for.
 
     Raises:
-        RuntimeError: If a buffer is extra, missing or not written; the message names it.
+        RuntimeError: If a buffer is extra or missing; the message names it.
     """
     names = {name for name, _ in model.named_buffers()}
     extra = sorted(names - _ROTARY_BUFFERS)
@@ -252,6 +239,3 @@ def _check_buffers(model: nn.Module, written: set[str]) -> None:
     missing = sorted(_ROTARY_BUFFERS - names)
     if missing:
         raise RuntimeError(f"The model has no buffer: {', '.join(missing)}")
-    unwritten = sorted(_ROTARY_BUFFERS - written)
-    if unwritten:
-        raise RuntimeError(f"The loader did not write the buffer: {', '.join(unwritten)}")

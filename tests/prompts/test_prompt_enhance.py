@@ -353,11 +353,6 @@ class TestLength:
         assert resolve_enhance_ceiling(config, family="zimage", mode="image") == 250
         assert resolve_enhance_ceiling({}, family=None, mode="video") == 300
 
-    def test_resolve_ceiling_refuses_audio_instead_of_using_the_image_presets(self):
-        config = {"model_presets": {"zimage": {"enhance_max_words": 180}}, "prompt_enhancer": {"length": {"max_words": 250}}}
-        with pytest.raises(ValueError, match="Audio prompts"):
-            resolve_enhance_ceiling(config, family="zimage", mode="audio")
-
     def test_unknown_length(self):
         with pytest.raises(ValueError, match="Unknown length"):
             plan_length(10, "huge", ceiling=300)

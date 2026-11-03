@@ -69,6 +69,15 @@ describe('AssetViewer with audio', () => {
     expect(action('upscale')).toBeNull();
   });
 
+  it('lists no upscale shortcut for a take, and says what E does for one', () => {
+    mountViewer();
+    flushSync(() => action('shortcuts')!.click());
+
+    const help = document.querySelector('#asset-viewer-shortcuts')!;
+    expect(help.textContent).not.toContain('Upscale');
+    expect(help.textContent).toContain('audio track or voice');
+  });
+
   it('lists the audio track under Use as, and the voice for a speech take', () => {
     const onuseaudio = vi.fn();
     mountViewer({ assets: [talk], onuseaudio, useAs: { audio_track: { disabled: false, hint: 'Video tab, from 0 s' }, voice: { disabled: false, hint: 'Speech, text filled in' } } });

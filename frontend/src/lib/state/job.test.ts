@@ -65,6 +65,21 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.audio).toBeNull();
   });
 
+  it('takes the elapsed time and the time left from an audio take\'s progress, and clears the take on a repeat', () => {
+    jobStore.startJob({ job_id: 'take-clock', workflow: 'music', media_type: 'audio', prompt: 'Song', model: 'yue2', runs: 2, created_at: '' });
+    const source = lastEventSource();
+
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Decode', step: 1, total: 1, part: 1, n_parts: 1, elapsed_secs: 42, eta_secs: 18 });
+    expect(jobStore.current).toMatchObject({ elapsed: 42, remaining: 18 });
+
+    // A progress event without an estimate keeps the last one.
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Decode', step: 1, total: 1, part: 1, n_parts: 1, elapsed_secs: 43 });
+    expect(jobStore.current).toMatchObject({ elapsed: 43, remaining: 18 });
+
+    source.emit('generation_repeat', { type: 'generation_repeat', job_id: 'take-clock' });
+    expect(jobStore.current?.audio).toBeNull();
+  });
+
   it('keeps the takes an audio job saves as its outputs, from each generation and from the end of the job', () => {
     jobStore.startJob({ job_id: 'take-outputs', workflow: 'music', media_type: 'audio', prompt: 'Song', model: 'yue2', runs: 2, created_at: '' });
     const source = lastEventSource();

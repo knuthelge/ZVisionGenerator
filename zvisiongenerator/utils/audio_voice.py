@@ -9,10 +9,10 @@ from typing import Any
 
 from zvisiongenerator.utils.provenance import read_config
 
-__all__ = ["is_any_voice_take", "voice_needs_consent"]
+__all__ = ["voice_needs_consent"]
 
 
-def is_any_voice_take(config: Mapping[str, Any] | None) -> bool:
+def _is_any_voice_take(config: Mapping[str, Any] | None) -> bool:
     """Return whether *config*, the settings embedded in an audio file, show a speech take read in the model's own voice.
 
     Such a take was made without a reference voice, so following it needs nobody's permission.
@@ -30,4 +30,4 @@ def voice_needs_consent(path: str | Path) -> bool:
         config = read_config(path)
     except subprocess.CalledProcessError, ValueError, OSError:
         return True
-    return not is_any_voice_take(config)
+    return not _is_any_voice_take(config)

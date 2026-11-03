@@ -155,10 +155,12 @@ describe('referenceEntries', () => {
 describe('audioUseEntries', () => {
   const items = (entries: ReturnType<typeof audioUseEntries>) => entries.flatMap((entry) => (entry.kind === 'item' ? [entry] : []));
 
-  it('disables a speech take longer than 30 s as a voice, with the reason as its hint and tooltip', () => {
-    const [, voice] = items(audioUseEntries(makeSpeechAsset({ duration: 44 }), vi.fn()));
+  it('disables a speech take longer than the model takes as a voice, with the reason as its hint and tooltip', () => {
+    const [, voice] = items(audioUseEntries(makeSpeechAsset({ duration: 44 }), vi.fn(), { voiceMaxSeconds: 30 }));
 
-    expect(voice).toMatchObject({ label: 'Voice', disabled: true, hint: 'Use a take of 30 s or less as a voice', title: 'Use a take of 30 s or less as a voice' });
+    expect(voice).toMatchObject({ label: 'Voice', disabled: true });
+    expect(voice!.hint).toContain('30');
+    expect(voice!.title).toBe(voice!.hint);
   });
 
   it('reports the chosen target', () => {

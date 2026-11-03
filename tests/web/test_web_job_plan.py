@@ -39,13 +39,17 @@ def _use_fake_planners(monkeypatch, env) -> None:
 @pytest.fixture
 def plan_env(monkeypatch, tmp_path):
     """Route the plan through fake planners, a fake Hub and a fake disk, and give the test a handle on each."""
-    env = SimpleNamespace(present=set(), unreachable=False, enhance=True, hub_calls=[], flights=DownloadFlights(), submitted=[], web_config=make_web_config(), root=tmp_path)
+    env = SimpleNamespace(
+        present=set(), unreachable=False, enhance=True, hub_calls=[], flights=DownloadFlights(), submitted=[], web_config=make_web_config(), root=tmp_path, queued_jobs=(), queued_downloads=()
+    )
     env.web_config.output_dir = str(tmp_path)
     packaged = load_packaged_config()
     env.web_config.app_config.update(model_aliases=packaged["model_aliases"], audio_model_presets=packaged["audio_model_presets"])
     monkeypatch.setattr(web_server, "load_web_config", lambda: env.web_config)
     patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="flux2", is_distilled=False, size=None), defaults=make_resolved_image_defaults(), submitted=env.submitted)
     monkeypatch.setattr(web_server.download_flights, "active", env.flights.active)
+    monkeypatch.setattr(web_server.web_runner, "committed_targets", lambda: env.queued_jobs)
+    monkeypatch.setattr(web_server.download_lane, "committed_targets", lambda: env.queued_downloads)
 
     _use_fake_planners(monkeypatch, env)
 
@@ -156,6 +160,47 @@ class TestGeneratePlan:
         parts = plan_env.client.post("/api/generate/plan", data=_form()).json()["parts"]
 
         assert [part["model"] for part in parts] == ["klein9b"]
+
+    def test_a_model_that_a_queued_job_will_download_is_left_out_so_the_second_generate_asks_nothing(self, plan_env):
+        plan_env.enhance = False
+        plan_env.queued_jobs = (DownloadTarget(_KLEIN),)
+
+        plan = plan_env.client.post("/api/generate/plan", data=_form()).json()
+
+        assert plan["parts"] == []
+        assert plan_env.hub_calls == []
+
+    def test_a_model_that_the_models_page_will_download_is_left_out(self, plan_env):
+        plan_env.enhance = False
+        plan_env.queued_downloads = (DownloadTarget(_KLEIN),)
+
+        assert plan_env.client.post("/api/generate/plan", data=_form()).json()["parts"] == []
+
+    def test_a_part_with_every_missing_target_on_its_way_is_left_out(self, plan_env, monkeypatch):
+        plan_env.enhance = False
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (DownloadTarget("owner/one"), DownloadTarget("owner/two")))
+        plan_env.flights.claim(DownloadTarget("owner/one"))
+        plan_env.queued_jobs = (DownloadTarget("owner/two"),)
+
+        assert plan_env.client.post("/api/generate/plan", data=_form()).json()["parts"] == []
+
+    def test_a_model_that_shares_a_file_with_one_on_its_way_is_still_asked_about(self, plan_env, monkeypatch):
+        plan_env.enhance = False
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (DownloadTarget("owner/shared"), DownloadTarget("owner/own")))
+        plan_env.queued_jobs = (DownloadTarget("owner/shared"),)
+
+        parts = plan_env.client.post("/api/generate/plan", data=_form()).json()["parts"]
+
+        assert [part["model"] for part in parts] == ["klein9b"]
+
+    def test_a_job_that_is_queued_when_it_is_submitted_keeps_its_planned_targets_for_the_next_plan(self, plan_env, monkeypatch):
+        plan_env.enhance = False
+        kept = []
+        monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", lambda **kwargs: kept.append(kwargs["planned_targets"]) or "job-1")
+
+        plan_env.client.post("/api/generate", data=_form())
+
+        assert kept == [(DownloadTarget(_KLEIN),)]
 
     def test_a_hub_that_cannot_be_reached_marks_the_plan_unchecked(self, plan_env):
         plan_env.unreachable = True
@@ -326,16 +371,33 @@ class TestPlanWithoutFileBodies:
 
         self._same_parts(video_env, data, files)
 
-    def test_an_upload_is_not_checked_as_a_file_by_the_plan_only_by_the_submit(self, plan_env):
+    def test_the_plan_refuses_the_image_type_the_submit_refuses(self, plan_env):
         files = [("image_file", ("start.gif", b"", "image/gif"))]
         form = _form(workflow="img2img")
 
         planned = _plan(plan_env, form, files)
         submitted = plan_env.client.post("/api/generate", data=form, files=files)
 
+        assert planned.status_code == submitted.status_code == 422
+        assert planned.json() == submitted.json()
+
+    def test_an_image_that_does_not_decode_is_left_to_the_submit(self, plan_env):
+        files = [("image_file", ("start.png", b"", "image/png"))]
+        form = _form(workflow="img2img")
+
+        planned = _plan(plan_env, form, files)
+        submitted = plan_env.client.post("/api/generate", data=form, files=[("image_file", ("start.png", b"not an image", "image/png"))])
+
         assert planned.status_code == 200
         assert submitted.status_code == 422
-        assert "PNG, JPEG, or WebP" in submitted.json()["detail"]
+
+    def test_a_track_type_the_submit_refuses_is_refused_by_the_plan(self, video_env):
+        data = {"mode": "video", "model": "ltx-8", "prompt": "a lake"}
+        files = [("audio_track_file", ("song.aac", b"", "audio/aac"))]
+
+        planned = _plan(video_env, data, files)
+
+        assert planned.status_code == 422
 
     def test_an_unreadable_track_is_refused_by_the_submit_and_not_by_the_plan(self, video_env):
         files = [("audio_track_file", ("song.m4a", b"", "audio/mp4"))]
@@ -363,6 +425,15 @@ class TestPlanWithoutFileBodies:
 
         assert response.status_code == 422
         assert "start image" in response.json()["detail"]
+
+    def test_a_typed_track_path_that_cannot_be_read_is_refused_by_the_plan(self, video_env):
+        data = {"mode": "video", "model": "ltx-8", "prompt": "a lake", "audio_track_path": str(video_env.root / "missing.m4a")}
+
+        planned = _plan(video_env, data, None)
+        submitted = video_env.client.post("/api/generate", data=data)
+
+        assert planned.status_code == submitted.status_code == 422
+        assert planned.json() == submitted.json()
 
     def test_a_video_field_error_still_refuses_the_plan(self, video_env):
         files = [("end_image_file", ("last.png", b"", "image/png"))]

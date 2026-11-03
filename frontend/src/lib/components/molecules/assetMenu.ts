@@ -1,5 +1,5 @@
 import {
-  AUDIO_TRACK_HINT, VOICE_HINT, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, extendReason, plainUpscaleMethod, upscaleFactors, voiceFits, voiceTooLongReason,
+  AUDIO_TRACK_HINT, VOICE_HINT, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, extendReason, plainUpscaleMethod, upscaleFactors, voiceTooLongReason,
   type AssetActionHandlers, type ReferenceTarget, type UseAsState,
 } from '$lib/state/assetActions';
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
@@ -135,7 +135,7 @@ export function referenceEntries(
 /**
  * Build the "Use as" items of an audio take: the Video tab's audio track, and for a speech take the Speech tab's voice. The hint
  * shows beside the label; an item the machine can't take is disabled with its reason as the hint and the tooltip. A speech take
- * longer than the voice limit is disabled with "Use a take of 30 s or less as a voice".
+ * longer than the speech model's voice limit is disabled with "Use a take of <limit> s or less as a voice".
  */
 export function audioUseEntries(asset: GalleryAsset, onuseaudio: NonNullable<AssetActionHandlers['onuseaudio']>, useAs: UseAsState = {}): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
@@ -147,7 +147,7 @@ export function audioUseEntries(asset: GalleryAsset, onuseaudio: NonNullable<Ass
   }
   if (canUseAsVoice(asset)) {
     const state = useAs.voice;
-    const reason = !voiceFits(asset, useAs) ? voiceTooLongReason(useAs) : state?.disabled === true ? state.hint : undefined;
+    const reason = voiceTooLongReason(asset, useAs) ?? (state?.disabled === true ? state.hint : undefined);
     const hint = reason ?? state?.hint ?? VOICE_HINT;
     entries.push({ kind: 'item', id: 'use-voice', label: 'Voice', hint, disabled: reason !== undefined, title: reason, onselect: () => onuseaudio(asset, 'voice') });
   }

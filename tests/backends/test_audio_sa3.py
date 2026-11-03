@@ -22,11 +22,10 @@ from torch import nn
 
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.backends.audio import sa3
-from zvisiongenerator.backends.audio.sa3 import FAMILY, StableAudio3Backend
+from zvisiongenerator.backends.audio.sa3 import StableAudio3Backend
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
-from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
 from tests._audio_presets import SA3_CHECKPOINT_REPO, SA3_CONFIG_REPO, SA3_TEXT_ENCODER_REPO, audio_config, sa3_preset
 
 SAMPLE_RATE = 44100
@@ -155,9 +154,9 @@ def preset() -> AudioPreset:
     return parse_audio_presets(audio_config(sa3=sa3_preset()))[0]
 
 
-def _loaded(preset: AudioPreset, caches: list[str] | None = None) -> StableAudio3Backend:
-    backend = StableAudio3Backend(empty_cache=(caches if caches is not None else []).append)
-    backend.load(preset, preset.platforms["cuda"], "cuda")
+def _loaded(preset: AudioPreset) -> StableAudio3Backend:
+    backend = StableAudio3Backend()
+    backend.load(preset, "cuda")
     return backend
 
 
@@ -171,7 +170,7 @@ def _take(backend: StableAudio3Backend, request: AudioGenerationRequest, progres
 
 class TestRegistry:
     def test_the_registry_creates_this_backend(self):
-        backend = backends_module.get_audio_backend(FAMILY)
+        backend = backends_module.get_audio_backend("stable_audio_3")
 
         assert isinstance(backend, StableAudio3Backend)
 
@@ -306,10 +305,9 @@ class TestGenerate:
         assert clip.seconds == 380.0
         assert clip.samples.shape == (2, 380 * SAMPLE_RATE)
 
-    def test_the_waveform_is_returned_from_before_the_clamp(self, preset, snapshots, built, generated):
+    def test_the_waveform_is_returned_from_before_the_clamp_so_it_may_peak_above_full_scale(self, preset, snapshots, built, generated):
         clip = _take(_loaded(preset), _request(seconds=30))
 
-        assert clip.preclamp is True
         assert clip.sample_rate == SAMPLE_RATE
         assert clip.samples.dtype.name == "float32"
         assert clip.samples.shape == (2, 30 * SAMPLE_RATE)
@@ -364,9 +362,8 @@ class TestGenerate:
 
 
 class TestClose:
-    def test_close_frees_the_model_and_the_device_cache(self, preset, snapshots, built):
-        caches: list[str] = []
-        backend = _loaded(preset, caches)
+    def test_close_frees_the_model(self, preset, snapshots, built):
+        backend = _loaded(preset)
         model = weakref.ref(built[0][1])
         built.clear()
 
@@ -374,31 +371,21 @@ class TestClose:
         gc.collect()
 
         assert model() is None
-        assert caches == ["cuda"]
 
-    def test_close_gives_the_global_torch_flags_back(self, preset, snapshots, built, torch_flags_guard):
-        set_app_flags()
-        before = current_flags()
-        backend = _loaded(preset)  # the real StableAudioModel sets the flags in its constructor
-        assert current_flags() != before
+    def test_closing_twice_is_harmless(self, preset, snapshots, built):
+        backend = _loaded(preset)
 
         backend.close()
-        assert current_flags() == before
         backend.close()
-        assert current_flags() == before
 
-    def test_a_failed_load_gives_the_global_torch_flags_back(self, preset, snapshots, built, monkeypatch, torch_flags_guard):
-        set_app_flags()
-        before = current_flags()
-
-        def fail_after_flipping(*args, **kwargs):
-            set_kit_flags()
+    def test_a_failed_load_leaves_a_backend_that_can_be_closed(self, preset, snapshots, built, monkeypatch):
+        def fail(*args, **kwargs):
             raise OSError("disk")
 
-        monkeypatch.setattr("stable_audio_3.model.StableAudioModel", fail_after_flipping)
-        backend = StableAudio3Backend(empty_cache=lambda device: None)
+        monkeypatch.setattr("stable_audio_3.model.StableAudioModel", fail)
+        backend = StableAudio3Backend()
 
         with pytest.raises(OSError, match="disk"):
-            backend.load(preset, preset.platforms["cuda"], "cuda")
+            backend.load(preset, "cuda")
 
-        assert current_flags() == before
+        backend.close()

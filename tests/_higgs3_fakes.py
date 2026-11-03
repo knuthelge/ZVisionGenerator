@@ -29,7 +29,6 @@ OFFICIAL_REPO = "bosonai/higgs-tts-3-4b"
 CODEC_REPO = "bosonai/higgs-audio-v2-tokenizer"
 
 PRESET = next(preset for preset in parse_audio_presets(audio_config()) if preset.id == "higgs3")
-ENTRY = PRESET.platforms["cuda"]
 
 CONFIG = Higgs3Config(
     hidden_size=4,
@@ -142,8 +141,8 @@ def install_fakes(monkeypatch: Any, tmp_path: Path, model: Any, codec: nn.Module
         A namespace with the mocks (``read_config``, ``load_model``, ``codec_load``), the folders (``official``,
         ``codec_dir``) and ``snapshots``, the mutable map from repo id to the snapshot folders the cache lookup returns.
     """
-    folders = {files.repo_id: tmp_path / "hub" / files.repo_id.replace("/", "--") for files in ENTRY.files}
-    for files in ENTRY.files:
+    folders = {files.repo_id: tmp_path / "hub" / files.repo_id.replace("/", "--") for files in PRESET.files}
+    for files in PRESET.files:
         for name in files.patterns:
             (folders[files.repo_id] / name).parent.mkdir(parents=True, exist_ok=True)
             (folders[files.repo_id] / name).write_text("x")

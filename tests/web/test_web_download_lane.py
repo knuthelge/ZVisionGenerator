@@ -137,6 +137,32 @@ class TestOrderAndQueue:
         assert second["id"] != first["id"]
 
 
+class TestCommittedTargets:
+    def test_queued_and_running_items_hold_their_targets_until_they_end(self, ensure):
+        lane = _lane(ensure)
+        queued_first = DownloadTarget("owner/queued")
+        running = _submit(lane, "a")
+        assert ensure.started.acquire(timeout=_WAIT)
+        second = lane.submit(kind="model", name="b", label="B", plan=_targets_for("b"), targets=(queued_first,))
+
+        assert set(lane.committed_targets()) == {DownloadTarget("owner/a"), queued_first}
+        ensure.release.set()
+        _wait_state(lane, second["id"], "done")
+        _wait_state(lane, running["id"], "done")
+
+        assert lane.committed_targets() == ()
+
+    def test_a_cancelled_item_holds_nothing(self, ensure):
+        lane = _lane(ensure)
+        _submit(lane, "a")
+        assert ensure.started.acquire(timeout=_WAIT)
+        queued = lane.submit(kind="model", name="b", label="B", plan=_targets_for("b"), targets=(DownloadTarget("owner/b"),))
+
+        lane.cancel(queued["id"])
+
+        assert lane.committed_targets() == (DownloadTarget("owner/a"),)
+
+
 class TestForget:
     def test_forgetting_a_row_drops_its_finished_items_and_keeps_queued_and_other_ones(self, ensure):
         ensure.release.set()

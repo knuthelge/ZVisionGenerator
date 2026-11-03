@@ -10,7 +10,6 @@ parts (``utils/speech_text``), each part seeded ``seed + index``, and the parts 
 
 from __future__ import annotations
 
-import gc
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +20,7 @@ import numpy as np
 from zvisiongenerator.backends.audio.higgs3_config import read_higgs3_config
 from zvisiongenerator.backends.audio.higgs3_generate import generate_speech_codes
 from zvisiongenerator.backends.audio.higgs3_prompt import load_tokenizer, special_ids
-from zvisiongenerator.core.audio_backend import AudioCancelled
+from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.core.video_types import AudioTrack
 from zvisiongenerator.utils.audio_resample import resample_audio
@@ -29,13 +28,12 @@ from zvisiongenerator.utils.audio_track import probe_track_seconds, read_track
 from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.utils.speech_join import join_speech_parts
 from zvisiongenerator.utils.speech_text import split_speech_text
-from zvisiongenerator.utils.torch_flags import TorchFlags, capture_torch_flags, restore_torch_flags
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.audio_backend import CancelCheck, ProgressCallback
     from zvisiongenerator.backends.audio.higgs3_prompt import SpecialIds
     from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
-    from zvisiongenerator.utils.audio_preset import AudioLimits, AudioPlatform, AudioPreset
+    from zvisiongenerator.utils.audio_preset import AudioLimits, AudioPreset
 
 __all__ = ["SAMPLE_RATE", "Higgs3Backend"]
 
@@ -43,7 +41,6 @@ SAMPLE_RATE = 24000
 """The model's sample rate, and the rate of every take."""
 
 SPEECH_PHASE = "Speech tokens"
-DECODE_PHASE = "Decode"
 
 _FRAME_STRIDE = 10
 """Report every this many frames (about 2.5 a second at the codec's 25 frames a second), so a long take does not flood the progress events."""
@@ -108,29 +105,26 @@ class Higgs3Backend:
         self._limits: AudioLimits | None = None
         self._settings: Mapping[str, Any] = {}
         self._progress: _Progress | None = None
-        self._flags: TorchFlags | None = None
 
-    def load(self, preset: AudioPreset, platform_entry: AudioPlatform, device: str) -> None:
-        """Load the model onto *device* and the codec onto the preset's ``codec_device``, from the Hugging Face cache.
+    def load(self, preset: AudioPreset, device: str) -> None:
+        """Load the model onto *device* and the codec onto the preset's ``codec_device`` (the CPU on CUDA and MPS on a Mac by default), from the Hugging Face cache.
 
         Nothing is downloaded: both repositories must already be in the cache.
 
         Args:
-            preset: The ``higgs3`` preset, whose limits and settings apply.
-            platform_entry: The preset's entry for this platform, which pins the model's and the codec's files.
+            preset: The ``higgs3`` preset: its pinned model and codec files, its limits and its settings for *device*.
             device: ``cuda`` or ``mps``.
 
         Raises:
             FileNotFoundError: If a repository is not in the cache with every listed file.
         """
-        model_files, codec_files = platform_entry.files
+        model_files, codec_files = preset.files
         official, codec_dir = snapshot_dir(model_files), snapshot_dir(codec_files)
         self.close()
         self._limits = preset.limits
         self._settings = preset.settings_for(device)
         self._device = device
-        self._codec_device = str(self._settings.get("codec_device", "cpu"))
-        self._flags = capture_torch_flags()  # model code may set global numerics flags; close() puts them back
+        self._codec_device = str(self._settings.get("codec_device", "mps" if device == "mps" else "cpu"))
         try:
             self._load_models(official, codec_dir)
         except BaseException:
@@ -154,7 +148,8 @@ class Higgs3Backend:
             cancelled: Checked before each part and on every frame; ``True`` stops the take.
 
         Returns:
-            One mono take at 24 kHz, with ``cut`` set when some part reached ``max_new_tokens`` without finishing.
+            One mono take at 24 kHz, with ``cut`` set when some part reached ``max_new_tokens`` without finishing. The codec's
+            output is not limited to -1..1, so a loud take may peak above 1.0; the runner levels it.
 
         Raises:
             AudioCancelled: If ``cancelled`` returned ``True``.
@@ -189,22 +184,12 @@ class Higgs3Backend:
         return AudioClip(samples=joined.reshape(1, -1), sample_rate=SAMPLE_RATE, cut=cut)
 
     def close(self) -> None:
-        """Free the model, the codec and the accelerator memory they held, and restore the torch flags.
+        """Drop the model and the codec; the runner returns the accelerator memory and the torch flags.
 
         Safe to call again, after a failed load and after a failed take.
         """
-        model, device, flags = self._model, self._device, self._flags
         self._model = self._tokenizer = self._ids = self._codec = None
         self._progress = None
-        self._flags = None
-        try:
-            del model
-            gc.collect()
-            if device:
-                _empty_cache(device)
-        finally:
-            if flags is not None:
-                restore_torch_flags(flags)
 
     def _load_models(self, official: Path, codec_dir: Path) -> None:
         """Load the tokenizer, the model and the codec from their cached folders."""
@@ -284,12 +269,12 @@ class Higgs3Backend:
         wave = self._decode(result.codes) if result.codes.shape[0] else np.zeros(0, dtype=np.float32)  # no decode is reported for a part without sound
         return wave, result.cut
 
-    def _voice_reference(self, voice: VoiceRef) -> tuple[Any, str | None]:
+    def _voice_reference(self, voice: VoiceRef) -> tuple[Any, str]:
         """Return the codes and transcript of the voice recording: read, polyphase-resampled to 24 kHz and encoded once."""
         seconds = min(probe_track_seconds(voice.path), float(self._limits.max_voice_seconds))
         stereo = read_track(AudioTrack(voice.path, 0.0), _READ_RATE, seconds)
         mono = resample_audio(stereo.mean(axis=0, keepdims=True), _READ_RATE, SAMPLE_RATE)[0]
-        return self._encode(mono), (voice.text or None)
+        return self._encode(mono), voice.text
 
     def _encode(self, wave: np.ndarray) -> Any:
         """Encode a 24 kHz mono waveform with the codec into ``[frames, codebooks]`` int64 codes on the CPU."""
@@ -301,13 +286,3 @@ class Higgs3Backend:
         with torch.no_grad():
             codes = self._codec.encode(batch).audio_codes
         return codes.squeeze(0).transpose(0, 1).to(torch.long).cpu()
-
-
-def _empty_cache(device: str) -> None:
-    """Return the cached accelerator memory of *device* to the system."""
-    import torch
-
-    if device == "cuda" and torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    elif device == "mps" and torch.backends.mps.is_available():
-        torch.mps.empty_cache()

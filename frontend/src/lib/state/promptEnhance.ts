@@ -1,3 +1,4 @@
+import { isAudioWorkflow } from './workspaceTab';
 import type { DraftState, EnhanceRecord, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, PromptFileOption, Workflow, WorkflowMode, WorkspaceWorkflow } from '$lib/types';
 
 /** The enhancer a run uses: Smart when chosen and available here, otherwise Fast. */
@@ -34,7 +35,7 @@ export function entryEnhanceSpec(option: Pick<PromptFileOption, 'enhance' | 'enh
 
 /** Media mode of a canonical workflow: an audio workflow (the kind of the Audio tab) is its own mode. */
 export function workflowMode(workflow: WorkspaceWorkflow): WorkflowMode {
-  if (workflow === 'music' || workflow === 'speech' || workflow === 'sound') return 'audio';
+  if (isAudioWorkflow(workflow)) return 'audio';
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'video' : 'image';
 }
 

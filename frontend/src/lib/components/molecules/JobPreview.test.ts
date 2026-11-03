@@ -69,6 +69,16 @@ describe('JobPreview', () => {
     expect(target.textContent).toContain('50%');
   });
 
+  it('says the model is downloading, not loading, while its files are fetched', () => {
+    const download = { role: 'model', model: 'flux', repo: 'org/flux', part: 1, parts: 1, bytes_done: 10, bytes_total: 100, bytes_per_sec: null, download_eta_secs: null, shared: false } as ActiveJobState['download'];
+    const loading = mountComponent(JobPreview, { job: makeJob({ phase: 'load' }) });
+    const downloading = mountComponent(JobPreview, { job: makeJob({ phase: 'load', download }) });
+
+    expect(loading.target.textContent).toContain('Loading the model');
+    expect(downloading.target.textContent).toContain('Downloading the model');
+    expect(downloading.target.textContent).not.toContain('Loading the model');
+  });
+
   describe('an audio job', () => {
     const takeJob = (overrides: Partial<ActiveJobState> = {}) => makeJob({ workflow: 'music', media_type: 'audio', width: null, height: null, ...overrides });
     const figure = (target: HTMLElement) => target.querySelector('[data-testid="job-preview"]') as HTMLElement;
@@ -134,7 +144,40 @@ describe('JobPreview', () => {
       const caption = (target: HTMLElement) => target.textContent?.match(/\d+:\d{2}/)?.[0];
       expect(caption(between.target)).toBe('1:34');
       expect(caption(landed.target)).toBe('1:34');
-      expect(figure(between.target).textContent).toBe(figure(landed.target).textContent);
+      const words = (target: HTMLElement) => figure(target).textContent?.replace(/\s+/g, ' ').trim();
+      expect(words(between.target)).toBe(words(landed.target));
+    });
+
+    it('plays and pauses the held take from the slot, and plays one take at a time', async () => {
+      const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+        this.dispatchEvent(new Event('play'));
+        return Promise.resolve();
+      });
+      const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+      const { target } = mountComponent(JobPreview, { job: takeJob({ status: 'paused', paused: true, itemFinished: true, outputs: [makeAudioAsset()] }) });
+      const button = () => figure(target).querySelector('.job-preview-play') as HTMLButtonElement;
+
+      expect(figure(target).querySelector('audio')?.getAttribute('src')).toBe('/media/out/song.flac');
+      button().click();
+      await settle();
+
+      expect(play).toHaveBeenCalledTimes(1);
+      expect(button().getAttribute('aria-pressed')).toBe('true');
+
+      figure(target).querySelector('audio')!.dispatchEvent(new Event('pause'));
+      await settle();
+
+      expect(button().getAttribute('aria-pressed')).toBe('false');
+      pause.mockRestore();
+      play.mockRestore();
+    });
+
+    it('offers no player while the Aurora runs or when the take has no waveform', () => {
+      const running = mountComponent(JobPreview, { job: takeJob({ audio: { phase: 'Song tokens', step: 250, total: null, part: 1, parts: 1 } }) });
+      const none = mountComponent(JobPreview, { job: takeJob({ status: 'failed' }) });
+
+      expect(running.target.querySelector('.job-preview-play')).toBeNull();
+      expect(none.target.querySelector('.job-preview-play')).toBeNull();
     });
 
     describe('the live preview', () => {

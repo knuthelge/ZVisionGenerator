@@ -1,5 +1,5 @@
 import { startImageSet } from './imageSlots';
-import type { AudioWorkflow, DraftState, NavTab, VideoKind, Workflow, WorkspaceTab, WorkspaceWorkflow } from '$lib/types';
+import { AUDIO_KINDS, type AudioWorkflow, type DraftState, type NavTab, type VideoKind, type Workflow, type WorkspaceTab, type WorkspaceWorkflow } from '$lib/types';
 
 /** The tabs that hold images and a text prompt, which every workflow of Image and Video belongs to. */
 export type MediaTab = Exclude<WorkspaceTab, 'audio'>;
@@ -12,8 +12,8 @@ export const WORKSPACE_TABS: readonly { id: NavTab; label: string }[] = [
 ];
 
 /** Whether a workflow belongs to the audio mode. */
-export function isAudioWorkflow(workflow: WorkspaceWorkflow): workflow is AudioWorkflow {
-  return workflow === 'music' || workflow === 'speech' || workflow === 'sound';
+export function isAudioWorkflow(workflow: string | undefined): workflow is AudioWorkflow {
+  return (AUDIO_KINDS as readonly (string | undefined)[]).includes(workflow);
 }
 
 /** The tabs to offer: Image and Video always, and Audio only when the server lists a music, speech or sound workflow (a model of that kind runs on this machine). */

@@ -795,19 +795,19 @@ describe('draft store – voice recording', () => {
     draft.reset();
   });
 
-  it('asks for a new transcript when a different recording is chosen', () => {
+  it('keeps the typed transcript when the recording is chosen, changed or cleared', () => {
+    draft.update('voiceText', 'typed before the recording');
     draft.setVoice({ path: '/voices/a.wav' });
-    draft.update('voiceText', 'what recording a says');
-
-    draft.setVoice({ path: '/voices/a.wav' });
-    expect(draft.state.voiceText).toBe('what recording a says');
+    expect(draft.state.voiceText).toBe('typed before the recording');
 
     draft.setVoice({ path: '/voices/b.wav' });
-    expect(draft.state.voiceText).toBe('');
+    expect(draft.state.voiceText).toBe('typed before the recording');
 
-    draft.update('voiceText', 'what recording b says');
     draft.setVoice({ file: new File(['x'], 'c.wav', { type: 'audio/wav' }) });
-    expect(draft.state.voiceText).toBe('');
+    expect(draft.state.voiceText).toBe('typed before the recording');
+
+    draft.setVoice(null);
+    expect(draft.state).toMatchObject({ voicePath: null, voiceUpload: null, voiceText: 'typed before the recording' });
   });
 });
 
@@ -2227,7 +2227,7 @@ describe('applyPreset', () => {
 
     const after = draft.state;
     expect(after).toMatchObject(IMAGE_PRESET_DRAFT);
-    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'lastImageModel', 'lastVideoModel', 'lastImageQuantize', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
+    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'lastImageModel', 'lastVideoModel', 'lastImageQuantize', 'settingsModel', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
     // Every key is either marked above or a preset key, so a new draft key must be classified here.
     const unclassified = Object.keys(after).filter((key) => !(key in MARKED) && !presetOwned.has(key) && key !== 'version');
     expect(unclassified).toEqual([]);

@@ -30,7 +30,7 @@ ziv-audio -m yue2 --prompt "calm piano, slow"
 ziv-audio -m yue2 --prompt "calm piano, slow" --lyrics "[Intro] [Instrumental] [Solo] [Outro]"
 ```
 
-With no lyrics, the instrumental has eight sections: `[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]`. Each tag is a section, so adding or removing tags makes the piece longer or shorter. `[Instrumental]` and `[Solo]` sections keep vocals out more reliably than `[verse]` and `[chorus]`; a take can still occasionally carry a voice, so generate again if it does.
+With no lyrics, the instrumental has eight sections: `[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]`. Each tag is a section, so adding or removing tags makes the piece longer or shorter. Use `[Instrumental]` and `[Solo]` to keep vocals out; see [Music](../concepts/audio.md#music).
 
 ## Speech
 
@@ -49,10 +49,10 @@ ziv-audio -m higgs3 --prompt "Welcome back." \
 
 The recording is 3 to 30 seconds long, and `--voice-text` is what it says. Use a clean, close-miked recording: see [Clone from a clean recording](../concepts/audio.md#voices). `--voice-consent` confirms the speaker allows their voice to be cloned; without it the command stops with `Add --voice-consent: cloning a voice needs the speaker's permission.`
 
-A speech take made without a voice recording can be a voice for the next take without `--voice-consent`, so a long reading can be continued in the same voice:
+A speech take made without a voice recording can be the voice of another take without `--voice-consent`, as long as it is 30 seconds or less like any voice. Its text is what `--voice-text` says:
 
 ```bash
-ziv-audio -m higgs3 --prompt "And then it rained." --voice welcome_2026-11-01_10-00-00.flac --voice-text "Welcome back."
+ziv-audio -m higgs3 --prompt "And then it rained." --voice speech_2026-11-01_10-00-00.flac --voice-text "Welcome back."
 ```
 
 ## Sound
@@ -61,7 +61,7 @@ ziv-audio -m higgs3 --prompt "And then it rained." --voice welcome_2026-11-01_10
 ziv-audio -m sa3 --prompt "rain on a tin roof, distant thunder" --seconds 30
 ```
 
-`--seconds` is the length, 1 second up to the model's limit; the default is 10. A take that comes out louder than full scale is brought down to -1 dBFS instead of clipping.
+`--seconds` is the length, 1 second up to the model's limit; the default is 10.
 
 ## Several takes
 
@@ -72,10 +72,14 @@ ziv-audio -m yue2 --prompt "lo-fi hip hop" --seed 42
 
 `--runs` makes several takes with one model load, each with its own random seed unless you set `--seed`. While it runs, press ++n++ to skip the take, ++r++ to repeat it with a new seed, ++p++ to pause or ++q++ to quit.
 
+## Progress
+
+While a take is made, the command shows what the model is doing and how far along it is, for example `Synthesis 12/64 · about 2 min left in the batch` for a bounded step or `Song tokens 1,840` for a step that ends on its own, and `Finishing...` while the sound is decoded. On a terminal this is one line that updates in place; in a pipe or a log file one line is printed each time the step changes. The time left covers all the takes still to make, this one included, and appears once the first take of a run has finished.
+
 ## The files
 
 Takes are saved as FLAC, 16-bit, at the model's own sample rate and channel count, in the current folder or the one you give with `-o`. The settings that made a take (model, style or text, lyrics, length, seed and, for a cloned voice, the recording and its text) are stored inside the file, never the speaker's consent. The Web UI reads them back to reuse a take.
 
 ## Copying from the Web UI
 
-The Audio tab's **Copy CLI** button builds the same command for the settings on screen. It adds `--voice-consent` only for a voice cloned from a recording.
+The terminal button in the Web UI's *Settings* header copies the same command for the settings on screen. It adds `--voice-consent` only for a voice cloned from a recording.

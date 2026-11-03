@@ -350,13 +350,14 @@ describe('the Audio tab', () => {
       expect(consent()!.checked).toBe(true);
     }
 
-    it('clears with a new file, which also needs its own transcript', async () => {
+    it('clears with a new file, which keeps the typed transcript', async () => {
       await ticked();
 
       await pickVoice(new File(['other'], 'other.wav', { type: 'audio/wav' }));
 
       expect(consent()!.checked).toBe(false);
-      expect(reason()).toContain('says');
+      expect(draft.state.voiceText).toBe('Hello, this is my voice.');
+      expect(reason()).toContain('Tick the box');
     });
 
     it('clears on Reuse of a take, which never carries it', async () => {
@@ -552,6 +553,54 @@ describe('the Audio tab', () => {
       await settle();
       expect(pop().querySelector('input[type="checkbox"]')).not.toBeNull();
       expect(pop().querySelector('input[type="checkbox"]')).toHaveProperty('checked', false);
+    });
+
+    it('warns on the Voice chip and opens its popover from the reason while the voice holds Generate back', async () => {
+      await mountAudio('speech', { compact: true });
+      draft.patch({ speechText: 'Hello there.', voiceMode: 'recording', voicePath: '/voices/me.wav' });
+      await settle();
+
+      expect(target.querySelector('[data-testid="audio-reason"]')?.textContent).toContain('Type what the recording says.');
+      expect(target.querySelector('[data-chip="voice"]')?.classList.contains('warn')).toBe(true);
+      (target.querySelector('[data-testid="audio-reason-voice"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect(target.querySelector('[data-testid="setting-popover"]')?.getAttribute('data-key')).toBe('voice');
+    });
+
+    it('offers no Voice button for a reason of the text', async () => {
+      await mountAudio('speech', { compact: true });
+
+      expect(target.querySelector('[data-testid="audio-reason"]')).not.toBeNull();
+      expect(target.querySelector('[data-testid="audio-reason-voice"]')).toBeNull();
+    });
+
+    it('puts the voice back with the popover\'s Reset, counted in the "All" settings', async () => {
+      await mountAudio('speech', { compact: true });
+      draft.setVoice({ path: '/voices/me.wav' });
+      draft.update('voiceText', 'Hi');
+      voiceConsent.ticked = true;
+      await settle();
+      (target.querySelector('[data-chip="voice"]') as HTMLButtonElement).click();
+      await settle();
+
+      const reset = Array.from(target.querySelectorAll<HTMLButtonElement>('[data-testid="setting-popover"] button')).find((button) => button.textContent?.trim() === 'Reset')!;
+      expect(reset.disabled).toBe(false);
+      reset.click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ voiceMode: 'any', voicePath: null, voiceUpload: null, voiceText: '' });
+      expect(voiceConsent.ticked).toBe(false);
+    });
+
+    it('reads the Audio text in the folded composer even when a prompt file was chosen on Image', async () => {
+      await mountAudio('sound', { compact: true });
+      draft.patch({ promptSource: 'file', promptFilePath: '/prompts/set.yaml', soundPrompt: 'Rain on a tin roof' });
+      await settle();
+
+      const line = target.querySelector('.composer-summary')?.textContent ?? '';
+      expect(line).toContain('Rain on a tin roof');
+      expect(line).not.toContain('set.yaml');
     });
 
     it('shows the reason above the composer\'s row and points Generate at it', async () => {

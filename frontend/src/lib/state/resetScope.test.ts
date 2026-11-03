@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { withAudio } from '../../test-utils/audio';
+import { AUDIO_MODELS, withAudio } from '../../test-utils/audio';
 import { makeContext } from '../../test-utils/workspace';
-import { defaultsFor, draft } from './draft.svelte';
+import { defaultsFor, draft, SETTING_KEYS } from './draft.svelte';
 import { sourceInfo } from './extend.fixtures';
 import { downloadStore } from './downloads.svelte';
 import { generateBlock } from './generateBlock.svelte';
@@ -40,7 +40,7 @@ const MARKED: DraftState = {
   workflow: 'img2img', promptSource: 'file', prompt: 'a prompt', scene: 'a scene', jsonPromptEnabled: true, jsonPrompt: '{"a":1}', firstSigma: 0.4, negativePrompt: 'blurry',
   promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one', 'two'], promptFileLoaded: { path: '/prompts/set.yaml', count: 2 },
   model: 'zit', ratio: '16:9', dimensionMode: 'custom', size: 'l', steps: 17, guidance: 2.5, width: 1000, height: 600, runs: 4, seed: 42,
-  loraString: 'detail:0.8', lorasByFamily: { 'model:ltx-8': 'detail:0.5' }, lastImageModel: 'zit', lastVideoModel: 'ltx-8', lastImageQuantize: 4,
+  loraString: 'detail:0.8', lorasByFamily: { 'model:ltx-8': 'detail:0.5' }, lastImageModel: 'zit', lastVideoModel: 'ltx-8', lastImageQuantize: 4, settingsModel: 'zit',
   referenceImagePath: '/refs/ref.png', referenceImageUpload: 'start.png', firstFramePath: '/refs/first.png', firstFrameUpload: 'first.png',
   referenceImagePaths: ['/refs/a.png', '/refs/b.png'], missingReferencePaths: ['/refs/b.png'], endImagePath: '/refs/end.png', endImageUpload: 'end.png',
   audioTrackPath: '/audio/song.mp3', audioTrackUpload: 'memo.m4a', audioTrackStart: 90,
@@ -239,6 +239,42 @@ describe('round trips between the tabs (G3, M2, M3)', () => {
     expect(draft.state).toMatchObject({ workflow: 'txt2vid', loraString: 'detail:0.6' });
   });
 
+  it('the Image settings and the applied preset survive a visit to the Audio tab', () => {
+    draft.hydrateFromContext(ctx, null);
+    draft.patch({ steps: 17, ratio: '16:9', size: 'l', scheduler: 'beta', upscaleEnabled: true, upscaleFactor: 4 });
+    draft.setAppliedPreset('look');
+
+    openTab('music');
+    openTab('txt2img');
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', model: 'zit', steps: 17, ratio: '16:9', size: 'l', scheduler: 'beta', upscaleEnabled: true, upscaleFactor: 4, appliedPreset: 'look' });
+  });
+
+  it('the Video settings and the applied preset survive a visit to the Audio tab', () => {
+    draft.hydrateFromContext(ctx, null);
+    openTab('txt2vid');
+    draft.patch({ steps: 11, frameCount: 33, audio: false, videoUpscaleEnabled: true, videoUpscaleFactor: 4 });
+    draft.setAppliedPreset('clip');
+
+    openTab('speech');
+    openTab('txt2vid');
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2vid', steps: 11, frameCount: 33, audio: false, videoUpscaleEnabled: true, videoUpscaleFactor: 4, appliedPreset: 'clip' });
+  });
+
+  it('Video, Audio, Image takes the Image defaults and forgets the Video preset', () => {
+    draft.hydrateFromContext(ctx, null);
+    const imageDefaults = defaultsFor(ctx, draft.state, null);
+    openTab('txt2vid');
+    draft.patch({ steps: 11, frameCount: 33 });
+    draft.setAppliedPreset('clip');
+
+    openTab('music');
+    openTab('txt2img');
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', steps: imageDefaults.steps, size: imageDefaults.size, appliedPreset: null });
+  });
+
   it('M3: the image quantization survives a visit to the Video tab, and a Reset keeps it', () => {
     draft.hydrateFromContext(ctx, null);
     draft.update('quantize', 4);
@@ -336,5 +372,34 @@ describe('the speaker\'s tick follows the voice (G4)', () => {
     voiceConsent.ticked = true;
     draft.setVoice({ path: '/voices/third.wav' });
     expect(voiceConsent.ticked).toBe(false);
+  });
+});
+
+describe('SETTING_KEYS', () => {
+  it('holds every field the settings and shared scopes own, so each can be compared with its default', () => {
+    const missing = keysOf(['settings', 'shared']).filter((key) => !(SETTING_KEYS as readonly string[]).includes(key));
+
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('the length of a sound', () => {
+  it('starts at the default of the sound model and is left alone on a model that makes none', () => {
+    const slower = withAudio(makeContext(), AUDIO_MODELS.map((model) => (model.kind === 'sound' ? { ...model, limits: { ...model.limits, default_seconds: 25 } } : model)));
+    const open = (workflow: AudioWorkflow) => ({ ...draft.state, workflow, audioKind: workflow, audioModels: { music: 'yue2', speech: 'higgs3', sound: 'sa3' }, model: { music: 'yue2', speech: 'higgs3', sound: 'sa3' }[workflow] });
+
+    expect(defaultsFor(slower, open('sound'), null).audioSeconds).toBe(25);
+    expect(defaultsFor(slower, open('music'), null).audioSeconds).not.toBe(25);
+  });
+
+  it('is the default from the first time the sound kind opens, so it is not shown as changed', () => {
+    const slower = withAudio(makeContext(), AUDIO_MODELS.map((model) => (model.kind === 'sound' ? { ...model, limits: { ...model.limits, default_seconds: 25 } } : model)));
+    draft.reset();
+    draft.hydrateFromContext(slower);
+
+    draft.setAudioKind('sound', slower);
+
+    expect(draft.state.audioSeconds).toBe(25);
+    expect(draft.state.audioSeconds).toBe(defaultsFor(slower, draft.state, null).audioSeconds);
   });
 });

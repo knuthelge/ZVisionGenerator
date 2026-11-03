@@ -578,7 +578,7 @@
       <Alert tone="error" live>{error}</Alert>
     {:else if emptyState}
       <EmptyState title={filteredEmptyState ? 'No matching assets' : 'No generated assets yet'} class="min-h-96 justify-center">
-        <p>{filteredEmptyState ? `No ${mediaFilter} assets match the current gallery filter.` : 'Generated outputs appear here after an image or video job completes.'}</p>
+        <p>{filteredEmptyState ? `No ${mediaFilter} assets match the current gallery filter.` : 'Generated outputs appear here after a job completes.'}</p>
         {#snippet actions()}
           {#if filteredEmptyState}
             <Button onclick={clearMediaFilter}>Show all media</Button>

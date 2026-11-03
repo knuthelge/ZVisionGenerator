@@ -83,6 +83,24 @@ describe('ConfirmDialog', () => {
     expect(onconfirm).not.toHaveBeenCalled();
   });
 
+  it('confirms a list of parts with plain Enter only, not with ⌘ or Ctrl held', () => {
+    const { onconfirm } = mountDialog({ parts: [{ label: 'FLUX.2 Klein 9B', size: '35.1 GB', lines: [] }] });
+
+    expect(press('Enter', { metaKey: true }).defaultPrevented).toBe(true);
+    expect(press('Enter', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(onconfirm).not.toHaveBeenCalled();
+
+    press('Enter');
+    expect(onconfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('still confirms a plain question with ⌘↵', () => {
+    const { onconfirm } = mountDialog();
+
+    press('Enter', { metaKey: true });
+    expect(onconfirm).toHaveBeenCalledTimes(1);
+  });
+
   it('lists its parts, one block each, with "size unknown" for a missing size', () => {
     mountDialog({
       question: 'Download 2 models?',

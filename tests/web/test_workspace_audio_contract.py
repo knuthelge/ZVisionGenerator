@@ -10,19 +10,16 @@ from tests._licences import use_licences
 from tests.web._helpers import make_web_config, make_workspace_bootstrap_view
 
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.audio_preset import AudioCapabilities, parse_audio_presets
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import workspace_api as workspace_api_module
-from zvisiongenerator.web.model_status import describe_audio_status
 from zvisiongenerator.web.workspace_contract import (
     AUDIO_WORKFLOW_VALUES,
     CANONICAL_WORKFLOW_VALUES,
     WORKFLOW_DEFINITIONS,
     build_workflow_contract,
     canonicalize_workflow,
-    hidden_audio_controls,
     workflow_mode,
 )
 
@@ -34,8 +31,11 @@ def _on(monkeypatch, key: str) -> None:
     monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: key)
 
 
-def _presets(**overrides):
-    return {preset.id: preset for preset in parse_audio_presets(audio_config(**overrides) if overrides else audio_config())}
+def _row(monkeypatch, model_id: str, key: str, *, budget, present=lambda _target: True, **overrides):
+    """Return the Workspace row of *model_id* on a *key* machine with *budget*, from the fixture presets (or the *overrides*)."""
+    _on(monkeypatch, key)
+    rows = audio_models_module.audio_model_rows(audio_config(**overrides), budget, target_present=present)
+    return next(row for row in rows if row["id"] == model_id)
 
 
 class TestWorkflowValues:
@@ -76,6 +76,25 @@ class TestListedWorkflows:
         assert web_server._build_workflow_contract(audio_config())["values"] == _VIDEO_AND_IMAGE
 
 
+class TestRunnableModels:
+    def test_the_presets_of_the_config_run_where_there_is_cuda_or_mps(self, monkeypatch):
+        _on(monkeypatch, "cuda")
+
+        presets = audio_models_module.runnable_audio_models(audio_config(sa3=sa3_preset()))
+
+        assert [preset.id for preset in presets] == ["sa3"]
+
+    def test_no_preset_runs_on_a_machine_with_neither(self, monkeypatch):
+        def refuse():
+            raise RuntimeError("no accelerator")
+
+        monkeypatch.setattr(audio_models_module, "audio_platform_key", refuse)
+
+        assert audio_models_module.runnable_audio_models(audio_config(sa3=sa3_preset())) == ()
+        with pytest.raises(ValueError, match="no accelerator"):
+            audio_models_module.find_audio_model(audio_config(sa3=sa3_preset()), "sa3")
+
+
 class TestVisibleControls:
     @pytest.fixture
     def definitions(self):
@@ -93,63 +112,39 @@ class TestVisibleControls:
             assert not image_and_video & set(definitions[name]["visible_controls"])
             assert definitions[name]["requires_reference_image"] is False and definitions[name]["requires_source_video"] is False
 
-    @pytest.mark.parametrize(
-        ("caps", "hidden"),
-        [
-            ({"lyrics": True, "duration": True, "voice_clone": True}, []),
-            ({"lyrics": False, "duration": True, "voice_clone": True}, ["lyrics"]),
-            ({"lyrics": True, "duration": False, "voice_clone": True}, ["length"]),
-            ({"lyrics": True, "duration": True, "voice_clone": False}, ["voice", "voice_consent", "voice_path", "voice_text"]),
-            ({"lyrics": False, "duration": False, "voice_clone": False}, ["length", "lyrics", "voice", "voice_consent", "voice_path", "voice_text"]),
-        ],
-    )
-    def test_a_capability_a_model_lacks_hides_its_controls(self, caps, hidden):
-        assert hidden_audio_controls(AudioCapabilities(**caps)) == hidden
-
-    def test_the_hidden_controls_are_all_controls_of_some_audio_workflow(self):
-        every = {control for name in AUDIO_WORKFLOW_VALUES for control in WORKFLOW_DEFINITIONS[name]["visible_controls"]}
-
-        assert set(hidden_audio_controls(AudioCapabilities(False, False, False))) <= every
-
 
 class TestMemoryAndDownloadStatus:
     @pytest.mark.parametrize(
         ("budget_gb", "status"),
         [(10, "fits"), (7, "tight"), (6, "too_large")],
     )
-    def test_a_cuda_model_compares_its_measured_peak_with_the_cards_memory(self, budget_gb, status):
-        preset = _presets()["yue2"]  # measured at 6.7 GiB on CUDA
+    def test_a_cuda_model_compares_its_measured_peak_with_the_cards_memory(self, monkeypatch, budget_gb, status):
+        row = _row(monkeypatch, "yue2", "cuda", budget=MemoryBudget(round(budget_gb * GIB), system_bytes=64 * GIB))  # measured at 6.7 GiB on CUDA
 
-        fit = describe_audio_status(preset, "cuda", budget=MemoryBudget(round(budget_gb * GIB), system_bytes=64 * GIB), target_present=lambda _t: True)["memory_fit"]
+        assert row["memory_fit"] == {"kind": "discrete", "budget_gb": round(budget_gb, 1), "by_quantize": {"none": {"status": status, "required_gb": 6.7}}}
 
-        assert fit == {"kind": "discrete", "budget_gb": round(budget_gb, 1), "by_quantize": {"none": {"status": status, "required_gb": 6.7}}}
-
-    def test_a_mac_compares_the_mps_peak_with_the_recommended_working_set(self):
+    def test_a_mac_compares_the_mps_peak_with_the_recommended_working_set(self, monkeypatch):
         raw = yue2_preset()
-        raw["platforms"]["mps"]["memory_gb"] = 12.0
-        preset = _presets(yue2=raw)["yue2"]
+        raw["platforms"]["mps"] = {"memory_gb": 12.0}
 
-        fit = describe_audio_status(preset, "mps", budget=MemoryBudget(16 * GIB), target_present=lambda _t: True)["memory_fit"]
+        fit = _row(monkeypatch, "yue2", "mps", budget=MemoryBudget(16 * GIB), yue2=raw)["memory_fit"]
+        small = _row(monkeypatch, "yue2", "mps", budget=MemoryBudget(6 * GIB), yue2=raw)["memory_fit"]
 
         assert fit == {"kind": "unified", "budget_gb": 16.0, "by_quantize": {"none": {"status": "fits", "required_gb": 12.0}}}
-        small = describe_audio_status(preset, "mps", budget=MemoryBudget(6 * GIB), target_present=lambda _t: True)["memory_fit"]
         assert small["by_quantize"]["none"]["status"] == "too_large"
 
-    def test_an_unmeasured_mac_peak_or_an_unknown_budget_gives_no_estimate(self):
-        preset = _presets()["yue2"]  # the Mac peak is null until the Mac gate fills it in
+    def test_an_unmeasured_mac_peak_or_an_unknown_budget_gives_no_estimate(self, monkeypatch):
+        assert _row(monkeypatch, "yue2", "mps", budget=MemoryBudget(16 * GIB))["memory_fit"] is None  # the Mac peak is unmeasured
+        assert _row(monkeypatch, "yue2", "cuda", budget=None)["memory_fit"] is None
 
-        assert describe_audio_status(preset, "mps", budget=MemoryBudget(16 * GIB), target_present=lambda _t: True)["memory_fit"] is None
-        assert describe_audio_status(preset, "cuda", budget=None, target_present=lambda _t: True)["memory_fit"] is None
-
-    def test_a_model_is_downloaded_when_every_repository_of_its_plan_is_on_disk(self):
-        preset = _presets()["yue2"]
+    def test_a_model_is_downloaded_when_every_repository_of_its_plan_is_on_disk(self, monkeypatch):
         on_disk = {"m-a-p/YuE2-3B"}
 
-        status = describe_audio_status(preset, "cuda", budget=None, target_present=lambda target: target.repo_id in on_disk)
+        status = _row(monkeypatch, "yue2", "cuda", budget=None, present=lambda target: target.repo_id in on_disk)["downloaded"]
         on_disk.add("m-a-p/YuE2-Vae")
-        after = describe_audio_status(preset, "cuda", budget=None, target_present=lambda target: target.repo_id in on_disk)
+        after = _row(monkeypatch, "yue2", "cuda", budget=None, present=lambda target: target.repo_id in on_disk)["downloaded"]
 
-        assert status["downloaded"] is False and after["downloaded"] is True
+        assert status is False and after is True
 
 
 class TestWorkspacePayload:
@@ -216,10 +211,8 @@ class TestWorkspacePayload:
             "label": "YuE2 3B",
             "kind": "music",
             "type": "audio",
-            "capabilities": {"lyrics": True, "duration": False, "voice_clone": False},
             "limits": {"max_seconds": 360},
             "instrumental_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
-            "hidden_controls": ["length", "voice", "voice_consent", "voice_path", "voice_text"],
             "licences": [
                 {
                     "name": "CC BY-NC 4.0 with individual creator permission",
@@ -234,8 +227,7 @@ class TestWorkspacePayload:
             "memory_fit": {"kind": "discrete", "budget_gb": 10.0, "by_quantize": {"none": {"status": "fits", "required_gb": 6.7}}},
         }
         assert rows["higgs3"]["limits"] == {"max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30}
-        assert rows["higgs3"]["capabilities"]["voice_clone"] is True and rows["higgs3"]["hidden_controls"] == ["length", "lyrics"]
-        assert rows["sa3"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0}
+        assert rows["sa3"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0, "default_seconds": 10.0}
         assert rows["higgs3"]["instrumental_sections"] is None and rows["sa3"]["instrumental_sections"] is None
         assert rows["sa3"]["downloaded"] is False  # none of its repositories is under m-a-p/
         assert rows["sa3"]["licences"] == []

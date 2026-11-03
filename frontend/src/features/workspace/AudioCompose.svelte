@@ -33,10 +33,10 @@
   const status = $derived(kind === 'music' ? musicStatus(view.music) : '');
   const characters = $derived(`${view.characters.toLocaleString('en-US')} / ${(view.maxCharacters ?? 0).toLocaleString('en-US')} characters`);
 
-  /** Bring a recent prompt back into the open kind's text box; a song's lyrics come back with its style (when the model takes lyrics). */
+  /** Bring a recent prompt back into the open kind's text box; a song's lyrics come back with its style. */
   function pickRecent(entry: RecentPrompt): void {
     draft.update(AUDIO_TEXT_KEYS[kind], entry.prompt);
-    if (kind === 'music' && view.model?.capabilities.lyrics !== false) draft.update('lyrics', entry.scene);
+    if (kind === 'music') draft.update('lyrics', entry.scene);
     recentsOpen = false;
     // A finger would raise the keyboard over the result.
     if (!layout.coarse) document.getElementById(kind === 'music' ? 'ws-audio-style' : 'ws-prompt')?.focus();
@@ -90,26 +90,24 @@
         ></textarea>
       </div>
     </div>
-    {#if view.model?.capabilities.lyrics !== false}
-      <div class="field">
-        <div class="label-row">
-          <label class="ui-label" for="ws-lyrics">Lyrics</label>
-          <span class="label-extras">optional · leave empty or use only [section] tags for an instrumental</span>
-        </div>
-        <div class="ui-prompt-box">
-          <textarea
-            id="ws-lyrics"
-            class="prompt-text"
-            placeholder={LYRICS_PLACEHOLDER}
-            aria-describedby="ws-music-status"
-            value={s.lyrics}
-            use:autogrow={s.lyrics}
-            oninput={(e) => draft.update('lyrics', e.currentTarget.value)}
-          ></textarea>
-          {@render tools()}
-        </div>
+    <div class="field">
+      <div class="label-row">
+        <label class="ui-label" for="ws-lyrics">Lyrics</label>
+        <span class="label-extras">optional · leave empty or use only [section] tags for an instrumental</span>
       </div>
-    {/if}
+      <div class="ui-prompt-box">
+        <textarea
+          id="ws-lyrics"
+          class="prompt-text"
+          placeholder={LYRICS_PLACEHOLDER}
+          aria-describedby="ws-music-status"
+          value={s.lyrics}
+          use:autogrow={s.lyrics}
+          oninput={(e) => draft.update('lyrics', e.currentTarget.value)}
+        ></textarea>
+        {@render tools()}
+      </div>
+    </div>
   </div>
   <div class="prompt-statusline" data-testid="prompt-statusline" data-state={view.music?.kind ?? 'none'}>
     <span id="ws-music-status" class="statusline-msg" role="status">{status}</span>

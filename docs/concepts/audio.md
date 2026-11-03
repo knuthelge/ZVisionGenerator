@@ -100,11 +100,11 @@ The first part follows the recording, and each later part follows the first, so 
 
 **Prompt** describes what you hear, such as `rain on a tin roof, distant thunder`, and **Length (s)** is how long it lasts: from 1 second to 380, 10 by default. Sound is stereo.
 
-The model can come out louder than full scale. A take that peaks above 0 dBFS is scaled down to −1 dBFS when it is saved, so it does not clip. The first Sound take after the model loads takes a few seconds longer than the ones after it.
+The first Sound take after the model loads takes a few seconds longer than the ones after it.
 
 ## Takes and files
 
-Every take is a FLAC file, 16-bit, at the model's own sample rate and channel count: music 48 kHz stereo, speech 24 kHz mono and sound 44.1 kHz stereo. FLAC is lossless and plays in every current browser. Files are named `music_<date>_<time>.flac`, `speech_…` or `sound_…`, and a name that is taken gets `_2`, `_3`….
+Every take is a FLAC file, 16-bit, at the model's own sample rate and channel count: music 48 kHz stereo, speech 24 kHz mono and sound 44.1 kHz stereo. FLAC is lossless and plays in every current browser. A take that comes out louder than full scale is scaled down to −1 dBFS when it is saved, so it does not clip. Files are named `music_<date>_<time>.flac`, `speech_…` or `sound_…`, and a name that is taken gets `_2`, `_3`….
 
 The settings that made the take are stored inside the file: the model, the style, text or prompt, the lyrics, the length, the seed, whether it was cut, how many parts a speech take was read in and, for a cloned voice, the recording's file and what it says. The speaker's consent is not among them. The Gallery reads the settings back, which is how **Reuse settings** works for audio.
 

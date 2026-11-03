@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
 
 __all__ = [
-    "AUDIO_FAMILIES",
     "accelerator_free_bytes",
     "audio_platform_key",
     "convert_h3_checkpoint",
@@ -349,12 +348,9 @@ _AUDIO_BACKENDS: Final = {
 }
 """The module and class of each audio model family's backend, imported only when the family is used."""
 
-AUDIO_FAMILIES: Final = tuple(_AUDIO_BACKENDS)
-"""The audio model families a preset can name in its platform entry."""
-
 
 def audio_platform_key() -> str:
-    """Return the key of this machine in an audio preset's ``platforms``: ``cuda`` on Windows and Linux, ``mps`` on macOS.
+    """Return the key of this machine for an audio preset's ``platforms`` overrides: ``cuda`` on Windows and Linux, ``mps`` on macOS.
 
     Raises:
         RuntimeError: On a platform with neither.
@@ -370,7 +366,7 @@ def get_audio_backend(family: str) -> "AudioBackend":
     """Create the audio backend of a model family.
 
     Args:
-        family: One of :data:`AUDIO_FAMILIES`.
+        family: The ``family`` a preset names: ``yue2``, ``higgs3`` or ``stable_audio_3``.
 
     Returns:
         A new backend; the caller loads it and closes it.
@@ -379,7 +375,7 @@ def get_audio_backend(family: str) -> "AudioBackend":
         RuntimeError: If no backend is registered for the family; the message lists the known families.
     """
     if family not in _AUDIO_BACKENDS:
-        raise RuntimeError(f"No audio backend for model family '{family}'. Known: {list(AUDIO_FAMILIES)}")
+        raise RuntimeError(f"No audio backend for model family '{family}'. Known: {list(_AUDIO_BACKENDS)}")
     module, name = _AUDIO_BACKENDS[family]
     return getattr(importlib.import_module(module), name)()
 

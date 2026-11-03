@@ -14,7 +14,7 @@ from tests.audio._helpers import clip, decode, sine
 
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_save import save_flac
-from zvisiongenerator.utils.audio_voice import is_any_voice_take, voice_needs_consent
+from zvisiongenerator.utils.audio_voice import voice_needs_consent
 from zvisiongenerator.utils.provenance import (
     AUDIO_CONFIG_SCHEMA,
     build_audio_config_payload,
@@ -127,13 +127,6 @@ class TestPayload:
 
 
 class TestAnyVoiceTake:
-    def test_a_speech_take_without_a_recorded_voice_is_an_any_take(self):
-        assert is_any_voice_take({"kind": "speech", "prompt": "Hi"})
-
-    @pytest.mark.parametrize("config", [None, {}, {"kind": "speech", "voice_path": "~/me.wav"}, {"kind": "music"}, {"kind": "sound"}])
-    def test_everything_else_is_not(self, config):
-        assert not is_any_voice_take(config)
-
     @REAL
     def test_a_file_needs_consent_unless_its_settings_show_an_any_take(self, tmp_path):
         any_take = save_flac(sine(0.1), 24000, tmp_path / "any.flac", {"kind": "speech", "prompt": "Hi"})

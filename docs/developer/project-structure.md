@@ -23,7 +23,7 @@ zvisiongenerator/
 ├── matte_room.py                  Memory guard for the background removal chain: swaps the image model out and back in when free memory is short
 ├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
-├── audio_runner.py                Audio generation run orchestration: plan, download, load once, make and save each take as FLAC, close; out-of-memory messages
+├── audio_runner.py                Audio generation run orchestration: seeds, load once, make and save each take as FLAC, close (torch flags and accelerator memory given back once); out-of-memory messages
 ├── config.yaml                    Default configuration (sizes, image, video and audio model presets)
 ├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
@@ -160,12 +160,13 @@ zvisiongenerator/
 │   ├── app_db.py                  The app database `ziv.sqlite3`: path, connections with the standard pragmas, per-component schema versions, corruption quarantine
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
-│   ├── audio_preset.py            Pure parser of the config's `audio_model_presets` section: frozen `AudioPreset`, `AudioPlatform`, `AudioCapabilities` and `AudioLimits` values, and the presets that run on a platform
+│   ├── audio_preset.py            Pure parser of the config's `audio_model_presets` section: frozen `AudioPreset` (family, pinned files, kind-derived abilities), `AudioPlatform` overrides and `AudioLimits` values; the last parse is reused while the section is unchanged
 │   ├── audio_fade.py              Fade the end of a clip to silence
+│   ├── audio_console.py           The live progress line of `ziv audio`: one line rewritten in place on a terminal, a line per phase elsewhere
 │   ├── audio_level.py             Scale a clip that peaks above a ceiling down to it (`limit_peak`)
 │   ├── audio_peaks.py             The 100 waveform peaks of an audio clip or file, for the gallery
 │   ├── audio_resample.py          Polyphase resampling of multi-channel audio
-│   ├── audio_request.py           The checks of an audio request that `ziv audio` and the Web UI share: the runnable model, the fields a model takes, the length of a sound and the limits of a speech request
+│   ├── audio_request.py           The checks of an audio request that `ziv audio` and the Web UI share: the model, the length of a sound and the limits of a speech request
 │   ├── audio_save.py              Write a take as 16-bit FLAC through ffmpeg with its settings in the `zvisiongenerator.config` tag
 │   ├── audio_track.py             Read a user's audio track and build the window sound of an extension
 │   ├── audio_voice.py             Whether a voice recording needs the speaker's consent: only a speech take of this app made without a reference voice does not
@@ -234,7 +235,7 @@ zvisiongenerator/
 ├── web/
 │   ├── audio_job.py               Turn an audio generate form's fields into the request of one take, with the refusals `ziv audio` makes
 │   ├── audio_inventory.py         The audio rows of the Models page (downloaded, download needed, memory fit, delete, disk use, licences) and the repositories the cache listing never offers as unused
-│   ├── audio_models.py            The audio models that run on this machine and each one's Workspace row (capabilities, limits, default length, a music model's section list, hidden controls, download state, memory fit, licences)
+│   ├── audio_models.py            The audio models that run on this machine and each one's Workspace row (limits, default length, a music model's section list, download state, memory fit, licences), and the shared row builder of that page and the Models page
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers

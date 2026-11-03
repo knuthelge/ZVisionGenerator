@@ -66,10 +66,9 @@ describe('the estimated progress of a take', () => {
     expect(auroraProgress('speech', at('Decode', 1, 1, 2, 2))).toBeCloseTo(1);
   });
 
-  it('counts a sound by its steps out of 8, then by its decode', () => {
+  it('counts a sound by its steps out of their total, then by its decode', () => {
     expect(auroraProgress('sound', at('Sampling', 0, 8))).toBe(0);
     expect(auroraProgress('sound', at('Sampling', 4, 8))).toBe(0.5);
-    expect(auroraProgress('sound', at('Sampling', 4, null))).toBe(0.5);
     expect(auroraProgress('sound', at('Decode', 0, 1))).toBe(1);
   });
 

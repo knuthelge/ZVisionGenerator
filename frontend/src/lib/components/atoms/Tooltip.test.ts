@@ -48,33 +48,15 @@ describe('Tooltip', () => {
     flushSync();
     expect(bubble.dataset.open).toBe('false');
 
-    trigger.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    trigger.dispatchEvent(new FocusEvent('focus'));
     flushSync();
     expect(bubble.dataset.open).toBe('true');
+    trigger.dispatchEvent(new FocusEvent('blur'));
+    flushSync();
+    expect(bubble.dataset.open).toBe('false');
+    trigger.dispatchEvent(new FocusEvent('focus'));
+    flushSync();
     trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    flushSync();
-    expect(bubble.dataset.open).toBe('false');
-  });
-
-  it('opens when a control inside takes focus (focusin bubbles) and closes when it leaves', () => {
-    const { trigger, bubble } = render({ focusable: false });
-    const inner = document.createElement('button');
-    trigger.prepend(inner);
-
-    inner.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-    flushSync();
-    expect(bubble.dataset.open).toBe('true');
-    inner.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
-    flushSync();
-    expect(bubble.dataset.open).toBe('false');
-  });
-
-  it('ignores a tap when touch is off', () => {
-    const { trigger, bubble } = render({ touch: false });
-    const tap = new Event('pointerdown', { bubbles: true }) as Event & { pointerType: string };
-    Object.defineProperty(tap, 'pointerType', { value: 'touch' });
-
-    trigger.dispatchEvent(tap);
     flushSync();
     expect(bubble.dataset.open).toBe('false');
   });

@@ -1,9 +1,6 @@
 import type { AudioModelOption, GalleryAsset } from '$lib/types';
 import { formatClock } from './clock';
 
-/** The longest recording the Speech tab takes as a voice, when no speech model says otherwise (seconds). */
-export const VOICE_MAX_SECONDS = 30;
-
 /** Whether a lyric line only names a section: `[verse]`, `[chorus 2]`. */
 function isSectionLine(line: string): boolean {
   return /^\[[^\]]*\]$/.test(line.trim());
@@ -57,7 +54,7 @@ interface CutNote {
 export function cutNote(asset: GalleryAsset, models: readonly AudioModelOption[] | undefined): CutNote | null {
   if (asset.cut !== true) return null;
   const model = models?.find((item) => item.id === asset.model);
-  const cap = model?.limits.max_seconds ?? asset.duration ?? null;
+  const cap = (model && model.kind !== 'speech' ? model.limits.max_seconds : null) ?? asset.duration ?? null;
   if (cap === null) return null;
   const at = formatClock(cap);
   return { text: `⚠ Cut at ${at}`, tip: `${audioModelLabel(asset, models)} stops at ${at}. Remove sections to hear its ending.` };

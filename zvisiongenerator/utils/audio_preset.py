@@ -1,8 +1,10 @@
 """Audio model presets: the ``audio_model_presets`` section of the config, parsed and validated into frozen values.
 
-A preset is one audio model, keyed by its model id (``-m yue2``). It names what the model is (``kind``), what it can do
-(``capabilities``), its own ceilings (``limits``), its model knobs (``settings``) and, per platform, the backend
-family and the pinned files it runs from. The functions here are pure: they read a config ``dict`` and do no I/O.
+A preset is one audio model, keyed by its model id (``-m yue2``). It names what the model is (``kind``), the backend
+family and the pinned files it runs from, its own ceilings (``limits``) and its model knobs (``settings``); a
+``platforms`` entry per accelerator (``cuda``, ``mps``) overrides settings and records the measured memory peak. What a
+model can do follows from its kind: music takes lyrics, sound takes a length, speech follows a voice. The functions here
+are pure: they read a config ``dict`` and do no I/O.
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ from __future__ import annotations
 import copy
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -19,13 +21,11 @@ from zvisiongenerator.utils.paths import split_huggingface_revision
 __all__ = [
     "AUDIO_KINDS",
     "AUDIO_PLATFORMS",
-    "AudioCapabilities",
     "AudioFiles",
     "AudioLimits",
     "AudioPlatform",
     "AudioPreset",
     "parse_audio_presets",
-    "runnable_audio_presets",
 ]
 
 AUDIO_KINDS: Final = ("music", "speech", "sound")
@@ -43,21 +43,6 @@ _LIMITS_BY_KIND: Final = {
     "sound": ("max_seconds",),
     "speech": ("max_new_tokens", "part_chars", "max_text_chars", "min_voice_seconds", "max_voice_seconds"),
 }
-
-
-@dataclass(frozen=True)
-class AudioCapabilities:
-    """What a model can do.
-
-    Attributes:
-        lyrics: The prompt is a style and the model also sings lyrics.
-        duration: The user picks the length in seconds.
-        voice_clone: The model can follow a voice recording.
-    """
-
-    lyrics: bool
-    duration: bool
-    voice_clone: bool
 
 
 @dataclass(frozen=True)
@@ -98,19 +83,15 @@ class AudioFiles:
 
 @dataclass(frozen=True)
 class AudioPlatform:
-    """How a preset runs on one platform.
+    """What a preset overrides or records for one platform.
 
     Attributes:
-        family: The backend family, such as ``yue2`` (``get_audio_backend`` resolves it).
-        files: The pinned files to download, in order.
-        memory_gb: The GPU memory the model peaks at on this platform, in GiB, or ``None`` while unmeasured.
+        memory_gb: The GPU memory the model peaked at when measured on this platform, in GiB, or ``None`` while unmeasured.
         settings: The settings this platform overrides; see :meth:`AudioPreset.settings_for`.
     """
 
-    family: str
-    files: tuple[AudioFiles, ...]
-    memory_gb: float | None
-    settings: Mapping[str, Any]
+    memory_gb: float | None = None
+    settings: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
 
 @dataclass(frozen=True)
@@ -121,27 +102,55 @@ class AudioPreset:
         id: The model id, the key in ``audio_model_presets``.
         label: The name the Web UI shows.
         kind: ``music``, ``speech`` or ``sound``.
-        capabilities: What the model can do.
+        family: The backend family, such as ``yue2`` (``get_audio_backend`` resolves it).
+        files: The pinned files to download, in order.
         limits: The model's ceilings.
         settings: The model knobs every platform shares, an open mapping.
-        platforms: The platform keys (``cuda``, ``mps``) the model runs on, with how.
+        platforms: The platform keys (``cuda``, ``mps``) the preset says something about; the others use the shared values.
     """
 
     id: str
     label: str
     kind: str
-    capabilities: AudioCapabilities
+    family: str
+    files: tuple[AudioFiles, ...]
     limits: AudioLimits
     settings: Mapping[str, Any]
     platforms: Mapping[str, AudioPlatform]
 
+    @property
+    def takes_lyrics(self) -> bool:
+        """Whether the prompt is a style and the model also sings lyrics (music)."""
+        return self.kind == "music"
+
+    @property
+    def sets_length(self) -> bool:
+        """Whether the user picks the length in seconds (sound); music takes its length from the lyrics and speech from the text."""
+        return self.kind == "sound"
+
+    @property
+    def follows_voice(self) -> bool:
+        """Whether the model can follow a voice recording (speech)."""
+        return self.kind == "speech"
+
     def settings_for(self, platform_key: str) -> dict[str, Any]:
-        """Return the settings that apply on *platform_key*, one of the preset's platforms: the shared ones, overridden by the platform's."""
-        return {**copy.deepcopy(dict(self.settings)), **copy.deepcopy(dict(self.platforms[platform_key].settings))}
+        """Return the settings that apply on *platform_key* (``cuda`` or ``mps``): the shared ones, overridden by the platform's."""
+        override = self.platforms[platform_key].settings if platform_key in self.platforms else {}
+        return {**copy.deepcopy(dict(self.settings)), **copy.deepcopy(dict(override))}
+
+    def memory_gb_for(self, platform_key: str) -> float | None:
+        """Return the GPU peak measured on *platform_key* in GiB, or ``None`` while unmeasured there."""
+        return self.platforms[platform_key].memory_gb if platform_key in self.platforms else None
+
+
+_cache: tuple[Mapping[str, Any], tuple[AudioPreset, ...]] | None = None
 
 
 def parse_audio_presets(config: Mapping[str, Any]) -> tuple[AudioPreset, ...]:
     """Parse and validate the ``audio_model_presets`` section of *config*, in the order it is written.
+
+    The last result is kept and returned again while the section is equal to the one it was parsed from, so the callers
+    that ask for the presets per request, per row or per gallery asset parse them once.
 
     Args:
         config: The loaded config. A missing section means no presets.
@@ -150,27 +159,29 @@ def parse_audio_presets(config: Mapping[str, Any]) -> tuple[AudioPreset, ...]:
         One frozen preset per entry.
 
     Raises:
-        ValueError: If the section or a preset is malformed: not a mapping, a missing or non-boolean capability, a
-            missing limit for the preset's kind, an unknown kind or platform, or a platform without a family or files.
+        ValueError: If the section or a preset is malformed: not a mapping, a missing or unknown key, a missing limit
+            for the preset's kind, an unknown kind or platform, or files that are not pinned to a commit.
     """
+    global _cache
     section = config.get(_SECTION)
     if section is None:
         return ()
+    cached = _cache
+    if cached is not None and cached[0] == section:
+        return cached[1]
     if not isinstance(section, Mapping):
         raise ValueError(f"config '{_SECTION}' must be a mapping of model id to preset, got {type(section).__name__}.")
-    return tuple(_parse_preset(str(model_id), raw) for model_id, raw in section.items())
-
-
-def runnable_audio_presets(config: Mapping[str, Any], platform_key: str) -> tuple[AudioPreset, ...]:
-    """Return the presets that have an entry for *platform_key* (``cuda`` or ``mps``), in config order."""
-    return tuple(preset for preset in parse_audio_presets(config) if platform_key in preset.platforms)
+    presets = tuple(_parse_preset(str(model_id), raw) for model_id, raw in section.items())
+    _cache = (copy.deepcopy(section), presets)
+    return presets
 
 
 def _parse_preset(model_id: str, raw: object) -> AudioPreset:
     """Validate one preset and return it."""
     where = f"config '{_SECTION}.{model_id}'"
     mapping = _mapping(raw, where)
-    for key in ("label", "kind", "capabilities", "limits", "platforms"):
+    _only_keys(mapping, ("label", "kind", "family", "files", "limits", "settings", "platforms"), where)
+    for key in ("label", "kind", "family", "files", "limits"):
         if key not in mapping:
             raise ValueError(f"{where} is missing the required key '{key}'.")
     kind = mapping["kind"]
@@ -180,10 +191,11 @@ def _parse_preset(model_id: str, raw: object) -> AudioPreset:
         id=model_id,
         label=_text(mapping["label"], f"{where}.label"),
         kind=kind,
-        capabilities=_capabilities(mapping["capabilities"], f"{where}.capabilities"),
+        family=_text(mapping["family"], f"{where}.family"),
+        files=_file_list(mapping["files"], f"{where}.files"),
         limits=_limits(mapping["limits"], kind, f"{where}.limits"),
         settings=_settings(mapping.get("settings"), f"{where}.settings"),
-        platforms=MappingProxyType({key: _platform(value, f"{where}.platforms.{key}") for key, value in _platform_entries(mapping["platforms"], f"{where}.platforms")}),
+        platforms=_platforms(mapping.get("platforms"), f"{where}.platforms"),
     )
 
 
@@ -216,19 +228,6 @@ def _number(value: object, where: str, *, integer: bool = False) -> float | int:
     return value
 
 
-def _capabilities(value: object, where: str) -> AudioCapabilities:
-    """Parse a ``capabilities`` mapping: every capability, each a boolean."""
-    caps = _mapping(value, where)
-    names = tuple(field.name for field in fields(AudioCapabilities))
-    _only_keys(caps, names, where)
-    for name in names:
-        if name not in caps:
-            raise ValueError(f"{where}.{name} is required.")
-        if not isinstance(caps[name], bool):
-            raise ValueError(f"{where}.{name} must be true or false.")
-    return AudioCapabilities(**caps)
-
-
 def _limits(value: object, kind: str, where: str) -> AudioLimits:
     """Parse a ``limits`` mapping: the limits of *kind*, each required."""
     limits = _mapping(value, where)
@@ -249,31 +248,31 @@ def _settings(value: object, where: str) -> Mapping[str, Any]:
     return MappingProxyType(copy.deepcopy(dict(_mapping(value, where))))
 
 
-def _platform_entries(value: object, where: str) -> list[tuple[str, Any]]:
-    """Return the entries of a ``platforms`` mapping: at least one, each keyed by a known platform."""
+def _platforms(value: object, where: str) -> Mapping[str, AudioPlatform]:
+    """Parse a ``platforms`` mapping (optional): each key a known platform, each entry its ``memory_gb`` and the ``settings`` it overrides."""
+    if value is None:
+        return MappingProxyType({})
     platforms = _mapping(value, where)
-    if not platforms:
-        raise ValueError(f"{where} must name at least one platform ({', '.join(AUDIO_PLATFORMS)}).")
     _only_keys(platforms, AUDIO_PLATFORMS, where)
-    return list(platforms.items())
+    return MappingProxyType({key: _platform(entry, f"{where}.{key}") for key, entry in platforms.items()})
 
 
 def _platform(value: object, where: str) -> AudioPlatform:
-    """Parse one platform entry: a backend ``family``, the pinned ``files``, the ``memory_gb`` peak and the ``settings`` it overrides."""
+    """Parse one platform entry: the measured ``memory_gb`` peak and the ``settings`` it overrides, each optional."""
     entry = _mapping(value, where)
-    _only_keys(entry, ("family", "files", "memory_gb", "settings"), where)
-    for key in ("family", "files", "memory_gb"):
-        if key not in entry:
-            raise ValueError(f"{where} is missing the required key '{key}' (use null for an unmeasured memory_gb).")
-    files = entry["files"]
-    if not isinstance(files, list) or not files:
-        raise ValueError(f"{where}.files must be a non-empty list of {{repo, files}} entries.")
+    _only_keys(entry, ("memory_gb", "settings"), where)
+    memory = entry.get("memory_gb")
     return AudioPlatform(
-        family=_text(entry["family"], f"{where}.family"),
-        files=tuple(_files(item, f"{where}.files[{index}]") for index, item in enumerate(files)),
-        memory_gb=None if entry["memory_gb"] is None else float(_number(entry["memory_gb"], f"{where}.memory_gb")),
+        memory_gb=None if memory is None else float(_number(memory, f"{where}.memory_gb")),
         settings=_settings(entry.get("settings"), f"{where}.settings"),
     )
+
+
+def _file_list(value: object, where: str) -> tuple[AudioFiles, ...]:
+    """Parse the ``files`` list: at least one ``{repo, files}`` entry."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{where} must be a non-empty list of {{repo, files}} entries.")
+    return tuple(_files(item, f"{where}[{index}]") for index, item in enumerate(value))
 
 
 def _files(value: object, where: str) -> AudioFiles:

@@ -332,7 +332,7 @@ describe('WorkspacePage Transparent background', () => {
     const popover = document.querySelector('[data-testid="licence-popover"]')!;
     expect(badge()!.getAttribute('aria-expanded')).toBe('true');
     expect(popover.textContent).toContain(MATTE_LICENCE.summary);
-    expect(popover.querySelector('a')!.textContent).toBe('Model card ↗');
+    expect(popover.querySelector('a')!.textContent).toBe(`${MATTE_LICENCE.url_label} ↗`);
     expect(toggle().checked).toBe(false);
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { auroraProgress } from '$lib/components/molecules/audioAurora';
+import { auroraNote, auroraProgress, MUSIC_PHASES } from '$lib/components/molecules/audioAurora';
 import type { ActiveJobState, AudioWorkflow } from '$lib/types';
 import { downloadFromEvent, trackJobEvent } from './jobPhases';
 import {
@@ -563,6 +563,19 @@ describe('an audio job', () => {
     expect(writing).toMatchObject({ state: 'current', percent: null });
     expect(writing.text).toContain('1:15');
     expect(audioRows(take({ audio: progress('Plan', 125, null) }))[0]).toMatchObject({ text: 'Planning', percent: null });
+  });
+
+  it('names each phase of a song alike on the card and in the strip', () => {
+    for (const { id, label } of MUSIC_PHASES) {
+      const current = audioRows(take({ audio: progress(id, 10, null) })).find((row) => row.state === 'current');
+      expect(current?.text.startsWith(label)).toBe(true);
+      expect(auroraNote('music', progress(id, 10, null)).startsWith(label)).toBe(true);
+    }
+  });
+
+  it('keeps the bar of a song\'s decode moving, whatever step count it reports', () => {
+    expect(audioRows(take({ audio: progress('Decode', 0, 1) }))[3]).toMatchObject({ state: 'current', percent: null });
+    expect(audioRows(take({ audio: progress('Decode', 1, 1) }))[3]).toMatchObject({ state: 'current', percent: null });
   });
 
   it('never counts steps from zero while the decode runs, or when a phase has no total', () => {

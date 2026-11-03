@@ -9,7 +9,6 @@ streamed in tensor by tensor (see :mod:`yue2_load`) and the acoustic part runs i
 
 from __future__ import annotations
 
-import gc
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Final
 
@@ -18,16 +17,15 @@ import numpy as np
 from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.backends.audio.yue2_load import load_model, size_checked_weights
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
-from zvisiongenerator.core.audio_backend import AudioCancelled
+from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.utils.audio_fade import fade_out
 from zvisiongenerator.utils.music_mode import INSTRUMENTAL, music_mode
-from zvisiongenerator.utils.torch_flags import TorchFlags, capture_torch_flags, restore_torch_flags
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.audio_backend import CancelCheck, ProgressCallback
     from zvisiongenerator.core.audio_types import AudioGenerationRequest
-    from zvisiongenerator.utils.audio_preset import AudioPlatform, AudioPreset
+    from zvisiongenerator.utils.audio_preset import AudioPreset
 
 __all__ = ["SAMPLE_RATE", "YuE2Backend"]
 
@@ -69,26 +67,23 @@ class YuE2Backend:
         self._device = ""
         self._settings: dict[str, Any] = {}
         self._max_seconds = 0.0
-        self._flags: TorchFlags | None = None
 
-    def load(self, preset: AudioPreset, platform_entry: AudioPlatform, device: str) -> None:
+    def load(self, preset: AudioPreset, device: str) -> None:
         """Load YuE2 for *preset* on *device*.
 
-        The model is streamed in and handed to the pipeline. With the ``weight_swap`` setting it is pinned in CPU memory and
-        wrapped in a :class:`WeightSwap`; without it, it is placed on *device*. The process memory fraction the kit caps is
+        The model is streamed in and handed to the pipeline. With the ``weight_swap`` setting (on by default on CUDA, off on
+        MPS) it is pinned in CPU memory and wrapped in a :class:`WeightSwap`; without it, it is placed on *device*. The process memory fraction the kit caps is
         set back to 1.0 on CUDA either way.
 
         Args:
-            preset: The ``yue2`` preset: its limits and shared settings.
-            platform_entry: The preset's entry for *device*: the model and VAE files and the platform's settings.
+            preset: The ``yue2`` preset: its model and VAE files, its limits and its settings for *device*.
             device: ``cuda`` or ``mps``.
 
         """
         settings = preset.settings_for(device)
-        weight_swap = bool(settings["weight_swap"])
-        model_files, vae_files = platform_entry.files
+        weight_swap = bool(settings.get("weight_swap", device == "cuda"))
+        model_files, vae_files = preset.files
         self._device = device
-        self._flags = capture_torch_flags()  # the kit sets global numerics flags; close() puts them back
         if weight_swap and device == "cuda":
             _stop_pin_rounding()
         try:
@@ -131,12 +126,12 @@ class YuE2Backend:
             raise
 
     def close(self) -> None:
-        """Free the model, the pinned weights and the memory limit, and restore the torch flags the kit changed.
+        """Free the model and the pinned weights and lift the process memory fraction the kit capped.
 
-        Safe to call twice, after a failed load and after a failed take.
+        The runner returns the cached accelerator memory and the torch flags the kit changed. Safe to call twice, after a
+        failed load and after a failed take.
         """
-        pipe, swap, device, flags = self._pipe, self._swap, self._device, self._flags
-        self._flags = None
+        pipe, swap, device = self._pipe, self._swap, self._device
         self._pipe = self._swap = None
         self._device = ""
         self._settings = {}
@@ -146,13 +141,8 @@ class YuE2Backend:
         finally:
             if swap is not None:
                 swap.release()
-            del pipe, swap
-            try:
-                if device == "cuda":
-                    _free_cuda()
-            finally:
-                if flags is not None:
-                    restore_torch_flags(flags)
+            if device == "cuda":
+                _lift_memory_fraction()
 
     def _take(self, style: str, lyrics: str, cot: str, seed: int, on_progress: ProgressCallback, stop: _CancelProbe) -> AudioClip:
         pipe, swap, settings = self._pipe, self._swap, self._settings
@@ -176,11 +166,11 @@ class YuE2Backend:
         on_progress("Song tokens", len(semantic.tokens), None, 1, 1)
         latents = _synthesize(pipe, swap, semantic, on_progress, stop)
         stop.raise_if_requested()
-        on_progress("Decode", 0, 1, 1, 1)
+        on_progress(DECODE_PHASE, 0, 1, 1, 1)
         if swap is not None:
             swap.phase("none")
         audio = pipe.decode(latents)
-        on_progress("Decode", 1, 1, 1, 1)
+        on_progress(DECODE_PHASE, 1, 1, 1, 1)
         samples = np.ascontiguousarray(audio.T, dtype=np.float32)
         if semantic.truncated:
             return AudioClip(fade_out(samples, SAMPLE_RATE, float(settings["fade_seconds"])), SAMPLE_RATE, cut=True)
@@ -287,14 +277,3 @@ def _lift_memory_fraction() -> None:
     import torch
 
     torch.cuda.set_per_process_memory_fraction(1.0)
-
-
-def _free_cuda() -> None:
-    """Collect garbage, return cached blocks to the driver and lift the process memory fraction."""
-    import torch
-
-    gc.collect()
-    try:
-        torch.cuda.empty_cache()
-    finally:
-        _lift_memory_fraction()

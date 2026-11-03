@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.downloads.flights import DownloadFlights, Flight
     from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 
-__all__ = ["DETACHED", "READY", "STOPPED", "UNCHECKED", "DownloadReport", "ensure_downloaded"]
+__all__ = ["DETACHED", "READY", "STOPPED", "UNCHECKED", "DownloadReport", "ensure_downloaded", "require_checked"]
 
 READY = "ready"
 UNCHECKED = "unchecked"
@@ -253,3 +253,22 @@ def ensure_downloaded(
             if flight.status == "failed":
                 raise RuntimeError(flight.message or f"Download of {target.repo_id} failed.")
     return READY
+
+
+def require_checked(outcome: str, targets: Sequence[DownloadTarget], label: str, *, present: Callable[[DownloadTarget], bool] = target_present_offline) -> None:
+    """Refuse an *outcome* of ``UNCHECKED`` when a target is not on disk: the Hub could not be reached to fetch it.
+
+    A model that loads only from files on disk (the audio models) calls this after :func:`ensure_downloaded`, so the user
+    hears about the connection rather than about a missing file.
+
+    Args:
+        outcome: What :func:`ensure_downloaded` returned.
+        targets: The downloads that were ensured.
+        label: The model's name, for the message.
+        present: Tells whether a target is fully on disk without using the network.
+
+    Raises:
+        RuntimeError: When *outcome* is ``UNCHECKED`` and a target is missing.
+    """
+    if outcome == UNCHECKED and not all(present(target) for target in targets):
+        raise RuntimeError(f"Could not reach Hugging Face to download {label}. Check the internet connection and try again.")

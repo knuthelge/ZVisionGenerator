@@ -239,7 +239,7 @@ The toolbar reads **Kind**, **Model**, the model's **ⓘ** licence mark and its 
 | **Speech** | **Text**, with a count against the 10,000 characters it can hold | **Voice**, then **Batch size** and **Seed** |
 | **Sound** | **Prompt**, what you hear | **Length (s)**, from 1 to 380 and 10 to begin with, then **Batch size** and **Seed** |
 
-- **Music:** a line under the boxes says what you will get: *Song · length follows the lyrics*, or *Instrumental · 8 sections · add or remove section tags to change its length*. Write words under `[verse]` and `[chorus]` tags for a song; leave **Lyrics** empty, or write only tags, for an instrumental; `[Instrumental]` and `[Solo]` tags keep vocals out more reliably than `[verse]` and `[chorus]`, and a take can still occasionally carry a voice, so generate again if it does. See [Music](../concepts/audio.md#music).
+- **Music:** a line under the boxes says what you will get: *Song · length follows the lyrics*, or *Instrumental · 8 sections · add or remove section tags to change its length*. Write words under `[verse]` and `[chorus]` tags for a song; leave **Lyrics** empty, or write only tags, for an instrumental; `[Instrumental]` and `[Solo]` tags keep vocals out. See [Music](../concepts/audio.md#music).
 - **Speech:** the help under **Text** says that long text is read in parts and joined into one take. Expressive tags such as `<|sfx:laughter|>` are typed into the text; see [Expressive tags](../concepts/audio.md#expressive-tags).
 - **Compose tools:** there is no enhancer, JSON mode or negative prompt, and no steps or guidance to set. The tools row has only **Recent prompts**: music, speech and sound each keep their own list, a song's recent prompt brings its lyrics back with its style, and **Clear recents** clears only the open kind's list.
 
@@ -252,11 +252,9 @@ The toolbar reads **Kind**, **Model**, the model's **ⓘ** licence mark and its 
 
 ![The Voice section on From a recording, with the file, What it says and the consent tick](../assets/screenshots/placeholder.svg "audio-voice")
 
-The tick is asked again after a new recording, **Reset**, a reload, or a **Reuse settings**, **Load settings** or **Use as** that replaces the voice. Reusing a song or a sound leaves the voice and its tick as they are. A take made with **Any** that you use as the voice needs no tick.
+The tick is never saved and is asked again whenever the voice changes; see [Voices](../concepts/audio.md#voices).
 
 A clean, close-miked recording gives the best voice; see [Clone from a clean recording](../concepts/audio.md#voices).
-
-**Reset** keeps the kind, the models and the text you wrote (Style, Lyrics, Text and Prompt), and puts back the length, **Batch size**, **Seed** and the voice. See [Reset](#reset).
 
 ### Why Generate is off
 
@@ -272,7 +270,7 @@ The job card counts **takes** (*Take 1 of 2*) and puts the text of the take unde
 
 The bar in the card's header is the whole take's progress, the same as the strip's: it keeps moving while a song is written, it never goes back between the parts of a speech, and a sound's reaches full as its last step ends. When a job is paused between takes, the card says which comes next (*Next: take 2 of 3*).
 
-The preview strip shows slow, drifting ribbons of light over a faint starfield. The part of the take already made glows and the rest stays faint. Music is amber, teal and coral bands, speech a coral ribbon that swells with the words, and sound a wide teal mist that brightens with each step. The sky changes with each stage: a haze while the model loads, stars coming out while a song is planned, a glow along the bottom that rises as the take is written, a faint far layer of ribbons while a song is rendered, and a clear sky with one line down the middle while the take is decoded (speech does this for each part). When the take is ready, the ribbons settle into its waveform, captioned *Last finished take* with its length; the same waveform and caption stay between takes and while paused. A job that fails or is stopped keeps the waveform of the last take it saved. With reduced motion turned on in your system, the strip only changes when the job reports progress, and shows the waveform at once when the take is ready. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs); Cancel also stops a take that is in progress.
+The preview strip shows the take forming as glowing ribbons that follow each stage, and settles into the take's waveform, captioned *Last finished take*, when it is ready; the waveform stays between takes and while paused, with a play button. A job that fails or is stopped keeps the waveform of the last take it saved. With reduced motion on, the strip changes only when the job reports progress. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs); Cancel also stops a take that is in progress.
 
 A job that runs out of GPU memory fails with a message that names the model and says to close other apps that use the GPU. For music it also says to shorten the lyrics.
 
@@ -286,7 +284,7 @@ Takes appear in the Gallery strip as audio tiles. See [Audio in the Gallery](gal
 
 ### On other screens
 
-On a tablet held upright, *Compose* and *Settings* sit side by side under the player. On a phone, **Audio** is the third choice in the top strip's workflow menu, and the strip's chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**. See [Other devices](devices.md#audio-on-a-phone).
+On a tablet held upright, *Compose* and *Settings* sit side by side under the player. On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
 
 ## Generate
 

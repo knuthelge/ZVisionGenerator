@@ -6,6 +6,7 @@ import type { IconName } from '$lib/components/atoms/Icon.svelte';
 import type { AudioWorkflow, DraftState, VideoKind, Workflow, WorkspaceWorkflow } from '$lib/types';
 import { AUDIO_KIND_INFO, VIDEO_KIND_INFO } from './kindInfo';
 import type { VoiceView } from './audioView';
+import { isAudioWorkflow } from '$lib/state/workspaceTab';
 
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
@@ -116,6 +117,8 @@ export interface AudioChipFacts {
   modelDownloaded: boolean;
   /** The Speech voice, when the model can follow a recording; null otherwise. */
   voice: Pick<VoiceView, 'summary' | 'recording' | 'chip'> | null;
+  /** Generate is held back by the voice (a transcript or tick still missing): the chip warns. */
+  voiceBlocks: boolean;
   /** Whether a chip's settings differ from their defaults (`SETTING_ROWS` decides which settings are the chip's). */
   changed: (chip: ChipKey) => boolean;
   /** The model takes a length (Sound). */
@@ -133,7 +136,7 @@ export function audioChips(f: AudioChipFacts): SettingChip[] {
   const chips: (SettingChip | null)[] = [
     { key: 'kind', label: '', value: AUDIO_KIND_INFO[f.kind].label, changed: false, icon: AUDIO_KIND_INFO[f.kind].icon },
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
-    f.voice ? { key: 'voice', label: 'Voice', value: f.voice.chip, changed: false, on: f.voice.recording && f.voice.summary.tone === 'active', warn: f.voice.summary.tone === 'error' } : null,
+    f.voice ? { key: 'voice', label: 'Voice', value: f.voice.chip, changed: f.changed('voice'), on: f.voice.recording && f.voice.summary.tone === 'active', warn: f.voice.summary.tone === 'error' || f.voiceBlocks } : null,
     f.showLength ? { key: 'length', label: 'Length', value: `${fmt(s.audioSeconds)} s`, changed: f.changed('length') } : null,
     f.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
     f.showRuns ? { key: 'runs', label: 'Batch', value: `×${s.runs}`, changed: f.changed('runs') } : null,
@@ -162,7 +165,7 @@ const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
  * the strip has its height and width before the request answers and nothing under the stage moves when it does.
  */
 export function pendingChips(workflow: WorkspaceWorkflow): SettingChip[] {
-  if (workflow === 'music' || workflow === 'speech' || workflow === 'sound') {
+  if (isAudioWorkflow(workflow)) {
     return PENDING_AUDIO_CHIPS[workflow].map(([key, label]) => ({ key, label, value: '—', changed: false }));
   }
   const kind: [ChipKey, string][] = workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? [['kind', '']] : [];

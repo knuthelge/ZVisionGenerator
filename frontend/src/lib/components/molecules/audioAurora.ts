@@ -15,23 +15,30 @@ export const FRAME_MS = 1000 / 30;
 /** Where the finished waveform sits in the slot as fractions of its width and height (`.job-preview-wave`). */
 export const WAVE_INSET = { x: 0.06, y: 0.14, w: 0.88, h: 0.72 } as const;
 
-/** YuE2 and Higgs make this many tokens (frames) per second of sound, so a token count is a time. */
+/**
+ * YuE2 and Higgs make this many tokens (frames) per second of sound, so a token count is a time. The `audio_progress` event
+ * carries counts only (`step`, `total`), not seconds, so the rate lives here.
+ */
 export const TOKENS_PER_SECOND = 25;
+
+/** The phase ids the backends report in `audio_progress` (`backends/audio/*.py`): a song's plan and tokens, and the decode every kind ends with. */
+export const PHASE_PLAN = 'Plan';
+export const PHASE_SONG_TOKENS = 'Song tokens';
+export const PHASE_DECODE = 'Decode';
+
+/** One phase of a song, in the order the model reports them: the name the card and the strip call it, and its share of the take as `[start, width]` (set from a few real runs). */
+export const MUSIC_PHASES: readonly { id: string; label: string; share: readonly [start: number, width: number] }[] = [
+  { id: PHASE_PLAN, label: 'Planning', share: [0, 0.06] },
+  { id: PHASE_SONG_TOKENS, label: 'Writing the song', share: [0.06, 0.66] },
+  { id: 'Synthesis', label: 'Rendering', share: [0.72, 0.24] },
+  { id: PHASE_DECODE, label: 'Finishing', share: [0.96, 0.04] },
+];
 /** The tokens at which a song's plan is about 63% done: its length is not known, so progress runs toward 1 without reaching it. */
 const PLAN_TOKENS_SCALE = 300;
 /** The seconds of a song at which its tokens are about 63% done. */
 const SONG_SECONDS_SCALE = 80;
-/** The diffusion steps of a sound, for a phase that reports no total. */
-const SOUND_STEPS = 8;
 /** The share of a speech part its tokens take; its decode is the rest. */
 const SPEECH_TOKENS_SHARE = 0.95;
-/** A song's share of the whole take per phase, as `[start, width]`; set from a few real runs. */
-const MUSIC_SHARES: Readonly<Record<string, readonly [number, number]>> = {
-  Plan: [0, 0.06],
-  'Song tokens': [0.06, 0.66],
-  Synthesis: [0.72, 0.24],
-  Decode: [0.96, 0.04],
-};
 
 /** The share of a phase done, or `fallback` when it reports no total. */
 function phaseShare(progress: AudioProgress, fallback: number): number {
@@ -42,12 +49,12 @@ function phaseShare(progress: AudioProgress, fallback: number): number {
 export function auroraProgress(kind: AudioWorkflow, progress: AudioProgress | null): number {
   if (progress === null) return 0;
   if (kind === 'music') {
-    const share = MUSIC_SHARES[progress.phase];
-    if (!share) return 0;
-    const [start, width] = share;
+    const phase = MUSIC_PHASES.find(({ id }) => id === progress.phase);
+    if (!phase) return 0;
+    const [start, width] = phase.share;
     const done =
-      progress.phase === 'Plan' ? 1 - Math.exp(-progress.step / PLAN_TOKENS_SCALE)
-      : progress.phase === 'Song tokens' ? 1 - Math.exp(-progress.step / TOKENS_PER_SECOND / SONG_SECONDS_SCALE)
+      progress.phase === PHASE_PLAN ? 1 - Math.exp(-progress.step / PLAN_TOKENS_SCALE)
+      : progress.phase === PHASE_SONG_TOKENS ? 1 - Math.exp(-progress.step / TOKENS_PER_SECOND / SONG_SECONDS_SCALE)
       : phaseShare(progress, 0.5);
     return start + width * clamp(done);
   }
@@ -55,11 +62,11 @@ export function auroraProgress(kind: AudioWorkflow, progress: AudioProgress | nu
     const parts = Math.max(1, progress.parts);
     const part = clamp(progress.part, 1, parts) - 1;
     const share = phaseShare(progress, 0);
-    const within = progress.phase === 'Decode' ? SPEECH_TOKENS_SHARE + (1 - SPEECH_TOKENS_SHARE) * share : SPEECH_TOKENS_SHARE * share;
+    const within = progress.phase === PHASE_DECODE ? SPEECH_TOKENS_SHARE + (1 - SPEECH_TOKENS_SHARE) * share : SPEECH_TOKENS_SHARE * share;
     return (part + within) / parts;
   }
-  if (progress.phase === 'Decode') return 1;
-  return clamp(progress.step / (progress.total ?? SOUND_STEPS));
+  if (progress.phase === PHASE_DECODE) return 1;
+  return phaseShare(progress, 0);
 }
 
 /** Where the playhead is, from 0 to 1 across the strip: how much of the take exists so far. A sound is made all at once, so its head is at the end. */
@@ -67,8 +74,8 @@ export function auroraHead(kind: AudioWorkflow, progress: AudioProgress | null):
   if (kind === 'sound') return 1;
   if (progress === null) return 0;
   if (kind === 'speech') return auroraProgress(kind, progress);
-  if (progress.phase === 'Plan') return 0.04 * (1 - Math.exp(-progress.step / PLAN_TOKENS_SCALE));
-  if (progress.phase === 'Song tokens') return 1 - Math.exp(-progress.step / TOKENS_PER_SECOND / SONG_SECONDS_SCALE);
+  if (progress.phase === PHASE_PLAN) return 0.04 * (1 - Math.exp(-progress.step / PLAN_TOKENS_SCALE));
+  if (progress.phase === PHASE_SONG_TOKENS) return 1 - Math.exp(-progress.step / TOKENS_PER_SECOND / SONG_SECONDS_SCALE);
   return 1;
 }
 
@@ -86,16 +93,17 @@ export function lastTakeCaption(takeSeconds: number | null | undefined): string 
 export function auroraNote(kind: AudioWorkflow, progress: AudioProgress | null, takeSeconds: number | null = null): string {
   if (progress === null) return lastTakeCaption(takeSeconds);
   if (kind === 'music') {
-    if (progress.phase === 'Plan') return 'Planning the song';
-    if (progress.phase === 'Song tokens') return `Writing · ${formatClock(progress.step / TOKENS_PER_SECOND)}`;
-    if (progress.phase === 'Synthesis') return progress.total ? `Rendering · ${Math.round(phaseShare(progress, 0) * 100)}%` : 'Rendering';
-    return 'Finishing';
+    const label = MUSIC_PHASES.find(({ id }) => id === progress.phase)?.label ?? 'Finishing';
+    if (progress.phase === PHASE_SONG_TOKENS) return `${label} · ${formatClock(progress.step / TOKENS_PER_SECOND)}`;
+    if (progress.phase === 'Synthesis' && progress.total) return `${label} · ${Math.round(phaseShare(progress, 0) * 100)}%`;
+    return label;
   }
   if (kind === 'speech') {
     const where = progress.parts > 1 ? ` part ${progress.part} of ${progress.parts}` : '';
-    return progress.phase === 'Decode' ? `Finishing${where}` : `Reading${where} · ${formatClock(progress.step / TOKENS_PER_SECOND)}`;
+    return progress.phase === PHASE_DECODE ? `Finishing${where}` : `Reading${where} · ${formatClock(progress.step / TOKENS_PER_SECOND)}`;
   }
-  return progress.phase === 'Decode' ? 'Finishing' : `Step ${progress.step} of ${progress.total ?? SOUND_STEPS}`;
+  if (progress.phase === PHASE_DECODE) return 'Finishing';
+  return progress.total ? `Step ${progress.step} of ${progress.total}` : 'Sampling';
 }
 
 // ── Colours ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -283,12 +291,12 @@ export const AURORA_STAGES: readonly AuroraStage[] = ['wait', 'plan', 'write', '
 
 /** The stage each phase the models report belongs to; a phase not listed here is writing. Sound's `Sampling` is the writing of its sky: its horizon rises with the steps. */
 const PHASE_STAGE: Readonly<Record<string, AuroraStage>> = {
-  Plan: 'plan',
-  'Song tokens': 'write',
+  [PHASE_PLAN]: 'plan',
+  [PHASE_SONG_TOKENS]: 'write',
   'Speech tokens': 'write',
   Sampling: 'write',
   Synthesis: 'synth',
-  Decode: 'decode',
+  [PHASE_DECODE]: 'decode',
 };
 
 /** The plan tokens by which all the stars are out. */

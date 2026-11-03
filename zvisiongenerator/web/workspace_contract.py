@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from zvisiongenerator.utils.audio_preset import AUDIO_KINDS
+
 if TYPE_CHECKING:
     from collections.abc import Collection
 
     from zvisiongenerator.core.video_family import VideoCapabilities
-    from zvisiongenerator.utils.audio_preset import AudioCapabilities
 
 
 # One repeated form field holds every reference (a file or a host path per row), so the rows keep their order.
 REFERENCE_FIELD = "reference"
 
-AUDIO_WORKFLOW_VALUES = ("music", "speech", "sound")
+AUDIO_WORKFLOW_VALUES = AUDIO_KINDS
 """The workflows of the audio mode, one per kind of audio (a workflow is named after its kind); the contract lists those a runnable model makes."""
 CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "txt2vid", "img2vid", "extend", *AUDIO_WORKFLOW_VALUES)
 PROMPT_SOURCE_VALUES = ("inline", "file")
@@ -331,13 +332,6 @@ AUDIO_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
 }
 WORKFLOW_DEFINITIONS.update(AUDIO_WORKFLOW_DEFINITIONS)
 
-# The workflow controls an audio model loses when it lacks a capability, by capability name.
-_AUDIO_CONTROLS_WITHOUT_CAPABILITY = {
-    "lyrics": ("lyrics",),
-    "duration": ("length",),
-    "voice_clone": VOICE_CONTROLS,
-}
-
 # The workflow controls a video family loses when it lacks a capability, by capability name.
 _CONTROLS_WITHOUT_CAPABILITY = {
     "lora": ("loras",),
@@ -358,11 +352,6 @@ def _hidden_controls(capabilities: object, table: dict[str, tuple[str, ...]]) ->
 def hidden_video_controls(capabilities: VideoCapabilities) -> list[str]:
     """Return the workflow controls a video model does not have, sorted, from what it cannot do on this platform."""
     return _hidden_controls(capabilities, _CONTROLS_WITHOUT_CAPABILITY)
-
-
-def hidden_audio_controls(capabilities: AudioCapabilities) -> list[str]:
-    """Return the workflow controls an audio model does not have, sorted, from its preset's ``capabilities``."""
-    return _hidden_controls(capabilities, _AUDIO_CONTROLS_WITHOUT_CAPABILITY)
 
 
 def canonicalize_workflow(value: Any, *, fallback: str | None = None) -> str | None:

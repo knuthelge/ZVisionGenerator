@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import argparse
 import logging
+import warnings
 from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.audio_runner import run_audio_batch
-from zvisiongenerator.backends import audio_platform_key
+from zvisiongenerator.backends import accelerator_memory_budget_or_none, audio_platform_key
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
-from zvisiongenerator.downloads import audio_plan, describe_refusal
+from zvisiongenerator.downloads import DETACHED, STOPPED, CliDownloadReporter, DownloadFlights, audio_plan, describe_refusal, ensure_downloaded, require_checked
 from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.app_log import setup_logging
+from zvisiongenerator.utils.audio_memory import audio_memory_fit, memory_warning_text
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.audio_request import DEFAULT_SOUND_SECONDS, check_seed, check_speech_request, check_supported_fields, find_runnable_preset, resolve_sound_seconds
+from zvisiongenerator.utils.audio_request import DEFAULT_SOUND_SECONDS, check_seed, check_speech_request, find_audio_preset, resolve_sound_seconds
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
@@ -27,6 +29,13 @@ _PROMPT_HELP = {
     "music": "Add --prompt: the style of the song, such as 'upbeat synth-pop, female vocal'.",
     "speech": "Add --prompt: the text to read.",
     "sound": "Add --prompt: a description of the sound, such as 'rain on a tin roof'.",
+}
+
+
+_NO_SECONDS_REASON = {
+    "music": "sets the length from the lyrics",
+    "speech": "reads the whole text",
+    "sound": "sets its own length",
 }
 
 
@@ -65,10 +74,10 @@ def _build_audio_parser(*, prog: str = "ziv-audio") -> argparse.ArgumentParser:
 
 
 def _find_preset(parser: argparse.ArgumentParser, config: dict[str, Any], model: str | None) -> AudioPreset:
-    """Return the runnable preset *model* names, or exit with what is wrong: no models configured, none on this platform, or an unknown id."""
+    """Return the preset *model* names, or exit with what is wrong: no models configured, no id, or an unknown id."""
     try:
-        return find_runnable_preset(config, audio_platform_key(), model, missing="--model is required")
-    except (ValueError, RuntimeError) as e:
+        return find_audio_preset(config, model, missing="--model is required")
+    except ValueError as e:
         parser.error(str(e))
 
 
@@ -85,16 +94,13 @@ def _read_lyrics(parser: argparse.ArgumentParser, args: argparse.Namespace) -> s
 def _check_flags(parser: argparse.ArgumentParser, args: argparse.Namespace, preset: AudioPreset) -> None:
     """Refuse a flag the model does not take, and the voice flags that do not fit together."""
     lyrics_flag = "--lyrics" if args.lyrics is not None else "--lyrics-file"
-    try:
-        check_supported_fields(
-            preset,
-            lyrics=args.lyrics is not None or args.lyrics_file is not None,
-            seconds=args.seconds is not None,
-            voice=args.voice is not None,
-            drop={"lyrics": lyrics_flag, "seconds": "--seconds", "voice": "--voice"},
-        )
-    except ValueError as e:
-        parser.error(str(e))
+    given_lyrics = args.lyrics is not None or args.lyrics_file is not None
+    if given_lyrics and not preset.takes_lyrics:
+        parser.error(f"{preset.label} takes no lyrics; drop {lyrics_flag}")
+    if args.seconds is not None and not preset.sets_length:
+        parser.error(f"{preset.label} {_NO_SECONDS_REASON[preset.kind]}; drop --seconds")
+    if args.voice is not None and not preset.follows_voice:
+        parser.error(f"{preset.label} cannot follow a voice; drop --voice")
     if args.voice is None:
         for given, flag in ((args.voice_text is not None, "--voice-text"), (args.voice_consent, "--voice-consent")):
             if given:
@@ -123,14 +129,37 @@ def _resolve_seconds(parser: argparse.ArgumentParser, args: argparse.Namespace, 
         parser.error(str(e))
 
 
-def _announce_music(request: AudioGenerationRequest, preset: AudioPreset) -> None:
+def _announce_music(request: AudioGenerationRequest, preset: AudioPreset, platform_key: str) -> None:
     """Say whether the lyrics make a song or an instrumental, when the preset gives the section list that decides it."""
-    settings = preset.settings_for(audio_platform_key())
+    settings = preset.settings_for(platform_key)
     sections = settings.get("instrumental_sections")
     if preset.kind != "music" or not sections:
         return
     _, kind, count = music_mode(request.lyrics, sections)
     print(f"Making an instrumental of {count} sections." if kind == INSTRUMENTAL else "Making a song from the lyrics.", flush=True)
+
+
+def _warn_if_memory_short(preset: AudioPreset, platform_key: str) -> None:
+    """Warn when the model's recorded GPU peak is too large or tight for this machine; the run goes on, as the download may still be wanted."""
+    text = memory_warning_text(preset.label, audio_memory_fit(preset, platform_key, accelerator_memory_budget_or_none()))
+    if text:
+        warnings.warn(text, stacklevel=2)
+
+
+def _download_model(preset: AudioPreset, skip: SkipSignal) -> bool:
+    """Fetch the model's files, with a live progress line on a terminal; return ``False`` when the user quit meanwhile.
+
+    Raises:
+        RuntimeError: When Hugging Face could not be reached and the files are not on disk.
+    """
+    targets = audio_plan(preset)
+    reporter = CliDownloadReporter()
+    try:
+        outcome = ensure_downloaded(targets, flights=DownloadFlights(), report=reporter, cancelled=lambda: skip.pending() == "quit")
+    finally:
+        reporter.close()
+    require_checked(outcome, targets, preset.label)
+    return outcome not in (STOPPED, DETACHED)
 
 
 def main(*, prog: str = "ziv-audio") -> None:
@@ -150,6 +179,10 @@ def main(*, prog: str = "ziv-audio") -> None:
     except ValueError as e:
         parser.error(str(e))
     preset = _find_preset(parser, config, args.model)
+    try:
+        platform_key = audio_platform_key()
+    except RuntimeError as e:
+        parser.error(str(e))
     prompt = (args.prompt or "").strip()
     if not prompt:
         parser.error(_PROMPT_HELP[preset.kind])
@@ -172,12 +205,13 @@ def main(*, prog: str = "ziv-audio") -> None:
         except ValueError as e:
             parser.error(str(e))
     output = str(Path(args.output).expanduser())
-    _announce_music(request, preset)
+    _announce_music(request, preset, platform_key)
 
+    # Before anything downloads: a card that is too small should be known before the model's files are fetched.
+    _warn_if_memory_short(preset, platform_key)
     # The terms of a model that has them are named before its files download.
-    platform_key = audio_platform_key()
     try:
-        print_licence_notice(preset.id, lambda: audio_plan(preset, platform_key))
+        print_licence_notice(preset.id, lambda: audio_plan(preset))
     except ValueError as e:
         parser.error(str(e))
 
@@ -186,7 +220,8 @@ def main(*, prog: str = "ziv-audio") -> None:
     if stdin_is_interactive():
         print("Commands: [n] skip  [q] quit  [p] pause  [r] repeat\n")
     try:
-        run_audio_batch(request, preset, config, runs=args.runs, seed=args.seed, output_dir=output, skip_signal=skip)
+        if _download_model(preset, skip):
+            run_audio_batch(request, preset, config, runs=args.runs, seed=args.seed, output_dir=output, skip_signal=skip)
     except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
         logger.exception("Audio generation failed")
         parser.error(describe_refusal(e) or str(e))

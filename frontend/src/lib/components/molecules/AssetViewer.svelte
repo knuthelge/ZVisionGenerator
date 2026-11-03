@@ -29,7 +29,7 @@
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
   import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
   import AudioPlayer from './AudioPlayer.svelte';
-  import { VIEWER_SHORTCUTS, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
+  import { viewerShortcutsFor, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { sheetDrag } from '$lib/actions/sheetDrag';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
@@ -976,7 +976,7 @@
     {#if helpOpen}
       <div id="asset-viewer-shortcuts" class="viewer-shortcuts ui-overlay" role="note" aria-label="Keyboard shortcuts">
         <h4 class="viewer-h ui-area-label">Keyboard shortcuts</h4>
-        <ShortcutList entries={VIEWER_SHORTCUTS} />
+        <ShortcutList entries={viewerShortcutsFor(isAudio)} />
       </div>
     {/if}
 

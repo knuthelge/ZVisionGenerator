@@ -37,6 +37,15 @@ describe('hydrateAudio', () => {
     expect(hydrateAudio(soundOnly, state())).toMatchObject({ workflow: 'sound', audioKind: 'sound', model: 'sa3' });
   });
 
+  it('gives a length nobody chose the default of the sound model, and keeps one that was chosen', () => {
+    const slower = withAudio(makeContext(), AUDIO_MODELS.map((model) => (model.kind === 'sound' ? { ...model, limits: { ...model.limits, default_seconds: 25 } } : model)));
+    const sound = { workflow: 'sound', audioKind: 'sound' } as const;
+
+    expect(hydrateAudio(slower, state({ ...sound, audioSeconds: 0 })).audioSeconds).toBe(25);
+    expect(hydrateAudio(slower, state({ ...sound, audioSeconds: 10 })).audioSeconds).toBe(10);
+    expect(hydrateAudio(slower, state({ audioSeconds: 0 })).audioSeconds).toBe(0);
+  });
+
   it('moves a sound\'s length into the model\'s range', () => {
     expect(hydrateAudio(ctx, state({ workflow: 'sound', audioKind: 'sound', audioSeconds: 900 })).audioSeconds).toBe(380);
     expect(hydrateAudio(ctx, state({ workflow: 'sound', audioKind: 'sound', audioSeconds: 0.2 })).audioSeconds).toBe(1);

@@ -440,6 +440,23 @@ describe('JobCard', () => {
       expect(percent).toBeGreaterThan(25);
     });
 
+    it('reports a single take\'s header bar by how far the take is, not by takes done', () => {
+      render(take({ runs: 1, workflow: 'speech', audio: { phase: 'Speech tokens', step: 250, total: 500, part: 1, parts: 1 } }));
+
+      const header = target.querySelector('.job-head [role="progressbar"]')!;
+      const now = Number(header.getAttribute('aria-valuenow'));
+      expect(Number(header.getAttribute('aria-valuemax'))).toBe(100);
+      expect(now).toBeGreaterThan(0);
+      expect(header.getAttribute('aria-valuetext')).toBe(`${now}% done`);
+    });
+
+    it('leaves the bar of a song\'s finishing row indeterminate', () => {
+      render(take({ audio: { phase: 'Decode', step: 1, total: 1, part: 1, parts: 1 } }));
+
+      expect(phases()).toEqual(['done', 'done', 'done', 'current']);
+      expect(bars()[0].hasAttribute('aria-valuenow')).toBe(false);
+    });
+
     it('shows a sound as one step line', () => {
       render(take({ workflow: 'sound', audio: { phase: 'Sampling', step: 5, total: 8, part: 1, parts: 1 } }));
 

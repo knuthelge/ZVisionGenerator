@@ -1,6 +1,6 @@
 import type { ActiveJobState, AudioWorkflow, JobControlAction, JobDownload, JobPhase } from '$lib/types';
 import { jobReviewUrl } from '$lib/api/workspace';
-import { auroraNote, auroraProgress, TOKENS_PER_SECOND } from '$lib/components/molecules/audioAurora';
+import { auroraNote, auroraProgress, MUSIC_PHASES, PHASE_DECODE, PHASE_SONG_TOKENS, TOKENS_PER_SECOND } from '$lib/components/molecules/audioAurora';
 import { formatClock } from './clock';
 import { downloadLine, partLabel } from './downloadProgress';
 import { phaseSeconds } from './jobPhases';
@@ -164,17 +164,6 @@ export function isAudioJob(job: ActiveJobState): boolean {
   return job.media_type === 'audio';
 }
 
-/** The phases of a song, in the order the model reports them, with what the card calls each. */
-const MUSIC_PHASES: readonly (readonly [phase: string, label: string])[] = [
-  ['Plan', 'Planning'],
-  ['Song tokens', 'Writing the song'],
-  ['Synthesis', 'Rendering'],
-  ['Decode', 'Finishing'],
-];
-
-/** The phase whose progress is a count of song tokens, which says how much sound it made rather than a share of a total. */
-const SONG_TOKENS = 'Song tokens';
-
 /** The field that holds the text of a take, by kind: what the job card calls its prompt. */
 export const AUDIO_FIELD_LABELS: Readonly<Record<AudioWorkflow, string>> = { music: 'Style', speech: 'Text', sound: 'Prompt' };
 
@@ -191,8 +180,8 @@ export interface AudioRow {
 
 /** What the current phase of a song says after its label: the time written so far, its steps, or nothing where it cannot count. */
 function musicProgress(phase: string, step: number, total: number | null): string {
-  if (phase === 'Decode') return '';
-  if (phase === SONG_TOKENS) return `${formatClock(step / TOKENS_PER_SECOND)} so far`;
+  if (phase === PHASE_DECODE) return '';
+  if (phase === PHASE_SONG_TOKENS) return `${formatClock(step / TOKENS_PER_SECOND)} so far`;
   return total !== null && total > 0 ? `step ${step} of ${total}` : '';
 }
 
@@ -203,14 +192,15 @@ function percentOf(step: number, total: number | null): number | null {
 /** The rows of a song: one per phase, with where the model is in the current one. */
 function musicRows(job: ActiveJobState): AudioRow[] {
   const progress = job.audio ?? null;
-  const current = job.itemFinished ? MUSIC_PHASES.length : progress ? MUSIC_PHASES.findIndex(([phase]) => phase === progress.phase) : 0;
-  return MUSIC_PHASES.map(([phase, label], index): AudioRow => {
+  const current = job.itemFinished ? MUSIC_PHASES.length : progress ? MUSIC_PHASES.findIndex(({ id }) => id === progress.phase) : 0;
+  return MUSIC_PHASES.map(({ id: phase, label }, index): AudioRow => {
     const state = index < current ? 'done' : index === current ? 'current' : 'next';
     if (state !== 'current') return { key: phase, text: label, state, percent: null };
     const step = progress?.step ?? 0;
     const total = progress?.total ?? null;
     const said = progress ? musicProgress(phase, step, total) : 'Starting…';
-    return { key: phase, text: said ? `${label} · ${said}` : label, state, percent: progress ? percentOf(step, total) : null };
+    // Decoding reports a step count of one, which says nothing about how long it takes: its bar keeps moving.
+    return { key: phase, text: said ? `${label} · ${said}` : label, state, percent: progress && phase !== PHASE_DECODE ? percentOf(step, total) : null };
   });
 }
 
@@ -224,7 +214,7 @@ function singleRow(job: ActiveJobState): AudioRow {
   if (job.itemFinished) return { key, text: finishingLabel(job), state: 'current', percent: 100 };
   if (progress === null) return { key, text: 'Starting…', state: 'current', percent: null };
   if (kind === 'speech') return { key, text: auroraNote(kind, progress), state: 'current', percent };
-  if (progress.phase === 'Decode' || !(progress.total !== null && progress.total > 0)) return { key, text: finishingLabel(job), state: 'current', percent: progress.phase === 'Decode' ? 100 : null };
+  if (progress.phase === PHASE_DECODE || !(progress.total !== null && progress.total > 0)) return { key, text: finishingLabel(job), state: 'current', percent: progress.phase === PHASE_DECODE ? 100 : null };
   return { key, text: `Step ${progress.step} of ${progress.total}`, state: 'current', percent };
 }
 

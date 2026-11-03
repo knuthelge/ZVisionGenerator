@@ -5,20 +5,21 @@ from __future__ import annotations
 import asyncio
 import functools
 import sys
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from tests._factories import _make_args, _make_video_args
+from tests._factories import _make_args, _make_plan, _make_video_args
 from tests._fake_process import FakeProcess, Launcher
 from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
-from zvisiongenerator.downloads import DETACHED, READY, STOPPED, UNCHECKED, DownloadFlights, DownloadProgress, DownloadReport, DownloadTarget, TargetCheck, ensure_downloaded
+from zvisiongenerator.downloads import DETACHED, READY, STOPPED, UNCHECKED, DownloadFlights, DownloadProgress, DownloadReport, DownloadTarget, TargetCheck, ensure_downloaded, require_checked
 from zvisiongenerator.downloads.child import ChildResult, run_in_child
 from zvisiongenerator.preflight import run_preflight as _real_run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
@@ -111,6 +112,36 @@ def _downloading(index: int) -> dict:
         "download_eta_secs": 9.0,
         "shared": False,
     }
+
+
+class TestCommittedTargets:
+    def test_queued_and_running_jobs_hold_their_planned_targets_until_they_end(self, monkeypatch):
+        gate = threading.Event()
+        first_target, second_target = DownloadTarget("owner/first"), DownloadTarget("owner/second")
+
+        def held(prompts_data, config, args, **_kw):
+            gate.wait(5.0)
+            return _make_plan(prompts_data, args, config=config)
+
+        runner = _runner()
+        try:
+            stub_request_job(monkeypatch, run_preflight=held)
+            monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="info")))
+            monkeypatch.setattr(web_runner_module, "run_batch", _batch_that_completes)
+            submit = lambda target: runner.submit_image_request_job(  # noqa: E731
+                request=_image_request(model_name="atlas"), prompts_data=_PROMPTS, config={}, args=_make_args(), model_ref="owner/atlas", planned_targets=(target,)
+            )
+            first, second = submit(first_target), submit(second_target)
+
+            assert set(runner.committed_targets()) == {first_target, second_target}  # one is running, one is queued
+            gate.set()
+            wait_for_status(runner, first, "completed")
+            wait_for_status(runner, second, "completed")
+
+            assert runner.committed_targets() == ()
+        finally:
+            gate.set()
+            runner.shutdown()
 
 
 class TestJobFlow:
@@ -435,7 +466,7 @@ class TestStop:
         events: list[dict] = []
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", ensure)
         try:
-            result = runner._ensure_downloads(JobDownloadPart("m", "m", "m", "model", (_TARGET,)), mode="image", total_iterations=3, progress_callback=events.append, control_signal=signal)
+            result = runner._ensure_downloads(JobDownloadPart("m", "m", "model", (_TARGET,)), mode="image", total_iterations=3, progress_callback=events.append, control_signal=signal)
         finally:
             runner.shutdown()
 
@@ -450,7 +481,19 @@ class TestEnsureDownloads:
         runner = _runner()
         try:
             for targets in (None, ()):
-                assert runner._ensure_downloads(JobDownloadPart("m", "m", "m", "model", targets), mode="image", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal()) is True
+                assert runner._ensure_downloads(JobDownloadPart("m", "m", "model", targets), mode="image", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal()) is True
+        finally:
+            runner.shutdown()
+
+    def test_an_unreachable_hub_ends_a_job_that_needs_the_files_on_disk(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: UNCHECKED)
+        monkeypatch.setattr(web_runner_module, "require_checked", functools.partial(require_checked, present=lambda target: False))
+        runner = _runner()
+        try:
+            with pytest.raises(RuntimeError, match="Could not reach Hugging Face to download m"):
+                runner._ensure_downloads(
+                    JobDownloadPart("m", "m", "model", (_TARGET,)), mode="audio", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal(), files_required=True
+                )
         finally:
             runner.shutdown()
 
@@ -460,7 +503,7 @@ class TestEnsureDownloads:
         events: list[dict] = []
         runner = _runner()
         try:
-            result = runner._ensure_downloads(JobDownloadPart("m", "m", "m", "model", (_TARGET,)), mode="video", total_iterations=4, progress_callback=events.append, control_signal=SkipSignal())
+            result = runner._ensure_downloads(JobDownloadPart("m", "m", "model", (_TARGET,)), mode="video", total_iterations=4, progress_callback=events.append, control_signal=SkipSignal())
         finally:
             runner.shutdown()
 
@@ -480,7 +523,7 @@ class TestEnsureDownloads:
         events: list[dict] = []
         runner = _runner()
         try:
-            runner._ensure_downloads(JobDownloadPart("label", "label", "label", "enhancer", (_TARGET,)), mode="video", total_iterations=1, progress_callback=events.append, control_signal=SkipSignal())
+            runner._ensure_downloads(JobDownloadPart("label", "label", "enhancer", (_TARGET,)), mode="video", total_iterations=1, progress_callback=events.append, control_signal=SkipSignal())
         finally:
             runner.shutdown()
 
@@ -507,7 +550,7 @@ class TestEnsureDownloads:
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, flights, **_kw: (seen.append(flights), READY)[1])
         runner = _runner(download_flights=flights)
         try:
-            runner._ensure_downloads(JobDownloadPart("m", "m", "m", "model", (_TARGET,)), mode="image", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal())
+            runner._ensure_downloads(JobDownloadPart("m", "m", "model", (_TARGET,)), mode="image", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal())
             assert runner.download_flights is flights
             assert isinstance(_runner().download_flights, DownloadFlights)
         finally:

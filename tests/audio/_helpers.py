@@ -30,7 +30,7 @@ def sine(seconds: float, rate: int = 24000, amplitude: float = 0.5, frequency: f
 
 
 def clip(seconds: float = 0.5, rate: int = 24000, amplitude: float = 0.5, channels: int = 1, **fields: Any) -> AudioClip:
-    """Return an :class:`AudioClip` of a sine, with *fields* (``cut``, ``preclamp``) set."""
+    """Return an :class:`AudioClip` of a sine, with *fields* (``cut``) set."""
     return AudioClip(samples=sine(seconds, rate, amplitude, channels=channels), sample_rate=rate, **fields)
 
 
@@ -61,21 +61,24 @@ def fake_backend(*clips: AudioClip, events: list | None = None) -> MagicMock:
     return backend
 
 
-def patch_runner(monkeypatch, backend: Any, *, ensure_outcome: str = "ready") -> SimpleNamespace:
-    """Patch the runner's surroundings: this machine is CUDA, the backend is *backend*, nothing downloads.
+def patch_runner(monkeypatch, backend: Any, *, present: bool = True) -> SimpleNamespace:
+    """Patch the runner's surroundings: this machine is CUDA, the backend is *backend*, the model's files are on disk (*present*).
 
-    Returns the patched ``ensure_downloaded`` and enhancer session mocks.
+    Returns the patched enhancer session and accelerator-memory release mocks.
     """
     from zvisiongenerator import audio_cli, audio_runner
 
-    ensure = MagicMock(return_value=ensure_outcome)
     session = MagicMock()
+    release = MagicMock()
     monkeypatch.setattr(audio_cli, "audio_platform_key", lambda: "cuda")
     monkeypatch.setattr(audio_runner, "audio_platform_key", lambda: "cuda")
     monkeypatch.setattr(audio_runner, "get_audio_backend", MagicMock(return_value=backend))
-    monkeypatch.setattr(audio_runner, "ensure_downloaded", ensure)
+    monkeypatch.setattr(audio_runner, "target_present_offline", lambda target: present)
     monkeypatch.setattr(audio_runner, "prompt_enhancer_session", session)
-    return SimpleNamespace(ensure=ensure, session=session)
+    monkeypatch.setattr(audio_runner, "release_accelerator_memory", release)
+    monkeypatch.setattr(audio_runner, "accelerator_memory_budget_or_none", lambda: None)
+    monkeypatch.setattr(audio_cli, "accelerator_memory_budget_or_none", lambda: None)
+    return SimpleNamespace(session=session, release=release)
 
 
 def voice_folder(root: Path) -> Path:

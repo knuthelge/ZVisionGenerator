@@ -28,8 +28,8 @@
   let reduced = $state(false);
   let hidden = $state(false);
   let onScreen = $state(true);
-  // Reduced motion redraws on progress only, so the drift clock advances by a fixed amount per event.
-  let stillClock = 0;
+  // Reduced motion redraws on progress only, and the sky's drift stays where it is: only the playhead, the level and the stage change.
+  const STILL_CLOCK = 997;
 
   const head = $derived(auroraHead(kind, progress));
   const level = $derived(auroraProgress(kind, progress));
@@ -75,7 +75,7 @@
     document.addEventListener('visibilitychange', onVisibility);
     const visible = typeof IntersectionObserver === 'function' ? new IntersectionObserver((entries) => { onScreen = entries.at(-1)?.isIntersecting ?? true; }) : null;
     visible?.observe(el);
-    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => draw(reduced ? stillClock : performance.now(), 0, reduced, landing)) : null;
+    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => draw(reduced ? STILL_CLOCK : performance.now(), 0, reduced, landing)) : null;
     resized?.observe(el);
     return () => {
       motion?.removeEventListener?.('change', onMotion);
@@ -101,8 +101,7 @@
     void stage;
     void plan;
     if (!reduced || peaks !== null || landed || !canvas) return;
-    stillClock += 997;
-    draw(stillClock, 0, true, null);
+    draw(STILL_CLOCK, 0, true, null);
   });
 
   // The frame clock: drifting while the take is made, then one landing. It stops while hidden, off screen or idle, and after the landing.

@@ -172,14 +172,19 @@ You rarely need to change these. They are documented in the packaged `config.yam
 
 ## `audio_model_presets`
 
-The audio models: one entry per model, keyed by the model id you pass with `-m`. A model is music, speech or sound, and each entry says what it can do, how long it can run, which files it downloads and how it runs on each platform. The packaged config ships these three models with their pinned sources, and the Audio tab and `ziv audio` offer them on every platform that has an entry:
+The audio models: one entry per model, keyed by the model id you pass with `-m`. A model is music, speech or sound, and each entry says which engine runs it, which files it downloads and how long it can run. The packaged config ships these three models with their pinned sources, and the Audio tab and `ziv audio` offer them on every machine with a CUDA card or Apple Silicon:
 
 ```yaml
 audio_model_presets:
   yue2:
     label: "YuE2 3B"
     kind: music
-    capabilities: { lyrics: true, duration: false, voice_clone: false }
+    family: yue2
+    files:
+      - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
+        files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
+      - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
+        files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
     limits: { max_seconds: 360 }
     settings:
       instrumental_sections: "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]"
@@ -190,77 +195,57 @@ audio_model_presets:
       vae_core_frames: 512
       fade_seconds: 2
     platforms:
-      cuda:
-        family: yue2
-        memory_gb: 6.7
-        files:
-          - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
-            files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
-          - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
-            files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
-        settings: { weight_swap: true }
-      mps:
-        family: yue2
-        memory_gb: null
-        files:
-          - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
-            files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
-          - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
-            files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
-        settings: { weight_swap: false }
+      cuda: { memory_gb: 6.7 }
   higgs3:
     label: "Higgs TTS 3 4B"
     kind: speech
-    capabilities: { lyrics: false, duration: false, voice_clone: true }
+    family: higgs3
+    files:
+      - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
+        files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
+      - repo: "bosonai/higgs-audio-v2-tokenizer@815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
+        files: [config.json, model.safetensors, preprocessor_config.json]
     limits: { max_new_tokens: 1500, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
     settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
     platforms:
-      cuda:
-        family: higgs3
-        memory_gb: 8.2
-        files:
-          - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
-            files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
-          - repo: "bosonai/higgs-audio-v2-tokenizer@815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
-            files: [config.json, model.safetensors, preprocessor_config.json]
-        settings: { codec_device: cpu }
-      # mps: the same entry with memory_gb: null and settings: { codec_device: mps }
+      cuda: { memory_gb: 8.2 }
   sa3:
     label: "Stable Audio 3 Medium"
     kind: sound
-    capabilities: { lyrics: false, duration: true, voice_clone: false }
+    family: stable_audio_3
+    files:
+      - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
+        files: [checkpoints/stable_audio_3_medium.safetensors]
+      - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
+        files: [model_config.json]
+      - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
+        files: ["t5gemma-b-b-ul2/*"]
     limits: { max_seconds: 380 }
     settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
     platforms:
-      cuda:
-        family: stable_audio_3
-        memory_gb: 6.1
-        files:
-          - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
-            files: [checkpoints/stable_audio_3_medium.safetensors]
-          - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
-            files: [model_config.json]
-          - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
-            files: ["t5gemma-b-b-ul2/*"]
-      # mps: the same entry with memory_gb: null
+      cuda: { memory_gb: 6.1 }
 ```
 
 | Key | Required | Description |
 |---|---|---|
 | `label` | yes | The name the Web UI shows |
-| `kind` | yes | `music`, `speech` or `sound`. The Web UI lists a kind's models in the order they are written here |
-| `capabilities.lyrics` | yes | `true` if the model sings lyrics |
-| `capabilities.duration` | yes | `true` if you choose the length in seconds |
-| `capabilities.voice_clone` | yes | `true` if the model can follow a voice recording |
+| `kind` | yes | `music`, `speech` or `sound`. The kind decides what the model takes: music takes lyrics, sound takes a length in seconds, speech follows a voice recording. The Web UI lists a kind's models in the order they are written here |
+| `family` | yes | Which engine runs the model: `yue2`, `higgs3` or `stable_audio_3` |
+| `files` | yes | The downloads, in order. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch from it |
 | `limits` | yes | The model's own ceilings. Music and sound models give `max_seconds`, the longest take. Speech models give `max_new_tokens` (per part), `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
-| `settings` | no | The model's own knobs, shared by every platform. Any keys the model reads, such as `temperature` or `ode_steps` |
-| `platforms.cuda`, `platforms.mps` | yes, at least one | Where the model runs. A model without an entry for your platform is not offered |
-| `platforms.<platform>.family` | yes | Which engine runs the model: `yue2`, `higgs3` or `stable_audio_3` |
-| `platforms.<platform>.memory_gb` | yes | The GPU memory the model peaks at on this platform, in GiB; `null` while it is unmeasured |
-| `platforms.<platform>.files` | yes | The downloads, in order. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch from it |
+| `settings` | no | The model's own knobs. Any keys the model reads, such as `temperature` or `ode_steps` |
+| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator |
 | `platforms.<platform>.settings` | no | Settings for this platform only. They win over the entry's `settings` |
+| `platforms.<platform>.memory_gb` | no | The GPU memory the model peaked at when measured on this platform, in GiB. Leave it out while it is unmeasured; the Web UI then shows no memory badge |
 
-Each limit and capability is required, and the app refuses to start when one is missing, when `kind` is unknown, or when a platform has no `family`, `files` or `memory_gb`.
+Two settings have a default for each accelerator, so an entry works on both without naming either, and you can set them under `settings` or `platforms.<platform>.settings` to change it:
+
+| Setting | Model | Default | Description |
+|---|---|---|---|
+| `weight_swap` | YuE2 | `true` on CUDA, `false` on MPS | Keep the weights in pinned CPU memory and move only the running phase's group to the GPU, which is how YuE2 fits a 10 GB card |
+| `codec_device` | Higgs TTS 3 | `cpu` on CUDA, `mps` on MPS | Where the audio codec runs. On CUDA the codec stays off the card so the model has the memory |
+
+The app refuses to start when a required key or a limit of the model's kind is missing, when `kind` is unknown, when a key is not one listed here, or when a `repo` is not pinned to a commit.
 
 ## `ideogram4_instant`
 

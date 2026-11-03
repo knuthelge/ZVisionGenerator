@@ -1,12 +1,14 @@
-"""Audio batch orchestration: plan, download, load once, make each take, save it as FLAC, close.
+"""Audio batch orchestration: plan the takes, load once, make each take, save it as FLAC, close.
 
 One job is one model: the backend loads once, makes every take of every run, and is closed in a ``finally`` also after a
-failure or a Stop. Pause, Repeat and Next work between takes (Next and Quit also stop a take in progress).
+failure or a Stop. Pause, Repeat and Next work between takes (Next and Quit also stop a take in progress). The model's
+files are downloaded before the batch starts, by the caller: the Web UI's job runner, or ``ziv audio``.
 """
 
 from __future__ import annotations
 
 import os
+import random
 import sys
 import time
 from collections.abc import Callable, Iterator, Sequence
@@ -15,25 +17,30 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import audio_platform_key, get_audio_backend, prompt_enhancer_session
+from zvisiongenerator.backends import accelerator_memory_budget_or_none, audio_platform_key, get_audio_backend, prompt_enhancer_session, release_accelerator_memory
 from zvisiongenerator.core.audio_backend import AudioBackend, AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_generation_finished, emit_progress
-from zvisiongenerator.downloads import DETACHED, STOPPED, DownloadFlights, DownloadReport, audio_plan, ensure_downloaded
+from zvisiongenerator.downloads import audio_plan, target_present_offline
 from zvisiongenerator.job_controls import announce_repeat, pause_until_resumed, seed_range
-from zvisiongenerator.preflight import plan_iterations
+from zvisiongenerator.utils.audio_console import ConsoleProgress
 from zvisiongenerator.utils.audio_level import limit_peak, peak_of
+from zvisiongenerator.utils.audio_memory import audio_memory_fit, memory_need_text
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.utils.filename import generate_filename, unique_output_path
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import build_audio_config_payload
 from zvisiongenerator.utils.speech_text import split_speech_text
+from zvisiongenerator.utils.torch_flags import preserved_torch_flags
 
-__all__ = ["OUT_OF_MEMORY_HINT", "run_audio_batch"]
+__all__ = ["run_audio_batch"]
 
-OUT_OF_MEMORY_HINT = "Close other apps that use the GPU and try again"
+_OUT_OF_MEMORY_HINT = "Close other apps that use the GPU and try again"
 """What the out-of-memory message tells the user to do; music adds ``or shorten the lyrics``."""
+
+_CUT_NOTE = "Reached the model's length limit; the take was cut short."
+"""What the CLI says after saving a take that stopped at the model's length limit."""
 
 _MPS_OUT_OF_MEMORY = "MPS backend out of memory"
 _LEVEL_CEILING_DB = -1.0
@@ -47,7 +54,6 @@ class _Outcome:
     cancelled: bool = False
     skipped: int = 0
     attempts: int = 0
-    seconds: float = 0.0
 
 
 def run_audio_batch(
@@ -60,22 +66,20 @@ def run_audio_batch(
     output_dir: str,
     progress_callback: ProgressCallback | None = None,
     skip_signal: SkipSignal | None = None,
-    flights: DownloadFlights | None = None,
-    on_download: Callable[[DownloadReport], None] | None = None,
 ) -> list[Path]:
     """Make *runs* takes of *request* with one load of the model and save each as a FLAC file with its settings.
 
-    The caller has checked the request against the preset's limits (``check_speech_request``) and *runs*.
+    The caller has checked the request against the preset's limits (``check_speech_request``) and *runs*, and has downloaded
+    the model's files.
 
-    Steps: plan the takes (no prompt enhancement), release a resident prompt enhancer, make sure the model's files are downloaded, load the backend once, make each
-    take, close the backend. A take whose peak is above 1.0 and that carries a waveform from before the library's
-    clamp (``AudioClip.preclamp``) is scaled to -1 dBFS before saving; other takes are saved as they are.
+    Steps: release a resident prompt enhancer, check the model's files are on disk, load the backend once, make each take,
+    close the backend, give back the torch flags the model code changed and the accelerator memory it held. A take whose peak
+    is above 1.0 is scaled to -1 dBFS before saving; other takes are saved as they are.
 
-    Events sent to *progress_callback* (all with ``mode="audio"``): ``model_loading`` (once the files are downloaded, before the load), ``batch_started``
-    (once the model is loaded), ``prompt_started``,
-    ``generation_started``, ``audio_progress`` (``phase``, ``step``, ``total``, ``part``, ``n_parts``),
-    ``generation_finished`` (status ``success`` or ``skipped``), and ``batch_completed`` or ``batch_cancelled``.
-    A take that fails raises; the web job then reports the failure.
+    Events sent to *progress_callback* (all with ``mode="audio"``): ``model_loading`` (before the load), ``batch_started``
+    (once the model is loaded), ``prompt_started``, ``generation_started``, ``audio_progress`` (``phase``, ``step``,
+    ``total``, ``part``, ``n_parts``, ``elapsed_secs``, ``eta_secs``), ``generation_finished`` (status ``success`` or
+    ``skipped``), and ``batch_completed`` or ``batch_cancelled``. A take that fails raises; the web job then reports the failure.
 
     Args:
         request: The take to make; its ``seed`` is replaced per take.
@@ -86,56 +90,38 @@ def run_audio_batch(
         output_dir: The folder the FLAC files are written to; created when missing.
         progress_callback: Receives the events above.
         skip_signal: The job's control signal (Pause, Repeat, Next, Quit).
-        flights: Registry that shares a running download with other callers; a private one by default.
-        on_download: Receives the download reports; by default the first report of each repository is printed.
 
     Returns:
         The saved files, in the order they were made.
 
     Raises:
-        FileNotFoundError: If a file the backend loads is missing from the cache.
-        RuntimeError: When the GPU runs out of memory (the message names the model and what to do), or a backend fails.
+        FileNotFoundError: If a file of the model is missing from the cache.
+        RuntimeError: When the GPU runs out of memory (the message names the model, what it needs against what the card has,
+            and what to do), or a backend fails.
     """
     platform_key = audio_platform_key()
-    platform = preset.platforms[platform_key]
-    targets = audio_plan(preset, platform_key)
-
     seed_min, seed_max = seed_range(config)
-    iterations = plan_iterations(
-        {request.kind: [(request.prompt, None)]},
-        runs=runs,
-        seed=seed,
-        seed_min=seed_min,
-        seed_max=seed_max,
-        json_prompt=True,  # the text is kept as written: no {a|b} choices in lyrics or speech
-        disabled=True,
-        override=None,
-        enhance_by_set=None,
-    )
-    total = len(iterations)
+    seeds = [seed if seed is not None else random.randint(seed_min, seed_max) for _ in range(runs)]
     skip = skip_signal or SkipSignal()
     started = time.time()
 
     prompt_enhancer_session.release_resident_enhancer()
-    if not _prepare_model(targets, skip, flights or DownloadFlights(), on_download, progress_callback, total):
-        return []
+    _require_downloaded(preset)
 
     os.makedirs(output_dir, exist_ok=True)
-    backend = get_audio_backend(platform.family)
-    outcome = _Outcome()
-    try:
+    backend = get_audio_backend(preset.family)
+    fit = audio_memory_fit(preset, platform_key, accelerator_memory_budget_or_none())
+    with _backend_session(backend):
         print(f"Loading {preset.label}...", flush=True)
-        emit_progress(progress_callback, "model_loading", mode="audio", model=preset.id)
-        with _friendly_oom(preset):
-            backend.load(preset, platform, platform_key)
-        emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=total, total_runs=runs)
-        outcome = _make_takes(backend, request, preset, iterations, output_dir=output_dir, skip=skip, progress_callback=progress_callback, seed_range_=(seed_min, seed_max), runs=runs)
-    finally:
-        backend.close()
+        emit_progress(progress_callback, "model_loading", mode="audio", model=preset.label)
+        with _friendly_oom(preset, fit):
+            backend.load(preset, platform_key)
+        emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=runs, total_runs=runs)
+        outcome = _make_takes(backend, request, preset, seeds, output_dir=output_dir, skip=skip, progress_callback=progress_callback, seed_range_=(seed_min, seed_max), memory_fit=fit)
 
     if outcome.cancelled:
         print("\n⏹ Quitting batch...")
-        emit_progress(progress_callback, "batch_cancelled", mode="audio", completed_iterations=len(outcome.saved) + outcome.skipped, total_iterations=total)
+        emit_progress(progress_callback, "batch_cancelled", mode="audio", completed_iterations=len(outcome.saved) + outcome.skipped, total_iterations=runs)
         return outcome.saved
     total_time = time.time() - started
     notes = f", {outcome.skipped} skipped" if outcome.skipped else ""
@@ -144,73 +130,64 @@ def run_audio_batch(
     return outcome.saved
 
 
-def _prepare_model(
-    targets: Sequence[Any],
-    skip: SkipSignal,
-    flights: DownloadFlights,
-    on_download: Callable[[DownloadReport], None] | None,
-    progress_callback: ProgressCallback | None,
-    total: int,
-) -> bool:
-    """Download the model's files; return ``False`` when the user stopped the job meanwhile."""
+def _require_downloaded(preset: AudioPreset) -> None:
+    """Refuse a model whose files are not on disk, before anything loads: the backend only reads the cache.
 
-    def _stopped() -> bool:
-        return skip.pending() == "quit"
-
-    outcome = ensure_downloaded(targets, flights=flights, report=on_download or _PrintFirstReport(), cancelled=_stopped)
-    if outcome in (STOPPED, DETACHED):
-        emit_progress(progress_callback, "batch_cancelled", mode="audio", completed_iterations=0, total_iterations=total, download=outcome)
-        return False
-    return True
+    Raises:
+        FileNotFoundError: When a file is missing. A caller whose download step could not reach Hugging Face says so first
+            (see :func:`~zvisiongenerator.downloads.ensure.require_checked`).
+    """
+    if not all(target_present_offline(target) for target in audio_plan(preset)):
+        raise FileNotFoundError(f"{preset.label} is not downloaded: some of its files are missing from the cache.")
 
 
-class _PrintFirstReport:
-    """Print one line for each repository the first time a download report names it."""
+@contextmanager
+def _backend_session(backend: AudioBackend) -> Iterator[AudioBackend]:
+    """Own the backend's lifecycle for the length of the block: whatever happens, close it, then give back what model code takes.
 
-    def __init__(self) -> None:
-        self._seen: set[str] = set()
-
-    def __call__(self, report: DownloadReport) -> None:
-        if report.repo in self._seen:
-            return
-        self._seen.add(report.repo)
-        print(f"Downloading {report.repo} (part {report.part} of {report.parts}, first use only)...", flush=True)
+    Model code switches global torch numerics flags when it builds a model, and the cached accelerator memory outlives it,
+    so both are put back here once for every backend rather than by each.
+    """
+    with preserved_torch_flags():
+        try:
+            yield backend
+        finally:
+            try:
+                backend.close()
+            finally:
+                release_accelerator_memory()
 
 
 def _make_takes(
     backend: AudioBackend,
     request: AudioGenerationRequest,
     preset: AudioPreset,
-    iterations: Sequence[Any],
+    seeds: Sequence[int],
     *,
     output_dir: str,
     skip: SkipSignal,
     progress_callback: ProgressCallback | None,
     seed_range_: tuple[int, int],
-    runs: int,
+    memory_fit: dict[str, Any] | None = None,
 ) -> _Outcome:
-    """Make and save every planned take, honouring Pause, Repeat, Next and Quit; return what was done."""
+    """Make and save one take per seed in *seeds*, honouring Pause, Repeat, Next and Quit; return what was done."""
     outcome = _Outcome()
-    total = len(iterations)
+    total = len(seeds)
     parts = _speech_parts(request, preset)
     gen_times: list[float] = []
     batch_start = time.time()
-    for ran, planned in enumerate(iterations, start=1):
-        seed = planned.seed
+    for ran, seed in enumerate(seeds, start=1):
         avg = sum(gen_times) / len(gen_times) if gen_times else None
         eta = avg * (total - ran + 1) if avg is not None else None
         context = {
             "mode": "audio",
-            "run_index": planned.run_index,
-            "total_runs": runs,
+            "run_index": ran - 1,
+            "total_runs": total,
             "ran_iterations": ran,
             "total_iterations": total,
-            "set_name": planned.set_name,
-            "prompt_index": planned.prompt_index,
-            "total_prompts": 1,
-            "prompt": planned.prompt,
+            "prompt": request.prompt,
         }
-        emit_progress(progress_callback, "prompt_started", **context, seed=seed, enhance_status=planned.enhance_status.value, elapsed_secs=time.time() - batch_start, avg_secs=avg, eta_secs=eta)
+        emit_progress(progress_callback, "prompt_started", **context, seed=seed, elapsed_secs=time.time() - batch_start, avg_secs=avg, eta_secs=eta)
         print(f"\n[{ran}/{total}] {preset.label}")
         while True:
             action = skip.consume()
@@ -224,9 +201,12 @@ def _make_takes(
             emit_progress(progress_callback, "generation_started", **context, seed=seed, elapsed_secs=time.time() - batch_start, avg_secs=avg, eta_secs=eta)
             print(f"  seed={seed}")
             began = time.monotonic()
+            console = ConsoleProgress()
             try:
-                with _friendly_oom(preset):
-                    clip = backend.generate(take, _progress_reporter(progress_callback, context), skip.check)
+                with _friendly_oom(preset, memory_fit):
+                    clip = backend.generate(
+                        take, _progress_reporter(progress_callback, context, console, batch_start=batch_start, take_began=began, gen_times=gen_times, takes_left=total - ran + 1), skip.check
+                    )
             except AudioCancelled:
                 if skip.consume() == "quit":
                     outcome.cancelled = True
@@ -235,11 +215,15 @@ def _make_takes(
                 outcome.skipped += 1
                 emit_generation_finished(progress_callback, event_context={**context, "seed": seed}, status="skipped")
                 break
+            finally:
+                console.close()
             elapsed = time.monotonic() - began
             path = _save(clip, take, parts, elapsed, output_dir)
             outcome.saved.append(path)
             gen_times.append(elapsed)
             print(f"  Saved {path}")
+            if clip.cut:
+                print(f"  {_CUT_NOTE}")
             emit_generation_finished(progress_callback, event_context={**context, "seed": seed}, status="success", filename=path.name, generation_time=elapsed, output_path=str(path))
 
             action = skip.consume()
@@ -256,17 +240,27 @@ def _make_takes(
     return outcome
 
 
-def _progress_reporter(progress_callback: ProgressCallback | None, context: dict[str, Any]) -> Callable[[str, int, int | None, int, int], None]:
-    """Return the backend's ``on_progress``: it prints each new phase (and part) and sends an ``audio_progress`` event for every call."""
-    last: list[tuple[str, int]] = []
+def _progress_reporter(
+    progress_callback: ProgressCallback | None,
+    context: dict[str, Any],
+    console: ConsoleProgress,
+    *,
+    batch_start: float,
+    take_began: float,
+    gen_times: Sequence[float],
+    takes_left: int,
+) -> Callable[[str, int, int | None, int, int], None]:
+    """Return the backend's ``on_progress``: it shows the progress on the console and sends an ``audio_progress`` event for every call.
+
+    Each event carries ``elapsed_secs`` (since the first take began) and ``eta_secs``: the average time of the takes made so far
+    times the *takes_left* (this one included), less the time this take (begun at *take_began*, monotonic) has already run, never
+    below zero; ``None`` before a take has finished.
+    """
 
     def _report(phase: str, step: int, total: int | None, part: int, n_parts: int) -> None:
-        marker = (phase, part)
-        if not last or last[0] != marker:
-            last[:] = [marker]
-            label = f"{phase} (part {part} of {n_parts})" if n_parts > 1 else phase
-            print(f"  {label}...", flush=True)
-        emit_progress(progress_callback, "audio_progress", **context, phase=phase, step=step, total=total, part=part, n_parts=n_parts)
+        eta = max(0.0, sum(gen_times) / len(gen_times) * takes_left - (time.monotonic() - take_began)) if gen_times else None
+        console(phase, step, total, part, n_parts, eta)
+        emit_progress(progress_callback, "audio_progress", **context, phase=phase, step=step, total=total, part=part, n_parts=n_parts, elapsed_secs=time.time() - batch_start, eta_secs=eta)
 
     return _report
 
@@ -274,7 +268,7 @@ def _progress_reporter(progress_callback: ProgressCallback | None, context: dict
 def _save(clip: AudioClip, request: AudioGenerationRequest, parts: int | None, generation_time: float, output_dir: str) -> Path:
     """Level *clip* when it needs it and write it as FLAC with the take's settings; return the file."""
     samples = clip.samples
-    if clip.preclamp and peak_of(samples) > 1.0:
+    if peak_of(samples) > 1.0:
         samples = limit_peak(samples, _LEVEL_CEILING_DB)
         print(f"  Peak above full scale; scaled to {_LEVEL_CEILING_DB:g} dBFS.")
     payload = build_audio_config_payload(request, clip, parts=parts, generation_time=generation_time)
@@ -290,25 +284,29 @@ def _speech_parts(request: AudioGenerationRequest, preset: AudioPreset) -> int |
 
 
 @contextmanager
-def _friendly_oom(preset: AudioPreset) -> Iterator[None]:
+def _friendly_oom(preset: AudioPreset, fit: dict[str, Any] | None) -> Iterator[None]:
     """Turn an out-of-memory error raised inside the block into the model's message."""
     try:
         yield
     except AudioCancelled:
         raise
     except Exception as exc:
-        friendly = _out_of_memory_error(exc, preset)
+        friendly = _out_of_memory_error(exc, preset, fit)
         if friendly is None:
             raise
         raise friendly from exc
 
 
-def _out_of_memory_error(exc: BaseException, preset: AudioPreset) -> RuntimeError | None:
-    """Return the user-facing error for a GPU out-of-memory *exc* (CUDA's, or the MPS ``RuntimeError``), else ``None``."""
+def _out_of_memory_error(exc: BaseException, preset: AudioPreset, fit: dict[str, Any] | None) -> RuntimeError | None:
+    """Return the user-facing error for a GPU out-of-memory *exc* (CUDA's, or the MPS ``RuntimeError``), else ``None``.
+
+    With a memory *fit* the message says what the model needs against what the GPU has.
+    """
     if not _is_out_of_memory(exc):
         return None
-    advice = f"{OUT_OF_MEMORY_HINT} or shorten the lyrics" if preset.kind == "music" else OUT_OF_MEMORY_HINT
-    return RuntimeError(f"{preset.label} ran out of GPU memory. {advice}.")
+    advice = f"{_OUT_OF_MEMORY_HINT} or shorten the lyrics" if preset.kind == "music" else _OUT_OF_MEMORY_HINT
+    sizes = f" ({memory_need_text(fit)})" if fit else ""
+    return RuntimeError(f"{preset.label} ran out of GPU memory{sizes}. {advice}.")
 
 
 def _is_out_of_memory(exc: BaseException) -> bool:

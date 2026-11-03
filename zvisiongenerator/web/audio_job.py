@@ -2,8 +2,7 @@
 
 The form's field names are the ones Copy CLI reads (``frontend/src/lib/state/cliCommand.ts``), and the request built here is
 the one the command it prints builds: the style of a song and the description of a sound are trimmed, the text of speech
-is kept as typed, and a field that belongs to another kind is ignored, as the form hides it. A field the kind shows but
-the model does not take is refused.
+is kept as typed, and a field that belongs to another kind is ignored, as the form hides it.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from dataclasses import dataclass
 
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.audio_request import check_speech_request, check_supported_fields, resolve_sound_seconds
+from zvisiongenerator.utils.audio_request import check_speech_request, resolve_sound_seconds
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
 
 __all__ = ["AudioFields", "audio_request_from_fields"]
@@ -24,7 +23,6 @@ _PROMPT_REQUIRED = {
 }
 _VOICE_TEXT_REQUIRED = "Write what the recording says first."
 _CONSENT_REQUIRED = "Cloning a voice needs the speaker's permission: tick the box to confirm it."
-_FIELD_NAMES = {"lyrics": "lyrics", "seconds": "seconds", "voice": "voice_path"}
 
 
 @dataclass(frozen=True)
@@ -59,8 +57,8 @@ def audio_request_from_fields(preset: AudioPreset, fields: AudioFields) -> Audio
     without a reference voice; speech is checked against the model's limits (text length, voice length, readable voice).
 
     Raises:
-        ValueError: If the style, text or description is blank, a field is one the model does not take, the length is out
-            of range, the voice has no transcript or no consent, or the speech request is over the model's limits.
+        ValueError: If the style, text or description is blank, the length is out of range, the voice has no transcript or
+            no consent, or the speech request is over the model's limits.
     """
     kind = preset.kind
     prompt = _line_breaks(fields.prompt)
@@ -69,7 +67,6 @@ def audio_request_from_fields(preset: AudioPreset, fields: AudioFields) -> Audio
     lyrics = _line_breaks(fields.lyrics) if kind == "music" and fields.lyrics.strip() else ""
     voice_path = fields.voice_path if kind == "speech" else None
     seconds = fields.seconds if kind == "sound" else None
-    check_supported_fields(preset, lyrics=bool(lyrics), seconds=seconds is not None, voice=voice_path is not None, drop=_FIELD_NAMES)
     request = AudioGenerationRequest(
         preset=preset.id,
         kind=kind,

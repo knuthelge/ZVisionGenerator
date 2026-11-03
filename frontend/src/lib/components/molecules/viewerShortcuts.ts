@@ -12,7 +12,7 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['←', '→'], label: 'Previous / next asset' },
   { keys: ['Home', 'End'], label: 'First / last asset' },
   { keys: ['R'], label: 'Reuse settings' },
-  { keys: ['E'], label: 'Use as start image or frame (image) or extend (video)' },
+  { keys: ['E'], label: 'Use as start image or frame (image), extend (video), or audio track or voice (audio)' },
   { keys: ['X → 2'], label: 'Upscale 2×' },
   { keys: ['X → 4'], label: 'Upscale 4×' },
   { keys: ['D'], label: 'Download' },
@@ -23,6 +23,11 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['?'], label: 'Show shortcuts' },
   { keys: ['Esc'], label: 'Close' },
 ];
+
+/** The shortcuts the viewer lists for an asset: a take cannot be upscaled, so it has no X chord. */
+export function viewerShortcutsFor(audio: boolean): readonly ShortcutEntry[] {
+  return audio ? VIEWER_SHORTCUTS.filter((entry) => !entry.keys[0].startsWith('X')) : VIEWER_SHORTCUTS;
+}
 
 const KEY_ACTIONS: Record<string, ViewerAction> = {
   Escape: 'close',

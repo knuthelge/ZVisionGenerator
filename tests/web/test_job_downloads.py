@@ -25,7 +25,7 @@ from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web import job_downloads as job_downloads_module
-from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, drop_in_flight, enhancer_part, job_download_parts
+from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, enhancer_part, is_committed, job_download_parts, missing_targets, planned_targets
 
 _PROMPTS = {"default": [("prompt", None)]}
 _CONFIG = {"generation": {}, "prompt_enhancer": {"model": {"darwin": "a/enhancer", "win32": "a/enhancer", "linux": "a/enhancer"}}}
@@ -68,7 +68,7 @@ def runner_planners(monkeypatch, tmp_path):
     original = web_runner_module.WebRunner._ensure_downloads
 
     def spy(self, part, **kwargs):
-        steps.append((part.role, part.event_model))
+        steps.append((part.role, part.label))
         return original(self, part, **kwargs)
 
     monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", spy)
@@ -90,7 +90,7 @@ def _downloaded(fixture) -> list[tuple[str, str, tuple[DownloadTarget, ...]]]:
 
 
 def _from_parts(parts) -> list[tuple[str, str, tuple[DownloadTarget, ...]]]:
-    return [(part.role, part.event_model, part.targets) for part in parts]
+    return [(part.role, part.label, part.targets) for part in parts]
 
 
 def _same_downloads(parts, fixture) -> None:
@@ -140,7 +140,7 @@ class TestPartsMatchTheRunner:
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas", args=args)
 
         assert [part.role for part in parts] == ["enhancer", "model", "matte"]
-        assert [part.event_model for part in parts] == ["Fast enhancer model", "atlas", MATTE_LABEL]
+        assert [part.label for part in parts] == ["Fast enhancer model", "atlas", MATTE_LABEL]
         assert parts[2].model_id == MATTE_LICENCE_MODEL
         _same_downloads(parts, runner_planners)
 
@@ -149,7 +149,7 @@ class TestPartsMatchTheRunner:
 
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas", args=_make_args())
 
-        assert [(part.role, part.event_model) for part in parts] == [("model", "atlas")]
+        assert [(part.role, part.label) for part in parts] == [("model", "atlas")]
 
     def test_a_video_job_with_upscale_downloads_the_upscale_files_and_the_enhancer(self, monkeypatch, runner_planners):
         stub_request_job(monkeypatch, run_preflight=_enhancing_preflight(monkeypatch))
@@ -178,7 +178,7 @@ class TestPartsMatchTheRunner:
 
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas")
 
-        assert [(part.role, part.event_model, part.label) for part in parts] == [("model", "SeedVR2 7B fp8", "SeedVR2 7B fp8")]
+        assert [(part.role, part.label) for part in parts] == [("model", "SeedVR2 7B fp8")]
         assert [part.model_id for part in parts] == ["seedvr2"]
         _same_downloads(parts, runner_planners)
 
@@ -188,7 +188,7 @@ class TestPartsMatchTheRunner:
 
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas")
 
-        assert [(part.role, part.event_model) for part in parts] == [("model", "atlas")]
+        assert [(part.role, part.label) for part in parts] == [("model", "atlas")]
         _same_downloads(parts, runner_planners)
 
     @pytest.mark.parametrize("extra", [{}, {"upscale_method": "seedvr2", "upscale_model": "seedvr2-3b"}], ids=["creative", "seedvr2"])
@@ -221,28 +221,28 @@ class TestPartsMatchTheRunner:
 
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM)
 
-        assert [(part.role, part.event_model) for part in parts] == [("model", "SeedVR2 7B fp8")]
+        assert [(part.role, part.label) for part in parts] == [("model", "SeedVR2 7B fp8")]
         _same_downloads(parts, runner_planners)
 
 
 class TestAudioParts:
-    """An audio job downloads its one model, planned from its preset for the platform it runs on."""
+    """An audio job downloads its one model, planned from its preset."""
 
     @staticmethod
     def _preset(model_id: str, config: dict):
         return next(preset for preset in parse_audio_presets(config) if preset.id == model_id)
 
     def test_an_audio_job_has_one_model_part_named_by_its_preset(self, monkeypatch):
-        audio = MagicMock(side_effect=lambda preset, key: (DownloadTarget(f"audio/{preset.id}", allow_patterns=(key,)),))
+        audio = MagicMock(side_effect=lambda preset: (DownloadTarget(f"audio/{preset.id}", allow_patterns=("files",)),))
         monkeypatch.setattr(job_downloads_module, "audio_plan", audio)
         config = audio_config(higgs3=higgs3_preset(), sa3=sa3_preset())
 
-        part = audio_model_part(self._preset("higgs3", config), "mps")
+        part = audio_model_part(self._preset("higgs3", config))
 
-        assert part == JobDownloadPart("Higgs TTS 3 4B", "higgs3", "higgs3", "model", (DownloadTarget("audio/higgs3", allow_patterns=("mps",)),))
+        assert part == JobDownloadPart("Higgs TTS 3 4B", "higgs3", "model", (DownloadTarget("audio/higgs3", allow_patterns=("files",)),))
 
     def test_the_real_planner_downloads_the_preset_s_files(self):
-        part = audio_model_part(self._preset("sa3", audio_config(sa3=sa3_preset())), "cuda")
+        part = audio_model_part(self._preset("sa3", audio_config(sa3=sa3_preset())))
 
         assert [target.repo_id for target in part.targets] == ["Comfy-Org/stable-audio-3", "cocktailpeanut/stable-audio-3-medium", "mlx-community/stable-audio-3-small-sfx"]
 
@@ -254,7 +254,7 @@ class TestPartLabels:
         video_request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", model_name="ltx-8")
         video = job_download_parts(video_request, config, platform_key=_PLATFORM, model_ref="owner/ltx", args=_make_args(no_enhance=True))
 
-        assert [(part.label, part.event_model, part.model_id) for part in (*image, *video)] == [("Atlas Turbo", "Atlas Turbo", "atlas"), ("LTX 8-bit", "LTX 8-bit", "ltx-8")]
+        assert [(part.label, part.model_id) for part in (*image, *video)] == [("Atlas Turbo", "atlas"), ("LTX 8-bit", "ltx-8")]
 
     def test_an_enhancer_part_is_labelled_by_its_tier_or_else_by_its_reference(self, monkeypatch, runner_planners):
         config = {"prompt_enhancer": {"model": "a/fast", "smart": {"model": "a/smart", "revision": "r1"}, "user_model": "a/mine"}}
@@ -285,7 +285,7 @@ class TestUncheckedParts:
         parts = job_download_parts(_image_request(), _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas", args=args)
 
         enhancer = parts[0]
-        assert (enhancer.role, enhancer.event_model, enhancer.model_id, enhancer.targets) == ("enhancer", "Fast enhancer model", "enhancer-fast", None)
+        assert (enhancer.role, enhancer.label, enhancer.model_id, enhancer.targets) == ("enhancer", "Fast enhancer model", "enhancer-fast", None)
         assert parts[1].targets == ()
 
     def test_a_planner_that_cannot_plan_gives_an_unchecked_model_part(self, monkeypatch, runner_planners):
@@ -302,7 +302,7 @@ class TestUncheckedParts:
 
         parts = job_download_parts(request, _CONFIG, platform_key=_PLATFORM, model_ref="owner/atlas")
 
-        assert [(part.event_model, part.model_id, part.targets) for part in parts] == [("seedvr2-7b", "seedvr2", None)]
+        assert [(part.label, part.model_id, part.targets) for part in parts] == [("seedvr2-7b", "seedvr2", None)]
 
 
 def test_a_job_that_needs_a_model_ref_refuses_without_one():
@@ -332,33 +332,72 @@ class TestOfflineEnhancerInARealJob:
         ensure.assert_not_called()
 
 
-class TestDropInFlight:
+class TestIsCommitted:
     @staticmethod
     def _part(role, *targets):
-        return JobDownloadPart(role, role, role, role, targets if targets != (None,) else None)
+        return JobDownloadPart(role, role, role, targets if targets != (None,) else None)
 
-    def test_a_target_that_a_running_download_fetches_is_dropped_from_its_part(self):
+    @staticmethod
+    def _absent(_target):
+        return False
+
+    def _committed(self, part, committed, present):
+        return is_committed(missing_targets(part, present), committed)
+
+    def test_a_part_whose_every_missing_target_is_on_its_way_is_dropped(self):
         files, other = DownloadTarget("a/model", allow_patterns=("*.bin",)), DownloadTarget("a/other")
-        part = self._part("model", files, other)
 
-        (kept,) = drop_in_flight((part,), [files])
+        assert self._committed(self._part("model", files, other), [files, other], self._absent)
 
-        assert kept.targets == (other,)
-
-    def test_a_part_with_every_target_running_is_dropped(self):
+    def test_the_same_model_queued_twice_is_asked_about_once(self):
         target = DownloadTarget("a/model")
 
-        assert drop_in_flight((self._part("model", target),), [target]) == ()
+        assert self._committed(self._part("model", target), [target], self._absent)
 
-    def test_two_files_of_one_repo_in_one_folder_are_two_flights(self):
+    def test_a_part_with_its_own_file_missing_stays_when_it_only_shares_one_that_is_on_its_way(self):
+        encoder, own = DownloadTarget("a/encoder"), DownloadTarget("a/ltx-8")
+        part = self._part("model", own, encoder)
+
+        assert not self._committed(part, [encoder], self._absent)
+
+    def test_a_shared_file_already_on_disk_does_not_hide_the_part_missing_its_own(self):
+        encoder, own = DownloadTarget("a/encoder"), DownloadTarget("a/ltx-8")
+        part = self._part("model", own, encoder)
+
+        assert not self._committed(part, [encoder], lambda target: target == encoder)
+
+    def test_a_part_wholly_on_disk_is_not_dropped_for_being_on_its_way(self):
+        target = DownloadTarget("a/model")
+        part = self._part("model", target)
+
+        assert not self._committed(part, [target], lambda _target: True)
+
+    def test_a_part_nothing_is_fetching_stays_unchanged(self):
+        part = self._part("model", DownloadTarget("a/model"))
+
+        assert not self._committed(part, [DownloadTarget("a/elsewhere")], self._absent)
+
+    def test_two_files_of_one_repo_in_one_folder_are_two_destinations(self):
         wanted = DownloadTarget("a/vae", allow_patterns=("vae.safetensors",), local_dir="/models")
-        running = DownloadTarget("a/vae", allow_patterns=("other.safetensors",), local_dir="/models")
+        committed = DownloadTarget("a/vae", allow_patterns=("other.safetensors",), local_dir="/models")
+        part = self._part("model", wanted)
 
-        (kept,) = drop_in_flight((self._part("model", wanted),), [running])
+        assert not self._committed(part, [committed], self._absent)
 
-        assert kept.targets == (wanted,)
+    def test_other_files_of_one_cached_repo_are_not_covered_by_a_download_of_part_of_it(self):
+        committed = DownloadTarget("a/repo", allow_patterns=("one.bin",))
+        wanted = DownloadTarget("a/repo", allow_patterns=("one.bin", "two.bin"))
+        part = self._part("model", wanted)
 
-    def test_an_unchecked_part_stays_whatever_runs(self):
+        assert not self._committed(part, [committed], self._absent)
+        assert self._committed(part, [DownloadTarget("a/repo")], self._absent)
+
+    def test_an_unchecked_part_stays_whatever_is_on_its_way(self):
         unchecked = self._part("enhancer", None)
 
-        assert drop_in_flight((unchecked,), [DownloadTarget("a/model")]) == (unchecked,)
+        assert not self._committed(unchecked, [DownloadTarget("a/model")], self._absent)
+
+    def test_the_planned_targets_of_all_parts_in_order_leave_out_an_unchecked_part(self):
+        first, second = DownloadTarget("a/one"), DownloadTarget("a/two")
+
+        assert planned_targets((self._part("enhancer", None), self._part("model", first, second))) == (first, second)

@@ -1,4 +1,4 @@
-"""The checks of an audio request that ``ziv audio`` and the Web UI share: the model, the fields it takes and the length of a sound.
+"""The checks of an audio request that ``ziv audio`` and the Web UI share: the model, the length of a sound and the limits of speech.
 
 All are pure functions of the config or a preset and the values the user gave. They raise ``ValueError`` with the
 message the user sees; the CLI turns it into a usage error and the Web UI into a 422.
@@ -10,7 +10,7 @@ import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.utils.audio_preset import parse_audio_presets, runnable_audio_presets
+from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.audio_track import probe_track_seconds
 from zvisiongenerator.utils.speech_text import split_speech_text
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.audio_types import AudioGenerationRequest
     from zvisiongenerator.utils.audio_preset import AudioLimits, AudioPreset
 
-__all__ = ["DEFAULT_SOUND_SECONDS", "MAX_SEED", "MIN_SOUND_SECONDS", "check_seed", "check_speech_request", "check_supported_fields", "find_runnable_preset", "resolve_sound_seconds"]
+__all__ = ["DEFAULT_SOUND_SECONDS", "MIN_SOUND_SECONDS", "check_seed", "check_speech_request", "find_audio_preset", "resolve_sound_seconds"]
 
 DEFAULT_SOUND_SECONDS = 10.0
 """The length of a sound when none is given."""
@@ -26,73 +26,41 @@ DEFAULT_SOUND_SECONDS = 10.0
 MIN_SOUND_SECONDS = 1.0
 """The shortest sound a model makes, in seconds."""
 
-MAX_SEED = 2**63 - 1
+_MAX_SEED = 2**63 - 1
 """The largest seed every audio model takes (YuE2's generator needs one below 2**63)."""
-
-_NO_SECONDS_REASON = {
-    "music": "sets the length from the lyrics",
-    "speech": "reads the whole text",
-    "sound": "sets its own length",
-}
 
 
 def check_seed(seed: int | None) -> None:
     """Refuse a seed no audio model takes, before anything loads; ``None`` (a random seed per take) passes.
 
     Raises:
-        ValueError: If *seed* is below 0 or above :data:`MAX_SEED`.
+        ValueError: If *seed* is below 0 or above :data:`_MAX_SEED`.
     """
-    if seed is not None and not 0 <= seed <= MAX_SEED:
-        raise ValueError(f"The seed must be from 0 to {MAX_SEED}.")
+    if seed is not None and not 0 <= seed <= _MAX_SEED:
+        raise ValueError(f"The seed must be from 0 to {_MAX_SEED}.")
 
 
-def find_runnable_preset(config: Mapping[str, Any], platform_key: str, model: str | None, *, missing: str) -> AudioPreset:
-    """Return the preset *model* names among those that run on *platform_key*.
+def find_audio_preset(config: Mapping[str, Any], model: str | None, *, missing: str) -> AudioPreset:
+    """Return the preset *model* names among the configured audio models.
 
     Args:
         config: The loaded config.
-        platform_key: The machine's key in a preset's ``platforms`` (``backends.audio_platform_key()``).
         model: The model id the user gave, or ``None``.
         missing: What to say when no model was given, such as ``"--model is required"``; the ids are added after it.
 
     Raises:
-        ValueError: If no audio models are configured or none runs on this platform, if *model* is ``None``, or if it names no
-            runnable preset. The message lists the runnable ids.
+        ValueError: If no audio models are configured, if *model* is ``None``, or if it names no preset. The message lists the ids.
     """
-    if not parse_audio_presets(config):
+    presets = parse_audio_presets(config)
+    if not presets:
         raise ValueError("No audio models are configured. Add presets under audio_model_presets in your config to use ziv audio.")
-    runnable = runnable_audio_presets(config, platform_key)
-    if not runnable:
-        raise ValueError(f"None of the configured audio models run on this platform ({platform_key}).")
-    ids = ", ".join(preset.id for preset in runnable)
+    ids = ", ".join(preset.id for preset in presets)
     if model is None:
         raise ValueError(f"{missing}. Choose one of: {ids}.")
-    preset = next((item for item in runnable if item.id == model), None)
+    preset = next((item for item in presets if item.id == model), None)
     if preset is None:
         raise ValueError(f"Unknown audio model '{model}'. Choose one of: {ids}.")
     return preset
-
-
-def check_supported_fields(preset: AudioPreset, *, lyrics: bool, seconds: bool, voice: bool, drop: Mapping[str, str]) -> None:
-    """Refuse a field that was given but that *preset* does not take.
-
-    Args:
-        preset: The audio model.
-        lyrics: Whether lyrics were given.
-        seconds: Whether a length was given.
-        voice: Whether a voice recording was given.
-        drop: What to tell the user to drop for each of ``lyrics``, ``seconds`` and ``voice``: a CLI flag, or a field name.
-
-    Raises:
-        ValueError: With the first refusal, such as ``"YuE2 3B sets the length from the lyrics; drop --seconds"``.
-    """
-    caps = preset.capabilities
-    if lyrics and not caps.lyrics:
-        raise ValueError(f"{preset.label} takes no lyrics; drop {drop['lyrics']}")
-    if seconds and not caps.duration:
-        raise ValueError(f"{preset.label} {_NO_SECONDS_REASON[preset.kind]}; drop {drop['seconds']}")
-    if voice and not caps.voice_clone:
-        raise ValueError(f"{preset.label} cannot follow a voice; drop {drop['voice']}")
 
 
 def resolve_sound_seconds(seconds: float | None, preset: AudioPreset, *, name: str) -> float | None:
@@ -106,7 +74,7 @@ def resolve_sound_seconds(seconds: float | None, preset: AudioPreset, *, name: s
     Raises:
         ValueError: If the length is not a number within ``MIN_SOUND_SECONDS`` to the model's ``max_seconds``.
     """
-    if not preset.capabilities.duration:
+    if not preset.sets_length:
         return None
     chosen = DEFAULT_SOUND_SECONDS if seconds is None else seconds
     longest = float(preset.limits.max_seconds)

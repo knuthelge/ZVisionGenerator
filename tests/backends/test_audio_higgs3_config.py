@@ -63,4 +63,4 @@ def test_the_official_layout_reads_to_the_expected_values(tmp_path: Path) -> Non
         num_codebooks=8,
         codebook_size=1026,
     )
-    assert (config.boc_id, config.eoc_id) == (1024, 1025)
+    assert config.boc_id == 1024

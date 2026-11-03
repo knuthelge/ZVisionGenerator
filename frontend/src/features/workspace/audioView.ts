@@ -59,6 +59,8 @@ export interface AudioView {
   voice: VoiceView;
   /** Generate's one reason when the take cannot be made yet, or null. */
   reason: string | null;
+  /** The reason comes from the voice (its recording, transcript or tick), which the Voice chip and section show. */
+  reasonFromVoice: boolean;
 }
 
 /** What `audioView` reads from the draft, the open model and the screen. */
@@ -79,23 +81,23 @@ const NO_VOICE: VoiceView = {
   text: '', needsConsent: false, ticked: false, sent: null, summary: { text: 'Any', tone: 'muted' }, chip: 'Any',
 };
 
-/** Format a range of seconds for a message: "3 to 30 seconds". */
-function rangeText(range: { min: number; max: number }): string {
-  return `${range.min} to ${range.max} seconds`;
+/** Format the voice range of a model for a message: "3 to 30 seconds". */
+function rangeText(range: { min: number; max: number } | null): string {
+  return range === null ? '' : `${range.min} to ${range.max} seconds`;
 }
 
 /** The voice, and the reason (in reading order) a recording blocks Generate, or null. */
 function voiceView(input: AudioViewInput): { voice: VoiceView; reason: string | null } {
   const { state, caps, model, file, restored, lengthOf, consent } = input;
   if (!caps.showVoice) return { voice: NO_VOICE, reason: null };
-  const range = { min: model?.limits.min_voice_seconds ?? 3, max: model?.limits.max_voice_seconds ?? 30 };
+  const range = model?.kind === 'speech' ? { min: model.limits.min_voice_seconds, max: model.limits.max_voice_seconds } : null;
   const path = hasPath(state.voicePath) ? state.voicePath : null;
   const set = path !== null || state.voiceUpload !== null;
   const recording = state.voiceMode === 'recording';
   const name = file?.name ?? (path !== null ? fileName(path) : (state.voiceUpload ?? ''));
   const gone = recording && file === null && path === null && state.voiceUpload !== null && restored;
   const length = recording && set ? lengthOf(trackKey(file === null ? path : null, file)) : null;
-  const outOfRange = length !== null && (length < range.min || length > range.max);
+  const outOfRange = range !== null && length !== null && (length < range.min || length > range.max);
   const error = gone ? 'Choose the recording again.' : outOfRange ? `Use a recording of ${rangeText(range)}. This one is ${formatTimestamp(length)}.` : null;
   const text = state.voiceText;
   const needsConsent = recording && set && !consent.exempt;
@@ -119,21 +121,22 @@ export function audioView(input: AudioViewInput): AudioView {
   const kind = caps.audioKind;
   const { voice, reason: voiceReason } = voiceView(input);
   if (!caps.isAudio || kind === null) {
-    return { active: false, kind: null, model, text: '', music: null, characters: 0, maxCharacters: null, overLimit: false, voice, reason: null };
+    return { active: false, kind: null, model, text: '', music: null, characters: 0, maxCharacters: null, overLimit: false, voice, reason: null, reasonFromVoice: false };
   }
   const text = state[AUDIO_TEXT_KEYS[kind]];
-  const maxCharacters = kind === 'speech' ? (model?.limits.max_text_chars ?? null) : null;
+  const maxCharacters = model?.kind === 'speech' ? model.limits.max_text_chars : null;
   // Counted as Python's len counts: a character outside the BMP is one.
   const characters = kind === 'speech' ? [...text].length : 0;
   const overLimit = maxCharacters !== null && characters > maxCharacters;
   const music = kind === 'music' && model?.instrumental_sections ? musicMode(state.lyrics, model.instrumental_sections) : null;
   const minutes = maxCharacters === null ? 0 : Math.round(maxCharacters / 1000);
+  const textReason = text.trim() === '' ? { music: 'Write the style.', speech: 'Write the text to speak.', sound: 'Describe the sound.' }[kind] : null;
   const reason =
-    text.trim() === '' ? { music: 'Write the style.', speech: 'Write the text to speak.', sound: 'Describe the sound.' }[kind]
+    textReason !== null ? textReason
     : voiceReason !== null ? voiceReason
     : overLimit ? `Shorten the text: it's over ${maxCharacters!.toLocaleString('en-US')} characters, about ${minutes} minutes of speech.`
     : null;
-  return { active: true, kind, model, text, music, characters, maxCharacters, overLimit, voice, reason };
+  return { active: true, kind, model, text, music, characters, maxCharacters, overLimit, voice, reason, reasonFromVoice: textReason === null && voiceReason !== null };
 }
 
 /** The view of the open tab, read from the draft, the held recording and the tick. */
@@ -163,9 +166,8 @@ export function audioFormData(view: AudioView, state: DraftState): FormData {
   form.set('workflow', kind);
   form.set('model', state.model);
   form.set('prompt', view.text);
-  // A model that takes no lyrics or no length is not sent them: the server refuses a field the model does not take.
-  if (kind === 'music' && view.model?.capabilities.lyrics !== false) form.set('lyrics', state.lyrics);
-  if (kind === 'sound' && view.model?.capabilities.duration !== false) form.set('seconds', String(state.audioSeconds));
+  if (kind === 'music') form.set('lyrics', state.lyrics);
+  if (kind === 'sound') form.set('seconds', String(state.audioSeconds));
   if (kind === 'speech' && view.voice.sent !== null) {
     const { file, path, text } = view.voice.sent;
     if (file !== null) form.set('voice_file', file);

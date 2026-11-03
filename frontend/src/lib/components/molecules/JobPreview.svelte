@@ -1,9 +1,10 @@
 <script lang="ts">
   import { Icon, Waveform } from '$lib/components/atoms';
-  import { isActive, isAudioJob, isPaused, isVideo, jobPhase, livePreviewNote, outputAspect, stepFraction } from '$lib/state/jobView';
+  import { activeDownload, isActive, isAudioJob, isPaused, isVideo, jobPhase, livePreviewNote, outputAspect, stepFraction } from '$lib/state/jobView';
   import type { ActiveJobState, AudioWorkflow } from '$lib/types';
   import AudioAurora from './AudioAurora.svelte';
   import { lastTakeCaption } from './audioAurora';
+  import { claimPlayback, releasePlayback } from '$lib/state/nowPlaying';
 
   interface Props {
     job: ActiveJobState;
@@ -31,7 +32,9 @@
   // A job that failed or was stopped keeps no live Aurora: the ribbons would hold their last frame for good. A finished job still lets its last take land.
   const stopped = $derived(!isActive(job) && job.status !== 'completed');
   const live = $derived(audio && !stopped && ((phase === 'generate' && !!job.audio) || waiting));
-  const waitingNote = $derived(phase === 'enhance' ? 'Enhancing the prompt' : phase === 'load' ? 'Loading the model' : 'Starting');
+  // The load step is a download first on a model's first use: say so, as the job card does.
+  const loadNote = $derived(activeDownload(job) ? 'Downloading the model' : 'Loading the model');
+  const waitingNote = $derived(phase === 'enhance' ? 'Enhancing the prompt' : phase === 'load' ? loadNote : 'Starting');
   // The outputs the job had when the current take began: a take that is skipped or fails adds none, and has no waveform to land on.
   let outputsBefore = $state(0);
   $effect.pre(() => {
@@ -44,12 +47,31 @@
   const src = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? lastOutput?.url ?? null) : job.previewUrl);
   const shown = $derived(!audio && src !== null && failedUrl !== src);
   const wave = $derived(lastPeaks.length > 0);
+  // The held take can be played from the slot: a job that waits or ended leaves it no other player on a phone.
+  const heldUrl = $derived(wave ? (lastOutput?.url ?? null) : null);
+  let held = $state<HTMLAudioElement | null>(null);
+  let heldPlaying = $state(false);
+  $effect(() => {
+    const element = held;
+    void heldUrl;
+    heldPlaying = false;
+    return () => {
+      if (!element) return;
+      element.pause();
+      releasePlayback(element);
+    };
+  });
+  function toggleHeld(): void {
+    if (!held) return;
+    if (held.paused) void held.play().catch(() => { heldPlaying = false; });
+    else held.pause();
+  }
   const tag = $derived(pausedBetween ? 'Last finished image' : `Live preview · ${Math.round(stepFraction(job) * 100)}%`);
   // What fills the slot until a preview arrives, by phase.
   const note = $derived.by(() => {
     if (phase === 'queue') return 'Waiting in the queue';
     if (phase === 'enhance') return 'Enhancing the prompt';
-    if (phase === 'load') return 'Loading the model';
+    if (phase === 'load') return loadNote;
     if (audio) return stopped ? 'No take saved' : 'Waiting for the take';
     if (isVideo(job)) return 'No live preview for video';
     return livePreviewNote(job);
@@ -78,6 +100,20 @@
     />
   {:else if wave}
     <span class="job-preview-wave"><Waveform peaks={lastPeaks} /></span>
+    {#if heldUrl}
+      <!-- svelte-ignore a11y_media_has_caption because a take has no captions to show -->
+      <audio
+        bind:this={held}
+        src={heldUrl}
+        preload="none"
+        onplay={() => { heldPlaying = true; if (held) claimPlayback(held); }}
+        onpause={() => { heldPlaying = false; }}
+        onended={() => { heldPlaying = false; }}
+      ></audio>
+      <button type="button" class="job-preview-play" aria-label={heldPlaying ? 'Pause the last take' : 'Play the last take'} aria-pressed={heldPlaying} onclick={toggleHeld}>
+        <Icon name={heldPlaying ? 'pause' : 'play'} size={16} />
+      </button>
+    {/if}
     <figcaption class="media-tag job-preview-tag">{lastTakeCaption(lastOutput?.duration)}</figcaption>
   {:else}
     <figcaption class="job-preview-note">{#if audio}<Icon name="waveform" size={14} />{:else if isVideo(job)}<Icon name="film" size={14} />{/if}{note}</figcaption>
@@ -95,5 +131,7 @@
   @media (prefers-reduced-motion: reduce) { .job-preview.empty { animation: none; } }
   .job-preview-tag { position: absolute; top: 8px; left: 8px; }
   .job-preview-wave { position: absolute; inset: 14% 6%; display: block; }
+  .job-preview-play { position: absolute; right: 8px; bottom: 8px; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg-surface) 80%, transparent); box-shadow: 0 0 0 1px var(--color-border-subtle); }
+  @media (hover: hover) { .job-preview-play:hover { background: var(--color-bg-surface); } }
   .job-preview-note { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; text-align: center; font-size: var(--text-content); font-weight: 600; color: var(--color-text-secondary); }
 </style>

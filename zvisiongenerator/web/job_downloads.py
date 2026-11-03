@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import warnings
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +13,7 @@ from zvisiongenerator.backends import get_seedvr2_upscaler
 from zvisiongenerator.backends import prompt_enhancer_session
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
-from zvisiongenerator.downloads import DownloadTarget, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads import DownloadTarget, audio_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, target_present_offline, video_plan
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name, model_reference, resolve_enhancer_model
 from zvisiongenerator.utils.licences import ENHANCER_LICENCE_TIERS, MATTE_LICENCE_MODEL, SEEDVR2_LICENCE_MODEL, enhancer_licence_model
@@ -31,10 +31,12 @@ __all__ = [
     "audio_model_part",
     "enhancer_part",
     "image_model_part",
+    "is_committed",
     "job_download_parts",
     "ltx_video_upscale_part",
-    "drop_in_flight",
     "matte_part",
+    "missing_targets",
+    "planned_targets",
     "seedvr2_part",
     "seedvr2_tier_part",
     "upscale_model_part",
@@ -58,8 +60,7 @@ class JobDownloadPart:
     """One model a job downloads before it loads.
 
     Attributes:
-        label: The name the download dialog shows.
-        event_model: The ``model`` value the job's ``model_downloading`` events carry.
+        label: The name the download dialog shows, also the ``model`` value of the job's ``model_downloading`` events.
         model_id: The model's identifier for looking up its licence records: the alias, ``matte``, ``seedvr2`` or ``enhancer-<tier>``.
         role: ``model``, ``enhancer`` or ``matte``; the ``role`` of the job's download events.
         targets: The files to fetch (``()`` when nothing is to be fetched), or ``None`` when they cannot be planned
@@ -67,7 +68,6 @@ class JobDownloadPart:
     """
 
     label: str
-    event_model: str
     model_id: str
     role: str
     targets: Targets
@@ -76,7 +76,7 @@ class JobDownloadPart:
 def image_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], platform_key: str) -> JobDownloadPart:
     """Return the part for the image model *name* (an alias or a path) that loads from *model_ref*, labelled as the Web UI names it."""
     label = model_display_name(config, name)
-    return JobDownloadPart(label, label, name, ROLE_MODEL, image_plan(model_ref, family=family, config=config, platform_key=platform_key))
+    return JobDownloadPart(label, name, ROLE_MODEL, image_plan(model_ref, family=family, config=config, platform_key=platform_key))
 
 
 def video_model_part(name: str, model_ref: str, *, family: str, config: dict[str, Any], upscale: bool) -> JobDownloadPart:
@@ -86,7 +86,7 @@ def video_model_part(name: str, model_ref: str, *, family: str, config: dict[str
         ValueError: If the ``video_model_presets`` config entries of the family are malformed.
     """
     label = model_display_name(config, name)
-    return JobDownloadPart(label, label, name, ROLE_MODEL, video_plan(model_ref, family=family, config=config, model_name=name, upscale=upscale))
+    return JobDownloadPart(label, name, ROLE_MODEL, video_plan(model_ref, family=family, config=config, model_name=name, upscale=upscale))
 
 
 def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, Any]) -> JobDownloadPart:
@@ -98,20 +98,20 @@ def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, An
     return video_model_part(request.model_name, request.model_ref, family="ltx", config=config, upscale=True)
 
 
-def audio_model_part(preset: AudioPreset, platform_key: str) -> JobDownloadPart:
-    """Return the part for the audio model *preset* an audio job generates with on the platform *platform_key*."""
-    return JobDownloadPart(preset.label, preset.id, preset.id, ROLE_MODEL, audio_plan(preset, platform_key))
+def audio_model_part(preset: AudioPreset) -> JobDownloadPart:
+    """Return the part for the audio model *preset* an audio job generates with."""
+    return JobDownloadPart(preset.label, preset.id, ROLE_MODEL, audio_plan(preset))
 
 
 def matte_part() -> JobDownloadPart:
     """Return the part for the background removal models of a transparent job."""
-    return JobDownloadPart(MATTE_LABEL, MATTE_LABEL, MATTE_LICENCE_MODEL, ROLE_MATTE, matte_plan())
+    return JobDownloadPart(MATTE_LABEL, MATTE_LICENCE_MODEL, ROLE_MATTE, matte_plan())
 
 
 def seedvr2_tier_part(model_name: str, weights: SeedVR2Weights, models_dir: Path) -> JobDownloadPart:
     """Return the part for SeedVR2 tier *model_name* as *weights* run it, with its files under *models_dir*."""
     label = seedvr2_tier_label(model_name, weights)
-    return JobDownloadPart(label, label, SEEDVR2_LICENCE_MODEL, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
+    return JobDownloadPart(label, SEEDVR2_LICENCE_MODEL, ROLE_MODEL, seedvr2_plan(model_name, models_dir=models_dir, weights=weights))
 
 
 def seedvr2_part(model_name: str | None) -> JobDownloadPart:
@@ -119,7 +119,7 @@ def seedvr2_part(model_name: str | None) -> JobDownloadPart:
     upscaler = get_seedvr2_upscaler()
     if upscaler is None:
         # The load reports that this platform has no SeedVR2 engine.
-        return JobDownloadPart(str(model_name), str(model_name), SEEDVR2_LICENCE_MODEL, ROLE_MODEL, None)
+        return JobDownloadPart(str(model_name), SEEDVR2_LICENCE_MODEL, ROLE_MODEL, None)
     return seedvr2_tier_part(str(model_name), upscaler.weights, get_ziv_data_dir() / "models")
 
 
@@ -174,25 +174,37 @@ def job_download_parts(
     return (*_enhancer_parts(args, enhance_by_set, config, platform_key), image, *matte)
 
 
-def drop_in_flight(parts: Sequence[JobDownloadPart], active: Iterable[DownloadTarget]) -> tuple[JobDownloadPart, ...]:
-    """Return *parts* without the targets that a running download (one of *active*) already fetches.
+def missing_targets(part: JobDownloadPart, present: Callable[[DownloadTarget], bool] = target_present_offline) -> tuple[DownloadTarget, ...] | None:
+    """Return the targets of *part* that are not on disk, or ``None`` for a part that is unchecked (``targets=None``)."""
+    if part.targets is None:
+        return None
+    return tuple(target for target in part.targets if not present(target))
 
-    A target counts as in flight when its ``key`` is the key of an active flight, so the job that follows the
-    flight needs no second question about it. A part with no target left has nothing to fetch and is dropped;
-    a part that is unchecked (``targets=None``) stays, since what it would fetch is unknown.
+
+def is_committed(missing: Sequence[DownloadTarget] | None, committed: Sequence[DownloadTarget]) -> bool:
+    """Return whether the user has already been asked about a part: it still lacks something and every file it lacks is on its way.
+
+    *missing* is :func:`missing_targets` of the part. *committed* holds the targets of running downloads, of queued and
+    running jobs and of queued and running Models-page downloads. A lacking target is on its way when one of them covers it
+    (same repo, revision and folder, and the committed files include the ones this target wants). A part that shares a
+    file with a committed one (an encoder two models use) but lacks one of its own is not committed, so its own download
+    is asked about. A part that is unchecked (``None``) is not, since what it would fetch is unknown.
     """
-    running = {target.key for target in active}
-    if not running:
-        return tuple(parts)
-    kept: list[JobDownloadPart] = []
-    for part in parts:
-        if part.targets is None:
-            kept.append(part)
-            continue
-        remaining = tuple(target for target in part.targets if target.key not in running)
-        if remaining:
-            kept.append(replace(part, targets=remaining))
-    return tuple(kept)
+    return bool(missing) and all(any(_covers(done, target) for done in committed) for target in missing or ())
+
+
+def _covers(committed: DownloadTarget, target: DownloadTarget) -> bool:
+    """Return whether the download of *committed* fetches every file *target* wants: the same destination, with the same or more files."""
+    if committed.key[:3] != target.key[:3]:
+        return False
+    if committed.allow_patterns is None:
+        return True
+    return target.allow_patterns is not None and set(target.allow_patterns) <= set(committed.allow_patterns)
+
+
+def planned_targets(parts: Iterable[JobDownloadPart]) -> tuple[DownloadTarget, ...]:
+    """Return every target of *parts*, in order; a part that is unchecked has none."""
+    return tuple(target for part in parts for target in part.targets or ())
 
 
 def _enhancer_parts(args: argparse.Namespace | None, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None, config: dict[str, Any], platform_key: str) -> tuple[JobDownloadPart, ...]:
@@ -230,7 +242,7 @@ def _enhancer_part(repo: str, revision: str | None, tier: str | None, targets: T
     reference = model_reference(repo, revision)
     label = f"{tier.capitalize()} enhancer model" if tier else reference
     model_id = enhancer_licence_model(tier) if tier in ENHANCER_LICENCE_TIERS else reference
-    return JobDownloadPart(label, label, model_id, ROLE_ENHANCER, targets)
+    return JobDownloadPart(label, model_id, ROLE_ENHANCER, targets)
 
 
 def _enhancer_tier(config: dict[str, Any], platform_key: str, repo: str, revision: str | None) -> str | None:

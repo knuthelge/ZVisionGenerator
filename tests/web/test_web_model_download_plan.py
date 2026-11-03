@@ -118,8 +118,8 @@ class TestRowPlan:
         seedvr2 = row_plan("model", "seedvr2-7b@fp8", _web_config(env, seedvr2=_seedvr2()))
         enhancer = row_plan("enhancer", "fast", _web_config(env))
 
-        assert (seedvr2.label, seedvr2.event_model) == (seedvr2_tier_label("seedvr2-7b", FP8_WEIGHTS),) * 2
-        assert (enhancer.label, enhancer.event_model) == ("Fast enhancer model",) * 2
+        assert seedvr2.label == seedvr2_tier_label("seedvr2-7b", FP8_WEIGHTS)
+        assert enhancer.label == "Fast enhancer model"
 
     def test_the_background_removal_row_plans_both_pinned_repos(self, env):
         plan = row_plan("matte", MATTE_ROW_NAME, _web_config(env))
@@ -148,7 +148,7 @@ class TestRowPlan:
 
         image, video = row_plan("model", "zit", web_config), row_plan("model", "ltx-8", web_config)
 
-        assert [(part.model_id, part.label, part.event_model) for part in (image, video)] == [("zit", "Z-Image Turbo", "Z-Image Turbo"), ("ltx-8", "LTX-2.3 8-bit", "LTX-2.3 8-bit")]
+        assert [(part.model_id, part.label) for part in (image, video)] == [("zit", "Z-Image Turbo"), ("ltx-8", "LTX-2.3 8-bit")]
 
     @pytest.mark.parametrize(("kind", "name"), [("model", "nope"), ("enhancer", "nope"), ("enhancer", "smart"), ("matte", "nope"), ("lora", "zit")])
     def test_an_unknown_row_or_kind_is_a_value_error(self, env, kind, name):
@@ -377,6 +377,25 @@ class TestRowSummary:
 
         assert summary["parts"] == [{"label": MATTE_LABEL, "model": MATTE_LICENCE_MODEL, "bytes": 200}]
         assert (summary["total_bytes"], summary["unchecked"]) == (200, False)
+
+    def test_each_target_is_looked_up_on_disk_once_while_a_part_is_summarised(self, env, tmp_path):
+        part = row_plan("matte", MATTE_ROW_NAME, _web_config(env))
+        looked_up: list[object] = []
+
+        def absent(target):
+            looked_up.append(target)
+            return False
+
+        parts_summary(
+            (part,),
+            committed=[DownloadTarget("a/elsewhere")],
+            check=lambda _target: TargetCheck(1, 100),
+            present=absent,
+            space=MagicMock(return_value=None),
+            cache_dir=lambda: tmp_path,
+        )
+
+        assert looked_up == list(part.targets)
 
     def test_a_row_s_licences_follow_its_model(self, env, tmp_path, monkeypatch):
         monkeypatch.setattr(job_downloads_module, "image_plan", MagicMock(return_value=(DownloadTarget("owner/a"),)))

@@ -556,7 +556,7 @@ class TestWebRunner:
             progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
 
         def _fake_ensure(self, part, **kwargs):
-            downloads.append((part.targets, kwargs["mode"], part.role, part.event_model))
+            downloads.append((part.targets, kwargs["mode"], part.role, part.label))
             return True
 
         monkeypatch.setattr(job_downloads_module, "seedvr2_plan", lambda name, **kwargs: plans.append((name, kwargs["weights"])) or targets)
@@ -638,7 +638,7 @@ class TestWebRunner:
         config = {"video_model_presets": {}}
 
         def _fake_ensure(self, part, **kwargs):
-            downloads.append((part.targets, kwargs["mode"], part.role, part.event_model))
+            downloads.append((part.targets, kwargs["mode"], part.role, part.label))
             return True
 
         def _fake_run(engine, model, request, *, progress_callback, skip_signal):

@@ -6,13 +6,12 @@ the fp32 state dict of the package's loader are never resident, and the checkpoi
 Attention is PyTorch's SDPA: ``flash_attn`` is optional and not needed.
 
 The library clamps its output to -1..1 inside ``generate``. The backend keeps the decoder's output from before the
-clamp by wrapping the instance's ``pretransform.decode`` for the length of one take, and returns it with
-``AudioClip.preclamp`` set so the save step can scale a take that peaks above 1.0 instead of clipping it.
+clamp by wrapping the instance's ``pretransform.decode`` for the length of one take, and returns it so the runner can
+scale a take that peaks above 1.0 instead of clipping it.
 """
 
 from __future__ import annotations
 
-import gc
 import json
 import warnings
 from collections.abc import Callable, Iterator
@@ -20,27 +19,21 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.core.audio_backend import AudioCancelled
+from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.utils.safetensors_stream import iter_tensors
-from zvisiongenerator.utils.torch_flags import TorchFlags, capture_torch_flags, restore_torch_flags
+from zvisiongenerator.utils.torch_flags import default_dtype
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.audio_backend import CancelCheck, ProgressCallback
     from zvisiongenerator.core.audio_types import AudioGenerationRequest
-    from zvisiongenerator.utils.audio_preset import AudioPlatform, AudioPreset
+    from zvisiongenerator.utils.audio_preset import AudioPreset
 
-__all__ = ["FAMILY", "StableAudio3Backend"]
-
-FAMILY = "stable_audio_3"
-"""The model family this backend serves: the name ``backends.get_audio_backend`` resolves."""
+__all__ = ["StableAudio3Backend"]
 
 PHASE = "Sampling"
 """The progress phase of a take: the diffusion steps."""
-
-DECODE_PHASE = "Decode"
-"""The progress phase after the last step: the decoder turns the latents into the waveform (up to 6 s on the first take after a load)."""
 
 _TEXT_ENCODER_DIR = "t5gemma-b-b-ul2"
 
@@ -76,30 +69,15 @@ def _fill_from_checkpoint(model: Any, checkpoint: Path) -> None:
         destination.copy_(tensor)
 
 
-@contextmanager
-def _fp16_default() -> Iterator[None]:
-    """Make new floating-point parameters fp16 for the length of the block, then restore the previous default dtype.
-
-    The package's factory builds fp32 models, which takes 9.2 GB of memory for Stable Audio 3 Medium. Built under this
-    default its parameters are fp16 from the start, about half that. Nothing the init computes survives: the
-    checkpoint holds every parameter and buffer of the model, and the fill overwrites each. The T5Gemma text encoder
-    loads at the dtype of its own files, whatever the default is.
-    """
-    import torch
-
-    previous = torch.get_default_dtype()
-    torch.set_default_dtype(torch.float16)
-    try:
-        yield
-    finally:
-        torch.set_default_dtype(previous)
-
-
 def _build_fp16(config: dict[str, Any], checkpoint: Path, device: str) -> Any:
     """Return the diffusion model built from *config* in fp16, filled from *checkpoint* and moved to *device*, ready to sample."""
+    import torch
     from stable_audio_3.factory import create_diffusion_cond_from_config
 
-    with _fp16_default():
+    # The package's factory builds fp32 models, 9.2 GB for Stable Audio 3 Medium. Built under an fp16 default its parameters
+    # are fp16 from the start, about half that. Nothing the init computes survives: the checkpoint holds every parameter and
+    # buffer of the model, and the fill overwrites each. The T5Gemma text encoder loads at the dtype of its own files.
+    with default_dtype(torch.float16):
         model = create_diffusion_cond_from_config(config)
     model.half()  # the buffers the factory made in fp32
     _fill_from_checkpoint(model, checkpoint)
@@ -143,36 +121,22 @@ def _keep_decoded(pretransform: Any, on_decode: Callable[[int], None] | None = N
             del pretransform.decode
 
 
-def _empty_cache(device: str) -> None:
-    """Return the cached accelerator memory of *device* to the system."""
-    import torch
-
-    if device.startswith("cuda") and torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    elif device == "mps":
-        torch.mps.empty_cache()
-
-
 class StableAudio3Backend:
     """Make a sound from a text description with Stable Audio 3 Medium on a torch device (``cuda`` or ``mps``).
 
     Implements :class:`zvisiongenerator.core.audio_backend.AudioBackend`.
     """
 
-    def __init__(self, empty_cache: Callable[[str], None] = _empty_cache) -> None:
-        self._empty_cache = empty_cache
+    def __init__(self) -> None:
         self._model: Any = None
-        self._device = ""
         self._settings: dict[str, Any] = {}
-        self._flags: TorchFlags | None = None
 
-    def load(self, preset: AudioPreset, platform_entry: AudioPlatform, device: str) -> None:
+    def load(self, preset: AudioPreset, device: str) -> None:
         """Load the model of *preset* onto *device*, filling it tensor by tensor in fp16.
 
         Args:
-            preset: The ``sa3`` preset; its settings give ``steps``, ``cfg_scale`` and ``sample_size``.
-            platform_entry: The preset's entry for this platform: the checkpoint, the config and the text encoder, in
-                that order.
+            preset: The ``sa3`` preset: the checkpoint, the config and the text encoder files, in that order, and the
+                settings ``steps``, ``cfg_scale`` and ``sample_size``.
             device: ``cuda`` or ``mps``.
 
         Raises:
@@ -181,11 +145,9 @@ class StableAudio3Backend:
         from stable_audio_3.model import StableAudioModel
 
         self.close()
-        checkpoint_files, config_files, encoder_files = platform_entry.files
+        checkpoint_files, config_files, encoder_files = preset.files
         checkpoint = snapshot_dir(checkpoint_files) / checkpoint_files.patterns[0]
         config = _model_config(snapshot_dir(config_files) / config_files.patterns[0], snapshot_dir(encoder_files) / _TEXT_ENCODER_DIR)
-        self._device = device  # set first, so close() frees the device's cache after a failed load too
-        self._flags = capture_torch_flags()  # StableAudioModel sets global numerics flags; close() puts them back
         try:
             self._model = StableAudioModel(_build_fp16(config, checkpoint, device), config, device, True)
             self._settings = preset.settings_for(device)
@@ -206,7 +168,7 @@ class StableAudio3Backend:
             cancelled: Called between steps; ``True`` stops the take.
 
         Returns:
-            A stereo 44.1 kHz clip with ``preclamp`` set: it may peak above 1.0.
+            A stereo 44.1 kHz clip from before the library's clamp, so it may peak above 1.0; the runner levels it.
 
         Raises:
             AudioCancelled: If ``cancelled`` returned ``True``.
@@ -239,21 +201,11 @@ class StableAudio3Backend:
             )
         frames = int(seconds * sound.model.sample_rate)
         samples = decoded[-1][0, :, :frames].float().cpu().contiguous().numpy()
-        return AudioClip(samples=samples, sample_rate=int(sound.model.sample_rate), preclamp=True)
+        return AudioClip(samples=samples, sample_rate=int(sound.model.sample_rate))
 
     def close(self) -> None:
-        """Free the model, return its accelerator memory and restore the torch flags the library changed.
+        """Drop the model; the runner returns the accelerator memory and the torch flags the library changed.
 
         Safe to call twice, after a failed load and after a failed take.
         """
-        device, flags = self._device, self._flags
         self._model = None
-        self._device = ""
-        self._flags = None
-        try:
-            gc.collect()
-            if device:
-                self._empty_cache(device)
-        finally:
-            if flags is not None:
-                restore_torch_flags(flags)

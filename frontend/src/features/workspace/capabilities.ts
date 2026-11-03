@@ -75,10 +75,9 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   const definition = context?.workflow_contract.definitions[state.workflow];
   const isImageMode = definition?.mode === 'image';
   const isAudio = definition?.mode === 'audio';
-  const audioModel = isAudio ? context?.audio_models?.find((model) => model.id === state.model) : undefined;
   const videoDefaults = context?.video_model_defaults?.[state.model] as VideoModelDefaults | undefined;
-  // A video (or audio) model that lacks a control (low memory, upscale, length, ...) does not show it, whatever the workflow offers.
-  const hidden = new Set(isImageMode ? [] : isAudio ? (audioModel?.hidden_controls ?? []) : (videoDefaults?.hidden_controls ?? []));
+  // A video model that lacks a control (low memory, upscale, ...) does not show it, whatever the workflow offers. An audio workflow offers what its kind takes.
+  const hidden = new Set(isImageMode || isAudio ? [] : (videoDefaults?.hidden_controls ?? []));
   const visible = new Set((definition?.visible_controls ?? []).filter((control) => !hidden.has(control)));
   const imageDefaults = isImageMode
     ? ((context?.image_model_defaults?.[state.model] ?? context?.defaults) as ImageModelDefaults | undefined)

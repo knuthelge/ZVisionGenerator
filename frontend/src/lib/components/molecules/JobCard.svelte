@@ -277,7 +277,8 @@
         valuetext={bar.fraction === null ? 'Size unknown' : `${Math.round(bar.fraction * 100)}% downloaded`}
       />
     {:else if bar.kind === 'bar'}
-      <div class="ui-progress job-bar" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax={total} aria-valuenow={done} aria-valuetext="{done} of {total} {noun}s done">
+      <!-- The fill is the bar's value: a one-item job fills while its item runs, though no item is done until it ends. -->
+      <div class="ui-progress job-bar" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(bar.fraction * 100)} aria-valuetext={total === 1 ? `${Math.round(bar.fraction * 100)}% done` : `${done} of ${total} ${noun}s done`}>
         <span class="ui-progress-fill" style:width="{bar.fraction * 100}%"></span>
       </div>
     {:else}

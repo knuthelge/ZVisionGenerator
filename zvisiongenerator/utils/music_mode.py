@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from typing import Final
 
-__all__ = ["INSTRUMENTAL", "SONG", "music_mode", "section_tags"]
+__all__ = ["INSTRUMENTAL", "music_mode"]
 
-SONG: Final = "song"
+_SONG: Final = "song"
 """The kind of a take whose Lyrics hold words."""
 
 INSTRUMENTAL: Final = "instrumental"
@@ -16,7 +16,7 @@ INSTRUMENTAL: Final = "instrumental"
 _TAG: Final = re.compile(r"\[[^\[\]\n]+\]")
 
 
-def section_tags(text: str) -> list[str]:
+def _section_tags(text: str) -> list[str]:
     """Return the ``[section]`` tags of *text*, in order and as written."""
     return _TAG.findall(text)
 
@@ -32,8 +32,8 @@ def music_mode(lyrics: str, default_sections: str) -> tuple[str, str, int]:
         ``(lyrics, kind, section_count)``: the lyrics to give the model, ``song`` or ``instrumental``, and the number of
         ``[section]`` tags in those lyrics.
     """
-    tags = section_tags(lyrics)
+    tags = _section_tags(lyrics)
     if _TAG.sub("", lyrics).strip():
-        return lyrics, SONG, len(tags)
-    tags = tags or section_tags(default_sections)
+        return lyrics, _SONG, len(tags)
+    tags = tags or _section_tags(default_sections)
     return "\n\n".join(tags), INSTRUMENTAL, len(tags)

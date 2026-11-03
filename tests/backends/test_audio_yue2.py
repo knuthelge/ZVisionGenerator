@@ -5,6 +5,7 @@ The swap's "GPU" is torch's ``meta`` device, so a tensor's device tells which we
 
 from __future__ import annotations
 
+import dataclasses
 import gc
 import weakref
 from types import SimpleNamespace
@@ -17,7 +18,6 @@ import torch
 import zvisiongenerator.backends.audio.yue2 as yue2_module
 from tests._audio_presets import audio_config
 from tests._factories import load_packaged_config
-from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
 from zvisiongenerator.backends.audio.yue2 import SAMPLE_RATE, YuE2Backend
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
 from zvisiongenerator.core.audio_backend import AudioCancelled
@@ -316,7 +316,7 @@ def _request(**changes) -> AudioGenerationRequest:
 def _loaded(platform: str = "cuda") -> YuE2Backend:
     backend = YuE2Backend()
     preset = _preset()
-    backend.load(preset, preset.platforms[platform], platform)
+    backend.load(preset, platform)
     return backend
 
 
@@ -335,7 +335,7 @@ class TestLoad:
         assert model_dir == "/models/m-a-p/YuE2-3B"
         assert vae_dir == "/models/m-a-p/YuE2-Vae"
         assert device == "cuda"
-        assert (settings["memory_budget_gib"], settings["vae_core_frames"], settings["ode_steps"], settings["weight_swap"]) == (24, 512, 32, True)
+        assert (settings["memory_budget_gib"], settings["vae_core_frames"], settings["ode_steps"]) == (24, 512, 32)
 
     def test_the_kits_pipeline_is_built_with_the_presets_values(self, monkeypatch):
         from_pretrained = MagicMock()
@@ -373,6 +373,24 @@ class TestLoad:
 
         assert kit.loads == [("/models/yue2", True)]
 
+    def test_cuda_swaps_the_weights_by_default_and_a_preset_can_turn_it_off(self, kit):
+        backend = _loaded()
+        assert backend._swap is not None
+
+        preset = _preset()
+        off = dataclasses.replace(preset, platforms={"cuda": dataclasses.replace(preset.platforms["cuda"], settings={"weight_swap": False})})
+        backend = YuE2Backend()
+        backend.load(off, "cuda")
+
+        assert backend._swap is None
+        assert kit.loads[-1] == ("/models/yue2", False)
+
+    def test_mps_loads_without_the_swap_by_default(self, kit):
+        backend = _loaded("mps")
+
+        assert backend._swap is None
+        assert kit.loads == [("/models/yue2", False)]
+
     def test_no_swap_is_built_with_weight_swap_off_and_the_model_goes_to_the_device(self, kit, monkeypatch):
         monkeypatch.setattr(yue2_module, "WeightSwap", MagicMock(side_effect=AssertionError("no swap expected")))
 
@@ -407,43 +425,10 @@ class TestLoad:
         backend = YuE2Backend()
 
         with pytest.raises(OSError, match="disk gone"):
-            backend.load(_preset(), _preset().platforms["cuda"], "cuda")
+            backend.load(_preset(), "cuda")
 
         assert kit.pipe.closed
         assert kit.fractions[-1] == 1.0
-
-    def test_close_gives_the_global_torch_flags_back(self, kit, monkeypatch, torch_flags_guard):
-        set_app_flags()
-        before = current_flags()
-        build = yue2_module._build_pipeline
-
-        def kit_build(*args):
-            set_kit_flags()  # the kit's constructor does this
-            return build(*args)
-
-        monkeypatch.setattr(yue2_module, "_build_pipeline", kit_build)
-        backend = _loaded()
-        assert current_flags() != before
-
-        backend.close()
-        assert current_flags() == before
-        backend.close()
-        assert current_flags() == before
-
-    def test_a_failed_load_gives_the_global_torch_flags_back(self, kit, monkeypatch, torch_flags_guard):
-        set_app_flags()
-        before = current_flags()
-
-        def failing_build(*args):
-            set_kit_flags()
-            raise OSError("disk gone")
-
-        monkeypatch.setattr(yue2_module, "_build_pipeline", failing_build)
-
-        with pytest.raises(OSError, match="disk gone"):
-            YuE2Backend().load(_preset(), _preset().platforms["cuda"], "cuda")
-
-        assert current_flags() == before
 
 
 # ---- generate -----------------------------------------------------------------------------------------------------
@@ -472,7 +457,7 @@ class TestGenerate:
         """The packaged config (not the test fixture) decides the default section list; the style gets no 'no vocals' text added."""
         preset = next(item for item in parse_audio_presets(load_packaged_config()) if item.id == "yue2")
         backend = YuE2Backend()
-        backend.load(preset, preset.platforms["cuda"], "cuda")
+        backend.load(preset, "cuda")
 
         backend.generate(_request(prompt="calm piano, slow", lyrics=lyrics), MagicMock(), _never_cancelled)
 

@@ -12,8 +12,7 @@ import numpy as np
 import pytest
 import torch
 
-from tests._higgs3_fakes import CODEC_REPO, CONFIG, ENTRY, OFFICIAL_REPO, PRESET, FakeCodec, FakeModel, codes_of, install_fakes
-from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
+from tests._higgs3_fakes import CODEC_REPO, CONFIG, OFFICIAL_REPO, PRESET, FakeCodec, FakeModel, codes_of, install_fakes
 
 from zvisiongenerator.backends.audio import higgs3 as higgs3_module
 from zvisiongenerator.backends.audio.higgs3 import SAMPLE_RATE, Higgs3Backend
@@ -47,7 +46,7 @@ def rig(monkeypatch, tmp_path):
     monkeypatch.setattr(higgs3_module, "probe_track_seconds", lambda path: 10.0)
     monkeypatch.setattr(audio_request_module, "probe_track_seconds", lambda path: 10.0)
     backend = Higgs3Backend()
-    backend.load(PRESET, ENTRY, "cuda")
+    backend.load(PRESET, "cuda")
     return SimpleNamespace(backend=backend, model=model, codec=codec, events=events, calls=calls, fakes=fakes)
 
 
@@ -91,7 +90,7 @@ class TestLoad:
         monkeypatch.setattr(huggingface_hub, "hf_hub_download", refuse)
         backend = Higgs3Backend()
 
-        backend.load(PRESET, ENTRY, "cuda")
+        backend.load(PRESET, "cuda")
 
         assert backend._model is not None
 
@@ -101,7 +100,7 @@ class TestLoad:
         backend = Higgs3Backend()
 
         with pytest.raises(FileNotFoundError, match=f"{repo_id} at [0-9a-f]{{40}} is not downloaded"):
-            backend.load(PRESET, ENTRY, "cuda")
+            backend.load(PRESET, "cuda")
 
         rig.fakes.load_model.reset_mock()
         rig.fakes.codec_load.reset_mock()
@@ -114,7 +113,7 @@ class TestLoad:
         backend = Higgs3Backend()
 
         with pytest.raises(OSError, match="no codec"):
-            backend.load(PRESET, ENTRY, "cuda")
+            backend.load(PRESET, "cuda")
 
         assert backend._model is None
 
@@ -130,13 +129,19 @@ class TestLoad:
         assert wave.ndim == 1
         assert wave.dtype == np.float32
 
-    def test_a_platform_can_put_the_codec_on_another_device(self, rig):
-        entry = type(ENTRY)(family=ENTRY.family, files=ENTRY.files, memory_gb=None, settings={"codec_device": "mps"})
+    def test_the_codec_runs_on_the_cpu_on_cuda_and_on_mps_on_a_mac_by_default(self, rig):
+        assert ("codec.to", "cpu") in rig.events
 
-        Higgs3Backend().load(PRESET, entry, "mps")
+        Higgs3Backend().load(PRESET, "mps")
 
         assert ("codec.to", "mps") in rig.events
         assert rig.fakes.load_model.call_args.args[2] == "mps"
+
+    def test_a_preset_can_put_the_codec_on_another_device(self, rig):
+        settings = {**PRESET.settings, "codec_device": "cuda"}
+        Higgs3Backend().load(dataclasses.replace(PRESET, settings=settings), "cuda")
+
+        assert ("codec.to", "cuda") in rig.events
 
 
 class TestParts:
@@ -153,6 +158,14 @@ class TestParts:
         assert clip.sample_rate == 24000
         assert clip.samples.dtype == np.float32
         assert not clip.cut
+
+    def test_a_loud_take_keeps_its_peaks_above_full_scale_for_the_runner_to_scale(self, rig):
+        rig.model.takes[:] = [100]
+        rig.codec.waves.append(_tone(1.0, amplitude=1.6))
+
+        clip, _ = _generate(rig, _request())
+
+        assert float(np.abs(clip.samples).max()) > 1.0
 
     def test_the_codes_of_a_part_reach_the_codec_without_the_frame_that_ended_it(self, rig):
         rig.model.takes[:] = [6]  # 6 head calls: 5 kept frames, 5 - (N - 1) = 4 of them sound
@@ -250,15 +263,6 @@ class TestParts:
 
         assert len(rig.codec.encoded) == 1
         assert rig.calls[0].reference_text == "Hello, this is me."
-
-    def test_a_recording_without_a_transcript_goes_without_one(self, rig, monkeypatch):
-        monkeypatch.setattr(higgs3_module, "read_track", lambda *args: np.zeros((2, 10 * 48000), dtype=np.float32))
-        rig.codec.waves.append(_tone(0.5))
-
-        _generate(rig, _request(voice=VoiceRef("me.wav")))
-
-        assert rig.calls[0].reference_text is None
-        assert rig.calls[0].reference_codes is not None
 
     def test_a_silent_first_part_stops_an_any_take(self, rig):
         _with_cap(rig, 1)  # fewer iterations than codebooks: the part has no sound
@@ -427,40 +431,6 @@ class TestClose:
         assert rig.backend._model is None
         assert rig.backend._codec is None
 
-    def test_close_gives_the_global_torch_flags_back(self, rig, torch_flags_guard):
-        rig.backend.close()
-        set_app_flags()
-        before = current_flags()
-
-        def flipping(*args, **kwargs):
-            set_kit_flags()  # model code may set the flags while it loads
-            return rig.model
-
-        rig.fakes.load_model.side_effect = flipping
-        rig.backend.load(PRESET, ENTRY, "cuda")
-        assert current_flags() != before
-
-        rig.backend.close()
-        assert current_flags() == before
-        rig.backend.close()
-        assert current_flags() == before
-
-    def test_a_failed_load_gives_the_global_torch_flags_back(self, rig, torch_flags_guard):
-        rig.backend.close()
-        set_app_flags()
-        before = current_flags()
-
-        def failing(*args, **kwargs):
-            set_kit_flags()
-            raise OSError("no codec")
-
-        rig.fakes.codec_load.side_effect = failing
-
-        with pytest.raises(OSError, match="no codec"):
-            rig.backend.load(PRESET, ENTRY, "cuda")
-
-        assert current_flags() == before
-
     def test_nothing_keeps_the_model_or_the_codec_alive_after_close(self, monkeypatch, tmp_path):
         # After close() a weak reference to each must be dead, so the accelerator memory they own can be freed.
         events: list = []
@@ -478,7 +448,7 @@ class TestClose:
         fakes.load_model.side_effect = make_model
         fakes.codec_load.side_effect = make_codec
         backend = Higgs3Backend()
-        backend.load(PRESET, ENTRY, "cuda")
+        backend.load(PRESET, "cuda")
         backend.generate(_request(), lambda *args: None, lambda: False)
         assert made["model"]() is not None and made["codec"]() is not None
 

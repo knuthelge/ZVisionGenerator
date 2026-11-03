@@ -1,9 +1,8 @@
 import { parseQuery } from '$lib/prefillParams';
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
-import { VOICE_MAX_SECONDS } from '$lib/state/audioAsset';
 import { imageSupport } from '$lib/state/imageSlots';
 import { workflowMode } from '$lib/state/promptEnhance';
-import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
+import type { AssetUpscaleFactor, DraftState, GalleryAsset, JobWorkflow, PrefillParams, SpeechAudioModel, UpscaleFactor, UpscaleMethod, Workflow, WorkspaceContext } from '$lib/types';
 
 /** Where an image goes: an image's start image, one more reference, a video's first frame, or a video's last frame. */
 export type ReferenceTarget = 'image' | 'reference' | 'video' | 'last';
@@ -185,15 +184,14 @@ function videoTakesAudioTrack(ctx: WorkspaceContext, videoModel: string): boolea
   return offered.includes('audio_track') && offered.includes('audio_track_path') && !hidden.includes('audio_track');
 }
 
-/** The Use as state of an audio take: the Video model must follow a track, and a speech model must clone voices. */
+/** The Use as state of an audio take: the Video model must follow a track, and a speech model must be there to follow a voice. */
 function audioUseState(ctx: WorkspaceContext, videoModel: string, videoName: string): UseAsState {
-  const cloning = (ctx.audio_models ?? []).filter((model) => model.kind === 'speech' && model.capabilities.voice_clone);
+  const cloning = (ctx.audio_models ?? []).filter((model): model is SpeechAudioModel => model.kind === 'speech');
   const state: UseAsState = {
     audio_track: videoTakesAudioTrack(ctx, videoModel) ? { disabled: false, hint: AUDIO_TRACK_HINT } : { disabled: true, hint: `${videoName || 'The video model'} can't follow an audio track` },
     voice: cloning.length > 0 ? { disabled: false, hint: VOICE_HINT } : { disabled: true, hint: 'No speech model here can use a voice' },
   };
-  const longest = Math.max(0, ...cloning.map((model) => model.limits.max_voice_seconds ?? 0));
-  if (longest > 0) state.voiceMaxSeconds = longest;
+  if (cloning.length > 0) state.voiceMaxSeconds = Math.max(...cloning.map((model) => model.limits.max_voice_seconds));
   return state;
 }
 
@@ -207,14 +205,13 @@ export function canUseAsVoice(asset: GalleryAsset): boolean {
   return asset.media_type === 'audio' && asset.kind === 'speech' && Boolean(asset.file_path);
 }
 
-/** The reason a speech take is too long to be a voice; the menu shows it in place of the hint. */
-export function voiceTooLongReason(useAs: UseAsState = {}): string {
-  return `Use a take of ${useAs.voiceMaxSeconds ?? VOICE_MAX_SECONDS} s or less as a voice`;
-}
-
-/** Return whether a speech take is within the voice length (`useAs.voiceMaxSeconds`, else 30 s); a take of unknown length is allowed. */
-export function voiceFits(asset: GalleryAsset, useAs: UseAsState = {}): boolean {
-  return asset.duration == null || asset.duration <= (useAs.voiceMaxSeconds ?? VOICE_MAX_SECONDS);
+/**
+ * The reason a speech take is too long to be a voice, which the menu shows in place of the hint; undefined when it fits. The
+ * limit is the speech model's (`useAs.voiceMaxSeconds`): without one, or for a take of unknown length, the take is allowed.
+ */
+export function voiceTooLongReason(asset: GalleryAsset, useAs: UseAsState = {}): string | undefined {
+  const max = useAs.voiceMaxSeconds;
+  return max !== undefined && asset.duration != null && asset.duration > max ? `Use a take of ${max} s or less as a voice` : undefined;
 }
 
 /**

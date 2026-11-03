@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -10,14 +11,15 @@ import torch
 
 from tests._audio_presets import audio_config
 from tests._media import REAL
+from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
 from tests.audio._helpers import clip, decode, fake_backend, patch_runner, preset, sine
 
 from zvisiongenerator import audio_runner
 from zvisiongenerator.audio_runner import run_audio_batch
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
-from zvisiongenerator.downloads import DETACHED, STOPPED
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 from zvisiongenerator.utils.provenance import read_config
 
 CONFIG = audio_config()
@@ -43,79 +45,115 @@ def _run(request, model, tmp_path, **overrides):
 
 
 class TestOrder:
-    def test_the_enhancer_is_released_then_the_files_are_ensured_then_the_model_loads(self, monkeypatch, tmp_path):
+    def test_the_enhancer_is_released_then_the_model_loads_and_is_closed_last(self, monkeypatch, tmp_path):
         order: list[str] = []
         backend = fake_backend(clip(), events=order)
         env = patch_runner(monkeypatch, backend)
         env.session.release_resident_enhancer.side_effect = lambda: order.append("release")
-        env.ensure.side_effect = lambda *a, **k: order.append("ensure") or "ready"
 
         _run(_music(), YUE2, tmp_path)
 
-        assert order == ["release", "ensure", "load", "generate", "close"]
+        assert order == ["release", "load", "generate", "close"]
 
-    def test_the_load_is_announced_after_the_download_and_the_batch_starts_once_the_model_is_loaded(self, monkeypatch, tmp_path):
+    def test_the_batch_starts_once_the_model_is_loaded(self, monkeypatch, tmp_path):
         order: list[str] = []
         backend = fake_backend(clip(), events=order)
-        env = patch_runner(monkeypatch, backend)
-        env.ensure.side_effect = lambda *a, **k: order.append("ensure") or "ready"
+        patch_runner(monkeypatch, backend)
 
         _run(_music(), YUE2, tmp_path, progress_callback=lambda event: order.append(event["type"]))
 
-        assert order[:5] == ["ensure", "model_loading", "load", "batch_started", "prompt_started"]
+        assert order[:4] == ["model_loading", "load", "batch_started", "prompt_started"]
 
-    def test_the_load_event_names_the_model(self, monkeypatch, tmp_path):
+    def test_the_load_event_names_the_model_by_its_label(self, monkeypatch, tmp_path):
         events: list[dict] = []
         patch_runner(monkeypatch, fake_backend(clip()))
 
         _run(_music(), YUE2, tmp_path, progress_callback=events.append)
 
         loading = next(e for e in events if e["type"] == "model_loading")
-        assert (loading["mode"], loading["model"]) == ("audio", "yue2")
+        assert (loading["mode"], loading["model"]) == ("audio", "YuE2 3B")
 
-    def test_a_stopped_download_sends_neither_the_load_nor_the_start(self, monkeypatch, tmp_path):
-        events: list[dict] = []
-        patch_runner(monkeypatch, fake_backend(clip()), ensure_outcome=STOPPED)
-
-        _run(_music(), YUE2, tmp_path, progress_callback=events.append)
-
-        assert [e["type"] for e in events] == ["batch_cancelled"]
-
-    def test_the_download_plan_is_the_presets_files_on_this_platform(self, monkeypatch, tmp_path):
-        env = patch_runner(monkeypatch, fake_backend(clip()))
-
-        _run(_music(), YUE2, tmp_path)
-
-        targets = env.ensure.call_args.args[0]
-        assert [target.repo_id for target in targets] == ["m-a-p/YuE2-3B", "m-a-p/YuE2-Vae"]
-
-    def test_the_backend_of_the_platform_entrys_family_loads_once_for_all_takes(self, monkeypatch, tmp_path):
+    def test_the_backend_of_the_presets_family_loads_once_for_all_takes(self, monkeypatch, tmp_path):
         backend = fake_backend(clip())
         patch_runner(monkeypatch, backend)
 
         _run(_music(), YUE2, tmp_path, runs=3)
 
         audio_runner.get_audio_backend.assert_called_once_with("yue2")
-        backend.load.assert_called_once_with(YUE2, YUE2.platforms["cuda"], "cuda")
+        backend.load.assert_called_once_with(YUE2, "cuda")
         assert backend.generate.call_count == 3 and backend.close.call_count == 1
 
-    def test_a_stopped_download_ends_the_job_without_loading(self, monkeypatch, tmp_path):
-        events: list[dict] = []
+
+class TestFilesOnDisk:
+    def test_files_that_are_not_on_disk_end_the_run_before_the_model_loads(self, monkeypatch, tmp_path):
         backend = fake_backend(clip())
-        patch_runner(monkeypatch, backend, ensure_outcome=STOPPED)
+        patch_runner(monkeypatch, backend, present=False)
 
-        saved = _run(_music(), YUE2, tmp_path, progress_callback=events.append)
+        with pytest.raises(FileNotFoundError, match="is not downloaded") as raised:
+            _run(_music(), YUE2, tmp_path)
 
-        assert saved == [] and backend.load.call_count == 0
-        assert events[-1]["type"] == "batch_cancelled" and events[-1]["download"] == STOPPED
+        assert "YuE2 3B" in str(raised.value)
+        assert backend.load.call_count == 0
 
-    def test_a_detached_download_ends_the_job_too(self, monkeypatch, tmp_path):
-        events: list[dict] = []
-        patch_runner(monkeypatch, fake_backend(clip()), ensure_outcome=DETACHED)
+    def test_files_on_disk_load_as_usual(self, monkeypatch, tmp_path):
+        patch_runner(monkeypatch, fake_backend(clip()))
 
-        _run(_music(), YUE2, tmp_path, progress_callback=events.append)
+        assert len(_run(_music(), YUE2, tmp_path)) == 1
 
-        assert events[-1]["download"] == DETACHED
+
+class TestLifecycle:
+    def test_the_torch_flags_the_model_code_changed_are_given_back_once_the_backend_is_closed(self, monkeypatch, tmp_path, torch_flags_guard):
+        backend = fake_backend(clip())
+        backend.load.side_effect = lambda *args, **kwargs: set_kit_flags()
+        patch_runner(monkeypatch, backend)
+        set_app_flags()
+        before = current_flags()
+
+        _run(_music(), YUE2, tmp_path)
+
+        assert current_flags() == before
+
+    def test_the_torch_flags_and_the_accelerator_memory_are_given_back_when_a_take_fails(self, monkeypatch, tmp_path, torch_flags_guard):
+        backend = fake_backend(clip())
+        backend.load.side_effect = lambda *args, **kwargs: set_kit_flags()
+        backend.generate.side_effect = ValueError("bad lyrics")
+        env = patch_runner(monkeypatch, backend)
+        set_app_flags()
+        before = current_flags()
+
+        with pytest.raises(ValueError, match="bad lyrics"):
+            _run(_music(), YUE2, tmp_path)
+
+        assert current_flags() == before
+        env.release.assert_called_once()
+
+    def test_the_torch_flags_are_given_back_when_loading_fails(self, monkeypatch, tmp_path, torch_flags_guard):
+        def failing_load(*args, **kwargs):
+            set_kit_flags()
+            raise FileNotFoundError("not downloaded")
+
+        backend = fake_backend(clip())
+        backend.load.side_effect = failing_load
+        env = patch_runner(monkeypatch, backend)
+        set_app_flags()
+        before = current_flags()
+
+        with pytest.raises(FileNotFoundError):
+            _run(_music(), YUE2, tmp_path)
+
+        assert current_flags() == before
+        backend.close.assert_called_once()
+        env.release.assert_called_once()
+
+    def test_the_memory_is_released_after_the_backend_is_closed(self, monkeypatch, tmp_path):
+        order: list[str] = []
+        backend = fake_backend(clip(), events=order)
+        env = patch_runner(monkeypatch, backend)
+        env.release.side_effect = lambda: order.append("release_memory")
+
+        _run(_music(), YUE2, tmp_path)
+
+        assert order[-2:] == ["close", "release_memory"]
 
 
 class TestSaving:
@@ -151,6 +189,14 @@ class TestSaving:
         assert saved[0].parent == tmp_path / "deep" / "er" and read_config(saved[0])["generation"]["cut"] is True
 
     @REAL
+    def test_the_console_says_when_a_take_was_cut_at_the_models_limit_and_only_then(self, monkeypatch, tmp_path, capsys):
+        patch_runner(monkeypatch, fake_backend(clip(0.2, cut=True), clip(0.2)))
+
+        _run(_music(), YUE2, tmp_path, runs=2)
+
+        assert capsys.readouterr().out.count(audio_runner._CUT_NOTE) == 1
+
+    @REAL
     def test_a_speech_take_records_the_full_text_and_the_number_of_parts(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip(0.2)))
         sentence = "This sentence has a fair number of characters in it, give or take. "
@@ -176,9 +222,9 @@ class TestSaving:
 
 class TestLevel:
     @REAL
-    def test_a_take_before_the_clamp_that_peaks_over_full_scale_is_brought_to_minus_1_dbfs(self, monkeypatch, tmp_path):
+    def test_a_take_that_peaks_over_full_scale_is_brought_to_minus_1_dbfs(self, monkeypatch, tmp_path):
         loud = sine(0.3, rate=44100, amplitude=10 ** (6.3 / 20))
-        patch_runner(monkeypatch, fake_backend(clip_from(loud, 44100, preclamp=True)))
+        patch_runner(monkeypatch, fake_backend(clip_from(loud, 44100)))
 
         saved = _run(_sound(), SA3, tmp_path)
 
@@ -186,28 +232,105 @@ class TestLevel:
         assert 20 * np.log10(np.abs(decoded).max()) == pytest.approx(-1.0, abs=0.01)
 
     @REAL
-    def test_a_take_before_the_clamp_that_stays_within_full_scale_is_saved_as_it_is(self, monkeypatch, tmp_path):
+    def test_a_take_that_stays_within_full_scale_is_saved_as_it_is(self, monkeypatch, tmp_path):
         samples = sine(0.3, rate=44100, amplitude=0.95)
-        patch_runner(monkeypatch, fake_backend(clip_from(samples, 44100, preclamp=True)))
+        patch_runner(monkeypatch, fake_backend(clip_from(samples, 44100)))
 
         decoded, _ = decode(_run(_sound(), SA3, tmp_path)[0])
 
         assert np.abs(decoded).max() == pytest.approx(0.95, abs=0.001)
-
-    @REAL
-    def test_a_clip_that_is_not_before_the_clamp_is_not_scaled(self, monkeypatch, tmp_path):
-        samples = sine(0.3, rate=44100, amplitude=1.5)
-        patch_runner(monkeypatch, fake_backend(clip_from(samples, 44100, preclamp=False)))
-
-        decoded, _ = decode(_run(_sound(), SA3, tmp_path)[0])
-
-        assert np.abs(decoded).max() == pytest.approx(1.0, abs=0.001)  # the 16-bit conversion clamps it, nothing else
 
 
 def clip_from(samples, rate, **fields):
     from zvisiongenerator.core.audio_types import AudioClip
 
     return AudioClip(samples=samples, sample_rate=rate, **fields)
+
+
+class TestTiming:
+    @staticmethod
+    def _eta(*, gen_times, takes_left, ran_secs):
+        events: list[dict] = []
+        console = MagicMock()
+        report = audio_runner._progress_reporter(
+            events.append, {"mode": "audio"}, console, batch_start=time.time() - 100, take_began=time.monotonic() - ran_secs, gen_times=gen_times, takes_left=takes_left
+        )
+
+        report("Sampling", 1, 2, 1, 1)
+
+        (event,) = events
+        return event
+
+    def test_the_time_left_counts_the_takes_to_go_less_what_this_one_has_run(self):
+        event = self._eta(gen_times=[20.0, 40.0], takes_left=3, ran_secs=10)
+
+        assert event["eta_secs"] == pytest.approx(80.0, abs=1.0)  # 30 s on average x 3 takes - 10 s
+        assert event["elapsed_secs"] == pytest.approx(100.0, abs=1.0)
+
+    def test_the_time_left_is_never_below_zero(self):
+        assert self._eta(gen_times=[20.0], takes_left=1, ran_secs=500)["eta_secs"] == 0.0
+
+    def test_there_is_no_estimate_before_a_take_has_finished(self):
+        assert self._eta(gen_times=[], takes_left=2, ran_secs=5)["eta_secs"] is None
+
+    @REAL
+    def test_the_second_take_of_a_job_counts_down_from_the_first_ones_time(self, monkeypatch, tmp_path):
+        events: list[dict] = []
+        backend = fake_backend(clip(0.1))
+        original = backend.generate.side_effect
+
+        def generate(request, on_progress, cancelled):
+            on_progress("Sampling", 1, 1, 1, 1)
+            return original(request, on_progress, cancelled)
+
+        backend.generate.side_effect = generate
+        patch_runner(monkeypatch, backend)
+
+        _run(_music(), YUE2, tmp_path, runs=2, progress_callback=events.append)
+
+        first, second = [e for e in events if e["type"] == "audio_progress"]
+        assert first["eta_secs"] is None and second["eta_secs"] is not None and second["eta_secs"] >= 0.0
+        assert all("elapsed_secs" in e for e in (first, second))
+
+
+class TestConsole:
+    @REAL
+    def test_a_phase_is_named_once_on_a_console_that_is_not_a_terminal(self, monkeypatch, tmp_path, capsys):
+        backend = fake_backend(clip(0.2))
+        original = backend.generate.side_effect
+
+        def generate(request, on_progress, cancelled):
+            for step in range(1, 4):
+                on_progress("Song tokens", step, None, 1, 1)
+            return original(request, on_progress, cancelled)
+
+        backend.generate.side_effect = generate
+        patch_runner(monkeypatch, backend)
+
+        _run(_music(), YUE2, tmp_path)
+
+        assert capsys.readouterr().out.count("Song tokens") == 1
+
+
+class TestSeeds:
+    def test_a_fixed_seed_is_every_takes_seed_and_a_missing_one_is_drawn_per_take_within_the_configured_range(self, monkeypatch, tmp_path):
+        backend = fake_backend(clip(0.2))
+        patch_runner(monkeypatch, backend)
+        config = {**CONFIG, "generation": {"seed_min": 100, "seed_max": 102}}
+
+        run_audio_batch(_music(), YUE2, config, runs=20, seed=None, output_dir=str(tmp_path / "out"))
+
+        drawn = {call.args[0].seed for call in backend.generate.call_args_list}
+        assert drawn <= {100, 101, 102} and len(drawn) > 1
+
+    def test_the_takes_are_numbered_for_the_job_events(self, monkeypatch, tmp_path):
+        events: list[dict] = []
+        patch_runner(monkeypatch, fake_backend(clip(0.2)))
+
+        _run(_music(), YUE2, tmp_path, runs=2, progress_callback=events.append)
+
+        started = [e for e in events if e["type"] == "prompt_started"]
+        assert [(e["run_index"], e["ran_iterations"], e["total_iterations"], e["total_runs"]) for e in started] == [(0, 1, 2, 2), (1, 2, 2, 2)]
 
 
 class TestOutOfMemory:
@@ -242,6 +365,17 @@ class TestOutOfMemory:
             _run(_music(), YUE2, tmp_path)
 
         backend.close.assert_called_once()
+
+    def test_the_message_names_what_the_model_needs_against_the_cards_size_when_known(self, monkeypatch, tmp_path):
+        backend = fake_backend(clip())
+        backend.generate.side_effect = torch.OutOfMemoryError("out of memory")
+        patch_runner(monkeypatch, backend)
+        monkeypatch.setattr(audio_runner, "accelerator_memory_budget_or_none", lambda: MemoryBudget(8 * GIB, system_bytes=64 * GIB))
+
+        with pytest.raises(RuntimeError) as raised:
+            _run(_speech(), HIGGS3, tmp_path)
+
+        assert "8.2 GB" in str(raised.value) and "8 GB" in str(raised.value)
 
     def test_another_runtime_error_is_not_rewritten(self, monkeypatch, tmp_path):
         backend = fake_backend(clip())

@@ -1,19 +1,12 @@
 import { isAudioWorkflow } from './workspaceTab';
-import type { AudioModelOption, AudioWorkflow, DraftState, WorkspaceContext, WorkspacePrefill } from '$lib/types';
-
-/** The kinds of the Audio tab, in the order the Kind control lists them. */
-const AUDIO_KINDS: readonly AudioWorkflow[] = ['music', 'speech', 'sound'];
-
-/** The length of a sound when none is chosen, and the shortest one a model makes (the server's `DEFAULT_SOUND_SECONDS` and `MIN_SOUND_SECONDS`). */
-const DEFAULT_SOUND_SECONDS = 10;
-const MIN_SOUND_SECONDS = 1;
+import { AUDIO_KINDS, type AudioModelOption, type AudioWorkflow, type DraftState, type WorkspaceContext, type WorkspacePrefill } from '$lib/types';
 
 /** The text fields of the Audio tab: the Music style and lyrics, the Speech text and the Sound prompt. */
 const AUDIO_TEXT_DEFAULTS = { audioStyle: '', lyrics: '', speechText: '', soundPrompt: '' } as const satisfies Partial<DraftState>;
 
-/** The other fields the Audio tab keeps in the draft: the length and the voice. */
+/** The other fields the Audio tab keeps in the draft: the length and the voice. The length is 0 (not chosen) until `hydrateAudio` fills it with a sound model's `default_seconds`, so a length nobody touched is the model's default and is not shown as changed. */
 const AUDIO_SETTING_DEFAULTS = {
-  audioSeconds: DEFAULT_SOUND_SECONDS,
+  audioSeconds: 0,
   voiceMode: 'any',
   voicePath: null,
   voiceUpload: null,
@@ -44,21 +37,28 @@ export function audioModelById(ctx: WorkspaceContext | null, id: string): AudioM
   return ctx?.audio_models?.find((model) => model.id === id) ?? null;
 }
 
-/** The range a sound's length can take on a model: from its shortest to its longest. */
-export function secondsRange(model: AudioModelOption | null): { min: number; max: number } {
-  return { min: model?.limits.min_seconds ?? MIN_SOUND_SECONDS, max: model?.limits.max_seconds ?? 600 };
+/** The range a sound's length can take on a model, from its shortest to its longest; null for a model that does not make sounds. */
+export function secondsRange(model: AudioModelOption | null): { min: number; max: number } | null {
+  return model?.kind === 'sound' ? { min: model.limits.min_seconds, max: model.limits.max_seconds } : null;
 }
 
-/** Move a length into a model's range. */
+/** Move a length into a sound model's range (a length that is not a number becomes the model's default); another model's length is left as it is. */
 export function clampSeconds(seconds: number, model: AudioModelOption | null): number {
-  const { min, max } = secondsRange(model);
-  return Math.min(max, Math.max(min, Number.isFinite(seconds) ? seconds : DEFAULT_SOUND_SECONDS));
+  if (model?.kind !== 'sound') return seconds;
+  const { min_seconds: min, max_seconds: max, default_seconds: fallback } = model.limits;
+  return Math.min(max, Math.max(min, Number.isFinite(seconds) ? seconds : fallback));
+}
+
+/** A length moved into a sound model's range; one nobody chose yet (0) is the sound model's default and stays 0 for a model that makes none. */
+function settledSeconds(seconds: number, model: AudioModelOption | null): number {
+  if (seconds > 0) return clampSeconds(seconds, model);
+  return model?.kind === 'sound' ? model.limits.default_seconds : seconds;
 }
 
 /**
  * Return the state settled on a kind and one of its models: the kind falls to the first one the machine runs when it runs
  * none of the state's, the model is the preferred one, else the state's, else the one last chosen for the kind, else the
- * kind's first, and a sound's length moves into the model's range.
+ * kind's first, and a sound's length moves into the model's range (a length not yet chosen is the model's default).
  */
 export function hydrateAudio(ctx: WorkspaceContext, state: DraftState, preferredModel: string | null = null): DraftState {
   const kinds = availableKinds(ctx);
@@ -74,7 +74,7 @@ export function hydrateAudio(ctx: WorkspaceContext, state: DraftState, preferred
     audioKind: kind,
     model,
     audioModels: { ...state.audioModels, [kind]: model },
-    audioSeconds: chosen?.capabilities.duration ? clampSeconds(state.audioSeconds, chosen) : state.audioSeconds,
+    audioSeconds: settledSeconds(state.audioSeconds, chosen),
   };
 }
 

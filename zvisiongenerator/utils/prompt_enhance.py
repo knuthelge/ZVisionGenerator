@@ -813,13 +813,7 @@ def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
 
 
 def resolve_enhance_ceiling(config: dict[str, Any], *, family: str | None, mode: str) -> int:
-    """Return the max enhanced-prompt word count for a model family (per-family override or global).
-
-    Raises:
-        ValueError: If *mode* is ``"audio"``, whose prompts are not enhanced.
-    """
-    if mode == "audio":
-        raise ValueError("Audio prompts can't be enhanced.")
+    """Return the max enhanced-prompt word count for a model family (per-family override or global)."""
     presets_key = "video_model_presets" if mode == "video" else "model_presets"
     preset = (config.get(presets_key) or {}).get(family or "", {}) or {}
     value = preset.get("enhance_max_words")

@@ -17,6 +17,7 @@ import type { EnhanceFrame, SettingsPreset, JobContext, PromptEnhancerContract, 
 import WorkspacePage from './WorkspacePage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
+import { makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeAsset, makeContext, makeGalleryPage, makeImageDefaults } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
@@ -232,6 +233,49 @@ describe('WorkspacePage history viewer (REC-UX-002)', () => {
     await settle();
 
     expect(target.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
+  });
+
+  it('stays on the open asset when a new one lands at the front of History', async () => {
+    const first = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png' });
+    const second = makeAsset({ id: 'out/second.png', url: '/media/out/second.png', filename: 'second.png' });
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([first, second]));
+    await mountWorkspace(makeContext({ history_assets: [] }));
+
+    (target.querySelector(`button[aria-label="View ${second.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    const shown = () => (target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null)?.getAttribute('src');
+    expect(shown()).toBe(second.url);
+
+    const landed = makeAsset({ id: 'out/new.png', url: '/media/out/new.png', filename: 'new.png' });
+    galleryStore.mergeOutputs([landed]);
+    await settle();
+
+    expect(galleryStore.assets[0].id).toBe(landed.id);
+    expect(shown()).toBe(second.url);
+  });
+
+  it('keeps a take playing in the viewer when a new one lands at the front of History', async () => {
+    const song = makeAudioAsset();
+    const talk = makeSpeechAsset();
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([song, talk]));
+    await mountWorkspace(makeContext({ history_assets: [] }));
+
+    (target.querySelector(`button[aria-label="View ${talk.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    const player = () => document.querySelector('[data-testid="viewer-audio"] audio') as HTMLAudioElement | null;
+    const opened = player();
+    expect(opened?.getAttribute('src')).toBe(talk.url);
+    const paused: (HTMLMediaElement | null)[] = [];
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { paused.push(this); });
+
+    const landed = makeAudioAsset({ id: 'out/new.flac', url: '/media/out/new.flac', thumbnail_url: '/media/out/new.flac', filename: 'new.flac' });
+    galleryStore.mergeOutputs([landed]);
+    await settle();
+
+    expect(galleryStore.assets.map((item) => item.id)).toEqual([landed.id, song.id, talk.id]);
+    expect(player()).toBe(opened);
+    expect(player()?.getAttribute('src')).toBe(talk.url);
+    expect(paused).not.toContain(opened);
   });
 });
 

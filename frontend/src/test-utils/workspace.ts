@@ -91,8 +91,8 @@ export function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): 
 export const FLUX_LICENCE: ModelLicence = {
   name: 'FLUX Non-Commercial License v2.1',
   supplier: 'Black Forest Labs',
-  summary: 'Non-commercial',
-  url: 'https://example.org/flux/model',
+  summary: 'Non-commercial use of the model; images may be used commercially',
+  url: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-9B',
   url_label: 'Model page',
   attribution: null,
 };
@@ -107,17 +107,17 @@ export const LTX_LICENCE: ModelLicence = {
 export const GEMMA_LICENCE: ModelLicence = {
   name: 'Gemma Terms of Use',
   supplier: 'Google',
-  summary: "Gemma's use policy applies",
-  url: 'https://example.org/gemma/LICENSE',
-  url_label: 'Licence',
+  summary: "Free to use, also commercially; Gemma's prohibited use policy applies",
+  url: 'https://huggingface.co/google/gemma-3-12b-it',
+  url_label: 'Model page',
   attribution: null,
 };
 export const MATTE_LICENCE: ModelLicence = {
-  name: 'BiRefNet (MIT) and ViTMatte (Apache-2.0)',
+  name: 'Research-only training data',
   supplier: 'BiRefNet and ViTMatte authors',
-  summary: "Trained on research datasets that don't allow commercial use",
-  url: 'https://example.org/matte/README.md',
-  url_label: 'Model card',
+  summary: "Non-commercial: ViTMatte was trained on Adobe's Deep Image Matting dataset, whose agreement allows models trained on it only for non-commercial use, and BiRefNet (MIT) partly on DIS5K, which is research-only",
+  url: 'https://github.com/xuebinqin/DIS/blob/e6455bae3892b3a7d8cf59ca91011a220d1ed606/DIS5K-Dataset-Terms-of-Use.pdf',
+  url_label: 'Dataset terms',
   attribution: null,
 };
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { withAudio } from '../../test-utils/audio';
 import { makeContext } from '../../test-utils/workspace';
 import { defaultsFor, draft } from '$lib/state/draft.svelte';
 import { sourceInfo } from '$lib/state/extend.fixtures';
@@ -27,7 +28,7 @@ describe('SETTING_ROWS', () => {
   it('covers the draft keys of the setting scopes, so a new setting needs a row', () => {
     // The custom size's width and height are compared through the size row's dimension mode.
     const exempt = new Set<keyof DraftState>(['width', 'height']);
-    const scoped = new Set<keyof DraftState>([...keysOf(['settings', 'shared', 'extendSettings', 'audioSettings']), 'referenceImageStrength']);
+    const scoped = new Set<keyof DraftState>([...keysOf(['settings', 'shared', 'extendSettings', 'audioSettings', 'voice']), 'referenceImageStrength']);
     const rowKeys = new Set<keyof DraftState>(SETTING_ROWS.flatMap((row) => row.keys));
 
     expect([...scoped].filter((key) => !rowKeys.has(key) && !exempt.has(key))).toEqual([]);
@@ -84,5 +85,29 @@ describe('the popovers\' Reset', () => {
     const caps = workspaceCapabilities(ctx, draft.state);
 
     expect(chipKeys('audio', caps, draft.state)).toEqual(expect.arrayContaining(['audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor']));
+  });
+});
+
+describe('the Audio voice', () => {
+  const audioCtx = withAudio(ctx);
+
+  function onSpeech(): { state: DraftState; defaults: DraftState } {
+    draft.hydrateFromContext(audioCtx, null);
+    draft.setTab('audio');
+    draft.onTabChange(audioCtx);
+    draft.setAudioKind('speech', audioCtx);
+    return { state: draft.state, defaults: defaultsFor(audioCtx, draft.state, null) };
+  }
+
+  it('counts in the Reset badge and the phone count once a recording or a transcript is set, and not before', () => {
+    const { state, defaults } = onSpeech();
+    const caps = workspaceCapabilities(audioCtx, state);
+    expect(changedRowCount(caps, state, defaults)).toBe(0);
+    expect(chipChanged('voice', caps, state, defaults)).toBe(false);
+
+    draft.setVoice({ path: '/voices/me.wav' });
+    expect(changedRowCount(caps, draft.state, defaults)).toBe(1);
+    expect(chipChanged('voice', caps, draft.state, defaults)).toBe(true);
+    expect(chipKeys('voice', caps, draft.state)).toEqual(['voiceMode', 'voicePath', 'voiceUpload', 'voiceText']);
   });
 });

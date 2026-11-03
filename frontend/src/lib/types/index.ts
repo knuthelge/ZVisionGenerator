@@ -2,8 +2,9 @@
 
 export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid' | 'extend';
 
-/** The workflows of the audio mode, one per kind of audio. The server lists them once an audio model can run. */
-export type AudioWorkflow = 'music' | 'speech' | 'sound';
+/** The kinds of audio, in the order the Kind control lists them: also the workflows of the audio mode, one per kind. The server lists a workflow once a model of its kind can run. */
+export const AUDIO_KINDS = ['music', 'speech', 'sound'] as const;
+export type AudioWorkflow = (typeof AUDIO_KINDS)[number];
 
 /** What the Workspace form can run: an image or video workflow, or the kind of the Audio tab. */
 export type WorkspaceWorkflow = Workflow | AudioWorkflow;
@@ -300,20 +301,36 @@ export interface ModelStatusFields {
   memory_fit?: MemoryFit | null;
 }
 
-/** One audio model the Workspace offers (`audio_models` of the workspace payload). */
-export interface AudioModelOption extends ModelStatusFields {
+/** The keys every audio model row has. The kind decides what a model takes: music has lyrics, sound a length, speech a voice. */
+interface AudioModelBase extends ModelStatusFields {
   id: string;
   label: string;
-  kind: AudioWorkflow;
   type: 'audio';
-  capabilities: { lyrics: boolean; duration: boolean; voice_clone: boolean };
-  /** The ceilings the kind has: `max_seconds`, `min_seconds`, `max_text_chars`, `min_voice_seconds`, `max_voice_seconds`. */
-  limits: Record<string, number>;
   /** A music model: the `[section]` list an empty Lyrics box stands for; null for the others. */
   instrumental_sections?: string | null;
-  hidden_controls: string[];
   licences: ModelLicence[];
 }
+
+/** A music model; `max_seconds` is where it cuts a song. */
+export interface MusicAudioModel extends AudioModelBase {
+  kind: 'music';
+  limits: { max_seconds: number };
+}
+
+/** A speech model: the text it reads in one take and the recordings it takes as a voice. */
+export interface SpeechAudioModel extends AudioModelBase {
+  kind: 'speech';
+  limits: { max_text_chars: number; min_voice_seconds: number; max_voice_seconds: number };
+}
+
+/** A sound model: the lengths it makes, and the one a new draft starts with. */
+export interface SoundAudioModel extends AudioModelBase {
+  kind: 'sound';
+  limits: { min_seconds: number; max_seconds: number; default_seconds: number };
+}
+
+/** One audio model the Workspace offers (`audio_models` of the workspace payload). */
+export type AudioModelOption = MusicAudioModel | SpeechAudioModel | SoundAudioModel;
 
 export interface ModelOption extends ModelStatusFields {
   id: string;
@@ -950,6 +967,8 @@ export interface DraftState {
   lastVideoModel: string;
   /** The quantization the image model last ran with; coming back from a video workflow (which has none) restores it. */
   lastImageQuantize: number | null;
+  /** The image or video model the settings were last hydrated for; the Audio tab holds none of its own, so coming back to this model keeps them. Empty before one was set. */
+  settingsModel: string;
   /** Image tab: the start image's path on the host; null when none is set or it was uploaded (`referenceImageUpload`). */
   referenceImagePath: string | null;
   /** Image tab: the file name of a start image uploaded from this device (its file is in `heldUploads` and the upload store); null when none. */
@@ -1055,7 +1074,7 @@ export interface DraftState {
   speechText: string;
   /** Audio tab, Sound: the Prompt box. */
   soundPrompt: string;
-  /** Audio tab, Sound: the length in seconds. */
+  /** Audio tab, Sound: the length in seconds; 0 until the model's default fills it. */
   audioSeconds: number;
   /** Audio tab, Speech: whether the model picks the voice (`any`) or follows a recording (`recording`). */
   voiceMode: 'any' | 'recording';
@@ -1284,6 +1303,9 @@ export interface AudioProgressEvent {
   total: number | null;
   part: number;
   n_parts: number;
+  /** Seconds since the take started, and the seconds left; the estimate is absent until the server has one. */
+  elapsed_secs?: number;
+  eta_secs?: number;
   run_index?: number;
   total_runs?: number;
 }
@@ -1562,14 +1584,14 @@ export interface JobDownloadPart {
   bytes: number | null;
 }
 
-/** A licence a model comes with, as the server reads it from the config's `licences` section. */
+/** A licence a model comes with, as the server reads it from the packaged licence records. */
 export interface ModelLicence {
   name: string;
   supplier: string;
   summary: string;
   /** The licence text pinned to a revision, or the model page of the licensor's original repository. */
   url: string;
-  /** What the link to `url` is called: "Licence", "Model page" or "Model card". */
+  /** What the link to `url` is called: "Licence", "Model page" or "Dataset terms". */
   url_label: string;
   /** The credit line the licence requires beside the model, such as "Powered by Stability AI"; null for most. */
   attribution: string | null;

@@ -7,7 +7,7 @@ import json
 import pytest
 
 from tests._paths import REPO_ROOT
-from zvisiongenerator.utils.music_mode import music_mode, section_tags
+from zvisiongenerator.utils.music_mode import music_mode
 
 CASES = json.loads((REPO_ROOT / "tests" / "audio" / "music_mode_cases.json").read_text(encoding="utf-8"))
 
@@ -17,7 +17,3 @@ def test_the_shared_cases(case):
     lyrics, kind, count = music_mode(case["lyrics"], case["default_sections"])
 
     assert {"lyrics": lyrics, "kind": kind, "section_count": count} == {key: case["expected"][key] for key in ("lyrics", "kind", "section_count")}
-
-
-def test_section_tags_keep_their_order_and_spelling():
-    assert section_tags("[Intro] la [Verse 2]\n[x]") == ["[Intro]", "[Verse 2]", "[x]"]

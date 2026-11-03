@@ -39,11 +39,6 @@ class Higgs3Config:
         """Return the id that begins a codebook's stream."""
         return self.codebook_size - 2
 
-    @property
-    def eoc_id(self) -> int:
-        """Return the id that ends a codebook's stream."""
-        return self.codebook_size - 1
-
 
 def read_higgs3_config(path: Path) -> Higgs3Config:
     """Return the network sizes held by the pinned official ``config.json`` at *path*."""

@@ -18,11 +18,11 @@ class VoiceRef:
 
     Attributes:
         path: The audio file.
-        text: What the recording says, when known; ``None`` leaves the model to go without a transcript.
+        text: What the recording says; the model follows the voice with its transcript.
     """
 
     path: str
-    text: str | None = None
+    text: str
 
 
 @dataclass(frozen=True)
@@ -56,13 +56,11 @@ class AudioClip:
         samples: Float32 samples shaped ``(channels, frames)``.
         sample_rate: Samples per second.
         cut: The model reached its length limit, so the take was cut short.
-        preclamp: The samples are the decoder's output from before the library clamped them to -1..1, so they may peak above 1.0.
     """
 
     samples: NDArray[np.float32]
     sample_rate: int
     cut: bool = False
-    preclamp: bool = False
 
     @property
     def seconds(self) -> float:

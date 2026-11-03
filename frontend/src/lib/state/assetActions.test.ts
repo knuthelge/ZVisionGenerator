@@ -5,7 +5,7 @@ import type { AssetUpscaleFactor, DraftState, GalleryAsset } from '$lib/types';
 
 import { AUDIO_MODELS, makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
-import { assetAspect, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceFits, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
+import { assetAspect, canExtend, canUseAsAudioTrack, canUseAsReference, canUseAsVoice, describeFallbackReason, extendParams, extendReason, ltxOptions, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, useAsState, voiceParams, voiceTooLongReason, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -250,12 +250,13 @@ describe('Use as for audio takes', () => {
     });
   });
 
-  it('allows a voice of 30 s or less, or the limit of the speech model', () => {
-    expect(voiceFits(makeSpeechAsset({ duration: 30 }))).toBe(true);
-    expect(voiceFits(makeSpeechAsset({ duration: 30.5 }))).toBe(false);
-    expect(voiceFits(makeSpeechAsset({ duration: null }))).toBe(true);
-    expect(voiceFits(makeSpeechAsset({ duration: 45 }), { voiceMaxSeconds: 60 })).toBe(true);
-    expect(voiceTooLongReason()).toBe('Use a take of 30 s or less as a voice');
+  it('allows a voice up to the limit of the speech model, and any length when none is known', () => {
+    const useAs = { voiceMaxSeconds: 30 };
+    expect(voiceTooLongReason(makeSpeechAsset({ duration: 30 }), useAs)).toBeUndefined();
+    expect(voiceTooLongReason(makeSpeechAsset({ duration: null }), useAs)).toBeUndefined();
+    expect(voiceTooLongReason(makeSpeechAsset({ duration: 45 }), { voiceMaxSeconds: 60 })).toBeUndefined();
+    expect(voiceTooLongReason(makeSpeechAsset({ duration: 30.5 }), useAs)).toEqual(expect.any(String));
+    expect(voiceTooLongReason(makeSpeechAsset({ duration: 3600 }))).toBeUndefined();
   });
 
   it('enables the audio track on a video model that follows one, with its hint, and says why on one that cannot', () => {

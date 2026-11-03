@@ -74,6 +74,8 @@
   const canReset = $derived(resetKeys.some((k) => !Object.is(s[k], defaults[k])));
 
   function reset(): void {
+    // The voice's recording is held outside the draft, with the speaker's tick: clearing them goes through the store.
+    if (key === 'voice') draft.setVoice(null);
     draft.patch(Object.fromEntries(resetKeys.map((k) => [k, defaults[k]])));
   }
 
@@ -273,7 +275,7 @@
       <p class="ui-help">{s.frameCount} frames at {timing.fps} fps.</p>
       {#if clipTime}<p class="ui-help">{clipTime}</p>{/if}
       {#if clipNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{clipNote.text}</p>{/if}
-    {:else if key === 'length'}
+    {:else if key === 'length' && lengthRange}
       <InspectorNumber ariaLabel="Length in seconds" value={s.audioSeconds} step={1} min={lengthRange.min} max={lengthRange.max} stepper size="lg" commitOnly onchange={setLength} />
       <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={s.audioSeconds} style:--fill={rangeFill(s.audioSeconds, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
       <p class="ui-help">From {lengthRange.min} to {lengthRange.max} seconds.</p>

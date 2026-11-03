@@ -1,8 +1,8 @@
-"""Snapshot and restore the process-wide PyTorch numerics flags that audio model code changes.
+"""Snapshot and restore the process-wide PyTorch numerics flags that audio model code changes, and set the default dtype for a block.
 
 The vendored audio kits switch these flags when a model is built (deterministic cuDNN, TF32 off, the strictest float32
 matmul precision). They are global, so a backend that is closed would leave every later image and video job slower.
-A backend takes a snapshot before it loads and restores it when it closes.
+The audio runner takes a snapshot before it loads a backend and restores it when the backend is closed.
 
 PyTorch keeps the TF32 and matmul-precision settings in per-backend ``fp32_precision`` values that the older
 ``allow_tf32`` flags and ``set_float32_matmul_precision`` also write. Code that mixes the two leaves them out of step,
@@ -12,10 +12,15 @@ are restored last, so a mixed state comes back exactly.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from operator import attrgetter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["TorchFlags", "capture_torch_flags", "restore_torch_flags"]
+if TYPE_CHECKING:
+    import torch
+
+__all__ = ["TorchFlags", "capture_torch_flags", "default_dtype", "preserved_torch_flags", "restore_torch_flags"]
 
 TorchFlags = dict[str, Any]
 """A snapshot: each flag's path under ``torch.backends`` to its value, plus ``float32_matmul_precision``."""
@@ -59,6 +64,29 @@ def restore_torch_flags(flags: TorchFlags) -> None:
         torch.set_float32_matmul_precision(flags["float32_matmul_precision"])
     for path in _PRECISIONS:
         _set(torch.backends, path, flags[path])
+
+
+@contextmanager
+def preserved_torch_flags() -> Iterator[None]:
+    """Give the global flags back as they were on entry, whatever the block (a model build, a take) changed and however it ends."""
+    flags = capture_torch_flags()
+    try:
+        yield
+    finally:
+        restore_torch_flags(flags)
+
+
+@contextmanager
+def default_dtype(dtype: torch.dtype) -> Iterator[None]:
+    """Make new floating-point parameters *dtype* for the length of the block, then restore the previous default dtype."""
+    import torch
+
+    previous = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(previous)
 
 
 def _set(root: Any, path: str, value: Any) -> None:

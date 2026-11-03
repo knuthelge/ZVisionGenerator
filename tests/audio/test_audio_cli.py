@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import shlex
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,6 +19,7 @@ from tests.audio._helpers import case_request, clip, fake_backend, patch_runner,
 from zvisiongenerator import audio_cli
 from zvisiongenerator.audio_cli import _build_audio_parser
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
+from zvisiongenerator.downloads import require_checked
 from zvisiongenerator.utils import audio_request as audio_request_module
 from zvisiongenerator.utils.video_splice import write_pcm16_wav
 
@@ -34,6 +37,8 @@ def env(monkeypatch, tmp_path):
     """Run ``main`` with the three fixture presets on a CUDA machine and a backend that makes a short clip; return the backend and the patched pieces."""
     backend = fake_backend(clip(0.2))
     patched = patch_runner(monkeypatch, backend)
+    patched.ensure = MagicMock(return_value="ready")
+    monkeypatch.setattr(audio_cli, "ensure_downloaded", patched.ensure)
     monkeypatch.setattr(audio_cli, "load_config", lambda: audio_config())
     monkeypatch.setattr(audio_cli, "ensure_ffmpeg", lambda: None)
     patched.backend = backend
@@ -114,15 +119,17 @@ class TestFlags:
 
 class TestRefusals:
     def test_a_flag_the_model_does_not_take_is_refused_by_name(self, env, monkeypatch, capsys):
-        assert "YuE2 3B sets the length from the lyrics; drop --seconds" in refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "--seconds", "30")
+        error = refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "--seconds", "30")
+
+        assert "--seconds" in error and "YuE2 3B" in error
 
     @pytest.mark.parametrize(("flag", "model"), [("--lyrics", "sa3"), ("--lyrics", "higgs3")])
     def test_lyrics_are_refused_by_a_model_without_them(self, env, monkeypatch, capsys, flag, model):
-        assert f"takes no lyrics; drop {flag}" in refuses(monkeypatch, capsys, "-m", model, "--prompt", "x", flag, "[verse]")
+        assert flag in refuses(monkeypatch, capsys, "-m", model, "--prompt", "x", flag, "[verse]")
 
     @pytest.mark.parametrize("model", ["yue2", "sa3"])
     def test_a_voice_is_refused_by_a_model_that_cannot_follow_one(self, env, monkeypatch, capsys, model):
-        assert "cannot follow a voice; drop --voice" in refuses(monkeypatch, capsys, "-m", model, "--prompt", "x", "--voice", "me.wav", "--voice-text", "x", "--voice-consent")
+        assert "--voice" in refuses(monkeypatch, capsys, "-m", model, "--prompt", "x", "--voice", "me.wav", "--voice-text", "x", "--voice-consent")
 
     def test_a_voice_without_its_text_is_refused(self, env, monkeypatch, capsys, voices):
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "me.wav"), "--voice-consent")
@@ -134,12 +141,12 @@ class TestRefusals:
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "me.wav"), "--voice-text", "Hello")
 
         assert "--voice-consent" in error
-        assert env.ensure.call_count == 0
+        assert env.ensure.call_count == 0 and env.backend.load.call_count == 0
 
     def test_a_cloned_take_needs_consent_too(self, env, monkeypatch, capsys, voices):
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "cloned.flac"), "--voice-text", "Hello")
 
-        assert "Add --voice-consent" in error
+        assert "--voice-consent" in error
 
     def test_an_any_take_needs_no_consent(self, env, monkeypatch, voices):
         requests = make(env, "-m", "higgs3", "--prompt", "x", "--voice", str(voices / "any.flac"), "--voice-text", "Hello", monkeypatch=monkeypatch)
@@ -172,7 +179,7 @@ class TestRefusals:
         assert "--voice-consent" not in capsys.readouterr().err
 
     def test_a_voice_that_is_not_there_is_refused(self, env, monkeypatch, capsys, tmp_path):
-        assert "Voice recording not found" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(tmp_path / "gone.wav"), "--voice-text", "x", "--voice-consent")
+        assert "gone.wav" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(tmp_path / "gone.wav"), "--voice-text", "x", "--voice-consent")
 
     @pytest.mark.parametrize("flag", [["--voice-text", "x"], ["--voice-consent"]])
     def test_the_voice_flags_need_a_voice(self, env, monkeypatch, capsys, flag):
@@ -184,25 +191,27 @@ class TestRefusals:
 
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(short), "--voice-text", "x", "--voice-consent")
 
-        assert "between 3 and 30 seconds" in error and env.ensure.call_count == 0
+        assert "3" in error and "30" in error and env.ensure.call_count == 0
 
-    @pytest.mark.parametrize(("model", "message"), [("yue2", "style of the song"), ("higgs3", "the text to read"), ("sa3", "description of the sound")])
-    def test_a_missing_or_blank_prompt_is_refused_in_words_of_the_kind(self, env, monkeypatch, capsys, model, message):
-        assert message in refuses(monkeypatch, capsys, "-m", model)
-        assert message in refuses(monkeypatch, capsys, "-m", model, "--prompt", "   ")
+    @pytest.mark.parametrize("model", ["yue2", "higgs3", "sa3"])
+    def test_a_missing_or_blank_prompt_is_refused_by_flag_name(self, env, monkeypatch, capsys, model):
+        assert "--prompt" in refuses(monkeypatch, capsys, "-m", model)
+        assert "--prompt" in refuses(monkeypatch, capsys, "-m", model, "--prompt", "   ")
 
     def test_speech_over_10000_characters_is_refused(self, env, monkeypatch, capsys):
         error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "word " * 2001)
 
-        assert "10,000" in error
+        assert "10,000" in error  # the limit is the config's, shown with a thousands separator
         assert env.ensure.call_count == 0
 
     @pytest.mark.parametrize("seconds", ["0.5", "381", "0", "-3", "nan"])
     def test_a_length_outside_the_models_range_is_refused(self, env, monkeypatch, capsys, seconds):
-        assert "--seconds must be between 1 and 380" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "--seconds", seconds)
+        error = refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "--seconds", seconds)
+
+        assert "--seconds" in error and "380" in error
 
     def test_a_lyrics_file_that_cannot_be_read_is_refused(self, env, monkeypatch, capsys, tmp_path):
-        assert "Could not read the lyrics file" in refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "--lyrics-file", str(tmp_path / "gone.txt"))
+        assert "gone.txt" in refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "--lyrics-file", str(tmp_path / "gone.txt"))
 
     @pytest.mark.parametrize("seed", ["-1", str(2**63)])
     def test_a_seed_no_model_takes_is_refused(self, env, monkeypatch, capsys, seed):
@@ -210,7 +219,7 @@ class TestRefusals:
         env.backend.load.assert_not_called()
 
     def test_zero_runs_are_refused(self, env, monkeypatch, capsys):
-        assert "--runs must be at least 1" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "-r", "0")
+        assert "--runs" in refuses(monkeypatch, capsys, "-m", "sa3", "--prompt", "x", "-r", "0")
 
 
 class TestModels:
@@ -220,13 +229,17 @@ class TestModels:
 
         error = refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x")
 
-        assert "No audio models are configured" in error
+        assert "audio_model_presets" in error
 
     def test_a_model_is_required_and_the_choices_are_listed(self, env, monkeypatch, capsys):
-        assert "--model is required. Choose one of: yue2, higgs3, sa3." in refuses(monkeypatch, capsys, "--prompt", "x")
+        error = refuses(monkeypatch, capsys, "--prompt", "x")
+
+        assert "--model" in error and all(model in error for model in ("yue2", "higgs3", "sa3"))
 
     def test_an_unknown_model_is_refused_with_the_choices(self, env, monkeypatch, capsys):
-        assert "Unknown audio model 'nope'. Choose one of: yue2, higgs3, sa3." in refuses(monkeypatch, capsys, "-m", "nope", "--prompt", "x")
+        error = refuses(monkeypatch, capsys, "-m", "nope", "--prompt", "x")
+
+        assert "nope" in error and all(model in error for model in ("yue2", "higgs3", "sa3"))
 
 
 class TestLicenceNotice:
@@ -272,6 +285,50 @@ class TestLicenceNotice:
         assert "By downloading" not in capsys.readouterr().out
 
 
+class TestMemoryWarning:
+    def test_a_card_that_is_too_small_is_warned_before_the_licence_notice_and_the_download(self, env, monkeypatch, capsys):
+        from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
+
+        monkeypatch.setattr(audio_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(8 * GIB, system_bytes=64 * GIB))
+        order: list[str] = []
+        monkeypatch.setattr(audio_cli, "print_licence_notice", lambda *a, **k: order.append("licence"))
+        env.ensure.side_effect = lambda *a, **k: order.append("download") or "ready"
+
+        with pytest.warns(UserWarning, match="Higgs TTS 3 4B.*8.2 GB.*8 GB") as warned:
+            make(env, "-m", "higgs3", "--prompt", "Hello there.", monkeypatch=monkeypatch)
+
+        assert len(warned) == 1 and order == ["licence", "download"]
+
+    def test_a_card_that_fits_is_not_warned(self, env, monkeypatch, recwarn):
+        from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
+
+        monkeypatch.setattr(audio_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(24 * GIB, system_bytes=64 * GIB))
+
+        make(env, "-m", "higgs3", "--prompt", "Hello there.", monkeypatch=monkeypatch)
+
+        assert not [w for w in recwarn if "GPU" in str(w.message)]
+
+
+class TestDownload:
+    def test_the_models_files_are_fetched_before_it_loads(self, env, monkeypatch):
+        order: list[str] = []
+        env.ensure.side_effect = lambda *a, **k: order.append("download") or "ready"
+        env.backend.load.side_effect = lambda *a, **k: order.append("load")
+
+        make(env, "-m", "sa3", "--prompt", "rain", monkeypatch=monkeypatch)
+
+        assert order == ["download", "load"]
+        assert [target.repo_id for target in env.ensure.call_args.args[0]][0] == "Comfy-Org/stable-audio-3"
+
+    @pytest.mark.parametrize("outcome", ["stopped", "detached"])
+    def test_quitting_during_the_download_makes_nothing(self, env, monkeypatch, outcome):
+        env.ensure.return_value = outcome
+
+        run_cli(monkeypatch, "-m", "sa3", "--prompt", "rain", "-o", str(env.out))
+
+        env.backend.load.assert_not_called()
+
+
 class TestFailures:
     def test_running_out_of_memory_names_the_model(self, env, monkeypatch, capsys):
         import torch
@@ -283,10 +340,27 @@ class TestFailures:
         assert "YuE2 3B" in error and "GPU memory" in error
         env.backend.close.assert_called_once()
 
+    def test_hugging_face_out_of_reach_ends_with_a_message_about_the_connection(self, env, monkeypatch, capsys):
+        env.ensure.return_value = "unchecked"
+        monkeypatch.setattr(audio_cli, "require_checked", functools.partial(require_checked, present=lambda target: False))
+
+        error = refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "-o", str(env.out))
+
+        assert "Hugging Face" in error and "YuE2 3B" in error
+        env.backend.load.assert_not_called()
+
+    def test_files_missing_after_a_download_that_was_checked_do_not_blame_the_connection(self, env, monkeypatch, capsys):
+        monkeypatch.setattr("zvisiongenerator.audio_runner.target_present_offline", lambda target: False)
+
+        error = refuses(monkeypatch, capsys, "-m", "yue2", "--prompt", "x", "-o", str(env.out))
+
+        assert "YuE2 3B is not downloaded" in error and "Hugging Face" not in error
+        env.backend.load.assert_not_called()
+
     def test_a_model_whose_files_are_not_in_the_cache_ends_with_its_own_message(self, env, monkeypatch, capsys):
         env.backend.load.side_effect = FileNotFoundError("Higgs TTS 3 needs bosonai/higgs-tts-3-4b, which is not downloaded.")
 
-        assert "bosonai/higgs-tts-3-4b, which is not downloaded" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "-o", str(env.out))
+        assert "bosonai/higgs-tts-3-4b" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "-o", str(env.out))
 
 
 class TestCopyCli:

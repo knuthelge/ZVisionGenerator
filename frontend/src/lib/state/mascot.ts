@@ -1,6 +1,8 @@
 import type { MascotMood, MascotTool } from '$lib/components/atoms/Mascot.svelte';
+import { PHASE_DECODE } from '$lib/components/molecules/audioAurora';
 import type { ActiveJobState, JobWorkflow } from '$lib/types';
 import { isAudioJob, jobPhase, stepFraction } from './jobView';
+import { isAudioWorkflow } from './workspaceTab';
 
 /**
  * A short-lived reaction: to a job finishing, failing, being stopped, or getting
@@ -54,7 +56,7 @@ function isMakingTake(job: ActiveJobState): boolean {
 function isFinishingTake(job: ActiveJobState): boolean {
   const progress = job.audio;
   if (!progress) return false;
-  if (progress.phase === 'Decode') return true;
+  if (progress.phase === PHASE_DECODE) return true;
   return job.workflow === 'sound' && progress.total !== null && progress.total > 0 && progress.step >= progress.total;
 }
 
@@ -115,7 +117,7 @@ export function mascotProgress(job: ActiveJobState | null): number | undefined {
 
 /** Pick what the mascot wears or holds: headphones for audio, a clapperboard for video workflows, otherwise a brush. */
 export function mascotTool(workflow: JobWorkflow | undefined): MascotTool {
-  if (workflow === 'music' || workflow === 'speech' || workflow === 'sound') return 'audio';
+  if (isAudioWorkflow(workflow)) return 'audio';
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'clapper' : 'brush';
 }
 

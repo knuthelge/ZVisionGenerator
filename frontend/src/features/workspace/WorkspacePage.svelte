@@ -136,6 +136,8 @@
   let formEl = $state<HTMLFormElement | undefined>(undefined);
   let lightboxOpen = $state(false);
   let lightboxIndex = $state(0);
+  // The history viewer follows its asset by id, not by place: a new take lands at the front of History while it is open.
+  let historyAssetId = $state<string | null>(null);
   let lightboxMode = $state<'history' | 'completed-output'>('history');
   let completedOutputTrigger = $state<HTMLElement | null>(null);
   let completedOutputAssetId = $state<string | null>(null);
@@ -347,6 +349,9 @@
       : galleryStore.assets
   );
 
+  const historyIndex = $derived(historyAssetId === null ? -1 : galleryStore.assets.findIndex((item) => item.id === historyAssetId));
+  const viewerIndex = $derived(lightboxMode === 'history' && historyIndex >= 0 ? historyIndex : lightboxIndex);
+
   // Surface successful batch items in History as soon as their SSE event lands.
   // The terminal refresh remains authoritative and reconciles the full inventory.
   $effect(() => {
@@ -429,6 +434,7 @@
         modelLabel: selectedModel?.label ?? s.model,
         modelDownloaded: selectedModel?.downloaded !== false,
         voice: caps.showVoice ? audio.voice : null,
+        voiceBlocks: audio.reasonFromVoice,
         changed: (chip) => chipChanged(chip, caps, s, defaults),
         showLength: caps.showLength,
         showSeed: caps.showSeed,
@@ -467,13 +473,13 @@
   // What the folded composer reads: the prompt file and its count, the Enhanced text, or the prompt.
   const composerSummary = $derived.by(() => {
     const s = draft.state;
-    if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} ${s.promptFileOptionIds.length === 1 ? 'prompt' : 'prompts'}` : 'Choose a prompt file', empty: !s.promptFilePath };
     // The Audio tab's composer reads the open kind's own text.
     if (isAudioWorkflow(s.workflow)) {
       const kind = { music: { label: 'Style · Lyrics', empty: 'Describe the style…' }, speech: { label: 'Text', empty: 'What to say…' }, sound: { label: 'Prompt', empty: 'Describe the sound…' } }[s.workflow];
       const text = s[AUDIO_TEXT_KEYS[s.workflow]];
       return { label: kind.label, text: text || kind.empty, empty: !text };
     }
+    if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} ${s.promptFileOptionIds.length === 1 ? 'prompt' : 'prompts'}` : 'Choose a prompt file', empty: !s.promptFilePath };
     const video = s.workflow === 'img2vid' || s.workflow === 'txt2vid' || s.workflow === 'extend';
     const enhanced = anyEnhancedUsed(s);
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
@@ -720,6 +726,7 @@
     if (index < 0) return;
     lightboxMode = 'history';
     lightboxIndex = index;
+    historyAssetId = asset.id;
     completedOutputTrigger = trigger;
     lightboxOpen = true;
   }
@@ -758,6 +765,7 @@
    */
   function applyPrefill(params: PrefillParams, options: { keepSettings?: boolean; recheck?: boolean } = {}): void {
     if (!context) return;
+    const fromAudio = workspaceTab(draft.state.workflow) === 'audio';
     if (params.workflow) draft.loadFromUrl({ workflow: params.workflow }, context);
     draft.hydrateFromContext(context, typeof params.model === 'string' ? params.model : null, options);
     // A prefill that is not a Use as sets every slot of its tab, an unnamed one emptied; the workflow follows from the images.
@@ -768,8 +776,10 @@
     if (options.recheck !== false) void recheckImages();
     // The prefill already re-hydrated for its tab; the tab-change effect must not redo it.
     _prevTab = workspaceTab(draft.state.workflow);
-    // The source brings its own settings, so the form no longer starts from a preset.
-    draft.setAppliedPreset(null);
+    // The source brings its own settings, so the form no longer starts from a preset. A Use as to or from the Audio tab brings
+    // none: the settings stay (or were reset with the model by the hydrate above), and so does the preset they came from.
+    const touchesAudio = fromAudio || workspaceTab(draft.state.workflow) === 'audio';
+    if (!(params.use_as !== undefined && touchesAudio)) draft.setAppliedPreset(null);
   }
 
   /** Refill the form from the settings a job was submitted with. */
@@ -990,6 +1000,7 @@
     lightboxOpen = false;
     const trigger = completedOutputTrigger?.isConnected ? completedOutputTrigger : null;
     lightboxMode = 'history';
+    historyAssetId = null;
     completedOutputTrigger = null;
     completedOutputAssetId = null;
     completedOutputJobId = null;
@@ -1000,8 +1011,26 @@
     lightboxIndex = index;
     if (lightboxMode === 'completed-output') {
       completedOutputAssetId = jobOutputs[index]?.id ?? null;
+    } else {
+      historyAssetId = galleryStore.assets[index]?.id ?? null;
     }
   }
+
+  // The history viewer keeps its last place for when its asset is gone, and moves to the neighbour then (it closes with nothing left).
+  $effect(() => {
+    if (lightboxMode !== 'history' || !lightboxOpen) return;
+    const assets = galleryStore.assets;
+    if (historyIndex >= 0) {
+      lightboxIndex = historyIndex;
+    } else if (assets.length === 0) {
+      lightboxOpen = false;
+      historyAssetId = null;
+    } else {
+      const next = Math.min(lightboxIndex, assets.length - 1);
+      lightboxIndex = next;
+      historyAssetId = assets[next].id;
+    }
+  });
 
   $effect(() => {
     if (lightboxMode !== 'completed-output') return;
@@ -1994,7 +2023,12 @@
           {/if}
           {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
           <!-- The Audio tab's one reason, above the row, so a disabled Generate says why. -->
-          {#if audioReason}<p id="ws-generate-reason-compact" class="ui-alert ui-alert-warning composer-error" data-testid="audio-reason">{audioReason}</p>{/if}
+          {#if audioReason}
+            <p id="ws-generate-reason-compact" class="ui-alert ui-alert-warning composer-error" data-testid="audio-reason">
+              <span class="min-w-0 flex-1 break-words">{audioReason}</span>
+              {#if audio?.reasonFromVoice}<button type="button" class="ui-btn ui-btn-sm" data-testid="audio-reason-voice" onclick={() => { activeChip = 'voice'; }}>Voice</button>{/if}
+            </p>
+          {/if}
           <div class="composer-row" hidden={composerOpen}>
             <button type="button" class="composer-summary" aria-label="Edit the prompt" disabled={controlsPending} onclick={() => void openComposer()}>
               <span class="ui-area-label composer-label">{composerSummary.label}</span>
@@ -2137,7 +2171,7 @@
 <AssetViewer
   assets={lightboxAssets}
   origin={completedOutputTrigger}
-  currentIndex={lightboxIndex}
+  currentIndex={viewerIndex}
   open={lightboxOpen}
   setLabel={lightboxMode === 'completed-output' ? 'This run' : 'Gallery'}
   {deletingIds}

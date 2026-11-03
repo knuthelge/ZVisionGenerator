@@ -83,7 +83,8 @@
         if (!e.repeat) cancel();
       } else if (e.key === 'Enter') {
         // A held key must not approve the action; Enter on a focused button or link activates that control natively.
-        if (e.repeat) e.preventDefault();
+        // A download list is approved with plain Enter: ⌘↵ or Ctrl+↵ (Generate's chord, pressed twice) never confirms it.
+        if (e.repeat || (parts && parts.length > 0 && (e.metaKey || e.ctrlKey))) e.preventDefault();
         else if (!(e.target instanceof HTMLButtonElement) && !(e.target instanceof HTMLAnchorElement)) {
           e.preventDefault();
           confirm();
