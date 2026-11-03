@@ -11,6 +11,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1113,7 +1114,8 @@ def test_gallery_video_offers_the_ltx_2x_option_on_macos(tmp_path, ltx_gallery):
     }
 
 
-def test_gallery_ltx_option_names_the_first_use_download_while_the_model_is_missing(tmp_path, ltx_gallery):
+def test_gallery_ltx_option_names_the_first_use_download_while_the_model_is_missing(tmp_path, ltx_gallery, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")  # the size label is keyed by platform
     ltx_gallery.downloaded = False
 
     ltx = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(_LTX_CLIP), _ltx_web_config(tmp_path))["upscale"]["ltx"]

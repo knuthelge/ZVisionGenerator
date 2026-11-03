@@ -48,6 +48,7 @@ Raise `ValueError`, `FileNotFoundError` or `RuntimeError` with a descriptive mes
 - **Never load real backends or models.** Use `unittest.mock.MagicMock` with controlled return values, for example a backend whose `.text_to_image.return_value` is `Image.new("RGB", (64, 64))` (see `_make_mock_backend()` in `tests/image/test_workflow.py`).
 - Build CLI arguments with `tests/_factories.py::_make_args(**overrides)`.
 - Use the `tmp_path` fixture for files, and `@pytest.mark.parametrize` for many input/output pairs.
+- **The suite hides the GPU.** `tests/conftest.py` sets `CUDA_VISIBLE_DEVICES=""` for the whole run, workers included, so `torch.cuda.is_available()` is `False` and no test opens a CUDA context; mock `is_available` when a test needs it to be true. `tests/common/test_gpu_hidden.py` fails if the GPU becomes visible.
 - Skip heavy dependencies with `pytest.importorskip("torch")`, and platform-specific tests with `@pytest.mark.skipif(sys.platform == ...)`.
 - **Test behavior and machine-readable contracts**: routes, config keys, storage keys, parser options, event names, file names, enum values, statuses, and accessible names a control needs. Not prose, help text, CSS classes, source text or incidental selectors.
 
