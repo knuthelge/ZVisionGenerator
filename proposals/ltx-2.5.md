@@ -64,7 +64,7 @@ diffusers 0.41.0 and transformers 5.19 already have every class. No dependency b
 
 **Sources and licence.** Every Lightricks 2.5 repo is gated (auto-approve). `unsloth/LTX-2.5-FP8` is ungated and byte-identical to `Lightricks/LTX-2.5-Diffusers` (same LFS ids). The LTX-2.x Community License applies: free under $10M annual revenue, and derivatives (our stored quants) keep the terms.
 
-Decided 2026-10-22: both families download from ungated sources. When a model first downloads, the download dialog shows one short line with a link to its licence, saying that the app expects the user to have agreed to it. See [Licence notice](#licence-notice).
+Decided 2026-10-22: both families download from ungated sources. The download dialog names the model's licence, with a link to it. See [Licence notice](#licence-notice).
 
 **Memory on 10 GB / 30 GB.** System RAM binds first, because the DiT copy is pinned in RAM and streamed block by block (`block_streaming.py:44-75, 145-150`). The app's estimate is `max(text encoder, transformer) + connectors + 6 GiB` (`utils/model_memory.py:510-512`). Phase 1a measured two of the options below; the rest are still estimates.
 
@@ -258,12 +258,11 @@ Reported Mac speeds: about 1.2 h projected for 8 steps at 1344×768 for 5 s on a
 
 ### Licence notice
 
-Shared by every family that needs it, built once in Phase 1:
+Shipped for every model with terms, LTX-2.5 and H3 included, by [Licences at download](archive/model-licences.md):
 
-- **Config:** a `licence` entry per video model preset (or alias), holding a display name and a URL. For LTX-2.5 it points at the LTX-2.x Community License; for H3, at the MiniMax H3 licence text.
-- **Download dialog:** when a model with a `licence` entry is about to download for the first time (the first-run picker and the Models-page download), the dialog shows one short line, for example: "LTX-2.5 is under the [LTX-2.x Community License](…). Downloading it means you have agreed to it." There is no separate checkbox.
-- **CLI:** the same line is printed once before a CLI download starts.
-- **Contract test:** the workspace and models payloads carry the licence name and URL for those models. Copy isn't tested.
+- **Records:** one record per licence in `zvisiongenerator/utils/licences.yaml` (not a `licence` entry per preset in config), with the supplier, a summary and licence and NOTICE links pinned to a revision. LTX-2.5 is under the LTX-2.x Community License; H3 under the MiniMax H3 Community License.
+- **Download dialog:** every download shows the models' licence lines in the dialog, as a notice with no checkbox.
+- **CLI:** the same lines are printed before a CLI download starts.
 
 ### Phase 1: LTX-2.5
 
@@ -339,7 +338,7 @@ Out:
 - **Memory:** the q4 estimate (21.08 GiB) matches the measurement and carries over, and the estimate and the download plan read the version's sources.
 - **Tests and docs:** mocked tests for detection, config resolution, renames, sampler selection, the Extend exception and the download plan, plus new diffusers contract tests. CHANGELOG and the video docs describe the alias.
 
-Not in 1c: the [licence notice](#licence-notice) and a prompt-embedding cache across jobs.
+Not in 1c: a prompt-embedding cache across jobs.
 
 ### Phase 2: MiniMax H3
 
