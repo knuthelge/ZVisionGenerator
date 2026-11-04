@@ -162,6 +162,37 @@ def gallery_asset_for_output_path(output_dir: str, output_path: str) -> GalleryA
     return _build_gallery_asset(root, file, _read_scanned_facts(file).facts)
 
 
+def audio_peaks(output_dir: str, asset_id: str) -> list[int] | None:
+    """Return the 100 waveform peaks (0 to 255) of the audio file *asset_id* under *output_dir*, decoding it only the first time.
+
+    The peaks are stored in the gallery index beside the file's other facts, so a second request for the same unchanged file
+    decodes nothing. A file the index has not stored yet (new, still being written, or a database that cannot be used) is
+    decoded again on the next request. A file that cannot be decoded gives ``[]``, which is not stored.
+
+    Returns:
+        The peaks, or ``None`` when *asset_id* is not an audio file under the output root.
+    """
+    root = Path(output_dir).expanduser().resolve()
+    candidate = resolve_output_asset_path(root, asset_id)
+    if candidate is None or _asset_kind(candidate) != "audio" or _is_hidden_from_inventory(root, candidate):
+        return None
+    file = _scanned_file(root, candidate)
+    if file is None:
+        return None
+    root_key = _index_root_key(root)
+    facts = _GALLERY_INDEX.cached_facts(root_key, file)
+    stored = (facts or {}).get("audio", {}).get("peaks")
+    if isinstance(stored, list):
+        return [int(peak) for peak in stored]
+    try:
+        peaks = read_waveform_peaks(file.path)
+    except Exception:
+        return []
+    if facts is not None:
+        _GALLERY_INDEX.add_fact(root_key, file, "audio", {**facts.get("audio", {}), "peaks": peaks})
+    return peaks
+
+
 def _index_root_key(root: Path) -> str:
     """Return the key the gallery index stores *root* under: its resolved path."""
     try:
@@ -814,10 +845,11 @@ def _read_video_facts(asset_path: Path) -> FactsRead:
 
 
 def _read_audio_facts(asset_path: Path) -> FactsRead:
-    """Read an audio file's embedded config and its ``audio`` facts: ``duration`` (seconds), ``channels``, ``sample_rate`` and 100 waveform ``peaks``.
+    """Read an audio file's embedded config and its ``audio`` facts: ``duration`` (seconds), ``channels`` and ``sample_rate``.
 
-    One ffprobe call gives the config, the duration, the channels and the rate; one ffmpeg decode gives the peaks. A reader
-    that fails leaves its facts out and marks the read incomplete, so the index reads the file again later.
+    One ffprobe call gives all of it; the file is never decoded. The waveform ``peaks`` are not read here: :func:`audio_peaks`
+    computes them on the first request for a file and stores them beside these facts. A reader that fails leaves its facts
+    out and marks the read incomplete, so the index reads the file again later.
     """
     try:
         data = ffprobe_json(asset_path, count_packets=False)
@@ -838,10 +870,6 @@ def _read_audio_facts(asset_path: Path) -> FactsRead:
     else:
         duration = optional_float(stream.get("duration")) or optional_float((data.get("format") or {}).get("duration"))
         audio = {key: value for key, value in {"duration": duration, "channels": channels, "sample_rate": rate}.items() if value is not None}
-        try:
-            audio["peaks"] = read_waveform_peaks(asset_path)
-        except Exception:
-            complete = False
     return FactsRead({"config": config, "image": {}, "audio": audio}, complete)
 
 

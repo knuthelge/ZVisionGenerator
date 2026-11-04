@@ -110,11 +110,11 @@ export function phaseSeconds(marks: PhaseMarks | undefined, phase: JobPhase): nu
 /**
  * Drop a queued control once the event shows it took effect.
  *
- * The pause a review starts (a `job_paused` that carries a `review`) is not the pause the user queued: that one waits
- * for the image to finish.
+ * A job that ends settles every one. The pause a review starts (a `job_paused` that carries a `review`) is not the pause
+ * the user queued: that one waits for the image to finish.
  */
 export function settleControl(queued: JobControlAction | null | undefined, type: string, event?: EventData): JobControlAction | null {
-  if (!queued) return null;
+  if (!queued || TERMINAL_EVENTS.has(type)) return null;
   if (queued === 'pause' && type === 'job_paused' && event?.review) return queued;
   return SETTLED_BY[queued].has(type) ? null : queued;
 }
@@ -153,6 +153,7 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
     serverOffset: at !== undefined ? at - receivedAt / 1000 : job.serverOffset,
     controlQueued: settleControl(job.controlQueued, type, event),
   };
+  if (job.controlQueued && !next.controlQueued) next.controlSettledAt = receivedAt;
 
   if (type === 'control_queued') {
     const action = event?.action;

@@ -1,6 +1,7 @@
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { GalleryAsset } from '$lib/types';
 import AssetViewer from './AssetViewer.svelte';
 import { LYRICS, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../../test-utils/audio';
 import { mountComponent } from '../../../test-utils/mount';
@@ -40,7 +41,8 @@ describe('AssetViewer with audio', () => {
   const talk = makeSpeechAsset();
 
   function mountViewer(props: Record<string, unknown> = {}): ReturnType<typeof mountComponent> {
-    return mountComponent(AssetViewer, { assets: [song, talk], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn(), onreuse: vi.fn(), onuseaudio: vi.fn(), ondelete: vi.fn(), ...props });
+    const assets = (props.assets as GalleryAsset[] | undefined) ?? [song, talk];
+    return mountComponent(AssetViewer, { assets, currentId: assets[0].id, open: true, onclose: vi.fn(), onnavigate: vi.fn(), onreuse: vi.fn(), onuseaudio: vi.fn(), ondelete: vi.fn(), ...props });
   }
 
   const action = (name: string) => document.querySelector<HTMLElement>(`[data-action="${name}"]`);
@@ -116,12 +118,26 @@ describe('AssetViewer with audio', () => {
     expect(voiceOf(talk)).toBe('Any');
   });
 
+  it('keeps playing when the list is replaced by a fresh copy holding the same take', async () => {
+    const props = reactiveProps({ assets: [song, talk], currentId: talk.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    const page = mountComponent(AssetViewer, props);
+    const element = document.querySelector('audio');
+    pause.mockClear();
+
+    props.assets = [makeAudioAsset({ id: 'out/new.flac', url: '/media/out/new.flac', filename: 'new.flac' }), { ...song }, { ...talk }];
+    flushSync();
+
+    expect(document.querySelector('audio')).toBe(element);
+    expect(pause).not.toHaveBeenCalled();
+    await page.unmount();
+  });
+
   it('pauses the take when the viewer pages to the next one and when it closes', async () => {
-    const props = reactiveProps({ assets: [song, talk], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    const props = reactiveProps({ assets: [song, talk], currentId: song.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
     const page = mountComponent(AssetViewer, props);
     pause.mockClear();
 
-    props.currentIndex = 1;
+    props.currentId = talk.id;
     flushSync();
     expect(pause).toHaveBeenCalled();
     expect(document.querySelector('audio')?.getAttribute('src')).toBe('/media/out/speech.flac');

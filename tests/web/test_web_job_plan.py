@@ -202,6 +202,33 @@ class TestGeneratePlan:
 
         assert kept == [(DownloadTarget(_KLEIN),)]
 
+    def test_the_job_is_queued_with_the_model_part_it_was_planned_with_so_the_worker_does_not_plan_again(self, plan_env, monkeypatch):
+        plan_env.enhance = False
+        kept = []
+        monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", lambda **kwargs: kept.append(kwargs) or "job-1")
+        planned = []
+        real = job_downloads_module.image_plan
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **kw: planned.append(a) or real(*a, **kw))
+
+        plan_env.client.post("/api/generate", data=_form())
+
+        (kwargs,) = kept
+        assert [(part.role, part.targets) for part in [kwargs["model_part"]]] == [("model", (DownloadTarget(_KLEIN),))]
+        assert len(planned) == 1  # one plan for the submit, whatever the targets and the part are used for
+
+    def test_a_model_that_cannot_be_planned_offline_is_planned_once_per_submit(self, plan_env, monkeypatch):
+        plan_env.enhance = False
+        kept = []
+        monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", lambda **kwargs: kept.append(kwargs) or "job-1")
+        planned = []
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **kw: planned.append(a) or None)  # offline: the file list cannot be read
+
+        plan_env.client.post("/api/generate", data=_form())
+
+        (kwargs,) = kept
+        assert kwargs["model_part"].targets is None and kwargs["planned_targets"] == ()
+        assert len(planned) == 1
+
     def test_a_hub_that_cannot_be_reached_marks_the_plan_unchecked(self, plan_env):
         plan_env.unreachable = True
         plan_env.enhance = False

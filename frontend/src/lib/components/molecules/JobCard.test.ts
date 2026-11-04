@@ -73,6 +73,29 @@ describe('JobCard', () => {
     expect(log().textContent).toContain('original settings unknown');
   });
 
+  describe('notice', () => {
+    it('is a row of its own under the buttons and shows its whole text', () => {
+      const props = reactiveProps({ job: makeJob({ runs: 3, supported_controls: IMAGE_CONTROLS, controlQueued: 'pause' }) });
+      component = mountComponent(JobCard, props);
+      target = component.target;
+      const notice = header().querySelector<HTMLElement>(':scope > .job-notice')!;
+      expect(notice.getAttribute('role')).toBe('status');
+      expect(notice.previousElementSibling?.classList.contains('job-row')).toBe(true);
+      expect(notice.querySelector('.job-notice-text')?.textContent).toBe('Pausing after this image');
+      expect(notice.querySelector('.job-notice-text')?.hasAttribute('title')).toBe(false);
+    });
+
+    it('arms Cancel on the first Esc, and the notice and the wide button follow', () => {
+      render({ runs: 3, supported_controls: IMAGE_CONTROLS }, { oncancel: vi.fn() });
+      expect(header().querySelector('.job-notice')?.textContent?.trim()).toBe('');
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      flushSync();
+      expect(header().querySelector('.job-notice-text')?.textContent).toBe('Press Esc again to cancel');
+      expect(header().querySelector('.job-controls')?.classList.contains('armed')).toBe(true);
+    });
+  });
+
   describe('controls by scope and phase', () => {
     it('puts Pause and Cancel in the header and Skip and Repeat on the task line', () => {
       render({ runs: 4, supported_controls: IMAGE_CONTROLS });
@@ -139,6 +162,39 @@ describe('JobCard', () => {
       flushSync();
       expect(control('pause-resume')!.getAttribute('aria-label')).toBe('Resume');
       expect(target.querySelector('.job-notice .ui-badge')).toBeNull();
+    });
+
+    it('drops the pending pause the moment the pause event arrives, not when the grace runs out', async () => {
+      const props = reactiveProps({ job: makeJob({ runs: 3, supported_controls: IMAGE_CONTROLS }), onpause: vi.fn().mockResolvedValue(undefined) });
+      component = mountComponent(JobCard, props);
+      target = component.target;
+      control('pause-resume')!.click();
+      await vi.waitFor(() => {
+        flushSync();
+        expect(target.querySelector('.job-notice .ui-badge')?.textContent).toContain('Pausing after this');
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSync();
+      expect(target.querySelector('.job-notice .ui-badge')).not.toBeNull();
+
+      // The server's job_paused settled the queued control; the request's own grace is still running.
+      props.job = { ...props.job, controlQueued: null, controlSettledAt: Date.now() + 1000, status: 'paused', paused: true, itemFinished: true };
+      flushSync();
+      expect(target.querySelector('.job-notice .ui-badge')).toBeNull();
+    });
+
+    it('drops the pending notice once the job has stopped, failed or finished', () => {
+      const props = reactiveProps({ job: makeJob({ runs: 2, supported_controls: IMAGE_CONTROLS, controlQueued: 'quit' }) });
+      component = mountComponent(JobCard, props);
+      target = component.target;
+      expect(target.querySelector('.job-notice .ui-badge')?.textContent).toContain('Stopping at the next step');
+
+      for (const status of ['cancelled', 'failed', 'completed'] as const) {
+        props.job = { ...props.job, status };
+        flushSync();
+        expect(target.querySelector('.job-notice .ui-badge')).toBeNull();
+      }
     });
 
     it('shows a rejected control and allows a retry', async () => {

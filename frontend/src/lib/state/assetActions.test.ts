@@ -164,7 +164,7 @@ describe('extend actions', () => {
 });
 
 describe('useAsState', () => {
-  const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, lastImageModel: '', lastVideoModel: '', referenceImagePaths: [], ...overrides });
+  const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, savedSettings: {}, referenceImagePaths: [], ...overrides });
   const context = () => makeContext({
     image_models: [
       { id: 'klein', label: 'Klein 9B', type: 'image' },
@@ -186,14 +186,14 @@ describe('useAsState', () => {
 
   it('reads the model each tab opens on', () => {
     // Image tab open on Ideogram: the start image is unavailable; the video tab opens on the video model last used.
-    const onImage = useAsState(context(), state({ workflow: 'txt2img', model: 'ideogram', lastVideoModel: 'h3' }));
+    const onImage = useAsState(context(), state({ workflow: 'txt2img', model: 'ideogram', savedSettings: { video: { model: 'h3' } } }));
     expect(onImage.image).toEqual({ disabled: true, hint: "Ideogram 4 can't use a start image" });
     expect(onImage.reference).toEqual({ disabled: true, hint: 'Ideogram 4 takes none' });
     expect(onImage.video).toEqual({ disabled: false });
     expect(onImage.last).toEqual({ disabled: false });
 
     // Video tab open on LTX: the image tab opens on the image model last used, Klein.
-    const onVideo = useAsState(context(), state({ workflow: 'txt2vid', model: 'ltx-8', lastImageModel: 'klein' }));
+    const onVideo = useAsState(context(), state({ workflow: 'txt2vid', model: 'ltx-8', savedSettings: { image: { model: 'klein' } } }));
     expect(onVideo.image).toEqual({ disabled: false });
     expect(onVideo.reference).toMatchObject({ disabled: false });
     expect(onVideo.last).toEqual({ disabled: true, hint: 'LTX 2.3 has no last frame' });
@@ -226,7 +226,7 @@ describe('useAsState', () => {
 });
 
 describe('Use as for audio takes', () => {
-  const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, lastImageModel: '', lastVideoModel: '', referenceImagePaths: [], ...overrides });
+  const state = (overrides: Partial<DraftState> = {}): DraftState => ({ ...draft.state, savedSettings: {}, referenceImagePaths: [], ...overrides });
   const context = (overrides: Partial<ReturnType<typeof makeContext>> = {}) => makeContext({
     video_models: [{ id: 'ltx-8', label: 'LTX 2.3', type: 'video' }, { id: 'h3', label: 'MiniMax H3', type: 'video' }],
     video_model_defaults: { 'ltx-8': makeVideoDefaults(), h3: makeVideoDefaults({ hidden_controls: ['audio_track'] }) },

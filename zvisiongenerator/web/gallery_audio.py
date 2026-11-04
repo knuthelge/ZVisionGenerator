@@ -33,8 +33,8 @@ def audio_asset_facts(config: Mapping[str, Any] | None, facts: Mapping[str, Any]
     """Return what a gallery asset keeps of an audio file, from its embedded *config* and the *facts* read from the file.
 
     Keys: ``kind`` (``music``, ``speech``, ``sound``, or ``None`` for a file without this app's settings), ``duration``
-    (seconds, from the file, else the recorded one), ``peaks`` (100 values of 0-255; empty when they could not be
-    read), ``channels``, ``sample_rate``, ``has_reference_voice``, ``lyrics``, ``seconds`` (the length asked for),
+    (seconds, from the file, else the recorded one), ``peaks`` (100 values of 0-255, or ``None`` while they are not
+    computed yet: the gallery computes them on the first request, see ``gallery.audio_peaks``), ``channels``, ``sample_rate``, ``has_reference_voice``, ``lyrics``, ``seconds`` (the length asked for),
     ``voice_path`` (``~`` expanded), ``voice_text``, ``cut`` and ``parts``.
     """
     reusable = is_reusable_audio_config(config)
@@ -45,7 +45,7 @@ def audio_asset_facts(config: Mapping[str, Any] | None, facts: Mapping[str, Any]
     return {
         "kind": recorded.get("kind") if reusable else None,
         "duration": optional_float(read.get("duration")) or optional_float(generation.get("duration")),
-        "peaks": [int(peak) for peak in read.get("peaks") or ()],
+        "peaks": [int(peak) for peak in read["peaks"]] if isinstance(read.get("peaks"), list) else None,
         "channels": optional_int(read.get("channels")),
         "sample_rate": optional_int(read.get("sample_rate")),
         "has_reference_voice": voice_path is not None,

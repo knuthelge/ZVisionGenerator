@@ -3,6 +3,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import type { AssetActionHandlers, UseAsState } from '$lib/state/assetActions';
   import { audioFoot, hasNoWords, tileWords } from '$lib/state/audioAsset';
+  import { audioPeaks } from '$lib/state/audioPeaks.svelte';
   import { formatClock } from '$lib/state/clock';
   import type { GalleryAsset } from '$lib/types';
   import { hold } from '$lib/actions/hold';
@@ -52,6 +53,11 @@
   // A take plays in the stage's panel; in a grid or strip it is a cover that opens the viewer, never a player.
   const audioPlayer = $derived(isAudio && density === 'stage');
   const words = $derived(isAudio ? tileWords(asset) : '');
+  // The listing carries no waveform; the tile asks for it once, and the server keeps it.
+  const peaks = $derived(audioPeaks.of(asset));
+  $effect(() => {
+    if (isAudio) audioPeaks.ensure(asset);
+  });
   // A tile with nothing to read, and every strip tile, shows only its icon and waveform.
   const bare = $derived(isAudio && (density === 'compact' || hasNoWords(asset)));
   const kindIcon = $derived<IconName>(asset.kind === 'speech' ? 'speech' : asset.kind === 'sound' ? 'waveform' : 'music');
@@ -105,7 +111,7 @@
     <span class="audio-cover" class:bare data-bare={bare} data-testid="audio-cover">
       <span class="audio-icon" aria-hidden="true"><Icon name={kindIcon} size={32} /></span>
       {#if !bare}<span class="audio-words" data-testid="audio-words"><span class="audio-text">{words}</span></span>{/if}
-      <Waveform class="audio-line" peaks={asset.peaks ?? []} />
+      <Waveform class="audio-line" {peaks} />
     </span>
     {#if length}<span class="media-tag audio-length" data-testid="audio-length">{length}</span>{/if}
   {/snippet}
@@ -137,7 +143,7 @@
   {/snippet}
 
   {#if audioPlayer}
-    <div class="asset-tile-media audio-stage"><AudioPlayer src={asset.url} peaks={asset.peaks ?? []} filename={asset.filename} duration={asset.duration} size="stage" /></div>
+    <div class="asset-tile-media audio-stage"><AudioPlayer src={asset.url} {peaks} filename={asset.filename} duration={asset.duration} size="stage" /></div>
   {:else if inlineVideo}
     <div class="asset-tile-media">{@render media()}</div>
   {:else}

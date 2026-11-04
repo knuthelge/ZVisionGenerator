@@ -21,3 +21,8 @@ export function submitUpscale(assetId: string, factor: UpscaleFactor, method: Up
 export function planUpscale(assetId: string, factor: UpscaleFactor, method: UpscaleMethod): Promise<JobDownloadPlan> {
   return api.post<JobDownloadPlan>('/api/upscale/plan', { asset_id: assetId, factor, method });
 }
+
+/** The waveform peaks (100 values, 0 to 255) of an audio file; the server decodes the file on the first request only. */
+export function getAudioPeaks(assetId: string): Promise<number[]> {
+  return api.get<{ id: string; peaks: number[] }>(`/api/gallery-peaks?id=${encodeURIComponent(assetId)}`).then((reply) => reply.peaks);
+}

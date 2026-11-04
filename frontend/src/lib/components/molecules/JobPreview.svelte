@@ -48,7 +48,8 @@
   const shown = $derived(!audio && src !== null && failedUrl !== src);
   const wave = $derived(lastPeaks.length > 0);
   // The held take can be played from the slot: a job that waits or ended leaves it no other player on a phone.
-  const heldUrl = $derived(wave ? (lastOutput?.url ?? null) : null);
+  // It is the waveform the slot shows, whether the Aurora has landed on it (a take just finished, or the job is paused) or the slot holds it still.
+  const heldUrl = $derived(wave ? (lastOutput?.url ?? null) : readyOutput && (readyOutput.peaks?.length ?? 0) > 0 ? readyOutput.url : null);
   let held = $state<HTMLAudioElement | null>(null);
   let heldPlaying = $state(false);
   $effect(() => {
@@ -78,6 +79,24 @@
   });
 </script>
 
+<!-- The held take's player: the audio element and the button that plays it. -->
+{#snippet heldPlayer()}
+  {#if heldUrl}
+    <!-- svelte-ignore a11y_media_has_caption because a take has no captions to show -->
+    <audio
+      bind:this={held}
+      src={heldUrl}
+      preload="none"
+      onplay={() => { heldPlaying = true; if (held) claimPlayback(held); }}
+      onpause={() => { heldPlaying = false; }}
+      onended={() => { heldPlaying = false; }}
+    ></audio>
+    <button type="button" class="job-preview-play" aria-label={heldPlaying ? 'Pause the last take' : 'Play the last take'} aria-pressed={heldPlaying} onclick={toggleHeld}>
+      <Icon name={heldPlaying ? 'pause' : 'play'} size={16} />
+    </button>
+  {/if}
+{/snippet}
+
 <!-- The forming image, as large as the stage allows; the job's facts sit in the card beside it. -->
 <figure class="job-preview {extraClass}" class:empty={!shown && !wave && !live} style:aspect-ratio={aspect} style:--ar={aspect} data-testid="job-preview">
   {#if shown && src}
@@ -98,22 +117,10 @@
       seconds={readyOutput?.duration ?? null}
       idle={isPaused(job) || !isActive(job) || (!!job.itemFinished && !readyOutput)}
     />
+    {@render heldPlayer()}
   {:else if wave}
     <span class="job-preview-wave"><Waveform peaks={lastPeaks} /></span>
-    {#if heldUrl}
-      <!-- svelte-ignore a11y_media_has_caption because a take has no captions to show -->
-      <audio
-        bind:this={held}
-        src={heldUrl}
-        preload="none"
-        onplay={() => { heldPlaying = true; if (held) claimPlayback(held); }}
-        onpause={() => { heldPlaying = false; }}
-        onended={() => { heldPlaying = false; }}
-      ></audio>
-      <button type="button" class="job-preview-play" aria-label={heldPlaying ? 'Pause the last take' : 'Play the last take'} aria-pressed={heldPlaying} onclick={toggleHeld}>
-        <Icon name={heldPlaying ? 'pause' : 'play'} size={16} />
-      </button>
-    {/if}
+    {@render heldPlayer()}
     <figcaption class="media-tag job-preview-tag">{lastTakeCaption(lastOutput?.duration)}</figcaption>
   {:else}
     <figcaption class="job-preview-note">{#if audio}<Icon name="waveform" size={14} />{:else if isVideo(job)}<Icon name="film" size={14} />{/if}{note}</figcaption>

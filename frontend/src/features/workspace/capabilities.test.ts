@@ -184,6 +184,12 @@ describe('stepsSpec', () => {
     expect(stepsSpec(null)).toBe(SPEC.steps);
     expect(stepsSpec(undefined)).toBe(SPEC.steps);
     expect(stepsSpec([])).toBe(SPEC.steps);
+    expect(stepsSpec(null, null)).toBe(SPEC.steps);
+  });
+
+  it('cuts the usual control at the most steps the model runs', () => {
+    expect(stepsSpec(null, 8)).toEqual({ ...SPEC.steps, max: 8 });
+    expect(stepsSpec(undefined, 500)).toEqual(SPEC.steps);
   });
 });
 

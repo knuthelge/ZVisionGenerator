@@ -8,6 +8,7 @@ import { draft } from '$lib/state/draft.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { jobStore } from '$lib/state/job.svelte';
 import { hasPendingReference, requestReference } from '$lib/state/pendingReference.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { toasts } from '$lib/state/toasts.svelte';
@@ -20,7 +21,7 @@ import { lastEventSource } from '../../test-utils/eventSource';
 import { makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeAsset, makeContext, makeGalleryPage, makeImageDefaults } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
-import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -215,6 +216,69 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(document.activeElement).toBe(secondButton);
+  });
+});
+
+describe('WorkspacePage viewers follow their asset by id', () => {
+  const asset = (name: string) => makeAsset({ id: `out/${name}.png`, url: `/media/out/${name}.png`, thumbnail_url: `/media/out/${name}-thumb.png`, filename: `${name}.png` });
+  const shown = () => (target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null)?.getAttribute('src');
+
+  it('keeps a completed output in view when an earlier output of the run is deleted', async () => {
+    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-ids', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 3, created_at: '2026-04-30T10:00:00Z' });
+    await mountWorkspace(makeContext());
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const [a, b, c] = [asset('a'), asset('b'), asset('c')];
+    lastEventSource().emit('job_completed', { type: 'job_completed', job_id: 'job-ids', total_runs: 3, outputs: [a, b, c] });
+    await settle();
+
+    target.querySelector(`button[aria-label="View ${c.filename} fullscreen"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(shown()).toBe(c.url);
+
+    jobStore.removeOutputs([a.id]);
+    await settle();
+
+    expect(shown()).toBe(c.url);
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('2 of 2');
+  });
+
+  it('keeps the History viewer on its asset when an earlier asset is deleted and older ones load', async () => {
+    const [a, b, c] = [asset('a'), asset('b'), asset('c')];
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ ...makeGalleryPage([a, b, c]), total_pages: 2, total_count: 5 })
+      .mockResolvedValue({ ...makeGalleryPage([asset('d'), asset('e')]), page: 2, total_pages: 2, total_count: 5 });
+    await mountWorkspace(makeContext({ history_assets: [] }));
+    (target.querySelector(`button[aria-label="View ${b.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    // Opening near the end of History loads the older page behind the viewer.
+    expect(galleryStore.assets).toHaveLength(5);
+    expect(shown()).toBe(b.url);
+
+    galleryStore.removeAssets([a]);
+    await settle();
+    expect(galleryStore.assets).toHaveLength(4);
+    expect(shown()).toBe(b.url);
+  });
+
+  it('keeps the phone viewer on its asset when a new one lands at the front of History', async () => {
+    layoutProbe.compact = true;
+    const [a, b] = [asset('a'), asset('b')];
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([a, b]));
+    await mountWorkspace(makeContext({ history_assets: [] }));
+    (target.querySelector('button[aria-label="Older output"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector(`.latest-region button[aria-label="View ${b.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="asset-viewer"]')?.getAttribute('data-compact')).toBe('true');
+    expect(shown()).toBe(b.url);
+
+    galleryStore.mergeOutputs([asset('new')]);
+    await settle();
+
+    expect(shown()).toBe(b.url);
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 3');
+    expect(document.querySelector('.viewer-pane-prev img')?.getAttribute('src')).toBe(a.thumbnail_url);
   });
 });
 
@@ -478,6 +542,24 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/first.png' });
 
     expect(toasts).toEqual([]);
+  });
+
+  it('keeps the preset and settings of the tab a Use as opens', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    draft.update('workflow', 'txt2vid');
+    await mountWithHistory([asset]);
+    draft.patch({ steps: 7 });
+    draft.setAppliedPreset('clip');
+    draft.setTab('image');
+    await settle();
+    expect(draft.state.appliedPreset).toBeNull();
+
+    // A Use as brings an image and no settings: the Video tab stays as it was left, preset included.
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'img2vid', firstFramePath: '/outputs/out/first.png', steps: 7, appliedPreset: 'clip' });
   });
 
   it('Use as forgets the upload it replaces in the store, so it does not come back after a reload', async () => {
@@ -775,6 +857,22 @@ describe('WorkspacePage asset actions and settings', () => {
       await settle();
       expect(stageTile().getAttribute('aria-label')).toBe('first.png');
       expect(position()).toBeNull();
+    });
+
+    it('stays on the viewed older output when a new one lands, and when an output newer than it is deleted', async () => {
+      await mountWithHistory([first(), second(), third()]);
+      arrow('ArrowRight');
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+
+      galleryStore.mergeOutputs([makeAsset({ id: 'out/new.png', filename: 'new.png' })]);
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+      expect(position()?.textContent).toContain('3');
+
+      galleryStore.removeAssets([first()]);
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
     });
 
     it('has Newer and Older buttons that disable at the ends', async () => {

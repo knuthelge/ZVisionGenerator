@@ -103,10 +103,6 @@
     };
   });
 
-  const viewerIndex = $derived(
-    selectedAsset ? assets.findIndex((a) => a.id === selectedAsset!.id) : 0
-  );
-
   $effect(() => {
     if (!sentinelEl || pageOnePending) return;
     const io = new IntersectionObserver(
@@ -642,7 +638,7 @@
 <AssetViewer
   {assets}
   origin={viewerTrigger}
-  currentIndex={viewerIndex}
+  currentId={selectedAsset?.id ?? null}
   open={lightboxOpen && selectedAsset !== null}
   setLabel="Gallery"
   {deletingIds}

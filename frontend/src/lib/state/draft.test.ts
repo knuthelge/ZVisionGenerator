@@ -3,8 +3,9 @@ import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed, isEnhancedStale, rememberedParts } from './promptEnhance';
 import { presetDiffers } from './presets';
 import { downloadStore } from './downloads.svelte';
-import { changedSettings, draft, extendStepFor, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
+import { changedSettings, draft, extendStepFor, fitDimensions, maxStepsFor, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
 import { heldUploads } from './heldUploads.svelte';
+import { withAudio } from '../../test-utils/audio';
 import { voiceConsent } from './voiceConsent.svelte';
 import { memoryUploadStore } from './uploadStore';
 import { navTab, videoKindOf } from './workspaceTab';
@@ -1991,6 +1992,13 @@ describe('hydrateFromContext – keepChangedSettings', () => {
 
     beforeEach(() => draft.update('workflow', 'txt2vid'));
 
+    it('reports the most steps a video model runs, and none for a model without a limit or an image model', () => {
+      const ctx = videoContext();
+      expect(maxStepsFor(ctx, 'txt2vid', 'ltx-2')).toBe(8);
+      expect(maxStepsFor(ctx, 'txt2vid', 'ltx-v-0.9')).toBeNull();
+      expect(maxStepsFor(ctx, 'txt2img', ctx.current_image_model ?? '')).toBeNull();
+    });
+
     it('caps the steps at the new model step limit', () => {
       const ctx = videoContext();
       draft.hydrateFromContext(ctx, 'ltx-v-0.9');
@@ -2203,6 +2211,7 @@ describe('applyPreset', () => {
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
     savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] } },
+    savedSettings: { video: { steps: 9 } },
     enhancedHistory: [{ prompt: 'plain rewrite', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }, { prompt: '{"caption":"x"}', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }],
     enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],
     enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
@@ -2227,7 +2236,7 @@ describe('applyPreset', () => {
 
     const after = draft.state;
     expect(after).toMatchObject(IMAGE_PRESET_DRAFT);
-    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'lastImageModel', 'lastVideoModel', 'lastImageQuantize', 'settingsModel', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
+    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
     // Every key is either marked above or a preset key, so a new draft key must be classified here.
     const unclassified = Object.keys(after).filter((key) => !(key in MARKED) && !presetOwned.has(key) && key !== 'version');
     expect(unclassified).toEqual([]);
@@ -2606,7 +2615,6 @@ describe('model remembered per mode', () => {
     draft.loadFromUrl(params, ctx);
 
     expect(draft.state.model).toBe('krea');
-    expect(draft.state.lastImageModel).toBe('krea');
   });
 
   it('falls back to the default when the remembered model is no longer offered', () => {
@@ -3362,5 +3370,148 @@ describe('audio track', () => {
 
       expect(draft.state.extendAudioTrackPath).toBe('/audio/mine.mp3');
     });
+  });
+});
+
+describe('settings kept per mode', () => {
+  const ctxFor = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => withAudio(makeContext({
+    image_models: [{ id: 'krea', label: 'Krea', type: 'image' }, { id: 'klein4b', label: 'Klein 4B', type: 'image' }],
+    video_models: [{ id: 'ltx-a', label: 'LTX A', type: 'video' }, { id: 'ltx-b', label: 'LTX B', type: 'video' }],
+    image_model_defaults: { krea: makeImageDefaults(), klein4b: makeImageDefaults() },
+    video_model_defaults: { 'ltx-a': makeVideoDefaults(), 'ltx-b': makeVideoDefaults() },
+    current_image_model: 'krea',
+    current_video_model: 'ltx-a',
+    loras: [{ name: 'detail', path: '/loras/detail.safetensors' }],
+    ...overrides,
+  }));
+  const IMAGE = { steps: 23, guidance: 4.5, width: 704, height: 1024, dimensionMode: 'custom' as const };
+  const VIDEO = { steps: 31, width: 640, height: 384, dimensionMode: 'custom' as const };
+
+  const openAudio = (ctx: WorkspaceContext): void => { draft.setTab('audio'); draft.onTabChange(ctx); };
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  /** Start on Image with settings and a preset of its own, then give Video others. */
+  function setUp(ctx: WorkspaceContext): void {
+    draft.hydrateFromContext(ctx, 'krea');
+    draft.patch(IMAGE);
+    draft.setAppliedPreset('image look');
+    draft.update('loraString', 'detail:0.7');
+    openTab('txt2vid', ctx);
+    expect(draft.state.model).toBe('ltx-a');
+    expect(draft.state.appliedPreset).toBeNull();
+    draft.patch(VIDEO);
+    draft.setAppliedPreset('video look');
+  }
+
+  it('puts Image back as it was after a visit to Video, with its preset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    openTab('txt2img', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'krea', ...IMAGE, appliedPreset: 'image look', loraString: 'detail:0.7' });
+  });
+
+  it('puts Video back as it was after a visit to Image, with its preset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+    openTab('txt2img', ctx);
+
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'ltx-a', ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('keeps both modes through the Audio tab, in either order', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    openAudio(ctx);
+    openTab('txt2vid', ctx);
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+    openAudio(ctx);
+    openTab('txt2img', ctx);
+    expect(draft.state).toMatchObject({ ...IMAGE, appliedPreset: 'image look', loraString: 'detail:0.7' });
+  });
+
+  it('keeps New and Extend as one video block', () => {
+    const ctx = ctxFor();
+    ctx.workflow_contract.values.push('extend');
+    setUp(ctx);
+
+    openTab('extend', ctx);
+    openTab('txt2img', ctx);
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('leaves the other mode\'s settings alone when one mode is reset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+    openTab('txt2img', ctx);
+
+    draft.resetSelections(ctx);
+    expect(draft.state.steps).not.toBe(IMAGE.steps);
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('applies a reused take exactly, without the saved settings of its mode leaking in', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    draft.loadFromUrl({ workflow: 'txt2img', model: 'krea', prompt: 'a cat' }, ctx, { exact: true });
+
+    expect(draft.state.workflow).toBe('txt2img');
+    expect(draft.state.steps).toBe(makeImageDefaults().steps);
+    expect(draft.state.appliedPreset).toBeNull();
+    openTab('txt2vid', ctx);
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('takes the defaults of a saved model that is no longer offered, and drops its preset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+    const later = ctxFor({ image_models: [{ id: 'klein4b', label: 'Klein 4B', type: 'image' }], current_image_model: 'klein4b' });
+
+    openTab('txt2img', later);
+
+    expect(draft.state).toMatchObject({ model: 'klein4b', steps: makeImageDefaults().steps, appliedPreset: null });
+  });
+
+  it('drops a LoRA that was removed while its mode was away', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    openTab('txt2img', ctxFor({ loras: [] }));
+
+    expect(draft.state.loraString).toBe('');
+  });
+
+  it('starts a mode visited for the first time on its model\'s defaults and without the other mode\'s preset', () => {
+    const ctx = ctxFor();
+    draft.hydrateFromContext(ctx, 'krea');
+    draft.patch(IMAGE);
+    draft.setAppliedPreset('image look');
+
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'ltx-a', steps: makeVideoDefaults().steps, appliedPreset: null });
+  });
+
+  it('survives a reload', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    draft.loadDraft();
+    openTab('txt2img', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'krea', ...IMAGE, appliedPreset: 'image look' });
   });
 });

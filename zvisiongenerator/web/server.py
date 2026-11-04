@@ -53,7 +53,6 @@ from zvisiongenerator.core.video_family import UNDESCRIBED_UPSCALE_STEPS, Settle
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSource, LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
-from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.audio_request import check_seed
@@ -131,6 +130,7 @@ from zvisiongenerator.web.download_lane import DownloadLane
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
 from zvisiongenerator.web.gallery import (
+    audio_peaks,
     GALLERY_MEDIA_EXTENSIONS,
     VIDEO_EXTENSIONS,
     build_gallery_page_json,
@@ -147,7 +147,7 @@ from zvisiongenerator.web.lora_details import describe_installed
 from zvisiongenerator.web.lora_download import LoraInstaller, import_source
 from zvisiongenerator.web.lora_sources import SOURCES, LoraSourcesError
 from zvisiongenerator.web.recent_prompts import RECENT_MODES, RecentPrompts, RecentPromptsError, recent_prompt_entry
-from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, job_download_parts, planned_targets
+from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, job_download_parts, job_model_part, planned_targets
 from zvisiongenerator.web.model_download_plan import parts_summary, row_plan
 from zvisiongenerator.web.path_browser import (
     AUDIO_TRACK_EXTENSIONS,
@@ -849,20 +849,20 @@ def _summarize_job_parts(parts: tuple[JobDownloadPart, ...]) -> dict[str, Any]:
         raise HTTPException(status_code=424, detail=str(exc)) from exc
 
 
-def _job_targets(
+def _job_parts(
     request: Any,
     config: dict[str, Any],
     *,
     model_ref: str | None,
     args: argparse.Namespace | None = None,
     enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
-) -> tuple[DownloadTarget, ...]:
-    """Return the targets the job for *request* downloads, which the runner keeps while the job is queued or running.
+) -> tuple[JobDownloadPart, ...]:
+    """Return the download parts of the job for *request*, planned once at submit: the runner keeps their targets while the job is queued or running and downloads the model's part as planned.
 
-    A plan that cannot be made leaves the job with none: the job reports the problem itself when it runs.
+    A plan that cannot be made leaves the job with none: the job plans again and reports the problem itself when it runs.
     """
     try:
-        return planned_targets(job_download_parts(request, config, platform_key=sys.platform, model_ref=model_ref, args=args, enhance_by_set=enhance_by_set))
+        return job_download_parts(request, config, platform_key=sys.platform, model_ref=model_ref, args=args, enhance_by_set=enhance_by_set)
     except ValueError, RuntimeError:
         return ()
 
@@ -1056,12 +1056,15 @@ def _upscale_plan_from_body(body: Any) -> dict[str, Any]:
 def _upscale_from_body(body: Any) -> JSONResponse:
     """Validate an upscale request, plan the job and submit it; runs off the event loop."""
     parsed = _parse_upscale_body(body)
-    targets = _job_targets(parsed.request, parsed.config, model_ref=parsed.model_ref)
+    parts = _job_parts(parsed.request, parsed.config, model_ref=parsed.model_ref)
+    targets, model_part = planned_targets(parts), job_model_part(parts)
     try:
         if isinstance(parsed.request, VideoFileUpscaleRequest):
             job_id = web_runner.submit_video_file_upscale_job(request=parsed.request, planned_targets=targets, admission_check=_reject_while_busy, context=parsed.context)
         elif isinstance(parsed.request, LtxVideoUpscaleRequest):
-            job_id = web_runner.submit_ltx_video_upscale_job(request=parsed.request, config=parsed.config, planned_targets=targets, admission_check=_reject_while_busy, context=parsed.context)
+            job_id = web_runner.submit_ltx_video_upscale_job(
+                request=parsed.request, config=parsed.config, planned_targets=targets, model_part=model_part, admission_check=_reject_while_busy, context=parsed.context
+            )
         else:
             job_id = web_runner.submit_upscale_job(
                 request=parsed.request,
@@ -1069,6 +1072,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
                 model_ref=parsed.model_ref,
                 config=parsed.config,
                 planned_targets=targets,
+                model_part=model_part,
                 admission_check=_reject_while_busy,
                 context=parsed.context,
             )
@@ -1344,6 +1348,7 @@ def _build_workflow_contract(app_config: dict[str, Any] | None = None) -> dict[s
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     """Parse an image generate form and queue its job."""
     parsed = _parse_image_job(form, web_config)
+    parts = _job_parts(parsed.request, parsed.config, model_ref=parsed.model_ref, args=parsed.args, enhance_by_set=parsed.enhance_by_set)
     job_id = web_runner.submit_image_request_job(
         request=parsed.request,
         prompts_data=parsed.prompts_data,
@@ -1352,7 +1357,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         model_ref=parsed.model_ref,
         quantize=parsed.args.quantize,
         enhance_by_set=parsed.enhance_by_set,
-        planned_targets=_job_targets(parsed.request, parsed.config, model_ref=parsed.model_ref, args=parsed.args, enhance_by_set=parsed.enhance_by_set),
+        planned_targets=planned_targets(parts),
+        model_part=job_model_part(parts),
         admission_check=_reject_while_busy,
         context=parsed.context,
         supported_controls=parsed.supported_controls,
@@ -1559,6 +1565,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
 def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     """Parse a video generate form (Extend included) and queue its job."""
     parsed = _parse_video_job(form, web_config)
+    parts = _job_parts(parsed.request, parsed.config, model_ref=parsed.model_ref, args=parsed.args, enhance_by_set=parsed.enhance_by_set)
     job_id = web_runner.submit_video_request_job(
         request=parsed.request,
         prompts_data=parsed.prompts_data,
@@ -1567,7 +1574,8 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         model_ref=parsed.model_ref,
         enhance_by_set=parsed.enhance_by_set,
         scene_by_set=parsed.scene_by_set,
-        planned_targets=_job_targets(parsed.request, parsed.config, model_ref=parsed.model_ref, args=parsed.args, enhance_by_set=parsed.enhance_by_set),
+        planned_targets=planned_targets(parts),
+        model_part=job_model_part(parts),
         admission_check=_reject_while_busy,
         context=parsed.context,
         supported_controls=parsed.supported_controls,
@@ -1804,7 +1812,7 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
         model_label=preset.label,
         prompt=request.prompt,
         runs=runs,
-        meta=_audio_job_meta(request, preset),
+        meta=_audio_job_meta(request),
         width=None,
         height=None,
         output_dir=output_dir,
@@ -1825,9 +1833,9 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
     )
 
 
-def _audio_job_meta(request: AudioGenerationRequest, preset: AudioPreset) -> str:
-    """Return the one-line summary a queued audio job shows: the model, then the length of a sound or the size of the text and whether it follows a voice."""
-    parts = [preset.label]
+def _audio_job_meta(request: AudioGenerationRequest) -> str:
+    """Return the one-line summary a queued audio job shows beside its model: the length of a sound, or the size of the text and whether it follows a voice."""
+    parts = []
     if request.seconds is not None:
         parts.append(f"{request.seconds:g} s")
     if request.kind == "speech":
@@ -3219,6 +3227,16 @@ async def api_cancel_job(job_id: str) -> dict[str, Any]:
         return web_runner.queue_job_control(job_id, "quit")
     except UnsupportedJobControlError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/gallery-peaks")
+def api_gallery_audio_peaks(asset_id: str = Query(..., alias="id", min_length=1)) -> dict[str, Any]:
+    """Return the waveform peaks of an audio asset by output-root-relative asset ID, decoding the file on the first request only."""
+    web_config = load_web_config()
+    peaks = audio_peaks(web_config.output_dir, asset_id)
+    if peaks is None:
+        raise HTTPException(status_code=404, detail=f"Audio asset not found: {asset_id}")
+    return {"id": asset_id, "peaks": peaks}
 
 
 @app.delete("/api/gallery/{asset_path:path}")

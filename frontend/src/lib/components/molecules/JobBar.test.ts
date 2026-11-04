@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ActiveJobState } from '$lib/types';
 import JobBar from './JobBar.svelte';
 import { mountComponent } from '../../../test-utils/mount';
+import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 
 function makeJob(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
   return {
@@ -27,6 +28,16 @@ describe('JobBar', () => {
     pause.click();
     await Promise.resolve();
     expect(onpause).toHaveBeenCalledWith('job-bar');
+  });
+
+  it('drops the pending notice once the job has ended', () => {
+    const props = reactiveProps({ job: makeJob({ controlQueued: 'quit' }), ondetails: vi.fn() });
+    const { target } = mountComponent(JobBar, props);
+    expect(target.textContent).toContain('Stopping at the next step');
+
+    props.job = { ...props.job, status: 'cancelled' };
+    flushSync();
+    expect(target.textContent).not.toContain('Stopping at the next step');
   });
 
   it('offers Resume while paused', () => {

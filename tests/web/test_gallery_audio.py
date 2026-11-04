@@ -104,7 +104,7 @@ class TestListing:
 
         payload = _json(tmp_path, "broken.flac")
 
-        assert payload["media_type"] == "audio" and payload["duration"] is None and payload["peaks"] == [] and payload["has_reusable_config"] is False
+        assert payload["media_type"] == "audio" and payload["duration"] is None and payload["peaks"] is None and payload["has_reusable_config"] is False
         assert payload["file_bytes"] == len(b"not audio")
 
     def test_the_media_url_of_an_audio_file_is_served(self, tmp_path):
@@ -139,7 +139,7 @@ class TestAssetJson:
 
         assert (payload["media_type"], payload["kind"], payload["workflow"], payload["filename"]) == ("audio", "music", "music", "song.flac")
         assert payload["duration"] == pytest.approx(2.0, abs=0.05) and (payload["channels"], payload["sample_rate"]) == (1, 48000)
-        assert len(payload["peaks"]) == 100 and all(0 <= peak <= 255 for peak in payload["peaks"])
+        assert payload["peaks"] is None  # the waveform is computed on the first request for it, not by the listing
         assert (payload["has_reference_voice"], payload["lyrics"], payload["cut"]) == (False, "[verse]\nHello there", False)
         assert (payload["prompt"], payload["model"], payload["seed"], payload["has_reusable_config"]) == ("upbeat synth-pop", "yue2", 7, True)
         assert payload["url"] == "/media/song.flac" and payload["file_path"] == str(tmp_path / "song.flac")
@@ -201,7 +201,7 @@ class TestAssetJson:
         payload = _json(tmp_path, "plain.flac")
 
         assert payload["has_reusable_config"] is False and payload["kind"] is None and payload["has_reference_voice"] is False
-        assert payload["duration"] == pytest.approx(1.0, abs=0.05) and len(payload["peaks"]) == 100
+        assert payload["duration"] == pytest.approx(1.0, abs=0.05) and payload["peaks"] is None
         assert _params(payload) == {"workflow": "music"}
         assert payload["prompt"] == "plain"  # the file name stands in as display text
 
@@ -290,7 +290,7 @@ class TestIndex:
         second = _json(tmp_path, "song.flac")
 
         assert reads == ["song.flac"]
-        assert second == first and len(second["peaks"]) == 100
+        assert second == first and second["peaks"] is None
         with closing(sqlite3.connect(app_db.app_db_path())) as conn:
             rows = conn.execute(f"SELECT rel_path FROM gallery_assets_v{GALLERY_INDEX_VERSION}").fetchall()
         assert rows == [("song.flac",)]
@@ -308,14 +308,126 @@ class TestIndex:
 
         assert reads == ["bad.flac", "bad.flac"]
 
-    def test_peaks_that_cannot_be_decoded_leave_the_rest_and_mark_the_read_incomplete(self, tmp_path, monkeypatch):
+    def test_reading_the_facts_of_an_audio_file_decodes_nothing(self, tmp_path, monkeypatch):
         path = save_flac(sine(0.2, rate=24000), 24000, tmp_path / "t.flac", {"kind": "sound"})
-        monkeypatch.setattr(gallery, "read_waveform_peaks", lambda _path: (_ for _ in ()).throw(RuntimeError("ffmpeg failed")))
+        monkeypatch.setattr(gallery, "read_waveform_peaks", lambda _path: pytest.fail("the scan decoded the file"))
 
         read = gallery._read_audio_facts(path)
 
-        assert not read.complete and "peaks" not in read.facts["audio"] and read.facts["audio"]["sample_rate"] == 24000
+        assert read.complete and "peaks" not in read.facts["audio"] and read.facts["audio"]["sample_rate"] == 24000
         assert read.facts["config"] == {"kind": "sound"}
+
+
+@REAL
+class TestPeaks:
+    @pytest.fixture
+    def decodes(self, monkeypatch):
+        """Count the files the gallery decodes for their waveform."""
+        names: list[str] = []
+        real = gallery.read_waveform_peaks
+        monkeypatch.setattr(gallery, "read_waveform_peaks", lambda path: names.append(Path(path).name) or real(path))
+        return names
+
+    @staticmethod
+    def _settled(tmp_path, name="song.flac", config=_SONG, **kwargs):
+        path = _take(tmp_path, name, config, **kwargs)
+        os.utime(path, (time.time() - 60, time.time() - 60))
+        return path
+
+    def test_a_scan_lists_audio_files_without_decoding_them(self, tmp_path, decodes):
+        self._settled(tmp_path)
+        self._settled(tmp_path, "talk.flac", _ANY)
+
+        assets = list_gallery_assets(str(tmp_path))
+        payloads = [gallery_asset_to_json(asset, _web_config()) for asset in assets]
+
+        assert decodes == [] and len(payloads) == 2
+        assert all(payload["peaks"] is None and payload["duration"] is not None for payload in payloads)
+
+    def test_the_first_request_decodes_and_stores_the_peaks_and_the_second_does_not(self, tmp_path, decodes):
+        self._settled(tmp_path, seconds=2.0)
+        list_gallery_assets(str(tmp_path))
+
+        first = gallery.audio_peaks(str(tmp_path), "song.flac")
+        second = gallery.audio_peaks(str(tmp_path), "song.flac")
+
+        assert first is not None and len(first) == 100 and all(0 <= peak <= 255 for peak in first)
+        assert second == first and decodes == ["song.flac"]
+
+    def test_a_listing_after_the_request_carries_the_stored_peaks_and_keeps_the_other_facts(self, tmp_path, decodes):
+        self._settled(tmp_path, seconds=2.0, rate=48000)
+        list_gallery_assets(str(tmp_path))
+        peaks = gallery.audio_peaks(str(tmp_path), "song.flac")
+
+        payload = _json(tmp_path, "song.flac")
+
+        assert payload["peaks"] == peaks and decodes == ["song.flac"]
+        assert payload["duration"] == pytest.approx(2.0, abs=0.05) and (payload["channels"], payload["sample_rate"]) == (1, 48000)
+
+    def test_a_changed_file_is_decoded_again(self, tmp_path, decodes):
+        path = self._settled(tmp_path, seconds=1.0)
+        list_gallery_assets(str(tmp_path))
+        gallery.audio_peaks(str(tmp_path), "song.flac")
+        save_flac(sine(3.0, rate=24000, amplitude=0.9), 24000, path, _SONG)
+        os.utime(path, (time.time() - 30, time.time() - 30))
+        list_gallery_assets(str(tmp_path))
+
+        gallery.audio_peaks(str(tmp_path), "song.flac")
+
+        assert decodes == ["song.flac", "song.flac"]
+
+    def test_a_file_the_index_has_not_stored_is_decoded_each_time_until_it_is(self, tmp_path, decodes):
+        _take(tmp_path, "fresh.flac", _SONG)  # newer than the settle time: the scan does not store it
+
+        gallery.audio_peaks(str(tmp_path), "fresh.flac")
+        gallery.audio_peaks(str(tmp_path), "fresh.flac")
+
+        assert decodes == ["fresh.flac", "fresh.flac"]
+
+    def test_a_file_that_cannot_be_decoded_gives_no_peaks_and_stores_nothing(self, tmp_path, monkeypatch):
+        self._settled(tmp_path)
+        list_gallery_assets(str(tmp_path))
+        monkeypatch.setattr(gallery, "read_waveform_peaks", lambda _path: (_ for _ in ()).throw(RuntimeError("ffmpeg failed")))
+
+        assert gallery.audio_peaks(str(tmp_path), "song.flac") == []
+        assert _json(tmp_path, "song.flac")["peaks"] is None
+
+    @pytest.mark.parametrize("asset_id", ["missing.flac", "../outside.flac", "pic.png", ".web_uploads/v.flac", "/etc/passwd"])
+    def test_only_an_audio_file_under_the_output_root_has_peaks(self, tmp_path, asset_id):
+        root = tmp_path / "out"
+        (root / ".web_uploads").mkdir(parents=True)
+        (root / ".web_uploads" / "v.flac").write_bytes(b"x")
+        (root / "pic.png").write_bytes(b"\x89PNG")
+        (tmp_path / "outside.flac").write_bytes(b"x")
+
+        assert gallery.audio_peaks(str(root), asset_id) is None
+
+    def test_the_route_returns_the_peaks_of_an_asset_and_404s_for_anything_else(self, tmp_path, monkeypatch, decodes):
+        root = tmp_path / "out"
+        root.mkdir()
+        self._settled(root)
+        list_gallery_assets(str(root))
+        config = _web_config()
+        config.output_dir = str(root)
+        monkeypatch.setattr(web_server, "load_web_config", lambda: config)
+        with TestClient(web_server.app) as client:
+            found = client.get("/api/gallery-peaks", params={"id": "song.flac"})
+            again = client.get("/api/gallery-peaks", params={"id": "song.flac"})
+            missing = client.get("/api/gallery-peaks", params={"id": "nope.flac"})
+
+        assert found.status_code == 200 and found.json()["id"] == "song.flac" and len(found.json()["peaks"]) == 100
+        assert again.json() == found.json() and decodes == ["song.flac"]
+        assert missing.status_code == 404
+
+    def test_a_take_just_made_reaches_the_job_card_with_its_peaks(self, tmp_path, monkeypatch):
+        from zvisiongenerator.web import web_runner
+
+        path = _take(tmp_path, "song.flac", _SONG)
+        monkeypatch.setattr(web_runner, "load_web_config", lambda: _web_config())
+
+        payload = web_runner._output_asset_payload({"output_dir": str(tmp_path)}, str(path))
+
+        assert payload is not None and len(payload["peaks"]) == 100
 
 
 class TestMedia:

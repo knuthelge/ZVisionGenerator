@@ -75,14 +75,18 @@
   });
 
   let sending = $state<{ jobId: string; action: JobControlAction } | null>(null);
-  let requested = $state<{ jobId: string; action: JobControlAction; at: number } | null>(null);
+  let requested = $state<{ jobId: string; action: JobControlAction; at: number; wallAt: number } | null>(null);
   let rejected = $state<{ jobId: string; action: JobControlAction; reason: string } | null>(null);
   let escArmedAt = $state<{ jobId: string; at: number } | null>(null);
 
+  // A control waits for the job's next step; once the job has ended there is none to wait for.
   const pending = $derived.by<JobControlAction | null>(() => {
+    if (!active) return null;
     if (sending?.jobId === job.job_id) return sending.action;
     if (job.controlQueued) return job.controlQueued;
-    return requested?.jobId === job.job_id && clock - requested.at < REQUEST_GRACE_MS ? requested.action : null;
+    if (requested?.jobId !== job.job_id || clock - requested.at >= REQUEST_GRACE_MS) return null;
+    // The event that settled the control ends the wait at once; the grace only bridges the gap before control_queued arrives.
+    return job.controlSettledAt !== undefined && job.controlSettledAt >= requested.wallAt ? null : requested.action;
   });
   const cancelArmed = $derived(escArmedAt?.jobId === job.job_id && clock - escArmedAt.at < ESC_ARM_MS);
   const available = $derived(new Set([...controls.job, ...controls.item]));
@@ -100,7 +104,7 @@
       const result = callback(jobId);
       if (result) await result;
       // Resume takes effect at once; the others wait for the server to act on them.
-      if (action !== 'resume') requested = { jobId, action, at: performance.now() };
+      if (action !== 'resume') requested = { jobId, action, at: performance.now(), wallAt: Date.now() };
     } catch (error) {
       rejected = { jobId, action, reason: errorText(error, '') };
     } finally {
@@ -229,9 +233,6 @@
         {#if statusIcon}<Icon name={statusIcon} size={14} />{:else}<span class="job-dot"></span>{/if}
         <span class="ui-area-label">{workflowLabel(job.workflow)}</span>
       </span>
-      <span class="job-notice" role="status" aria-live="polite">
-        {#if notice}<Badge variant={notice.variant} class="job-notice-badge"><Icon name={notice.icon} size={12} />{notice.text}</Badge>{/if}
-      </span>
       {#if active}
         {#if controls.job.length}
           <JobControls controls={controls.job} label="Job controls" {names} {pending} disabled={offline} {cancelArmed} onsend={(action) => void tapControl(action)} />
@@ -239,6 +240,10 @@
           <span class="ui-help">No controls for {noun} jobs yet</span>
         {/if}
       {/if}
+    </div>
+    <!-- The notice answers the buttons above it, on a row of its own that is there only while it has something to say. -->
+    <div class="job-notice" role="status" aria-live="polite">
+      {#if notice}<Badge variant={notice.variant} class="job-notice-badge"><Icon name={notice.icon} size={12} /><span class="job-notice-text">{notice.text}</span></Badge>{/if}
     </div>
     <div class="job-row job-title-row">
       <h3 class="job-title">{headline(job)}</h3>
@@ -318,12 +323,18 @@
   .job-head { display: flex; flex-direction: column; gap: 2px; padding: 10px var(--job-gutter) 14px; border-bottom: 1px solid var(--color-border-subtle); }
   .job-row { display: flex; align-items: center; gap: 12px; min-width: 0; height: var(--spacing-control-sm); }
   .job-title-row { align-items: baseline; justify-content: space-between; gap: 16px; height: 24px; }
-  .job-status { display: flex; flex: none; align-items: center; gap: 8px; color: var(--job-tone); }
-  .job-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--job-tone); }
-  /* The feedback slot sits against the buttons it answers and never moves the layout. */
-  .job-notice { display: flex; flex: 1; justify-content: flex-end; min-width: 0; overflow: hidden; }
-  .job-notice :global(.job-notice-badge) { height: var(--spacing-control-sm); max-width: 100%; padding: 0 8px; gap: 6px; overflow: hidden; border-radius: var(--radius-sm); font-size: var(--text-ui); text-overflow: ellipsis; }
-  .job-head :global(.job-controls) { flex: none; margin-right: -7px; }
+  .job-status { display: flex; flex: 0 1 auto; align-items: center; gap: 8px; min-width: 0; color: var(--job-tone); }
+  .job-status :global(.ui-area-label) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--job-tone); }
+  /* The controls sit at the right edge; an armed Cancel is a filled button, so it keeps inside the gutter. */
+  .job-head :global(.job-controls) { flex: none; margin-left: auto; margin-right: -7px; }
+  .job-head :global(.job-controls.armed) { margin-right: 0; }
+  /* The notice has the card's full width on a row of its own, so it reads in full at every size; a long one wraps. */
+  .job-notice { display: flex; min-width: 0; }
+  .job-notice:empty { margin-top: -2px; }
+  .job-notice :global(.job-notice-badge) { height: auto; min-height: var(--spacing-control-sm); max-width: 100%; margin: 2px 0 4px; padding: 3px 8px; gap: 6px; border-radius: var(--radius-sm); font-size: var(--text-ui); line-height: 16px; white-space: normal; }
+  .job-notice :global(.job-notice-badge svg) { flex: none; }
+  .job-notice-text { min-width: 0; overflow-wrap: anywhere; }
   .job-title { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; line-height: 24px; white-space: nowrap; text-overflow: ellipsis; }
   .job-time { flex: none; font-size: var(--text-ui); line-height: 16px; white-space: nowrap; color: var(--color-text-muted); }
   .job-time b { font-weight: 500; color: var(--color-text-primary); }

@@ -61,10 +61,13 @@
     if (wave?.hasPointerCapture?.(event.pointerId)) wave.releasePointerCapture(event.pointerId);
   }
 
+  // The file itself, not the prop: a parent that hands over a fresh copy of the same take keeps it playing.
+  const file = $derived(src);
+
   // A take never keeps playing when its player goes: the panel leaves (paging, closing, another take) or another file loads.
   $effect(() => {
     const element = audio;
-    void src;
+    void file;
     played = 0;
     return () => {
       if (!element) return;

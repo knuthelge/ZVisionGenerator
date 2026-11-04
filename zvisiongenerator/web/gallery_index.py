@@ -264,6 +264,57 @@ class GalleryIndex:
             with closing(conn):
                 return self._reconcile(conn, rows, root_key, files, read, prune)
 
+    def cached_facts(self, root_key: str, file: ScannedFile) -> Facts | None:
+        """Return the stored facts of *file* when its row matches the file's stat key, else ``None``; never reads the file.
+
+        Takes no scan lock and creates no database file; errors only warn and give ``None``.
+        """
+        path = self._path_provider()
+        if not path.exists():
+            return None
+        conn: app_db.AppConnection | None = None
+        try:
+            conn = app_db.connect(path, components=(self._component,))
+            row = conn.execute(f"SELECT mtime_ns, ctime_ns, size, facts FROM {self._table} WHERE root = ? AND rel_path = ?", (root_key, file.rel_path)).fetchone()
+        except _DB_ERRORS as exc:
+            self._handle_failure(conn, exc, "reading file metadata without the cache")
+            return None
+        finally:
+            if conn is not None:
+                conn.close()
+        if row is None or (row[0], row[1], row[2]) != file.stat_key:
+            return None
+        return _parse_facts(row[3])
+
+    def add_fact(self, root_key: str, file: ScannedFile, name: str, value: Any) -> bool:
+        """Add *name* to the stored facts of *file* when its row still matches the file's stat key; return whether it was stored.
+
+        The fact is one that is read after the scan and stored once (a waveform), so a row is never created here: a file the
+        scan has not stored yet keeps its fact for the next call to compute. Errors only warn.
+        """
+        with self._lock:
+            facts = self.cached_facts(root_key, file)
+            if facts is None:
+                return False
+            text = _serialize({**facts, name: value})
+            if text is None:
+                return False
+            conn: app_db.AppConnection | None = None
+            try:
+                conn = app_db.connect(self._path_provider(), components=(self._component,))
+                with app_db.transaction(conn):
+                    cursor = conn.execute(
+                        f"UPDATE {self._table} SET facts = ? WHERE root = ? AND rel_path = ? AND mtime_ns = ? AND ctime_ns = ? AND size = ?",
+                        (text, root_key, file.rel_path, *file.stat_key),
+                    )
+                return cursor.rowcount > 0
+            except _DB_ERRORS as exc:
+                self._handle_failure(conn, exc, "could not store a file fact")
+                return False
+            finally:
+                if conn is not None:
+                    conn.close()
+
     def forget(self, root_key: str, rel_paths: Iterable[str]) -> None:
         """Remove the rows of *rel_paths* under *root_key*; errors only warn.
 

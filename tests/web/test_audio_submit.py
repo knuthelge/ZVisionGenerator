@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -18,6 +19,7 @@ from tests._paths import FIXTURES
 from tests.audio._helpers import case_request, clip, fake_backend, patch_runner, voice_folder
 from tests.web._helpers import make_web_config, wait_for_status
 
+from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.downloads.ensure import DownloadReport
 from zvisiongenerator.downloads.flights import DownloadFlights
@@ -25,6 +27,7 @@ from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadProgress, TargetCheck
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.audio_save import save_flac
+from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import model_download_plan as plan_module
 from zvisiongenerator.web import server as web_server
@@ -80,6 +83,14 @@ class TestSubmit:
         assert (job["preset"].id, job["runs"], job["seed"], job["output_dir"]) == ("yue2", 2, 7, str(env.root / "out"))
         assert job["config"] is env.web_config.app_config
         assert job["context"]["settings"]["prompt"] == "  upbeat synth-pop  "  # Load settings restores the form as it was sent
+
+    def test_the_summary_of_a_queued_job_does_not_repeat_the_model(self, env):
+        sound = env.post(model="sa3", prompt="rain", seconds="3").json()
+        speech = env.post(model="higgs3", prompt="Welcome back.").json()
+
+        assert sound["meta"] == "3 s"
+        assert speech["meta"] == "13 characters"
+        assert sound["model_label"] not in sound["meta"]
 
     def test_the_queued_job_keeps_the_models_download_targets_for_the_next_plan(self, env):
         env.post(workflow="music", model="yue2", prompt="synth-pop")
@@ -595,6 +606,51 @@ class TestRunner:
 
         assert snapshot["status"] == "cancelled" and snapshot["terminal_event"] == "job_cancelled"
         assert not backend.generate.called
+
+    def test_a_stop_queued_before_the_job_starts_cancels_it_before_any_download_or_load(self, runner, monkeypatch, tmp_path):
+        backend = fake_backend(clip(0.3))
+        patch_runner(monkeypatch, backend)
+        control = SkipSignal()
+        control.queue_action("quit")
+        events: list[dict] = []
+        preset = next(item for item in parse_audio_presets(audio_config()) if item.id == "sa3")
+
+        runner._run_audio_request(
+            request=AudioGenerationRequest(preset="sa3", kind="sound", prompt="rain", seconds=2.0),
+            preset=preset,
+            config=audio_config(),
+            runs=2,
+            seed=5,
+            output_dir=str(tmp_path),
+            progress_callback=events.append,
+            control_signal=control,
+        )
+
+        assert events == [{"type": "batch_cancelled", "mode": "audio", "completed_iterations": 0, "total_iterations": 2}]
+        assert not runner.ensure.called and not backend.load.called
+
+    def test_a_stop_during_the_model_load_ends_the_job_cancelled_and_frees_the_backend(self, runner, monkeypatch, tmp_path):
+        backend = fake_backend(clip(0.3))
+        patch_runner(monkeypatch, backend)
+        loading = threading.Event()
+
+        def load(preset, device, cancelled=None):
+            loading.set()
+            deadline = time.monotonic() + 5
+            while not cancelled():
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            raise AudioCancelled
+
+        backend.load.side_effect = load
+
+        job_id = self.submit(runner, tmp_path)
+        assert loading.wait(5)
+        runner.queue_job_control(job_id, "quit")
+        snapshot = wait_for_status(runner, job_id, "cancelled", timeout=10)
+
+        assert snapshot["terminal_event"] == "job_cancelled"
+        assert not backend.generate.called and backend.close.called
 
     def test_the_job_is_exclusive_and_offers_the_image_controls(self, runner, monkeypatch, tmp_path):
         release = threading.Event()

@@ -49,10 +49,6 @@ const DEFAULT_DRAFT: DraftState = {
   seed: null,
   loraString: '',
   lorasByFamily: {},
-  lastImageModel: '',
-  lastVideoModel: '',
-  lastImageQuantize: null,
-  settingsModel: '',
   referenceImagePath: null,
   referenceImageUpload: null,
   firstFramePath: null,
@@ -100,6 +96,7 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedFrom: null,
   enhancedHistory: [],
   savedText: {},
+  savedSettings: {},
   enhanceSettings: null,
   enhanceSettingsVideo: null,
   enhanceAuto: false,
@@ -233,6 +230,29 @@ function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftS
   return { ...state, ...(entering ?? EMPTY_TEXT), savedText: { ...rest, [from]: _textOf(state) } };
 }
 
+/** The scopes a mode keeps for when it comes back: its Settings pane values, the model with its LoRAs and quantization, and the applied preset. */
+const MODE_MEMORY_SCOPES: readonly Scope[] = ['settings', 'model', 'preset'];
+
+/**
+ * Return the state with the settings of the mode a workflow belongs to. Image and Video each keep their own, with their model
+ * and preset: moving to the other mode saves the open ones under the mode being left and brings back what the entered one saved
+ * (for a mode not visited yet, the model and settings stay for the next hydration to replace with the model's defaults). The Audio tab holds none of these: entering it saves the mode it leaves and changes nothing else, so coming back
+ * to that mode, or on to the other, finds its own.
+ */
+function _withSettingsOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
+  const from = workflowMode(state.workflow);
+  const to = workflowMode(workflow);
+  if (from === to) return state;
+  const savedSettings = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: pickScopes(state, MODE_MEMORY_SCOPES) };
+  if (to === 'audio') return { ...state, savedSettings };
+  return { ...state, savedSettings, ...savedSettings[to] };
+}
+
+/** Return the state with the text and the settings of the mode a workflow belongs to, as that mode left them. */
+function _withModeOf(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
+  return _withSettingsOfMode(_withTextOfMode(state, workflow), workflow);
+}
+
 /** The draft fields that hold an image path: one per slot, and the reference rows. */
 const SLOT_KEYS = ['referenceImagePath', 'firstFramePath', 'endImagePath', 'referenceImagePaths'] as const satisfies readonly (keyof DraftState)[];
 
@@ -339,16 +359,6 @@ function _isVideoWorkflow(workflow: WorkspaceWorkflow): boolean {
   return workflowMode(workflow) === 'video';
 }
 
-/**
- * Remember the state's model as the last one used in its own mode (image or video), whichever workflow is open, and as the one the
- * settings belong to. An image model also remembers its quantization, which the video workflows clear.
- */
-function _rememberModel(ctx: WorkspaceContext, state: DraftState): DraftState {
-  if (ctx.video_models.some((model) => model.id === state.model)) return { ...state, lastVideoModel: state.model, settingsModel: state.model };
-  if (ctx.image_models.some((model) => model.id === state.model)) return { ...state, lastImageModel: state.model, lastImageQuantize: state.quantize, settingsModel: state.model };
-  return state;
-}
-
 /** Return the backend defaults for a model in a workflow's mode, or null when none are known. */
 function _modelDefaultsFor(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string): ImageModelDefaults | VideoModelDefaults | null {
   const isVideoMode = _isVideoWorkflow(workflow);
@@ -416,6 +426,13 @@ export function extendStepFor(ctx: WorkspaceContext, model: string): number {
 export function stepOptionsFor(ctx: WorkspaceContext, model: string): number[] | null {
   const options = _videoDefaultsOf(ctx, model)?.step_options;
   return options && options.length > 0 ? options : null;
+}
+
+/** Return the most steps a model runs, or null when it has no limit; only video models have one. */
+export function maxStepsFor(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string): number | null {
+  if (!_isVideoWorkflow(workflow)) return null;
+  const maxSteps = (_modelDefaultsFor(ctx, workflow, model) as VideoModelDefaults | null)?.max_steps;
+  return typeof maxSteps === 'number' ? maxSteps : null;
 }
 
 /** Move a step count to the nearest offered one (the higher on a tie), as the server does. */
@@ -540,8 +557,8 @@ function _fitToModel(ctx: WorkspaceContext, state: DraftState): DraftState {
   const defaults = _modelDefaultsFor(ctx, state.workflow, state.model);
   if (!defaults) return state;
   const fitted = _fitSizeToModel(ctx, state, defaults);
-  const maxSteps = _isVideoWorkflow(state.workflow) ? (defaults as VideoModelDefaults).max_steps : null;
-  return typeof maxSteps === 'number' ? { ...fitted, steps: Math.min(fitted.steps, maxSteps) } : fitted;
+  const maxSteps = maxStepsFor(ctx, state.workflow, state.model);
+  return maxSteps !== null ? { ...fitted, steps: Math.min(fitted.steps, maxSteps) } : fitted;
 }
 
 /**
@@ -702,7 +719,7 @@ export const draft = {
       // The tick follows the voice: a prefill that replaces the voice leaves it for the person to give, and one that does not
       // (a song or a sound) leaves the voice and its tick alone.
       if (voice) voiceConsent.reset(voice.exempt);
-      const opened: DraftState = { ..._withTextOfMode(_draft, workflow), ...(exact ? pickScopes(DEFAULT_DRAFT, REUSE_SCOPE.audio) : {}), ...prefill, ...patch, workflow, audioKind: workflow };
+      const opened: DraftState = { ..._withModeOf(_draft, workflow), ...(exact ? pickScopes(DEFAULT_DRAFT, REUSE_SCOPE.audio) : {}), ...prefill, ...patch, workflow, audioKind: workflow };
       const hydrated = ctx ? hydrateAudio(ctx, opened) : opened;
       _draft = ctx ? { ...hydrated, ..._swapFamilyLoras(ctx, _draft, _draft.model, hydrated.model) } : hydrated;
       return;
@@ -843,7 +860,7 @@ export const draft = {
     // A model named here without a re-hydration still swaps LoRAs by family; LoRAs the URL names win over remembered ones.
     const loras = ctx && prefill.model !== undefined ? _swapFamilyLoras(ctx, _draft, _draft.model, prefill.model) : {};
     // Opening the other mode brings back its own text first, so a prefill sets the opened tab's text only.
-    const opened = { ..._withTextOfMode(_draft, workflow), ...loras };
+    const opened = { ..._withModeOf(_draft, workflow), ...loras };
     // An exact prefill puts the take's scopes back to their defaults for its model first; the source's own track is not a default of a take.
     const reset = exact ? pickScopes(defaultsFor(ctx, { ...opened, workflow, model: prefill.model ?? opened.model, extendPrefill: null }, _extendSource), REUSE_SCOPE[workspaceTab(workflow)]) : {};
     _draft = { ...opened, ...reset, ...prefill };
@@ -871,8 +888,6 @@ export const draft = {
     if (_draft.workflow === 'extend' && !ctx.workflow_contract.values.includes('extend')) _draft = _withDerivedWorkflow(ctx, { ..._draft, workflow: 'txt2vid', videoKind: 'new' });
     // The Audio tab settles on a kind and one of its models; a machine that runs no audio model gives the tab back to Image.
     if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img' };
-    // The model the draft holds belongs to the mode it came from, which the workflow may just have left: remember it first.
-    _draft = _rememberModel(ctx, _draft);
     if (isAudioWorkflow(_draft.workflow)) {
       const hydrated = hydrateAudio(ctx, _draft, preferredModel);
       _draft = { ...hydrated, ..._swapFamilyLoras(ctx, _draft, _draft.model, hydrated.model) };
@@ -884,26 +899,20 @@ export const draft = {
     const isVideoMode = _isVideoWorkflow(workflow);
     const validModels = isVideoMode ? ctx.video_models : ctx.image_models;
 
-    // Determine model: preferredModel > current draft model (if still valid) > the model last used in this mode
-    // (if still valid) > context default. An explicit preferredModel that is not valid goes straight to the default.
-    const remembered = isVideoMode ? _draft.lastVideoModel : _draft.lastImageModel;
-    const candidates = preferredModel !== null ? [preferredModel] : [_draft.model, remembered];
+    // Determine model: preferredModel > current draft model (if still valid) > context default. An explicit preferredModel
+    // that is not valid goes straight to the default. Coming back to a mode has already put its own model in the draft.
+    const candidates = preferredModel !== null ? [preferredModel] : [_draft.model];
     const model = candidates.find((id) => id !== '' && validModels.some((m) => m.id === id))
       ?? (isVideoMode ? ctx.current_video_model : ctx.current_image_model)
       ?? validModels[0]?.id
       ?? '';
 
-    // The Audio tab leaves the settings of the model it came from in the draft: they still belong to that model.
-    const comingFromAudio = audioModelById(ctx, _draft.model) !== null;
-    const sameModel = model === (comingFromAudio ? _draft.settingsModel : _draft.model);
+    const sameModel = model === _draft.model;
     const keepSettings = options.keepSettings === true && sameModel;
     const keepChanged = options.keepChangedSettings === true;
     const keepsPromptSource = (keepSettings || keepChanged) && ctx.prompt_sources.includes(_draft.promptSource);
     const promptSource = keepsPromptSource ? _draft.promptSource : ctx.default_prompt_source;
-    // Coming back to the image model last run from a mode without quantization (video, audio) brings its quantization back.
-    const returnsToImage = !isVideoMode && model === _draft.lastImageModel && !ctx.image_models.some((m) => m.id === _draft.model);
-    const quantize = returnsToImage ? _draft.lastImageQuantize : _draft.quantize;
-    let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource, quantize, ..._swapFamilyLoras(ctx, _draft, _draft.model, model) });
+    let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource, ..._swapFamilyLoras(ctx, _draft, _draft.model, model) });
     if (keepSettings || (keepChanged && sameModel)) {
       // Same model: the user's settings win over its defaults. A preset that no longer exists falls back to the default size.
       const saved: Partial<DraftState> = _pickSettings(_draft);
@@ -914,9 +923,9 @@ export const draft = {
     } else if (keepChanged) {
       nextState = _fitToModel(ctx, { ...nextState, ..._changedSinceOldDefaults(ctx, _draft) });
     }
-    // Settings of a model of the other mode (or none) were not set by the applied preset's: it no longer describes them.
-    if (comingFromAudio && !sameModel) nextState = { ...nextState, appliedPreset: null };
-    nextState = _rememberModel(ctx, _applyCapabilityGates(ctx, nextState));
+    // A model that is gone (a mode's saved model that was removed) takes its defaults: the applied preset no longer describes them.
+    if (!sameModel && preferredModel === null) nextState = { ...nextState, appliedPreset: null };
+    nextState = _applyCapabilityGates(ctx, nextState);
 
     // The workflow follows from the tab and its images, whatever the model: one it cannot start from an image runs from text.
     _draft = _withDerivedWorkflow(ctx, nextState);
@@ -926,8 +935,9 @@ export const draft = {
 
   /**
    * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind, the Video tab's the kind it was
-   * left on). When the tab is of the other mode (image or video) the
-   * applied preset is forgotten and the text swaps to what that mode kept; the Audio tab in between keeps both settings and preset. The model and defaults follow when the Workspace calls `onTabChange` with its context.
+   * left on). Opening the other mode (image or video) saves the open mode's text, settings, model and preset and brings back the
+   * ones that mode kept (`_withModeOf`); the Audio tab in between changes none of them. When the mode has none yet, the model and
+   * defaults follow when the Workspace calls `onTabChange` with its context.
    * Without a context the model's capabilities are unknown, so the tab's start image is assumed to be usable.
    */
   setTab(tab: NavTab): void {
@@ -937,9 +947,9 @@ export const draft = {
     const videoKind = left ?? _draft.videoKind;
     // The Audio tab opens on the kind it was left on, the Video tab on its kind.
     const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && videoKind === 'extend' ? 'extend' : workflowFor(tab, _draft, true);
-    // The Audio tab sits between the modes without taking the settings: only Image to Video (or back) forgets the preset.
-    const leavesMode = [workflow, _draft.workflow].every((w) => !isAudioWorkflow(w)) && workflowMode(workflow) !== workflowMode(_draft.workflow);
-    _draft = { ..._withTextOfMode(_draft, workflow), workflow, videoKind, ...(leavesMode ? { appliedPreset: null } : {}) };
+    // A mode opened for the first time starts without the preset of the one it comes from; the next hydration gives it its model's defaults.
+    const entersFresh = workflowMode(workflow) !== 'audio' && workflowMode(workflow) !== workflowMode(_draft.workflow) && !_draft.savedSettings[workflowMode(workflow)];
+    _draft = { ..._withModeOf(_draft, workflow), workflow, videoKind, ...(entersFresh ? { appliedPreset: null } : {}) };
     this.saveDraft();
   },
 
@@ -961,6 +971,12 @@ export const draft = {
    */
   onTabChange(ctx: WorkspaceContext): void {
     this.hydrateFromContext(ctx, null, { keepSettings: true });
+    // The LoRAs a mode comes back with may have been removed since it was left.
+    const loraString = keepInstalledLoras(_draft.loraString, ctx.loras, downloadStore.loraNames());
+    if (loraString !== _draft.loraString) {
+      _draft = { ..._draft, loraString };
+      this.saveDraft();
+    }
   },
 
   /**
@@ -998,7 +1014,7 @@ export const draft = {
 
   /** Open a kind of the Audio tab: Music, Speech or Sound, on the model last chosen for it. */
   setAudioKind(kind: AudioWorkflow, ctx: WorkspaceContext | null): void {
-    const opened: DraftState = { ..._withTextOfMode(_draft, kind), workflow: kind, audioKind: kind, model: _draft.audioModels[kind] };
+    const opened: DraftState = { ..._withModeOf(_draft, kind), workflow: kind, audioKind: kind, model: _draft.audioModels[kind] };
     _draft = ctx ? hydrateAudio(ctx, opened) : opened;
     this.saveDraft();
   },
@@ -1098,12 +1114,13 @@ export const draft = {
   },
 
   /**
-   * Take a LoRA out of the current chips and out of what each model family remembers, so no later Generate or family
-   * switch can ask for a file that is gone. *installed* lets a chip written as a path be matched by its name.
+   * Take a LoRA out of the current chips and out of what each model family and each mode remembers, so no later Generate,
+   * family switch or tab change can ask for a file that is gone. *installed* lets a chip written as a path be matched by its name.
    */
   removeLora(name: string, installed: LoraInfo[] = []): void {
     const lorasByFamily = Object.fromEntries(Object.entries(_draft.lorasByFamily).map(([key, value]) => [key, withoutLora(value, name, installed)]));
-    _draft = { ..._draft, loraString: withoutLora(_draft.loraString, name, installed), lorasByFamily };
+    const savedSettings = Object.fromEntries(Object.entries(_draft.savedSettings).map(([mode, saved]) => [mode, saved.loraString === undefined ? saved : { ...saved, loraString: withoutLora(saved.loraString, name, installed) }]));
+    _draft = { ..._draft, loraString: withoutLora(_draft.loraString, name, installed), lorasByFamily, savedSettings };
     this.saveDraft();
   },
 

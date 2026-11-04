@@ -2,6 +2,7 @@
 import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import SettingsStrip from './SettingsStrip.svelte';
 import type { SettingChip } from './settingsChips';
 
@@ -41,6 +42,21 @@ describe('SettingsStrip', () => {
     app = flushSync(() => mount(SettingsStrip, { target, props: { chips: failed, activeKey: null, changedCount: 0, onopen: vi.fn(), onall: vi.fn() } }));
 
     expect((target.querySelector('[data-chip="loras"]') as HTMLElement).dataset.download).toBe('failed');
+  });
+
+  it('scrolls the row back to its first chip when the tab changes, and not for other changes', () => {
+    const props = reactiveProps({ chips, activeKey: null, changedCount: 0, tab: 'image', onopen: vi.fn(), onall: vi.fn() });
+    app = flushSync(() => mount(SettingsStrip, { target, props }));
+    const row = target.querySelector('.strip-chips') as HTMLElement;
+    row.scrollLeft = 120;
+
+    props.changedCount = 2;
+    flushSync();
+    expect(row.scrollLeft).toBe(120);
+
+    props.tab = 'video';
+    flushSync();
+    expect(row.scrollLeft).toBe(0);
   });
 
   it('shows one chip per setting with its value, the changed dot and All with the count', () => {

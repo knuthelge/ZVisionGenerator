@@ -478,6 +478,24 @@ describe('GalleryPage regressions', () => {
     vi.restoreAllMocks();
   });
 
+  it('stays on the open asset when a new output lands at the front of the list', async () => {
+    const [a, b, c] = ['a', 'b', 'c'].map((name) => makeAsset({ id: `${name}.png`, filename: `${name}.png` }));
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [a, b, c], page: 1, total_pages: 1, total_count: 3 });
+
+    mountPage();
+    await settle();
+    await openViewer('b.png');
+    const title = () => document.querySelector('#asset-viewer-title')?.textContent;
+    expect(title()).toBe('b.png');
+
+    galleryStore.mergeOutputs([makeAsset({ id: 'new.png', filename: 'new.png' })]);
+    await settle();
+
+    expect(target.querySelector('button[aria-label="View new.png"]')).not.toBeNull();
+    expect(title()).toBe('b.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 4');
+  });
+
   it('keeps paging in the viewer after a delete without skipping shifted assets', async () => {
     const [a, b, c, d, e, f, g] = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((name) => makeAsset({ id: `${name}.png`, filename: `${name}.png` }));
     galleryApiMocks.getGallery

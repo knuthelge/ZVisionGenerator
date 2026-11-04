@@ -109,7 +109,7 @@
     <p id={questionId} class="font-heading text-content font-extrabold text-text-primary">{question}</p>
     {#if parts && parts.length > 0}
       {#if hasTerms}
-        <p class="mt-1.5 text-content text-text-secondary">By downloading you agree to the terms shown under each model.</p>
+        <p class="mt-1.5 text-content text-text-secondary">By downloading you agree to the terms shown under each model. These are short summaries; the linked licence is what applies.</p>
       {/if}
       <ul class="mt-1.5" data-testid="confirm-parts">
         {#each parts as part, index (index)}

@@ -23,6 +23,7 @@
   import { isTyping } from '$lib/keyboard';
   import { canExtend, canUseAsAudioTrack, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type UseAsState } from '$lib/state/assetActions';
   import { takeWords, wordBlocks } from '$lib/state/audioAsset';
+  import { audioPeaks } from '$lib/state/audioPeaks.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { AudioModelOption, GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
@@ -42,7 +43,8 @@
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
     assets: GalleryAsset[];
-    currentIndex: number;
+    /** The id of the open asset: the viewer follows it, so assets landing before or after it never move the view. */
+    currentId: string | null;
     open: boolean;
     /** Where these assets come from, e.g. "History"; shown under the filename. */
     setLabel?: string;
@@ -61,7 +63,7 @@
 
   let {
     assets,
-    currentIndex,
+    currentId,
     open,
     setLabel = '',
     deletingIds = new Set<string>(),
@@ -79,8 +81,11 @@
     ondelete,
   }: Props = $props();
 
-  // A delete can shrink the list under the viewer; stay on the nearest remaining asset.
-  const index = $derived(Math.min(currentIndex, assets.length - 1));
+  // The open asset is found by id. When it leaves the list (a delete), the viewer stays on the place it had, which is
+  // its nearest remaining neighbour, and tells the parent so the id follows.
+  let lastIndex = 0;
+  const foundIndex = $derived(currentId === null ? -1 : assets.findIndex((item) => item.id === currentId));
+  const index = $derived(foundIndex >= 0 ? foundIndex : Math.min(lastIndex, assets.length - 1));
   const asset = $derived(index >= 0 ? assets[index] : null);
   const hasPrev = $derived(index > 0);
   const hasNext = $derived(index < assets.length - 1);
@@ -94,6 +99,11 @@
 
   $effect(() => {
     if (open && assets.length > 0 && index >= assets.length - NEAR_END) onnearend?.();
+  });
+
+  $effect(() => {
+    if (foundIndex >= 0) lastIndex = foundIndex;
+    else if (open && currentId !== null && assets.length > 0) onnavigate(index);
   });
 
   // Keep the current thumbnail centred in the strip as the viewer moves.
@@ -118,6 +128,10 @@
   });
 
   const isAudio = $derived(asset?.media_type === 'audio');
+  // The listing carries no waveform; the shown take asks for it once (the strip and the neighbours draw what is already fetched).
+  $effect(() => {
+    if (asset && isAudio) audioPeaks.ensure(asset);
+  });
   // Use as: an image's start image, reference or frame; an audio take's audio track or voice.
   const referenceItems = $derived<ActionMenuEntry[]>(
     !asset ? [] : asset.media_type === 'audio' ? (onuseaudio ? audioUseEntries(asset, onuseaudio, useAs) : []) : onreference ? referenceEntries(asset, onreference, useAs) : []
@@ -810,7 +824,7 @@
           <div bind:this={paneEl} class="viewer-pane viewer-pane-current" style:transform={drag?.axis === 'y' ? pullTransform(drag.offset) : undefined}>
             {#if asset.media_type === 'audio'}
               <div class="viewer-audio" data-testid="viewer-audio">
-                <AudioPlayer src={asset.url} peaks={asset.peaks ?? []} filename={asset.filename} duration={asset.duration} size="viewer" />
+                <AudioPlayer src={asset.url} peaks={audioPeaks.of(asset)} filename={asset.filename} duration={asset.duration} size="viewer" />
                 {#if words.length > 0}
                   <div class="viewer-words" data-testid="viewer-words">
                     {#each words as block (block.label)}
@@ -957,7 +971,7 @@
             onclick={() => onnavigate(itemIndex)}
           >
             {#if item.media_type === 'audio'}
-              <span class="film-audio" aria-hidden="true"><Waveform peaks={item.peaks ?? []} /></span>
+              <span class="film-audio" aria-hidden="true"><Waveform peaks={audioPeaks.of(item)} /></span>
             {:else if item.media_type === 'video' && Math.abs(itemIndex - index) > FILM_VIDEO_RADIUS}
               <span class="film-video-placeholder" aria-hidden="true">▶</span>
             {:else if item.media_type === 'video'}
@@ -1019,7 +1033,7 @@
 {#snippet neighbour(item: GalleryAsset)}
   <!-- A neighbour waiting beside the shown asset: its thumbnail, or a video's first frame. -->
   {#if item.media_type === 'audio'}
-    <span class="viewer-neighbour viewer-neighbour-audio" aria-hidden="true"><Waveform peaks={item.peaks ?? []} /></span>
+    <span class="viewer-neighbour viewer-neighbour-audio" aria-hidden="true"><Waveform peaks={audioPeaks.of(item)} /></span>
   {:else if item.media_type === 'video'}
     <video class="viewer-neighbour" src={thumbOf(item)} muted preload="metadata"></video>
   {:else}

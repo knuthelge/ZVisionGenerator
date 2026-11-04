@@ -135,12 +135,10 @@
   const generateError = $derived(submitError?.draft === draft.state ? submitError.message : null);
   let formEl = $state<HTMLFormElement | undefined>(undefined);
   let lightboxOpen = $state(false);
-  let lightboxIndex = $state(0);
-  // The history viewer follows its asset by id, not by place: a new take lands at the front of History while it is open.
-  let historyAssetId = $state<string | null>(null);
+  // The viewer follows its asset by id, not by place: a new output lands at the front of History while it is open.
+  let viewerAssetId = $state<string | null>(null);
   let lightboxMode = $state<'history' | 'completed-output'>('history');
   let completedOutputTrigger = $state<HTMLElement | null>(null);
-  let completedOutputAssetId = $state<string | null>(null);
   let completedOutputJobId = $state<string | null>(null);
   let reaction = $state<MascotReaction | null>(null);
   let greeting = $state(true);
@@ -348,9 +346,6 @@
       ? jobOutputs
       : galleryStore.assets
   );
-
-  const historyIndex = $derived(historyAssetId === null ? -1 : galleryStore.assets.findIndex((item) => item.id === historyAssetId));
-  const viewerIndex = $derived(lightboxMode === 'history' && historyIndex >= 0 ? historyIndex : lightboxIndex);
 
   // Surface successful batch items in History as soon as their SSE event lands.
   // The terminal refresh remains authoritative and reconciles the full inventory.
@@ -725,8 +720,7 @@
     const index = galleryStore.assets.findIndex((item) => item.id === asset.id);
     if (index < 0) return;
     lightboxMode = 'history';
-    lightboxIndex = index;
-    historyAssetId = asset.id;
+    viewerAssetId = asset.id;
     completedOutputTrigger = trigger;
     lightboxOpen = true;
   }
@@ -765,7 +759,6 @@
    */
   function applyPrefill(params: PrefillParams, options: { keepSettings?: boolean; recheck?: boolean } = {}): void {
     if (!context) return;
-    const fromAudio = workspaceTab(draft.state.workflow) === 'audio';
     if (params.workflow) draft.loadFromUrl({ workflow: params.workflow }, context);
     draft.hydrateFromContext(context, typeof params.model === 'string' ? params.model : null, options);
     // A prefill that is not a Use as sets every slot of its tab, an unnamed one emptied; the workflow follows from the images.
@@ -776,10 +769,9 @@
     if (options.recheck !== false) void recheckImages();
     // The prefill already re-hydrated for its tab; the tab-change effect must not redo it.
     _prevTab = workspaceTab(draft.state.workflow);
-    // The source brings its own settings, so the form no longer starts from a preset. A Use as to or from the Audio tab brings
-    // none: the settings stay (or were reset with the model by the hydrate above), and so does the preset they came from.
-    const touchesAudio = fromAudio || workspaceTab(draft.state.workflow) === 'audio';
-    if (!(params.use_as !== undefined && touchesAudio)) draft.setAppliedPreset(null);
+    // The source brings its own settings, so the form no longer starts from a preset. A Use as brings none (an image or a take
+    // only): the settings stay, or were reset with the model by the hydrate above, and so does the preset they came from.
+    if (params.use_as === undefined) draft.setAppliedPreset(null);
   }
 
   /** Refill the form from the settings a job was submitted with. */
@@ -988,9 +980,8 @@
   function openCompletedOutputViewer(index: number, trigger: HTMLElement): void {
     if (!jobOutputs[index]) return;
     lightboxMode = 'completed-output';
-    lightboxIndex = index;
+    viewerAssetId = jobOutputs[index].id;
     completedOutputTrigger = trigger;
-    completedOutputAssetId = jobOutputs[index].id;
     completedOutputJobId = jobStore.current?.job_id ?? null;
     lightboxOpen = true;
   }
@@ -1000,55 +991,23 @@
     lightboxOpen = false;
     const trigger = completedOutputTrigger?.isConnected ? completedOutputTrigger : null;
     lightboxMode = 'history';
-    historyAssetId = null;
+    viewerAssetId = null;
     completedOutputTrigger = null;
-    completedOutputAssetId = null;
     completedOutputJobId = null;
     queueMicrotask(() => trigger?.focus());
   }
 
   function navigateLightbox(index: number): void {
-    lightboxIndex = index;
-    if (lightboxMode === 'completed-output') {
-      completedOutputAssetId = jobOutputs[index]?.id ?? null;
-    } else {
-      historyAssetId = galleryStore.assets[index]?.id ?? null;
-    }
+    viewerAssetId = lightboxAssets[index]?.id ?? null;
   }
 
-  // The history viewer keeps its last place for when its asset is gone, and moves to the neighbour then (it closes with nothing left).
+  // The viewer closes with nothing left to show. When its asset is deleted it moves to the neighbour itself.
   $effect(() => {
-    if (lightboxMode !== 'history' || !lightboxOpen) return;
-    const assets = galleryStore.assets;
-    if (historyIndex >= 0) {
-      lightboxIndex = historyIndex;
-    } else if (assets.length === 0) {
-      lightboxOpen = false;
-      historyAssetId = null;
-    } else {
-      const next = Math.min(lightboxIndex, assets.length - 1);
-      lightboxIndex = next;
-      historyAssetId = assets[next].id;
-    }
-  });
-
-  $effect(() => {
-    if (lightboxMode !== 'completed-output') return;
-    if (jobOutputs.length === 0 || completedOutputJobId !== jobStore.current?.job_id) {
-      lightboxOpen = false;
-      lightboxIndex = 0;
-      completedOutputAssetId = null;
-      completedOutputJobId = null;
-      return;
-    }
-    const selectedIndex = jobOutputs.findIndex((output) => output.id === completedOutputAssetId);
-    if (selectedIndex >= 0) {
-      if (lightboxIndex !== selectedIndex) lightboxIndex = selectedIndex;
-    } else {
-      // The shown output was deleted: stay on its neighbour, like the history and gallery viewers.
-      const nextIndex = Math.min(lightboxIndex, jobOutputs.length - 1);
-      lightboxIndex = nextIndex;
-      completedOutputAssetId = jobOutputs[nextIndex].id;
+    if (!lightboxOpen) return;
+    if (lightboxMode === 'history') {
+      if (galleryStore.assets.length === 0) closeLightbox();
+    } else if (jobOutputs.length === 0 || completedOutputJobId !== jobStore.current?.job_id) {
+      closeLightbox();
     }
   });
 
@@ -2012,7 +1971,7 @@
           />
         {/if}
         {#if context}<PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />{/if}
-        <SettingsStrip {chips} activeKey={activeChip} {changedCount} pending={controlsPending} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
+        <SettingsStrip {chips} tab={workspaceTab(draft.state.workflow)} activeKey={activeChip} {changedCount} pending={controlsPending} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
         <div class="composer" class:expanded={composerOpen} data-testid="composer">
           {#if block.failures.length > 0}
             {@const failedItem = chipDownload(block.failures[0].name, loraOptions, downloadStore.items, downloadStore.unlisted)}
@@ -2171,7 +2130,7 @@
 <AssetViewer
   assets={lightboxAssets}
   origin={completedOutputTrigger}
-  currentIndex={viewerIndex}
+  currentId={viewerAssetId}
   open={lightboxOpen}
   setLabel={lightboxMode === 'completed-output' ? 'This run' : 'Gallery'}
   {deletingIds}

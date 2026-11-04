@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { defaultsFor, draft, extendStepFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
+  import { defaultsFor, draft, extendStepFor, maxStepsFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection, LicenceMark, Select } from '$lib/components/molecules';
@@ -89,10 +89,11 @@
 
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
   const stepOptions = $derived(caps.isImageMode ? null : stepOptionsFor(context, model));
-  const stepsRange = $derived(stepOptions ? stepsSpec(stepOptions) : SPEC.steps);
+  const maxSteps = $derived(caps.isImageMode ? null : maxStepsFor(context, s.workflow, model));
+  const stepsRange = $derived(stepsSpec(stepOptions, maxSteps));
 
   function setSteps(steps: number): void {
-    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : steps);
+    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : maxSteps !== null ? Math.min(steps, maxSteps) : steps);
   }
 
   // --- Extend: the length of the new frames (the source itself is chosen in SourceVideoSection) ---

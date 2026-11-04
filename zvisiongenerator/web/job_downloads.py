@@ -33,6 +33,7 @@ __all__ = [
     "image_model_part",
     "is_committed",
     "job_download_parts",
+    "job_model_part",
     "ltx_video_upscale_part",
     "matte_part",
     "missing_targets",
@@ -172,6 +173,11 @@ def job_download_parts(
         return (upscale_model_part(request, model_ref, config, platform_key=platform_key), *matte)
     image = image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=platform_key)
     return (*_enhancer_parts(args, enhance_by_set, config, platform_key), image, *matte)
+
+
+def job_model_part(parts: Iterable[JobDownloadPart]) -> JobDownloadPart | None:
+    """Return the part of the generation or upscale model among a job's *parts*, or ``None`` when the job has none (its plan could not be made)."""
+    return next((part for part in parts if part.role == ROLE_MODEL), None)
 
 
 def missing_targets(part: JobDownloadPart, present: Callable[[DownloadTarget], bool] = target_present_offline) -> tuple[DownloadTarget, ...] | None:

@@ -10,13 +10,20 @@
     changedCount: number;
     /** The context is still loading: the chips are placeholders and nothing opens. */
     pending?: boolean;
+    /** The open tab: when it changes, the row scrolls back to its first chip, as the new tab's chips begin there. */
+    tab?: string;
     onopen: (key: ChipKey) => void;
     onall: () => void;
   }
 
-  let { chips, activeKey, changedCount, pending = false, onopen, onall }: Props = $props();
+  let { chips, activeKey, changedCount, pending = false, tab = '', onopen, onall }: Props = $props();
 
   let scroller = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    void tab;
+    if (scroller) scroller.scrollLeft = 0;
+  });
 
   // Bring the chip that opened into view, so its popover and its chip line up. The row scrolls itself: scrollIntoView
   // would also scroll the page, which jolts the screen on a phone whose address bar is in play.

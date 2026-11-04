@@ -2,7 +2,7 @@
   import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
   import { LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { defaultsFor, draft, extendStepFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
+  import { defaultsFor, draft, extendStepFor, maxStepsFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { downloadStore } from '$lib/state/downloads.svelte';
   import { galleryStore } from '$lib/state/gallery.svelte';
@@ -128,10 +128,11 @@
 
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
   const stepOptions = $derived(caps.isImageMode ? null : stepOptionsFor(context, s.model));
-  const stepsRange = $derived(stepOptions ? stepsSpec(stepOptions) : SPEC.steps);
+  const maxSteps = $derived(caps.isImageMode ? null : maxStepsFor(context, s.workflow, s.model));
+  const stepsRange = $derived(stepsSpec(stepOptions, maxSteps));
 
   function setSteps(steps: number): void {
-    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : steps);
+    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : maxSteps !== null ? Math.min(steps, maxSteps) : steps);
   }
 
   // --- Extend ---

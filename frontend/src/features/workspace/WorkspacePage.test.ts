@@ -2170,6 +2170,35 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('#ws-negative-prompt')).not.toBeNull();
   });
 
+  it('keeps the Steps field within the video model\'s limit, so the shown count is the one that runs', async () => {
+    const context = makeContext();
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    draft.hydrateFromContext(context, 'ltx-8');
+    await heldUploads.restore();
+    app = flushSync(() => mount(ControlsSidebar, {
+      target,
+      props: {
+        context,
+        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, get audio() { return currentAudioView(context); },
+        busy: false,
+      },
+    }));
+    await settle();
+    const steps = target.querySelector('#ws-steps') as HTMLInputElement;
+    const limit = context.video_model_defaults!['ltx-8'].max_steps!;
+    expect((target.querySelector('.mini-range[type="range"]') as HTMLInputElement).max).toBe(String(limit));
+
+    // Typing past the limit holds the limit, in the draft and in the field once it is left.
+    steps.value = String(limit + 4);
+    steps.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(draft.state.steps).toBe(limit);
+    steps.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(steps.value).toBe(String(limit));
+  });
+
   it('gates reference image and upscale controls by selected model capabilities', async () => {
     draft.update('workflow', 'img2img');
 

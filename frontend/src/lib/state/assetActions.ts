@@ -150,8 +150,8 @@ function modelLabel(options: readonly { id: string; label: string }[], id: strin
 export function useAsState(ctx: WorkspaceContext | null, state: DraftState): UseAsState {
   if (ctx === null) return {};
   const ownMode = workflowMode(state.workflow);
-  const imageModel = (ownMode === 'image' ? state.model : state.lastImageModel) || (ctx.current_image_model ?? '');
-  const videoModel = (ownMode === 'video' ? state.model : state.lastVideoModel) || (ctx.current_video_model ?? '');
+  const imageModel = (ownMode === 'image' ? state.model : state.savedSettings.image?.model) || (ctx.current_image_model ?? '');
+  const videoModel = (ownMode === 'video' ? state.model : state.savedSettings.video?.model) || (ctx.current_video_model ?? '');
   const imageName = modelLabel(ctx.image_models, imageModel);
   const videoName = modelLabel(ctx.video_models, videoModel);
   const imageSupports = imageSupport(ctx, imageModel, 'image');

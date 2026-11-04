@@ -135,6 +135,7 @@
           </p>
         </section>
       {/each}
+      <p class="licence-note">These are short summaries; the linked licence is what applies.</p>
     </div>
   {/if}
 {/if}
@@ -168,6 +169,7 @@
   .licence-name { font-weight: 600; color: var(--color-text-primary); overflow-wrap: anywhere; }
   .licence-supplier { font-size: var(--text-meta); color: var(--color-text-muted); }
   .licence-summary { margin-top: 4px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+  .licence-note { margin-top: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
   .licence-attribution { margin-top: 4px; font-size: var(--text-meta); color: var(--color-text-muted); overflow-wrap: anywhere; }
   .licence-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   @media (pointer: coarse) { .licence-links :global(.ui-btn) { min-height: 44px; } }

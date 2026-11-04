@@ -172,6 +172,15 @@ describe('JobPreview', () => {
       play.mockRestore();
     });
 
+    it('plays the take the Aurora has landed on while the job is paused after it', () => {
+      const progress = { phase: 'Decode', step: 1, total: 1, part: 1, parts: 1 };
+      const paused = mountComponent(JobPreview, { job: takeJob({ audio: progress, status: 'paused', paused: true, itemFinished: true, outputs: [makeAudioAsset()] }) });
+
+      expect(figure(paused.target).querySelectorAll('rect.bar')).toHaveLength(100);
+      expect(figure(paused.target).querySelector('audio')?.getAttribute('src')).toBe('/media/out/song.flac');
+      expect(figure(paused.target).querySelector('.job-preview-play')).not.toBeNull();
+    });
+
     it('offers no player while the Aurora runs or when the take has no waveform', () => {
       const running = mountComponent(JobPreview, { job: takeJob({ audio: { phase: 'Song tokens', step: 250, total: null, part: 1, parts: 1 } }) });
       const none = mountComponent(JobPreview, { job: takeJob({ status: 'failed' }) });

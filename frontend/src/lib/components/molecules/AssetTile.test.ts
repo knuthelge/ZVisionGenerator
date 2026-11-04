@@ -1,5 +1,7 @@
 import { flushSync } from 'svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { audioPeaks } from '$lib/state/audioPeaks.svelte';
 
 import type { GalleryAsset } from '$lib/types';
 
@@ -28,6 +30,9 @@ function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
 function menuActions(): string[] {
   return Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action') ?? '');
 }
+
+const mocks = vi.hoisted(() => ({ getAudioPeaks: vi.fn() }));
+vi.mock('$lib/api/gallery', () => ({ getAudioPeaks: mocks.getAudioPeaks }));
 
 describe('AssetTile', () => {
   let page: ReturnType<typeof mountComponent>;
@@ -288,6 +293,30 @@ describe('AssetTile with audio', () => {
     page = mountComponent(AssetTile, props);
     target = page.target;
   }
+
+  beforeEach(() => {
+    audioPeaks.reset();
+    mocks.getAudioPeaks.mockReset();
+  });
+
+  it('asks the server for the waveform of a take the listing sent without one, and draws it', async () => {
+    mocks.getAudioPeaks.mockResolvedValue(Array.from({ length: 100 }, () => 255));
+    mountTile({ asset: makeAudioAsset({ peaks: null }) });
+    const barHeights = () => Array.from(target.querySelectorAll('.audio-cover .bar')).map((bar) => bar.getAttribute('height'));
+    const flat = barHeights();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+
+    expect(mocks.getAudioPeaks).toHaveBeenCalledExactlyOnceWith('out/song.flac');
+    expect(barHeights()).not.toEqual(flat);
+  });
+
+  it('does not ask when the listing carried the waveform', () => {
+    mountTile({ asset: makeAudioAsset() });
+
+    expect(mocks.getAudioPeaks).not.toHaveBeenCalled();
+  });
 
   const words = () => target.querySelector('[data-testid="audio-words"]')?.textContent ?? null;
   const cover = () => target.querySelector<HTMLElement>('[data-testid="audio-cover"]')!;

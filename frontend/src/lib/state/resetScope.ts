@@ -118,11 +118,8 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
 
   enhancedHistory: 'memory',
   lorasByFamily: 'memory',
-  lastImageModel: 'memory',
-  lastVideoModel: 'memory',
-  lastImageQuantize: 'memory',
-  settingsModel: 'memory',
   savedText: 'memory',
+  savedSettings: 'memory',
   enhanceAuto: 'memory',
   enhanceModel: 'memory',
   enhanceFormat: 'memory',

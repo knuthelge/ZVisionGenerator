@@ -165,6 +165,63 @@ class TestJobFlow:
         latest = history[types.index(DOWNLOADING_EVENT)]
         assert latest["bytes_done"] == latest["bytes_total"] == 1000  # the owned part's final report is the one kept
 
+    def test_a_job_submitted_with_its_model_part_downloads_that_part_without_planning_again(self, monkeypatch):
+        planned: list = []
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **kw: planned.append(a) or (DownloadTarget("owner/replanned"),))
+        ensured: list = []
+
+        def ensure(targets, **_kw):
+            ensured.append(tuple(targets))
+            return READY
+
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", ensure)
+        runner = _runner()
+        try:
+            stub_request_job(monkeypatch)
+            monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="info")))
+            monkeypatch.setattr(web_runner_module, "run_batch", _batch_that_completes)
+            part = JobDownloadPart("atlas", "atlas", "model", (_TARGET,))
+            job_id = runner.submit_image_request_job(
+                request=_image_request(model_name="atlas"), prompts_data=_PROMPTS, config={}, args=_make_args(), model_ref="owner/atlas", planned_targets=(_TARGET,), model_part=part
+            )
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert planned == [] and ensured == [(_TARGET,)]
+
+    def test_a_job_submitted_without_a_model_part_plans_it_when_it_runs(self, monkeypatch):
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (DownloadTarget("owner/replanned"),))
+        ensured: list = []
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda targets, **_kw: ensured.append(tuple(targets)) or READY)
+        runner = _runner()
+        try:
+            wait_for_status(runner, _submit_image(monkeypatch, runner), "completed")
+        finally:
+            runner.shutdown()
+
+        assert ensured == [(DownloadTarget("owner/replanned"),)]
+
+    def test_a_video_job_submitted_with_its_model_part_downloads_that_part_without_planning_again(self, monkeypatch):
+        planned: list = []
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda *a, **kw: planned.append(a) or (DownloadTarget("owner/replanned"),))
+        ensured: list = []
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda targets, **_kw: ensured.append(tuple(targets)) or READY)
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(
+            web_runner_module, "run_video_batch", lambda *, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+        )
+        runner = _runner()
+        try:
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", model_name="ltx-q4")
+            part = JobDownloadPart("ltx-q4", "ltx-q4", "model", (_TARGET,))
+            job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config={}, args=_make_video_args(), model_ref="owner/ltx", model_part=part)
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert planned == [] and ensured == [(_TARGET,)]
+
     def test_the_download_events_carry_the_contract_fields_and_no_generation_eta(self, monkeypatch):
         monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         seen: list[dict] = []

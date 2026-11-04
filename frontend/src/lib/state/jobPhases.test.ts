@@ -53,10 +53,27 @@ describe('jobPhases', () => {
     expect(settleControl('quit', 'generation_finished')).toBe('quit');
   });
 
+  it('settles every queued control when the job ends', () => {
+    for (const type of ['job_completed', 'job_failed', 'job_cancelled']) expect(settleControl('quit', type)).toBeNull();
+  });
+
   it('keeps a queued pause through the pause a review starts, and settles it on a plain pause', () => {
     expect(settleControl('pause', 'job_paused', { review: { iteration: 1 } })).toBe('pause');
     expect(settleControl('pause', 'job_paused', {})).toBeNull();
     expect(settleControl('pause', 'job_paused')).toBeNull();
+  });
+
+  it('stamps the moment a queued control took effect, and not for events that leave it waiting', () => {
+    let state = job({ controlQueued: 'pause' });
+    state = trackJobEvent(state, 'step_progress', {}, 100);
+    expect(state.controlSettledAt).toBeUndefined();
+    state = trackJobEvent(state, 'job_paused', {}, 200);
+    expect(state.controlQueued).toBeNull();
+    expect(state.controlSettledAt).toBe(200);
+
+    const next = trackJobEvent(job({ controlQueued: 'next' }), 'generation_finished', {}, 300);
+    expect(next.controlSettledAt).toBe(300);
+    expect(trackJobEvent(job(), 'job_paused', {}, 400).controlSettledAt).toBeUndefined();
   });
 
   it('keeps a pending pause, next or repeat through a review and its decision', () => {

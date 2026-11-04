@@ -73,8 +73,8 @@ export interface GalleryAsset {
   duration?: number | null;
   /** An audio take: what it is (`music`, `speech`, `sound`); null for a file without this app's settings. */
   kind?: AudioWorkflow | null;
-  /** An audio take: 100 values of 0-255, the relative loudness along the take; empty when they could not be read. */
-  peaks?: number[];
+  /** An audio take: 100 values of 0-255, the relative loudness along the take; null or absent while the server has not computed them (the app asks for them), empty when they could not be read. */
+  peaks?: number[] | null;
   channels?: number | null;
   sample_rate?: number | null;
   /** An audio take: the label of the model's preset, null when no such preset is configured; `model` stays its id. */
@@ -961,14 +961,6 @@ export interface DraftState {
   loraString: string;
   /** LoRAs last chosen for each model family (keyed `model:<id>` when the family is unknown); `loraString` holds the current family's. */
   lorasByFamily: Record<string, string>;
-  /** The image model last chosen in an image workflow; coming back from a video workflow restores it. Empty before one was chosen. */
-  lastImageModel: string;
-  /** The video model last chosen in a video workflow; coming back from an image workflow restores it. Empty before one was chosen. */
-  lastVideoModel: string;
-  /** The quantization the image model last ran with; coming back from a video workflow (which has none) restores it. */
-  lastImageQuantize: number | null;
-  /** The image or video model the settings were last hydrated for; the Audio tab holds none of its own, so coming back to this model keeps them. Empty before one was set. */
-  settingsModel: string;
   /** Image tab: the start image's path on the host; null when none is set or it was uploaded (`referenceImageUpload`). */
   referenceImagePath: string | null;
   /** Image tab: the file name of a start image uploaded from this device (its file is in `heldUploads` and the upload store); null when none. */
@@ -1042,6 +1034,12 @@ export interface DraftState {
    * `TabText`) hold the open one's. Opening the other mode swaps the two. Empty until the first switch.
    */
   savedText: Partial<Record<WorkflowMode, TabText>>;
+  /**
+   * What the mode (image or video) that is not open kept: its Settings pane values, model with its LoRAs and quantization, and
+   * applied preset. The fields themselves hold the open one's; opening the other mode swaps the two, so each mode comes back as
+   * it was left. A mode not visited yet has none, and takes its model's defaults.
+   */
+  savedSettings: Partial<Record<WorkflowMode, Partial<DraftState>>>;
   /** Last-used enhancement options for images; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;
   /** Last-used enhancement options for video, with the Rewrite choice of each video workflow; null until any are picked. */
@@ -1237,6 +1235,8 @@ export interface ActiveJobState extends JobContext {
   audio?: AudioProgress | null;
   /** A control the server accepted that has not taken effect yet (pause waits for the current image or video). */
   controlQueued?: JobControlAction | null;
+  /** Client time (ms since epoch) a queued control took effect; a request made before it no longer counts as pending. */
+  controlSettledAt?: number;
   /** 'reconnecting' while the event stream is down and the shown progress may be stale. */
   connection?: 'live' | 'reconnecting';
   /** Client time (ms since epoch) of the last event received. */
