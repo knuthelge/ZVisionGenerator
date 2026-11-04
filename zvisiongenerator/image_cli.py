@@ -225,6 +225,7 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error("--model is required. Provide a model name, path, or HuggingFace repo ID.")
     # A repo id that is an alias's repo runs as that alias: it gets the alias's licence notice and is recorded under its name.
     picked_model = canonical_model_name(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    args.model_name = picked_model
     args.model = resolve_model_path(picked_model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
 
     lora_paths, lora_weights = None, None

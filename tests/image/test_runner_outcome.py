@@ -12,7 +12,7 @@ from PIL import Image
 
 from tests._factories import _make_args, _make_plan
 
-from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
@@ -20,6 +20,7 @@ from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
+from zvisiongenerator.utils.provenance import build_image_config_payload
 
 _MODEL_INFO = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 
@@ -75,6 +76,17 @@ def _captured_request(config=_CONFIG, **args_overrides):
 )
 def test_args_reach_the_generation_request(args_overrides, attribute, expected):
     assert getattr(_captured_request(**args_overrides), attribute) == expected
+
+
+def test_the_request_records_the_alias_when_the_cli_picked_one():
+    request = _captured_request(model="/models/zit", model_name="zit")
+
+    assert request.model_name == "zit"
+    assert build_image_config_payload(request, ImageWorkingArtifacts())["model"] == "zit"
+
+
+def test_the_request_records_the_model_when_no_alias_was_picked():
+    assert _captured_request(model="/models/custom").model_name == "/models/custom"
 
 
 _UNSET = object()

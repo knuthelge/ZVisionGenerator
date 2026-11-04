@@ -47,6 +47,7 @@ def run(monkeypatch, capsys):
 
     def start(argv: list[str], *, present: bool = False) -> list[tuple[str, str]]:
         _patch_image_main_dependencies(monkeypatch)
+        start.batch = image_cli.run_batch
         monkeypatch.setattr(image_cli, "load_config", lambda: _CONFIG)
         monkeypatch.setattr(image_cli, "resolve_model_path", lambda model, **kwargs: _CONFIG["model_aliases"].get(model, model))
         monkeypatch.setattr(image_cli, "image_plan", plans)
@@ -118,3 +119,13 @@ class TestImageCliLicenceNotice:
         steps = run(["-m", "zit", "--transparent"], present=True)
 
         assert NOTICE_HEADER not in steps[1][1]
+
+
+class TestImageCliRecordedModelName:
+    @pytest.mark.parametrize("model", ["klein9b", "owner/klein9b"])
+    def test_a_model_is_recorded_under_its_alias_whether_picked_by_alias_or_repo_id(self, run, model):
+        run(["-m", model])
+
+        args = run.batch.call_args.args[4]
+        assert args.model_name == "klein9b"
+        assert args.model == "owner/klein9b"

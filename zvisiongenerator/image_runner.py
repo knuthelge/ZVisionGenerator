@@ -287,7 +287,7 @@ def run_batch(
                     _display_request = ImageGenerationRequest(
                         backend=backend,
                         model=model,
-                        model_name=args.model,
+                        model_name=getattr(args, "model_name", None) or args.model,
                         model_family=_family,
                         supports_negative_prompt=supports_neg,
                         prompt=prompt,
@@ -373,7 +373,7 @@ def run_batch(
                         request = ImageGenerationRequest(
                             backend=backend,
                             model=model,
-                            model_name=args.model,
+                            model_name=getattr(args, "model_name", None) or args.model,
                             model_family=_family,
                             supports_negative_prompt=supports_neg,
                             max_reference_images=max_references,
