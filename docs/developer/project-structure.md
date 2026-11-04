@@ -43,6 +43,7 @@ zvisiongenerator/
 │   │   ├── sa3.py                 Stable Audio 3 Medium: built in fp16 and filled tensor by tensor, with the output kept from before the library's clamp
 │   │   ├── yue2.py                YuE2: the vendored kit run stage by stage, with song or instrumental from the Lyrics
 │   │   ├── yue2_load.py           Stream YuE2's weights in tensor by tensor
+│   │   ├── yue2_mps.py            Exact speed-ups for YuE2's token phases on MPS: folded decode attention and the song-token head
 │   │   └── yue2_swap.py           Keep YuE2's weight groups in pinned CPU memory and put only the running phase's group on the GPU
 │   ├── cuda/                      Windows and Linux (diffusers/CUDA); what image and video share sits here
 │   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)

@@ -77,23 +77,29 @@ The estimate doesn't count memory used by other apps, or by an image model that 
 
 ## Audio
 
-The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux. The figures are peak GPU memory measured on an otherwise empty 10 GB card:
-
-| Model | GPU memory | Measured at |
-|---|---|---|
-| YuE2 3B (`yue2`) | about 6.7 GiB | A take of the full 6:00 |
-| Higgs TTS 3 4B (`higgs3`) | about 8.2 GiB | A part of the longest the app allows |
-| Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
-
-Speech memory depends on the part, not the whole text, because a long text is read one part at a time. System memory matters too: YuE2 peaks at about 11 GiB while it loads or runs, which leaves a computer with 16 GB of RAM little to spare.
+The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux, and a Mac with 32 GB of unified memory. Speech memory depends on the part, not the whole text, because a long text is read one part at a time.
 
 === "macOS"
 
-    The audio models run on the Mac's GPU. Their peak memory has not been measured on a Mac yet, so they show no memory badge there.
+    The audio models run on the Mac's GPU. The figures are peak GPU memory measured on a 32 GB Mac:
+
+    | Model | GPU memory | Measured at |
+    |---|---|---|
+    | YuE2 3B (`yue2`) | about 10.5 GiB | A take of the full 6:00 |
+    | Higgs TTS 3 4B (`higgs3`) | about 11.0 GiB | A text read in four parts |
+    | Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
 
 === "Windows and Linux"
 
-    YuE2 keeps its weights in system memory and moves the part it needs to the GPU, which is how it fits a 10 GB card. This adds a few seconds when the model loads and does not change the result.
+    The figures are peak GPU memory measured on an otherwise empty 10 GB card:
+
+    | Model | GPU memory | Measured at |
+    |---|---|---|
+    | YuE2 3B (`yue2`) | about 6.7 GiB | A take of the full 6:00 |
+    | Higgs TTS 3 4B (`higgs3`) | about 8.2 GiB | A part of the longest the app allows |
+    | Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
+
+    System memory matters too: YuE2 peaks at about 11 GiB while it loads or runs, which leaves a computer with 16 GB of RAM little to spare. YuE2 keeps its weights in system memory and moves the part it needs to the GPU, which is how it fits a 10 GB card. This adds a few seconds when the model loads and does not change the result.
 
 ## One model at a time
 

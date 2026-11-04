@@ -60,7 +60,7 @@ def yue2_preset() -> dict[str, Any]:
             "vae_core_frames": 512,
             "fade_seconds": 2,
         },
-        "platforms": {"cuda": {"memory_gb": 6.7}},
+        "platforms": {"cuda": {"memory_gb": 6.7}, "mps": {"memory_gb": 10.5}},
     }
 
 
@@ -73,7 +73,7 @@ def higgs3_preset() -> dict[str, Any]:
         "files": higgs3_files(),
         "limits": {"max_new_tokens": 1500, "part_chars": 500, "max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30},
         "settings": {"temperature": 0.7, "top_p": 0.95, "join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, "edge_silence_max_ms": 150},
-        "platforms": {"cuda": {"memory_gb": 8.2}},
+        "platforms": {"cuda": {"memory_gb": 8.2}, "mps": {"memory_gb": 11.0}},
     }
 
 
@@ -86,7 +86,7 @@ def sa3_preset() -> dict[str, Any]:
         "files": sa3_files(),
         "limits": {"max_seconds": 380},
         "settings": {"steps": 8, "cfg_scale": 1.0, "sample_size": 16777216},
-        "platforms": {"cuda": {"memory_gb": 6.1}},
+        "platforms": {"cuda": {"memory_gb": 6.1}, "mps": {"memory_gb": 6.1}},
     }
 
 

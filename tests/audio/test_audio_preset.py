@@ -97,7 +97,9 @@ class TestPlatformSettings:
         assert not [preset.id for preset in presets if {"weight_swap", "codec_device"} & set(preset.settings)]
 
     def test_the_memory_peak_belongs_to_the_platform_it_was_measured_on(self):
-        (yue2,) = parse_audio_presets(audio_config(yue2=yue2_preset()))
+        preset = yue2_preset()
+        del preset["platforms"]["mps"]
+        (yue2,) = parse_audio_presets(audio_config(yue2=preset))
 
         assert yue2.memory_gb_for("cuda") == 6.7
         assert yue2.memory_gb_for("mps") is None
