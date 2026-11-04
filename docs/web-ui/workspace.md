@@ -1,8 +1,8 @@
 # Workspace
 
-The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, so switching tabs never moves text from one to the other.
+The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, model, settings and preset, and each comes back as you left it.
 
-**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). Both kinds share the prompt, the model, the LoRAs and the steps and seed. Each keeps its own inputs, so switching back and forth loses nothing: **New** its size, duration, frames, upscale and audio track, **Extend** its source video, **Extend by** and audio track. Video reopens on the kind you left it on. **Kind** is hidden on a computer that can't extend. On a tablet held upright the toolbar shows only the controls, without the words *Kind* and *Model*. On a phone, a **Kind** chip leads the strip ([Video on a phone](devices.md#video-on-a-phone)).
+**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). The two share the prompt, model, LoRAs, steps and seed; each keeps its own inputs. **Kind** is hidden on a computer that can't extend.
 
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
@@ -20,9 +20,9 @@ Each model shows whether it is downloaded and a memory badge:
 
 The badge follows the quant you pick, so you can see whether `q8` or `q4` brings a large model within reach. Hover it for the estimate. See [Memory](../concepts/memory.md) for how it's worked out.
 
-Every built-in model shows an **ⓘ** right after the model picker. Hover it, or press it, to read the licence and open its text. It follows the model you pick and is missing for a model of your own, such as a converted checkpoint. On a phone, the **Model** list has an **ⓘ** at the end of each built-in model's row, and **All** shows the one beside the picker.
+Every built-in model has an **ⓘ** beside the picker. Hover or press it to read the model's licence (see [Licences](../concepts/models.md#licences)). A model of your own has none.
 
-A model that isn't downloaded yet shows *not downloaded*. When a job would download it, **Generate** first asks: the dialog lists each model the job needs to download, such as the model, the prompt enhancer and the background removal models, with its size and the free space on the drive. Each model shows its terms under its name, such as the non-commercial terms of FLUX.2 Klein 9B, with links to the licence, and the dialog says that downloading means you agree to them (see [Licences](../concepts/models.md#licences)). **Download** starts the job and the download; **Cancel** queues nothing. A model that is already downloading, for example from the [Models](models.md) page, isn't asked about again, and its picker shows its progress, for example *Downloading 42%*. When Hugging Face can't be reached to read the sizes, the dialog says it couldn't check the size and offers **Download anyway**.
+A model that isn't downloaded yet shows *not downloaded*. When a job would download it, **Generate** first asks: the dialog lists what will download (the model, the prompt enhancer, the background removal models) with its size, the free space and its terms. **Download** starts the job and the download; **Cancel** queues nothing. A model that is already downloading isn't asked about again, and its picker shows its progress.
 
 The **Add LoRA** menu lists the LoRAs made for the selected model first, with the ones you used with it recently on top, and folds the rest under **Other models (n)**. Its last item, **Discover LoRAs…**, opens [Discover LoRAs](#discover-loras). LoRAs are remembered per model family, and per size for FLUX.2 Klein (4B and 9B keep separate LoRAs): switch to another family and you get the LoRAs you last used with it. See [LoRAs](../concepts/loras.md).
 
@@ -46,7 +46,7 @@ A **preset** saves your whole setup under a name, so you can bring it back in on
 - **The menu** has **Update** (write the current settings into the preset), **Save as…**, **Rename…** and **Delete**. A dot on the control shows when the form differs from the applied preset.
 - Image and video have their own presets; only the ones for the current kind are listed.
 - A model or LoRA that isn't installed is skipped.
-- Switching between image and video, **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards.
+- **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards. Switching between Image and Video leaves each tab's preset as it was.
 
 Presets are kept as files in `presets` in the [data folder](../concepts/data-folder.md), so they follow you to every browser. The CLI doesn't use them.
 
@@ -123,11 +123,11 @@ What each setting does is in [Images](../concepts/images.md), [Video](../concept
 
 ### Transparent background
 
-**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). A **Non-commercial** button with an **ⓘ** sits beside it; hover it, or press it, to read the cut-out models' terms and open the dataset terms. The job card shows **Downloading background removal** while the cut-out models download and **Removing background…** while the cut-out runs.
+**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). The **Non-commercial** button beside it opens the cut-out models' terms.
 
 ![The Transparent switch in Post-processing, with its Non-commercial button](../assets/screenshots/placeholder.svg "transparent-background")
 
-On a phone, the switch is in the **Post-processing** section of **All**. While it is on, a **Transparent** chip joins the settings strip; its popover, **Transparent background**, holds the switch.
+On a phone, the switch is in the **Post-processing** section of **All**.
 
 ### Images
 
@@ -151,10 +151,9 @@ Folded, the header's summary says what **Generate** will use: in Image *None*, *
 
 **Where images stay**
 
-- An image stays until you press its × or **Reset**, including after you reload the page and including images uploaded from your device.
-- **Image** and **Video** each keep their own images. Adding a first frame in Video doesn't put it into Image, and switching between **Image** and **Video**, between its kinds, or changing the model, clears none of them.
-- **Reuse settings** and **Load settings** replace the images of the tab they open with the ones the job used. A job made from text leaves that tab's images empty.
-- **Reset** in the *Settings* header clears the open tab's images along with its other settings; the other tab keeps its images. What it clears on each tab is in [Reset](#reset).
+- An image stays until you press its × or **Reset**, also after a reload.
+- **Image** and **Video** each keep their own images; switching tabs, kinds or models clears none of them.
+- **Reuse settings** and **Load settings** replace the open tab's images with the ones the job used.
 
 **Images a model can't use**
 
@@ -187,24 +186,13 @@ A server file that can't be read is refused at **Generate** with *Can't read the
 
 Your settings stay in the browser between visits, as long as the Web UI starts on the same port.
 
-When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset, and a custom size is scaled to fit its limits, keeping its shape. Changing the quant changes nothing else.
+When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset.
 
-**Reuse settings** and **Load settings** apply a take's settings exactly. What the take did not record takes its default instead of what the form held: a take made without LoRAs, a negative prompt or a seed comes back without them, and a size the model doesn't offer becomes its largest preset. They replace the open tab's settings, images, prompts, LoRAs, quant and *Enhance* options, and leave the other tabs, the prompts file and your enhancer choices as they are. **Extend** brings the LoRAs the source was made with, and **Use as** and a link change only what they name.
+**Reuse settings** and **Load settings** apply a take's settings exactly: what the take did not record takes its default instead of what the form held. They replace the open tab's settings, images, prompts, LoRAs, quant and *Enhance* options and leave the other tabs alone. **Use as** changes only what it names.
 
 ### Reset
 
-**Reset** in the *Settings* header puts the open tab back to its defaults. It touches that tab only: nothing on another tab, and nothing in the other mode, changes.
-
-| Tab | Reset puts back |
-|---|---|
-| Image | The settings at the model's defaults; the start image, the references and **Strength**; Image's *Enhance* options |
-| Video, New | The settings at the model's defaults; the first and last frame and the audio track; Video's *Enhance* options |
-| Video, Extend | The settings at the model's defaults; the length of the extension, to the source's default; the audio track, to the one the source filled in; Video's *Enhance* options |
-| Audio | The length, the voice (the recording, what it says, *Any* or *From a recording*, and the tick), **Batch size** and **Seed** |
-
-**Batch size** and **Seed** are shared by every tab, so each Reset puts them back. The applied preset is deselected.
-
-Reset keeps the model, LoRAs and quant, the prompts and the prompt file (the Enhanced text included), the Extend source, the Video kind that is open, the *Enhance* choices of enhancer, format and auto-enhance, and the Audio tab's kind, models and text. Image and Video each have their own *Enhance* options, so a Reset on one leaves the other's.
+**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the length, the voice, **Batch size** and **Seed**. It keeps the model, LoRAs and quant, the prompts and the Extend source, and it never touches another tab. **Batch size** and **Seed** are shared by every tab, so each Reset puts them back.
 
 ### Copy as a command
 
@@ -229,9 +217,7 @@ Typing in a path field suggests matching folders and files: ++tab++ takes the fi
 
 ![The Audio tab on Music, with Style and Lyrics under Compose and the status line saying Song](../assets/screenshots/placeholder.svg "audio-music")
 
-The toolbar reads **Kind**, **Model**, the model's **ⓘ** licence mark and its memory badge. **Kind** is **Music**, **Speech** or **Sound**, and decides what *Compose* and *Settings* show. Presets, **Quant** and LoRAs aren't used. The tab opens on the kind you left it on and remembers the model you picked for each kind. A model that isn't downloaded yet is asked for when you press **Generate**, with its size and licence, as for [images](#model-and-loras).
-
-### Compose
+The toolbar reads **Kind** (**Music**, **Speech** or **Sound**), **Model**, the model's **ⓘ** licence mark and its memory badge. The kind decides what *Compose* and *Settings* show; presets, **Quant** and LoRAs aren't used. A model that isn't downloaded yet is asked for when you press **Generate**, as for [images](#model-and-loras).
 
 | Kind | Compose | Settings |
 |---|---|---|
@@ -239,52 +225,27 @@ The toolbar reads **Kind**, **Model**, the model's **ⓘ** licence mark and its 
 | **Speech** | **Text**, with a count against the 10,000 characters it can hold | **Voice**, then **Batch size** and **Seed** |
 | **Sound** | **Prompt**, what you hear | **Length (s)**, from 1 to 380 and 10 to begin with, then **Batch size** and **Seed** |
 
-- **Music:** a line under the boxes says what you will get: *Song · length follows the lyrics*, or *Instrumental · 8 sections · add or remove section tags to change its length*. Write words under `[verse]` and `[chorus]` tags for a song; leave **Lyrics** empty, or write only tags, for an instrumental; `[Instrumental]` and `[Solo]` tags keep vocals out. See [Music](../concepts/audio.md#music).
-- **Speech:** the help under **Text** says that long text is read in parts and joined into one take. Expressive tags such as `<|sfx:laughter|>` are typed into the text; see [Expressive tags](../concepts/audio.md#expressive-tags).
-- **Compose tools:** there is no enhancer, JSON mode or negative prompt, and no steps or guidance to set. The tools row has only **Recent prompts**: music, speech and sound each keep their own list, a song's recent prompt brings its lyrics back with its style, and **Clear recents** clears only the open kind's list.
+- **Music:** a line under the boxes says whether you will get a song or an instrumental. See [Music](../concepts/audio.md#music).
+- **Speech:** type expressive tags such as `<|sfx:laughter|>` into the text; see [Expressive tags](../concepts/audio.md#expressive-tags).
+- **No enhancer, JSON mode or negative prompt.** The tools row has only **Recent prompts**, one list per kind.
 
 ### Voice
 
-**Voice** is the first group in Speech's *Settings*. See [Voices](../concepts/audio.md#voices) for what each choice does.
-
-1. Leave it on **Any** to let the model pick a voice. The help under it points to **Use as** → **Voice** in the [Gallery](gallery.md#use-as-an-audio-track-or-a-voice) for keeping one.
-2. Or choose **From a recording**. Add a file of 3 to 30 seconds (Browse, upload or drop; its length shows beside its name), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.*
+**Voice** is the first group in Speech's *Settings*. Leave it on **Any**, or choose **From a recording**: add a file of 3 to 30 seconds (Browse, upload or drop), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.* The tick is asked again whenever the voice changes. See [Voices](../concepts/audio.md#voices).
 
 ![The Voice section on From a recording, with the file, What it says and the consent tick](../assets/screenshots/placeholder.svg "audio-voice")
 
-The tick is never saved and is asked again whenever the voice changes; see [Voices](../concepts/audio.md#voices).
-
-A clean, close-miked recording gives the best voice; see [Clone from a clean recording](../concepts/audio.md#voices).
-
-### Why Generate is off
-
-While something is missing, **Generate** is disabled and one reason shows above it, always the first that applies: the style, the text or prompt, the recording, its length, **What it says**, the tick, and then text over the limit (*Shorten the text: it's over 10,000 characters, about 10 minutes of speech.*).
+While something is missing, **Generate** is disabled and the first reason shows above it.
 
 ### While a take is made
 
-The job card counts **takes** (*Take 1 of 2*) and puts the text of the take under **Style** (music), **Text** (speech) or **Prompt** (sound). Its rows use the same words as the preview strip:
-
-- **Music** has four rows: *Planning*, *Writing the song*, *Rendering* and *Finishing*. The row at work shows how much of the song is written so far (*Writing the song · 1:15 so far*) and then the steps of the render; rows still to come read *Next*.
-- **Speech** has one row, *Reading part 2 of 4 · 0:16*, which reads *Finishing part 2 of 4* while that part is decoded. Text in one part reads *Reading · 0:16*.
-- **Sound** has one step line as an image does, *Step 5 of 8*, and then *Finishing up…*.
-
-The bar in the card's header is the whole take's progress, the same as the strip's: it keeps moving while a song is written, it never goes back between the parts of a speech, and a sound's reaches full as its last step ends. When a job is paused between takes, the card says which comes next (*Next: take 2 of 3*).
-
-The preview strip shows the take forming as glowing ribbons that follow each stage, and settles into the take's waveform, captioned *Last finished take*, when it is ready; the waveform stays between takes and while paused, with a play button. A job that fails or is stopped keeps the waveform of the last take it saved. With reduced motion on, the strip changes only when the job reports progress. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs); Cancel also stops a take that is in progress.
-
-A job that runs out of GPU memory fails with a message that names the model and says to close other apps that use the GPU. For music it also says to shorten the lyrics.
+The job card counts takes (*Take 1 of 2*) and shows the stage the model is in: for music *Planning*, *Writing the song*, *Rendering* and *Finishing*, for speech the part being read (*Reading part 2 of 4*), for sound its steps. The preview strip shows the take forming and settles into its waveform when it is ready. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs).
 
 ### The result
 
 ![A finished take in the player, with its waveform and the browser's audio controls](../assets/screenshots/placeholder.svg "audio-take")
 
-The preview shows the finished take as a **player**: its waveform with a playhead, over the browser's own audio controls. Click or drag the waveform to seek. Nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and the caption gives the words, model, length and seed. A take that reached YuE2's limit carries **⚠ Cut at 6:00**.
-
-Takes appear in the Gallery strip as audio tiles. See [Audio in the Gallery](gallery.md#audio).
-
-### On other screens
-
-On a tablet held upright, *Compose* and *Settings* sit side by side under the player. On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
+The preview shows the finished take as a player: its waveform over the browser's own audio controls. Click or drag the waveform to seek. Nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and a take that reached YuE2's limit carries **Cut at 6:00**. Takes appear in the Gallery strip as audio tiles; see [Audio in the Gallery](gallery.md#audio). On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
 
 ## Generate
 

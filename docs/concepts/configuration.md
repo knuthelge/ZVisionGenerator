@@ -172,7 +172,7 @@ You rarely need to change these. They are documented in the packaged `config.yam
 
 ## `audio_model_presets`
 
-The audio models: one entry per model, keyed by the model id you pass with `-m`. A model is music, speech or sound, and each entry says which engine runs it, which files it downloads and how long it can run. The packaged config ships these three models with their pinned sources, and the Audio tab and `ziv audio` offer them on every machine with a CUDA card or Apple Silicon:
+The audio models: one entry per model, keyed by the model id you pass with `-m`. The packaged config ships `yue2`, `higgs3` and `sa3` with their pinned sources, and the Audio tab and `ziv audio` offer them on every machine with a CUDA card or Apple silicon. You rarely need to change them. The shipped entries:
 
 ```yaml
 audio_model_presets:
@@ -229,23 +229,14 @@ audio_model_presets:
 | Key | Required | Description |
 |---|---|---|
 | `label` | yes | The name the Web UI shows |
-| `kind` | yes | `music`, `speech` or `sound`. The kind decides what the model takes: music takes lyrics, sound takes a length in seconds, speech follows a voice recording. The Web UI lists a kind's models in the order they are written here |
+| `kind` | yes | `music`, `speech` or `sound`. The kind decides what the model takes: music takes lyrics, sound takes a length, speech follows a voice recording |
 | `family` | yes | Which engine runs the model: `yue2`, `higgs3` or `stable_audio_3` |
-| `files` | yes | The downloads, in order. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch from it |
-| `limits` | yes | The model's own ceilings. Music and sound models give `max_seconds`, the longest take. Speech models give `max_new_tokens` (per part), `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
-| `settings` | no | The model's own knobs. Any keys the model reads, such as `temperature` or `ode_steps` |
-| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator |
-| `platforms.<platform>.settings` | no | Settings for this platform only. They win over the entry's `settings` |
-| `platforms.<platform>.memory_gb` | no | The GPU memory the model peaked at when measured on this platform, in GiB. Leave it out while it is unmeasured; the Web UI then shows no memory badge |
+| `files` | yes | The downloads. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch |
+| `limits` | yes | The model's own ceilings: `max_seconds` for music and sound; for speech `max_new_tokens`, `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
+| `settings` | no | The model's own settings, such as `temperature` or `ode_steps` |
+| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator: `settings` that win over the entry's, and `memory_gb`, the GPU memory the model peaked at in GiB. Leave `memory_gb` out while it is unmeasured; the Web UI then shows no memory badge |
 
-Two settings have a default for each accelerator, so an entry works on both without naming either, and you can set them under `settings` or `platforms.<platform>.settings` to change it:
-
-| Setting | Model | Default | Description |
-|---|---|---|---|
-| `weight_swap` | YuE2 | `true` on CUDA, `false` on MPS | Keep the weights in pinned CPU memory and move only the running phase's group to the GPU, which is how YuE2 fits a 10 GB card |
-| `codec_device` | Higgs TTS 3 | `cpu` on CUDA, `mps` on MPS | Where the audio codec runs. On CUDA the codec stays off the card so the model has the memory |
-
-The app refuses to start when a required key or a limit of the model's kind is missing, when `kind` is unknown, when a key is not one listed here, or when a `repo` is not pinned to a commit.
+The app refuses to start when a required key or limit is missing, when `kind` is unknown, or when a `repo` is not pinned to a commit.
 
 ## `ideogram4_instant`
 

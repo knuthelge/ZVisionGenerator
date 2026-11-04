@@ -82,20 +82,18 @@ The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux. The figures a
 | Model | GPU memory | Measured at |
 |---|---|---|
 | YuE2 3B (`yue2`) | about 6.7 GiB | A take of the full 6:00 |
-| Higgs TTS 3 4B (`higgs3`) | about 8.2 GiB | A part of the longest the app allows; the audio codec runs on the CPU |
+| Higgs TTS 3 4B (`higgs3`) | about 8.2 GiB | A part of the longest the app allows |
 | Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
 
-Speech memory depends on the part, not the whole text, because a long text is read one part at a time.
-
-System memory matters too. On Windows and Linux, YuE2 peaks at about 11 GiB of system memory while it loads or runs, which leaves a computer with 16 GB of RAM little to spare. Stable Audio 3 needs about 5.5 GiB of system memory while it loads. Higgs TTS 3 adds about 0.8 GB of system memory when it loads.
+Speech memory depends on the part, not the whole text, because a long text is read one part at a time. System memory matters too: YuE2 peaks at about 11 GiB while it loads or runs, which leaves a computer with 16 GB of RAM little to spare.
 
 === "macOS"
 
-    The audio models run on the Mac's GPU and keep all of a model's weights there, with no weight swap. Their peak memory has not been measured on a Mac yet, so they show no memory badge there.
+    The audio models run on the Mac's GPU. Their peak memory has not been measured on a Mac yet, so they show no memory badge there.
 
 === "Windows and Linux"
 
-    YuE2 would run out of memory on a 10 GB card for a long song if the whole model sat on the GPU. It keeps its weights in system memory and moves the group that the running phase needs to the GPU, which adds about 6 seconds when the model loads and a second or less per phase. The take is identical to one made without the swap.
+    YuE2 keeps its weights in system memory and moves the part it needs to the GPU, which is how it fits a 10 GB card. This adds a few seconds when the model loads and does not change the result.
 
 ## One model at a time
 

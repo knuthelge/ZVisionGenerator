@@ -18,9 +18,9 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 
 A built-in model shows its name with its alias under it, for example FLUX.2 Klein 9B and `klein9b`. The alias is what you use in the CLI and in prompt files.
 
-Every built-in model has an **ⓘ** after its name: image, video, audio and SeedVR2 models, the **Fast** and **Smart** prompt enhancer models and the **Background removal** row. A **Custom** enhancer model has none, because the app does not know its licence. Hover it, or press it, to read the licence's name, who licenses it and what it allows, with a link to the licence text or the model's original page and, where the licence asks for one, its credit line. A model with two licences, such as the LTX models with Gemma, shows both. See [Licences](../concepts/models.md#licences).
+Every built-in model has an **ⓘ** after its name. Hover or press it to read the licence and open its text. A model of your own has none. See [Licences](../concepts/models.md#licences).
 
-The **Audio models** table has a **Kind** column, **Music**, **Speech** or **Sound**, and its rows appear only for models that run on this machine.
+The **Audio models** table has a **Kind** column (**Music**, **Speech** or **Sound**).
 
 ![The Audio models table with YuE2 3B, Higgs TTS 3 4B and Stable Audio 3 Medium](../assets/screenshots/placeholder.svg "models-audio")
 
@@ -30,9 +30,9 @@ The **Audio models** table has a **Kind** column, **Music**, **Speech** or **Sou
 
 ## Download ahead of time
 
-A row whose files aren't fully downloaded has a **Download** button. Without it, the first job that needs the model asks to download it, with its size and the free space, and then shows the progress on its card.
+A row whose files aren't fully downloaded has a **Download** button. Without it, the first job that needs the model asks to download it and then shows the progress on its card.
 
-1. **Download** first shows the download's size and the free space on the drive. The dialog also names the model's terms under it, with links, and says that downloading means you agree to them. When the space looks short, **Download anyway** replaces the button.
+1. **Download** first shows the download's size, the free space on the drive and the model's terms. When the space looks short, **Download anyway** replaces the button.
 2. Downloads run one at a time, beside your jobs: they don't take a place in the job queue, so you can generate while one runs. Later downloads wait as **Queued**.
 3. **Cancel** on a row stops a running download or removes a queued one. Finished files are kept, so the next Download continues with the rest.
 
@@ -60,7 +60,7 @@ Each row has a delete button, which appears as soon as any of the model's files 
 | Quantized copy | The stored `q8` or `q4` copy. See [Stored quants](../concepts/quantization.md#stored-quants). |
 | SeedVR2 | Its folder. The next plain upscale downloads it again. |
 | Background removal | Both cut-out models' downloads. The next job with **Transparent** on downloads them again. |
-| Audio model | Its Hugging Face downloads. The next take downloads them again. Takes you made stay in the output folder. |
+| Audio model | Its downloads. The next take downloads them again. Takes you made stay in the output folder. |
 
 **Other downloads** lists models in the Hugging Face cache that no model, enhancer or converted model uses, for example a model another tool downloaded, or one left behind by a model you deleted. The size is what deleting it frees. The cache is shared with other apps on your computer, so another app may download a deleted repo again.
 

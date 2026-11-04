@@ -12,8 +12,7 @@
 
     - An NVIDIA GPU, RTX 20-series (Turing) or newer, including the RTX 50-series.
     - NVIDIA driver 580 or newer.
-    - A card with 10 GB of memory to make speech (Higgs TTS 3 needs about 8.2 GB).
-    - About 20 GB of system memory for video with `ltx-4`, 21 GB with `ltx25-4`, 27 GB with `ltx-8`, 18 GB free for MiniMax H3, and about 11 GB for YuE2 music. See [Memory](concepts/memory.md).
+    - About 20 GB of system memory for video with `ltx-4`, 21 GB with `ltx25-4`, 27 GB with `ltx-8`, 18 GB free for MiniMax H3, and about 11 GB for YuE2 music. A 10 GB card is enough for the audio models. See [Memory](concepts/memory.md).
     - [ffmpeg](https://ffmpeg.org/) for video and audio. `ziv-video` and `ziv-audio` offer to install it with `winget` (Windows) or `apt`, `dnf` or `pacman` (Linux) if it's missing.
 
     There is no CPU fallback for generation: PyTorch must see a CUDA device.

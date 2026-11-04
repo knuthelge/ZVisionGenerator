@@ -15,24 +15,20 @@ The **Gallery** (++g++ ++g++) shows every image, video and audio file in your ou
 
 ## Audio
 
-An audio take is a tile that shows, top to bottom, an icon for its kind, the words of the take and a thin waveform, with its length in the corner. The words are a song's style and lyric lines, the text of speech, or a sound's prompt. A tile doesn't play; open it for that.
+An audio take is a tile with an icon for its kind, the words of the take, a thin waveform and its length. A tile doesn't play; open it for that.
 
 ![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/placeholder.svg "gallery-audio")
 
-An audio file without this app's settings, such as one you copied into the output folder, shows a larger icon and waveform and *audio · no settings*. It plays, but **Reuse settings** is greyed. The Gallery lists FLAC, WAV, MP3, M4A and OGG files.
+The viewer shows a player: the take's waveform over the browser's own audio controls. Click or drag the waveform to seek. **Details** lists the kind, model, voice, length, seed and format. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
 
-The viewer shows the player, larger, with the words under it. The player is the take's waveform over the browser's own audio controls: click or drag the waveform to seek, and use the controls to play, pause and set the volume. Playback stops when you step to another file or close the viewer. **Details** lists the kind, model, voice, length (*cut at the cap* for a take that hit its limit), seed and the file's format, sample rate and channels.
-
-**Reuse settings** on a take opens the **Audio** tab on its kind with the model, words, length, seed and, for a cloned voice, its recording and what it says. The consent tick is never saved, so a cloned voice asks for it again. See [Takes and files](../concepts/audio.md#takes-and-files).
-
-**Download** and **Delete** work as for other files. **Upscale** and **Extend** aren't offered.
+An audio file without this app's settings, such as one you copied into the output folder, plays but has no **Reuse settings**.
 
 ### Use as an audio track or a voice
 
 **Use as** on an audio take offers:
 
-- **Audio track** opens **Video** with the file as the clip's [audio track](workspace.md#audio-track), from 0 s. It is greyed, with the reason, when the video model that **Video** opens on can't follow a track.
-- **Voice** (speech takes) opens **Audio** on Speech with the take as the recording and its text as **What it says**. It is greyed, with the reason, for a take longer than 30 seconds. This is how to keep one voice across separate takes: make takes with **Any** until one fits, then use it. A take made with **Any** needs no consent tick. A take that was itself cloned from a recording does. See [Voices](../concepts/audio.md#voices).
+- **Audio track** opens **Video** with the file as the clip's [audio track](workspace.md#audio-track). It is greyed, with the reason, when the video model can't follow a track.
+- **Voice** (speech takes) opens **Audio** on Speech with the take as the recording and its text as **What it says**. It is greyed for a take longer than 30 seconds. This is how to keep one voice across separate takes; see [Voices](../concepts/audio.md#voices).
 
 ## Select and delete
 
@@ -100,6 +96,6 @@ The **Upscale** menu offers:
 - **2×** and **4×**: a plain upscale that enlarges faithfully and adds fine detail. Works for any image.
 - **2× creative** and **4× creative**: the image model redraws the enlarged image with the image's own settings.
 
-Each item shows the output size, for example `2× → 1664×2432`. When the upscale needs a model that isn't downloaded, a dialog asks first, with its size and the free space; **Cancel** starts nothing. The job runs in the Workspace, or joins the queue. The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`.
+Each item shows the output size, for example `2× → 1664×2432`. The job runs in the Workspace, or joins the queue. The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`.
 
 How the two kinds differ, and when an option is unavailable, is in [Upscaling an existing image](../concepts/upscaling.md#upscaling-an-existing-image).

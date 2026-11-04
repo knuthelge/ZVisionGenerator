@@ -48,7 +48,7 @@ ziv-video -m ltx-4 --image photo.jpg --prompt "The camera slowly zooms in"
 
 ## Model licences
 
-Every built-in model comes with terms, such as the non-commercial licence of `klein9b`. Before a download of a model starts, the command prints its licence, who licenses it, what it allows, the link to the model's original repository and any credit line the licence asks for, and then goes on without asking:
+Every built-in model comes with terms, such as the non-commercial licence of `klein9b`. Before a model's first download, the command prints its licence, who licenses it, what it allows and a link, and then goes on without asking:
 
 ```text
 By downloading you agree to these terms:
@@ -56,7 +56,7 @@ FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial use of the 
   https://huggingface.co/black-forest-labs/FLUX.2-klein-9B
 ```
 
-Nothing is printed for a model that is already downloaded or a model of your own, such as a converted checkpoint. `--enhance` prints the terms of the Fast or Smart prompt enhancer before it downloads it, `--transparent` prints the terms of the background removal models before it downloads them, and `ziv-model` prints the LTX licence before it downloads the distilled LoRA for `--distill`. See [Licences](../concepts/models.md#licences) for every model's terms.
+The same goes for the prompt enhancer and the `--transparent` models. See [Licences](../concepts/models.md#licences) for every model's terms.
 
 ## Run many at once
 

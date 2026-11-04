@@ -7,24 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
-- **Make music, speech and sound on the new Audio tab, and with `ziv-audio` (`ziv audio`).** Songs and instrumentals up to 6 minutes with YuE2 3B, speech of up to about 10 minutes with Higgs TTS 3 (in a voice the model picks, or cloned from a recording you have permission to use) and ambience and sound effects of up to 380 s with Stable Audio 3 Medium. Takes are saved as FLAC with their settings and play in the Gallery, which has a new **Audio only** filter. **Use as → Audio track** gives a take to a video, and **Use as → Voice** makes a speech take the voice of the next one. Runs on Windows and Linux with a 10 GB GPU and on macOS with Apple silicon, and needs ffmpeg, as video does. The models are non-commercial or limited; their terms are shown at download (`audio_model_presets`)
-- **A live preview for audio jobs.** The preview strip follows each stage of a take and settles into its waveform, and the job card names the stages (*Planning*, *Writing the song*, *Rendering*, *Finishing* for music; *Reading part 2 of 4* for speech)
-- **Blob wears headphones on the Audio tab** and grooves along while a take is made
-- **Every built-in model shows its licence.** An **ⓘ** beside the model picker, on the Models page and in the download dialog names the licence, what it allows, a link to the licensor's page and any credit line it asks for. The CLIs print the same terms before a first download
+- **Audio.** A new **Audio** tab and `ziv-audio` (`ziv audio`) make songs and instrumentals with YuE2 3B (up to 6 minutes), speech with Higgs TTS 3 (in a voice the model picks, or cloned from a recording you have permission to use) and ambience and sound effects with Stable Audio 3 Medium (up to 380 s). Takes are saved as FLAC with their settings, show a live preview while they are made, and play in the Gallery, which has a new **Audio only** filter. **Use as → Audio track** gives a take to a video, and **Use as → Voice** makes a speech take the voice of the next one. It runs on Windows and Linux with a 10 GB GPU, and needs ffmpeg like video does; macOS is intended and has not been measured
+- **Every built-in model shows its licence.** An **ⓘ** beside the model picker, on the Models page and in the download dialog names the licence, what it allows and a link, and the CLIs print the same terms before a first download. The three audio models are non-commercial or limited, so read them before you use the output
 
 ### Changed
-- **The Web UI asks before a job downloads a model.** Generate, Upscale and Enhance list what will download, with its size, the free space and its terms, as the Models page does. A model that is already queued or downloading isn't asked about again
-- **Reset acts on the open tab only.** It puts back that tab's settings, images and *Enhance* options and nothing on another tab, so Image and Video no longer clear each other's *Enhance* options. The enhancer, its format and auto-enhance keep your choice. **Batch size** and **Seed** are shared by every tab, so any Reset puts them back
-- **Reuse settings and Load settings apply a file's settings exactly.** What the file didn't record takes its default instead of what the form held: quant, a negative prompt, finishing settings, seed, **Batch size** and the *Enhance* options no longer carry over, and a size the model doesn't offer becomes its largest preset
-- **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio. In Video, **Kind** switches between **New** and **Extend** (a chip on a phone). Each kind keeps its own inputs, the prompt, model and LoRAs are shared, Video reopens on the kind you left, and **Extend** in the viewer or a video's menu opens it as before
-- **The Transparent switch's Non-commercial badge opens the cut-out models' terms**: they were trained on research-only datasets, so commercial use of the cut-outs is not cleared
-- Checkboxes have a clearer outline
-- The top bar hides its wordmark in windows narrower than 1000 px, so the three tabs fit
+- **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms
+- **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio, and **Kind** in Video switches between **New** and **Extend**
+- **Reset acts on the open tab only**, and **Reuse settings** and **Load settings** apply a file's settings exactly: what the file didn't record takes its default instead of what the form held
 
 ### Fixed
+- **Image and Video keep their own settings, model and preset** when you switch between them
+- **The viewer stays on the result you opened** when a new one lands or an earlier one is deleted
+- **The job card's notice has room**, so *Pausing after this image* is no longer cut off
+- **Steps stops at the video model's limit** as you type, so the count shown is the count that runs
 - **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is
-- **The Image tab keeps its quant** after a visit to the Video tab
-- **The Workspace viewer stays on the result you opened** when a new one lands in History, instead of jumping to another
 - `ziv-image -m <owner/repo>` with a built-in model's repo records the model under its short name, as `ziv-video` does
 
 ## [0.14.0b4] - 2026-11-02
