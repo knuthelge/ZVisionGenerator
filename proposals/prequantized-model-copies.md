@@ -1,6 +1,6 @@
 # Download pre-quantized copies instead of building them
 
-**Status:** Proposed (2026-10-27)
+**Status:** Proposed (2026-11-04: licences of the image models added)
 
 ## Problem
 
@@ -56,13 +56,21 @@ Sizes are from the Hugging Face API at the pinned revisions (2026-10-27). Prepar
 
 ## Licences
 
-Read from each upstream licence on 2026-10-27. None of them names quantization; each defines derivatives broadly enough ("any modified version", "adapted weights") that a quantized copy is a derivative and the distribution terms apply.
+Read from each upstream licence on 2026-10-27 (enhancer, LTX, Gemma, H3) and 2026-11-04 (image models, from the licence texts or, for Apache-2.0, the Hub's licence tag). None of them names quantization; each defines derivatives broadly enough ("any modified version", "adapted weights", "Derivatives") that a quantized copy is a derivative and the distribution terms apply.
 
 | Source | Licence | Can we publish a quantized copy? |
 |---|---|---|
 | Qwen3.5 heretic (enhancer) | Apache-2.0 | **Yes.** Keep LICENSE and NOTICE and state the change |
 | LTX-2.3, LTX-2.5 | LTX-2 Community License | **Yes, with a catch.** Licence copy, Attachment A use restrictions, modified-file notices, distribution only under this licence (§3.1–3.4). §3.5 restricts transfers to large commercial entities; see Open questions |
 | Gemma 3 (the LTX-2.3 text encoder) | Gemma Terms of Use | **Yes.** Pass on the §3.2 use restrictions, a copy of the terms, modified-file notices, and a NOTICE file (§3.1) |
+| Z-Image Turbo (`zit`), FLUX.2 Klein 4B (`klein4b`), MOSS-Image SFT and its 4-step LoRA (`moss`) | Apache-2.0 | **Yes.** Keep LICENSE and NOTICE and state the change |
+| FLUX.2 Klein 9B (`klein9b`) | FLUX Non-Commercial License v2.1 | **Yes, non-commercial only.** A copy of the licence, stating that rights come from Black Forest Labs directly; BFL's Attribution Notice in a NOTICE file, with a statement that we modified the model; no suggestion that it is an official or endorsed release (§4). Distribution for any commercial or production purpose is excluded |
+| Ideogram 4 Instant (`ideo`) | Ideogram Non-Commercial Model Agreement | **Yes, non-commercial only.** Redistribution on terms no less restrictive (same non-commercial standard and use restrictions), a copy of the agreement, and the attribution notice the agreement gives word for word in a NOTICE file (§3). Its "Distribution" includes hosted services, which a download repo isn't. Our transformer comes from a personal repackage (`Hippotes`) of fal's distill; the model card names Ideogram and fal (`fal/ideogram-v4-instant`) as the origin |
+| Krea 2 Turbo (`krea2`) | Krea 2 Community License | **Yes.** A copy of the agreement that binds each recipient, and Krea's attribution notice in a NOTICE file stating that we modified the model (§3.1–3.2). Commercial use is allowed only below US$1M yearly revenue (§2.3), and that limit passes on to every user of the copy |
+
+The non-commercial licences (`klein9b`, `ideo`) allow a free public download, but only while the project itself makes no money from it: sponsorship, paid tiers or a commercial bundle would need a fresh read first. The FLUX and Krea licences also ask for content filters or output review; those clauses govern running the model and generating output, so a link to the licence in the model card is enough on our side.
+
+Unsloth already publishes copies under exactly these terms (`unsloth/FLUX.2-klein-9B`, `unsloth/Krea-2-Turbo`, `unsloth/LTX-2.5-FP8`, `unsloth/ideogram-4-nf4-diffusers`, all ungated), so publishing ours takes no position the community hasn't already taken.
 
 MiniMax H3 can't be published: its licence allows distribution only within an Applicable Territory that excludes the EU, UK, Korea and US, which a Hugging Face repo can't respect, and the unlicensed `lightx2v` turbo LoRA is merged into `h3@q4`.
 
@@ -89,7 +97,7 @@ The macOS H3 saving comes from `mlx-community`'s text encoder instead (see Spike
 
 One Hugging Face **organization** for the project, with at least two maintainers, so no copy depends on one person's account (see Open questions). Every repo is public and ungated: the app's rule is no Hugging Face account for defaults ([first-run.md](archive/first-run.md)). Each repo carries:
 
-- the upstream licence files and the NOTICE text each licence requires;
+- the upstream licence files and the NOTICE text each licence requires, with the "modified" statement the FLUX, Krea, Gemma and LTX licences ask for;
 - a model card with `base_model`, `base_model_relation: quantized`, the source pins, what was changed, and a line saying it is not an official release.
 
 Phases 1–2 host about 95 GB (phase 3 hosts nothing).
@@ -99,7 +107,7 @@ Phases 1–2 host about 95 GB (phase 3 hosts nothing).
 | Platform | What | Format |
 |---|---|---|
 | Windows/Linux | Enhancer | transformers `save_pretrained` with bitsandbytes NF4 (the `BitsAndBytesConfig` the loader uses today), text model only |
-| Windows/Linux | LTX transformer and text encoder | the existing prepared-copy shards (NF4 packed as `Linear4bit` saves itself, FP8 `float8_e4m3fn`) with their manifest, unchanged |
+| Windows/Linux | LTX transformer and text encoder | the existing prepared-copy shards (NF4 packed as `Linear4bit` saves itself, 8-bit weights as [cuda-q8-int8.md](cuda-q8-int8.md) settles them) with their manifest |
 | macOS | Image models | `mflux-community`'s `mflux-save` output (MLX affine, group 64) |
 
 No new format, and no torchao: torchao would add a dependency and a second load path to save bytes we already save.
@@ -160,9 +168,10 @@ Each phase ships on both platforms together.
 2. Is hosting the uncensored ("heretic", abliterated) enhancer models, today personal uploads by `coder3101`, under the project's name acceptable? That is a reputational choice as much as a technical one. If not, phase 1 is dropped, or the enhancer moves to a censored base.
 3. Is the LTX §3.5 clause acceptable for a public ungated repo? It forbids transferring a derivative to a Commercial Entity (≥ US$10M revenue) that has no paid licence, which an ungated repo can't check; the existing community copies (`unsloth`, `dgrauet`) take the same position. The alternative is gating with automatic approval, which brings back the Hugging Face account requirement.
 4. Should MiniMax be asked for permission to publish an H3 copy? It would also need a licensed turbo LoRA.
+5. Is publishing the non-commercial models (`klein9b`, `ideo`) under the project's org acceptable, given it rules out any paid offering around those copies later? The app already labels both non-commercial, so users see the same limit either way.
 
 ## Alternatives considered
 
 - **Use third-party pre-quantized repos everywhere.** Right for macOS image models (`mflux-community`) and the H3 text encoder (`mlx-community`). On Windows/Linux the NF4 copies that exist (`OzzyGT`, `Veetance`, `cookieshake`, `AcademiaSD`, …) are personal uploads in other layouts, which would trade one single-maintainer risk for another and change the output.
-- **Our own Windows/Linux image-model copies (NF4/FP8).** Only if usage shows users pick q4/q8; the default level is unquantized.
+- **Our own Windows/Linux image-model copies (NF4 and 8-bit).** The licences allow every image model (see Licences; `klein9b` and `ideo` non-commercial only). Still only if usage shows users pick q4/q8, because the default level is unquantized.
 - **Stream-quantize during the download.** Cuts the disk but not the download, and needs a streaming writer per loader.
