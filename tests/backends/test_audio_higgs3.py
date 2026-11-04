@@ -7,7 +7,8 @@ import gc
 import subprocess
 import sys
 import weakref
-from types import SimpleNamespace
+from functools import lru_cache
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -545,6 +546,41 @@ class TestClose:
         assert made["model"]() is None
         assert made["codec"]() is None
         assert backend._progress is None and backend._tokenizer is None and backend._ids is None
+
+    def test_close_frees_a_codec_held_by_the_conv_layer_cache(self, monkeypatch):
+        # transformers' codec caches its conv layers in an lru_cache keyed by the codec itself.
+        class CachingCodec:
+            @lru_cache
+            def _get_conv1d_layers(self, module):
+                return ()
+
+        codec_module = ModuleType(higgs3_module._CODEC_MODULE)
+        codec_module.HiggsAudioV2TokenizerPreTrainedModel = CachingCodec
+        monkeypatch.setitem(sys.modules, higgs3_module._CODEC_MODULE, codec_module)
+        codec = CachingCodec()
+        codec._get_conv1d_layers(None)
+        held = weakref.ref(codec)
+        del codec
+
+        Higgs3Backend().close()
+        gc.collect()
+
+        assert held() is None
+
+    def test_close_warns_instead_of_raising_when_the_cache_is_gone(self, monkeypatch):
+        codec_module = ModuleType(higgs3_module._CODEC_MODULE)
+        codec_module.HiggsAudioV2TokenizerPreTrainedModel = type("Codec", (), {"_get_conv1d_layers": lambda self, module: ()})
+        monkeypatch.setitem(sys.modules, higgs3_module._CODEC_MODULE, codec_module)
+
+        with pytest.warns(UserWarning, match="cache was not found"):
+            Higgs3Backend().close()
+
+    def test_close_without_transformers_loaded_imports_nothing(self, monkeypatch):
+        monkeypatch.delitem(sys.modules, higgs3_module._CODEC_MODULE, raising=False)
+
+        Higgs3Backend().close()
+
+        assert higgs3_module._CODEC_MODULE not in sys.modules
 
 
 class TestImports:
