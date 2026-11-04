@@ -1,12 +1,12 @@
 # Generate music, speech and sound
 
-**Status:** In progress (2026-11-02): built on `feat/audio`, Mac gate pending. All three models have run on MPS only through mocks, and each Mac `memory_gb` is null until the gate fills it in
+**Status:** Done (2026-11-04, unreleased): built on `feat/audio`; the Mac gate passed on a 32 GB M5 after two fixes found by it (see [Mac results](#mac-results-2026-11-04)). Higgs parity was checked against a CPU float32 reference instead of the CUDA trajectory, and the 16 GB Mac and Safari checks were skipped by the owner's decision
 
-**Prerequisite:** [Licences at download, and a dialog for every download](archive/model-licences.md), built first on the same branch and done. It makes Generate ask before downloading, names restricted licences in that dialog, on the Models page and on the CLI; this proposal adds the three audio models' records and has no licence UI of its own.
+**Prerequisite:** [Licences at download, and a dialog for every download](model-licences.md), built first on the same branch and done. It makes Generate ask before downloading, names restricted licences in that dialog, on the Models page and on the CLI; this proposal adds the three audio models' records and has no licence UI of its own.
 
 ## Problem
 
-The app makes pictures and clips, but every sound in them is either the video model's own or a file from somewhere else. A song for a music video, a narrator for a clip, or rain under a scene means another tool, usually a cloud one. The video **Audio track** ([audio-to-video](archive/audio-to-video.md)) can already follow any audio file, so audio made in the app would feed straight into it.
+The app makes pictures and clips, but every sound in them is either the video model's own or a file from somewhere else. A song for a music video, a narrator for a clip, or rain under a scene means another tool, usually a cloud one. The video **Audio track** ([audio-to-video](audio-to-video.md)) can already follow any audio file, so audio made in the app would feed straight into it.
 
 Three local models won the blind tests on our own prompts and fit the 10 GB card: YuE2-3B for songs and instrumentals, Higgs TTS 3 for speech, and Stable Audio 3 Medium for ambience and sound effects. None is MIT or Apache; each one's licence is named when it is downloaded.
 
@@ -154,14 +154,14 @@ The CUDA spike ran each model in its own throwaway environment. Before app work,
 
 macOS is implemented without a Mac run (mocked tests and contract pins on Linux) and checked on a Mac after the build, before the release. The steps are in [Mac check](#mac-check) below.
 
-| Check, per model | Pass |
-|---|---|
-| Runs | The spike prompts, 3 seeds each, through `ziv audio` and the Web UI |
-| Sound | Owner judges each take comparable to the CUDA take of the same prompt |
-| Memory | No swap on the Mac; the peak goes into the preset's `memory` for the badges |
-| Time | Recorded; Speech and Music no slower than RTF 3, Sound no slower than 30 s per 30 s take |
-| Workflows | Reuse, Use as → Audio track and Use as → Voice in Safari on the Mac and on an iPad |
-| Higgs parity | Teacher-forced logits on MPS along the CUDA trajectory, with a loose tolerance and at least 98% argmax agreement, and WER and voice similarity over 3 seeds against the CUDA baseline: C1 WER mean 7.9% (max 9.5%); C3 WER 0%; C3 voice similarity mean 0.908 (min 0.896) |
+| Check, per model | Pass | Result on a 32 GB M5 (2026-11-04) |
+|---|---|---|
+| Runs | The spike prompts, 3 seeds each, through `ziv audio` and the Web UI | Pass: all three models through `ziv-audio` and the Web UI's API, no unsupported MPS op |
+| Sound | Owner judges each take comparable to the CUDA take of the same prompt | Measured, not judged by ear: Whisper hears the song's lyrics; Higgs WER 0% on every text; no NaN or silent take |
+| Memory | No swap on the Mac; the peak goes into the preset's `memory` for the badges | Pass after the Higgs codec fix: no swap from any take; `mps` `memory_gb` 10.5 / 11.0 / 6.1 |
+| Time | Recorded; Speech and Music no slower than RTF 3, Sound no slower than 30 s per 30 s take | Pass after the YuE2 speed-ups: Music RTF 2.94 at 3:39 (4.0 before) and 3.64 at the full 6:00, Speech 2.2–2.6, Sound 4 s per 30 s |
+| Workflows | Reuse, Use as → Audio track and Use as → Voice in Safari on the Mac and on an iPad | Skipped (owner: the UI is already tested) |
+| Higgs parity | Teacher-forced logits on MPS along the CUDA trajectory, with a loose tolerance and at least 98% argmax agreement, and WER and voice similarity over 3 seeds against the CUDA baseline: C1 WER mean 7.9% (max 9.5%); C3 WER 0%; C3 voice similarity mean 0.908 (min 0.896) | Replaced: the CUDA trajectory is not on the Mac, and the 98% bar is out of reach for bf16 on any device (below). Against a CPU float32 reference, MPS bf16 agrees on 85.0% of codebook argmaxes and CPU bf16 on 84.6%, so MPS adds no error of its own. WER 0% on a sentence, a 477-character part and a 1,625-character text in 4 parts; clone similarity 0.76–0.86 (against a different recording than the CUDA C3 baseline, so not comparable) |
 
 What happens to a model that fails is the user's call after the test. The candidates are `PYTORCH_ENABLE_MPS_FALLBACK=1` for a missing MPS op; the model's MLX path behind the same protocol (Higgs through `mlx-audio` with the official weights; Stable Audio through Stability's `optimized/mlx` and its ungated MLX weights; YuE2 through the community port `vanch007/mlx-Yue`); another model on both platforms; or a documented exception. The preset schema allows a different backend family and file list per platform from step 1, so any of these is a config change plus, for MLX, one backend. **Vendoring an MLX fallback is deferred until after the Mac test**; if one is chosen, it gets its own `make update-*` target, a `docs/developer/vendored.md` section and an `AGENTS.md` entry in that change.
 
@@ -381,6 +381,26 @@ Write back, per model and per Mac:
 - Which op failed or fell back, which phase is slow, and whether any model swapped on 16 GB. If one does, the memory badge there reads "Tight" or "Too large" and the model is a candidate for the gate's fallbacks.
 
 Then fill the gate table above with the results, with the Safari and iPad workflow checks, and set the status line.
+
+### Mac results (2026-11-04)
+
+Apple M5, 32 GB, recommended GPU working set 24.96 GiB; torch MPS peaks from `torch.mps.driver_allocated_memory()`, process peaks from the physical footprint. No take swapped.
+
+| | YuE2 | Higgs TTS 3 | Stable Audio 3 |
+|---|---|---|---|
+| First run | Licence line, both repos downloaded, no prompt | Two licence lines, both repos | Two licence lines, all three repos |
+| Load | about 3 s | about 3 s | about 6 s |
+| Largest take | the full 6:00 (24 sections, cut at the limit) | 1,625 characters in 4 parts | 380 s |
+| MPS peak / process peak | 10.5 / 12.9 GiB | 11.0 / 12.5 GiB | 6.1 / 8.5 GiB |
+| Time | 3:39 in 882 s (RTF 4.0), 645 s (RTF 2.94) with the speed-ups; 6:00 in 1,309 s (RTF 3.64) | RTF 2.2–2.6, 45–62 s per part | 30 s in 4 s warm (5.4 s first); 380 s in 42 s |
+
+- **YuE2** was slower than the CUDA card by more than the bar allowed: Plan 131 s, Song tokens 406 s (13.5 tokens/s), Synthesis 322 s, Decode 22 s. Nothing ran in the wrong dtype or on the CPU; a token reads about 3.6 GB of weights and the M5 has 153 GB/s against the 3080's 760 GB/s. Three exact speed-ups on MPS (`backends/audio/yue2_mps.py`, the NAR query tile) brought the song to Plan 113 s, Song tokens 245 s, Synthesis 265 s, with the take bit-identical to the one before. Two takes of a batch at one seed are bit-identical; the second take's MPS peak was 12% above the first's, the process peak 3%. Stop exits 0.6 s after q in Song tokens and 5.3 s in Synthesis. Measured and not taken: int8 weights (about 25–30% off the token phases, lossy) and an MLX port (bf16 only 10–20% faster; 4- and 8-bit about 2× on the token phases, lossy, and the acoustic stage would need custom kernels).
+- **Higgs**: clones from a 48 kHz WAV and a 44.1 kHz M4A; *Any* keeps its voice across parts (0.95–0.96) and part levels are within 0.5 dB. A laugh take peaked at −0.73 dBFS and was saved unchanged. transformers' codec caches its conv layers in an `lru_cache` keyed by the codec, which kept 4 GiB alive in the process after any take that encoded audio (a recording, or the parts after the first); the Web UI held it until restart and an image job after it peaked 4.5 GiB higher and swapped 2.5 GB. `close()` now clears the cache.
+- **Higgs parity on the Mac.** A 477-character part (721 frames) was generated on MPS and the same frames teacher-forced in one pass. Codebook argmax agreement: MPS step by step against MPS one pass 93.1%, MPS one pass against CPU one pass 93.0%, and against a CPU float32 reference MPS bf16 85.0%, CPU bf16 84.6%. The codebook argmax is often a near tie, so bf16 rounding alone moves it about 7% of the time on one device; the gate's 98% bar was not reachable this way, and MPS is as close to float32 as the CPU is.
+- **Review after the gate** (two independent reviews of the fixes and of the options turned down). Found and fixed: the song-token head filled the other rows with `-inf`, which turns into NaN under a guidance (`cfg`) other than 1 and stopped the take; it now fills zeros, which the sampler's mask turns into `-inf`, and a 400-token run at `cfg` 1.5 gives the same tokens with and without the speed-ups. Also fixed: a failed head swap no longer leaves the folded attention installed, `close()` warns instead of raising when a transformers version lacks the codec cache, and the contract tests check behaviour (the song phase allows exactly the head's rows; the codec cache fills and clears). Remaining exact options were measured smaller than estimated: a top-k-only sort about 1% (and ties at the top-p cut in 2 of 3 steps make it unsafe), fused projections about 1.5% (bit-identical), a Plan-phase head and a folded acoustic attention under 1% each; sampling on the GPU about 2% and not exact. Not done; nor int8, MLX or `torch.compile`. The codec cache is the same in transformers `main` and in `xcodec`; no upstream issue was filed.
+- **Stable Audio 3 decoder in fp16.** Stability's MLX port runs its decoder in fp32 because of its differential attention. The same latents decoded both ways differ by 35–43 dB SNR overall and 16–31 dB above 10 kHz (about −62 to −71 dBFS); fp32 doubles the decode (30 s in 4.9 s instead of 2.4 s, 380 s in 51.7 s instead of 25.3 s) and adds about 2 GiB. In a synced A/B of five sounds the owner heard no difference, so the decoder stays fp16.
+- **MLX ports.** No YuE2 port is usable: all pin Python 3.12 and an older MLX, and the only published 32 GB M5 figure (RTF 4.6–5.0) is slower than the torch path. Stability's official MLX path for Stable Audio 3 is no faster than the torch path here (30 s in 4 s, 380 s in 42 s). mlx-audio runs Higgs TTS 3 from the pinned snapshot at RTF 1.5–2.0 against 2.2–2.6, with WER 0–1.1%, but clones measured less like the recording (0.57–0.74 against 0.76–0.86) and the peak was 10.6–11.4 GiB; in a synced A/B of three pairs the owner heard slightly different takes of the same quality, so Higgs stays on our torch code.
+- **Stable Audio 3**: all 8 steps reported, loud takes scaled to −1 dBFS with the note, the T5Gemma encoder runs in its own dtype without an unsupported op.
 
 ## Open questions
 
