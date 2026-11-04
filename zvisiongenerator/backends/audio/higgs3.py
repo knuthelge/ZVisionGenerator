@@ -10,6 +10,8 @@ parts (``utils/speech_text``), each part seeded ``seed + index``, and the parts 
 
 from __future__ import annotations
 
+import sys
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,6 +60,9 @@ _FRAMES_PER_CHAR = _FRAMES_PER_SECOND / _CHARS_PER_SECOND
 # A recording is read at twice the model's rate and then polyphase-resampled to it, which matched the model's own
 # resampling in level and word error rate.
 _READ_RATE = 2 * SAMPLE_RATE
+
+_CODEC_MODULE = "transformers.models.higgs_audio_v2_tokenizer.modeling_higgs_audio_v2_tokenizer"
+"""The module of transformers' codec, whose conv-layer cache :func:`_clear_codec_cache` clears."""
 
 
 def _estimate_part_frames(text: str, max_new_tokens: int) -> int:
@@ -210,6 +215,7 @@ class Higgs3Backend:
         """
         self._model = self._tokenizer = self._ids = self._codec = None
         self._progress = None
+        _clear_codec_cache()
 
     def _load_models(self, official: Path, codec_dir: Path, cancelled: CancelCheck | None = None) -> None:
         """Load the tokenizer, the model and the codec from their cached folders."""
@@ -313,3 +319,21 @@ class Higgs3Backend:
         with torch.no_grad():
             codes = self._codec.encode(batch).audio_codes
         return codes.squeeze(0).transpose(0, 1).to(torch.long).cpu()
+
+
+def _clear_codec_cache() -> None:
+    """Clear transformers' cache of the codec's conv layers, so no codec outlives :meth:`Higgs3Backend.close`.
+
+    ``HiggsAudioV2TokenizerPreTrainedModel._get_conv1d_layers`` is an ``lru_cache`` on a method: its keys hold every
+    codec that has encoded audio (a voice recording, or the first part's take that later parts follow), with all of its
+    weights. Transformers is only looked up, never imported: when it is not loaded, nothing is cached. A transformers
+    without that cache gets a warning, so ``close()`` never raises.
+    """
+    module = sys.modules.get(_CODEC_MODULE)
+    if module is None:
+        return
+    cache_clear = getattr(getattr(getattr(module, "HiggsAudioV2TokenizerPreTrainedModel", None), "_get_conv1d_layers", None), "cache_clear", None)
+    if cache_clear is None:
+        warnings.warn("The Higgs codec's conv-layer cache was not found; the codec may stay in memory after the job.", stacklevel=2)
+        return
+    cache_clear()
