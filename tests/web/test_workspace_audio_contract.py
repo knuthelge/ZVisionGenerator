@@ -134,7 +134,10 @@ class TestMemoryAndDownloadStatus:
         assert small["by_quantize"]["none"]["status"] == "too_large"
 
     def test_an_unmeasured_mac_peak_or_an_unknown_budget_gives_no_estimate(self, monkeypatch):
-        assert _row(monkeypatch, "yue2", "mps", budget=MemoryBudget(16 * GIB))["memory_fit"] is None  # the Mac peak is unmeasured
+        unmeasured = yue2_preset()
+        del unmeasured["platforms"]["mps"]
+
+        assert _row(monkeypatch, "yue2", "mps", budget=MemoryBudget(16 * GIB), yue2=unmeasured)["memory_fit"] is None
         assert _row(monkeypatch, "yue2", "cuda", budget=None)["memory_fit"] is None
 
     def test_a_model_is_downloaded_when_every_repository_of_its_plan_is_on_disk(self, monkeypatch):

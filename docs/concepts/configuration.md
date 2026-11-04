@@ -196,6 +196,7 @@ audio_model_presets:
       fade_seconds: 2
     platforms:
       cuda: { memory_gb: 6.7 }
+      mps: { memory_gb: 10.5 }
   higgs3:
     label: "Higgs TTS 3 4B"
     kind: speech
@@ -209,6 +210,7 @@ audio_model_presets:
     settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
     platforms:
       cuda: { memory_gb: 8.2 }
+      mps: { memory_gb: 11.0 }
   sa3:
     label: "Stable Audio 3 Medium"
     kind: sound
@@ -224,6 +226,7 @@ audio_model_presets:
     settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
     platforms:
       cuda: { memory_gb: 6.1 }
+      mps: { memory_gb: 6.1 }
 ```
 
 | Key | Required | Description |
