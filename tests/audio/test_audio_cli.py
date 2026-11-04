@@ -20,6 +20,8 @@ from zvisiongenerator import audio_cli
 from zvisiongenerator.audio_cli import _build_audio_parser
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.downloads import require_checked
+from zvisiongenerator.utils.audio_track import TRACK_UNREADABLE
+from zvisiongenerator.utils.library_noise import MUTED_ERROR_TEXT
 from zvisiongenerator.utils import audio_request as audio_request_module
 from zvisiongenerator.utils.video_splice import write_pcm16_wav
 
@@ -62,6 +64,37 @@ def refuses(monkeypatch, capsys, *argv: str) -> str:
 def make(env, *argv: str, monkeypatch) -> list[AudioGenerationRequest]:
     run_cli(monkeypatch, *argv, "-o", str(env.out))
     return [call.args[0] for call in env.backend.generate.call_args_list]
+
+
+class TestQuit:
+    @pytest.mark.parametrize("outcome", ["stopped", "detached"])
+    def test_a_quit_during_the_download_says_so_on_its_own_row_and_makes_nothing(self, env, monkeypatch, capsys, outcome):
+        env.ensure.return_value = outcome
+
+        run_cli(monkeypatch, "-m", "sa3", "--prompt", "rain", "-o", str(env.out))
+
+        out = capsys.readouterr().out
+        assert out.endswith("⏹ Quitting batch...\n") and not out.endswith("\n\n")
+        env.backend.load.assert_not_called()
+
+    def test_the_commands_line_is_followed_by_no_blank_row(self, env, monkeypatch, capsys):
+        monkeypatch.setattr(audio_cli, "stdin_is_interactive", lambda: True)
+        monkeypatch.setattr(audio_cli.SkipSignal, "start", lambda self: None)
+
+        run_cli(monkeypatch, "-m", "sa3", "--prompt", "rain", "-o", str(env.out))
+
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[0].startswith("Commands:") and lines[1] != ""
+
+
+class TestConsoleNoise:
+    def test_warnings_and_log_lines_are_routed_through_the_live_line_with_the_known_noise_muted(self, env, monkeypatch):
+        route = MagicMock()
+        monkeypatch.setattr(audio_cli, "route_stderr_through_live_line", route)
+
+        make(env, "-m", "sa3", "--prompt", "rain", monkeypatch=monkeypatch)
+
+        route.assert_called_once_with(mute=MUTED_ERROR_TEXT)
 
 
 class TestFlags:
@@ -180,6 +213,19 @@ class TestRefusals:
 
     def test_a_voice_that_is_not_there_is_refused(self, env, monkeypatch, capsys, tmp_path):
         assert "gone.wav" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(tmp_path / "gone.wav"), "--voice-text", "x", "--voice-consent")
+
+    def test_a_voice_that_is_not_an_audio_file_is_refused_by_name(self, env, monkeypatch, capsys, tmp_path):
+        notes = tmp_path / "notes.txt"
+        notes.write_text("not audio", encoding="utf-8")
+
+        def unreadable(path):
+            raise ValueError(TRACK_UNREADABLE)
+
+        monkeypatch.setattr(audio_request_module, "probe_track_seconds", unreadable)
+
+        error = refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "--voice", str(notes), "--voice-text", "x", "--voice-consent")
+
+        assert f"{TRACK_UNREADABLE} in {notes}" in error and env.ensure.call_count == 0
 
     @pytest.mark.parametrize("flag", [["--voice-text", "x"], ["--voice-consent"]])
     def test_the_voice_flags_need_a_voice(self, env, monkeypatch, capsys, flag):

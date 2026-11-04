@@ -23,6 +23,8 @@ from transformers import Qwen3Config, Qwen3Model
 from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
 
 from zvisiongenerator.backends.audio.higgs3_prompt import AUDIO_SLOT
+from zvisiongenerator.backends.audio.build_cancel import stop_while_building
+from zvisiongenerator.core.audio_backend import raise_if_cancelled
 from zvisiongenerator.utils.safetensors_stream import iter_tensors
 from zvisiongenerator.utils.torch_flags import default_dtype
 
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from transformers import Cache
 
     from zvisiongenerator.backends.audio.higgs3_config import Higgs3Config
+    from zvisiongenerator.core.audio_backend import CancelCheck
 
 __all__ = ["FusedCodebookEmbedding", "FusedCodebookHead", "Higgs3Model", "checkpoint_target", "load_higgs3_model"]
 
@@ -167,7 +170,7 @@ def checkpoint_target(name: str) -> str | None:
     raise ValueError(f"The checkpoint holds a tensor this model has no place for: {name}")
 
 
-def load_higgs3_model(config: Higgs3Config, checkpoint: Path, device: str) -> Higgs3Model:
+def load_higgs3_model(config: Higgs3Config, checkpoint: Path, device: str, cancelled: CancelCheck | None = None) -> Higgs3Model:
     """Return the network for *config* on *device*, filled from the official safetensors file *checkpoint*, in bf16 and ready to run.
 
     The network is built on the meta device, allocated empty on *device*, and filled one tensor at a time, so peak host
@@ -177,16 +180,21 @@ def load_higgs3_model(config: Higgs3Config, checkpoint: Path, device: str) -> Hi
         config: The network sizes.
         checkpoint: The official ``model.safetensors``.
         device: The torch device to load onto.
+        cancelled: Called while the network is built, before it is allocated and before each tensor is copied; ``True`` raises :class:`AudioCancelled`.
 
     Raises:
+        AudioCancelled: If *cancelled* returned ``True``.
         ValueError: If a checkpoint tensor has no place in the model, or its shape or dtype is not the model's.
         RuntimeError: If a parameter is filled twice or never, or a buffer is missing or extra.
     """
-    with torch.device("meta"), default_dtype(torch.bfloat16):
+    raise_if_cancelled(cancelled)
+    with torch.device("meta"), default_dtype(torch.bfloat16), stop_while_building(cancelled):
         model = Higgs3Model(config)
+    raise_if_cancelled(cancelled)
     model.to_empty(device=device)
+    raise_if_cancelled(cancelled)
     with torch.no_grad():
-        _fill_parameters(model, checkpoint)
+        _fill_parameters(model, checkpoint, cancelled)
         model.audio_head.weight = model.audio_embedding.weight
         _write_rotary_buffers(model)
     _check_buffers(model)
@@ -196,11 +204,12 @@ def load_higgs3_model(config: Higgs3Config, checkpoint: Path, device: str) -> Hi
     return model.eval().requires_grad_(False)
 
 
-def _fill_parameters(model: Higgs3Model, checkpoint: Path) -> None:
+def _fill_parameters(model: Higgs3Model, checkpoint: Path, cancelled: CancelCheck | None = None) -> None:
     """Copy each used tensor of *checkpoint* into its parameter, and check that every parameter but the tied head was filled exactly once."""
     parameters = dict(model.named_parameters())
     filled: set[str] = set()
     for name, tensor in iter_tensors(checkpoint, wanted=lambda tensor_name: checkpoint_target(tensor_name) is not None):
+        raise_if_cancelled(cancelled)
         target = checkpoint_target(name)
         destination = parameters.get(target) if target is not None else None
         if destination is None:

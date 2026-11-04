@@ -19,9 +19,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled
+from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled, raise_if_cancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.backends.audio import snapshot_dir
+from zvisiongenerator.backends.audio.build_cancel import stop_while_building
+from zvisiongenerator.utils.library_noise import quiet_flash_attn_probe, silence_autotune_report
 from zvisiongenerator.utils.safetensors_stream import iter_tensors
 from zvisiongenerator.utils.torch_flags import default_dtype
 
@@ -51,16 +53,18 @@ def _model_config(config_path: Path, text_encoder: Path) -> dict[str, Any]:
     return config
 
 
-def _fill_from_checkpoint(model: Any, checkpoint: Path) -> None:
+def _fill_from_checkpoint(model: Any, checkpoint: Path, cancelled: CancelCheck | None = None) -> None:
     """Copy the checkpoint's tensors into *model*'s parameters and buffers one at a time, converting each to the model's dtype.
 
     Names are matched the way the package's loader matches them (``remap_state_dict_keys``); a tensor the model lacks, or
-    whose shape differs, is skipped with a warning, as the package's loader skips it.
+    whose shape differs, is skipped with a warning, as the package's loader skips it. *cancelled* is called before each tensor;
+    ``True`` raises :class:`AudioCancelled`.
     """
     from stable_audio_3.loading_utils import remap_state_dict_keys
 
     destinations = model.state_dict()  # views of the live tensors: copying into them fills the model
     for name, tensor in iter_tensors(checkpoint):
+        raise_if_cancelled(cancelled)
         key = next(iter(remap_state_dict_keys({name: None}, destinations)))
         destination = destinations.get(key)
         if destination is None or destination.shape != tensor.shape:
@@ -69,19 +73,31 @@ def _fill_from_checkpoint(model: Any, checkpoint: Path) -> None:
         destination.copy_(tensor)
 
 
-def _build_fp16(config: dict[str, Any], checkpoint: Path, device: str) -> Any:
-    """Return the diffusion model built from *config* in fp16, filled from *checkpoint* and moved to *device*, ready to sample."""
+def _build_fp16(config: dict[str, Any], checkpoint: Path, device: str, cancelled: CancelCheck | None = None) -> Any:
+    """Return the diffusion model built from *config* with an fp16 DiT and decoder, filled from *checkpoint* and moved to *device*, ready to sample."""
     import torch
     from stable_audio_3.factory import create_diffusion_cond_from_config
 
     # The package's factory builds fp32 models, 9.2 GB for Stable Audio 3 Medium. Built under an fp16 default its parameters
     # are fp16 from the start, about half that. Nothing the init computes survives: the checkpoint holds every parameter and
-    # buffer of the model, and the fill overwrites each. The T5Gemma text encoder loads at the dtype of its own files.
-    with default_dtype(torch.float16):
+    # buffer of the model, and the fill overwrites each.
+    raise_if_cancelled(cancelled)
+    # The factory builds the DiT, the decoder and the T5Gemma conditioner in one call; the hook sees each layer it creates.
+    with default_dtype(torch.float16), stop_while_building(cancelled):
         model = create_diffusion_cond_from_config(config)
-    model.half()  # the buffers the factory made in fp32
-    _fill_from_checkpoint(model, checkpoint)
+    raise_if_cancelled(cancelled)
+    # Only the DiT and the decoder run in fp16 (the buffers the factory made in fp32 are converted here). The conditioner's own
+    # layers (the projection, the padding embedding, the number embedder) are small and stay fp32. The T5Gemma text encoder is
+    # not a registered submodule of the conditioner, so no conversion of the model reaches it: it loads at the dtype of its own
+    # files (bf16-trained, and it overflows in fp16) and is never cast to fp16 here. The package casts the conditioning it
+    # produces to the DiT's dtype before sampling.
+    model.model.half()
+    model.pretransform.half()
+    model.conditioner.float()
+    raise_if_cancelled(cancelled)
+    _fill_from_checkpoint(model, checkpoint, cancelled)
     model.to(device).eval().requires_grad_(False)
+    raise_if_cancelled(cancelled)
     model.use_lora = False
     model.lora_names = []
     return model
@@ -131,25 +147,31 @@ class StableAudio3Backend:
         self._model: Any = None
         self._settings: dict[str, Any] = {}
 
-    def load(self, preset: AudioPreset, device: str) -> None:
+    def load(self, preset: AudioPreset, device: str, cancelled: CancelCheck | None = None) -> None:
         """Load the model of *preset* onto *device*, filling it tensor by tensor in fp16.
 
         Args:
             preset: The ``sa3`` preset: the checkpoint, the config and the text encoder files, in that order, and the
                 settings ``steps``, ``cfg_scale`` and ``sample_size``.
             device: ``cuda`` or ``mps``.
+            cancelled: Called while the model is built (before and after it, and for each layer created), before each
+                checkpoint tensor is copied and after the model is on the device; ``True`` stops the load.
 
         Raises:
             FileNotFoundError: If a file is not downloaded.
+            AudioCancelled: If *cancelled* returned ``True``; the half-filled model is freed.
         """
-        from stable_audio_3.model import StableAudioModel
+        with quiet_flash_attn_probe():  # the package prints that the optional flash_attn is missing, which it does not need
+            from stable_audio_3.model import StableAudioModel
+        silence_autotune_report()  # the first take compiles flex attention, which prints its kernel tuning tables
+        raise_if_cancelled(cancelled)  # the import above takes seconds
 
         self.close()
         checkpoint_files, config_files, encoder_files = preset.files
         checkpoint = snapshot_dir(checkpoint_files) / checkpoint_files.patterns[0]
         config = _model_config(snapshot_dir(config_files) / config_files.patterns[0], snapshot_dir(encoder_files) / _TEXT_ENCODER_DIR)
         try:
-            self._model = StableAudioModel(_build_fp16(config, checkpoint, device), config, device, True)
+            self._model = StableAudioModel(_build_fp16(config, checkpoint, device, cancelled), config, device, True)
             self._settings = preset.settings_for(device)
         except BaseException:
             self.close()

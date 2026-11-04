@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import gc
+import subprocess
+import sys
 import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -67,7 +69,7 @@ def _with_cap(rig, max_new_tokens: int) -> None:
 class TestLoad:
     def test_the_model_is_built_from_the_official_snapshots_config_and_weights_on_the_device(self, rig):
         rig.fakes.read_config.assert_called_once_with(rig.fakes.official / "config.json")
-        rig.fakes.load_model.assert_called_once_with(CONFIG, rig.fakes.official / "model.safetensors", "cuda")
+        rig.fakes.load_model.assert_called_once_with(CONFIG, rig.fakes.official / "model.safetensors", "cuda", None)
 
     def test_the_tokenizer_comes_from_the_official_snapshot(self, rig):
         rig.fakes.tokenizer_load.assert_called_once_with(rig.fakes.official)
@@ -107,6 +109,71 @@ class TestLoad:
         assert backend._model is None
         rig.fakes.load_model.assert_not_called()
         rig.fakes.codec_load.assert_not_called()
+
+    def test_the_stop_check_reaches_the_weight_load(self, rig):
+        def check() -> bool:
+            return False
+
+        Higgs3Backend().load(PRESET, "cuda", cancelled=check)
+
+        assert rig.fakes.load_model.call_args.args[3] is check
+
+    def test_a_stop_during_the_weight_load_leaves_the_backend_unloaded_and_never_loads_the_codec(self, rig):
+        rig.fakes.load_model.side_effect = AudioCancelled
+        rig.fakes.codec_load.reset_mock()
+        backend = Higgs3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(PRESET, "cuda", cancelled=lambda: True)
+
+        assert backend._model is None
+        rig.fakes.codec_load.assert_not_called()
+
+    def test_a_stop_before_anything_loads_reads_neither_the_tokenizer_nor_the_model(self, rig):
+        rig.fakes.tokenizer_load.reset_mock()
+        rig.fakes.load_model.reset_mock()
+        backend = Higgs3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(PRESET, "cuda", cancelled=lambda: True)
+
+        rig.fakes.tokenizer_load.assert_not_called()
+        rig.fakes.load_model.assert_not_called()
+        assert backend._model is None
+
+    def test_a_stop_after_the_tokenizer_is_read_builds_no_model(self, rig):
+        stopped: list[bool] = []
+        rig.fakes.tokenizer_load.side_effect = lambda folder: stopped.append(True) or MagicMock()
+        rig.fakes.load_model.reset_mock()
+        backend = Higgs3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(PRESET, "cuda", cancelled=lambda: bool(stopped))
+
+        rig.fakes.load_model.assert_not_called()
+
+    def test_a_stop_after_the_model_is_read_skips_the_codec_and_frees_the_model(self, rig):
+        stopped: list[bool] = []
+        rig.fakes.load_model.side_effect = lambda *args: stopped.append(True) or FakeModel()
+        rig.fakes.codec_load.reset_mock()
+        backend = Higgs3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(PRESET, "cuda", cancelled=lambda: bool(stopped))
+
+        assert backend._model is None
+        rig.fakes.codec_load.assert_not_called()
+
+    def test_a_stop_while_the_codec_is_built_is_seen_when_it_returns(self, rig):
+        stopped: list[bool] = []
+        original = rig.fakes.codec_load.return_value
+        rig.fakes.codec_load.side_effect = lambda *args, **kwargs: stopped.append(True) or original
+        backend = Higgs3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(PRESET, "cuda", cancelled=lambda: bool(stopped))
+
+        assert backend._model is None and backend._codec is None
 
     def test_a_failed_load_leaves_the_backend_unloaded(self, rig):
         rig.fakes.codec_load.side_effect = OSError("no codec")
@@ -216,24 +283,44 @@ class TestParts:
 
         assert rig.codec.encoded == []
 
-    def test_with_a_recording_part_1_follows_it_and_later_parts_follow_part_1(self, rig, monkeypatch):
+    def test_with_a_recording_every_part_follows_it_and_nothing_is_chained(self, rig, monkeypatch):
         read = MagicMock(return_value=np.full((2, 10 * 48000), 0.1, dtype=np.float32))
         monkeypatch.setattr(higgs3_module, "read_track", read)
         rig.codec.waves.extend([_tone(2.0), _tone(0.5), _tone(0.5)])
 
         _generate(rig, _request(THREE_PARTS, voice=VoiceRef("me.wav", "Hello, this is me.")))
 
-        recording, part_1_take = rig.codec.encoded  # the recording once, then part 1's take once
+        (recording,) = rig.codec.encoded  # the recording once; part 1's take is not encoded
         assert recording.shape == (1, 1, 10 * SAMPLE_RATE)  # read at 48 kHz, polyphase-resampled to 24 kHz
-        assert part_1_take.shape == (1, 1, 2 * SAMPLE_RATE)
         assert read.call_args.args[0].path == "me.wav"
         assert read.call_args.args[1:] == (48000, 10.0)
-        first, second, third = rig.calls
-        assert first.reference_text == "Hello, this is me."
-        assert torch.equal(first.reference_codes, codes_of(0))  # the recording's codes
-        assert torch.equal(second.reference_codes, codes_of(1))  # part 1's take, not the recording
-        assert second.reference_codes is third.reference_codes
-        assert (second.reference_text, third.reference_text) == (PART_1, PART_1)
+        assert len(rig.calls) == 3
+        for call in rig.calls:
+            assert torch.equal(call.reference_codes, codes_of(0))  # the recording's codes
+            assert call.reference_text == "Hello, this is me."
+
+    def test_with_any_a_reference_longer_than_the_voice_limit_is_cut_to_it_with_its_words(self, rig):
+        long_take = _tone(40.0)  # the preset allows a voice 30 s long
+        words = " ".join(f"w{n}" for n in range(100))
+        part_1 = words + "." * (300 - len(words))
+        rig.codec.waves.extend([long_take, _tone(0.5)])
+
+        _generate(rig, _request(f"{part_1} {PART_2}"))
+
+        (encoded,) = rig.codec.encoded
+        assert encoded.shape == (1, 1, 30 * SAMPLE_RATE)
+        np.testing.assert_allclose(encoded.reshape(-1).numpy(), long_take[: 30 * SAMPLE_RATE].numpy())
+        reference_text = rig.calls[1].reference_text
+        assert reference_text == " ".join(part_1.split()[:75])  # 30 of 40 seconds keeps three quarters of the words
+
+    def test_with_any_a_reference_within_the_voice_limit_is_kept_whole(self, rig):
+        rig.codec.waves.extend([_tone(29.0), _tone(0.5)])
+
+        _generate(rig, _request(f"{PART_1} {PART_2}"))
+
+        (encoded,) = rig.codec.encoded
+        assert encoded.shape == (1, 1, 29 * SAMPLE_RATE)
+        assert rig.calls[1].reference_text == PART_1
 
     def test_a_stereo_recording_is_averaged_to_mono_before_it_is_encoded(self, rig, monkeypatch):
         stereo = np.stack([np.full(10 * 48000, 0.2, dtype=np.float32), np.full(10 * 48000, -0.2, dtype=np.float32)])  # opposite channels cancel
@@ -458,3 +545,17 @@ class TestClose:
         assert made["model"]() is None
         assert made["codec"]() is None
         assert backend._progress is None and backend._tokenizer is None and backend._ids is None
+
+
+class TestImports:
+    def test_importing_the_backend_loads_neither_torch_nor_transformers_nor_the_network(self):
+        """The network module needs torch to define its classes, so only a load imports it."""
+        code = (
+            "import sys\n"
+            "import zvisiongenerator.backends.audio.higgs3, zvisiongenerator.backends.audio.higgs3_generate\n"
+            "import zvisiongenerator.backends.audio.higgs3_codes, zvisiongenerator.backends.audio.higgs3_prompt, zvisiongenerator.backends.audio.higgs3_config\n"
+            "heavy = {'torch', 'transformers', 'zvisiongenerator.backends.audio.higgs3_model'}\n"
+            "raise SystemExit(bool(heavy & {name.split('.')[0] if name != 'zvisiongenerator.backends.audio.higgs3_model' else name for name in sys.modules}))"
+        )
+
+        assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0

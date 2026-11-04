@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import TextIO
+from collections.abc import Sequence
+from typing import Any, TextIO
 
-__all__ = ["LiveLine", "shared_line"]
+__all__ = ["LiveLine", "LiveLineStream", "route_stderr_through_live_line", "shared_line"]
 
 
 class LiveLine:
@@ -71,6 +72,12 @@ class LiveLine:
             target.write(f"{text}\n")
             target.flush()
 
+    def write_through(self, text: str, file: TextIO) -> None:
+        """Write *text* to *file* as it is, after ending the live line; the caller supplies any newline."""
+        with self._lock:
+            self.end()
+            file.write(text)
+
 
 _SHARED = LiveLine()
 
@@ -78,3 +85,44 @@ _SHARED = LiveLine()
 def shared_line() -> LiveLine:
     """Return the live line of the process console, which every reporter and the key listener write through."""
     return _SHARED
+
+
+class LiveLineStream:
+    """Wrap a stream so that whatever is written to it ends the live line first.
+
+    Library warnings, log records and ``print`` calls to an error stream land on the row of an unfinished progress line
+    otherwise. Attributes other than ``write`` (``isatty``, ``fileno``, ``encoding``) come from the wrapped stream.
+
+    Args:
+        stream: The stream to wrap, normally ``sys.stderr``.
+        line: The live line to end before each write.
+        mute: Text that marks a write to drop: a write that contains any of these is swallowed whole.
+    """
+
+    def __init__(self, stream: TextIO, line: LiveLine, *, mute: Sequence[str] = ()) -> None:
+        self._stream = stream
+        self._line = line
+        self._mute = tuple(mute)
+
+    def write(self, text: str) -> int:
+        """Write *text* after ending the live line, unless it holds muted text; return its length."""
+        if text and not any(muted in text for muted in self._mute):
+            self._line.write_through(text, self._stream)
+        return len(text)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+def route_stderr_through_live_line(*, line: LiveLine | None = None, mute: Sequence[str] = ()) -> None:
+    """Make ``sys.stderr`` end the live line before it writes; do nothing when it already does.
+
+    Call it before the logging handlers are made, so they write through the wrapper.
+
+    Args:
+        line: The live line to end; the process console's when ``None``.
+        mute: Text that marks a write to drop (see :class:`LiveLineStream`).
+    """
+    if isinstance(sys.stderr, LiveLineStream):
+        return
+    sys.stderr = LiveLineStream(sys.stderr, line or shared_line(), mute=mute)  # type: ignore[assignment]

@@ -15,6 +15,7 @@ from tests.backends._helpers import TINY, checkpoint_tensors, write_checkpoint
 from zvisiongenerator.backends.audio import higgs3_model
 from zvisiongenerator.backends.audio.higgs3_model import FusedCodebookEmbedding, FusedCodebookHead, Higgs3Model, _qwen3_config, checkpoint_target, load_higgs3_model
 from zvisiongenerator.backends.audio.higgs3_prompt import AUDIO_SLOT
+from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.utils import safetensors_stream
 
 ROTARY = {"backbone.rotary_emb.inv_freq", "backbone.rotary_emb.original_inv_freq"}
@@ -79,6 +80,22 @@ class TestLoad:
             if target is not None:
                 assert torch.equal(parameters[target], tensor), name
         assert set(parameters) == {checkpoint_target(name) for name in tensors if checkpoint_target(name)}
+
+    def test_a_stop_ends_the_load_between_tensors(self, checkpoint: tuple[Path, dict[str, torch.Tensor]], monkeypatch) -> None:
+        reads: list[str] = []
+        real = higgs3_model.iter_tensors
+
+        def counting(path, **kwargs):
+            for name, tensor in real(path, **kwargs):
+                reads.append(name)
+                yield name, tensor
+
+        monkeypatch.setattr(higgs3_model, "iter_tensors", counting)
+
+        with pytest.raises(AudioCancelled):
+            load_higgs3_model(TINY, checkpoint[0], "cpu", cancelled=lambda: len(reads) >= 2)
+
+        assert len(reads) == 2
 
     def test_the_stored_head_copy_is_not_used(self, checkpoint: tuple[Path, dict[str, torch.Tensor]]) -> None:
         path, tensors = checkpoint

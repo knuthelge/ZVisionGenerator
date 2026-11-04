@@ -282,7 +282,7 @@ class _FakeNar:
 @pytest.fixture
 def kit(monkeypatch, pinned):
     """Wire the backend to a fake pipeline, a tiny model, a recording memory fraction and the fake NAR."""
-    state = SimpleNamespace(pipe=_FakePipe(), model=_TinyModel(), fractions=[], build=[], nars=[], loads=[])
+    state = SimpleNamespace(pipe=_FakePipe(), model=_TinyModel(), fractions=[], build=[], nars=[], loads=[], load_cancelled=None)
     monkeypatch.setattr(yue2_module, "snapshot_dir", lambda files: f"/models/{files.repo_id}")
 
     def build(model_dir, vae_dir, device, settings):
@@ -291,8 +291,9 @@ def kit(monkeypatch, pinned):
 
     monkeypatch.setattr(yue2_module, "_build_pipeline", build)
 
-    def load_model(model_dir, *, pin):
+    def load_model(model_dir, *, pin, cancelled=None):
         state.loads.append((model_dir, pin))
+        state.load_cancelled = cancelled
         return state.model
 
     monkeypatch.setattr(yue2_module, "load_model", load_model)
@@ -419,6 +420,52 @@ class TestLoad:
 
         assert seen and seen[0] is not original
         assert kit_pipeline.model_identity is original
+
+    def test_the_stop_check_reaches_the_streamed_weight_load(self, kit):
+        def check() -> bool:
+            return False
+
+        YuE2Backend().load(_preset(), "cuda", cancelled=check)
+
+        assert kit.load_cancelled is check
+
+    def test_a_stop_before_the_pipeline_is_built_builds_nothing(self, kit):
+        with pytest.raises(AudioCancelled):
+            YuE2Backend().load(_preset(), "cuda", cancelled=lambda: True)
+
+        assert kit.build == [] and kit.loads == []
+
+    def test_a_stop_after_the_pipeline_is_built_reads_no_weights_and_closes_it(self, kit, monkeypatch):
+        stopped: list[bool] = []
+        built = yue2_module._build_pipeline
+        monkeypatch.setattr(yue2_module, "_build_pipeline", lambda *args: stopped.append(True) or built(*args))
+
+        with pytest.raises(AudioCancelled):
+            YuE2Backend().load(_preset(), "cuda", cancelled=lambda: bool(stopped))
+
+        assert kit.loads == [] and kit.pipe.closed
+
+    def test_a_stop_after_the_weights_are_read_pins_nothing(self, kit, monkeypatch):
+        stopped: list[bool] = []
+        original = yue2_module.load_model
+        monkeypatch.setattr(yue2_module, "load_model", lambda *args, **kwargs: stopped.append(True) or original(*args, **kwargs))
+        monkeypatch.setattr(yue2_module, "WeightSwap", MagicMock(side_effect=AssertionError("the weights were pinned after the stop")))
+
+        with pytest.raises(AudioCancelled):
+            YuE2Backend().load(_preset(), "cuda", cancelled=lambda: bool(stopped))
+
+        assert kit.pipe.closed
+
+    def test_a_stop_during_the_weight_load_closes_the_pipeline_and_lifts_the_fraction(self, kit, monkeypatch):
+        monkeypatch.setattr(yue2_module, "load_model", MagicMock(side_effect=AudioCancelled))
+        backend = YuE2Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(_preset(), "cuda", cancelled=lambda: False)
+
+        assert kit.pipe.closed
+        assert kit.fractions[-1] == 1.0
+        assert backend._pipe is None and backend._swap is None
 
     def test_a_failed_load_closes_the_pipeline_and_lifts_the_fraction(self, kit, monkeypatch):
         monkeypatch.setattr(yue2_module, "load_model", MagicMock(side_effect=OSError("disk gone")))

@@ -34,10 +34,13 @@ from zvisiongenerator.utils.provenance import build_audio_config_payload
 from zvisiongenerator.utils.speech_text import split_speech_text
 from zvisiongenerator.utils.torch_flags import preserved_torch_flags
 
-__all__ = ["run_audio_batch"]
+__all__ = ["QUIT_MESSAGE", "run_audio_batch"]
 
 _OUT_OF_MEMORY_HINT = "Close other apps that use the GPU and try again"
 """What the out-of-memory message tells the user to do; music adds ``or shorten the lyrics``."""
+
+QUIT_MESSAGE = "⏹ Quitting batch..."
+"""What the console says when the user quits."""
 
 _CUT_NOTE = "Reached the model's length limit; the take was cut short."
 """What the CLI says after saving a take that stopped at the model's length limit."""
@@ -112,15 +115,14 @@ def run_audio_batch(
     backend = get_audio_backend(preset.family)
     fit = audio_memory_fit(preset, platform_key, accelerator_memory_budget_or_none())
     with _backend_session(backend):
-        print(f"Loading {preset.label}...", flush=True)
-        emit_progress(progress_callback, "model_loading", mode="audio", model=preset.label)
-        with _friendly_oom(preset, fit):
-            backend.load(preset, platform_key)
-        emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=runs, total_runs=runs)
-        outcome = _make_takes(backend, request, preset, seeds, output_dir=output_dir, skip=skip, progress_callback=progress_callback, seed_range_=(seed_min, seed_max), memory_fit=fit)
+        if _load_unless_quit(backend, preset, platform_key, fit, skip=skip, progress_callback=progress_callback):
+            emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=runs, total_runs=runs)
+            outcome = _make_takes(backend, request, preset, seeds, output_dir=output_dir, skip=skip, progress_callback=progress_callback, seed_range_=(seed_min, seed_max), memory_fit=fit)
+        else:
+            outcome = _Outcome(cancelled=True)
 
     if outcome.cancelled:
-        print("\n⏹ Quitting batch...")
+        print(f"\n{QUIT_MESSAGE}")
         emit_progress(progress_callback, "batch_cancelled", mode="audio", completed_iterations=len(outcome.saved) + outcome.skipped, total_iterations=runs)
         return outcome.saved
     total_time = time.time() - started
@@ -128,6 +130,32 @@ def run_audio_batch(
     print(f"\nBatch complete: {len(outcome.saved)}/{outcome.attempts} takes made{notes} in {total_time:.1f}s")
     emit_progress(progress_callback, "batch_completed", mode="audio", completed_iterations=outcome.attempts, total_iterations=outcome.attempts, total_time=total_time)
     return outcome.saved
+
+
+def _load_unless_quit(
+    backend: AudioBackend,
+    preset: AudioPreset,
+    platform_key: str,
+    fit: dict[str, Any] | None,
+    *,
+    skip: SkipSignal,
+    progress_callback: ProgressCallback | None,
+) -> bool:
+    """Load the model unless Quit is queued, before the load or while it runs; return whether it is loaded.
+
+    The backend checks Quit between the tensors it reads, so a stop during a long load ends it early; the caller's backend
+    session then frees what was loaded.
+    """
+    if skip.pending() == "quit":
+        return False
+    print(f"Loading {preset.label}...", flush=True)
+    emit_progress(progress_callback, "model_loading", mode="audio", model=preset.label)
+    try:
+        with _friendly_oom(preset, fit):
+            backend.load(preset, platform_key, cancelled=lambda: skip.pending() == "quit")
+    except AudioCancelled:
+        return False
+    return True
 
 
 def _require_downloaded(preset: AudioPreset) -> None:
@@ -188,7 +216,9 @@ def _make_takes(
             "prompt": request.prompt,
         }
         emit_progress(progress_callback, "prompt_started", **context, seed=seed, elapsed_secs=time.time() - batch_start, avg_secs=avg, eta_secs=eta)
-        print(f"\n[{ran}/{total}] {preset.label}")
+        if ran > 1:
+            print()  # the first take's header follows the "Loading" line directly
+        print(f"[{ran}/{total}] {preset.label}")
         while True:
             action = skip.consume()
             if action == "pause":
@@ -229,8 +259,6 @@ def _make_takes(
             action = skip.consume()
             if action == "pause":
                 action = pause_until_resumed(skip, progress_callback=progress_callback, mode="audio", completed_iterations=len(outcome.saved) + outcome.skipped, total_iterations=total)
-                if action != "quit":
-                    break
             if action == "quit":
                 outcome.cancelled = True
                 return outcome

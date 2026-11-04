@@ -47,20 +47,30 @@ class _Pretransform(nn.Module):
         return waveform
 
 
-class _Diffusion(nn.Module):
-    """The model ``create_diffusion_cond_from_config`` returns: a diffusion backbone, a decoder and the call order of ``half`` and ``to``."""
+class _Conditioner(nn.Module):
+    """The conditioner as the package builds it: a registered projection and a text encoder kept out of ``children()``, as ``T5GemmaConditioner`` does."""
 
-    def __init__(self, events: list[str]) -> None:
+    def __init__(self, encoder_dtype: torch.dtype) -> None:
+        super().__init__()
+        self.proj_out = nn.Linear(4, 3)
+        self.__dict__["encoder"] = nn.Linear(2, 4).to(encoder_dtype)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Encode in the encoder's dtype, then project as the package does: cast to the projection's dtype first."""
+        embeddings = self.encoder(tokens.to(self.encoder.weight.dtype))
+        return self.proj_out(embeddings.to(self.proj_out.weight.dtype))
+
+
+class _Diffusion(nn.Module):
+    """The model ``create_diffusion_cond_from_config`` returns: a diffusion backbone, a decoder, a conditioner and the order of ``to``."""
+
+    def __init__(self, events: list[str], encoder_dtype: torch.dtype = torch.bfloat16) -> None:
         super().__init__()
         self.events = events
         self.model = nn.Linear(2, 3)
         self.pretransform = _Pretransform()
+        self.conditioner = _Conditioner(encoder_dtype)
         self.sample_rate = SAMPLE_RATE
-
-    def half(self) -> _Diffusion:
-        """Record the call, then halve."""
-        self.events.append("half")
-        return super().half()
 
     def to(self, device: str, *args: Any, **kwargs: Any) -> _Diffusion:  # type: ignore[override]
         """Record the target device and stay where the stand-in is."""
@@ -185,6 +195,35 @@ class TestLoad:
             assert actual.dtype == torch.float16
             assert torch.equal(actual, expected.half())
 
+    def test_only_the_dit_and_the_decoder_are_converted_to_fp16(self, preset, snapshots, built):
+        _loaded(preset)
+
+        model = built[0][1]
+        assert {p.dtype for p in model.model.parameters()} == {torch.float16}
+        assert {p.dtype for p in model.pretransform.parameters()} <= {torch.float16}
+        assert {p.dtype for p in model.conditioner.parameters()} == {torch.float32}  # the projection
+
+    def test_the_text_encoder_keeps_the_dtype_of_its_files(self, preset, snapshots, events, monkeypatch):
+        """The encoder is bf16-trained and overflows in fp16: neither bf16 nor fp32 files are converted by the load."""
+        models: list[_Diffusion] = []
+
+        def factory(config: dict[str, Any]) -> _Diffusion:
+            models.append(_Diffusion(events, encoder_dtype=wanted[0]))
+            return models[-1]
+
+        monkeypatch.setattr("stable_audio_3.factory.create_diffusion_cond_from_config", factory)
+        for wanted in ([torch.bfloat16], [torch.float32]):
+            _loaded(preset)
+            assert models[-1].conditioner.encoder.weight.dtype == wanted[0]
+
+    def test_the_conditioning_is_not_squeezed_through_fp16_and_the_dit_gets_its_own_dtype(self, preset, snapshots, built):
+        _loaded(preset)
+
+        model = built[0][1]
+        conditioning = model.conditioner(torch.ones(1, 2))
+        assert conditioning.dtype == torch.float32  # a bf16 encoder output is not cast to fp16
+        assert conditioning.type(next(model.model.parameters()).dtype).dtype == torch.float16  # what StableAudioModel.generate does
+
     def test_the_model_is_built_in_fp16_so_no_fp32_weights_exist(self, preset, snapshots, events, monkeypatch):
         """The factory runs under an fp16 default dtype, so its parameters are never fp32."""
         seen: list[tuple[torch.dtype, torch.dtype]] = []
@@ -266,6 +305,14 @@ class TestLoad:
         assert backend._model.model is built[0][1]
         assert built[0][1].use_lora is False and built[0][1].lora_names == []
         assert backend._model.device == "cuda"
+
+    def test_the_autotune_tables_are_silenced_before_the_first_take_compiles(self, preset, snapshots, built, monkeypatch):
+        silenced: list[bool] = []
+        monkeypatch.setattr(sa3, "silence_autotune_report", lambda: silenced.append(True))
+
+        _loaded(preset)
+
+        assert silenced == [True]
 
     def test_works_without_flash_attn(self, preset, snapshots, built, generated, monkeypatch):
         monkeypatch.setitem(sys.modules, "flash_attn", None)  # an import of it raises ImportError
@@ -377,6 +424,88 @@ class TestClose:
 
         backend.close()
         backend.close()
+
+    def test_a_stop_before_the_checkpoint_is_filled_leaves_an_unloaded_backend_that_never_reaches_the_device(self, preset, snapshots, built, events):
+        backend = StableAudio3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(preset, "cuda", cancelled=lambda: True)
+
+        assert backend._model is None
+        assert "to cuda" not in events
+        backend.close()
+
+    def test_a_stop_between_checkpoint_tensors_ends_the_fill(self, preset, snapshots, built, events, monkeypatch):
+        stopped: list[bool] = []
+        real = sa3.iter_tensors
+
+        def tensors(path):
+            iterator = iter(real(path))
+            yield next(iterator)
+            stopped.append(True)
+            yield from iterator
+
+        monkeypatch.setattr(sa3, "iter_tensors", tensors)
+        backend = StableAudio3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(preset, "cuda", cancelled=lambda: bool(stopped))
+
+        assert backend._model is None and "to cuda" not in events
+
+    def test_a_stop_while_the_model_is_being_built_is_seen_at_the_next_layer(self, preset, snapshots, events, monkeypatch):
+        stopped: list[bool] = []
+        filled: list[bool] = []
+
+        def factory(config: dict[str, Any]) -> nn.Module:
+            model = nn.Module()
+            model.first = nn.Linear(1, 1)
+            stopped.append(True)  # the user presses Stop while the library is still creating layers
+            model.second = nn.Linear(1, 1)
+            events.append("built")
+            return model
+
+        monkeypatch.setattr("stable_audio_3.factory.create_diffusion_cond_from_config", factory)
+        monkeypatch.setattr(sa3, "_fill_from_checkpoint", lambda *args, **kwargs: filled.append(True))
+        backend = StableAudio3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(preset, "cuda", cancelled=lambda: bool(stopped))
+
+        assert "built" not in events and not filled and backend._model is None
+
+    def test_a_stop_during_the_last_step_of_the_build_is_seen_before_the_fill(self, preset, snapshots, events, monkeypatch):
+        stopped: list[bool] = []
+        filled: list[bool] = []
+
+        def factory(config: dict[str, Any]) -> _Diffusion:
+            stopped.append(True)  # after the last layer: only the checks between the steps can see it
+            return _Diffusion(events)
+
+        monkeypatch.setattr("stable_audio_3.factory.create_diffusion_cond_from_config", factory)
+        monkeypatch.setattr(sa3, "_fill_from_checkpoint", lambda *args, **kwargs: filled.append(True))
+        backend = StableAudio3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(preset, "cuda", cancelled=lambda: bool(stopped))
+
+        assert not filled and "to cuda" not in events and backend._model is None
+
+    def test_a_stop_while_the_model_moves_to_the_device_ends_the_load(self, preset, snapshots, built, events, monkeypatch):
+        stopped: list[bool] = []
+        original = _Diffusion.to
+
+        def to(self, device, *args, **kwargs):
+            stopped.append(True)
+            return original(self, device, *args, **kwargs)
+
+        monkeypatch.setattr(_Diffusion, "to", to)
+        backend = StableAudio3Backend()
+
+        with pytest.raises(AudioCancelled):
+            backend.load(preset, "cuda", cancelled=lambda: bool(stopped))
+
+        assert backend._model is None
 
     def test_a_failed_load_leaves_a_backend_that_can_be_closed(self, preset, snapshots, built, monkeypatch):
         def fail(*args, **kwargs):

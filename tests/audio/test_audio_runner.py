@@ -80,7 +80,8 @@ class TestOrder:
         _run(_music(), YUE2, tmp_path, runs=3)
 
         audio_runner.get_audio_backend.assert_called_once_with("yue2")
-        backend.load.assert_called_once_with(YUE2, "cuda")
+        backend.load.assert_called_once()
+        assert backend.load.call_args.args == (YUE2, "cuda")
         assert backend.generate.call_count == 3 and backend.close.call_count == 1
 
 
@@ -295,6 +296,17 @@ class TestTiming:
 
 class TestConsole:
     @REAL
+    def test_the_first_take_header_follows_the_loading_line_and_later_takes_are_set_off_by_a_blank_row(self, monkeypatch, tmp_path, capsys):
+        patch_runner(monkeypatch, fake_backend(clip(0.2), clip(0.2)))
+
+        _run(_music(), YUE2, tmp_path, runs=2)
+
+        lines = capsys.readouterr().out.splitlines()
+        first, second = (index for index, line in enumerate(lines) if line.startswith("["))
+        assert lines[first - 1].startswith("Loading ")
+        assert lines[second - 1] == ""
+
+    @REAL
     def test_a_phase_is_named_once_on_a_console_that_is_not_a_terminal(self, monkeypatch, tmp_path, capsys):
         backend = fake_backend(clip(0.2))
         original = backend.generate.side_effect
@@ -436,6 +448,75 @@ class TestClosing:
         assert backend.generate.call_count == 0 and backend.close.call_count == 1
 
 
+class TestQuitWhileLoading:
+    def test_quit_queued_before_the_load_never_loads_the_model(self, monkeypatch, tmp_path):
+        control = SkipSignal()
+        control.queue_action("quit")
+        events: list[dict] = []
+        backend = fake_backend(clip())
+        patch_runner(monkeypatch, backend)
+
+        saved = _run(_music(), YUE2, tmp_path, runs=2, skip_signal=control, progress_callback=events.append)
+
+        assert saved == [] and backend.load.call_count == 0 and backend.generate.call_count == 0
+        assert [e["type"] for e in events] == ["batch_cancelled"]
+        assert events[0] == {"type": "batch_cancelled", "mode": "audio", "completed_iterations": 0, "total_iterations": 2}
+
+    def test_the_load_gets_a_check_that_follows_quit(self, monkeypatch, tmp_path):
+        control = SkipSignal()
+        backend = fake_backend(clip())
+        seen: list[bool] = []
+
+        def load(model, device, cancelled=None):
+            seen.append(cancelled())
+            control.queue_action("quit")
+            seen.append(cancelled())
+
+        backend.load.side_effect = load
+        patch_runner(monkeypatch, backend)
+
+        _run(_music(), YUE2, tmp_path, skip_signal=control)
+
+        assert seen == [False, True]
+
+    def test_skip_does_not_count_as_quit_for_the_load(self, monkeypatch, tmp_path):
+        control = SkipSignal()
+        backend = fake_backend(clip())
+        seen: list[bool] = []
+
+        def load(model, device, cancelled=None):
+            control.queue_action("skip")
+            seen.append(cancelled())
+
+        backend.load.side_effect = load
+        patch_runner(monkeypatch, backend)
+
+        _run(_music(), YUE2, tmp_path, skip_signal=control)
+
+        assert seen == [False]
+
+    def test_a_stop_during_the_load_closes_the_backend_and_reports_a_cancelled_batch(self, monkeypatch, tmp_path):
+        control = SkipSignal()
+        events: list[dict] = []
+        backend = fake_backend(clip())
+
+        def load(model, device, cancelled=None):
+            control.queue_action("quit")
+            assert cancelled()
+            raise AudioCancelled
+
+        backend.load.side_effect = load
+        env = patch_runner(monkeypatch, backend)
+
+        saved = _run(_music(), YUE2, tmp_path, runs=3, skip_signal=control, progress_callback=events.append)
+
+        assert saved == [] and backend.generate.call_count == 0
+        backend.close.assert_called_once()
+        env.release.assert_called_once()
+        assert [e["type"] for e in events] == ["model_loading", "batch_cancelled"]
+        assert events[-1] == {"type": "batch_cancelled", "mode": "audio", "completed_iterations": 0, "total_iterations": 3}
+
+
 class TestJobControls:
     @REAL
     def test_next_drops_the_running_take_and_goes_on_with_the_next(self, monkeypatch, tmp_path):
@@ -500,6 +581,72 @@ class TestJobControls:
         _run(_music(), YUE2, tmp_path, runs=2, skip_signal=control)
 
         assert paused.call_count == 2 and paused.call_args.kwargs["mode"] == "audio"
+
+    @REAL
+    @pytest.mark.parametrize(("queued_on_resume", "takes"), [("repeat", 2), ("skip", 1), (None, 1)])
+    def test_a_pause_after_a_take_then_honours_what_was_queued_while_paused(self, monkeypatch, tmp_path, queued_on_resume, takes):
+        control = SkipSignal()
+        events: list[dict] = []
+        backend = fake_backend(clip(0.2))
+        first = backend.generate.side_effect
+        calls = {"n": 0}
+        resumed = iter([queued_on_resume, None])
+        monkeypatch.setattr(audio_runner, "pause_until_resumed", MagicMock(side_effect=lambda *_a, **_k: next(resumed)))
+
+        def generate(request, on_progress, cancelled):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                control.queue_action("pause")
+            return first(request, on_progress, cancelled)
+
+        backend.generate.side_effect = generate
+        patch_runner(monkeypatch, backend)
+
+        saved = _run(_music(), YUE2, tmp_path, seed=1, skip_signal=control, progress_callback=events.append)
+
+        assert len(saved) == takes
+        assert [e["type"] for e in events].count("generation_repeat") == takes - 1
+
+    @REAL
+    def test_a_quit_queued_while_paused_after_a_take_stops_the_batch(self, monkeypatch, tmp_path):
+        control = SkipSignal()
+        events: list[dict] = []
+        backend = fake_backend(clip(0.2))
+        first = backend.generate.side_effect
+
+        def generate(request, on_progress, cancelled):
+            control.queue_action("pause")
+            return first(request, on_progress, cancelled)
+
+        backend.generate.side_effect = generate
+        monkeypatch.setattr(audio_runner, "pause_until_resumed", MagicMock(return_value="quit"))
+        patch_runner(monkeypatch, backend)
+
+        saved = _run(_music(), YUE2, tmp_path, runs=2, skip_signal=control, progress_callback=events.append)
+
+        assert len(saved) == 1 and events[-1]["type"] == "batch_cancelled"
+
+    @REAL
+    def test_the_batch_reports_the_takes_made_against_the_takes_planned_including_repeats(self, monkeypatch, tmp_path):
+        control = SkipSignal()
+        events: list[dict] = []
+        backend = fake_backend(clip(0.2))
+        first = backend.generate.side_effect
+        calls = {"n": 0}
+
+        def generate(request, on_progress, cancelled):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                control.queue_action("repeat")
+            return first(request, on_progress, cancelled)
+
+        backend.generate.side_effect = generate
+        patch_runner(monkeypatch, backend)
+
+        _run(_music(), YUE2, tmp_path, runs=2, skip_signal=control, progress_callback=events.append)
+
+        done = events[-1]
+        assert (done["type"], done["completed_iterations"], done["total_iterations"]) == ("batch_completed", 3, 3)
 
     @REAL
     def test_events_follow_the_batch_and_carry_the_backends_progress(self, monkeypatch, tmp_path):

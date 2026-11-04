@@ -13,16 +13,21 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from zvisiongenerator.backends.audio.build_cancel import stop_while_building
+from zvisiongenerator.core.audio_backend import raise_if_cancelled
 from zvisiongenerator.utils.safetensors_stream import iter_tensors
+
+if TYPE_CHECKING:
+    from zvisiongenerator.core.audio_backend import CancelCheck
 
 __all__ = ["load_model", "size_checked_weights"]
 
 _MANIFEST = "weights_manifest.json"
 
 
-def load_model(model_dir: Path | str, *, pin: bool) -> Any:
+def load_model(model_dir: Path | str, *, pin: bool, cancelled: CancelCheck | None = None) -> Any:
     """Build ``YuE2ForCausalLM`` on the CPU in bf16 from *model_dir*'s safetensors files, reading one tensor at a time.
 
     The model adopts the tensors as read, so nothing is copied and the file is never mapped.
@@ -30,18 +35,30 @@ def load_model(model_dir: Path | str, *, pin: bool) -> Any:
     Args:
         model_dir: A model folder: ``config.json`` and the ``*.safetensors`` files.
         pin: Pin each tensor in page-locked memory as it is read, so a later copy to the GPU is fast and pins nothing again.
+        cancelled: Called before each tensor is read and while the model is built from them; ``True`` stops the load.
 
     Returns:
         The model in eval mode.
+
+    Raises:
+        AudioCancelled: If *cancelled* returned ``True``; the tensors read so far are dropped.
     """
     import torch
 
     from yue2.modeling_yue2 import YuE2Config, YuE2ForCausalLM
 
     directory = Path(model_dir)
-    state = {name: tensor.pin_memory() if pin else tensor for file in sorted(directory.glob("*.safetensors")) for name, tensor in iter_tensors(file)}
+    state = {}
+    for file in sorted(directory.glob("*.safetensors")):
+        for name, tensor in iter_tensors(file):
+            raise_if_cancelled(cancelled)
+            state[name] = tensor.pin_memory() if pin else tensor
+    raise_if_cancelled(cancelled)
     config = YuE2Config.from_pretrained(directory)
-    return YuE2ForCausalLM.from_pretrained(None, config=config, state_dict=state, torch_dtype=torch.bfloat16).eval()
+    with stop_while_building(cancelled):
+        model = YuE2ForCausalLM.from_pretrained(None, config=config, state_dict=state, torch_dtype=torch.bfloat16).eval()
+    raise_if_cancelled(cancelled)
+    return model
 
 
 @contextmanager

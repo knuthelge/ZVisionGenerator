@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
     from zvisiongenerator.utils.audio_preset import AudioPreset
 
-__all__ = ["DECODE_PHASE", "AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback"]
+__all__ = ["DECODE_PHASE", "AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback", "raise_if_cancelled"]
 
 DECODE_PHASE = "Decode"
 """The progress phase after the last step, when the decoder turns what was made into the waveform; it has no count of its own worth showing."""
@@ -38,6 +38,12 @@ class AudioCancelled(Exception):
     """
 
 
+def raise_if_cancelled(cancelled: CancelCheck | None) -> None:
+    """Raise :class:`AudioCancelled` when *cancelled* is given and returns ``True``; do nothing otherwise."""
+    if cancelled is not None and cancelled():
+        raise AudioCancelled
+
+
 @runtime_checkable
 class AudioBackend(Protocol):
     """Platform-specific audio inference engine for one model family.
@@ -48,12 +54,17 @@ class AudioBackend(Protocol):
     - close(): free everything the backend holds, also after a failed take
     """
 
-    def load(self, preset: AudioPreset, device: str) -> None:
+    def load(self, preset: AudioPreset, device: str, cancelled: CancelCheck | None = None) -> None:
         """Load the model of *preset* onto *device* (``cuda`` or ``mps``).
 
         Args:
             preset: The audio preset: its files, limits and settings (``preset.settings_for(device)``).
             device: ``cuda`` or ``mps``.
+            cancelled: Called between the tensors read from the weight files; ``True`` stops the load. The backend frees what it
+                held before raising.
+
+        Raises:
+            AudioCancelled: If ``cancelled`` returned ``True`` and the load stopped.
         """
         ...
 

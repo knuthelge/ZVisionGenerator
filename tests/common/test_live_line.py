@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import sys
+
 from tests._streams import FakeStream
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.live_line import LiveLine, shared_line
+from zvisiongenerator.utils.live_line import LiveLine, LiveLineStream, route_stderr_through_live_line, shared_line
 
 
 class TestOnATerminal:
@@ -78,3 +81,73 @@ class TestKeyMessages:
 
     def test_the_default_signal_writes_through_the_shared_line(self):
         assert SkipSignal()._live_line is shared_line()
+
+
+class TestErrorStream:
+    def test_a_write_ends_the_open_line_first_and_leaves_no_blank_row(self):
+        out, err = FakeStream(terminal=True), FakeStream(terminal=True)
+        line = LiveLine(out)
+        stream = LiveLineStream(err, line)
+        line.rewrite("  Plan...")
+
+        stream.write("WARNING: something\n")
+        line.end()
+
+        assert out.getvalue().endswith("Plan...\n") and out.getvalue().count("\n") == 1
+        assert err.getvalue() == "WARNING: something\n"
+
+    def test_a_write_with_no_open_line_adds_nothing_to_the_live_stream(self):
+        out, err = FakeStream(terminal=True), FakeStream(terminal=True)
+        stream = LiveLineStream(err, LiveLine(out))
+
+        stream.write("plain\n")
+
+        assert out.getvalue() == "" and err.getvalue() == "plain\n"
+
+    def test_a_write_that_holds_muted_text_is_dropped_and_still_counts_as_written(self):
+        out, err = FakeStream(terminal=True), FakeStream(terminal=True)
+        line = LiveLine(out)
+        stream = LiveLineStream(err, line, mute=("is deprecated",))
+        line.rewrite("  Plan...")
+
+        written = stream.write("[lib] `x` is deprecated!\n")
+
+        assert written == len("[lib] `x` is deprecated!\n")
+        assert err.getvalue() == "" and out.getvalue() == "\r  Plan..."  # the line stays open: nothing interrupted it
+
+    def test_the_rest_of_the_stream_comes_from_the_wrapped_one(self):
+        err = FakeStream(terminal=True)
+
+        stream = LiveLineStream(err, LiveLine(FakeStream(terminal=True)))
+
+        assert stream.isatty() is True
+        stream.flush()
+
+    def test_logging_and_warnings_end_the_line_before_they_print(self, monkeypatch):
+        out, err = FakeStream(terminal=True), FakeStream(terminal=True)
+        line = LiveLine(out)
+        monkeypatch.setattr(sys, "stderr", err)
+        route_stderr_through_live_line(line=line)
+        handler = logging.StreamHandler(sys.stderr)  # as the console handler and a library's own handler are made
+        logger = logging.getLogger("test_live_line.library")
+        logger.propagate = False
+        logger.addHandler(handler)
+        line.rewrite("  Synthesis 3/10")
+        try:
+            logger.warning("[lib] a message")
+            line.rewrite("  Synthesis 4/10")
+            print("a library's print to the error stream", file=sys.stderr)
+        finally:
+            logger.removeHandler(handler)
+
+        assert out.getvalue().count("\n") == 2  # each message closed the row it interrupted
+        assert err.getvalue() == "[lib] a message\na library's print to the error stream\n"
+
+    def test_routing_twice_wraps_once(self, monkeypatch):
+        monkeypatch.setattr(sys, "stderr", FakeStream(terminal=True))
+
+        route_stderr_through_live_line(line=LiveLine(FakeStream(terminal=True)))
+        wrapped = sys.stderr
+        route_stderr_through_live_line(line=LiveLine(FakeStream(terminal=True)))
+
+        assert isinstance(wrapped, LiveLineStream) and sys.stderr is wrapped

@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from zvisiongenerator.backends.audio.build_cancel import stop_while_building
 from zvisiongenerator.backends.audio.higgs3_config import read_higgs3_config
 from zvisiongenerator.backends.audio.higgs3_generate import generate_speech_codes
 from zvisiongenerator.backends.audio.higgs3_prompt import load_tokenizer, special_ids
-from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled
+from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled, raise_if_cancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.core.video_types import AudioTrack
 from zvisiongenerator.utils.audio_resample import resample_audio
@@ -77,6 +78,19 @@ def _part_total(estimate: int, step: int, max_new_tokens: int) -> int:
     return min(max_new_tokens, max(estimate, step + _FRAME_STRIDE))
 
 
+def _trim_reference(wave: np.ndarray, text: str, max_seconds: float) -> tuple[np.ndarray, str]:
+    """Return the start of *wave* up to *max_seconds* with the same share of the words of *text*, or both as they are when *wave* is short enough.
+
+    A voice reference is held to the length of a recording; the transcript is cut in proportion so it still matches what is heard.
+    """
+    keep = int(max_seconds * SAMPLE_RATE)
+    if wave.shape[0] <= keep:
+        return wave, text
+    words = text.split()
+    kept_words = max(1, int(len(words) * keep / wave.shape[0]))
+    return wave[:keep], " ".join(words[:kept_words])
+
+
 @dataclass
 class _Progress:
     """The position of the part being made, which the frame callback and the decoder report from."""
@@ -106,7 +120,7 @@ class Higgs3Backend:
         self._settings: Mapping[str, Any] = {}
         self._progress: _Progress | None = None
 
-    def load(self, preset: AudioPreset, device: str) -> None:
+    def load(self, preset: AudioPreset, device: str, cancelled: CancelCheck | None = None) -> None:
         """Load the model onto *device* and the codec onto the preset's ``codec_device`` (the CPU on CUDA and MPS on a Mac by default), from the Hugging Face cache.
 
         Nothing is downloaded: both repositories must already be in the cache.
@@ -114,9 +128,12 @@ class Higgs3Backend:
         Args:
             preset: The ``higgs3`` preset: its pinned model and codec files, its limits and its settings for *device*.
             device: ``cuda`` or ``mps``.
+            cancelled: Called between the load steps (tokenizer, network, codec), while the network and the codec are built and
+                before each tensor of the model is copied; ``True`` stops the load.
 
         Raises:
             FileNotFoundError: If a repository is not in the cache with every listed file.
+            AudioCancelled: If *cancelled* returned ``True``; everything loaded so far is freed.
         """
         model_files, codec_files = preset.files
         official, codec_dir = snapshot_dir(model_files), snapshot_dir(codec_files)
@@ -126,7 +143,7 @@ class Higgs3Backend:
         self._device = device
         self._codec_device = str(self._settings.get("codec_device", "mps" if device == "mps" else "cpu"))
         try:
-            self._load_models(official, codec_dir)
+            self._load_models(official, codec_dir, cancelled)
         except BaseException:
             self.close()
             raise
@@ -134,10 +151,11 @@ class Higgs3Backend:
     def generate(self, request: AudioGenerationRequest, on_progress: ProgressCallback, cancelled: CancelCheck) -> AudioClip:
         """Read the request's text, in parts when it is long, and return it as one take.
 
-        Part *i* is seeded ``request.seed + i``. Part 1 follows the voice recording (with its transcript) when there is
-        one, and is read in the model's own voice when there is not. When there are more parts, part 1's own waveform
-        is encoded once and is the reference (with part 1's text as the transcript) for parts 2 to *n*, so one voice
-        and room reads the whole text.
+        Part *i* is seeded ``request.seed + i``. With a voice recording, every part follows the recording (with its
+        transcript). Without one, part 1 is read in the model's own voice; when there are more parts, part 1's own
+        waveform is encoded once and is the reference for parts 2 to *n* (with part 1's text as the transcript), so one
+        voice and room reads the whole text. That reference is cut to the preset's ``max_voice_seconds``, the same
+        length a recording is held to, with the transcript cut to the same share of its words.
 
         Args:
             request: The take to make.
@@ -158,7 +176,8 @@ class Higgs3Backend:
         limits = self._limits
         parts = split_speech_text(request.prompt, int(limits.part_chars), max_text_chars=int(limits.max_text_chars))
         max_new_tokens = int(limits.max_new_tokens)
-        reference = self._voice_reference(request.voice) if request.voice is not None else None  # for part 1 only
+        voice_reference = self._voice_reference(request.voice) if request.voice is not None else None
+        reference = voice_reference  # a recording is every part's reference; otherwise part 1 has none and the later parts follow part 1
         progress = _Progress(on_progress, cancelled, max_new_tokens, len(parts))
         self._progress = progress
         waves: list[np.ndarray] = []
@@ -171,10 +190,11 @@ class Higgs3Backend:
                 progress.estimate = _estimate_part_frames(text, max_new_tokens)
                 wave, part_cut = self._read_part(text, request.seed + index, reference, max_new_tokens)
                 cut = cut or part_cut
-                if index == 0 and len(parts) > 1:
+                if index == 0 and len(parts) > 1 and voice_reference is None:
                     if not wave.size:
                         raise RuntimeError("Higgs TTS 3 made no sound for the first part of the text, so the rest has no voice to follow. Try another seed.")
-                    reference = (self._encode(wave), text)
+                    reference_wave, reference_text = _trim_reference(wave, text, float(limits.max_voice_seconds))
+                    reference = (self._encode(reference_wave), reference_text)
                 waves.append(wave)
         finally:
             self._progress = None
@@ -191,19 +211,26 @@ class Higgs3Backend:
         self._model = self._tokenizer = self._ids = self._codec = None
         self._progress = None
 
-    def _load_models(self, official: Path, codec_dir: Path) -> None:
+    def _load_models(self, official: Path, codec_dir: Path, cancelled: CancelCheck | None = None) -> None:
         """Load the tokenizer, the model and the codec from their cached folders."""
         import torch
         from transformers import HiggsAudioV2TokenizerModel
 
         from zvisiongenerator.backends.audio.higgs3_model import load_higgs3_model
 
+        raise_if_cancelled(cancelled)  # the imports above take seconds
         config = read_higgs3_config(official / "config.json")
         tokenizer = load_tokenizer(official)
         ids = special_ids(tokenizer)
-        model = load_higgs3_model(config, official / "model.safetensors", self._device)
+        raise_if_cancelled(cancelled)
+        model = load_higgs3_model(config, official / "model.safetensors", self._device, cancelled)
+        raise_if_cancelled(cancelled)
         # No remote code: the codec class is native to transformers.
-        codec = HiggsAudioV2TokenizerModel.from_pretrained(str(codec_dir), dtype=torch.float32).to(self._codec_device).eval()
+        with stop_while_building(cancelled):
+            codec = HiggsAudioV2TokenizerModel.from_pretrained(str(codec_dir), dtype=torch.float32)
+        raise_if_cancelled(cancelled)
+        codec = codec.to(self._codec_device).eval()
+        raise_if_cancelled(cancelled)
         for parameter in codec.parameters():
             parameter.requires_grad_(False)
         self._boc_id = config.boc_id

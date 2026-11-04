@@ -184,6 +184,19 @@ def test_the_pretransform_is_an_attribute_of_the_diffusion_model() -> None:
     assert assigned["self.same"] == "self.model.pretransform"
 
 
+def test_the_diffusion_model_holds_the_parts_the_backend_converts_by_name() -> None:
+    init = _function(_class(_tree("models/diffusion.py"), "ConditionedDiffusionModelWrapper"), "__init__")
+    assigned = {ast.unparse(target) for node in ast.walk(init) if isinstance(node, ast.Assign) for target in node.targets}
+    assert {"self.model", "self.conditioner", "self.pretransform"} <= assigned
+
+
+def test_the_text_encoder_is_not_a_registered_submodule_of_its_conditioner() -> None:
+    """The backend relies on this: converting the model to fp16 never reaches the bf16-trained T5Gemma encoder."""
+    init = _function(_class(_tree("models/conditioners.py"), "T5GemmaConditioner"), "__init__")
+    assigned = {ast.unparse(target) for node in ast.walk(init) if isinstance(node, ast.Assign) for target in node.targets}
+    assert "self.__dict__['model']" in assigned
+
+
 # ---- Import check ----------------------------------------------------------------------------------------------------
 
 

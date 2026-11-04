@@ -11,6 +11,8 @@ from safetensors.torch import save_file
 
 import yue2.pipeline as kit_pipeline
 from yue2.modeling_yue2 import YuE2Config, YuE2ForCausalLM
+from zvisiongenerator.backends.audio import yue2_load
+from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.backends.audio.yue2_load import _size_checked_identity, load_model, size_checked_weights
 
 
@@ -75,6 +77,26 @@ class TestLoadModel:
         monkeypatch.setattr(torch.Tensor, "pin_memory", lambda self, *args: pytest.fail("pinned"))
 
         load_model(model_dir, pin=False)
+
+    def test_a_stop_ends_the_load_between_tensors_and_builds_no_model(self, model_dir, monkeypatch):
+        reads: list[str] = []
+        real = yue2_load.iter_tensors
+
+        def counting(path):
+            for name, tensor in real(path):
+                reads.append(name)
+                yield name, tensor
+
+        monkeypatch.setattr(yue2_load, "iter_tensors", counting)
+        monkeypatch.setattr(YuE2ForCausalLM, "from_pretrained", lambda *args, **kwargs: pytest.fail("the model was built after the stop"))
+
+        with pytest.raises(AudioCancelled):
+            load_model(model_dir, pin=False, cancelled=lambda: len(reads) >= 3)
+
+        assert len(reads) == 3
+
+    def test_without_a_stop_check_every_tensor_is_read(self, model_dir):
+        assert load_model(model_dir, pin=False, cancelled=lambda: False) is not None
 
     def test_the_file_is_not_mapped(self, model_dir, monkeypatch):
         monkeypatch.setattr("safetensors.safe_open", lambda *args, **kwargs: pytest.fail("the file was mapped"))

@@ -350,6 +350,7 @@ Pass = the step's condition holds with **no swap growth and Memory Pressure stay
 2. A long sound: `--seconds 380`. Pass: it saves at about 380 s and plays to the end; record the time and the MPS peak, and check the 16 GB Mac does not swap.
 3. A loud prompt ("glass breaking", "thunderclap"). Pass: the CLI prints the scaled-to -1 dBFS note, or the take is already under full scale; the file never clips.
 4. Record the load's system memory peak. On CUDA the load needs about 5.5 GiB of system memory; on a 16 GB Mac check the fp16 build does not push Memory Pressure to yellow or red.
+5. The T5Gemma text encoder is not converted to fp16: it runs in the dtype of its files, while the DiT and decoder run in fp16 and the conditioner's small layers in fp32. Check that MPS runs the encoder in that dtype without an unsupported-op error and that the sound follows the prompt (a prompt that is ignored, or NaN silence, points at the encoder); if it does not, the encoder would need fp32 on MPS.
 
 ### 5. Web UI in Safari
 

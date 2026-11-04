@@ -8,7 +8,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.audio_runner import run_audio_batch
+from zvisiongenerator.audio_runner import QUIT_MESSAGE, run_audio_batch
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, audio_platform_key
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.downloads import DETACHED, STOPPED, CliDownloadReporter, DownloadFlights, audio_plan, describe_refusal, ensure_downloaded, require_checked
@@ -16,11 +16,14 @@ from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.audio_memory import audio_memory_fit, memory_warning_text
 from zvisiongenerator.utils.audio_preset import AudioPreset
+from zvisiongenerator.utils.audio_track import TRACK_UNREADABLE
 from zvisiongenerator.utils.audio_request import DEFAULT_SOUND_SECONDS, check_seed, check_speech_request, find_audio_preset, resolve_sound_seconds
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
+from zvisiongenerator.utils.library_noise import MUTED_ERROR_TEXT, mute_library_warnings
+from zvisiongenerator.utils.live_line import route_stderr_through_live_line
 from zvisiongenerator.utils.music_mode import INSTRUMENTAL, music_mode
 
 logger = logging.getLogger(__name__)
@@ -159,13 +162,19 @@ def _download_model(preset: AudioPreset, skip: SkipSignal) -> bool:
     finally:
         reporter.close()
     require_checked(outcome, targets, preset.label)
-    return outcome not in (STOPPED, DETACHED)
+    if outcome in (STOPPED, DETACHED):
+        print(QUIT_MESSAGE)  # the reporter ended its line, so this starts on a fresh row
+        return False
+    return True
 
 
 def main(*, prog: str = "ziv-audio") -> None:
     """Entry point for ziv-audio CLI."""
     parser = _build_audio_parser(prog=prog)
     args = parser.parse_args()
+    # Warnings and log lines end the progress line before they print; set up first, so the log handlers write through it.
+    route_stderr_through_live_line(mute=MUTED_ERROR_TEXT)
+    mute_library_warnings()
     setup_logging("audio")
 
     if args.runs < 1:
@@ -203,7 +212,8 @@ def main(*, prog: str = "ziv-audio") -> None:
         try:
             check_speech_request(request, preset.limits)
         except ValueError as e:
-            parser.error(str(e))
+            # The library's message cannot say which file; the command line knows.
+            parser.error(f"{e} in {args.voice}" if str(e) == TRACK_UNREADABLE else str(e))
     output = str(Path(args.output).expanduser())
     _announce_music(request, preset, platform_key)
 
@@ -218,7 +228,7 @@ def main(*, prog: str = "ziv-audio") -> None:
     skip = SkipSignal()
     skip.start()
     if stdin_is_interactive():
-        print("Commands: [n] skip  [q] quit  [p] pause  [r] repeat\n")
+        print("Commands: [n] skip  [q] quit  [p] pause  [r] repeat")
     try:
         if _download_model(preset, skip):
             run_audio_batch(request, preset, config, runs=args.runs, seed=args.seed, output_dir=output, skip_signal=skip)

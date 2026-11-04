@@ -15,9 +15,10 @@ from typing import TYPE_CHECKING, Any, Final
 import numpy as np
 
 from zvisiongenerator.backends.audio import snapshot_dir
+from zvisiongenerator.backends.audio.build_cancel import stop_while_building
 from zvisiongenerator.backends.audio.yue2_load import load_model, size_checked_weights
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
-from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled
+from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled, raise_if_cancelled
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.utils.audio_fade import fade_out
 from zvisiongenerator.utils.music_mode import INSTRUMENTAL, music_mode
@@ -68,7 +69,7 @@ class YuE2Backend:
         self._settings: dict[str, Any] = {}
         self._max_seconds = 0.0
 
-    def load(self, preset: AudioPreset, device: str) -> None:
+    def load(self, preset: AudioPreset, device: str, cancelled: CancelCheck | None = None) -> None:
         """Load YuE2 for *preset* on *device*.
 
         The model is streamed in and handed to the pipeline. With the ``weight_swap`` setting (on by default on CUDA, off on
@@ -78,7 +79,11 @@ class YuE2Backend:
         Args:
             preset: The ``yue2`` preset: its model and VAE files, its limits and its settings for *device*.
             device: ``cuda`` or ``mps``.
+            cancelled: Checked while the pipeline is built, before each tensor is read, while the model is built from them and
+                between the steps that place it; ``True`` stops the load.
 
+        Raises:
+            AudioCancelled: If *cancelled* returned ``True``; everything loaded so far is freed.
         """
         settings = preset.settings_for(device)
         weight_swap = bool(settings.get("weight_swap", device == "cuda"))
@@ -87,11 +92,14 @@ class YuE2Backend:
         if weight_swap and device == "cuda":
             _stop_pin_rounding()
         try:
-            pipe = _build_pipeline(str(snapshot_dir(model_files)), str(snapshot_dir(vae_files)), device, settings)
+            raise_if_cancelled(cancelled)
+            with stop_while_building(cancelled):
+                pipe = _build_pipeline(str(snapshot_dir(model_files)), str(snapshot_dir(vae_files)), device, settings)
             self._pipe = pipe
+            raise_if_cancelled(cancelled)
             if device == "cuda":
                 _lift_memory_fraction()
-            self._swap = _install_model(pipe, device, weight_swap=weight_swap)
+            self._swap = _install_model(pipe, device, weight_swap=weight_swap, cancelled=cancelled)
             self._settings = settings
             self._max_seconds = float(preset.limits.max_seconds)
         except BaseException:
@@ -242,20 +250,23 @@ def _build_pipeline(model_dir: str, vae_dir: str, device: str, settings: dict[st
         )
 
 
-def _install_model(pipe: Any, device: str, *, weight_swap: bool) -> WeightSwap | None:
+def _install_model(pipe: Any, device: str, *, weight_swap: bool, cancelled: CancelCheck | None = None) -> WeightSwap | None:
     """Stream the model in and make the pipeline use it; return the :class:`WeightSwap` that owns its placement, if any.
 
     With *weight_swap* the tensors are pinned in CPU memory as they are read, so the swap has nothing left to copy.
     Without it the model moves to *device* parameter by parameter, each CPU copy freed as it goes.
     """
-    model = load_model(pipe.model_dir, pin=weight_swap)
+    model = load_model(pipe.model_dir, pin=weight_swap, cancelled=cancelled)
     pipe._model = model
+    raise_if_cancelled(cancelled)
     if weight_swap:
         swap = WeightSwap(model, device)
+        raise_if_cancelled(cancelled)  # pinning the weights takes seconds
         # The stock loader would move the whole model to the GPU; the swap owns placement.
         pipe._load_model = lambda for_nar=False: model
         return swap
     model.to(device)
+    raise_if_cancelled(cancelled)
     # The kit's decode moves the model to the CPU to make room for the VAE; bring it back for the next take.
     pipe._load_model = lambda for_nar=False: model.to(device)
     return None

@@ -45,6 +45,9 @@ class ConsoleProgress:
     file) one line is printed when the phase or part changes, so a log is not flooded. Call :meth:`close` when the take
     ends, so the cursor is not left on the line.
 
+    The total shown for a phase (or part) is the first one reported, so it stays put while the count runs. A model that
+    cannot know its length in advance reports a moving estimate; once the count passes the first total, only the count is shown.
+
     Args:
         line: The console line to write through; the process console's when ``None``.
     """
@@ -52,11 +55,17 @@ class ConsoleProgress:
     def __init__(self, line: LiveLine | None = None) -> None:
         self._line = line or shared_line()
         self._marker: tuple[str, int] | None = None
+        self._total: int | None = None  # the first total reported for the phase and part in progress
 
     def __call__(self, phase: str, step: int, total: int | None, part: int, n_parts: int, eta_secs: float | None) -> None:
         """Show one progress report."""
         changed = self._marker != (phase, part)
         self._marker = (phase, part)
+        if changed:
+            self._total = None
+        if self._total is None:
+            self._total = total
+        total = self._total if self._total and step <= self._total else None
         if not self._line.is_terminal():
             if changed:
                 self._line.print_line(f"  {_part_label(phase, part, n_parts)}...")
