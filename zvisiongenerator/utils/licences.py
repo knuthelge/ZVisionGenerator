@@ -21,6 +21,7 @@ __all__ = [
     "DATA_FILE",
     "ENHANCER_LICENCE_TIERS",
     "MATTE_LICENCE_MODEL",
+    "NOTICE_FOOTER",
     "NOTICE_HEADER",
     "SEEDVR2_LICENCE_MODEL",
     "LicenceRecord",
@@ -47,6 +48,9 @@ ENHANCER_LICENCE_TIERS: Final = ("fast", "smart")
 
 NOTICE_HEADER: Final = "By downloading you agree to these terms:"
 """The first line of a licence notice."""
+
+NOTICE_FOOTER: Final = "These are short summaries; the linked licence is what applies."
+"""The last line of a licence notice."""
 
 
 @dataclass(frozen=True)
@@ -160,4 +164,5 @@ def _notice_lines(covering: Sequence[LicenceRecord], plan: Callable[[], Sequence
         lines += [licence_text(record), f"  {record.url}"]
         if record.attribution is not None:
             lines.append(f"  {record.attribution}")
+    lines.append(NOTICE_FOOTER)
     return tuple(lines)

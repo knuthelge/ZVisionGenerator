@@ -17,6 +17,7 @@ from zvisiongenerator.utils.licences import (
     SEEDVR2_LICENCE_MODEL,
     LicenceRecord,
     enhancer_licence_model,
+    NOTICE_FOOTER,
     licence_notice,
     licence_payload,
     licence_text,
@@ -96,6 +97,7 @@ def test_notice_lists_every_record_of_a_missing_model() -> None:
         "Second (Acme): Non-commercial",
         f"  {_URL}",
         f"  {_ATTRIBUTION}",
+        NOTICE_FOOTER,
     )
 
 
@@ -205,7 +207,7 @@ def test_a_record_notice_names_only_the_record_asked_for() -> None:
 
     lines = record_notice(records, "second", _plan(["target"]), lambda target: False)
 
-    assert lines == ("By downloading you agree to these terms:", "Second (Acme): Non-commercial", f"  {_URL}", f"  {_ATTRIBUTION}")
+    assert lines == ("By downloading you agree to these terms:", "Second (Acme): Non-commercial", f"  {_URL}", f"  {_ATTRIBUTION}", NOTICE_FOOTER)
 
 
 def test_a_record_notice_is_empty_for_an_unknown_record_without_planning_or_when_the_files_are_present() -> None:

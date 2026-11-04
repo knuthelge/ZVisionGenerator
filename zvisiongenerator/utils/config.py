@@ -809,6 +809,21 @@ def ltx_distilled_lora_source(config: dict[str, Any], version: str | None = None
     return _ltx_hub_file(block["distilled_lora"], f"{_ltx_path(version)}.distilled_lora")
 
 
+def ltx_distilled_lora_licence(config: dict[str, Any], version: str | None = None) -> str | None:
+    """Return the id of the licence record that covers the distilled LoRA of LTX version *version* (``distilled_lora.licence``), or ``None`` when it names none.
+
+    Raises:
+        ValueError: If the entry is set but is not a non-blank string.
+    """
+    entry = _ltx_block(config, version).get("distilled_lora")
+    record = entry.get("licence") if isinstance(entry, dict) else None
+    if record is None:
+        return None
+    if not isinstance(record, str) or not record.strip():
+        raise ValueError(f"{_ltx_path(version)}.distilled_lora.licence must be a non-blank string.")
+    return record.strip()
+
+
 def ltx_mlx_base_repo(config: dict[str, Any], bits: int, version: str | None = None) -> str:
     """Return the MLX LTX repo a converted checkpoint of *version* at *bits* takes its other components from on macOS (``mlx_base.q<bits>``).
 

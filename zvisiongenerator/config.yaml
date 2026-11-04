@@ -396,6 +396,7 @@ video_model_presets:
     distilled_lora:
       repo: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
       filename: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+      licence: ltx-2-community  # the licence record (utils/licences.yaml) named before the download
     # macOS: the pinned MLX pack of each quantize level (the ltx-4 and ltx-8 aliases), and the folder a converted
     # checkpoint takes its VAEs, vocoder, upsampler and configs from. A pack is downloaded as exactly the files of
     # mlx_files, at its pinned revision. After changing a pin, list the files of the new revision that the vendored
@@ -429,6 +430,7 @@ video_model_presets:
         distilled_lora:
           repo: "lxxxy6/LTX-2.5@3506f52caf688795fc35edbf0d1b197bc30f3df1"
           filename: "ltx-2.5-22b-distilled-lora-450-bf16.safetensors"
+          licence: ltx-2x-community
         # macOS: the MLX folder a converted LTX-2.5 checkpoint takes its Gemma 4 text encoder, VAEs, duration head,
         # upsampler and configs from (the ltx25-4 repo). It only has q4, and its quantize_config.json is linked at both levels:
         # the MLX loader reads the bits from the weights' shapes.
