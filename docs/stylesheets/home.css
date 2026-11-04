@@ -1,4 +1,4 @@
-/* Home page hero: the product screenshot on a blurred backdrop of a generated image. */
+/* Home page hero: the logo and the product screenshot on a blurred backdrop of a generated image. */
 
 .zh {
   position: relative;
@@ -26,10 +26,17 @@
   position: relative;
 }
 
+.zh__logo {
+  display: block;
+  width: min(22rem, 78vw);
+  height: auto;
+  margin: 0 auto 2.2rem;
+}
+
 .zh h1 {
   max-width: 42rem;
-  margin: 0 auto 0.6rem;
-  font-size: 3.1rem;
+  margin: 0 auto 0.8rem;
+  font-size: 2.7rem;
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.08;
@@ -98,14 +105,135 @@
 }
 
 @media (max-width: 760px) {
+  .zh {
+    padding-top: 3rem;
+  }
+
+  .zh__logo {
+    margin-bottom: 1.6rem;
+  }
+
   .zh h1 {
-    font-size: 2.1rem;
+    font-size: 2rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .zh__rise {
     animation: none;
+  }
+}
+
+/* Parallax: the backdrop drifts down at 0.35x of the scroll, so the hero glides over it.
+   Scroll-driven, so it runs off the main thread; browsers without it keep a still backdrop. */
+
+@keyframes zh-drift {
+  to { transform: translateY(525px); }
+}
+
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .zh::before {
+      will-change: transform;
+      animation: zh-drift linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0px 1500px;
+    }
+  }
+}
+
+/* Home page body: one centred column under the hero, sections marked in teal, the feature list as cards. */
+
+.zhome {
+  --zhome-surface: #f3f5f6;
+  --zhome-mark: #0d9488;
+  max-width: 44rem;
+  margin: 0 auto 3rem;
+  font-size: 0.85rem;
+}
+
+[data-md-color-scheme="slate"] .zhome {
+  --zhome-surface: #11151c;
+  --zhome-mark: #2dd4bf;
+}
+
+.md-typeset .zhome h2 {
+  margin: 3.6rem 0 1.1rem;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
+.md-typeset .zhome h2::before {
+  content: "";
+  display: block;
+  width: 2rem;
+  height: 0.2rem;
+  margin-bottom: 0.9rem;
+  border-radius: 0.1rem;
+  background: var(--zhome-mark);
+}
+
+.md-typeset .zhome > h2:first-child {
+  margin-top: 1rem;
+}
+
+.md-typeset .zhome > p {
+  max-width: 38rem;
+}
+
+.md-typeset .zhome > .highlight {
+  max-width: 28rem;
+}
+
+.md-typeset .zhome > .highlight code {
+  font-size: 0.75rem;
+}
+
+.md-typeset .zhome__features ul,
+.md-typeset .zhome__next ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  margin: 0 0 1.2rem;
+  padding: 0;
+  list-style: none;
+}
+
+.md-typeset .zhome__features ul {
+  gap: 0.8rem;
+}
+
+.md-typeset .zhome__features ul > li {
+  margin: 0;
+  padding: 0.9rem 1.1rem;
+  border-radius: 0.6rem;
+  line-height: 1.55;
+  background: var(--zhome-surface);
+}
+
+.md-typeset .zhome__next ul {
+  column-gap: 2rem;
+}
+
+.md-typeset .zhome__next ul > li {
+  margin: 0;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.md-typeset .zhome .grid {
+  gap: 0.8rem;
+}
+
+.md-typeset .zhome .grid.cards > ul > li {
+  border: none;
+  border-radius: 0.6rem;
+  background: var(--zhome-surface);
+}
+
+@media (max-width: 760px) {
+  .md-typeset .zhome h2 {
+    margin-top: 2.8rem;
+    font-size: 1.25rem;
   }
 }
 
