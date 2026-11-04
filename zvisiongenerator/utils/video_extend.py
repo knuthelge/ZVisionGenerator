@@ -13,7 +13,7 @@ from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext, enhance_context
-from zvisiongenerator.utils.provenance import RecordedSettings, read_mp4_config, recorded_settings
+from zvisiongenerator.utils.provenance import RecordedSettings, read_config, recorded_settings
 from zvisiongenerator.utils.video_probe import NO_VIDEO_STREAM, VideoProbe, audio_decodes, frame_rates_match, probe_video
 
 if TYPE_CHECKING:
@@ -414,7 +414,7 @@ def require_extend_source(inspection: ExtendInspection, path: str | Path) -> Ext
 def _read_config(path: Path) -> dict[str, Any] | None:
     """Read the config payload embedded in a clip; a clip without a readable one gives ``None``."""
     try:
-        config = read_mp4_config(path)
+        config = read_config(path)
     except subprocess.CalledProcessError, OSError, ValueError:
         return None
     return config if isinstance(config, dict) else None

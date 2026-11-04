@@ -1,12 +1,11 @@
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError } from '$lib/api/client';
 import { downloadStore } from '$lib/state/downloads.svelte';
 import { draft } from '$lib/state/draft.svelte';
 import { router } from '$lib/state/router.svelte';
 import { addToast, dismissToast } from '$lib/state/toasts.svelte';
-import type { DownloadItem, DownloadPlan, ModelInventory } from '$lib/types';
+import type { AudioModelEntry, DownloadItem, ModelInventory, RowDownloadPlan } from '$lib/types';
 
 const modelApiMocks = vi.hoisted(() => ({
   getModelInventory: vi.fn<() => Promise<ModelInventory>>(),
@@ -16,6 +15,7 @@ const modelApiMocks = vi.hoisted(() => ({
   importLoraLocal: vi.fn(),
   importLoraHF: vi.fn(),
   deleteModel: vi.fn(),
+  deleteAudioModel: vi.fn(),
   deleteEnhancerModel: vi.fn(),
   deleteBackgroundRemoval: vi.fn(),
   deleteOtherDownload: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 
 import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
-import { TRANSPARENT_TERMS } from '../workspace/transparent';
+import { FLUX_LICENCE, GEMMA_LICENCE, LTX_LICENCE, MATTE_LICENCE } from '../../test-utils/workspace';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { mountComponent, settle } from '../../test-utils/mount';
 import { pickOption } from '../../test-utils/select';
@@ -764,13 +764,13 @@ describe('ModelsPage Browse buttons', () => {
 });
 
 describe('ModelsPage downloads', () => {
-  const plan = (overrides: Partial<DownloadPlan> = {}): DownloadPlan => ({
-    kind: 'model',
-    name: 'klein9b',
+  const plan = (overrides: Partial<RowDownloadPlan> = {}): RowDownloadPlan => ({
     label: 'klein9b',
-    parts: [{ repo: 'org/klein', files: 4, bytes: 34.7e9 }],
+    parts: [{ label: 'klein9b', model: 'klein9b', bytes: 34.7e9 }],
     total_bytes: 34.7e9,
     space: { path: '/hub', needed_bytes: 34.7e9, free_bytes: 512e9, enough: true },
+    unchecked: false,
+    licences: [],
     ...overrides,
   });
   const item = (overrides: Partial<DownloadItem> = {}): DownloadItem => ({ id: 'd1', kind: 'model', name: 'klein9b', label: 'klein9b', state: 'queued', message: null, ...overrides });
@@ -865,7 +865,7 @@ describe('ModelsPage downloads', () => {
 
   it('downloads an enhancer tier by kind and tier name', async () => {
     const tier = { revision: null, download_size_label: null, unavailable: null, disk_size_label: null, deletable: false };
-    modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ kind: 'enhancer', name: 'smart', label: 'Smart enhancer model' }));
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ label: 'Smart enhancer model', parts: [{ label: 'Smart enhancer model', model: 'smart', bytes: 34.7e9 }] }));
     modelApiMocks.startDownload.mockResolvedValue(item({ kind: 'enhancer', name: 'smart' }));
     await mountPage({ ...inventoryWith(), enhancer_models: [{ ...tier, tier: 'smart', repo: 'org/smart', downloaded: false, download_needed: true }] });
 
@@ -878,8 +878,40 @@ describe('ModelsPage downloads', () => {
     expect(modelApiMocks.startDownload).toHaveBeenCalledWith('enhancer', 'smart');
   });
 
+  describe('licence marks', () => {
+    const klein = { name: 'klein9b', label: 'FLUX.2 Klein 9B', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null, licences: [FLUX_LICENCE] };
+    const zit = { name: 'zit', label: 'zit', family: 'zimage', downloaded: true, download_needed: false, delete: null, licences: [] };
+    const ltx = { name: 'ltx-4', label: 'LTX distilled model', family: 'ltx', supports_i2v: true, downloaded: false, download_needed: true, delete: null, licences: [LTX_LICENCE, GEMMA_LICENCE] };
+    const markIn = (name: string): HTMLButtonElement | null => {
+      const row = Array.from(target.querySelectorAll('tr')).find((tr) => tr.querySelector('[data-testid="model-name"]')?.textContent === name);
+      return row?.querySelector('[data-testid="licence-mark"]') ?? null;
+    };
+
+    it('puts a mark after the name of each restricted row and none on a row without a record', async () => {
+      await mountPage(inventoryWith({ image_models: [klein, zit], video_models: [ltx] }));
+
+      expect(markIn('FLUX.2 Klein 9B')!.getAttribute('aria-label')).toBe('Licence: FLUX Non-Commercial License v2.1');
+      expect(markIn('LTX distilled model')!.getAttribute('aria-label')).toBe(`Licences: ${LTX_LICENCE.name} and ${GEMMA_LICENCE.name}`);
+      expect(markIn('zit')).toBeNull();
+    });
+
+    it('puts a mark on an enhancer tier that has a record and none on a custom model', async () => {
+      const tier = { revision: null, download_size_label: null, unavailable: null, downloaded: true, download_needed: false, disk_size_label: null, deletable: false };
+      await mountPage({
+        ...inventoryWith(),
+        enhancer_models: [
+          { ...tier, tier: 'fast', repo: 'org/fast', licences: [FLUX_LICENCE] },
+          { ...tier, tier: 'custom', repo: 'org/mine', licences: [] },
+        ],
+      });
+
+      const marks = Array.from(target.querySelectorAll('[data-testid="enhancer-row"]')).map((row) => row.querySelector('[data-testid="licence-mark"]')?.getAttribute('aria-label') ?? null);
+      expect(marks).toEqual(['Licence: FLUX Non-Commercial License v2.1', null]);
+    });
+  });
+
   describe('background removal row', () => {
-    const matte = { name: 'background-removal', label: 'Background removal', downloaded: false, disk_size_label: null, download_size_label: '548 MB', deletable: false, download_needed: true };
+    const matte = { name: 'background-removal', label: 'Background removal', downloaded: false, disk_size_label: null, download_size_label: '548 MB', deletable: false, download_needed: true, licences: [MATTE_LICENCE] };
     const matteRow = (): HTMLElement | null => target.querySelector('[data-testid="matte-row"]');
     const matteDownloadButton = (): HTMLButtonElement | null => target.querySelector('[data-testid="matte-row"] [data-testid="download-button"]');
 
@@ -888,21 +920,22 @@ describe('ModelsPage downloads', () => {
       expect(matteRow()).toBeNull();
     });
 
-    it('shows the label, the first-use size, the Non-commercial badge and Download', async () => {
+    it('shows the label, the first-use size, the licence mark and Download', async () => {
       await mountPage(inventoryWith({ background_removal: matte }));
 
       const row = matteRow()!;
       expect(row.querySelector('[data-testid="model-name"]')!.textContent).toBe('Background removal');
       expect(row.querySelector('[data-testid="model-id"]')).toBeNull();
       expect(row.textContent).toContain('≈548 MB');
-      expect(row.querySelector('[data-testid="matte-terms"]')!.textContent).toContain('Non-commercial');
-      expect(row.querySelector('[data-testid="matte-terms"] [role="tooltip"]')!.textContent).toBe(TRANSPARENT_TERMS);
+      const mark = row.querySelector('[data-testid="licence-mark"]')!;
+      expect(mark.getAttribute('aria-label')).toBe(`Licence: ${MATTE_LICENCE.name}`);
+      expect(row.querySelector('.ui-badge-warning')).toBeNull();
       expect(matteDownloadButton()!.getAttribute('aria-label')).toBe('Download the background removal models');
       expect(row.querySelector('[data-testid="delete-button"]')).toBeNull();
     });
 
     it('downloads by kind matte and name background-removal', async () => {
-      modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ kind: 'matte', name: 'background-removal', label: 'Background removal' }));
+      modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ label: 'Background removal', parts: [{ label: 'Background removal', model: 'matte', bytes: 34.7e9 }] }));
       modelApiMocks.startDownload.mockResolvedValue(item({ kind: 'matte', name: 'background-removal', label: 'Background removal' }));
       await mountPage(inventoryWith({ background_removal: matte }));
 
@@ -1076,6 +1109,94 @@ describe('ModelsPage downloads', () => {
       expect(nameTooltip('moss')).toContain(PREPARED_INSTANT_TOOLTIP);
       expect(nameTooltip('klein9b')).toContain(DOWNLOADABLE_TOOLTIP);
       expect(target.querySelectorAll('[data-testid="download-button"]')).toHaveLength(2);
+    });
+  });
+
+  describe('audio models panel', () => {
+    const YUE_LICENCE = { name: 'CC BY-NC 4.0', supplier: 'M-A-P', summary: 'Non-commercial, credit required', url: 'https://example.org/yue2/LICENSE', url_label: 'Licence', attribution: null };
+    const gpuFit = { kind: 'discrete' as const, budget_gb: 10, by_quantize: { none: { status: 'tight' as const, required_gb: 8.8 } } };
+    const yue2: AudioModelEntry = { name: 'yue2', label: 'YuE2 3B', kind: 'music', downloaded: false, download_needed: true, memory_fit: gpuFit, delete: null, disk_size_label: null, licences: [YUE_LICENCE] };
+    const higgs: AudioModelEntry = { name: 'higgs3', label: 'Higgs TTS 3', kind: 'speech', downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'bosonai/higgs-tts-3-4b', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '9.1 GB' };
+    const sa3: AudioModelEntry = { name: 'sa3', label: 'Stable Audio 3 Medium', kind: 'sound', downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'Comfy-Org/stable-audio-3', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '5.4 GB' };
+    const rows = () => Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-row"]'));
+    const row = (name: string) => rows().find((item) => item.dataset.model === name)!;
+    const audioPlan = (overrides: Partial<RowDownloadPlan> = {}) => plan({ label: 'YuE2 3B', parts: [{ label: 'YuE2 3B', model: 'yue2', bytes: 7e9 }], total_bytes: 7e9, licences: [{ ...YUE_LICENCE, model: 'yue2' }], ...overrides });
+
+    it('is hidden without an audio model', async () => {
+      await mountPage();
+      expect(target.querySelector('[data-testid="audio-models"]')).toBeNull();
+      expect(target.textContent).not.toContain('Audio models');
+
+      await page.unmount();
+      await mountPage(inventoryWith({ audio_models: [] }));
+      expect(target.textContent).not.toContain('Audio models');
+    });
+
+    it('lists one row per model, with its label, kind, size and memory badge', async () => {
+      await mountPage(inventoryWith({ audio_models: [yue2, higgs, sa3] }));
+
+      expect(rows().map((item) => [item.querySelector('[data-testid="model-name"]')?.textContent, item.querySelector('[data-testid="audio-kind"]')?.textContent, item.querySelector('[data-testid="disk-size"]')?.textContent ?? null])).toEqual([
+        ['YuE2 3B', 'Music', null],
+        ['Higgs TTS 3', 'Speech', '9.1 GB'],
+        ['Stable Audio 3 Medium', 'Sound', '5.4 GB'],
+      ]);
+      expect(row('yue2').querySelector('[data-testid="model-memory-fit"]')?.textContent).toContain('Tight');
+    });
+
+    it('offers Download on a row that needs files and Delete on a row with files, never both missing', async () => {
+      await mountPage(inventoryWith({ audio_models: [yue2, higgs, sa3] }));
+
+      expect(row('yue2').querySelector('[data-testid="download-button"]')?.getAttribute('aria-label')).toBe('Download YuE2 3B');
+      expect(row('yue2').querySelector('[data-testid="delete-button"]')).toBeNull();
+      expect(row('higgs3').querySelector('[data-testid="download-button"]')).toBeNull();
+      expect(row('higgs3').querySelector('[data-testid="delete-button"]')?.getAttribute('aria-label')).toContain('Higgs TTS 3');
+      expect(row('sa3').querySelector('[data-testid="delete-button"]')).not.toBeNull();
+    });
+
+    it('shows the licence mark of a restricted model only', async () => {
+      await mountPage(inventoryWith({ audio_models: [yue2, sa3] }));
+
+      expect(row('yue2').querySelector('[data-testid="licence-mark"]')?.getAttribute('aria-label')).toBe('Licence: CC BY-NC 4.0');
+      expect(row('sa3').querySelector('[data-testid="licence-mark"]')).toBeNull();
+    });
+
+    it('reads the audio plan, shows the licence line under the model and starts the download by its kind', async () => {
+      modelApiMocks.getDownloadPlan.mockResolvedValue(audioPlan());
+      modelApiMocks.startDownload.mockResolvedValue(item({ kind: 'audio', name: 'yue2', label: 'YuE2 3B' }));
+      await mountPage(inventoryWith({ audio_models: [yue2] }));
+
+      row('yue2').querySelector<HTMLButtonElement>('[data-testid="download-button"]')!.click();
+      await tickFor();
+
+      expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('audio', 'yue2');
+      expect(confirmDialog()?.textContent).toContain('CC BY-NC 4.0');
+      expect(confirmDialog()?.textContent).toContain('Non-commercial, credit required');
+      confirmButton().click();
+      await tickFor();
+      expect(modelApiMocks.startDownload).toHaveBeenCalledWith('audio', 'yue2');
+    });
+
+    it('shows the running download of a model under its row, with Cancel', async () => {
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [running({ kind: 'audio', name: 'yue2', label: 'YuE2 3B' })] });
+      await mountPage(inventoryWith({ audio_models: [yue2] }));
+
+      expect(row('yue2').querySelector('[data-testid="download-cancel"]')).not.toBeNull();
+      expect(target.querySelector('[data-testid="download-subrow"]')?.textContent).toContain('12.4');
+    });
+
+    it('deletes the downloads of a model after confirmation, by its id', async () => {
+      modelApiMocks.deleteAudioModel.mockResolvedValue({ status: 'ok', tone: 'success', message: 'Deleted the downloads of Higgs TTS 3.' });
+      await mountPage(inventoryWith({ audio_models: [higgs] }));
+
+      row('higgs3').querySelector<HTMLButtonElement>('[data-testid="delete-button"]')!.click();
+      await tickFor();
+      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Higgs TTS 3');
+      expect(document.querySelector('[data-testid="delete-audio"]')?.textContent).toContain('Frees 9.1 GB');
+      expect(modelApiMocks.deleteAudioModel).not.toHaveBeenCalled();
+
+      (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+      await tickFor();
+      expect(modelApiMocks.deleteAudioModel).toHaveBeenCalledWith('higgs3');
     });
   });
 

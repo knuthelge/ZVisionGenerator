@@ -6,15 +6,15 @@ import { ApiError } from '$lib/api/client';
 import { draft } from '$lib/state/draft.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
+import { workspaceMemory } from '$lib/state/pageMemory';
 import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from '$lib/types';
 
 import WorkspacePage from './WorkspacePage.svelte';
-import { TRANSPARENT_TERMS } from './transparent';
 import { placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
-import { makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
+import { FLUX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, dragFiles, fakeDebounceTimers, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, configApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, presetApiMocks, videoMemoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
@@ -55,6 +55,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getWorkspaceContext: mocks.getWorkspaceContext,
     getWorkspaceCoreContext: mocks.getWorkspaceCoreContext,
     submitGenerate: mocks.submitGenerate,
+    planGenerate: mocks.planGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
     checkReferencePaths: mocks.checkReferencePaths,
@@ -308,7 +309,7 @@ describe('WorkspacePage Transparent background', () => {
   const toggle = () => target.querySelector('#ws-pp-transparent') as HTMLInputElement;
   const badge = () => target.querySelector('[data-testid="transparent-terms"]') as HTMLElement | null;
 
-  it('renders a labelled switch and the Non-commercial badge in the Post-processing section', async () => {
+  it('renders a labelled switch and the Non-commercial licence mark in the Post-processing section', async () => {
     await mountWorkspace(makeContext());
 
     expect(row()).not.toBeNull();
@@ -316,26 +317,23 @@ describe('WorkspacePage Transparent background', () => {
     expect(toggle().getAttribute('aria-label')).toBe('Transparent background');
     expect(toggle().checked).toBe(false);
     expect(badge()).not.toBeNull();
-    expect(badge()!.querySelector('.ui-badge')).not.toBeNull();
-    // The badge sits outside the switch's label, so tapping it never flips the switch.
+    expect(badge()!.classList.contains('ui-badge')).toBe(true);
+    // The name is the visible word plus the record, and the mark sits outside the switch's label, so tapping it never flips the switch.
+    expect(badge()!.getAttribute('aria-label')).toBe(`Non-commercial. Licence: ${MATTE_LICENCE.name}`);
+    expect(badge()!.getAttribute('aria-haspopup')).toBe('dialog');
     expect(badge()!.closest('label')).toBeNull();
   });
 
-  it('makes the reason reachable by focus: the badge is a tab stop that describes itself with the tooltip', async () => {
+  it('opens the matte record in a popover from the mark', async () => {
     await mountWorkspace(makeContext());
 
-    const trigger = badge()!;
-    expect(trigger.tabIndex).toBe(0);
-    const tooltip = trigger.querySelector('[role="tooltip"]') as HTMLElement;
-    expect(trigger.getAttribute('aria-describedby')).toBe(tooltip.id);
-    expect(tooltip.dataset.open).toBe('false');
+    flushSync(() => badge()!.click());
 
-    flushSync(() => trigger.dispatchEvent(new FocusEvent('focus')));
-    expect(tooltip.dataset.open).toBe('true');
-    expect(tooltip.textContent).toBe(TRANSPARENT_TERMS);
-
-    flushSync(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-    expect(tooltip.dataset.open).toBe('false');
+    const popover = document.querySelector('[data-testid="licence-popover"]')!;
+    expect(badge()!.getAttribute('aria-expanded')).toBe('true');
+    expect(popover.textContent).toContain(MATTE_LICENCE.summary);
+    expect(popover.querySelector('a')!.textContent).toBe(`${MATTE_LICENCE.url_label} ↗`);
+    expect(toggle().checked).toBe(false);
   });
 
   it('turns the draft on and marks the row changed, with a Reset that puts it back', async () => {
@@ -370,6 +368,24 @@ describe('WorkspacePage Transparent background', () => {
     await settle();
 
     expect(toggle()).toBeNull();
+  });
+});
+
+describe('WorkspacePage licence mark beside the Model picker', () => {
+  const mark = () => target.querySelector('[data-testid="model-licence"]') as HTMLButtonElement | null;
+  const select = () => target.querySelector('#ws-model') as HTMLButtonElement;
+
+  it('follows the selected model: none for zit, the record for a restricted one, and gone again after switching back', async () => {
+    await mountWorkspace(makeContext());
+    expect(mark()).toBeNull();
+
+    pickOption(select(), 'flux-lite');
+    await settle();
+    expect(mark()!.getAttribute('aria-label')).toBe(`Licence: ${FLUX_LICENCE.name}`);
+
+    pickOption(select(), 'zit');
+    await settle();
+    expect(mark()).toBeNull();
   });
 });
 
@@ -1403,7 +1419,7 @@ describe('WorkspacePage Images section', () => {
     });
   }
 
-  it('Images is third after Size and Sampling, in Image and Video, not in Extend', async () => {
+  it('Images is third after Size and Sampling, in Image and Video, not in the Extend kind', async () => {
     await mountWorkspace(makeContext());
     expect(sections().slice(0, 3)).toEqual(['size', 'sampling', 'images']);
     await unmount(app!);
@@ -1415,6 +1431,8 @@ describe('WorkspacePage Images section', () => {
     await unmount(app!);
     app = null;
 
+    // The page remembers the last context, which cannot extend; the Extend kind needs the one that can.
+    workspaceMemory.forget();
     const extendContext = makeContext();
     extendContext.workflow_contract.values = [...extendContext.workflow_contract.values, 'extend'];
     draft.update('workflow', 'extend');

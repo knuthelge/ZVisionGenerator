@@ -51,6 +51,11 @@ describe('Tooltip', () => {
     trigger.dispatchEvent(new FocusEvent('focus'));
     flushSync();
     expect(bubble.dataset.open).toBe('true');
+    trigger.dispatchEvent(new FocusEvent('blur'));
+    flushSync();
+    expect(bubble.dataset.open).toBe('false');
+    trigger.dispatchEvent(new FocusEvent('focus'));
+    flushSync();
     trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     flushSync();
     expect(bubble.dataset.open).toBe('false');

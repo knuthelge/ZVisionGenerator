@@ -15,6 +15,7 @@ How the app works, whichever way you use it. The [Web UI](../web-ui/index.md) an
 | [Prompt enhancer](prompt-enhancer.md) | The local model that rewrites your prompts, and its options |
 | [Images](images.md) | Sizes, start image, references and post-processing |
 | [Video](video.md) | Scene and action, sizes, sound and extending a clip |
+| [Audio](audio.md) | Songs, instrumentals, speech and sound effects, voices and the files they make |
 | [Upscaling](upscaling.md) | Upscaling new images, existing images and video |
 | [LoRAs](loras.md) | Adding styles and subjects to a model |
 

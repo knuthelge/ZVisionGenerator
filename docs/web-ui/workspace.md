@@ -1,6 +1,8 @@
 # Workspace
 
-The Workspace is where you make things. Pick **Image**, **Video** or **Extend Video** in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, and **Extend Video** shares the prompt of **Video**, so switching tabs never moves text from one to the other.
+The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**](#the-audio-tab) in the top bar, write a prompt under *Compose*, adjust *Settings*, and press **Generate**. A run starts from an image when you add one in [Images](#images). **Image** and **Video** each keep their own prompt, model, settings and preset, and each comes back as you left it.
+
+**Video** has two kinds, chosen with **Kind** at the start of the toolbar: **New** makes a clip from text or a first frame, and **Extend** continues a clip you already have (see [Extending a video](../concepts/video.md#extending-a-video)). The two share the prompt, model, LoRAs, steps and seed; each keeps its own inputs. **Kind** is hidden on a computer that can't extend.
 
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
@@ -18,7 +20,9 @@ Each model shows whether it is downloaded and a memory badge:
 
 The badge follows the quant you pick, so you can see whether `q8` or `q4` brings a large model within reach. Hover it for the estimate. See [Memory](../concepts/memory.md) for how it's worked out.
 
-A model that isn't downloaded yet shows *not downloaded*, and downloads by itself when a job first needs it. While it downloads from the [Models](models.md) page, the picker shows its progress, for example *Downloading 42%*.
+Every built-in model has an **ⓘ** beside the picker. Hover or press it to read the model's licence (see [Licences](../concepts/models.md#licences)). A model of your own has none.
+
+A model that isn't downloaded yet shows *not downloaded*. When a job would download it, **Generate** first asks: the dialog lists what will download (the model, the prompt enhancer, the background removal models) with its size, the free space and its terms. **Download** starts the job and the download; **Cancel** queues nothing. A model that is already downloading isn't asked about again, and its picker shows its progress.
 
 The **Add LoRA** menu lists the LoRAs made for the selected model first, with the ones you used with it recently on top, and folds the rest under **Other models (n)**. Its last item, **Discover LoRAs…**, opens [Discover LoRAs](#discover-loras). LoRAs are remembered per model family, and per size for FLUX.2 Klein (4B and 9B keep separate LoRAs): switch to another family and you get the LoRAs you last used with it. See [LoRAs](../concepts/loras.md).
 
@@ -42,7 +46,7 @@ A **preset** saves your whole setup under a name, so you can bring it back in on
 - **The menu** has **Update** (write the current settings into the preset), **Save as…**, **Rename…** and **Delete**. A dot on the control shows when the form differs from the applied preset.
 - Image and video have their own presets; only the ones for the current kind are listed.
 - A model or LoRA that isn't installed is skipped.
-- Switching between image and video, **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards.
+- **Reset**, starting an extend, and reusing a job's settings deselect the preset. Pick it again afterwards. Switching between Image and Video leaves each tab's preset as it was.
 
 Presets are kept as files in `presets` in the [data folder](../concepts/data-folder.md), so they follow you to every browser. The CLI doesn't use them.
 
@@ -83,11 +87,11 @@ For video, *Compose* has a **Scene** box above the **Action** box. See [Scene an
 
 ### Recent prompts
 
-The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video** and **Extend Video**. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
+The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video**, whichever kind. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
 
 - **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text is dropped. A JSON caption turns on **{ } JSON** and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and tab don't change.
 - **From the keyboard:** press ++alt+up++ in an empty prompt to open the list with the filter ready. ++up++ and ++down++ move, ++enter++ picks and ++esc++ closes and puts the cursor back in the prompt box (or on the button, if you opened the list with it).
-- **Clear recents** at the bottom of the list removes the prompts of the mode you are in, after asking. The other mode's prompts stay.
+- **Clear recents** at the bottom of the list removes the prompts of the list you are in, after asking. Every other list stays.
 
 ![Recent prompts menu open over the prompt box](../assets/screenshots/placeholder.svg "recent-prompts")
 
@@ -104,7 +108,7 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 | **Size** | **Ratio**, **Resolution**, or a custom **W × H**; **Duration (s)** for video |
 | **Sampling** | **Steps**, **Guidance**, **Scheduler**, **Seed**, **Batch size** |
 | **Images** | In Image, the **Start image** with its **Strength**, and [references](#references) (FLUX.2 Klein). In Video, a **First frame** and an optional **Last frame**. See [Images](#images) |
-| **Audio track** | In Video and Extend Video, an audio file the clip follows, with **Start at**. See [Audio track](#audio-track) |
+| **Audio track** | In Video, either kind, an audio file the clip follows, with **Start at**. See [Audio track](#audio-track) |
 | **Upscale** | The factor, **Denoise**, and **Review** before upscaling |
 | **Post-processing** | **Sharpen**, **Contrast**, **Saturation** and **Transparent** (images) |
 | **Video** | **Audio**, **Low memory** |
@@ -112,18 +116,18 @@ A **Negative prompt** box appears for models that use one. Ideogram 4 adds a **P
 Groups and rows only show when the model and tab use them.
 
 - **Change a number** by typing it, or by dragging its label sideways. On a touch screen, numbers have − and + buttons instead (hold to repeat).
-- **Put one setting back** with the reset mark next to it. **Reset** in the *Settings* header puts all settings back to the model's defaults, and keeps the model, LoRAs, quant and the prompts.
+- **Put one setting back** with the reset mark next to it. **Reset** in the *Settings* header puts the open tab [back to its defaults](#reset). The number beside it counts the settings that differ from their defaults, and a phone shows the same number on its *All* sheet.
 - **Seed** is random for every run unless you type one. The dice button picks a new one.
 
 What each setting does is in [Images](../concepts/images.md), [Video](../concepts/video.md) and [Upscaling](../concepts/upscaling.md).
 
 ### Transparent background
 
-**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). A **Non-commercial** badge sits beside it; hover it for the reason. The job card shows **Downloading background removal** while the cut-out models download and **Removing background…** while the cut-out runs.
+**Transparent** in **Post-processing** switches on [Transparent background](../concepts/images.md#transparent-background). The **Non-commercial** button beside it opens the cut-out models' terms.
 
-![The Transparent switch in Post-processing, with its Non-commercial badge](../assets/screenshots/placeholder.svg "transparent-background")
+![The Transparent switch in Post-processing, with its Non-commercial button](../assets/screenshots/placeholder.svg "transparent-background")
 
-On a phone, the switch is in the **Post-processing** section of **All**. While it is on, a **Transparent** chip joins the settings strip; its popover, **Transparent background**, holds the switch.
+On a phone, the switch is in the **Post-processing** section of **All**.
 
 ### Images
 
@@ -147,10 +151,9 @@ Folded, the header's summary says what **Generate** will use: in Image *None*, *
 
 **Where images stay**
 
-- An image stays until you press its × or **Reset**, including after you reload the page and including images uploaded from your device.
-- **Image** and **Video** each keep their own images. Adding a first frame in Video doesn't put it into Image, and switching between **Image**, **Video** and **Extend Video**, or changing the model, clears none of them.
-- **Reuse settings** and **Load settings** replace the images of the tab they open with the ones the job used. A job made from text leaves that tab's images empty.
-- **Reset** in the *Settings* header clears the open tab's images along with the other settings: in Image the start image, the references and **Strength**, in Video the first and last frame. In **Extend Video** it clears no images. The other tab keeps its images.
+- An image stays until you press its × or **Reset**, also after a reload.
+- **Image** and **Video** each keep their own images; switching tabs, kinds or models clears none of them.
+- **Reuse settings** and **Load settings** replace the open tab's images with the ones the job used.
 
 **Images a model can't use**
 
@@ -173,9 +176,9 @@ When the model takes [references](../concepts/images.md#references), the **Image
 
 ### Audio track
 
-The **Audio track** section comes after **Images** in **Video**, and after **Source video** in **Extend Video**. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
+The **Audio track** section comes after **Images** in **Video**, and after **Source video** in the **Extend** kind. Give it a file by path, **Browse**, upload or drop (WAV, MP3, M4A, FLAC or OGG), and set **Start at** in seconds. The track's length shows beside its name to help you choose **Start at**. What the track does is in [Audio track](../concepts/video.md#audio-track).
 
-In **Extend Video**, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. **Reset** clears the track, except one the source filled in.
+In the **Extend** kind, choosing a source made from a track fills in that track from where its sound ended; a track you chose yourself stays when you change the source. [Reset](#reset) clears the track, except one the source filled in.
 
 A server file that can't be read is refused at **Generate** with *Can't read the audio track*. An upload lost on reload blocks **Generate** with *Choose the audio track again.* On a phone, the **Track** chip opens the same rows in a popover.
 
@@ -183,13 +186,17 @@ A server file that can't be read is refused at **Generate** with *Can't read the
 
 Your settings stay in the browser between visits, as long as the Web UI starts on the same port.
 
-When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset, and a custom size is scaled to fit its limits, keeping its shape. Changing the quant changes nothing else.
+When you choose another model, the settings you changed are kept and the rest take the new model's defaults. A size the new model doesn't offer becomes its largest preset.
 
-**Reset**, **Reuse settings**, **Load settings** and **Extend** apply the model's defaults instead, and use exactly the LoRAs the source was made with.
+**Reuse settings** and **Load settings** apply a take's settings exactly: what the take did not record takes its default instead of what the form held. They replace the open tab's settings, images, prompts, LoRAs, quant and *Enhance* options and leave the other tabs alone. **Use as** changes only what it names.
+
+### Reset
+
+**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the length, the voice, **Batch size** and **Seed**. It keeps the model, LoRAs and quant, the prompts and the Extend source, and it never touches another tab. **Batch size** and **Seed** are shared by every tab, so each Reset puts them back.
 
 ### Copy as a command
 
-The terminal button in the *Settings* header copies a `ziv image` or `ziv video` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
+The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
 
 !!! note "When the command differs"
     The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path.
@@ -204,6 +211,42 @@ Fields that take a path on the server's machine (prompt files, the output folder
 
 Typing in a path field suggests matching folders and files: ++tab++ takes the first, the arrow keys and ++enter++ pick another, and ++down++ in an empty field suggests recent paths and the usual folders.
 
+## The Audio tab
+
+**Audio** is the last tab in the top bar. It makes music, speech and sound; what each kind is, the models and the limits are in [Audio](../concepts/audio.md). The tab is hidden on a machine that can't run an audio model.
+
+![The Audio tab on Music, with Style and Lyrics under Compose and the status line saying Song](../assets/screenshots/placeholder.svg "audio-music")
+
+The toolbar reads **Kind** (**Music**, **Speech** or **Sound**), **Model**, the model's **ⓘ** licence mark and its memory badge. The kind decides what *Compose* and *Settings* show; presets, **Quant** and LoRAs aren't used. A model that isn't downloaded yet is asked for when you press **Generate**, as for [images](#model-and-loras).
+
+| Kind | Compose | Settings |
+|---|---|---|
+| **Music** | **Style** (required) above **Lyrics** (optional) | **Batch size**, **Seed** |
+| **Speech** | **Text**, with a count against the 10,000 characters it can hold | **Voice**, then **Batch size** and **Seed** |
+| **Sound** | **Prompt**, what you hear | **Length (s)**, from 1 to 380 and 10 to begin with, then **Batch size** and **Seed** |
+
+- **Music:** a line under the boxes says whether you will get a song or an instrumental. See [Music](../concepts/audio.md#music).
+- **Speech:** type expressive tags such as `<|sfx:laughter|>` into the text; see [Expressive tags](../concepts/audio.md#expressive-tags).
+- **No enhancer, JSON mode or negative prompt.** The tools row has only **Recent prompts**, one list per kind.
+
+### Voice
+
+**Voice** is the first group in Speech's *Settings*. Leave it on **Any**, or choose **From a recording**: add a file of 3 to 30 seconds (Browse, upload or drop), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.* The tick is asked again whenever the voice changes. See [Voices](../concepts/audio.md#voices).
+
+![The Voice section on From a recording, with the file, What it says and the consent tick](../assets/screenshots/placeholder.svg "audio-voice")
+
+While something is missing, **Generate** is disabled and the first reason shows above it.
+
+### While a take is made
+
+The job card counts takes (*Take 1 of 2*) and shows the stage the model is in: for music *Planning*, *Writing the song*, *Rendering* and *Finishing*, for speech the part being read (*Reading part 2 of 4*), for sound its steps. The preview strip shows the take forming and settles into its waveform when it is ready. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs).
+
+### The result
+
+![A finished take in the player, with its waveform and the browser's audio controls](../assets/screenshots/placeholder.svg "audio-take")
+
+The preview shows the finished take as a player: its waveform over the browser's own audio controls. Click or drag the waveform to seek. Nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and a take that reached YuE2's limit carries **Cut at 6:00**. Takes appear in the Gallery strip as audio tiles; see [Audio in the Gallery](gallery.md#audio). On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
+
 ## Generate
 
 Press **Generate**, or ++ctrl+enter++ (++cmd+enter++ on a Mac). ++ctrl+shift+enter++ generates with a new seed, even when the seed is locked.
@@ -216,7 +259,7 @@ If the job can't start with the current settings, for example because the start 
 
 The **live preview** shows the current image taking shape after every step ([Live preview](../concepts/images.md#live-preview)), so you can skip a bad one early. It has the image's own shape, a custom size included. It is a preview only and never saved.
 
-The **job card** beside it shows the progress, the time left and each phase with its timing. When a model isn't downloaded yet, the load step shows the download first, with its size, speed and time left.
+The **job card** beside it shows the progress, the time left and each phase with its timing. When a model isn't downloaded yet, the load step shows the download first, with its size, speed and time left. Jobs that are already in the queue don't ask; they download when their turn comes.
 
 | Control | Does | Key |
 |---|---|---|
@@ -260,3 +303,4 @@ Some models change what the Workspace offers:
 
 - **Ideogram 4 Instant** adds a JSON caption mode and a **First sigma** setting. It has no start image or upscale, so the **Images** section is hidden, and its width and height are limited to 256–2048 in steps of 16. See [Ideogram 4](../concepts/models.md#ideogram-4-instant).
 - **Video** adds **Duration (s)**, **Audio**, **Low memory** and, on models that follow one, an [**Audio track**](#audio-track).
+- **Audio** replaces the prompt box and settings with those of its [kind](#the-audio-tab).

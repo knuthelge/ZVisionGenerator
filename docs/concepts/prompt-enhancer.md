@@ -25,7 +25,7 @@ There are two built-in enhancer models. **Fast** is the default. **Smart** is la
 
 Both are uncensored variants of Qwen3.5, because small instruction-tuned models often refuse or tone down ordinary creative prompts, such as a battle scene, a horror shot or a villain's portrait.
 
-Where Smart doesn't fit, the Web UI says why and Fast runs; the CLI warns and uses Fast. A model downloads the first time it's needed, or ahead of time from the [Models page](../web-ui/models.md).
+Where Smart doesn't fit, the Web UI says why and Fast runs; the CLI warns and uses Fast. A model downloads the first time it's needed (the Web UI asks first, with its size) or ahead of time from the [Models page](../web-ui/models.md).
 
 Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of memory.
 
@@ -117,7 +117,7 @@ The default depends on the workflow, and on whether a first frame is set. The ch
 
 - **Video without a first frame** rewrites both, splitting what you wrote: setting, look and camera setup go to the scene, events in order to the action.
 - **Video with a first frame** rewrites the action only when you gave a scene (what the image shows), so it isn't restyled. With a blank scene it writes a short scene too.
-- **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. It uses the previous clip's prompt as context, so it doesn't repeat its actions or lines.
+- **Extend** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. It uses the previous clip's prompt as context, so it doesn't repeat its actions or lines.
 
 Action only needs a scene; with a blank one, both parts are written. Style, Mood, Theme, Shot, Angle, Palette and Focus on have no effect with Action only, since they shape the scene.
 

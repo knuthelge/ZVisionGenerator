@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.hf_cache import cached_model_repos, free_stranded_shared_files, stranded_shared_files
+from zvisiongenerator.utils.hf_cache import cached_model_repos, free_stranded_shared_files, repo_disk_bytes, stranded_shared_files
 from zvisiongenerator.utils.matte_models import BIREFNET, VITMATTE
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, installed_models_linking_to, used_repo_ids
@@ -92,6 +92,16 @@ class TestCachedModelRepos:
 
     def test_a_missing_cache_has_no_repos(self, tmp_path):
         assert cached_model_repos(tmp_path / "missing") == ()
+
+
+class TestRepoDiskBytes:
+    def test_a_repo_counts_its_own_files_and_its_files_in_the_shared_store(self, hub):
+        repo_dir = _repo(hub, "org/one", shared={"ee" * 32: 700}, local=10)
+
+        assert repo_disk_bytes(repo_dir) == 710
+
+    def test_a_missing_repo_is_zero(self, hub):
+        assert repo_disk_bytes(hub / "models--org--gone") == 0
 
 
 class TestStrandedSharedFiles:

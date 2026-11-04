@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 import threading
 
+from zvisiongenerator.utils.live_line import LiveLine, shared_line
+
 
 def stdin_is_interactive() -> bool:
     """Return whether stdin is a terminal that can deliver key presses."""
@@ -17,8 +19,14 @@ class SkipSignal:
     _REVIEW_DECISIONS = frozenset({"approve", "discard"})
     _REVIEW_POLL_SECONDS = 0.2
 
-    def __init__(self):
-        """Create the signal."""
+    def __init__(self, live_line: LiveLine | None = None):
+        """Create the signal.
+
+        Args:
+            live_line: The console line key messages are printed through, which ends an unfinished progress line first; the
+                process console's when ``None``.
+        """
+        self._live_line = live_line or shared_line()
         self._action = None
         self._lock = threading.Lock()
         self._running = False
@@ -184,7 +192,7 @@ class SkipSignal:
                 msg = self._on_command_key(ch.lower())
 
         if msg:
-            print(msg, file=sys.stderr, flush=True)
+            self._live_line.message(msg)
 
     def _on_command_key(self, ch: str) -> str | None:
         """Queue the action for a command key and return the message to show (call with the lock held)."""

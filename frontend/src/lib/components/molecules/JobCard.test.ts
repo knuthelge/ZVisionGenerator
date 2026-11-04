@@ -73,6 +73,29 @@ describe('JobCard', () => {
     expect(log().textContent).toContain('original settings unknown');
   });
 
+  describe('notice', () => {
+    it('is a row of its own under the buttons and shows its whole text', () => {
+      const props = reactiveProps({ job: makeJob({ runs: 3, supported_controls: IMAGE_CONTROLS, controlQueued: 'pause' }) });
+      component = mountComponent(JobCard, props);
+      target = component.target;
+      const notice = header().querySelector<HTMLElement>(':scope > .job-notice')!;
+      expect(notice.getAttribute('role')).toBe('status');
+      expect(notice.previousElementSibling?.classList.contains('job-row')).toBe(true);
+      expect(notice.querySelector('.job-notice-text')?.textContent).toBe('Pausing after this image');
+      expect(notice.querySelector('.job-notice-text')?.hasAttribute('title')).toBe(false);
+    });
+
+    it('arms Cancel on the first Esc, and the notice and the wide button follow', () => {
+      render({ runs: 3, supported_controls: IMAGE_CONTROLS }, { oncancel: vi.fn() });
+      expect(header().querySelector('.job-notice')?.textContent?.trim()).toBe('');
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      flushSync();
+      expect(header().querySelector('.job-notice-text')?.textContent).toBe('Press Esc again to cancel');
+      expect(header().querySelector('.job-controls')?.classList.contains('armed')).toBe(true);
+    });
+  });
+
   describe('controls by scope and phase', () => {
     it('puts Pause and Cancel in the header and Skip and Repeat on the task line', () => {
       render({ runs: 4, supported_controls: IMAGE_CONTROLS });
@@ -139,6 +162,39 @@ describe('JobCard', () => {
       flushSync();
       expect(control('pause-resume')!.getAttribute('aria-label')).toBe('Resume');
       expect(target.querySelector('.job-notice .ui-badge')).toBeNull();
+    });
+
+    it('drops the pending pause the moment the pause event arrives, not when the grace runs out', async () => {
+      const props = reactiveProps({ job: makeJob({ runs: 3, supported_controls: IMAGE_CONTROLS }), onpause: vi.fn().mockResolvedValue(undefined) });
+      component = mountComponent(JobCard, props);
+      target = component.target;
+      control('pause-resume')!.click();
+      await vi.waitFor(() => {
+        flushSync();
+        expect(target.querySelector('.job-notice .ui-badge')?.textContent).toContain('Pausing after this');
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSync();
+      expect(target.querySelector('.job-notice .ui-badge')).not.toBeNull();
+
+      // The server's job_paused settled the queued control; the request's own grace is still running.
+      props.job = { ...props.job, controlQueued: null, controlSettledAt: Date.now() + 1000, status: 'paused', paused: true, itemFinished: true };
+      flushSync();
+      expect(target.querySelector('.job-notice .ui-badge')).toBeNull();
+    });
+
+    it('drops the pending notice once the job has stopped, failed or finished', () => {
+      const props = reactiveProps({ job: makeJob({ runs: 2, supported_controls: IMAGE_CONTROLS, controlQueued: 'quit' }) });
+      component = mountComponent(JobCard, props);
+      target = component.target;
+      expect(target.querySelector('.job-notice .ui-badge')?.textContent).toContain('Stopping at the next step');
+
+      for (const status of ['cancelled', 'failed', 'completed'] as const) {
+        props.job = { ...props.job, status };
+        flushSync();
+        expect(target.querySelector('.job-notice .ui-badge')).toBeNull();
+      }
     });
 
     it('shows a rejected control and allows a retry', async () => {
@@ -400,5 +456,75 @@ describe('JobCard', () => {
       expect(log().querySelector('.dl-pct')?.textContent).toBe('25%');
     });
 
+  });
+
+  describe('an audio job', () => {
+    const take = (overrides: Partial<ActiveJobState> = {}): Partial<ActiveJobState> => ({
+      workflow: 'music', media_type: 'audio', currentStep: 0, totalSteps: 0, runs: 2, supported_controls: IMAGE_CONTROLS, ...overrides,
+    });
+    const phases = () => Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-phases"] .job-step')).map((step) => step.dataset.phaseState);
+    const bars = () => Array.from(log().querySelectorAll('[data-testid="audio-phases"] [role="progressbar"]'));
+
+    it('shows a song as four rows: the finished one done, the current one with a bar, the rest waiting', () => {
+      render(take({ audio: { phase: 'Song tokens', step: 1875, total: null, part: 1, parts: 1 } }));
+
+      expect(phases()).toEqual(['done', 'current', 'next', 'next']);
+      expect(log().querySelectorAll('[data-testid="audio-phases"] .job-step-done')).toHaveLength(1);
+      const [current, ...waiting] = bars();
+      expect(current.hasAttribute('aria-valuenow')).toBe(false);
+      expect(waiting).toHaveLength(2);
+      for (const bar of waiting) expect(bar.getAttribute('aria-valuenow')).toBe('0');
+    });
+
+    it('gives a phase with a total a percentage and a determinate bar', () => {
+      render(take({ audio: { phase: 'Synthesis', step: 5, total: 8, part: 1, parts: 1 } }));
+
+      expect(phases()).toEqual(['done', 'done', 'current', 'next']);
+      const bar = bars()[0];
+      expect(bar.getAttribute('aria-valuenow')).toBe('63');
+      expect(bar.getAttribute('aria-valuemax')).toBe('100');
+      expect(log().querySelector('[data-testid="audio-phases"] .num')?.textContent).toBe('63%');
+    });
+
+    it('shows speech as one row whose bar is the take\'s progress', () => {
+      render(take({ workflow: 'speech', audio: { phase: 'Speech tokens', step: 250, total: 500, part: 2, parts: 4 } }));
+
+      expect(phases()).toEqual(['current']);
+      const bar = bars()[0];
+      const percent = Math.round(Number(bar.getAttribute('aria-valuenow')) / Number(bar.getAttribute('aria-valuemax')) * 100);
+      expect(log().querySelector('[data-testid="audio-phases"] .num')?.textContent).toBe(`${percent}%`);
+      expect(percent).toBeGreaterThan(25);
+    });
+
+    it('reports a single take\'s header bar by how far the take is, not by takes done', () => {
+      render(take({ runs: 1, workflow: 'speech', audio: { phase: 'Speech tokens', step: 250, total: 500, part: 1, parts: 1 } }));
+
+      const header = target.querySelector('.job-head [role="progressbar"]')!;
+      const now = Number(header.getAttribute('aria-valuenow'));
+      expect(Number(header.getAttribute('aria-valuemax'))).toBe(100);
+      expect(now).toBeGreaterThan(0);
+      expect(header.getAttribute('aria-valuetext')).toBe(`${now}% done`);
+    });
+
+    it('leaves the bar of a song\'s finishing row indeterminate', () => {
+      render(take({ audio: { phase: 'Decode', step: 1, total: 1, part: 1, parts: 1 } }));
+
+      expect(phases()).toEqual(['done', 'done', 'done', 'current']);
+      expect(bars()[0].hasAttribute('aria-valuenow')).toBe(false);
+    });
+
+    it('shows a sound as one step line', () => {
+      render(take({ workflow: 'sound', audio: { phase: 'Sampling', step: 5, total: 8, part: 1, parts: 1 } }));
+
+      expect(phases()).toEqual(['current']);
+      expect(bars()[0].getAttribute('aria-valuenow')).toBe('63');
+      expect(bars()[0].getAttribute('aria-valuemax')).toBe('100');
+    });
+
+    it('keeps no preview slot for audio', () => {
+      render(take());
+
+      expect(log().querySelector('.job-media')).toBeNull();
+    });
   });
 });

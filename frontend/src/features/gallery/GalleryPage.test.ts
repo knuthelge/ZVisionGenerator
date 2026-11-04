@@ -59,8 +59,9 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 }));
 
 import GalleryPage from './GalleryPage.svelte';
+import { makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../test-utils/audio';
 import { mountComponent, settle } from '../../test-utils/mount';
-import { pickOption } from '../../test-utils/select';
+import { optionLabels, pickOption } from '../../test-utils/select';
 import { makeContext, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 
 class MockIntersectionObserver {
@@ -252,7 +253,7 @@ describe('GalleryPage regressions', () => {
       prompt: 'Reuse me',
       model: 'zit',
       seed: '9876',
-      reference_path: '',
+      reuse: 'true',
     });
   });
 
@@ -389,7 +390,7 @@ describe('GalleryPage regressions', () => {
     draft.reset();
   });
 
-  it('sends a video to the Extend Video workflow from its menu, with its model, and leaves the text to the source', async () => {
+  it('sends a video to the Extend workflow from its menu, with its model, and leaves the text to the source', async () => {
     const asset = makeAsset({
       filename: 'walk.mp4', media_type: 'video', workflow: 'txt2vid', file_path: '/outputs/walk.mp4', scene: 'A street at night.', prompt: 'She waves.',
       lora: 'style:0.8', reuse_state: {
@@ -475,6 +476,24 @@ describe('GalleryPage regressions', () => {
     expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(3);
     expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest');
     vi.restoreAllMocks();
+  });
+
+  it('stays on the open asset when a new output lands at the front of the list', async () => {
+    const [a, b, c] = ['a', 'b', 'c'].map((name) => makeAsset({ id: `${name}.png`, filename: `${name}.png` }));
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [a, b, c], page: 1, total_pages: 1, total_count: 3 });
+
+    mountPage();
+    await settle();
+    await openViewer('b.png');
+    const title = () => document.querySelector('#asset-viewer-title')?.textContent;
+    expect(title()).toBe('b.png');
+
+    galleryStore.mergeOutputs([makeAsset({ id: 'new.png', filename: 'new.png' })]);
+    await settle();
+
+    expect(target.querySelector('button[aria-label="View new.png"]')).not.toBeNull();
+    expect(title()).toBe('b.png');
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 4');
   });
 
   it('keeps paging in the viewer after a delete without skipping shifted assets', async () => {
@@ -1189,3 +1208,60 @@ describe('GalleryPage memory', () => {
     expect(target.querySelector('[data-testid="gallery-placeholders"]')).not.toBeNull();
   });
 });
+
+describe('GalleryPage with audio', () => {
+  const reply = (assets: GalleryAsset[]) => ({ assets, page: 1, total_pages: 1, total_count: assets.length });
+
+  it('offers Audio only in the media filter and asks the server for audio', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([makeAudioAsset()]));
+    mountPage();
+    await settle();
+    const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+
+    expect(optionLabels(filterSelect)).toEqual(['All media', 'Images only', 'Videos only', 'Audio only']);
+    pickOption(filterSelect, 'audio');
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'audio', 'newest');
+    expect(filterSelect.dataset.value).toBe('audio');
+  });
+
+  it('lists takes as audio tiles beside the images, and a file without settings as the no-settings tile', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([makeAssetForAudioPage(), makeAudioAsset(), makeSpeechAsset(), makeImportedAudio()]));
+    mountPage();
+    await settle();
+
+    const covers = Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-cover"]'));
+    expect(covers.map((cover) => cover.dataset.bare)).toEqual(['false', 'false', 'true']);
+    expect(target.querySelectorAll('img')).toHaveLength(1);
+    expect(target.textContent).toContain('audio · no settings');
+  });
+
+  it('sends a take as the audio track to the Video tab, from 0 s', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([makeAudioAsset()]));
+    mountPage();
+    await settle();
+    (target.querySelector('button[aria-label="More actions for song.flac"]') as HTMLButtonElement).click();
+    flushSync();
+
+    (document.querySelector('[role="menu"] [data-action="use-audio-track"]') as HTMLButtonElement).click();
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'txt2vid', audio_track_path: '/outputs/out/song.flac', audio_track_start: '0', use_as: 'audio_track' });
+  });
+
+  it('sends a speech take as the voice to the Speech tab, with its text', async () => {
+    galleryApiMocks.getGallery.mockResolvedValue(reply([makeSpeechAsset()]));
+    mountPage();
+    await settle();
+    (target.querySelector('button[aria-label="More actions for speech.flac"]') as HTMLButtonElement).click();
+    flushSync();
+
+    (document.querySelector('[role="menu"] [data-action="use-voice"]') as HTMLButtonElement).click();
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'speech', voice_path: '/outputs/out/speech.flac', voice_text: 'Welcome back to the workshop.', use_as: 'voice' });
+  });
+});
+
+function makeAssetForAudioPage(): GalleryAsset {
+  return makeAsset({ id: 'img.png', filename: 'img.png' });
+}

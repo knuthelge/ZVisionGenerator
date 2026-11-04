@@ -12,9 +12,9 @@ Recipes for common changes. Each lists where the change goes and what has to mov
 
 ## Add a CLI flag
 
-1. Add the argument in `image_cli._build_parser()` or `video_cli._build_video_parser()`. Flags shared by both, such as the enhance flags, go in `enhance_cli.py`.
+1. Add the argument in `image_cli._build_parser()`, `video_cli._build_video_parser()` or `audio_cli._build_audio_parser()`. Flags shared by both, such as the enhance flags, go in `enhance_cli.py`.
 2. Carry it through to where it's used. If it changes which stages run, see [Add a workflow stage](#add-a-workflow-stage).
-3. If the Web UI has the same setting, keep the two in step: the form, the job arguments in `web/server.py`, and the command the Web UI copies (`frontend/src/lib/state/cliCommand.ts`).
+3. If the Web UI has the same setting, keep the two in step: the form, the job arguments in `web/server.py`, and the command the Web UI copies (`frontend/src/lib/state/cliCommand.ts`). The audio commands are checked against `tests/fixtures/audio_cli_cases.json`, which both the Python and the Vitest tests read.
 4. Test the parser option and the behavior.
 5. Add it to the [command reference](../cli/reference.md), and to a how-to page if it's something people do. A test fails when a flag is missing from the reference.
 
@@ -45,7 +45,8 @@ No stage loads the prompt enhancer: work that must happen before the model loads
 1. Add the alias to `model_aliases` in `config.yaml`: a repo, or a map per platform. Point at the upstream repo when it is ungated, otherwise at a mirror whose weights match upstream's sha256.
 2. Add `model_labels.<alias>.name`, and for an image model `download_size_label` per platform, read from a dry-run download plan against an empty cache.
 3. For a repo whose family can't be detected offline, add it to `model_alias_families`.
-4. Update the [Models](../concepts/models.md) page, and `CHANGELOG.md`.
+4. Add a record, free licences included, to `zvisiongenerator/utils/licences.yaml`, or add the alias to the `models` of the record that covers it. A URL points to the licensor's original repository: a licence file pinned to a commit, or its model page when the repository is gated or has no licence file. Optional `attribution` holds a credit line the licence requires. `make check` fails on a record that names a model that does not exist, a model that has no record, or a URL that is neither pinned nor a model page.
+5. Update the [Models](../concepts/models.md) page (its Licences table lists every record), and `CHANGELOG.md`.
 
 ## Add a model family
 

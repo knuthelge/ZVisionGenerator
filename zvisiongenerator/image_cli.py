@@ -25,9 +25,11 @@ from zvisiongenerator.utils.model_files import cached_snapshot_dirs
 from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, model_display_name, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
+from zvisiongenerator.utils.licences import MATTE_LICENCE_MODEL
 from zvisiongenerator.utils.lora import resolve_lora_references
-from zvisiongenerator.downloads import describe_refusal
-from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
+from zvisiongenerator.downloads import describe_refusal, image_plan, matte_plan
+from zvisiongenerator.licence_cli import print_licence_notice
+from zvisiongenerator.utils.paths import canonical_model_name, get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.prompt_enhance import image_enhance_entries
 from zvisiongenerator.utils.references import check_reference_count, check_reference_files, parse_reference_paths
@@ -95,7 +97,7 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
         "--transparent",
         action="store_true",
         default=False,
-        help="Cut the subject out and save a PNG with transparency. Non-commercial: the cut-out models were trained on research datasets that don't allow commercial use.",
+        help="Cut the subject out and save a PNG with transparency. Non-commercial: the cut-out models were trained on research-only datasets, so commercial use is not cleared.",
     )
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="Path to a start image for img2img.")
     parser.add_argument("--image-strength", dest="image_strength", type=float, default=0.5, help="Denoising strength for the start image (0.0–1.0). Default: 0.5.")
@@ -221,8 +223,10 @@ def main(*, prog: str = "ziv-image") -> None:
 
     if args.model is None:
         parser.error("--model is required. Provide a model name, path, or HuggingFace repo ID.")
-    picked_model = args.model
-    args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    # A repo id that is an alias's repo runs as that alias: it gets the alias's licence notice and is recorded under its name.
+    picked_model = canonical_model_name(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    args.model_name = picked_model
+    args.model = resolve_model_path(picked_model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
 
     lora_paths, lora_weights = None, None
     if args.lora is not None:
@@ -352,6 +356,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         label = model_display_name(config, picked_model)
         try:
+            print_licence_notice(picked_model, lambda: image_plan(args.model, family=model_info.family, config=config, platform_key=sys.platform))
             built = ensure_built_model(
                 args.model,
                 config,
@@ -366,6 +371,7 @@ def main(*, prog: str = "ziv-image") -> None:
             return
         if args.transparent:
             try:
+                print_licence_notice(MATTE_LICENCE_MODEL, matte_plan)
                 _fetch_matte_models()
             except Exception as e:  # noqa: BLE001 - the Hub client raises its own error types; any failure stops the run before a model loads
                 logger.exception("Failed to download the background removal models")

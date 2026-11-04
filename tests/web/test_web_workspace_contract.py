@@ -14,7 +14,16 @@ from zvisiongenerator.core.video_family import VideoCapabilities
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.workspace_api import _build_video_bootstrap_defaults
-from zvisiongenerator.web.workspace_contract import AUDIO_TRACK_CONTROLS, CANONICAL_WORKFLOW_VALUES, END_FRAME_CONTROLS, WORKFLOW_DEFINITIONS, hidden_video_controls
+from zvisiongenerator.web.workspace_contract import (
+    AUDIO_TRACK_CONTROLS,
+    AUDIO_WORKFLOW_VALUES,
+    CANONICAL_WORKFLOW_VALUES,
+    END_FRAME_CONTROLS,
+    WORKFLOW_DEFINITIONS,
+    default_workflow_for_mode,
+    hidden_video_controls,
+    workflow_mode,
+)
 
 _UPSCALE_CONTROLS = ["video_upscale_enabled", "video_upscale_factor", "video_upscale_review"]
 _END_CONTROLS = ["end_image", "end_image_clear", "end_image_path"]
@@ -24,6 +33,16 @@ _TRACK_CONTROLS = ["audio_track", "audio_track_path", "audio_track_start"]
 def _web_config(config: dict | None = None) -> SimpleNamespace:
     config = config if config is not None else load_packaged_config()
     return SimpleNamespace(app_config=config, video_ratios=tuple(config["video_sizes"]), video_size_options={ratio: tuple(sizes) for ratio, sizes in config["video_sizes"].items()})
+
+
+# ---------------------------------------------------------------------------
+# the media mode of a workflow
+# ---------------------------------------------------------------------------
+
+
+def test_image_and_video_have_their_own_default_workflow() -> None:
+    assert [default_workflow_for_mode(mode) for mode in ("image", "video")] == ["txt2img", "txt2vid"]
+    assert workflow_mode(AUDIO_WORKFLOW_VALUES[0]) == "audio"
 
 
 # ---------------------------------------------------------------------------

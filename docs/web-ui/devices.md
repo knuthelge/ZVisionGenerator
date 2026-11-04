@@ -57,7 +57,7 @@ The menu at the top left opens the other pages. Menus, dialogs and sheets close 
 
 ### Images on a phone
 
-One **Images** chip in the strip stands for every image the run uses. Its value says what **Generate** will use, such as *pond.png · 2 references* in **Image** or *dawn.png → dusk.png* in **Video**, or *None*. It is not shown on a model that can use no image, or in **Extend Video**.
+One **Images** chip in the strip stands for every image the run uses. Its value says what **Generate** will use, such as *pond.png · 2 references* in **Image** or *dawn.png → dusk.png* in **Video**, or *None*. It is not shown on a model that can use no image, or in the **Extend** kind of **Video**.
 
 Tap it to open one popover with the same groups as the Settings pane on a computer:
 
@@ -70,7 +70,15 @@ A missing image is marked in red in its group, and the chip shows a warning mark
 
 ### The audio track on a phone
 
-A **Track** chip after **Images** (after **Source** in **Extend Video**) opens the [audio track](workspace.md#audio-track) in a popover. It reads *none*, *on*, or the **Start at** time. A voice memo from your phone works as a file.
+A **Track** chip after **Images** (after **Source** in the **Extend** kind) opens the [audio track](workspace.md#audio-track) in a popover. It reads *none*, *on*, or the **Start at** time. A voice memo from your phone works as a file.
+
+### Video on a phone
+
+The workflow menu in the top strip has **Image**, **Video** and **Audio**. In **Video**, the first chip is **Kind**: **New** or **Extend**. In **Extend**, **Source** takes the place of **Images**. Each kind keeps its own inputs when you switch.
+
+### Audio on a phone
+
+**Audio** is the third choice in the workflow menu. The chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**; see [The Audio tab](workspace.md#the-audio-tab) for what each does. The finished take is a player on the preview, and its **⋯** button opens the same menu as an image's, with **Use as** → **Audio track** and **Voice**.
 
 ### The viewer on a phone
 

@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { GalleryPage, JobContext, UpscaleFactor, UpscaleMethod } from '$lib/types';
+import type { GalleryPage, JobContext, JobDownloadPlan, UpscaleFactor, UpscaleMethod } from '$lib/types';
 
 export function getGallery(page: number = 1, filter?: string, sortOrder?: string): Promise<GalleryPage> {
   const params = new URLSearchParams({ page: String(page) });
@@ -15,4 +15,14 @@ export function deleteAsset(assetId: string): Promise<void> {
 /** Queue a job that upscales an existing image; resolves to the job, like a generate. */
 export function submitUpscale(assetId: string, factor: UpscaleFactor, method: UpscaleMethod): Promise<JobContext> {
   return api.post<JobContext>('/api/upscale', { asset_id: assetId, factor, method });
+}
+
+/** What `submitUpscale` of the same file would download: the missing models, their sizes and the free space. */
+export function planUpscale(assetId: string, factor: UpscaleFactor, method: UpscaleMethod): Promise<JobDownloadPlan> {
+  return api.post<JobDownloadPlan>('/api/upscale/plan', { asset_id: assetId, factor, method });
+}
+
+/** The waveform peaks (100 values, 0 to 255) of an audio file; the server decodes the file on the first request only. */
+export function getAudioPeaks(assetId: string): Promise<number[]> {
+  return api.get<{ id: string; peaks: number[] }>(`/api/gallery-peaks?id=${encodeURIComponent(assetId)}`).then((reply) => reply.peaks);
 }

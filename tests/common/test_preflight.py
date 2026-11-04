@@ -10,13 +10,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests._factories import make_extend_source
+from tests._licences import use_licences
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSource
+from zvisiongenerator.downloads import DownloadTarget
 from zvisiongenerator.utils.config import load_config, video_family
 from zvisiongenerator.preflight import _iteration_context, _job_context, plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.licences import NOTICE_HEADER
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, entry_scene, resolve_enhance_ceiling
 from zvisiongenerator.utils.prompt_enhance_video import CONTINUE_NATURALLY
 
@@ -796,3 +799,43 @@ class TestPreflightEvents:
         assert {"job_paused", "prompt_enhance_failed", "preflight_finished"} <= set(_types(events))
         for event in events:
             assert not {"eta_secs", "avg_secs", "elapsed_secs"} & event.keys()
+
+
+class TestEnhancerLicenceNotice:
+    """The CLI (no download hook) names the enhancer tier's terms before its first download."""
+
+    _RECORD = {"enhancer-apache": {"name": "Test Licence", "supplier": "Test Lab", "summary": "Free to use", "url": f"https://example.com/{'a' * 40}/LICENSE", "models": ["enhancer-fast"]}}
+    _TARGET = DownloadTarget("a/b", None, None)
+
+    @pytest.fixture(autouse=True)
+    def _records(self, monkeypatch, tmp_path):
+        use_licences(monkeypatch, tmp_path, self._RECORD)
+
+    def _notice(self, monkeypatch, capsys, *, present, **kwargs):
+        monkeypatch.setattr("zvisiongenerator.preflight.enhancer_plan", lambda repo, revision: (self._TARGET,))
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: present)
+        _run(**kwargs)
+        return capsys.readouterr().out
+
+    def test_missing_enhancer_files_print_the_terms_before_the_download(self, monkeypatch, capsys):
+        out = self._notice(monkeypatch, capsys, present=False)
+
+        assert NOTICE_HEADER in out and "Test Licence" in out
+
+    def test_a_downloaded_enhancer_prints_nothing(self, monkeypatch, capsys):
+        assert "Test Licence" not in self._notice(monkeypatch, capsys, present=True)
+
+    def test_a_job_with_a_download_hook_prints_nothing(self, monkeypatch, capsys):
+        out = self._notice(monkeypatch, capsys, present=False, ensure_downloads=lambda repo, revision: True)
+
+        assert "Test Licence" not in out
+
+    def test_a_job_that_rewrites_nothing_prints_nothing(self, monkeypatch, capsys):
+        out = self._notice(monkeypatch, capsys, present=False, args=_args(enhance=None))
+
+        assert "Test Licence" not in out
+
+    def test_a_custom_enhancer_model_has_no_record(self, monkeypatch, capsys):
+        out = self._notice(monkeypatch, capsys, present=False, args=_args(enhance_model="other/model"))
+
+        assert "Test Licence" not in out

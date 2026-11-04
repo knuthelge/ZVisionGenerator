@@ -44,7 +44,8 @@ describe('AssetViewer', () => {
   beforeEach(() => localStorage.clear());
 
   function mountViewer(props: Record<string, unknown>): void {
-    page = mountComponent(AssetViewer, { assets: [makeAsset(), assetB], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn(), ...props });
+    const assets = (props.assets as GalleryAsset[] | undefined) ?? [makeAsset(), assetB];
+    page = mountComponent(AssetViewer, { assets, currentId: assets[0]?.id ?? null, open: true, onclose: vi.fn(), onnavigate: vi.fn(), ...props });
   }
 
   function button(label: string): HTMLButtonElement | null {
@@ -57,7 +58,7 @@ describe('AssetViewer', () => {
     expect(button('Next asset')?.disabled).toBe(false);
 
     await page.unmount();
-    mountViewer({ currentIndex: 1 });
+    mountViewer({ currentId: assetB.id });
     expect(button('Previous asset')?.disabled).toBe(false);
     expect(button('Next asset')?.disabled).toBe(true);
   });
@@ -134,7 +135,7 @@ describe('AssetViewer', () => {
     const onreuse = vi.fn();
     const onreference = vi.fn();
     const ondelete = vi.fn();
-    mountViewer({ currentIndex: 1, onreuse, onreference, ondelete });
+    mountViewer({ currentId: assetB.id, onreuse, onreference, ondelete });
 
     (document.querySelector('[data-action="reuse"]') as HTMLButtonElement).click();
     expect(onreuse).toHaveBeenCalledWith(assetB);
@@ -186,27 +187,51 @@ describe('AssetViewer', () => {
     expect(onreference).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 'reference');
   });
 
-  it('stays on the nearest asset when the list shrinks and closes when it empties', async () => {
+  it('stays on the nearest asset when the open one leaves the list and closes when it empties', async () => {
     const onclose = vi.fn();
-    mountViewer({ currentIndex: 5, onclose });
+    const onnavigate = vi.fn();
+    const props = reactiveProps({ assets: [makeAsset(), assetB], currentId: assetB.id, open: true, onclose, onnavigate });
+    page = mountComponent(AssetViewer, props);
     expect(document.querySelector('#asset-viewer-title')?.textContent).toBe('asset-b.png');
 
-    await page.unmount();
-    mountViewer({ assets: [], onclose });
+    props.assets = [makeAsset()];
+    flushSync();
+    expect(document.querySelector('#asset-viewer-title')?.textContent).toBe('asset-a.png');
+    expect(onnavigate).toHaveBeenLastCalledWith(0);
+
+    props.assets = [];
     flushSync();
     expect(onclose).toHaveBeenCalled();
     expect(document.querySelector('[data-testid="asset-viewer"]')).toBeNull();
   });
 
+  it('keeps the open asset when others land before or after it', () => {
+    const props = reactiveProps({ assets: [makeAsset(), assetB], currentId: assetB.id, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    page = mountComponent(AssetViewer, props);
+    const title = () => document.querySelector('#asset-viewer-title')?.textContent;
+    const counter = () => document.querySelector('.viewer-title small')?.textContent;
+    expect(counter()).toContain('2 of 2');
+
+    props.assets = [makeAsset({ id: 'out/new.png', filename: 'new.png' }), makeAsset(), assetB];
+    flushSync();
+    expect(title()).toBe('asset-b.png');
+    expect(counter()).toContain('3 of 3');
+
+    props.assets = [...props.assets as GalleryAsset[], makeAsset({ id: 'out/older.png', filename: 'older.png' })];
+    flushSync();
+    expect(title()).toBe('asset-b.png');
+    expect(counter()).toContain('3 of 4');
+  });
+
   it('lists every asset in the thumbnail strip and asks for more near the end', async () => {
     const many = Array.from({ length: 30 }, (_, i) => makeAsset({ id: `out/${i}.png`, url: `/media/out/${i}.png`, filename: `${i}.png` }));
     const onnearend = vi.fn();
-    mountViewer({ assets: many, currentIndex: 10, onnearend });
+    mountViewer({ assets: many, currentId: many[10].id, onnearend });
     expect(document.querySelectorAll('[data-film-index]')).toHaveLength(30);
     expect(onnearend).not.toHaveBeenCalled();
 
     await page.unmount();
-    mountViewer({ assets: many, currentIndex: 28, onnearend });
+    mountViewer({ assets: many, currentId: many[28].id, onnearend });
     expect(onnearend).toHaveBeenCalled();
   });
 
@@ -219,7 +244,7 @@ describe('AssetViewer', () => {
 
   it.each(['Delete', 'Backspace'])('deletes the shown asset with %s', (key) => {
     const ondelete = vi.fn();
-    mountViewer({ currentIndex: 1, ondelete });
+    mountViewer({ currentId: assetB.id, ondelete });
     expect(press(key).defaultPrevented).toBe(true);
     expect(ondelete).toHaveBeenCalledWith(assetB, { confirm: true });
   });
@@ -259,7 +284,7 @@ describe('AssetViewer', () => {
   it('jumps to the first and last asset with Home and End', () => {
     const many = Array.from({ length: 5 }, (_, i) => makeAsset({ id: `out/${i}.png`, filename: `${i}.png` }));
     const onnavigate = vi.fn();
-    mountViewer({ assets: many, currentIndex: 2, onnavigate });
+    mountViewer({ assets: many, currentId: many[2].id, onnavigate });
     press('End');
     expect(onnavigate).toHaveBeenLastCalledWith(4);
     press('Home');
@@ -394,7 +419,7 @@ describe('AssetViewer', () => {
   });
 
   it('takes the shortcut list down with it when the viewer closes, leaving no layer behind', () => {
-    const props = reactiveProps({ assets: [makeAsset(), assetB], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    const props = reactiveProps({ assets: [makeAsset(), assetB], currentId: 'out/asset-a.png', open: true, onclose: vi.fn(), onnavigate: vi.fn() });
     page = mountComponent(AssetViewer, props);
     press('?', { shiftKey: true });
     expect(document.querySelector('#asset-viewer-shortcuts')).not.toBeNull();
@@ -602,7 +627,7 @@ describe('AssetViewer', () => {
     const checkered = (selector: string) => document.querySelector(selector)?.classList.contains('ui-checkerboard');
 
     it('sits behind the main image and the stand-in of a transparent asset, on the images themselves', () => {
-      mountViewer({ assets: [cutOut('a'), opaque], currentIndex: 0 });
+      mountViewer({ assets: [cutOut('a'), opaque], currentId: 'out/a.png' });
       expect(document.querySelector<HTMLElement>('.viewer-media')?.dataset.transparent).toBe('true');
       expect(checkered('.viewer-media')).toBe(true);
       expect(document.querySelector<HTMLElement>('.viewer-standin')?.dataset.transparent).toBe('true');
@@ -610,14 +635,14 @@ describe('AssetViewer', () => {
     });
 
     it('leaves an opaque asset without it', () => {
-      mountViewer({ assets: [cutOut('a'), opaque], currentIndex: 1 });
+      mountViewer({ assets: [cutOut('a'), opaque], currentId: opaque.id });
       expect(document.querySelector<HTMLElement>('.viewer-media')?.dataset.transparent).toBe('false');
       expect(checkered('.viewer-media')).toBe(false);
       expect(checkered('.viewer-standin')).toBe(false);
     });
 
     it('marks only the transparent thumbnails in the filmstrip', () => {
-      mountViewer({ assets: [cutOut('a'), opaque, cutOut('b')], currentIndex: 1 });
+      mountViewer({ assets: [cutOut('a'), opaque, cutOut('b')], currentId: opaque.id });
       const states = Array.from(document.querySelectorAll<HTMLImageElement>('.viewer-film img')).map((img) => img.classList.contains('ui-checkerboard'));
       expect(states).toEqual([true, false, true]);
     });
@@ -625,7 +650,7 @@ describe('AssetViewer', () => {
     it('marks the neighbours waiting beside the shown asset in the touch layer', () => {
       touch.coarse = true;
       try {
-        mountViewer({ assets: [cutOut('a'), opaque, cutOut('b')], currentIndex: 1 });
+        mountViewer({ assets: [cutOut('a'), opaque, cutOut('b')], currentId: 'out/plain.png' });
         const prev = document.querySelector('.viewer-pane-prev .viewer-neighbour');
         const next = document.querySelector('.viewer-pane-next .viewer-neighbour');
         expect(prev?.classList.contains('ui-checkerboard')).toBe(true);
@@ -643,7 +668,7 @@ describe('AssetViewer', () => {
       const origin = document.createElement('button');
       document.body.appendChild(origin);
       try {
-        mountViewer({ assets: [cutOut('a'), opaque], currentIndex: 0, origin });
+        mountViewer({ assets: [cutOut('a'), opaque], currentId: 'out/a.png', origin });
         const flight = document.querySelector<HTMLElement>('[data-testid="viewer-flight"]');
         expect(flight?.dataset.transparent).toBe('true');
         expect(flight?.classList.contains('ui-checkerboard')).toBe(true);
@@ -661,7 +686,7 @@ describe('AssetViewer', () => {
       const origin = document.createElement('button');
       document.body.appendChild(origin);
       try {
-        mountViewer({ assets: [opaque, cutOut('a')], currentIndex: 0, origin });
+        mountViewer({ assets: [opaque, cutOut('a')], currentId: opaque.id, origin });
         const flight = document.querySelector<HTMLElement>('[data-testid="viewer-flight"]');
         expect(flight).not.toBeNull();
         expect(flight?.dataset.transparent).toBe('false');

@@ -19,6 +19,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("ZIV_UI_ALLOWED_HOSTS", "testserver")
 # Entry points start the error log; keep tests from writing ~/.ziv/logs or replacing exception hooks.
 os.environ.setdefault("ZIV_LOG", "off")
+# Hide the GPU from the whole run, xdist workers and subprocesses included (they inherit the environment). Some vendored packages
+# open a CUDA context at import time (SeedVR2 probes bfloat16 on cuda:0), so a mocked test would otherwise take GPU memory, and
+# every worker would take its own. Assigned, not defaulted: a developer's own CUDA_VISIBLE_DEVICES must not let a test back in.
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -28,16 +32,16 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_web_download_planning(request, monkeypatch):
-    """Plan no downloads in the web runner (``None`` = cannot plan), so no web job test reaches Hugging Face through a planner.
+    """Plan no downloads for web jobs (``None`` = cannot plan), so no web job test reaches Hugging Face through a planner.
 
     Tests install the planners they need after this runs; ``@pytest.mark.real_download_plans`` keeps the real ones.
     """
     if request.node.get_closest_marker("real_download_plans"):
         return
-    from zvisiongenerator.web import web_runner
+    from zvisiongenerator.web import job_downloads
 
     for name in ("image_plan", "video_plan", "seedvr2_plan", "enhancer_plan"):
-        monkeypatch.setattr(web_runner, name, lambda *_a, **_kw: None)
+        monkeypatch.setattr(job_downloads, name, lambda *_a, **_kw: None)
 
 
 @pytest.fixture(autouse=True)
@@ -99,6 +103,16 @@ def _no_hub_downloads(monkeypatch):
     yield
     if calls:
         pytest.fail("Test reached the Hugging Face Hub unmocked: " + ", ".join(calls), pytrace=False)
+
+
+@pytest.fixture
+def torch_flags_guard():
+    """Put the process-wide PyTorch flags back after a test that sets them."""
+    from zvisiongenerator.utils.torch_flags import capture_torch_flags, restore_torch_flags
+
+    saved = capture_torch_flags()
+    yield
+    restore_torch_flags(saved)
 
 
 @pytest.fixture

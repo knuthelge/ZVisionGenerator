@@ -33,13 +33,25 @@ describe('TopStrip', () => {
     expect(onmenu).toHaveBeenCalledOnce();
 
     const select = target.querySelector('[role="combobox"][aria-label="Workflow"]') as HTMLButtonElement;
-    expect(optionValues(select)).toEqual(['image', 'video', 'extend']);
+    expect(optionValues(select)).toEqual(['image', 'video']);
     pickOption(select, 'video');
     expect(draft.state.workflow).toBe('txt2vid');
 
     expect(target.querySelector('[data-testid="strip-status"]')?.textContent).toContain('Ready');
     expect(target.querySelector('button[aria-label="Gallery"]')).not.toBeNull();
     expect(target.querySelector('button[aria-label="Back to the Workspace"]')).toBeNull();
+  });
+
+  it('offers Audio as the third workflow when the contract lists an audio kind, and opens it on the kind it was left on', () => {
+    app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', workflows: ['txt2img', 'img2img', 'img2vid', 'txt2vid', 'extend', 'music', 'speech', 'sound'], onmenu: vi.fn() } }));
+    draft.update('audioKind', 'speech');
+
+    const select = target.querySelector('[role="combobox"][aria-label="Workflow"]') as HTMLButtonElement;
+    expect(optionValues(select)).toEqual(['image', 'video', 'audio']);
+    pickOption(select, 'audio');
+
+    expect(draft.state.workflow).toBe('speech');
+    expect(target.querySelector('[role="combobox"][aria-label="Workflow"]')?.textContent).toContain('Audio');
   });
 
   it('scrolls the page to its top when its title is tapped', () => {

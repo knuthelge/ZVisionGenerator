@@ -10,7 +10,7 @@ from zvisiongenerator.utils.h3_preset import HubFiles
 from zvisiongenerator.utils.model_files import cached_snapshot_dirs
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
-__all__ = ["pack_for_reference", "snapshot_download", "snapshot_with"]
+__all__ = ["cached_snapshot", "pack_for_reference", "snapshot_download", "snapshot_with"]
 
 
 def snapshot_download(**kwargs: Any) -> str:
@@ -20,11 +20,16 @@ def snapshot_download(**kwargs: Any) -> str:
     return hub_snapshot_download(**kwargs)
 
 
+def cached_snapshot(files: HubFiles) -> Path | None:
+    """Return the cached snapshot folder that holds all of *files*, or ``None`` when no cached snapshot does."""
+    return next((snapshot for snapshot in cached_snapshot_dirs(files.repo_id, files.revision) if all((snapshot / name).is_file() for name in files.files)), None)
+
+
 def snapshot_with(files: HubFiles, download: Callable[..., str]) -> Path:
     """Return the snapshot folder that holds all of *files*: a cached one, else a fresh download of just those files."""
-    for snapshot in cached_snapshot_dirs(files.repo_id, files.revision):
-        if all((snapshot / name).is_file() for name in files.files):
-            return snapshot
+    cached = cached_snapshot(files)
+    if cached is not None:
+        return cached
     return Path(download(repo_id=files.repo_id, revision=files.revision, allow_patterns=list(files.files)))
 
 

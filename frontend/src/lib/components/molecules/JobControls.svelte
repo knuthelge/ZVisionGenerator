@@ -39,7 +39,6 @@
   function text(action: JobControlAction): string {
     if (action === 'resume') return 'Resume';
     if (action === 'quit' && cancelArmed) return 'Cancel job';
-    if (action === 'pause' && pending === 'pause') return 'Pausing';
     return '';
   }
 
@@ -60,7 +59,7 @@
   ><Icon name={ICONS[action]} size={14} />{text(action)}<kbd class="ui-kbd">{CONTROL_KEYS[action]}</kbd></button>
 {/snippet}
 
-<span class="job-controls" role="group" aria-label={label}>
+<span class="job-controls" class:armed={cancelArmed} role="group" aria-label={label}>
   {#each main as action (action === 'resume' ? 'pause' : action)}{@render button(action)}{/each}
   {#if main.length && hasQuit}<span class="job-controls-divider" aria-hidden="true"></span>{/if}
   {#if hasQuit}{@render button('quit')}{/if}

@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ActiveJobState } from '$lib/types';
+import { auroraNote, auroraProgress, MUSIC_PHASES } from '$lib/components/molecules/audioAurora';
+import type { ActiveJobState, AudioWorkflow } from '$lib/types';
 import { downloadFromEvent, trackJobEvent } from './jobPhases';
 import {
-  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, finishingText, formatClock, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, isVideoUpscale, itemActivity, itemFraction, iterations, itemNoun,
+  activeDownload, AUDIO_FIELD_LABELS, audioFraction, audioRows, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, finishingText, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, isVideoUpscale, itemActivity, itemFraction, iterations, itemNoun,
   jobBar, jobControls, jobTone, livePreviewNote, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
   reviewVideoUrl, stageBars, stepUnit, timeLeft
 } from './jobView';
+import { formatClock } from './clock';
 
 const IMAGE_CONTROLS = ['next', 'pause', 'resume', 'repeat', 'quit'];
 
@@ -530,5 +532,142 @@ describe('failureToastText', () => {
   it('still says the next queued job starts when a reason is shown', () => {
     expect(failureToastText('Out of memory', true)).toMatch(/next queued job/);
     expect(failureToastText('Out of memory.', true)).not.toContain('..');
+  });
+});
+
+describe('an audio job', () => {
+  const take = (overrides: Partial<ActiveJobState> = {}) => job({ workflow: 'music', media_type: 'audio', currentStep: 0, totalSteps: 0, ...overrides });
+  const progress = (phase: string, step: number, total: number | null, part = 1, parts = 1) => ({ phase, step, total, part, parts });
+  const speech = (audio: ActiveJobState['audio'], overrides: Partial<ActiveJobState> = {}) => take({ workflow: 'speech', audio, ...overrides });
+  const sound = (audio: ActiveJobState['audio'], overrides: Partial<ActiveJobState> = {}) => take({ workflow: 'sound', audio, ...overrides });
+  const states = (state: ActiveJobState) => audioRows(state).map((row) => row.state);
+
+  it('lists the phases of a song as rows, and speech and a sound as one row', () => {
+    expect(states(take())).toEqual(['current', 'next', 'next', 'next']);
+    expect(states(speech(null))).toEqual(['current']);
+    expect(states(sound(null))).toEqual(['current']);
+    expect(audioRows(job())).toEqual([]);
+  });
+
+  it('marks the finished phases of a song and gives the current one its percentage when it has a total', () => {
+    const rows = audioRows(take({ audio: progress('Synthesis', 5, 8) }));
+
+    expect(rows.map((row) => row.state)).toEqual(['done', 'done', 'current', 'next']);
+    expect(rows[2]).toMatchObject({ percent: 63 });
+  });
+
+  it('measures the writing of a song in time, which has no total, and counts nothing while it plans', () => {
+    const [plan, writing] = audioRows(take({ audio: progress('Song tokens', 25 * 75, null) }));
+
+    expect(plan.state).toBe('done');
+    expect(writing).toMatchObject({ state: 'current', percent: null });
+    expect(writing.text).toContain('1:15');
+    expect(audioRows(take({ audio: progress('Plan', 125, null) }))[0]).toMatchObject({ text: 'Planning', percent: null });
+  });
+
+  it('names each phase of a song alike on the card and in the strip', () => {
+    for (const { id, label } of MUSIC_PHASES) {
+      const current = audioRows(take({ audio: progress(id, 10, null) })).find((row) => row.state === 'current');
+      expect(current?.text.startsWith(label)).toBe(true);
+      expect(auroraNote('music', progress(id, 10, null)).startsWith(label)).toBe(true);
+    }
+  });
+
+  it('keeps the bar of a song\'s decode moving, whatever step count it reports', () => {
+    expect(audioRows(take({ audio: progress('Decode', 0, 1) }))[3]).toMatchObject({ state: 'current', percent: null });
+    expect(audioRows(take({ audio: progress('Decode', 1, 1) }))[3]).toMatchObject({ state: 'current', percent: null });
+  });
+
+  it('never counts steps from zero while the decode runs, or when a phase has no total', () => {
+    const texts = [
+      audioRows(take({ audio: progress('Decode', 0, null) }))[3],
+      audioRows(take({ audio: progress('Synthesis', 0, null) }))[2],
+      audioRows(sound(progress('Decode', 0, null)))[0],
+      audioRows(sound(progress('Sampling', 0, null)))[0],
+    ].map((row) => row.text);
+
+    for (const text of texts) expect(text).not.toMatch(/step 0/i);
+  });
+
+  it('shows a sound as one step line, then as finishing at 100% once it is decoding', () => {
+    expect(audioRows(sound(progress('Sampling', 5, 8)))[0]).toMatchObject({ percent: 63 });
+    expect(audioRows(sound(progress('Sampling', 5, 8)))[0].text).toContain('5 of 8');
+    expect(audioRows(sound(progress('Decode', 0, 1)))[0]).toMatchObject({ text: finishingLabel(sound(null)), percent: 100 });
+  });
+
+  it('shows speech as one row that names the part and spans all parts', () => {
+    const [first] = audioRows(speech(progress('Speech tokens', 250, 500, 2, 4)));
+    const [decoding] = audioRows(speech(progress('Decode', 0, 1, 2, 4)));
+
+    expect(first.text).toContain('part 2 of 4');
+    expect(decoding.text).toContain('part 2 of 4');
+    expect(first.percent).toBe(Math.round(audioFraction(speech(progress('Speech tokens', 250, 500, 2, 4))) * 100));
+    expect(first.percent).toBeGreaterThan(25);
+    expect(decoding.percent).toBeGreaterThan(first.percent!);
+    expect(decoding.text).not.toBe(first.text);
+  });
+
+  it('finishes every row of a song with the take', () => {
+    expect(states(take({ audio: progress('Decode', 1, 1), itemFinished: true }))).toEqual(['done', 'done', 'done', 'done']);
+    expect(audioFraction(take({ itemFinished: true }))).toBe(1);
+  });
+
+  describe('the take\'s bar', () => {
+    const fraction = (state: ActiveJobState) => itemFraction(state);
+
+    it('is the Aurora estimate, so the bar, the segments and the strip agree', () => {
+      for (const state of [take({ audio: progress('Song tokens', 500, null) }), speech(progress('Speech tokens', 90, 500, 2, 4)), sound(progress('Sampling', 4, 8))]) {
+        expect(audioFraction(state)).toBe(auroraProgress(state.workflow as AudioWorkflow, state.audio ?? null));
+        expect(fraction(state)).toBe(audioFraction(state));
+      }
+      expect(audioFraction(take())).toBe(0);
+    });
+
+    it('never runs backwards across the parts of a speech take', () => {
+      const parts = 4;
+      const events = Array.from({ length: parts }, (_, index) => [
+        ...[0, 125, 250, 375, 500].map((step) => progress('Speech tokens', step, 500, index + 1, parts)),
+        progress('Decode', 0, 1, index + 1, parts),
+        progress('Decode', 1, 1, index + 1, parts),
+      ]).flat();
+      const bars = events.map((audio) => audioFraction(speech(audio)));
+
+      for (let i = 1; i < bars.length; i += 1) expect(bars[i]).toBeGreaterThanOrEqual(bars[i - 1]);
+      expect(bars[0]).toBe(0);
+      expect(bars[bars.length - 1]).toBeCloseTo(1);
+      expect(audioFraction(speech(events[events.length - 1], { itemFinished: true }))).toBe(1);
+    });
+
+    it('moves while a song writes its tokens, and keeps rising into the render', () => {
+      const bars = [25 * 5, 25 * 40, 25 * 120].map((step) => audioFraction(take({ audio: progress('Song tokens', step, null) })));
+
+      expect(bars[0]).toBeGreaterThan(0.06);
+      expect(bars[1]).toBeGreaterThan(bars[0]);
+      expect(bars[2]).toBeGreaterThan(bars[1]);
+      expect(audioFraction(take({ audio: progress('Synthesis', 1, 8) }))).toBeGreaterThan(bars[2]);
+    });
+
+    it('reaches 100% for a sound as its decode starts', () => {
+      expect(audioFraction(sound(progress('Sampling', 8, 8)))).toBe(1);
+      expect(audioFraction(sound(progress('Decode', 0, 1)))).toBe(1);
+      expect(audioFraction(sound(progress('Sampling', 4, 8)))).toBe(0.5);
+    });
+  });
+
+  it('labels the take\'s text by kind, and says which take is next when paused between two', () => {
+    expect(positionLabel(take({ runs: 2 }))).toBe(AUDIO_FIELD_LABELS.music);
+    expect(positionLabel(speech(null, { runs: 2 }))).toBe(AUDIO_FIELD_LABELS.speech);
+    expect(positionLabel(sound(null))).toBe(AUDIO_FIELD_LABELS.sound);
+    expect(new Set(Object.values(AUDIO_FIELD_LABELS)).size).toBe(3);
+    expect(positionLabel(take({ runs: 3, batchIndex: 0, itemFinished: true, status: 'paused', paused: true }))).toContain('take 2 of 3');
+    expect(positionLabel(take({ runs: 3, batchIndex: 0, itemFinished: true, status: 'paused', paused: true }))).not.toMatch(/run/i);
+  });
+
+  it('counts takes in the headline', () => {
+    expect(headline(take({ runs: 2 }))).toBe('Take 1 of 2');
+    expect(headline(take({ runs: 2, batchIndex: 1 }))).toBe('Take 2 of 2');
+    expect(headline(take())).toBe('Making the take');
+    expect(headline(take({ runs: 3, status: 'completed', phase: 'generate' }))).toBe('Finished 3 takes');
+    expect(headline(take({ runs: 2, status: 'failed' }))).toBe('Failed on take 1 of 2');
   });
 });

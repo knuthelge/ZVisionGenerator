@@ -8282,8 +8282,8 @@
    "sha256": "b7a8f6d0deccef4ae40d1ed716004288050b3135b779f62fd31def6ee9346f6f",
    "trigger": "yarn art style",
    "weight": 1.0,
-   "licence": "other",
-   "non_commercial": false,
+   "licence": "ideogram-4-non-commercial",
+   "non_commercial": true,
    "downloads": 38,
    "platforms": [
     "darwin",
@@ -8318,8 +8318,8 @@
    "sha256": "755a98c514241c07d2be9e60d39095143cadca3f7e03f21664ec5e53fcbb786d",
    "trigger": null,
    "weight": 0.9,
-   "licence": "other",
-   "non_commercial": false,
+   "licence": "ideogram-4-non-commercial",
+   "non_commercial": true,
    "downloads": 0,
    "platforms": [
     "darwin",

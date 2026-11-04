@@ -19,12 +19,13 @@ export const SPEC = {
 } satisfies Record<string, NumberSpec>;
 
 /**
- * The Steps bounds of a model that offers only some step counts (`[4, 8]` is 4 to 8 in steps of 4), or the usual bounds.
+ * The Steps bounds of a model: the counts it offers (`[4, 8]` is 4 to 8 in steps of 4), else the usual bounds cut at its limit.
  *
  * @param options The model's offered step counts, ascending.
+ * @param maxSteps The most steps the model runs, or null for no limit.
  */
-export function stepsSpec(options: readonly number[] | null | undefined): { step: number; min: number; max: number } {
-  if (!options || options.length === 0) return SPEC.steps;
+export function stepsSpec(options: readonly number[] | null | undefined, maxSteps: number | null = null): { step: number; min: number; max: number } {
+  if (!options || options.length === 0) return maxSteps === null ? SPEC.steps : { ...SPEC.steps, max: Math.max(SPEC.steps.min, Math.min(SPEC.steps.max, maxSteps)) };
   return { step: options.length > 1 ? options[1] - options[0] : 1, min: options[0], max: options[options.length - 1] };
 }
 

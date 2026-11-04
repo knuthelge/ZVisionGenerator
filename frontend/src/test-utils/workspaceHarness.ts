@@ -21,7 +21,7 @@ import type { WorkspaceContext } from '$lib/types';
 import { makeGalleryPage } from './workspace';
 import {
   browseApiMocks, configApiMocks, discoverApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, modelApiMocks,
-  presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, videoMemoryApiMocks, workspaceApiMocks,
+  EMPTY_JOB_PLAN, presetApiMocks, promptFileApiMocks, recentPromptsApiMocks, videoMemoryApiMocks, workspaceApiMocks,
 } from './workspaceMocks';
 
 // The timer that is real while a test fakes the debounce timers.
@@ -52,9 +52,11 @@ export function resetWorkspaceTest(): void {
   modelApiMocks.getDownloads.mockReset();
   modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
   modelApiMocks.deleteLora.mockReset();
+  modelApiMocks.getDownloadPlan.mockReset();
+  modelApiMocks.getDownloadPlan.mockResolvedValue({ label: 'Fast enhancer model', parts: [], total_bytes: 0, space: null, unchecked: false, licences: [] });
   toasts.splice(0, toasts.length);
   for (const mock of [
-    workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
+    workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.planGenerate, workspaceApiMocks.getJobSnapshot,
     galleryApiMocks.getGallery, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.checkReferencePaths, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
     videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
@@ -64,6 +66,7 @@ export function resetWorkspaceTest(): void {
   recentPromptsApiMocks.clearRecentPrompts.mockReset();
   workspaceApiMocks.clearQueue.mockClear();
   workspaceApiMocks.cancelJob.mockClear();
+  workspaceApiMocks.planGenerate.mockResolvedValue(EMPTY_JOB_PLAN);
   workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });
   workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
   workspaceApiMocks.checkReferencePaths.mockResolvedValue([]);

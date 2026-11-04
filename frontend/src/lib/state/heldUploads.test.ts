@@ -134,8 +134,8 @@ describe('heldUploads', () => {
     const get = vi.spyOn(store, 'get');
     await Promise.all([heldUploads.restore(), heldUploads.restore()]);
     await heldUploads.restore();
-    // One read per tab: Image, Video and Extend Video.
-    expect(get).toHaveBeenCalledTimes(3);
+    // One read per tab: Image, Video, Extend and Audio.
+    expect(get).toHaveBeenCalledTimes(4);
   });
 
   it('clear deletes both records, clearTab only its own', async () => {
@@ -238,5 +238,43 @@ describe('heldUploads', () => {
       expect([heldUploads.audioTrack, heldUploads.extendAudioTrack, await store.get('video'), await store.get('extend')]).toEqual([null, null, null, null]);
     });
 
+
+  describe('the voice recording of the Audio tab', () => {
+    const voice = (name: string): File => new File(['x'], name, { type: 'audio/wav' });
+
+    it('is held beside the other tabs\' uploads and persists in its own record, so it survives a visit to the Gallery', async () => {
+      const recording = voice('narrator.wav');
+      const first = file('first.png');
+      heldUploads.setStart('video', first);
+      heldUploads.setVoice(recording);
+      await heldUploads.persisted();
+
+      expect(heldUploads.voice).toBe(recording);
+      expect(await store.get('audio')).toEqual({ start: null, end: null, references: [], track: recording });
+
+      heldUploads.useStore(store);
+      expect(heldUploads.voice).toBeNull();
+      await heldUploads.restore();
+
+      expect([heldUploads.voice, heldUploads.firstFrame]).toEqual([recording, first]);
+    });
+
+    it('is forgotten with the Audio tab and by clear, and kept when another tab is cleared', async () => {
+      heldUploads.setVoice(voice('narrator.wav'));
+      heldUploads.setTrack('video', voice('video.m4a'));
+
+      heldUploads.clearTab('video');
+      expect(heldUploads.voice?.name).toBe('narrator.wav');
+
+      heldUploads.clearTab('audio');
+      await heldUploads.persisted();
+      expect([heldUploads.voice, await store.get('audio')]).toEqual([null, null]);
+
+      heldUploads.setVoice(voice('again.wav'));
+      heldUploads.clear();
+      await heldUploads.persisted();
+      expect([heldUploads.voice, await store.get('audio')]).toEqual([null, null]);
+    });
+  });
   });
 });

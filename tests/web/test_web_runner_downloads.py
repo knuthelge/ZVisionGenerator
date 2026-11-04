@@ -5,25 +5,28 @@ from __future__ import annotations
 import asyncio
 import functools
 import sys
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from tests._factories import _make_args, _make_video_args
+from tests._factories import _make_args, _make_plan, _make_video_args
 from tests._fake_process import FakeProcess, Launcher
 from tests.web._helpers import sse_payload, stub_request_job, wait_for_status
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
-from zvisiongenerator.downloads import DETACHED, READY, STOPPED, UNCHECKED, DownloadFlights, DownloadProgress, DownloadReport, DownloadTarget, TargetCheck, ensure_downloaded
+from zvisiongenerator.downloads import DETACHED, READY, STOPPED, UNCHECKED, DownloadFlights, DownloadProgress, DownloadReport, DownloadTarget, TargetCheck, ensure_downloaded, require_checked
 from zvisiongenerator.downloads.child import ChildResult, run_in_child
 from zvisiongenerator.preflight import run_preflight as _real_run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS
+from zvisiongenerator.web import job_downloads as job_downloads_module
+from zvisiongenerator.web.job_downloads import JobDownloadPart
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web.job_contract import DOWNLOADING_EVENT
 
@@ -111,10 +114,40 @@ def _downloading(index: int) -> dict:
     }
 
 
+class TestCommittedTargets:
+    def test_queued_and_running_jobs_hold_their_planned_targets_until_they_end(self, monkeypatch):
+        gate = threading.Event()
+        first_target, second_target = DownloadTarget("owner/first"), DownloadTarget("owner/second")
+
+        def held(prompts_data, config, args, **_kw):
+            gate.wait(5.0)
+            return _make_plan(prompts_data, args, config=config)
+
+        runner = _runner()
+        try:
+            stub_request_job(monkeypatch, run_preflight=held)
+            monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="info")))
+            monkeypatch.setattr(web_runner_module, "run_batch", _batch_that_completes)
+            submit = lambda target: runner.submit_image_request_job(  # noqa: E731
+                request=_image_request(model_name="atlas"), prompts_data=_PROMPTS, config={}, args=_make_args(), model_ref="owner/atlas", planned_targets=(target,)
+            )
+            first, second = submit(first_target), submit(second_target)
+
+            assert set(runner.committed_targets()) == {first_target, second_target}  # one is running, one is queued
+            gate.set()
+            wait_for_status(runner, first, "completed")
+            wait_for_status(runner, second, "completed")
+
+            assert runner.committed_targets() == ()
+        finally:
+            gate.set()
+            runner.shutdown()
+
+
 class TestJobFlow:
     def test_an_image_job_downloads_before_it_loads_and_history_keeps_the_latest_progress(self, monkeypatch):
         """SC-2: model_downloading comes before model_loading, and the history keeps only the latest, in event_id order."""
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         _fake_ensure(monkeypatch, run=_child_that_reports(3))
         runner = _runner()
         try:
@@ -132,8 +165,65 @@ class TestJobFlow:
         latest = history[types.index(DOWNLOADING_EVENT)]
         assert latest["bytes_done"] == latest["bytes_total"] == 1000  # the owned part's final report is the one kept
 
+    def test_a_job_submitted_with_its_model_part_downloads_that_part_without_planning_again(self, monkeypatch):
+        planned: list = []
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **kw: planned.append(a) or (DownloadTarget("owner/replanned"),))
+        ensured: list = []
+
+        def ensure(targets, **_kw):
+            ensured.append(tuple(targets))
+            return READY
+
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", ensure)
+        runner = _runner()
+        try:
+            stub_request_job(monkeypatch)
+            monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(name="model"), MagicMock(name="info")))
+            monkeypatch.setattr(web_runner_module, "run_batch", _batch_that_completes)
+            part = JobDownloadPart("atlas", "atlas", "model", (_TARGET,))
+            job_id = runner.submit_image_request_job(
+                request=_image_request(model_name="atlas"), prompts_data=_PROMPTS, config={}, args=_make_args(), model_ref="owner/atlas", planned_targets=(_TARGET,), model_part=part
+            )
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert planned == [] and ensured == [(_TARGET,)]
+
+    def test_a_job_submitted_without_a_model_part_plans_it_when_it_runs(self, monkeypatch):
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (DownloadTarget("owner/replanned"),))
+        ensured: list = []
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda targets, **_kw: ensured.append(tuple(targets)) or READY)
+        runner = _runner()
+        try:
+            wait_for_status(runner, _submit_image(monkeypatch, runner), "completed")
+        finally:
+            runner.shutdown()
+
+        assert ensured == [(DownloadTarget("owner/replanned"),)]
+
+    def test_a_video_job_submitted_with_its_model_part_downloads_that_part_without_planning_again(self, monkeypatch):
+        planned: list = []
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda *a, **kw: planned.append(a) or (DownloadTarget("owner/replanned"),))
+        ensured: list = []
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda targets, **_kw: ensured.append(tuple(targets)) or READY)
+        stub_request_job(monkeypatch)
+        monkeypatch.setattr(
+            web_runner_module, "run_video_batch", lambda *, progress_callback, **_kw: progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+        )
+        runner = _runner()
+        try:
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", model_name="ltx-q4")
+            part = JobDownloadPart("ltx-q4", "ltx-q4", "model", (_TARGET,))
+            job_id = runner.submit_video_request_job(request=request, prompts_data=_PROMPTS, config={}, args=_make_video_args(), model_ref="owner/ltx", model_part=part)
+            wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert planned == [] and ensured == [(_TARGET,)]
+
     def test_the_download_events_carry_the_contract_fields_and_no_generation_eta(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         seen: list[dict] = []
         _fake_ensure(monkeypatch, run=_child_that_reports(2))
         runner = _runner()
@@ -159,7 +249,7 @@ class TestJobFlow:
 
     def test_a_video_job_downloads_before_model_loading(self, monkeypatch):
         calls: list = []
-        monkeypatch.setattr(web_runner_module, "video_plan", lambda *a, **kw: (calls.append((a, kw)), (_TARGET,))[1])
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda *a, **kw: (calls.append((a, kw)), (_TARGET,))[1])
         _fake_ensure(monkeypatch, run=_child_that_reports(1))
         stub_request_job(monkeypatch)
         monkeypatch.setattr(
@@ -194,7 +284,7 @@ class TestJobFlow:
         assert "model_loading" in types
 
     def test_a_failed_download_fails_the_job_with_the_repo_in_the_message(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         _fake_ensure(monkeypatch, run=lambda _target, **_kw: ChildResult("failed", "disk full"))
         runner = _runner()
         try:
@@ -230,7 +320,7 @@ class _EnhancerHarness:
             downloaded=lambda repo, revision: self.cached,
         )
         monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, revision: True)
-        monkeypatch.setattr(web_runner_module, "enhancer_plan", lambda repo, revision: (self.planned.append((repo, revision)), (_ENHANCER_TARGET,))[1])
+        monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda repo, revision: (self.planned.append((repo, revision)), (_ENHANCER_TARGET,))[1])
         monkeypatch.setattr(web_runner_module, "run_preflight", lambda *a, **kw: _real_run_preflight(*a, session=session, release_memory=lambda: None, **kw))
 
     def child(self, steps: int = 2):
@@ -270,7 +360,7 @@ class TestEnhancerDownload:
         types = [event["type"] for event in history]
         download = history[types.index(DOWNLOADING_EVENT)]
         assert download["role"] == "enhancer"
-        assert download["model"] == "a/enhancer"
+        assert download["model"] == "Fast enhancer model"
         assert download["repo"] == "a/enhancer"
         assert download["bytes_done"] == download["bytes_total"] == 1000
         assert types.count(DOWNLOADING_EVENT) == 1
@@ -367,7 +457,7 @@ class TestEnhancerDownload:
 class TestStop:
     def test_stopping_the_owning_job_terminates_then_kills_the_child_cleans_up_and_cancels(self, monkeypatch):
         """SC-3: the owner's Stop ends the child (kill after the grace period), cleans up and reports download "stopped"."""
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         process = FakeProcess(running_polls=None, wait_timeouts=1)
         cleanup = MagicMock()
         run = functools.partial(run_in_child, popen=Launcher(process), poll_secs=0.01, grace_secs=0.01, cleanup=cleanup)
@@ -393,7 +483,7 @@ class TestStop:
         assert "model_loading" not in [event["type"] for event in events]
 
     def test_stopping_a_job_that_waits_on_another_download_detaches_and_leaves_that_download_running(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         _fake_ensure(monkeypatch, run=MagicMock(side_effect=AssertionError("the waiter must not download")))
         flights = DownloadFlights()
         owner_flight, owner = flights.claim(_TARGET)
@@ -433,7 +523,7 @@ class TestStop:
         events: list[dict] = []
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", ensure)
         try:
-            result = runner._ensure_downloads((_TARGET,), mode="image", role="model", model="m", total_iterations=3, progress_callback=events.append, control_signal=signal)
+            result = runner._ensure_downloads(JobDownloadPart("m", "m", "model", (_TARGET,)), mode="image", total_iterations=3, progress_callback=events.append, control_signal=signal)
         finally:
             runner.shutdown()
 
@@ -448,7 +538,19 @@ class TestEnsureDownloads:
         runner = _runner()
         try:
             for targets in (None, ()):
-                assert runner._ensure_downloads(targets, mode="image", role="model", model="m", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal()) is True
+                assert runner._ensure_downloads(JobDownloadPart("m", "m", "model", targets), mode="image", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal()) is True
+        finally:
+            runner.shutdown()
+
+    def test_an_unreachable_hub_ends_a_job_that_needs_the_files_on_disk(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: UNCHECKED)
+        monkeypatch.setattr(web_runner_module, "require_checked", functools.partial(require_checked, present=lambda target: False))
+        runner = _runner()
+        try:
+            with pytest.raises(RuntimeError, match="Could not reach Hugging Face to download m"):
+                runner._ensure_downloads(
+                    JobDownloadPart("m", "m", "model", (_TARGET,)), mode="audio", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal(), files_required=True
+                )
         finally:
             runner.shutdown()
 
@@ -458,7 +560,7 @@ class TestEnsureDownloads:
         events: list[dict] = []
         runner = _runner()
         try:
-            result = runner._ensure_downloads((_TARGET,), mode="video", role="model", model="m", total_iterations=4, progress_callback=events.append, control_signal=SkipSignal())
+            result = runner._ensure_downloads(JobDownloadPart("m", "m", "model", (_TARGET,)), mode="video", total_iterations=4, progress_callback=events.append, control_signal=SkipSignal())
         finally:
             runner.shutdown()
 
@@ -478,7 +580,7 @@ class TestEnsureDownloads:
         events: list[dict] = []
         runner = _runner()
         try:
-            runner._ensure_downloads((_TARGET,), mode="video", role="enhancer", model="label", total_iterations=1, progress_callback=events.append, control_signal=SkipSignal())
+            runner._ensure_downloads(JobDownloadPart("label", "label", "enhancer", (_TARGET,)), mode="video", total_iterations=1, progress_callback=events.append, control_signal=SkipSignal())
         finally:
             runner.shutdown()
 
@@ -505,7 +607,7 @@ class TestEnsureDownloads:
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, flights, **_kw: (seen.append(flights), READY)[1])
         runner = _runner(download_flights=flights)
         try:
-            runner._ensure_downloads((_TARGET,), mode="image", role="model", model="m", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal())
+            runner._ensure_downloads(JobDownloadPart("m", "m", "model", (_TARGET,)), mode="image", total_iterations=1, progress_callback=MagicMock(), control_signal=SkipSignal())
             assert runner.download_flights is flights
             assert isinstance(_runner().download_flights, DownloadFlights)
         finally:
@@ -517,7 +619,7 @@ class TestEnsureDownloads:
 class TestPlannerArguments:
     def test_the_image_job_plans_with_its_family_config_and_platform(self, monkeypatch):
         plan = MagicMock(return_value=None)
-        monkeypatch.setattr(web_runner_module, "image_plan", plan)
+        monkeypatch.setattr(job_downloads_module, "image_plan", plan)
         runner = _runner()
         try:
             job_id = _submit_image(monkeypatch, runner, config={"generation": {}})
@@ -529,7 +631,7 @@ class TestPlannerArguments:
 
     def test_the_creative_upscale_plans_the_image_model_with_the_app_config(self, monkeypatch, tmp_path):
         plan = MagicMock(return_value=None)
-        monkeypatch.setattr(web_runner_module, "image_plan", plan)
+        monkeypatch.setattr(job_downloads_module, "image_plan", plan)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
         monkeypatch.setattr(
@@ -549,7 +651,7 @@ class TestPlannerArguments:
         """A model built on first use (MOSS-Image, Ideogram 4 Instant) is built from the app config on the upscale path too."""
         calls: list = []
         config = {"moss_image": {}}
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: None)
         monkeypatch.setattr(web_runner_module, "ensure_built_model", lambda model_ref, cfg, **_kw: calls.append(("built", model_ref, cfg)) or True)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: calls.append(("load",)) or (MagicMock(), MagicMock()))
@@ -569,9 +671,11 @@ class TestPlannerArguments:
     def test_the_seedvr2_upscale_plans_its_tier_files_and_labels_the_download_with_the_tier(self, monkeypatch, tmp_path):
         upscaler = SimpleNamespace(weights=FP8_WEIGHTS)
         plan = MagicMock(return_value=(_TARGET,))
-        monkeypatch.setattr(web_runner_module, "seedvr2_plan", plan)
+        monkeypatch.setattr(job_downloads_module, "seedvr2_plan", plan)
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: upscaler)
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", lambda: upscaler)
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         _fake_ensure(monkeypatch, run=_child_that_reports(1))
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_seedvr2", lambda _engine, _name, *, on_phase, **_kw: (on_phase("loading"), MagicMock())[1])
@@ -593,7 +697,7 @@ class TestPlannerArguments:
         assert [event["type"] for event in events].index(DOWNLOADING_EVENT) < [event["type"] for event in events].index("model_loading")
 
     def test_an_upscale_stopped_while_downloading_reports_one_iteration(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: STOPPED)
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", MagicMock(side_effect=AssertionError("no load after a stopped download")))
@@ -627,11 +731,13 @@ class TestMatteDownloads:
 
     def _upscale(self, monkeypatch, tmp_path, request, *, planned=True):
         matte = MagicMock(return_value=(self._MATTE_TARGET,) if planned else None)
-        monkeypatch.setattr(web_runner_module, "matte_plan", matte)
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
-        monkeypatch.setattr(web_runner_module, "seedvr2_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "matte_plan", matte)
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "seedvr2_plan", lambda *_a, **_kw: (_TARGET,))
         monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=FP8_WEIGHTS))
+        monkeypatch.setattr(job_downloads_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=FP8_WEIGHTS))
         monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(job_downloads_module, "get_ziv_data_dir", lambda: tmp_path)
         _fake_ensure(monkeypatch, run=_child_that_reports(1))
         stub_request_job(monkeypatch)
         monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
@@ -649,8 +755,8 @@ class TestMatteDownloads:
             runner.shutdown()
 
     def test_a_transparent_image_job_downloads_the_matte_models_after_the_model(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
-        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: (self._MATTE_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: (self._MATTE_TARGET,))
         _fake_ensure(monkeypatch, run=_child_that_reports(1))
         runner = _runner()
         events = self._record_published(runner)
@@ -667,8 +773,8 @@ class TestMatteDownloads:
 
     def test_an_image_job_without_transparent_plans_no_matte_download(self, monkeypatch):
         matte = MagicMock(side_effect=AssertionError("no matte plan without transparent"))
-        monkeypatch.setattr(web_runner_module, "matte_plan", matte)
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "matte_plan", matte)
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: (_TARGET,))
         _fake_ensure(monkeypatch, run=_child_that_reports(1))
         runner = _runner()
         try:
@@ -681,8 +787,8 @@ class TestMatteDownloads:
         assert {role for role, _ in self._roles(events)} == {"model"}
 
     def test_a_transparent_image_job_with_the_models_present_publishes_no_matte_event(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
-        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: (self._MATTE_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: (self._MATTE_TARGET,))
         _fake_ensure(monkeypatch, run=_child_that_reports(1), present=lambda _t: True)
         runner = _runner()
         try:
@@ -695,8 +801,8 @@ class TestMatteDownloads:
         assert self._roles(events) == []
 
     def test_a_transparent_image_job_goes_on_when_the_matte_plan_is_unavailable_offline(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
-        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: None)
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: None)
         runner = _runner()
         try:
             job_id = _submit_image(monkeypatch, runner, request=_image_request(model_name="atlas", transparent=True))
@@ -725,8 +831,8 @@ class TestMatteDownloads:
         matte.assert_not_called()
 
     def test_a_stop_during_the_matte_download_ends_the_job_with_download_stopped(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
-        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: (self._MATTE_TARGET,))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: (self._MATTE_TARGET,))
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: STOPPED)
         run_batch = MagicMock(side_effect=AssertionError("no batch after a stopped download"))
         runner = _runner()
@@ -742,8 +848,8 @@ class TestMatteDownloads:
 
     def test_a_transparent_image_job_hands_the_batch_a_reload_that_loads_the_same_model_again(self, monkeypatch):
         """The matte room frees the model before matting and reloads it afterwards; without ``reload_model`` that guard is silently off."""
-        monkeypatch.setattr(web_runner_module, "image_plan", lambda *_a, **_kw: None)
-        monkeypatch.setattr(web_runner_module, "matte_plan", lambda: None)
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *_a, **_kw: None)
+        monkeypatch.setattr(job_downloads_module, "matte_plan", lambda: None)
         first, reloaded = MagicMock(name="first model"), MagicMock(name="reloaded model")
         load = MagicMock(side_effect=[(MagicMock(name="backend"), first, MagicMock(name="info")), (MagicMock(name="backend"), reloaded, MagicMock(name="info"))])
         monkeypatch.setattr(web_runner_module, "_load_image_model_with_progress", load)
@@ -832,12 +938,12 @@ class TestHistoryReplacement:
     @pytest.mark.parametrize("mode", ["image", "video"])
     def test_the_hook_labels_its_events_with_the_mode_and_counts_every_planned_iteration_across_sets_and_runs(self, monkeypatch, mode):
         seen: list = []
-        monkeypatch.setattr(web_runner_module, "enhancer_plan", lambda repo, revision: (DownloadTarget(repo, revision),))
+        monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda repo, revision: (DownloadTarget(repo, revision),))
         monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_kw: STOPPED)
         runner = _runner()
         try:
             prompts_data = {"a": [("one", None), ("two", None)], "b": [("three", None)]}
-            hook = runner._enhancer_download_hook(mode=mode, prompts_data=prompts_data, args=_make_args(runs=4), progress_callback=seen.append, control_signal=SkipSignal())
+            hook = runner._enhancer_download_hook(mode=mode, prompts_data=prompts_data, args=_make_args(runs=4), config={}, progress_callback=seen.append, control_signal=SkipSignal())
             result = hook("a/enhancer", "rev")
         finally:
             runner.shutdown()
@@ -861,7 +967,7 @@ class TestMacH3VideoJob:
         planned: list = []
         from zvisiongenerator.downloads.plans import video_plan as real_plan
 
-        monkeypatch.setattr(web_runner_module, "video_plan", lambda *a, **kw: (planned.append(real_plan(*a, **kw)), None)[1])
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda *a, **kw: (planned.append(real_plan(*a, **kw)), None)[1])
         backend = h3_video.H3MlxVideoBackend()
         loaded: list = []
         monkeypatch.setattr(h3_video, "resolve_mlx_files", lambda *_a, **_kw: SimpleNamespace(lora_file="turbo.safetensors"))

@@ -9,7 +9,7 @@ import { jobStore } from '$lib/state/job.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { JobSnapshot, RecentPrompt, WorkflowMode, WorkspaceContext } from '$lib/types';
-import { makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
+import { FLUX_LICENCE, makeContext, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 
 vi.mock('$lib/state/layoutMode.svelte', () => ({
   layout: { compact: true, mode: 'compact', coarse: true },
@@ -77,7 +77,7 @@ describe('WorkspacePage on a phone', () => {
     expect(strip).not.toBeNull();
     expect(strip!.getAttribute('aria-busy')).toBe('true');
     const chips = Array.from(strip!.querySelectorAll<HTMLButtonElement>('[data-chip]'));
-    expect(chips.map((chip) => chip.dataset.chip)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
+    expect(chips.map((chip) => chip.dataset.chip)).toEqual(['kind', 'preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
     expect(chips.every((chip) => chip.disabled)).toBe(true);
     expect((strip!.querySelector('[aria-label="All settings"]') as HTMLButtonElement).disabled).toBe(true);
 
@@ -169,7 +169,7 @@ describe('WorkspacePage on a phone', () => {
       expect(chip()).toBeNull();
     });
 
-    it('shows the row and the badge in the All settings sheet', async () => {
+    it('shows the row and the Non-commercial licence mark in the All settings sheet', async () => {
       await mountPhone();
 
       (target.querySelector('[aria-label="All settings"]') as HTMLButtonElement).click();
@@ -177,7 +177,65 @@ describe('WorkspacePage on a phone', () => {
 
       const sheet = document.querySelector('[data-testid="sheet"]')!;
       expect(sheet.querySelector('#ws-pp-transparent')).not.toBeNull();
-      expect(sheet.querySelector('[data-testid="transparent-terms"] .ui-badge')).not.toBeNull();
+      expect(sheet.querySelector('.ui-badge[data-testid="transparent-terms"]')).not.toBeNull();
+    });
+  });
+
+  describe('the licence marks of the model', () => {
+    const chip = () => target.querySelector('[data-chip="model"]') as HTMLButtonElement;
+    const popover = () => target.querySelector('[data-testid="setting-popover"]') as HTMLElement | null;
+
+    beforeEach(() => {
+      Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    });
+
+    afterEach(() => {
+      delete (Element.prototype as Partial<Element>).animate;
+    });
+
+    async function mountPhone(): Promise<void> {
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext());
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+    }
+
+    it('ends each restricted row of the Model popover with a mark', async () => {
+      await mountPhone();
+
+      chip().click();
+      await settle();
+
+      const rows = Array.from(popover()!.querySelectorAll('.pop-model'));
+      expect(rows).toHaveLength(2);
+      const [zit, flux] = rows;
+      expect(zit.querySelector('.licence-mark')).toBeNull();
+      const mark = flux.querySelector('.licence-mark') as HTMLButtonElement;
+      expect(mark.getAttribute('aria-label')).toBe(`Licence: ${FLUX_LICENCE.name}`);
+    });
+
+    it('does not change the model when the mark is pressed', async () => {
+      await mountPhone();
+      chip().click();
+      await settle();
+      const before = draft.state.model;
+
+      (popover()!.querySelector('.pop-model .licence-mark') as HTMLButtonElement).click();
+      await settle();
+
+      expect(draft.state.model).toBe(before);
+      expect(document.querySelector('[data-testid="licence-popover"]')).not.toBeNull();
+    });
+
+    it('shows the selected model\'s mark in the toolbar at the head of the All settings sheet, none for zit', async () => {
+      draft.update('model', 'flux-lite');
+      await mountPhone();
+
+      (target.querySelector('[aria-label="All settings"]') as HTMLButtonElement).click();
+      await settle();
+
+      const sheet = document.querySelector('[data-testid="sheet"]')!;
+      const mark = sheet.querySelector('[data-testid="model-licence"]') as HTMLButtonElement;
+      expect(mark.getAttribute('aria-label')).toBe(`Licence: ${FLUX_LICENCE.name}`);
     });
   });
 
@@ -371,7 +429,7 @@ describe('WorkspacePage on a phone', () => {
       expect(popover()!.querySelector('input[aria-label="Strength"]')).toBeNull();
     });
 
-    it('is hidden on a model that can use no image, and in Extend Video', async () => {
+    it('is hidden on a model that can use no image, and in the Extend kind', async () => {
       const ideo = makeContext({
         image_models: [{ id: 'zit', label: 'zit', type: 'image' }, { id: 'ideo', label: 'ideo', type: 'image' }],
         image_model_defaults: { zit: makeImageDefaults({ max_reference_images: 4 }), ideo: makeIdeogramDefaults() },
@@ -387,6 +445,8 @@ describe('WorkspacePage on a phone', () => {
 
       await unmount(app!);
       app = null;
+      // The page remembers the last context, which cannot extend; the Extend kind needs the one that can.
+      workspaceMemory.forget();
       const extendContext = makeContext();
       extendContext.workflow_contract.values = [...extendContext.workflow_contract.values, 'extend'];
       draft.reset();

@@ -12,7 +12,7 @@ No hub offers safe-only results, so safety comes from someone looking at what is
 
 **Real previews.** The repository shows what the LoRA does: two to four preview images that come from the LoRA itself, not a trainer's generic sample prompts. A repository whose previews are only videos lists two to four of them instead. A repository without previews is not listed.
 
-**A licence that was read.** The licence is one of the ids in `LICENCES`. A non-commercial licence is listed, with `non_commercial` set, so the UI can badge it. A licence not in the table is read first, then added to `LICENCES`.
+**A licence that was read.** The licence is one of the ids in `LICENCES`. A non-commercial licence is listed, with `non_commercial` set, so the UI can badge it. A licence not in the table is read first, then added to `LICENCES`. A LoRA takes its base model's non-commercial badge only when that base makes the images non-commercial too, whatever the card says: the Ideogram 4 LoRAs are `ideogram-4-non-commercial`. A LoRA on FLUX.2 Klein 9B keeps its card's licence, because FLUX's non-commercial terms restrict use of the model while its section 2.d allows the images commercially.
 
 **Tested platforms.** Content is looked at once. The file format (kohya, PEFT, ai-toolkit, LoKr, ComfyUI) is loaded on both macOS and Windows or Linux.
 

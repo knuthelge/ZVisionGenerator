@@ -17,7 +17,7 @@ export type AudioTrackTone = 'muted' | 'active' | 'error';
  * `block` and the submit reads `sent`.
  */
 export interface AudioTrackView {
-  /** The open tab, or null in Image, which holds no track. */
+  /** The open tab, or null in Image and Audio, which hold no track. */
   tab: TrackTab | null;
   /** The model follows a track, so the Audio track section is offered. */
   visible: boolean;
@@ -46,7 +46,7 @@ export interface AudioTrackView {
 export interface AudioTrackViewInput {
   state: TrackState & Pick<DraftState, 'workflow'>;
   caps: Pick<WorkspaceCapabilities, 'showAudioTrack' | 'audioTrackInEffect'>;
-  /** The held uploads (`heldUploads`): the track of Video and the track of Extend Video. */
+  /** The held uploads (`heldUploads`): the track of Video and the track of the Extend kind. */
   files: { audioTrack: File | null; extendAudioTrack: File | null };
   /** The held uploads have been read back, so an upload without a file is known to be lost. */
   restored: boolean;
@@ -57,7 +57,7 @@ export interface AudioTrackViewInput {
 /** Derive whether the open tab follows a track, what a submit sends and why Generate is off when the track is gone. */
 export function audioTrackView({ state, caps, files, restored, lengthOf }: AudioTrackViewInput): AudioTrackView {
   const workspace = workspaceTab(state.workflow);
-  const tab: TrackTab | null = workspace === 'image' ? null : workspace;
+  const tab: TrackTab | null = workspace === 'video' || workspace === 'extend' ? workspace : null;
   if (tab === null) {
     return { tab, visible: false, set: false, path: null, file: null, name: '', start: 0, length: null, gone: false, block: null, sent: null, summary: { text: 'None', tone: 'muted' } };
   }

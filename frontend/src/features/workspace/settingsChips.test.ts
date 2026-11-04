@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { DraftState } from '$lib/types';
 import type { WorkspaceCapabilities } from './capabilities';
 import type { ImagesSummary } from './imagesSummary';
-import { pendingChips, settingsChips, type ChipFacts } from './settingsChips';
+import { audioChips, pendingChips, settingsChips, type AudioChipFacts, type ChipFacts } from './settingsChips';
 
 const imageCaps = {
   isImageMode: true, showFrameCount: false, showExtendLength: false, showSteps: true, showGuidance: true, showI2IStrength: false, showSeed: true,
@@ -17,8 +17,8 @@ const state = {
 
 function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
   return {
-    caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null, extendChanged: false,
-    loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
+    caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null,
+    loraNames: [], videoKind: null, modelLabel: 'Z-Image Turbo', modelDownloaded: true, sourceName: null, images: null, track: null, memoryWarn: false,
     presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
   };
@@ -29,8 +29,8 @@ describe('settingsChips', () => {
     const image = pendingChips('txt2img');
     expect(image.map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'images', 'size', 'loras', 'upscale', 'model']);
     expect(image.every((chip) => chip.value === '—' && !chip.changed)).toBe(true);
-    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
-    expect(pendingChips('extend')[1]?.key).toBe('extendSeconds');
+    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['kind', 'preset', 'seconds', 'steps', 'guidance', 'seed', 'images', 'track', 'size', 'audio', 'loras', 'model']);
+    expect(pendingChips('extend').map((chip) => chip.key).slice(0, 3)).toEqual(['kind', 'preset', 'extendSeconds']);
     expect(pendingChips('extend').map((chip) => chip.key)).not.toContain('images');
   });
 
@@ -50,11 +50,28 @@ describe('settingsChips', () => {
     expect(settingsChips(facts({ caps, seconds: 5 })).map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'seed', 'runs', 'size', 'audio', 'loras', 'model']);
   });
 
+  describe('the Kind chip of Video', () => {
+    const videoCaps = { ...imageCaps, isImageMode: false, showFrameCount: true, showImageUpscale: false } as WorkspaceCapabilities;
+    const extendCaps = { ...videoCaps, showFrameCount: false, showExtendLength: true, showSourceVideo: true } as WorkspaceCapabilities;
+
+    it('comes first and names the open kind, when the machine offers more than one', () => {
+      const chips = settingsChips(facts({ caps: videoCaps, seconds: 5, videoKind: 'new' }));
+      expect(chips[0]).toMatchObject({ key: 'kind', value: 'New' });
+      expect(settingsChips(facts({ caps: extendCaps, extendSeconds: 2, videoKind: 'extend' }))[0]).toMatchObject({ key: 'kind', value: 'Extend' });
+      expect(settingsChips(facts({ caps: videoCaps, seconds: 5 })).map((chip) => chip.key)).not.toContain('kind');
+    });
+
+    it('calls the extension length Length, so no two chips are named Extend', () => {
+      const chips = settingsChips(facts({ caps: extendCaps, extendSeconds: 2, videoKind: 'extend' }));
+      expect(chips.find((chip) => chip.key === 'extendSeconds')).toMatchObject({ label: 'Length', value: '+2 s' });
+    });
+  });
+
   describe('the Track chip', () => {
     const track = (f: Partial<ChipFacts>) => settingsChips(facts(f)).find((chip) => chip.key === 'track');
     const videoCaps = { ...imageCaps, isImageMode: false, showFrameCount: true, showImageUpscale: false, showSourceVideo: false } as WorkspaceCapabilities;
 
-    it('comes right after Images, and after Source in Extend Video', () => {
+    it('comes right after Images, and after Source in Extend', () => {
       const images: ImagesSummary = { text: 'None', tone: 'muted' };
       const keys = (f: Partial<ChipFacts>) => settingsChips(facts({ caps: videoCaps, seconds: 5, ...f })).map((chip) => chip.key);
 
@@ -95,13 +112,9 @@ describe('settingsChips', () => {
       expect(images({ images: summary({ tone: 'error' }) })).toMatchObject({ on: false, warn: true });
     });
 
-    it('carries the changed flag of Strength while an image-to-image run offers it', () => {
-      const caps = { ...imageCaps, showI2IStrength: true } as WorkspaceCapabilities;
-      const changed = (...keys: string[]) => keys.includes('referenceImageStrength');
-
-      expect(images({ images: summary(), caps, state: { ...state, workflow: 'img2img' } as DraftState, changed })?.changed).toBe(true);
-      expect(images({ images: summary(), caps, state: { ...state, workflow: 'txt2img' } as DraftState, changed })?.changed).toBe(false);
-      expect(images({ images: summary(), caps: imageCaps, state: { ...state, workflow: 'img2img' } as DraftState, changed })?.changed).toBe(false);
+    it('carries the changed flag of Strength', () => {
+      expect(images({ images: summary(), changed: (chip) => chip === 'images' })?.changed).toBe(true);
+      expect(images({ images: summary(), changed: () => false })?.changed).toBe(false);
     });
 
     it('replaces the old per-image chips', () => {
@@ -127,7 +140,7 @@ describe('settingsChips', () => {
   });
 
   it('shows values, the changed flag and the on state', () => {
-    const chips = settingsChips(facts({ state: { ...state, seed: 4242, upscaleEnabled: true, upscaleFactor: 4 }, changed: (...keys) => keys.includes('seed'), loraNames: ['detail-tweaker'] }));
+    const chips = settingsChips(facts({ state: { ...state, seed: 4242, upscaleEnabled: true, upscaleFactor: 4 }, changed: (chip) => chip === 'seed', loraNames: ['detail-tweaker'] }));
     const byKey = Object.fromEntries(chips.map((chip) => [chip.key, chip]));
     expect(byKey.seed).toMatchObject({ value: '4242', changed: true, on: true });
     expect(byKey.upscale).toMatchObject({ value: '4×', on: true });
@@ -154,7 +167,7 @@ describe('settingsChips', () => {
 
     it('carries the changed flag', () => {
       const on = { ...state, postprocessTransparent: true } as DraftState;
-      expect(transparent({ state: on, changed: (...keys) => keys.includes('postprocessTransparent') })?.changed).toBe(true);
+      expect(transparent({ state: on, changed: (chip) => chip === 'transparent' })?.changed).toBe(true);
     });
 
     it('is never offered where the workflow has no Transparent control, even when the draft has it on', () => {
@@ -173,5 +186,49 @@ describe('settingsChips', () => {
     const chips = settingsChips(facts({ modelDownloaded: false, caps: { ...imageCaps, showFrameCount: true } as WorkspaceCapabilities, seconds: 8, memoryWarn: true }));
     expect(chips.find((chip) => chip.key === 'model')?.warn).toBe(true);
     expect(chips.find((chip) => chip.key === 'seconds')?.warn).toBe(true);
+  });
+});
+
+describe('audioChips', () => {
+  const audioState = { workflow: 'speech', audioSeconds: 10, seed: null, runs: 1 } as DraftState;
+  const voice = { summary: { text: 'Any', tone: 'muted' as const }, recording: false, chip: 'Any' };
+
+  function audioFacts(overrides: Partial<AudioChipFacts> = {}): AudioChipFacts {
+    return { kind: 'speech', state: audioState, modelLabel: 'Higgs TTS 3 4B', modelDownloaded: true, voice, voiceBlocks: false, changed: () => false, showLength: false, showSeed: true, showRuns: true, ...overrides };
+  }
+
+  it('lists Kind, Model, Voice, Seed and Batch for Speech, with no preset, size or LoRA', () => {
+    const chips = audioChips(audioFacts());
+
+    expect(chips.map((chip) => chip.key)).toEqual(['kind', 'model', 'voice', 'seed', 'runs']);
+    expect(chips[0]).toMatchObject({ value: 'Speech', icon: 'speech' });
+    expect(chips[2]).toMatchObject({ label: 'Voice', value: 'Any', on: false });
+  });
+
+  it('puts Length in place of Voice for Sound and neither for Music', () => {
+    expect(audioChips(audioFacts({ kind: 'sound', voice: null, showLength: true })).map((chip) => chip.key)).toEqual(['kind', 'model', 'length', 'seed', 'runs']);
+    expect(audioChips(audioFacts({ kind: 'music', voice: null })).map((chip) => chip.key)).toEqual(['kind', 'model', 'seed', 'runs']);
+    expect(audioChips(audioFacts({ kind: 'sound', voice: null, showLength: true })).find((chip) => chip.key === 'length')?.value).toBe('10 s');
+  });
+
+  it('marks a model that is not downloaded, a followed recording, and a recording that is wrong', () => {
+    expect(audioChips(audioFacts({ modelDownloaded: false })).find((chip) => chip.key === 'model')?.warn).toBe(true);
+    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, recording: true, chip: 'me.wav' };
+    expect(audioChips(audioFacts({ voice: cloned })).find((chip) => chip.key === 'voice')).toMatchObject({ value: 'me.wav', on: true, warn: false });
+    const wrong = { summary: { text: 'Use a recording of 3 to 30 seconds', tone: 'error' as const }, recording: true, chip: 'me.wav' };
+    expect(audioChips(audioFacts({ voice: wrong })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
+  });
+
+  it('marks the Voice chip changed when the voice differs from its default', () => {
+    const chip = (changedKeys: string[]) => audioChips(audioFacts({ changed: (key) => changedKeys.includes(key) })).find((item) => item.key === 'voice');
+
+    expect(chip(['voice'])?.changed).toBe(true);
+    expect(chip([])?.changed).toBe(false);
+  });
+
+  it('warns on the Voice chip while the voice holds Generate back', () => {
+    const cloned = { summary: { text: 'me.wav', tone: 'active' as const }, recording: true, chip: 'me.wav' };
+
+    expect(audioChips(audioFacts({ voice: cloned, voiceBlocks: true })).find((chip) => chip.key === 'voice')?.warn).toBe(true);
   });
 });

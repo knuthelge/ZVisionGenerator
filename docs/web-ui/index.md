@@ -32,8 +32,8 @@ The **top bar** has the pages and, on the Workspace, the three tabs:
 | Tab | Makes |
 |---|---|
 | Image | An image from a prompt, or from a start image you add in **Images** |
-| Video | A video from a prompt, or one that starts on a first frame you add in **Images** |
-| Extend Video | More of a video you already have |
+| Video | A video from a prompt, or one that starts on a first frame you add in **Images**; or, with **Extend**, more of a video you already have |
+| Audio | Music, speech or sound, as FLAC files |
 
 The pages:
 

@@ -12,11 +12,12 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="ziv",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Z-Vision Generator — AI image and video generation.\n"
+            "Z-Vision Generator — AI image, video and audio generation.\n"
             "\n"
             "commands:\n"
             "  image   Generate images (also available as ziv-image)\n"
             "  video   Generate videos (also available as ziv-video)\n"
+            "  audio   Generate music, speech and sound (also available as ziv-audio)\n"
             "  model   Manage models and LoRAs (also available as ziv-model)\n"
             "  ui      Launch the local Web UI (also available as ziv-ui)"
         ),
@@ -27,7 +28,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Entry point for the unified ``ziv`` command.
 
-    Dispatches to image, video, model, or Web UI entrypoints.
+    Dispatches to image, video, audio, model, or Web UI entrypoints.
     With no subcommand, prints command discovery help and exits.
     With --help/-h, prints usage and exits.
     With --version, prints version and exits.
@@ -62,6 +63,11 @@ def main() -> None:
 
         sys.argv = ["ziv video", *remaining_args]
         video_main(prog="ziv video")
+    elif command == "audio":
+        from zvisiongenerator.audio_cli import main as audio_main
+
+        sys.argv = ["ziv audio", *remaining_args]
+        audio_main(prog="ziv audio")
     elif command == "model":
         from zvisiongenerator.converters.convert_checkpoint import main as model_main
 

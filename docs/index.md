@@ -6,21 +6,38 @@ hide:
 ---
 
 <div class="zh">
-<h1 class="zh__rise">Your own studio for AI images and video.</h1>
-<p class="zh__rise">Write a prompt, press Generate, and the picture or clip is made on your own computer. No cloud, no node graphs.</p>
+<img class="zh__logo zh__rise" src="assets/ziv-logo-dark.svg" alt="Z-Vision Generator">
+<h1 class="zh__rise">Your own studio for AI images, video and audio.</h1>
+<p class="zh__rise">Write a prompt, press Generate, and the picture, clip or track is made on your own computer. No cloud, no node graphs.</p>
 <div class="zh__buttons zh__rise zh__rise--late"><a class="zh__btn zh__btn--primary" href="web-ui/">Start with the Web UI</a><a class="zh__btn" href="cli/">Use the CLI</a></div>
 <img class="zh__shot zh__rise zh__rise--late" src="assets/screenshots/workspace.webp" alt="The Workspace with an enhanced prompt and a finished image">
 </div>
 
+<div class="zhome" markdown>
+
+## Install
+
+```bash
+uv tool install z-vision-generator
+ziv ui
+```
+
+This installs the app and opens the Web UI in your browser. It needs Python 3.14 or newer and [uv](https://docs.astral.sh/uv/). On Windows, add PyTorch's CUDA index as shown in [Install](install.md).
+
 ## What it does
+
+<div class="zhome__features" markdown>
 
 - **Images** from a prompt, with Z-Image, FLUX.2 Klein, Krea 2 Turbo, Ideogram 4 Instant and MOSS-Image.
 - **Videos with sound** from a prompt or a starting image, with LTX-2.3, LTX-2.5 and MiniMax H3. End on a chosen last frame with H3, and extend a clip to make it longer.
+- **Audio**: songs and instrumentals up to six minutes with YuE2, speech with Higgs TTS 3 in a voice the model picks or one that follows a recording, and ambience and sound effects with Stable Audio 3. Use any take as a video's audio track.
 - **A prompt enhancer** that runs on your machine and turns a short idea into a detailed prompt.
 - **Upscaling** of new and existing images, of video as it's made, and of existing videos on Windows and Linux.
 - **Prompt files** with random choices, reusable snippets and batch runs.
 - **LoRAs**, stacked and weighted, for images and video.
 - **Models that download themselves** on first use, or ahead of time from the Models page, and your own fine-tunes converted with one command.
+
+</div>
 
 It runs on macOS with Apple Silicon, and on Windows and Linux with an NVIDIA GPU. The same models and features work on all three.
 
@@ -40,7 +57,7 @@ It runs on macOS with Apple Silicon, and on Windows and Linux with an NVIDIA GPU
 
     ---
 
-    `ziv-image` and `ziv-video` for scripted and batch work, with every setting as a flag.
+    `ziv-image`, `ziv-video` and `ziv-audio` for scripted and batch work, with every setting as a flag.
 
     [Start with the CLI](cli/index.md){ .md-button }
 
@@ -50,7 +67,13 @@ Both use the same models, prompt files, settings and output folder, so you can s
 
 ## Where to go next
 
+<div class="zhome__next" markdown>
+
 - [Install](install.md): what you need and how to install.
 - [Concepts](concepts/index.md): how models, prompts, upscaling and memory work, whichever way you use the app.
 - [Troubleshooting](concepts/troubleshooting.md): when something goes wrong.
 - [Developer](developer/index.md): working on the code.
+
+</div>
+
+</div>

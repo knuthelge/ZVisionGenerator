@@ -184,6 +184,12 @@ describe('stepsSpec', () => {
     expect(stepsSpec(null)).toBe(SPEC.steps);
     expect(stepsSpec(undefined)).toBe(SPEC.steps);
     expect(stepsSpec([])).toBe(SPEC.steps);
+    expect(stepsSpec(null, null)).toBe(SPEC.steps);
+  });
+
+  it('cuts the usual control at the most steps the model runs', () => {
+    expect(stepsSpec(null, 8)).toEqual({ ...SPEC.steps, max: 8 });
+    expect(stepsSpec(undefined, 500)).toEqual(SPEC.steps);
   });
 });
 
@@ -220,7 +226,7 @@ describe('workspaceCapabilities for the audio track', () => {
     }
   });
 
-  it('reads the track of the open tab: the Extend Video track does not count in Video', () => {
+  it('reads the track of the open tab: the Extend track does not count in Video', () => {
     expect(workspaceCapabilities(context, stateOf('ltx', { extendAudioTrackPath: '/a/song.mp3' })).audioTrackInEffect).toBe(false);
     expect(workspaceCapabilities(context, stateOf('ltx', { workflow: 'extend', extendAudioTrackPath: '/a/song.mp3' })).audioTrackInEffect).toBe(true);
     expect(workspaceCapabilities(context, stateOf('ltx', { workflow: 'extend', audioTrackPath: '/a/song.mp3' })).audioTrackInEffect).toBe(false);

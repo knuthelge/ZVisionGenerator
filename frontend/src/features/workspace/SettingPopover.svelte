@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Badge, Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
-  import { ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
+  import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
+  import { LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { draft, extendStepFor, offeredSizes, settingDefaultsFor, snapSteps, stepOptionsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { defaultsFor, draft, extendStepFor, maxStepsFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { downloadStore } from '$lib/state/downloads.svelte';
   import { galleryStore } from '$lib/state/gallery.svelte';
@@ -13,11 +13,11 @@
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
   import { extendGuard, extendModelSupport, extendSourceFacts } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { defaultExtendFrames, durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import { durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
   import type { ModelOption, WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
+  import { chipKeys } from './settingRows';
   import { randomSeed } from './seed';
-  import { TRANSPARENT_TERMS } from './transparent';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
@@ -25,6 +25,12 @@
   import { fly } from 'svelte/transition';
   import AudioTrackPopover from './AudioTrackPopover.svelte';
   import type { AudioTrackView } from './audioTrackView';
+  import { AUDIO_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
+  import type { AudioView } from './audioView';
+  import type { AudioWorkflow, VideoKind } from '$lib/types';
+  import VoicePopover from './VoicePopover.svelte';
+  import { availableKinds, clampSeconds, secondsRange } from '$lib/state/audioDraft';
+  import { videoKinds } from '$lib/state/workspaceTab';
   import ImagesPopover from './ImagesPopover.svelte';
   import type { ImagesView } from './imagesView';
   import type { ChipKey } from './settingsChips';
@@ -37,6 +43,8 @@
     images: ImagesView;
     /** The audio track view of the open tab, computed once by the Workspace. */
     audioTrack: AudioTrackView;
+    /** The Audio tab's view of the open kind, computed once by the Workspace. */
+    audio: AudioView;
     /** The models the workflow can use, with their status. */
     models: ModelOption[];
     /** Quantization choices for the model, or null when it has none. */
@@ -49,26 +57,25 @@
     ondiscover?: () => void;
   }
 
-  let { key, context, busy, images, audioTrack, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
+  let { key, context, busy, images, audioTrack, audio, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
-  const defaults = $derived(settingDefaultsFor(context, { workflow: s.workflow, model: s.model }));
+  const defaults = $derived(defaultsFor(context, s, draft.extendSource));
   const TITLES: Record<ChipKey, string> = {
     seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', seed: 'Seed', runs: 'Batch size',
     source: 'Source video', images: 'Images', track: 'Audio track', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', transparent: 'Transparent background', model: 'Model',
+    kind: 'Kind', voice: 'Voice', length: 'Length',
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
-  /** The settings a popover's Reset puts back; none for the ones that have no default (model, LoRAs, files). */
-  const RESET_KEYS: Partial<Record<ChipKey, SettingKey[]>> = {
-    seconds: ['frameCount'], steps: ['steps'], guidance: ['guidance'], seed: ['seed'], runs: ['runs'],
-    size: ['ratio', 'size', 'dimensionMode'], audio: ['audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleReview'], upscale: ['upscaleEnabled', 'upscaleFactor', 'upscaleReview'], transparent: ['postprocessTransparent'],
-  };
-  const resetKeys = $derived(RESET_KEYS[key] ?? []);
-  const canReset = $derived(resetKeys.some((k) => s[k] !== defaults[k]));
+  /** The settings a popover's Reset puts back: those of its chip's rows in `SETTING_ROWS`; none for the ones that have no default (model, LoRAs, files). */
+  const resetKeys = $derived(chipKeys(key, caps, s));
+  const canReset = $derived(resetKeys.some((k) => !Object.is(s[k], defaults[k])));
 
   function reset(): void {
+    // The voice's recording is held outside the draft, with the speaker's tick: clearing them goes through the store.
+    if (key === 'voice') draft.setVoice(null);
     draft.patch(Object.fromEntries(resetKeys.map((k) => [k, defaults[k]])));
   }
 
@@ -107,12 +114,25 @@
     if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
   }
 
+  // --- Length of a sound ---
+  const lengthRange = $derived(secondsRange(audio.model));
+  const kindChoice = $derived<KindChoice>(
+    caps.isAudio
+      ? { kinds: availableKinds(context), info: AUDIO_KIND_INFO, value: s.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
+      : { kinds: videoKinds(context.workflow_contract.values), info: VIDEO_KIND_INFO, value: s.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) },
+  );
+
+  function setLength(seconds: number | null): void {
+    if (seconds !== null) draft.update('audioSeconds', clampSeconds(seconds, audio.model));
+  }
+
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
   const stepOptions = $derived(caps.isImageMode ? null : stepOptionsFor(context, s.model));
-  const stepsRange = $derived(stepOptions ? stepsSpec(stepOptions) : SPEC.steps);
+  const maxSteps = $derived(caps.isImageMode ? null : maxStepsFor(context, s.workflow, s.model));
+  const stepsRange = $derived(stepsSpec(stepOptions, maxSteps));
 
   function setSteps(steps: number): void {
-    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : steps);
+    draft.update('steps', stepOptions ? snapSteps(steps, stepOptions) : maxSteps !== null ? Math.min(steps, maxSteps) : steps);
   }
 
   // --- Extend ---
@@ -122,7 +142,6 @@
   const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, { alignment: extendStep }) : { step: 0.1, min: 0.1 });
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
-  const extendDefault = $derived(sourceFps ? defaultExtendFrames(sourceFps, extendStep) : null);
   const extendMemoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
   const extendTime = $derived(clipTimeNote(info?.memory_fit ?? null));
   const sourceGuard = $derived(extendGuard(s, info, extendInspection.statusFor(s.extendSourcePath), extendModelSupport(context, s.model)));
@@ -158,7 +177,7 @@
   }
 
   // --- Images ---
-  // The popover holds the section's groups; when the model can use no image (or the tab is Extend Video) it has nothing to show.
+  // The popover holds the section's groups; when the model can use no image (or the kind is Extend) it has nothing to show.
   const imagesVisible = $derived(images.visible);
   $effect(() => {
     if (key === 'images' && !imagesVisible) onclose();
@@ -167,6 +186,11 @@
   // The popover holds the section's rows; on a model that follows no track (or in Image) it has nothing to show.
   $effect(() => {
     if (key === 'track' && !audioTrack.visible) onclose();
+  });
+  // --- Voice ---
+  // The popover holds the section's rows; on a model that cannot follow a recording it has nothing to show.
+  $effect(() => {
+    if (key === 'voice' && !caps.showVoice) onclose();
   });
   const title = $derived(TITLES[key]);
 
@@ -200,6 +224,7 @@
   }
 
   const selectedModel = $derived(models.find((model) => model.id === s.model) ?? null);
+  const matteSummary = $derived(context.matte_licences?.[0]?.summary ?? '');
 
   /**
    * Publish the room above the popover's anchor as `--pop-room`: the height between the top of the phone's workspace (under
@@ -221,7 +246,7 @@
   }
 </script>
 
-<div class="setting-popover ui-sheet" class:image-pop={key === 'images' || key === 'track'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
+<div class="setting-popover ui-sheet" class:image-pop={key === 'images' || key === 'track' || key === 'voice'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
   <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
   <div class="ui-sheet-head" data-sheet-handle>
     <h3 class="ui-area-label">{title}</h3>
@@ -242,7 +267,7 @@
     {:else if key === 'runs'}
       <InspectorNumber ariaLabel="Batch size" value={s.runs} {...SPEC.runs} stepper size="lg" onchange={(v) => v !== null && draft.update('runs', v)} />
       <input class="ui-range pop-range" type="range" aria-label="Batch size" min={1} max={16} step={1} value={Math.min(s.runs, 16)} style:--fill={rangeFill(Math.min(s.runs, 16), { min: 1, max: 16 })} oninput={(e) => draft.update('runs', Number(e.currentTarget.value))}>
-      <p class="ui-help">{caps.isImageMode ? 'Images' : 'Clips'} per run, each with its own seed.</p>
+      <p class="ui-help">{caps.isAudio ? 'Takes' : caps.isImageMode ? 'Images' : 'Clips'} per run, each with its own seed.</p>
     {:else if key === 'seconds'}
       <InspectorNumber ariaLabel="Clip length in seconds" value={shownSeconds} {...secondsSpec} stepper size="lg" commitOnly onchange={setSeconds} />
       {#if secondsSpec.max !== undefined}
@@ -251,14 +276,27 @@
       <p class="ui-help">{s.frameCount} frames at {timing.fps} fps.</p>
       {#if clipTime}<p class="ui-help">{clipTime}</p>{/if}
       {#if clipNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{clipNote.text}</p>{/if}
+    {:else if key === 'length' && lengthRange}
+      <InspectorNumber ariaLabel="Length in seconds" value={s.audioSeconds} step={1} min={lengthRange.min} max={lengthRange.max} stepper size="lg" commitOnly onchange={setLength} />
+      <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={s.audioSeconds} style:--fill={rangeFill(s.audioSeconds, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
+      <p class="ui-help">From {lengthRange.min} to {lengthRange.max} seconds.</p>
+    {:else if key === 'kind'}
+      <div class="pop-list" role="radiogroup" aria-label="Kind">
+        {#each kindChoice.kinds as kind (kind)}
+          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === kindChoice.value} onclick={() => { if (kind !== kindChoice.value) kindChoice.pick(kind); }}>
+            <Icon name={kindChoice.info[kind].icon} size={16} />
+            <span class="pop-item-text">{kindChoice.info[kind].label}</span>
+            <small>{kindChoice.info[kind].description}</small>
+          </button>
+        {/each}
+      </div>
+    {:else if key === 'voice'}
+      <VoicePopover voice={audio.voice} />
     {:else if key === 'extendSeconds'}
       <InspectorNumber ariaLabel="Extend by, in seconds" value={shownExtendSeconds} {...extendSecondsSpec} stepper size="lg" commitOnly disabled={sourceFps === null} onchange={setExtendSeconds} />
       <p class="ui-help">{sourceFps === null ? 'Choose a video to extend first.' : extendLength ? `Total ${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames${s.extendFrames !== null ? ` · +${s.extendFrames} new` : ''}` : ''}</p>
       {#if extendTime}<p class="ui-help">{extendTime}</p>{/if}
       {#if extendMemoryNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{extendMemoryNote.text}</p>{/if}
-      {#if extendDefault !== null && s.extendFrames !== extendDefault}
-        <button type="button" class="ui-btn" onclick={() => draft.update('extendFrames', extendDefault)}>Back to the default length</button>
-      {/if}
     {:else if key === 'seed'}
       <InspectorNumber ariaLabel="Seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" stepper={false} size="lg" onchange={(v) => draft.update('seed', v)} />
       <div class="pop-list">
@@ -281,15 +319,19 @@
     {:else if key === 'model'}
       <div class="pop-list" role="radiogroup" aria-label="Model">
         {#each models as model (model.id)}
-          <button type="button" class="pop-item" role="radio" aria-checked={model.id === s.model} onclick={() => { if (model.id !== s.model) onModelChange(model.id); }}>
-            <Icon name="cube" size={16} />
-            <span class="pop-item-text">{model.label}</span>
-            <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.active('model', model.id))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
-          </button>
+          <!-- The mark is the radio's sibling: a button cannot sit inside a button. -->
+          <div class="pop-model" class:has-mark={Boolean(model.licences?.length)}>
+            <button type="button" class="pop-item" role="radio" aria-checked={model.id === s.model} onclick={() => { if (model.id !== s.model) onModelChange(model.id); }}>
+              <Icon name="cube" size={16} />
+              <span class="pop-item-text">{model.label}</span>
+              <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.activeModel(model))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
+            </button>
+            {#if model.licences?.length}<LicenceMark licences={model.licences} testId="model-licence-{model.id}" />{/if}
+          </div>
         {/each}
       </div>
-      {#if selectedModel && selectedModel.downloaded === false && !downloadStore.active('model', selectedModel.id)}
-        <p class="ui-help" data-testid="model-not-downloaded">{selectedModel.label} is not downloaded. The first run downloads it; the Models page shows its size.</p>
+      {#if selectedModel && selectedModel.downloaded === false && !downloadStore.activeModel(selectedModel)}
+        <p class="ui-help" data-testid="model-not-downloaded">{selectedModel.label} is not downloaded. Generate asks before downloading it; the Models page shows its size.</p>
       {/if}
       {#if quantizeOptions}
         <div class="pop-row"><span>Quantization</span>
@@ -345,7 +387,7 @@
       <p class="ui-help">Denoise, steps, guidance and sharpen for the upscale are under All.</p>
     {:else if key === 'transparent'}
       <label class="pop-row">Transparent background<Toggle ariaLabel="Transparent background" checked={s.postprocessTransparent} disabled={busy} onchange={(e) => draft.update('postprocessTransparent', (e.currentTarget as HTMLInputElement).checked)} /></label>
-      <p class="pop-terms" data-testid="transparent-reason"><Badge variant="warning">Non-commercial</Badge><span>{TRANSPARENT_TERMS}.</span></p>
+      <p class="pop-terms" data-testid="transparent-reason"><LicenceMark licences={context.matte_licences ?? []} label="Non-commercial" testId="transparent-terms" /><span>{matteSummary}.</span></p>
     {:else if key === 'audio'}
       {#if caps.showAudio}
         <label class="pop-row">Audio<Toggle ariaLabel="Audio" checked={s.audio} onchange={(e) => draft.update('audio', (e.currentTarget as HTMLInputElement).checked)} /></label>
@@ -401,10 +443,16 @@
   .pop-dims { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
   .dim-times { font-family: var(--font-mono); color: var(--color-text-muted); }
   .pop-list { display: flex; flex-direction: column; gap: 2px; }
+  .pop-model { display: flex; align-items: center; }
+  .pop-model > .pop-item { flex: 1; min-width: 0; }
+  /* The line under a kind is words, not a number: it keeps its whole width. */
+  .pop-model.has-mark :global(.licence-mark-wrap) { width: 44px; justify-content: center; }
   .pop-item { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 15px; white-space: nowrap; text-align: left; color: var(--color-text-primary); }
   .pop-item:active { background: var(--color-bg-surface-hover); }
   .pop-item[aria-pressed='true'], .pop-item[aria-checked='true'] { background: color-mix(in srgb, var(--color-primary-main) 12%, transparent); color: var(--color-primary-main); }
   .pop-item small { flex: none; max-width: 42%; margin-left: auto; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-muted); }
+  /* The line under a kind is words, not a number: it keeps its whole width. */
+  .pop-item.pop-kind small { max-width: none; font-family: inherit; }
   .pop-item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pop-item-text.muted { color: var(--color-text-muted); }
   .pop-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 15px; }

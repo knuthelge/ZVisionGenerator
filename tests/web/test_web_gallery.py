@@ -865,7 +865,7 @@ def test_an_extension_flags_a_deleted_source_video_without_reading_again(tmp_pat
     clip.write_bytes(b"\x00" * 8)
     _backdate(source, clip)
     config = {"schema": "zvisiongenerator.config.v1", **_extend_config(source), "model": "ltx-8"}
-    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={}), patch("zvisiongenerator.web.gallery.mp4_config_from_probe", return_value=config):
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={}), patch("zvisiongenerator.web.gallery.config_from_probe", return_value=config):
         list_gallery_assets(str(tmp_path))
     reads.clear()
 
@@ -917,7 +917,7 @@ def test_indexed_assets_equal_freshly_read_ones_except_the_age_label(tmp_path, m
     clip.write_bytes(b"\x00" * 8)
     _backdate(clip)
     video_config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "model": "ltx-8", "scene": "Rain.", "frame_count": 49}
-    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={}), patch("zvisiongenerator.web.gallery.mp4_config_from_probe", return_value=video_config):
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={}), patch("zvisiongenerator.web.gallery.config_from_probe", return_value=video_config):
         cold = list_gallery_assets(str(tmp_path))
     reads.clear()
     _restart_index(monkeypatch)

@@ -36,6 +36,7 @@ nav = [
     { "How-to" = [
       { "Generate images" = "cli/images.md" },
       { "Generate videos" = "cli/video.md" },
+      { "Generate audio" = "cli/audio.md" },
       { "Batches and prompt files" = "cli/batches.md" },
       { "Enhance prompts" = "cli/enhance.md" },
       { "Manage models and LoRAs" = "cli/models.md" },
@@ -52,6 +53,7 @@ nav = [
       { "Prompt enhancer" = "concepts/prompt-enhancer.md" },
       { "Images" = "concepts/images.md" },
       { "Video" = "concepts/video.md" },
+      { "Audio" = "concepts/audio.md" },
       { "Upscaling" = "concepts/upscaling.md" },
       { "LoRAs" = "concepts/loras.md" },
     ] },

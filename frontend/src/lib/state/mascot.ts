@@ -1,6 +1,8 @@
 import type { MascotMood, MascotTool } from '$lib/components/atoms/Mascot.svelte';
+import { PHASE_DECODE } from '$lib/components/molecules/audioAurora';
 import type { ActiveJobState, JobWorkflow } from '$lib/types';
-import { jobPhase, stepFraction } from './jobView';
+import { isAudioJob, jobPhase, stepFraction } from './jobView';
+import { isAudioWorkflow } from './workspaceTab';
 
 /**
  * A short-lived reaction: to a job finishing, failing, being stopped, or getting
@@ -42,6 +44,22 @@ function isPainting(job: ActiveJobState): boolean {
   return job.outputs.length > 0 || (job.promptNumber ?? 1) > 1;
 }
 
+/**
+ * Report whether a running audio take has started. Audio jobs report no denoising steps, so the first `audio_progress`
+ * event is what shows the model at work; the gaps between the takes of a batch still count.
+ */
+function isMakingTake(job: ActiveJobState): boolean {
+  return job.audio != null || job.outputs.length > 0 || (job.promptNumber ?? 1) > 1;
+}
+
+/** Report whether a running take is in its last stretch: the decode, or for a sound the last sampling step. */
+function isFinishingTake(job: ActiveJobState): boolean {
+  const progress = job.audio;
+  if (!progress) return false;
+  if (progress.phase === PHASE_DECODE) return true;
+  return job.workflow === 'sound' && progress.total !== null && progress.total > 0 && progress.step >= progress.total;
+}
+
 /** Report whether a running job is in the last stretch of its denoising steps. */
 function isFinishing(job: ActiveJobState): boolean {
   return job.totalSteps >= FINISHING_MIN_STEPS && job.currentStep / job.totalSteps >= FINISHING_FRACTION;
@@ -57,6 +75,10 @@ function jobMood(job: ActiveJobState | null): MascotMood | null {
       // A render waiting for approval: the mascot looks to the user.
       if (job.review) return 'curious';
       if (job.stageName === 'enhancing_prompts') return 'reading';
+      if (isAudioJob(job)) {
+        if (!isMakingTake(job)) return 'thinking';
+        return isFinishingTake(job) ? 'finishing' : 'creating';
+      }
       if (!isPainting(job)) return 'thinking';
       return isFinishing(job) ? 'finishing' : 'creating';
     case 'paused':
@@ -90,11 +112,12 @@ export function mascotMood({ job, reaction, loadError, loading, greeting, typing
  * own steps would otherwise read as the creating canvas starting over.
  */
 export function mascotProgress(job: ActiveJobState | null): number | undefined {
-  return job && jobPhase(job) === 'generate' && job.stageName !== 'upscale' && job.totalSteps > 0 ? stepFraction(job) : undefined;
+  return job && !isAudioJob(job) && jobPhase(job) === 'generate' && job.stageName !== 'upscale' && job.totalSteps > 0 ? stepFraction(job) : undefined;
 }
 
-/** Pick what the mascot holds: a clapperboard for video workflows, otherwise a brush. */
+/** Pick what the mascot wears or holds: headphones for audio, a clapperboard for video workflows, otherwise a brush. */
 export function mascotTool(workflow: JobWorkflow | undefined): MascotTool {
+  if (isAudioWorkflow(workflow)) return 'audio';
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'clapper' : 'brush';
 }
 

@@ -7,7 +7,7 @@ Everything the app keeps lives in one folder, `~/.ziv/`. It survives an update, 
 ├── models/          Converted models, stored quants and prepared copies (such as `h3@q4`), Ideogram 4 Instant and SeedVR2
 ├── loras/           LoRA .safetensors files
 ├── cache/           Temporary files, such as a Mac job's renamed LoRA copies; empty between jobs
-├── outputs/         Images and videos made in the Web UI (the default output folder)
+├── outputs/         Images, videos and audio made in the Web UI (the default output folder)
 ├── presets/         Web UI presets: an image and a video folder, one .yaml file each
 ├── logs/            The error log of each command
 ├── run/             Running Web UI servers
@@ -30,7 +30,7 @@ ziv ui
 
 The Web UI saves to the **Output folder** on the [Config page](../web-ui/config.md), `outputs` in the data folder by default. The CLI saves to the current folder, or to `-o`.
 
-Files are named after the prompt set and the time: `portrait_2026-10-04_14-03-22.png`. When a name is taken, `_2`, `_3`… is added, so nothing is overwritten. An inline prompt's set is `prompt`. Videos follow the same pattern.
+Files are named after the prompt set and the time: `portrait_2026-10-04_14-03-22.png`. When a name is taken, `_2`, `_3`… is added, so nothing is overwritten. An inline prompt's set is `prompt`. Videos follow the same pattern, and audio takes are named after their kind, such as `music_2026-10-04_14-03-22.flac`.
 
 Every file records the settings it was made with: prompt and negative prompt, scene, model, seed, steps, guidance, scheduler, size, LoRAs, start image and strength, references, quant, generation time, upscale method and its settings, the sharpen, contrast and saturation amounts, and whether the background was removed. An enhanced prompt also keeps your own prompt and the enhance options. The Web UI viewer shows them under **Details**, and **Reuse settings** loads them.
 

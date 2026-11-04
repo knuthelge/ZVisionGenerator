@@ -58,7 +58,7 @@ The figures are peaks for Turbo images from 1024×1024 up to 4 megapixels, on a 
 
 ## Video
 
-Video, with or without a first frame, checks the clip's size and length against memory before generating, and Extend Video checks the extension. The check never blocks a job; it warns when the clip may run slowly or fail.
+Video, with or without a first frame, checks the clip's size and length against memory before generating, and an extension checks the extension. The check never blocks a job; it warns when the clip may run slowly or fail.
 
 - **Web UI:** a note under **Duration (s)** says **Tight** or **Too large** and which memory it's about. It follows the model, size, duration, **Low memory** and **Upscale** (for MiniMax H3 on Windows and Linux, also the LoRAs and **Review**), and stays hidden while the clip fits. For MiniMax H3 it also shows the expected time. The badge on a video model is the estimate for a 5 s clip at 768×448.
 - **CLI:** `ziv-video` prints one warning and carries on.
@@ -74,6 +74,26 @@ To fit a clip: make it shorter, use a smaller size, and keep **Low memory** on.
     `ltx-4` needs about 20 GB of system memory, `ltx-8` about 27 GB, `ltx25-4` about 21 GB, and MiniMax H3 about 18 GB free. On a 10 GB GPU with `ltx-4`, clips up to 20 s at `m`, 15 s at `l` and 10 s at `xl` fit, with or without upscaling. The estimate was measured on one 10 GB GPU with 32 GB of system memory; on other cards the limits are extrapolated. For MiniMax H3 it also covers the mode (image to video and Extend need more), LoRAs and upscale, and every estimate was at or above the measured peak.
 
 The estimate doesn't count memory used by other apps, or by an image model that is still loaded.
+
+## Audio
+
+The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux. The figures are peak GPU memory measured on an otherwise empty 10 GB card:
+
+| Model | GPU memory | Measured at |
+|---|---|---|
+| YuE2 3B (`yue2`) | about 6.7 GiB | A take of the full 6:00 |
+| Higgs TTS 3 4B (`higgs3`) | about 8.2 GiB | A part of the longest the app allows |
+| Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
+
+Speech memory depends on the part, not the whole text, because a long text is read one part at a time. System memory matters too: YuE2 peaks at about 11 GiB while it loads or runs, which leaves a computer with 16 GB of RAM little to spare.
+
+=== "macOS"
+
+    The audio models run on the Mac's GPU. Their peak memory has not been measured on a Mac yet, so they show no memory badge there.
+
+=== "Windows and Linux"
+
+    YuE2 keeps its weights in system memory and moves the part it needs to the GPU, which is how it fits a 10 GB card. This adds a few seconds when the model loads and does not change the result.
 
 ## One model at a time
 

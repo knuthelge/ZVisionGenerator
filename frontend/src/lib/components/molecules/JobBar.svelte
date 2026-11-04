@@ -31,7 +31,7 @@
   const bars = $derived(stageBars(job));
   const items = $derived(iterations(job));
   const eta = $derived(etaLabel(job));
-  const pending = $derived(job.controlQueued ?? null);
+  const pending = $derived(active ? (job.controlQueued ?? null) : null);
   const shownPrompt = $derived(job.enhancedPrompt || job.prompt || 'No prompt supplied');
   const notice = $derived.by(() => {
     if (pending === 'pause') return phase === 'enhance' ? 'Pausing after this rewrite' : `Pausing after this ${noun}`;

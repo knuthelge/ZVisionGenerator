@@ -21,7 +21,7 @@ def require_ffmpeg() -> None:
     if shutil.which("ffmpeg"):
         return
 
-    raise RuntimeError("ffmpeg is required for video generation but was not found on PATH. Install ffmpeg from https://ffmpeg.org/download.html, ensure it is on PATH, then retry.")
+    raise RuntimeError("ffmpeg is required but was not found on PATH. Install ffmpeg from https://ffmpeg.org/download.html, ensure it is on PATH, then retry.")
 
 
 # Lines of the version and build banner that ffmpeg prints before any real message.
@@ -101,7 +101,7 @@ def ensure_ffmpeg() -> None:
     if shutil.which("ffmpeg"):
         return
 
-    print("ffmpeg is required for video generation but was not found on PATH.")
+    print("ffmpeg is required but was not found on PATH.")
 
     for executable, command, manager in _install_options():
         if shutil.which(executable):

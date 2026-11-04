@@ -1,11 +1,19 @@
 import { trackOf, trackSet } from '$lib/state/audioTrack';
 import { imageSupport } from '$lib/state/imageSlots';
-import { workspaceTab } from '$lib/state/workspaceTab';
-import type { DraftState, ImageModelDefaults, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext } from '$lib/types';
+import { isAudioWorkflow, workspaceTab } from '$lib/state/workspaceTab';
+import type { AudioWorkflow, DraftState, ImageModelDefaults, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 
 /** Which workspace controls apply to the current workflow and model. */
 export interface WorkspaceCapabilities {
   isImageMode: boolean;
+  /** The Audio tab is open: no image, no video, only the fields of its kind. */
+  isAudio: boolean;
+  /** The kind the Audio tab shows (its workflow), or null on any other tab. */
+  audioKind: AudioWorkflow | null;
+  /** Sound, on a model that takes a length: the Length (s) row. */
+  showLength: boolean;
+  /** Speech, on a model that can follow a recording: the Voice section. */
+  showVoice: boolean;
   supportsNegativePrompt: boolean;
   supportsJsonPrompt: boolean;
   supportsFirstSigma: boolean;
@@ -66,9 +74,10 @@ export interface WorkspaceCapabilities {
 export function workspaceCapabilities(context: WorkspaceContext | null, state: DraftState): WorkspaceCapabilities {
   const definition = context?.workflow_contract.definitions[state.workflow];
   const isImageMode = definition?.mode === 'image';
+  const isAudio = definition?.mode === 'audio';
   const videoDefaults = context?.video_model_defaults?.[state.model] as VideoModelDefaults | undefined;
-  // A video model that lacks a control (low memory, upscale, ...) does not show it, whatever the workflow offers.
-  const hidden = new Set(isImageMode ? [] : (videoDefaults?.hidden_controls ?? []));
+  // A video model that lacks a control (low memory, upscale, ...) does not show it, whatever the workflow offers. An audio workflow offers what its kind takes.
+  const hidden = new Set(isImageMode || isAudio ? [] : (videoDefaults?.hidden_controls ?? []));
   const visible = new Set((definition?.visible_controls ?? []).filter((control) => !hidden.has(control)));
   const imageDefaults = isImageMode
     ? ((context?.image_model_defaults?.[state.model] ?? context?.defaults) as ImageModelDefaults | undefined)
@@ -87,12 +96,16 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   // A track set on a model without the capability stays in the draft but is hidden, not sent and not counted.
   const showAudioTrack = !isImageMode && visible.has('audio_track') && visible.has('audio_track_path');
   const tab = workspaceTab(state.workflow);
-  const audioTrackInEffect = showAudioTrack && tab !== 'image' && trackSet(trackOf(state, tab));
+  const audioTrackInEffect = showAudioTrack && (tab === 'video' || tab === 'extend') && trackSet(trackOf(state, tab));
   // A model that cannot upscale a clip made from a track (H3) loses the Upscale controls while one is in effect.
   const upscaleWithTrack = !audioTrackInEffect || videoDefaults?.supports_audio_track_upscale !== false;
 
   return {
     isImageMode,
+    isAudio,
+    audioKind: isAudio && isAudioWorkflow(state.workflow) ? state.workflow : null,
+    showLength: visible.has('length'),
+    showVoice: visible.has('voice') && visible.has('voice_path') && visible.has('voice_text'),
     supportsNegativePrompt,
     supportsJsonPrompt: isImageMode && (imageDefaults?.supports_json_prompt ?? false),
     supportsFirstSigma: isImageMode && (imageDefaults?.supports_first_sigma ?? false),

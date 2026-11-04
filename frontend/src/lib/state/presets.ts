@@ -14,7 +14,7 @@ const IMAGE_KEYS = [
 const VIDEO_KEYS = ['lora', 'ratio', 'size', 'width', 'height', 'runs', 'steps', 'frames', 'audio', 'low_memory', 'video_upscale_factor', 'review'] as const;
 
 /** The settings every preset of a mode holds, in file order. */
-export const PRESET_KEYS: Record<PresetMode, readonly string[]> = { image: IMAGE_KEYS, video: VIDEO_KEYS };
+export const PRESET_KEYS: Record<PresetMode, readonly string[]> = { image: IMAGE_KEYS, video: VIDEO_KEYS, audio: [] };
 
 const SIZE_KEYS = ['ratio', 'size', 'width', 'height'] as const;
 
@@ -39,7 +39,7 @@ const VIDEO_DRAFT_KEYS: Record<string, DraftKey[]> = {
   frames: ['frameCount'], audio: ['audio'], low_memory: ['lowMemory'],
   video_upscale_factor: ['videoUpscaleEnabled', 'videoUpscaleFactor'], review: ['videoUpscaleReview'],
 };
-const DRAFT_KEYS: Record<PresetMode, Record<string, DraftKey[]>> = { image: IMAGE_DRAFT_KEYS, video: VIDEO_DRAFT_KEYS };
+const DRAFT_KEYS: Record<PresetMode, Record<string, DraftKey[]>> = { image: IMAGE_DRAFT_KEYS, video: VIDEO_DRAFT_KEYS, audio: {} };
 
 function _mode(state: Pick<DraftState, 'workflow'>): PresetMode {
   return workflowMode(state.workflow);
@@ -48,8 +48,8 @@ function _mode(state: Pick<DraftState, 'workflow'>): PresetMode {
 /** Return the draft keys applying a preset of the state's mode may write, apart from `appliedPreset`. */
 export function presetDraftKeys(state: Pick<DraftState, 'workflow'>): Set<DraftKey> {
   const owned = PRESET_KEYS[_mode(state)].flatMap((key) => DRAFT_KEYS[_mode(state)][key] ?? []);
-  // A preset may change the model, and with it the LoRAs remembered per family and the model remembered for the mode.
-  return new Set<DraftKey>([...owned, 'model', 'loraString', 'lorasByFamily', 'lastImageModel', 'lastVideoModel']);
+  // A preset may change the model, and with it the LoRAs remembered per family.
+  return new Set<DraftKey>([...owned, 'model', 'loraString', 'lorasByFamily']);
 }
 
 /** Return *value* while its feature is on, else null: a setting of an off feature is not saved. */

@@ -1,21 +1,23 @@
-"""Plan the downloads behind a Models-page row: the targets, whether the row needs any, and what they would fetch."""
+"""Plan the downloads behind a Models-page row or a job: the targets, whether the row needs any, and what they would fetch."""
 
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.downloads.check import check_target
-from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, image_plan, matte_plan, seedvr2_plan, video_plan
+from zvisiongenerator.downloads.plans import built_model_plan, enhancer_plan, matte_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.space import space_need
-from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name
-from zvisiongenerator.utils.matte_models import MATTE_LABEL, MATTE_ROW_NAME
+from zvisiongenerator.utils.config import enhancer_tier_models
+from zvisiongenerator.utils.licences import LicenceRecord, licence_payload
+from zvisiongenerator.utils.matte_models import MATTE_ROW_NAME
 from zvisiongenerator.utils.model_files import huggingface_cache_dir
 from zvisiongenerator.utils.seedvr2 import seedvr2_row_name
+from zvisiongenerator.web.audio_models import find_audio_model
+from zvisiongenerator.web.job_downloads import JobDownloadPart, audio_model_part, enhancer_part, image_model_part, is_committed, matte_part, missing_targets, seedvr2_tier_part, video_model_part
 
 if TYPE_CHECKING:
     from zvisiongenerator.downloads.space import SpaceNeed
@@ -24,58 +26,43 @@ if TYPE_CHECKING:
     from zvisiongenerator.web.model_inventory import ImageInventoryEntry
 
 __all__ = [
+    "KIND_AUDIO",
     "KIND_ENHANCER",
     "KIND_MATTE",
     "KIND_MODEL",
-    "PlanUnchecked",
-    "RowPlan",
     "enhancer_download_needed",
     "matte_download_needed",
-    "plan_summary",
+    "parts_summary",
     "row_download_needed",
     "row_plan",
 ]
 
 KIND_MODEL = "model"
+KIND_AUDIO = "audio"
 KIND_ENHANCER = "enhancer"
 KIND_MATTE = "matte"
 
 
-class PlanUnchecked(Exception):  # noqa: N818 - a state, not an error class; callers map it to HTTP 503
-    """Raised when a plan's size cannot be determined because the Hugging Face Hub cannot be reached."""
+def row_plan(kind: str, name: str, web_config: WebUiConfig) -> JobDownloadPart:
+    """Return the download of the Models-page row *name* of *kind* as one part, the shape a job's plan has.
 
-
-@dataclass(frozen=True)
-class RowPlan:
-    """The downloads a Models-page row needs.
-
-    Attributes:
-        kind: ``"model"`` (image, video and SeedVR2 rows, by name), ``"enhancer"`` (by tier) or ``"matte"`` (the one Background removal row).
-        name: The row's name or tier.
-        label: How the row reads in messages.
-        targets: The targets to fetch, or ``None`` when the plan cannot be made now (no connection to read the model's file list).
-    """
-
-    kind: str
-    name: str
-    label: str
-    targets: tuple[DownloadTarget, ...] | None
-
-
-def row_plan(kind: str, name: str, web_config: WebUiConfig) -> RowPlan:
-    """Return the download plan of the Models-page row *name* of *kind*.
+    *kind* is ``"model"`` (image, video and SeedVR2 rows, by name), ``"audio"`` (an audio model, by id), ``"enhancer"``
+    (by tier) or ``"matte"`` (the one Background removal row). The part's targets are ``None`` when the plan cannot be
+    made now (no connection to read the model's file list).
 
     Raises:
         ValueError: If *kind* is unknown or no such row exists.
     """
     if kind == KIND_MODEL:
         return _model_row_plan(name, web_config)
+    if kind == KIND_AUDIO:
+        return audio_model_part(find_audio_model(web_config.app_config, name))
     if kind == KIND_ENHANCER:
         repo, revision = _enhancer_model(name, web_config.app_config)
-        return RowPlan(kind, name, _enhancer_label(name), enhancer_plan(repo, revision))
+        return enhancer_part(repo, revision, web_config.app_config, platform_key=sys.platform, tier=name)
     if kind == KIND_MATTE:
         _require_matte_row(name)
-        return RowPlan(kind, name, MATTE_LABEL, matte_plan())
+        return matte_part()
     raise ValueError(f"Unknown download kind '{kind}'.")
 
 
@@ -145,59 +132,92 @@ def matte_download_needed(*, present: Callable[[DownloadTarget], bool] = target_
     return _any_missing(matte_plan(), present)
 
 
-def plan_summary(
-    plan: RowPlan,
+def parts_summary(
+    parts: Sequence[JobDownloadPart],
     *,
+    committed: Iterable[DownloadTarget] = (),
     check: Callable[[DownloadTarget], TargetCheck | None] = check_target,
     present: Callable[[DownloadTarget], bool] = target_present_offline,
     space: Callable[..., SpaceNeed | None] = space_need,
     cache_dir: Callable[[], Path] = huggingface_cache_dir,
+    licences: Sequence[LicenceRecord] = (),
 ) -> dict[str, Any]:
-    """Describe what downloading *plan* would fetch: parts with their file counts and sizes, the total and the free space.
+    """Describe what the downloads of *parts* (a job's, or a Models-page row's one part) would fetch, for the download dialog.
 
-    Targets already on disk are skipped; each other one is dry-run against the Hub. ``parts`` is empty and ``space``
-    is ``None`` when nothing is missing; ``total_bytes`` is ``None`` when any part's size is unknown. ``space`` is
-    the main download drive's estimate only.
+    A part is listed when it has files to fetch, or with ``bytes`` ``None`` (and the result ``unchecked``) when it
+    cannot be planned or the Hub cannot be reached. Targets already on disk are skipped without a Hub call. Parts the user
+    was already asked about are left out: see :func:`~zvisiongenerator.web.job_downloads.is_committed` for *committed*.
 
     Raises:
-        PlanUnchecked: If the plan cannot be made now or a target cannot be checked because the Hub is unreachable.
         RuntimeError: If the Hub refused a request (gated, missing repo or revision, server error); the message names the repo.
     """
-    if plan.targets is None:
-        raise PlanUnchecked(f"Could not reach Hugging Face to check the download of {plan.label}.")
+    listed: list[dict[str, Any]] = []
     checked: list[tuple[DownloadTarget, TargetCheck]] = []
-    for target in plan.targets:
-        if present(target):
+    unchecked = False
+    on_their_way = tuple(committed)
+    for part in parts:
+        missing = missing_targets(part, present)
+        if is_committed(missing, on_their_way):
             continue
-        result = check(target)
-        if result is None:
-            raise PlanUnchecked(f"Could not reach Hugging Face to check the download of {plan.label}.")
-        if result.missing_files > 0:
-            checked.append((target, result))
-    sizes = [result.missing_bytes for _, result in checked]
+        entry, part_unchecked, part_checked = _part_entry(part, missing, check=check)
+        checked.extend(part_checked)
+        unchecked = unchecked or part_unchecked
+        if entry is not None:
+            listed.append(entry)
+    sizes = [entry["bytes"] for entry in listed]
     need = space(checked, cache_dir=cache_dir()) if checked else None
     return {
-        "kind": plan.kind,
-        "name": plan.name,
-        "label": plan.label,
-        "parts": [{"repo": target.repo_id, "files": result.missing_files, "bytes": result.missing_bytes} for target, result in checked],
-        "total_bytes": None if any(size is None for size in sizes) else sum(size or 0 for size in sizes),
+        "parts": listed,
+        "total_bytes": None if any(size is None for size in sizes) else sum(sizes),
         "space": None if need is None else {"path": str(need.path), "needed_bytes": need.needed_bytes, "free_bytes": need.free_bytes, "enough": need.enough},
+        "unchecked": unchecked,
+        "licences": [{"model": entry["model"], **record} for entry in listed for record in licence_payload(licences, entry["model"])],
     }
 
 
-def _model_row_plan(name: str, web_config: WebUiConfig) -> RowPlan:
+def _part_entry(
+    part: JobDownloadPart,
+    missing: Sequence[DownloadTarget] | None,
+    *,
+    check: Callable[[DownloadTarget], TargetCheck | None],
+) -> tuple[dict[str, Any] | None, bool, list[tuple[DownloadTarget, TargetCheck]]]:
+    """Return a part's dialog entry (``None`` when it has nothing to fetch), whether it is unchecked and its checked targets.
+
+    *missing* is the part's targets that are not on disk (``None`` for an unchecked part): only those are checked against the Hub.
+    """
+    if missing is None:
+        return _entry(part, None), True, []
+    to_fetch: list[tuple[DownloadTarget, TargetCheck]] = []
+    for target in missing:
+        result = check(target)
+        if result is None:
+            return _entry(part, None), True, to_fetch
+        if result.missing_files > 0:
+            to_fetch.append((target, result))
+    if not to_fetch:
+        return None, False, []
+    sizes = [result.missing_bytes for _, result in to_fetch]
+    size = None if any(item is None for item in sizes) else sum(item or 0 for item in sizes)
+    return _entry(part, size), False, to_fetch
+
+
+def _entry(part: JobDownloadPart, size: int | None) -> dict[str, Any]:
+    """Return one part's row in the download plan: its label, its model (the key of its licences) and what it fetches."""
+    return {"label": part.label, "model": part.model_id, "bytes": size}
+
+
+def _model_row_plan(name: str, web_config: WebUiConfig) -> JobDownloadPart:
     """Return the plan of an image, SeedVR2 or video row; ``ValueError`` when there is no such row."""
     app_config = web_config.app_config
     image = _image_entry(name, web_config)
     if image is not None:
-        return RowPlan(KIND_MODEL, name, model_display_name(app_config, name), image_plan(image.resolved_path, family=image.family, config=app_config, platform_key=sys.platform))
+        return image_model_part(name, image.resolved_path, family=image.family, config=app_config, platform_key=sys.platform)
     setup = web_config.seedvr2
     if _is_seedvr2_row(name, web_config) and setup is not None:
-        return RowPlan(KIND_MODEL, name, name, seedvr2_plan(setup.tier.model, models_dir=Path(web_config.models_dir), weights=setup.weights))
+        return seedvr2_tier_part(setup.tier.model, setup.weights, Path(web_config.models_dir))
     video = next((entry for entry in web_config.video_inventory if entry.name == name), None)
     if video is not None:
-        return RowPlan(KIND_MODEL, name, model_display_name(app_config, name), video_plan(video.resolved_path, family=video.family, config=app_config, model_name=video.name, upscale=True))
+        return video_model_part(video.name, video.resolved_path, family=video.family, config=app_config, upscale=True)
     raise ValueError(f"No model named '{name}' to download.")
 
 
@@ -224,11 +244,6 @@ def _require_matte_row(name: str) -> None:
     """Raise ``ValueError`` unless *name* is the one Background removal row."""
     if name != MATTE_ROW_NAME:
         raise ValueError(f"No background removal row '{name}' to download.")
-
-
-def _enhancer_label(tier: str) -> str:
-    """Return how an enhancer tier reads in messages, such as "Smart enhancer model"."""
-    return f"{tier.capitalize()} enhancer model"
 
 
 def _any_missing(targets: Sequence[DownloadTarget] | None, present: Callable[[DownloadTarget], bool]) -> bool:

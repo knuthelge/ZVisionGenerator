@@ -18,6 +18,10 @@ Port 8080 was busy, so the next free port was used. The terminal prints the addr
 
 Start it with `ziv ui --host local` and use the network address it prints. To reach it under a host name that isn't this computer's name, list the name in `ZIV_UI_ALLOWED_HOSTS`. See [Other devices](../web-ui/devices.md).
 
+### ffmpeg is missing
+
+Video and audio need ffmpeg. `ziv-video` and `ziv-audio` offer to install it and ask first. The Web UI says it was not found when you press **Generate**; install it, make sure it is on your `PATH`, and try again. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion.
+
 ## Windows and Linux: CUDA
 
 ### "CUDA is not available"
@@ -111,10 +115,6 @@ Only some models use one. See [Negative prompts](prompts.md#negative-prompts).
 Check that the LoRA was made for this model family. Only standard LoRAs and LyCORIS LoKr files are supported. See [LoRAs](loras.md#what-works).
 
 ## Video
-
-### ffmpeg is missing
-
-`ziv-video` offers to install it and asks first. On Windows, open a new terminal afterwards. On Fedora, `dnf install ffmpeg` needs RPM Fusion.
 
 ### "Could not detect video model family"
 

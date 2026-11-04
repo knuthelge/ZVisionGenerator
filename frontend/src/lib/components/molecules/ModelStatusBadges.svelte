@@ -22,13 +22,19 @@
   export const PREPARED_SEEDVR2_TOOLTIP = 'Downloaded. The first upscale makes its 8-bit copy.';
   export const PREPARED_INSTANT_TOOLTIP = 'Downloaded. The first image builds it.';
 
+  /** Whether the estimate has a system-memory part: image and video models on a discrete GPU do; an audio model's fit is the GPU's alone. */
+  function hasSystemPart(fit: MemoryFit, estimate: MemoryFitEstimate): boolean {
+    return fit.kind === 'discrete' && estimate.system_gb !== undefined && fit.system_budget_gb !== undefined;
+  }
+
   function needLine(fit: MemoryFit, estimate: MemoryFitEstimate): string {
     if (fit.kind !== 'discrete') return `Needs ~${estimate.required_gb} GB; this Mac recommends up to ~${fit.budget_gb} GB for the GPU.`;
+    if (!hasSystemPart(fit, estimate)) return `Needs ~${estimate.required_gb} GB of GPU memory (this GPU has ${fit.budget_gb} GB).`;
     return `Needs ~${estimate.required_gb} GB of GPU memory (this GPU has ${fit.budget_gb} GB) and ~${estimate.system_gb} GB of system memory (this machine has ${fit.system_budget_gb} GB).`;
   }
 
   function levelSummary(fit: MemoryFit, value: MemoryFitEstimate): string {
-    const need = fit.kind === 'discrete' ? `~${value.required_gb} GB GPU, ~${value.system_gb} GB system` : `~${value.required_gb} GB`;
+    const need = hasSystemPart(fit, value) ? `~${value.required_gb} GB GPU, ~${value.system_gb} GB system` : `~${value.required_gb} GB`;
     return `${need} (${MEMORY_FIT_LABELS[value.status]})`;
   }
 

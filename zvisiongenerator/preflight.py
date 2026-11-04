@@ -18,10 +18,13 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends import prompt_enhancer_session, release_accelerator_memory, video_family_on_platform
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
+from zvisiongenerator.downloads import enhancer_plan
 from zvisiongenerator.job_controls import pause_until_resumed, seed_range
+from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.prompt_compose import expand_random_choices, is_original_prompt
 from zvisiongenerator.utils.config import model_reference
 from zvisiongenerator.utils.enhance_record import enhancer_tier
+from zvisiongenerator.utils.licences import ENHANCER_LICENCE_TIERS, enhancer_licence_model
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
     EnhanceSettings,
@@ -143,7 +146,8 @@ def run_preflight(
             ``release_accelerator_memory``, looked up at call time).
         ensure_downloads: Called with the enhancer ``(repo, revision)`` before it loads, to fetch what it lacks.
             Returning ``False`` ends the job without loading the enhancer; the hook reports that cancellation itself.
-            ``None`` (the CLI) loads straight away and reports a first-use download as the ``downloading`` load phase.
+            ``None`` (the CLI) prints the enhancer tier's licence notice when its files are missing, then loads straight
+            away and reports a first-use download as the ``downloading`` load phase.
 
     Returns:
         The job plan; ``cancelled`` is set when the user quit during preflight or the hook ended the job.
@@ -194,7 +198,9 @@ def run_preflight(
     )
     if reference is None:
         raise RuntimeError("Prompt enhancement was requested but no enhancer model could be planned.")
-    if ensure_downloads is not None and not ensure_downloads(*reference):
+    if ensure_downloads is None:
+        _print_enhancer_licence(config, reference)
+    elif not ensure_downloads(*reference):
         return JobPlan(iterations, cancelled=True)
     pause = _make_pause(control, mode=mode, total_iterations=total_iterations, progress_callback=progress_callback)
     caption = mode == "image" and getattr(args, "enhance_format", None) == "json"
@@ -221,6 +227,13 @@ def run_preflight(
         emit_progress(progress_callback, "batch_cancelled", mode=mode, completed_iterations=0, total_iterations=total_iterations)
         return JobPlan(planned, cancelled=True, enhancer=used)
     return _finish(JobPlan(planned, enhancer=used), mode=mode, progress_callback=progress_callback)
+
+
+def _print_enhancer_licence(config: dict[str, Any], reference: tuple[str, str | None]) -> None:
+    """Print the terms of the enhancer tier *reference* names, before its first download; nothing for a custom model or one on disk."""
+    tier = enhancer_tier(config, platform_key=sys.platform, model=model_reference(*reference))
+    if tier in ENHANCER_LICENCE_TIERS:
+        print_licence_notice(enhancer_licence_model(tier), lambda: enhancer_plan(*reference))
 
 
 def _rewrite_all(

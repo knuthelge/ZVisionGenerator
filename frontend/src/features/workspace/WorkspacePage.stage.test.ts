@@ -8,6 +8,7 @@ import { draft } from '$lib/state/draft.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { jobStore } from '$lib/state/job.svelte';
 import { hasPendingReference, requestReference } from '$lib/state/pendingReference.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { toasts } from '$lib/state/toasts.svelte';
@@ -17,9 +18,10 @@ import type { EnhanceFrame, SettingsPreset, JobContext, PromptEnhancerContract, 
 import WorkspacePage from './WorkspacePage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
+import { makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
 import { makeAsset, makeContext, makeGalleryPage, makeImageDefaults } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
-import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
+import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
@@ -58,6 +60,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getWorkspaceContext: mocks.getWorkspaceContext,
     getWorkspaceCoreContext: mocks.getWorkspaceCoreContext,
     submitGenerate: mocks.submitGenerate,
+    planGenerate: mocks.planGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
     checkReferencePaths: mocks.checkReferencePaths,
@@ -216,6 +219,69 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
   });
 });
 
+describe('WorkspacePage viewers follow their asset by id', () => {
+  const asset = (name: string) => makeAsset({ id: `out/${name}.png`, url: `/media/out/${name}.png`, thumbnail_url: `/media/out/${name}-thumb.png`, filename: `${name}.png` });
+  const shown = () => (target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null)?.getAttribute('src');
+
+  it('keeps a completed output in view when an earlier output of the run is deleted', async () => {
+    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-ids', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 3, created_at: '2026-04-30T10:00:00Z' });
+    await mountWorkspace(makeContext());
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const [a, b, c] = [asset('a'), asset('b'), asset('c')];
+    lastEventSource().emit('job_completed', { type: 'job_completed', job_id: 'job-ids', total_runs: 3, outputs: [a, b, c] });
+    await settle();
+
+    target.querySelector(`button[aria-label="View ${c.filename} fullscreen"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(shown()).toBe(c.url);
+
+    jobStore.removeOutputs([a.id]);
+    await settle();
+
+    expect(shown()).toBe(c.url);
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('2 of 2');
+  });
+
+  it('keeps the History viewer on its asset when an earlier asset is deleted and older ones load', async () => {
+    const [a, b, c] = [asset('a'), asset('b'), asset('c')];
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ ...makeGalleryPage([a, b, c]), total_pages: 2, total_count: 5 })
+      .mockResolvedValue({ ...makeGalleryPage([asset('d'), asset('e')]), page: 2, total_pages: 2, total_count: 5 });
+    await mountWorkspace(makeContext({ history_assets: [] }));
+    (target.querySelector(`button[aria-label="View ${b.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    // Opening near the end of History loads the older page behind the viewer.
+    expect(galleryStore.assets).toHaveLength(5);
+    expect(shown()).toBe(b.url);
+
+    galleryStore.removeAssets([a]);
+    await settle();
+    expect(galleryStore.assets).toHaveLength(4);
+    expect(shown()).toBe(b.url);
+  });
+
+  it('keeps the phone viewer on its asset when a new one lands at the front of History', async () => {
+    layoutProbe.compact = true;
+    const [a, b] = [asset('a'), asset('b')];
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([a, b]));
+    await mountWorkspace(makeContext({ history_assets: [] }));
+    (target.querySelector('button[aria-label="Older output"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector(`.latest-region button[aria-label="View ${b.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="asset-viewer"]')?.getAttribute('data-compact')).toBe('true');
+    expect(shown()).toBe(b.url);
+
+    galleryStore.mergeOutputs([asset('new')]);
+    await settle();
+
+    expect(shown()).toBe(b.url);
+    expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 3');
+    expect(document.querySelector('.viewer-pane-prev img')?.getAttribute('src')).toBe(a.thumbnail_url);
+  });
+});
+
 describe('WorkspacePage history viewer (REC-UX-002)', () => {
 
   it('clicking a history row opens the workspace viewer lightbox', async () => {
@@ -231,6 +297,49 @@ describe('WorkspacePage history viewer (REC-UX-002)', () => {
     await settle();
 
     expect(target.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
+  });
+
+  it('stays on the open asset when a new one lands at the front of History', async () => {
+    const first = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png' });
+    const second = makeAsset({ id: 'out/second.png', url: '/media/out/second.png', filename: 'second.png' });
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([first, second]));
+    await mountWorkspace(makeContext({ history_assets: [] }));
+
+    (target.querySelector(`button[aria-label="View ${second.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    const shown = () => (target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null)?.getAttribute('src');
+    expect(shown()).toBe(second.url);
+
+    const landed = makeAsset({ id: 'out/new.png', url: '/media/out/new.png', filename: 'new.png' });
+    galleryStore.mergeOutputs([landed]);
+    await settle();
+
+    expect(galleryStore.assets[0].id).toBe(landed.id);
+    expect(shown()).toBe(second.url);
+  });
+
+  it('keeps a take playing in the viewer when a new one lands at the front of History', async () => {
+    const song = makeAudioAsset();
+    const talk = makeSpeechAsset();
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([song, talk]));
+    await mountWorkspace(makeContext({ history_assets: [] }));
+
+    (target.querySelector(`button[aria-label="View ${talk.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+    const player = () => document.querySelector('[data-testid="viewer-audio"] audio') as HTMLAudioElement | null;
+    const opened = player();
+    expect(opened?.getAttribute('src')).toBe(talk.url);
+    const paused: (HTMLMediaElement | null)[] = [];
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { paused.push(this); });
+
+    const landed = makeAudioAsset({ id: 'out/new.flac', url: '/media/out/new.flac', thumbnail_url: '/media/out/new.flac', filename: 'new.flac' });
+    galleryStore.mergeOutputs([landed]);
+    await settle();
+
+    expect(galleryStore.assets.map((item) => item.id)).toEqual([landed.id, song.id, talk.id]);
+    expect(player()).toBe(opened);
+    expect(player()?.getAttribute('src')).toBe(talk.url);
+    expect(paused).not.toContain(opened);
   });
 });
 
@@ -433,6 +542,24 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/first.png' });
 
     expect(toasts).toEqual([]);
+  });
+
+  it('keeps the preset and settings of the tab a Use as opens', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    draft.update('workflow', 'txt2vid');
+    await mountWithHistory([asset]);
+    draft.patch({ steps: 7 });
+    draft.setAppliedPreset('clip');
+    draft.setTab('image');
+    await settle();
+    expect(draft.state.appliedPreset).toBeNull();
+
+    // A Use as brings an image and no settings: the Video tab stays as it was left, preset included.
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'img2vid', firstFramePath: '/outputs/out/first.png', steps: 7, appliedPreset: 'clip' });
   });
 
   it('Use as forgets the upload it replaces in the store, so it does not come back after a reload', async () => {
@@ -730,6 +857,22 @@ describe('WorkspacePage asset actions and settings', () => {
       await settle();
       expect(stageTile().getAttribute('aria-label')).toBe('first.png');
       expect(position()).toBeNull();
+    });
+
+    it('stays on the viewed older output when a new one lands, and when an output newer than it is deleted', async () => {
+      await mountWithHistory([first(), second(), third()]);
+      arrow('ArrowRight');
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+
+      galleryStore.mergeOutputs([makeAsset({ id: 'out/new.png', filename: 'new.png' })]);
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+      expect(position()?.textContent).toContain('3');
+
+      galleryStore.removeAssets([first()]);
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
     });
 
     it('has Newer and Older buttons that disable at the ends', async () => {
@@ -1481,7 +1624,7 @@ describe('WorkspacePage extend', () => {
       expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'download', 'delete']);
     });
 
-    it('turns the Workspace to Extend Video with the clip as source, its scene in the boxes, and checks it', async () => {
+    it('turns the Workspace to Extend with the clip as source, its scene in the boxes, and checks it', async () => {
       const asset = clip();
       await mountWithClip(asset);
       openMenu(asset);
@@ -1489,13 +1632,14 @@ describe('WorkspacePage extend', () => {
       await settle();
 
       expect(draft.state).toMatchObject({ workflow: 'extend', extendSourcePath: SOURCE, scene: 'A woman on a rainy street.', prompt: '' });
+      expect(target.querySelector('[data-testid="kind-control"] [data-value="extend"]')?.getAttribute('aria-pressed')).toBe('true');
       expect(lastInspect()).toMatchObject({ path: SOURCE });
       expect(input('ws-source-path').value).toBe(SOURCE);
       expect(text('[data-testid="extend-source-facts"]')).toContain('512 × 288');
       expect(toasts.map((toast) => toast.message)).toContain('walk.mp4 is now the source video');
     });
 
-    it('replaces the text of an earlier source when already on Extend Video', async () => {
+    it('replaces the text of an earlier source when already on Extend', async () => {
       const asset = clip();
       await mountWithClip(asset, 'extend');
       draft.patch({ scene: 'Old scene.', prompt: 'Old action.', extendSourcePath: '/clips/old.mp4' });
@@ -1549,7 +1693,7 @@ describe('WorkspacePage extend', () => {
     });
   });
 
-  describe('a prefill that opens Extend Video', () => {
+  describe('a prefill that opens Extend', () => {
     it('leaves the uploads of the Image and Video tabs alone, as Extend holds no image of its own', async () => {
       const png = (name: string) => new File(['img'], name, { type: 'image/png' });
       heldUploads.setStart('image', png('start.png'));

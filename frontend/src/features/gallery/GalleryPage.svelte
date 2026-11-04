@@ -9,7 +9,7 @@
   import { galleryStore, type GalleryQuery, type MediaFilter, type SortOrder } from '$lib/state/gallery.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { extendParams, referenceParams, reuseParams, useAsState, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { audioTrackParams, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, UpscaleFactor, UpscaleMethod } from '$lib/types';
@@ -102,10 +102,6 @@
       _mutationRevision += 1;
     };
   });
-
-  const viewerIndex = $derived(
-    selectedAsset ? assets.findIndex((a) => a.id === selectedAsset!.id) : 0
-  );
 
   $effect(() => {
     if (!sentinelEl || pageOnePending) return;
@@ -238,7 +234,7 @@
   }
 
   function beginReplacementView(
-    filter: 'all' | 'image' | 'video',
+    filter: MediaFilter,
     sort: 'newest' | 'oldest'
   ): void {
     mediaFilter = filter;
@@ -249,7 +245,7 @@
     void loadPageOne(filter, sort, _viewGeneration, _mutationRevision);
   }
 
-  function onFilterChange(value: 'all' | 'image' | 'video'): void {
+  function onFilterChange(value: MediaFilter): void {
     beginReplacementView(value, sortOrder);
   }
 
@@ -456,6 +452,12 @@
     } else router.navigate('workspace', referenceParams(asset, target));
   }
 
+  /** An audio take becomes the Video tab's audio track or the Speech tab's voice; the Workspace reads the params on mount. */
+  function useAudio(asset: GalleryAsset, target: AudioUseTarget): void {
+    if (!asset.file_path) return;
+    router.navigate('workspace', target === 'audio_track' ? audioTrackParams(asset) : voiceParams(asset));
+  }
+
   function extendAsset(asset: GalleryAsset): void {
     router.navigate('workspace', extendParams(asset));
     addToast(`${asset.filename} is now the source video`, 'success');
@@ -535,8 +537,9 @@
           { value: 'all', label: 'All media' },
           { value: 'image', label: 'Images only' },
           { value: 'video', label: 'Videos only' },
+          { value: 'audio', label: 'Audio only' },
         ]}
-        onchange={(next) => onFilterChange(next as 'all' | 'image' | 'video')}
+        onchange={(next) => onFilterChange(next as MediaFilter)}
       />
       <Select
         ariaLabel="Sort gallery assets"
@@ -571,7 +574,7 @@
       <Alert tone="error" live>{error}</Alert>
     {:else if emptyState}
       <EmptyState title={filteredEmptyState ? 'No matching assets' : 'No generated assets yet'} class="min-h-96 justify-center">
-        <p>{filteredEmptyState ? `No ${mediaFilter} assets match the current gallery filter.` : 'Generated outputs appear here after an image or video job completes.'}</p>
+        <p>{filteredEmptyState ? `No ${mediaFilter} assets match the current gallery filter.` : 'Generated outputs appear here after a job completes.'}</p>
         {#snippet actions()}
           {#if filteredEmptyState}
             <Button onclick={clearMediaFilter}>Show all media</Button>
@@ -593,6 +596,7 @@
             onpreview={selectMode ? (asset) => toggleSelect(asset, !selected.has(asset.id)) : openViewer}
             onreuse={reuseInWorkspace}
             onreference={useAsReference}
+            onuseaudio={useAudio}
             {useAs}
             onextend={extendAsset}
             onupscale={upscaleAsset}
@@ -634,7 +638,7 @@
 <AssetViewer
   {assets}
   origin={viewerTrigger}
-  currentIndex={viewerIndex}
+  currentId={selectedAsset?.id ?? null}
   open={lightboxOpen && selectedAsset !== null}
   setLabel="Gallery"
   {deletingIds}
@@ -643,7 +647,9 @@
   onnearend={() => { if (hasMore) void loadMorePages(); }}
   onreuse={reuseInWorkspace}
   onreference={useAsReference}
+  onuseaudio={useAudio}
   {useAs}
+  audioModels={workspaceMemory.get()?.audio_models}
   onextend={extendAsset}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}

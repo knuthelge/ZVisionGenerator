@@ -22,6 +22,7 @@ import yaml
 from zvisiongenerator.core.video_family import FrameRule, VideoCapabilities, VideoFamily
 from zvisiongenerator.utils.h3_preset import HubFiles, h3_preset
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.ltx_converted import LTX_FAMILY_MODEL_TYPE
 from zvisiongenerator.utils.paths import get_ziv_data_dir, parse_huggingface_repo_reference, split_huggingface_revision
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
@@ -83,6 +84,7 @@ def load_config() -> dict[str, Any]:
         "video_sizes",
         "video_generation",
         "video_model_presets",
+        "audio_model_presets",
         "prompt_enhancer",
     )
     for section in _EXPECTED_DICTS:
@@ -172,6 +174,8 @@ def load_config() -> dict[str, Any]:
 
     seedvr2_settings(config, MLX_WEIGHTS.tiers_key)
     seedvr2_settings(config, FP8_WEIGHTS.tiers_key)
+
+    parse_audio_presets(config)
 
     return config
 
@@ -803,6 +807,21 @@ def ltx_distilled_lora_source(config: dict[str, Any], version: str | None = None
     if block.get("distilled_lora") is None:
         return None
     return _ltx_hub_file(block["distilled_lora"], f"{_ltx_path(version)}.distilled_lora")
+
+
+def ltx_distilled_lora_licence(config: dict[str, Any], version: str | None = None) -> str | None:
+    """Return the id of the licence record that covers the distilled LoRA of LTX version *version* (``distilled_lora.licence``), or ``None`` when it names none.
+
+    Raises:
+        ValueError: If the entry is set but is not a non-blank string.
+    """
+    entry = _ltx_block(config, version).get("distilled_lora")
+    record = entry.get("licence") if isinstance(entry, dict) else None
+    if record is None:
+        return None
+    if not isinstance(record, str) or not record.strip():
+        raise ValueError(f"{_ltx_path(version)}.distilled_lora.licence must be a non-blank string.")
+    return record.strip()
 
 
 def ltx_mlx_base_repo(config: dict[str, Any], bits: int, version: str | None = None) -> str:

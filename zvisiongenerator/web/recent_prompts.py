@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.utils import app_db
+from zvisiongenerator.utils.audio_preset import AUDIO_KINDS
 
 _LIMIT = 50
 
@@ -18,10 +19,14 @@ _COLUMNS = ("format", "prompt", "scene", "negative_prompt", "mode", "used_at")
 type RecentPrompt = dict[str, Any]
 
 __all__ = [
+    "RECENT_MODES",
     "RecentPrompts",
     "RecentPromptsError",
     "recent_prompt_entry",
 ]
+
+RECENT_MODES = ("image", "video", *AUDIO_KINDS)
+"""The lists the recents are kept in: one per Workspace mode, and one per audio kind."""
 
 
 def recent_prompt_entry(
@@ -33,12 +38,14 @@ def recent_prompt_entry(
     negative_prompt: str | None,
     mode: str,
     used_at: float,
+    lyrics: str | None = None,
 ) -> RecentPrompt | None:
     """Build the entry for an accepted submit, or ``None`` when it does not belong in the recents.
 
     A prompt-file run and a submit whose text and scene are both blank are not remembered. A JSON caption
     (image mode only) is stored as sent with ``format`` ``"json"``; a plain submit keeps the scene for
-    video and the negative prompt for image, and blanks the other.
+    video and the negative prompt for image, and blanks the other. An audio submit is kept under its kind, and a music
+    one keeps its lyrics in the scene.
 
     Args:
         prompt_source: ``"file"`` for a prompt-file run; anything else is an inline prompt.
@@ -46,8 +53,9 @@ def recent_prompt_entry(
         json_prompt: The submitted JSON caption text.
         scene: The submitted video scene.
         negative_prompt: The submitted negative prompt.
-        mode: ``"image"`` or ``"video"``.
+        mode: One of :data:`RECENT_MODES`: ``"image"``, ``"video"``, or the audio kind.
         used_at: Server time of the submit in epoch seconds.
+        lyrics: The submitted lyrics; kept for music only.
 
     Returns:
         The entry with ``format``, ``prompt``, ``scene``, ``negative_prompt``, ``mode`` and ``used_at``.
@@ -59,8 +67,11 @@ def recent_prompt_entry(
     if mode == "image" and caption:
         return {"format": "json", "prompt": caption, "scene": "", "negative_prompt": negative, "mode": mode, "used_at": used_at}
     text = (prompt or "").strip()
-    stored_scene = (scene or "").strip() if mode == "video" else ""
-    if not text and not stored_scene:
+    if mode == "music":
+        stored_scene = (lyrics or "").replace("\r\n", "\n").strip()
+    else:
+        stored_scene = (scene or "").strip() if mode == "video" else ""
+    if not text and not (stored_scene and mode == "video"):
         return None
     return {
         "format": "text",

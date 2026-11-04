@@ -26,7 +26,7 @@ Every module, function, and class should be **atomic**: a single, self-contained
 
 ## Repository Rules
 
-- `packages/ltx_*`, `packages/seedvr2_torch`, `packages/minimax_h3_mlx` and `packages/moss_image` are vendored. Never edit them by hand; update them with `make update-ltx`, `make update-seedvr2`, `make update-h3-mlx` and `make update-moss`.
+- `packages/ltx_*`, `packages/seedvr2_torch`, `packages/minimax_h3_mlx`, `packages/moss_image`, `packages/yue2` and `packages/stable_audio_3` are vendored. Never edit them by hand; update them with `make update-ltx`, `make update-seedvr2`, `make update-h3-mlx`, `make update-moss`, `make update-yue2` and `make update-sa3`.
 - The Web UI is built from `frontend/` (Svelte 5, TypeScript, pnpm) into `zvisiongenerator/web/static/app/`, which is committed. After any frontend change, run `make frontend-build` and commit the rebuilt files.
 - Future work is written up as proposals in `proposals/` (see its README). Check there before larger work. When a proposal ships or is rejected, update its status and move it to `proposals/archive/`. Files in `docs/` never link to proposals.
 - User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`. Explain a feature once in Concepts; the Web UI and CLI pages show how to use it and link there. New settings go in `docs/concepts/configuration.md` and new flags in `docs/cli/reference.md`. See [Writing docs](docs/developer/docs.md).
@@ -49,7 +49,7 @@ Run `make check` before finishing. It is the full CI gate: ruff lint and format 
 
 ## Testing
 
-- Tests live in `tests/<area>/test_<module>.py`, where the area is one of `web`, `video`, `image`, `prompts`, `downloads`, `converters`, `contracts`, `backends` (with `cuda` and `mac`) or `common`; frontend tests sit next to their source as `*.test.ts`. A feature that spans areas is selected with `-k`, for example `-k h3`.
+- Tests live in `tests/<area>/test_<module>.py`, where the area is one of `web`, `video`, `image`, `prompts`, `downloads`, `converters`, `contracts`, `backends` (with `cuda` and `mac`), `audio` or `common`; frontend tests sit next to their source as `*.test.ts`. A feature that spans areas is selected with `-k`, for example `-k h3`.
 - Never import from `conftest` or from another test module. Import shared helpers as `tests.<module>`: `tests/_factories.py` and the other `tests/_*.py` modules for helpers used in more than one area, `tests/<area>/_helpers.py` for one area. Resolve repo paths through `tests/_paths.py`, never from `__file__`.
 - Never load real backends or models. Use `MagicMock` with controlled return values and `tests/_factories.py::_make_args(**overrides)` for CLI args.
 - Test behavior and machine-readable contracts (routes, config keys, event names, enum values, statuses), not prose, help text, CSS classes, or source text.

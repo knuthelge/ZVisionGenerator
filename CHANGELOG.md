@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- **Audio.** A new **Audio** tab and `ziv-audio` (`ziv audio`) make songs and instrumentals with YuE2 3B (up to 6 minutes), speech with Higgs TTS 3 (in a voice the model picks, or cloned from a recording you have permission to use) and ambience and sound effects with Stable Audio 3 Medium (up to 380 s). Takes are saved as FLAC with their settings, show a live preview while they are made, and play in the Gallery, which has a new **Audio only** filter. **Use as → Audio track** gives a take to a video, and **Use as → Voice** makes a speech take the voice of the next one. It runs on Windows and Linux with a 10 GB GPU, and needs ffmpeg like video does; macOS is intended and has not been measured
+- **Every built-in model shows its licence.** An **ⓘ** beside the model picker, on the Models page and in the download dialog names the licence, what it allows and a link, and the CLIs print the same terms before a first download. The three audio models are non-commercial or limited, so read them before you use the output
+
+### Changed
+- **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms
+- **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio, and **Kind** in Video switches between **New** and **Extend**
+- **Reset acts on the open tab only**, and **Reuse settings** and **Load settings** apply a file's settings exactly: what the file didn't record takes its default instead of what the form held
+
+### Fixed
+- **Image and Video keep their own settings, model and preset** when you switch between them
+- **The viewer stays on the result you opened** when a new one lands or an earlier one is deleted
+- **The job card's notice has room**, so *Pausing after this image* is no longer cut off
+- **Steps stops at the video model's limit** as you type, so the count shown is the count that runs
+- **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is
+- `ziv-image -m <owner/repo>` with a built-in model's repo records the model under its short name, as `ziv-video` does
+
 ## [0.14.0b4] - 2026-11-02
 
 ### Added

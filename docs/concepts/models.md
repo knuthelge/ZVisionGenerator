@@ -1,16 +1,16 @@
 # Models
 
-A model is what turns a prompt into an image or video. The app has built-in models that download on first use, and you can add your own.
+A model is what turns a prompt into an image, a video or a sound. The app has built-in models that download on first use, and you can add your own.
 
 ## Image models
 
 | Model | Alias | Download | Steps | Negative prompt | License |
 |---|---|---|---|---|---|
-| FLUX.2 Klein 4B | `klein4b` | 16 GB | 4 | No | See its [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) |
-| FLUX.2 Klein 9B | `klein9b` | 35 GB | 4 | No | See its [model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
-| Z-Image Turbo | `zit` | 33 GB | 10 | Yes | See its [model page](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) |
-| Krea 2 Turbo | `krea2` | 36 GB | 8 | No | [Krea 2 Community License](https://huggingface.co/krea/Krea-2-Turbo) |
-| Ideogram 4 Instant | `ideo` | 28 GB (macOS), 24 GB (Windows, Linux) | 8 | No | Ideogram's non-commercial license |
+| FLUX.2 Klein 4B | `klein4b` | 16 GB | 4 | No | Apache-2.0 |
+| FLUX.2 Klein 9B | `klein9b` | 35 GB | 4 | No | FLUX Non-Commercial License v2.1 |
+| Z-Image Turbo | `zit` | 33 GB | 10 | Yes | Apache-2.0 |
+| Krea 2 Turbo | `krea2` | 36 GB | 8 | No | Krea 2 Community License Agreement |
+| Ideogram 4 Instant | `ideo` | 28 GB (macOS), 24 GB (Windows, Linux) | 8 | No | Ideogram Non-Commercial Model Agreement |
 | MOSS-Image Turbo | `moss` | 28 GB | 4 | No | Apache-2.0 |
 | MOSS-Image SFT | `moss-sft` | 27 GB | 50 | Yes | Apache-2.0 |
 
@@ -18,7 +18,7 @@ Klein 4B is the lightest and the first-run pick on machines with less than 32 GB
 
 The download is the one-time size. Memory needs depend on your machine and the [quant](quantization.md); the Web UI's badges show what fits. See [Memory](memory.md).
 
-All built-in models download without a Hugging Face account. Where the original repository needs a login, the alias points to an ungated mirror whose weights match the original.
+The License column names each model's licence; [Licences](#licences) has the terms and links. All built-in models download without a Hugging Face account. Where the original repository needs a login, the alias points to an ungated mirror whose weights match the original.
 
 ### FLUX.2 Klein
 
@@ -63,7 +63,7 @@ The weights are large, about 26 GB for the transformer plus a 9 GB text encoder,
     - **macOS:** at 1024×1024, unquantized and `q8` peak at about 33 GB and `q4` at about 25 GB, mostly briefly while the image is decoded at the end. On an M5 all three take about 15 s per step at that size; `q4` is faster at smaller sizes.
     - **Windows and Linux:** the transformer streams to the GPU block by block. On a 10 GB GPU with 32 GB of system memory, `q4` and `q8` both take about 3.5 s per step at 1024×1024, about a minute per image (`q8` peaks at about 17 GB of system memory, `q4` at 14 GB). Unquantized it takes about 15 s per step and peaks at about 26 GB, so pick `q4` or `q8`.
 
-    Every source is pinned to a checked revision in the `ideogram4_instant` section of the [configuration](configuration.md), and the folder is rebuilt when a pin changes. The model is under Ideogram's non-commercial license, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
+    Every source is pinned to a checked revision in the `ideogram4_instant` section of the [configuration](configuration.md), and the folder is rebuilt when a pin changes. The model is under the Ideogram Non-Commercial Model Agreement, which applies as soon as you download or use it: see `LICENSE.md` in the folder.
 
 ### MOSS-Image
 
@@ -97,12 +97,12 @@ Start with `moss`. Pick `moss-sft` when you want a negative prompt or the model 
 
 ## Video models
 
-| Model | Alias | Download | Needs | Can do |
-|---|---|---|---|---|
-| LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale |
-| LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same |
-| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same |
-| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS |
+| Model | Alias | Download | Needs | Can do | License |
+|---|---|---|---|---|---|
+| LTX-2.3 4-bit | `ltx-4` | 28.6 GB (macOS) | The least memory. About 20 GB of system memory on Windows and Linux. | Text or image to video, Extend, upscale | LTX-2 Community License Agreement and Gemma Terms of Use |
+| LTX-2.3 8-bit | `ltx-8` | 37.8 GB (macOS) | Closer to the full model. About 27 GB of system memory on Windows and Linux; a Mac with 32 GB or more. | The same | LTX-2 Community License Agreement and Gemma Terms of Use |
+| LTX-2.5 4-bit | `ltx25-4` | 71 GB (Windows, Linux), 28.8 GB (macOS) | The newer LTX, with the memory need of `ltx-4`: about 21 GB of system memory on Windows and Linux. | The same | LTX-2.x Community License Agreement |
+| MiniMax H3 | `h3` | 98 GB (Windows, Linux), 107 GB (macOS) | Much larger and slower than LTX. About 18 GB of free system memory on Windows and Linux; a Mac with 32 GB. | 4 or 8 steps. No upscale on macOS | MiniMax H3 Community License Agreement |
 
 All of them make video with sound, from a prompt or a starting image (with an optional [last frame](video.md#first-and-last-frame)), and can [extend](video.md#extending-a-video) a clip. The first run of each downloads it and, on Windows and Linux, prepares it for your GPU, which takes a while. See [Video](video.md).
 
@@ -161,7 +161,51 @@ On macOS, `ltx-4` and `ltx-8` download only the files the app loads, at fixed re
 
     Longer clips take longer: 10 s at 864×480 took about 9 minutes, 14 s about 13. An upscaled `l` clip is estimated at about 5½ minutes. The estimate leaves out the one-time preparation.
 
-MiniMax H3 is released under the MiniMax H3 Community License, published with the model on Hugging Face (`MiniMaxAI/MiniMax-H3`). It restricts use in some regions and above an annual revenue limit, asks commercial products that show H3 to name it in their interface, and counts LoRAs as derivatives of the model. Read it before you use the model or its output.
+MiniMax H3 is released under the MiniMax H3 Community License Agreement, published with the model on Hugging Face (`MiniMaxAI/MiniMax-H3`). It restricts use in some regions and above an annual revenue limit, requires commercial products to show "MiniMax H3" in their interface, and counts LoRAs as derivatives of the model. Read it before you use the model or its output; see [Licences](#licences).
+
+## Audio models
+
+| Model | Alias | Makes | Download | License |
+|---|---|---|---|---|
+| YuE2 3B | `yue2` | Songs and instrumentals | about 8 GB | CC BY-NC 4.0 with additional creator permission |
+| Higgs TTS 3 4B | `higgs3` | Speech | about 10 GB | Boson Higgs TTS 3 Research and Non-Commercial License and Boson Higgs Audio 2 Community License Agreement |
+| Stable Audio 3 Medium | `sa3` | Ambience and sound effects | about 10 GB | Stability AI Community License and Gemma Terms of Use |
+
+The alias is what you pass to `ziv audio -m`. What each kind does, and how long a take can be, is in [Audio](audio.md); what they need is in [Memory](memory.md#audio). All three are restricted in some way: read their [Licences](#licences) before you use the output.
+
+## Licences
+
+Every built-in model comes with terms. The Web UI shows them in the download dialog, beside the model picker and on the Models page, and the CLI prints them before a download. Downloading a model means you agree to its terms. The one-line summaries are a guide; the linked licence is what applies. The links lead to the model's original page; where that is gated, the app downloads from an ungated mirror, so you need no Hugging Face account.
+
+| Licence | Supplier | Covers | Terms | Links |
+|---|---|---|---|---|
+| FLUX Non-Commercial License v2.1 | Black Forest Labs | `klein9b` | Non-commercial use of the model; images may be used commercially | [Model page](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) |
+| Krea 2 Community License Agreement | Krea | `krea2` | Free under $1M revenue, images included; you must filter harmful content | [Licence](https://cdn.jsdelivr.net/gh/krea-ai/krea-2@db3984fbc6e13b34c0064990fc2d95ac64d00058/assets/hf_samples/LICENSE.pdf) |
+| Ideogram Non-Commercial Model Agreement | Ideogram | `ideo` | Non-commercial, images included: no ads, client work or paid products | [Model page](https://huggingface.co/ideogram-ai/ideogram-4-fp8) |
+| LTX-2 Community License Agreement | Lightricks | `ltx-4`, `ltx-8` | Free under $10M revenue | [Licence](https://github.com/Lightricks/LTX-2/blob/a95ab856bf29407b6b066ede0abe1846050db56c/LICENSE-2) |
+| LTX-2.x Community License Agreement | Lightricks | `ltx25-4` | Free under $10M revenue | [Model page](https://huggingface.co/Lightricks/LTX-2.5) |
+| MiniMax H3 Community License Agreement | MiniMax | `h3` | Not licensed in the EU, UK, South Korea or the USA; written permission needed over $20M revenue; commercial products show "MiniMax H3" | [Licence](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE) |
+| CC BY-NC 4.0 with additional creator permission | M-A-P | `yue2` | Non-commercial; individual creators may monetise their outputs, companies need a licence | [Licence](https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE) |
+| Boson Higgs TTS 3 Research and Non-Commercial License | Boson AI | `higgs3` | Non-commercial; creators may publish and monetise their own content if they credit Boson AI's Higgs Audio | [Licence](https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE) |
+| Boson Higgs Audio 2 Community License Agreement | Boson AI | `higgs3` | Free up to 100,000 annual active users; products credit Boson AI and Meta Llama 3 | [Licence](https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE) |
+| Stability AI Community License | Stability AI | `sa3` | Free under $1M revenue; commercial use needs a free registration | [Model page](https://huggingface.co/stabilityai/stable-audio-3-medium) |
+| Gemma Terms of Use | Google | `ltx-4`, `ltx-8`, `sa3` | Free to use, also commercially; Gemma's prohibited use policy applies | [Model page](https://huggingface.co/google/gemma-3-12b-it) |
+| Apache License 2.0 | Tongyi-MAI | `zit` | Free to use, also commercially | [Model page](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) |
+| Apache License 2.0 | Black Forest Labs | `klein4b` | Free to use, also commercially | [Licence](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/e7b7dc27f91deacad38e78976d1f2b499d76a294/LICENSE.md) |
+| Apache License 2.0 | OpenMOSS | `moss`, `moss-sft` | Free to use, also commercially | [Licence](https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT/blob/f972bd4b4b9e3852133cc5da954d87bc32cd8fb9/LICENSE) |
+| Apache License 2.0 | Qwen | The Fast and Smart [prompt enhancer](prompt-enhancer.md) models | Free to use, also commercially | [Licence](https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/LICENSE) |
+| Apache License 2.0 | ByteDance Seed | The SeedVR2 upscale models | Free to use, also commercially | [Model page](https://huggingface.co/ByteDance-Seed/SeedVR2-7B) |
+| Research-only training data | BiRefNet and ViTMatte authors | Background removal | Non-commercial: ViTMatte was trained on Adobe's Deep Image Matting dataset, whose agreement allows models trained on it only for non-commercial use, and BiRefNet (MIT) partly on DIS5K, which is research-only | [Dataset terms](https://github.com/xuebinqin/DIS/blob/e6455bae3892b3a7d8cf59ca91011a220d1ed606/DIS5K-Dataset-Terms-of-Use.pdf) |
+
+LTX-2.3 and Stable Audio 3 Medium come with Gemma's terms as well as their own, because a Gemma model is their text encoder. Higgs TTS 3 comes with two licences, one for the model and one for the audio codec it uses.
+
+**FLUX.2 Klein 9B.** The licence limits the model and anything built from it to non-commercial use, but the images it makes may be used for any purpose, commercial ones included (section 2.d). They may not be used to train a model that competes with FLUX.
+
+**Higgs TTS 3.** Audio you publish with it must acknowledge it, in the audio or in the text shown with it, for example "This audio was created with Boson AI's Higgs Audio". An application or demo that other people can use shows "Built with Higgs TTS 3 licensed from Boson AI USA, Inc.". Cloning a voice without the speaker's consent is forbidden, and commercial use beyond creators publishing their own content needs a licence from Boson. The audio codec's Higgs Audio 2 licence builds on the Meta Llama 3 Community License: products that use it show "Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved", and need an expanded licence above 100,000 annual active users. This app's Higgs TTS 3 code is "Derived from Higgs TTS 3, licensed from Boson AI USA, Inc."; the weights stay under Boson's licence.
+
+**Stable Audio 3 Medium.** Commercial use needs a free registration with Stability AI, and the licence ends once you or your affiliates earn more than $1M a year. Anyone who makes the model, or a product built on it, available to others must show "Powered by Stability AI" and pass on the notice "This Stability AI Model is licensed under the Stability AI Community License, Copyright © Stability AI Ltd. All Rights Reserved". Personal and research use needs none of this.
+
+**YuE2.** Individual creators may publish and sell the songs they make. A company that uses the model commercially needs a licence from its authors.
 
 ## Your own models
 

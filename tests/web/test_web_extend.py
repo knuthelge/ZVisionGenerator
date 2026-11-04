@@ -42,7 +42,7 @@ def clip(monkeypatch, tmp_path):
     extend_api_module._inspect_by_identity.cache_clear()
     spec.probed = []
     monkeypatch.setattr(video_extend_module, "probe_video", lambda path: spec.probed.append(path) or _clip_probe(**spec.probe))
-    monkeypatch.setattr(video_extend_module, "read_mp4_config", lambda _path: spec.config)
+    monkeypatch.setattr(video_extend_module, "read_config", lambda _path: spec.config)
     monkeypatch.setattr(video_extend_module, "audio_decodes", lambda *_args, **_kwargs: spec.audio_ok)
     for module in (web_server, extend_api_module):
         monkeypatch.setattr(module, "supports_video_extend", lambda: True)

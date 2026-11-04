@@ -1,9 +1,14 @@
 <script lang="ts">
-  import { Icon } from '$lib/components/atoms';
+  import { Icon, Waveform } from '$lib/components/atoms';
+  import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import type { AssetActionHandlers, UseAsState } from '$lib/state/assetActions';
+  import { audioFoot, hasNoWords, tileWords } from '$lib/state/audioAsset';
+  import { audioPeaks } from '$lib/state/audioPeaks.svelte';
+  import { formatClock } from '$lib/state/clock';
   import type { GalleryAsset } from '$lib/types';
   import { hold } from '$lib/actions/hold';
   import ActionMenu from './ActionMenu.svelte';
+  import AudioPlayer from './AudioPlayer.svelte';
   import { assetMenuEntries } from './assetMenu';
 
   interface Props extends AssetActionHandlers {
@@ -35,6 +40,7 @@
     onreference,
     onextend,
     onupscale,
+    onuseaudio,
     ondelete,
     class: extraClass = '',
   }: Props = $props();
@@ -43,13 +49,31 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
 
   const isVideo = $derived(asset.media_type === 'video');
+  const isAudio = $derived(asset.media_type === 'audio');
+  // A take plays in the stage's panel; in a grid or strip it is a cover that opens the viewer, never a player.
+  const audioPlayer = $derived(isAudio && density === 'stage');
+  const words = $derived(isAudio ? tileWords(asset) : '');
+  // The listing carries no waveform; the tile asks for it once, and the server keeps it.
+  const peaks = $derived(audioPeaks.of(asset));
+  $effect(() => {
+    if (isAudio) audioPeaks.ensure(asset);
+  });
+  // A tile with nothing to read, and every strip tile, shows only its icon and waveform.
+  const bare = $derived(isAudio && (density === 'compact' || hasNoWords(asset)));
+  const kindIcon = $derived<IconName>(asset.kind === 'speech' ? 'speech' : asset.kind === 'sound' ? 'waveform' : 'music');
+  const length = $derived(asset.duration != null ? formatClock(asset.duration) : null);
   const transparent = $derived(asset.transparent === true && !isVideo);
   const canReuse = $derived(asset.has_reusable_config === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, useAs));
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   // The stage shows the full-resolution file; small tiles use the thumbnail.
   const src = $derived(density === 'stage' ? asset.url : (asset.thumbnail_url || asset.url));
+
+  // A player has no image to wait for: the stage may show it as soon as it is there.
+  $effect(() => {
+    if (audioPlayer) onmediaload?.();
+  });
 
   function preview(trigger: HTMLElement): void {
     onpreview?.(asset, trigger);
@@ -70,20 +94,32 @@
 
 <!-- A finger's long press opens the same menu as ⋯; so does a right-click, at the pointer. -->
 <article
-  use:hold={{ onhold: () => { contextAt = null; menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, video' }}
+  use:hold={{ onhold: () => { contextAt = null; menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, video, [data-own-drag]' }}
   oncontextmenu={onContextMenu}
   class="asset-tile {extraClass}"
   data-density={density}
   data-asset-id={asset.id}
   data-video={isVideo}
+  data-audio={isAudio}
   data-transparent={transparent}
   data-selected={selected}
   data-menu-open={menuOpen}
   aria-busy={deleting}
   aria-label={asset.filename}
 >
+  {#snippet audioCover()}
+    <span class="audio-cover" class:bare data-bare={bare} data-testid="audio-cover">
+      <span class="audio-icon" aria-hidden="true"><Icon name={kindIcon} size={32} /></span>
+      {#if !bare}<span class="audio-words" data-testid="audio-words"><span class="audio-text">{words}</span></span>{/if}
+      <Waveform class="audio-line" {peaks} />
+    </span>
+    {#if length}<span class="media-tag audio-length" data-testid="audio-length">{length}</span>{/if}
+  {/snippet}
+
   {#snippet media()}
-    {#if isVideo}
+    {#if isAudio}
+      {@render audioCover()}
+    {:else if isVideo}
       <video
         {src}
         class="asset-tile-img"
@@ -106,7 +142,9 @@
     {/if}
   {/snippet}
 
-  {#if inlineVideo}
+  {#if audioPlayer}
+    <div class="asset-tile-media audio-stage"><AudioPlayer src={asset.url} {peaks} filename={asset.filename} duration={asset.duration} size="stage" /></div>
+  {:else if inlineVideo}
     <div class="asset-tile-media">{@render media()}</div>
   {:else}
     <button
@@ -128,7 +166,7 @@
   {/if}
 
   <div class="asset-tile-actions">
-    {#if onpreview}
+    {#if onpreview && !audioPlayer}
       <button
         type="button"
         class="asset-tile-action asset-tile-expand ui-media-action"
@@ -162,7 +200,7 @@
   {#if density === 'card'}
     <div class="asset-tile-foot ui-media-foot">
       <p class="truncate text-ui font-medium text-text-secondary">{asset.filename}</p>
-      <p class="mt-0.5 truncate text-meta text-text-muted">{asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}</p>
+      <p class="mt-0.5 truncate text-meta text-text-muted">{#if isAudio}{audioFoot(asset, new Date(asset.created_at).toLocaleDateString())}{:else}{asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}{/if}</p>
     </div>
   {/if}
 
@@ -253,6 +291,39 @@
   .asset-tile-action:disabled { opacity: 0.5; cursor: not-allowed; }
   .asset-tile[data-density='compact'] .asset-tile-actions { top: 4px; right: 4px; gap: 3px; }
   .asset-tile[data-density='compact'] .asset-tile-action { width: 24px; height: 24px; border-radius: var(--radius-sm); }
+
+  /* Audio. The stage shows the take's player panel (max 880px), centred, with the corner actions at 10px of the panel. */
+  .asset-tile[data-audio='true'][data-density='stage'] { flex: none; width: 100%; max-width: 880px; align-self: center; }
+  .asset-tile[data-audio='true'][data-density='stage'] .asset-tile-media { flex: none; cursor: default; }
+  .asset-tile[data-audio='true'][data-density='stage'] .asset-tile-actions { top: 10px; right: 10px; gap: 6px; opacity: 1; pointer-events: auto; }
+  .audio-stage { display: block; }
+
+  /* A grid tile (D4): the kind icon, the first lines of the words, then a thin waveform line pinned to the foot. */
+  .audio-cover { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; height: 100%; padding: 12px 12px 10px; background: var(--color-bg-surface-hover); text-align: left; }
+  .audio-icon { display: flex; flex: none; justify-content: center; color: var(--color-text-muted); }
+  .audio-words { display: block; flex: 0 1 auto; min-height: 0; overflow: hidden; }
+  /* The clamp sits on this inner block, not on the flex item, so the line count holds. */
+  .audio-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; white-space: pre-line; overflow-wrap: anywhere; font-size: var(--text-ui); line-height: 1.45; color: var(--color-text-secondary); }
+  .audio-cover :global(.audio-line) { flex: none; height: 16px; margin-top: auto; }
+  /* Nothing to read, or a strip tile: the icon and a waveform, centred together. */
+  .audio-cover.bare { justify-content: center; gap: 18px; }
+  .audio-cover.bare .audio-icon :global(svg) { width: 44px; height: 44px; }
+  .audio-cover.bare :global(.audio-line) { height: 28px; margin-top: 0; }
+  .audio-length { position: absolute; top: 6px; right: 6px; z-index: 1; }
+  .asset-tile[data-density='compact'] .audio-cover { gap: 10px; padding: 8px; }
+  .asset-tile[data-density='compact'] .audio-cover.bare .audio-icon :global(svg) { width: 24px; height: 24px; }
+  .asset-tile[data-density='compact'] .audio-cover.bare :global(.audio-line) { height: 20px; }
+  .asset-tile[data-density='compact'] .audio-length { top: auto; bottom: 4px; right: 4px; height: 18px; line-height: 18px; font-size: 10px; }
+  /* The tile's buttons take the corner while they show: the length steps aside (a finger's ⋯ never leaves, so it moves over). */
+  @media (hover: hover) {
+    .asset-tile[data-density='card']:hover .audio-length, .asset-tile[data-density='card']:focus-within .audio-length, .asset-tile[data-density='card'][data-menu-open='true'] .audio-length { opacity: 0; }
+  }
+  @media (hover: none) { .asset-tile[data-density='card'] .audio-length { right: 40px; } }
+  @media (max-width: 639px) {
+    .audio-cover { gap: 6px; padding: 10px 10px 8px; }
+    .audio-icon :global(svg) { width: 28px; height: 28px; }
+    .audio-text { -webkit-line-clamp: 3; line-clamp: 3; }
+  }
 
   .asset-tile-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; border-radius: 4px; }
   .asset-tile-context-anchor { position: fixed; width: 1px; height: 1px; pointer-events: none; }

@@ -14,7 +14,7 @@ function view(state: Partial<AudioTrackViewInput['state']> = {}, input: Partial<
   const tab = workspaceTab(full.workflow);
   return audioTrackView({
     state: full,
-    caps: { showAudioTrack: shown, audioTrackInEffect: shown && tab !== 'image' && trackSet(trackOf(full, tab)) },
+    caps: { showAudioTrack: shown, audioTrackInEffect: shown && (tab === 'video' || tab === 'extend') && trackSet(trackOf(full, tab)) },
     files: { audioTrack: null, extendAudioTrack: null },
     restored: true,
     lengthOf: () => null,
@@ -45,7 +45,7 @@ describe('audioTrackView', () => {
     expect(v.name).toBe('memo.m4a');
   });
 
-  it('keeps the track of Extend Video apart from the Video track', () => {
+  it('keeps the track of Extend apart from the Video track', () => {
     const extending = view({ workflow: 'extend', audioTrackPath: '/audio/video.mp3', extendAudioTrackPath: '/audio/extend.mp3', extendAudioTrackStart: 6.65 });
 
     expect(extending).toMatchObject({ tab: 'extend', sent: { path: '/audio/extend.mp3', file: null, start: 6.65 } });

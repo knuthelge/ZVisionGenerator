@@ -1,8 +1,11 @@
-import type { ActiveJobState, JobControlAction, JobDownload, JobPhase } from '$lib/types';
+import type { ActiveJobState, AudioWorkflow, JobControlAction, JobDownload, JobPhase } from '$lib/types';
 import { jobReviewUrl } from '$lib/api/workspace';
+import { auroraNote, auroraProgress, MUSIC_PHASES, PHASE_DECODE, PHASE_SONG_TOKENS, TOKENS_PER_SECOND } from '$lib/components/molecules/audioAurora';
+import { formatClock } from './clock';
 import { downloadLine, partLabel } from './downloadProgress';
 import { phaseSeconds } from './jobPhases';
 import { checked } from './jobSettings';
+
 
 /** What the job card says about a job, derived from its state. Every function here is pure. */
 
@@ -150,8 +153,80 @@ export function stepUnit(job: ActiveJobState): 'Batch' | 'Step' {
   return countsBatches(job) ? 'Batch' : 'Step';
 }
 
-export function itemNoun(job: ActiveJobState): 'image' | 'video' {
+/** What the job makes, one at a time: an image, a video, or a take (a piece of audio). */
+export function itemNoun(job: ActiveJobState): 'image' | 'video' | 'take' {
+  if (isAudioJob(job)) return 'take';
   return isVideo(job) ? 'video' : 'image';
+}
+
+/** Whether the job makes audio (music, speech or sound). */
+export function isAudioJob(job: ActiveJobState): boolean {
+  return job.media_type === 'audio';
+}
+
+/** The field that holds the text of a take, by kind: what the job card calls its prompt. */
+export const AUDIO_FIELD_LABELS: Readonly<Record<AudioWorkflow, string>> = { music: 'Style', speech: 'Text', sound: 'Prompt' };
+
+/** One row of an audio take's progress. */
+export interface AudioRow {
+  /** The model's name for the phase, or the kind for a take that has one row. */
+  key: string;
+  /** What the row says: its label, and for the current row where it is. */
+  text: string;
+  state: 'done' | 'current' | 'next';
+  /** The current row's percentage; null while its total is unknown, and the bar is indeterminate. */
+  percent: number | null;
+}
+
+/** What the current phase of a song says after its label: the time written so far, its steps, or nothing where it cannot count. */
+function musicProgress(phase: string, step: number, total: number | null): string {
+  if (phase === PHASE_DECODE) return '';
+  if (phase === PHASE_SONG_TOKENS) return `${formatClock(step / TOKENS_PER_SECOND)} so far`;
+  return total !== null && total > 0 ? `step ${step} of ${total}` : '';
+}
+
+function percentOf(step: number, total: number | null): number | null {
+  return total !== null && total > 0 ? Math.min(100, Math.round((step / total) * 100)) : null;
+}
+
+/** The rows of a song: one per phase, with where the model is in the current one. */
+function musicRows(job: ActiveJobState): AudioRow[] {
+  const progress = job.audio ?? null;
+  const current = job.itemFinished ? MUSIC_PHASES.length : progress ? MUSIC_PHASES.findIndex(({ id }) => id === progress.phase) : 0;
+  return MUSIC_PHASES.map(({ id: phase, label }, index): AudioRow => {
+    const state = index < current ? 'done' : index === current ? 'current' : 'next';
+    if (state !== 'current') return { key: phase, text: label, state, percent: null };
+    const step = progress?.step ?? 0;
+    const total = progress?.total ?? null;
+    const said = progress ? musicProgress(phase, step, total) : 'Starting…';
+    // Decoding reports a step count of one, which says nothing about how long it takes: its bar keeps moving.
+    return { key: phase, text: said ? `${label} · ${said}` : label, state, percent: progress && phase !== PHASE_DECODE ? percentOf(step, total) : null };
+  });
+}
+
+/** The one row of a speech take, or of a sound, whose bar is the take's progress: what Aurora's note says for speech, the image card's step line for a sound. */
+function singleRow(job: ActiveJobState): AudioRow {
+  const kind = job.workflow as AudioWorkflow;
+  const progress = job.audio ?? null;
+  const fraction = audioFraction(job);
+  const percent = Math.round(fraction * 100);
+  const key = kind;
+  if (job.itemFinished) return { key, text: finishingLabel(job), state: 'current', percent: 100 };
+  if (progress === null) return { key, text: 'Starting…', state: 'current', percent: null };
+  if (kind === 'speech') return { key, text: auroraNote(kind, progress), state: 'current', percent };
+  if (progress.phase === PHASE_DECODE || !(progress.total !== null && progress.total > 0)) return { key, text: finishingLabel(job), state: 'current', percent: progress.phase === PHASE_DECODE ? 100 : null };
+  return { key, text: `Step ${progress.step} of ${progress.total}`, state: 'current', percent };
+}
+
+/** The rows the card shows for the current take: a song's phases, or one row for speech and for a sound. Empty for a job that is not audio. */
+export function audioRows(job: ActiveJobState): AudioRow[] {
+  if (!isAudioJob(job)) return [];
+  return job.workflow === 'music' ? musicRows(job) : [singleRow(job)];
+}
+
+/** The current take's progress in [0, 1]: Aurora's estimate, so the bar, the batch segments and the strip agree. */
+export function audioFraction(job: ActiveJobState): number {
+  return job.itemFinished ? 1 : auroraProgress(job.workflow as AudioWorkflow, job.audio ?? null);
 }
 
 export function jobPhase(job: ActiveJobState): JobPhase {
@@ -217,6 +292,7 @@ export function stageBars(job: ActiveJobState): StageBar[] {
 
 /** The current item's progress in [0, 1], counting each stage of a multi-stage item equally. */
 export function itemFraction(job: ActiveJobState): number {
+  if (isAudioJob(job)) return audioFraction(job);
   if (job.itemFinished || itemActivity(job) === 'finishing') return 1;
   const bars = stageBars(job);
   if (!bars.length) return stepFraction(job);
@@ -343,6 +419,7 @@ export function headline(job: ActiveJobState): string {
     return job.loadQuant ? 'Preparing the model' : 'Loading the model';
   }
   if (job.workflow === 'upscale') return isVideo(job) ? 'Upscaling video' : 'Upscaling';
+  if (isAudioJob(job)) return total > 1 ? `Take ${index + 1} of ${total}` : 'Making the take';
   const verb = job.stageName === 'upscale' && !job.itemFinished ? 'Upscaling' : 'Generating';
   return total > 1 ? `${verb} ${noun} ${index + 1} of ${total}` : `${verb} ${noun}`;
 }
@@ -527,9 +604,17 @@ export function readySummary(job: ActiveJobState): { parts: string[]; secs: numb
   return { parts, secs, warn };
 }
 
+/** The label over an audio take's text: the field's name, since the title counts the takes, or which take comes next when paused between two. */
+function audioPositionLabel(job: ActiveJobState): string {
+  const { total, index } = iterations(job);
+  if (total > 1 && isPaused(job) && job.itemFinished) return `Next: take ${Math.min(total - 1, index + 1) + 1} of ${total}`;
+  return AUDIO_FIELD_LABELS[job.workflow as AudioWorkflow] ?? 'Prompt';
+}
+
 /** Where the current item sits in the batch, or what runs next when paused between items. */
 export function positionLabel(job: ActiveJobState): string {
   if (job.workflow === 'upscale') return 'Source';
+  if (isAudioJob(job)) return audioPositionLabel(job);
   const perRun = promptsPerRun(job);
   const runs = Math.max(1, Math.floor(job.runs || 1));
   const { total, index } = iterations(job);
@@ -575,15 +660,6 @@ export function outcome(job: ActiveJobState): { text: string; error: boolean; sa
   if (job.status === 'unknown') text = 'The server restarted and no longer has this job.';
   const savedText = saved === 0 ? 'Nothing saved' : total > 1 ? `${saved} of ${total} saved to the Gallery` : 'Saved to the Gallery';
   return { text, error: job.status === 'failed', saved: total > 1 && notRun > 0 ? `${savedText} · ${notRun} not run` : savedText };
-}
-
-/** m:ss, or h:mm:ss from an hour. */
-export function formatClock(secs: number): string {
-  const rounded = Math.max(0, Math.round(Number.isFinite(secs) ? secs : 0));
-  const h = Math.floor(rounded / 3600);
-  const m = Math.floor((rounded % 3600) / 60);
-  const s = rounded % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 }
 
 /** The failure toast: the server's reason when the job has one, else the plain text; notes that the next queued job starts. */

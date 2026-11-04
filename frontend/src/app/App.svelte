@@ -9,7 +9,7 @@
   import type { MascotReaction } from '$lib/state/mascot';
   import { addToast } from '$lib/state/toasts.svelte';
   import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
-  import type { JobLogEntry, PageId, Workflow } from '$lib/types';
+  import type { JobLogEntry, PageId, WorkspaceWorkflow } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
   import TopStrip from '$lib/components/organisms/TopStrip.svelte';
@@ -30,7 +30,7 @@
 
   let ready = $state(false);
   // The workflows the Workspace's contract lists; the Workspace fills it once its context has loaded.
-  let workflows = $state<Workflow[] | null>(null);
+  let workflows = $state<WorkspaceWorkflow[] | null>(null);
   // Phones: the pages live in a drawer behind the strip's menu button.
   let drawerOpen = $state(false);
   let jobLogOpen = $state(false);

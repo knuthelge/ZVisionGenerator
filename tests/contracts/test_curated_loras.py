@@ -29,7 +29,7 @@ from zvisiongenerator.utils.curated_loras import (
 from zvisiongenerator.web.workspace_contract import CANONICAL_WORKFLOW_VALUES
 
 _ENTRIES = load_curated_loras()
-_NON_COMMERCIAL_LICENCES = {"cc-by-nc-4.0", "flux-non-commercial", "flux-2-research"}
+_NON_COMMERCIAL_LICENCES = {"cc-by-nc-4.0", "flux-non-commercial", "flux-2-research", "ideogram-4-non-commercial"}
 _GENERIC_NAMES = {"pytorch_lora_weights", "adapter_model", "lora", "model", "weights", "diffusion_pytorch_model", "model_lora"}
 _PLATFORMS = {"darwin", "win32", "linux"}
 

@@ -5,7 +5,7 @@ type EventData = Record<string, unknown> | null | undefined;
 /** Enhancement and model load are both setup: a job that started may still turn out to enhance first. */
 const PHASE_RANK: Record<JobPhase, number> = { queue: 0, enhance: 1, load: 1, generate: 2 };
 const GENERATE_EVENTS: ReadonlySet<string> = new Set([
-  'batch_started', 'prompt_started', 'workflow_started', 'workflow_stage_started', 'step_progress', 'generation_finished',
+  'batch_started', 'prompt_started', 'workflow_started', 'workflow_stage_started', 'step_progress', 'audio_progress', 'generation_finished',
 ]);
 const CONTROL_ACTIONS: ReadonlySet<string> = new Set(['pause', 'resume', 'next', 'repeat', 'approve', 'discard', 'quit']);
 /** Controls whose control_queued event does not become the card's pending label: Resume acts at once, a review decision is the overlay's. */
@@ -110,11 +110,11 @@ export function phaseSeconds(marks: PhaseMarks | undefined, phase: JobPhase): nu
 /**
  * Drop a queued control once the event shows it took effect.
  *
- * The pause a review starts (a `job_paused` that carries a `review`) is not the pause the user queued: that one waits
- * for the image to finish.
+ * A job that ends settles every one. The pause a review starts (a `job_paused` that carries a `review`) is not the pause
+ * the user queued: that one waits for the image to finish.
  */
 export function settleControl(queued: JobControlAction | null | undefined, type: string, event?: EventData): JobControlAction | null {
-  if (!queued) return null;
+  if (!queued || TERMINAL_EVENTS.has(type)) return null;
   if (queued === 'pause' && type === 'job_paused' && event?.review) return queued;
   return SETTLED_BY[queued].has(type) ? null : queued;
 }
@@ -153,6 +153,7 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
     serverOffset: at !== undefined ? at - receivedAt / 1000 : job.serverOffset,
     controlQueued: settleControl(job.controlQueued, type, event),
   };
+  if (job.controlQueued && !next.controlQueued) next.controlSettledAt = receivedAt;
 
   if (type === 'control_queued') {
     const action = event?.action;

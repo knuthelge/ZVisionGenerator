@@ -1,3 +1,4 @@
+import { AUDIO_FIELD_DEFAULTS, audioModelById, audioPrefill, availableKinds, hydrateAudio } from './audioDraft';
 import { extendPrefillFor } from './extend';
 import { downloadStore } from './downloads.svelte';
 import { heldUploads } from './heldUploads.svelte';
@@ -8,16 +9,18 @@ import { outputSettingsPatch } from './jobSettings';
 import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrames, defaultExtendFrames, EXTEND_FRAME_STEP, snapExtendFrames } from './videoDuration';
-import { workflowFor, workspaceTab } from './workspaceTab';
+import { isAudioWorkflow, navTab, videoKindOf, workflowFor, workspaceTab, type MediaTab } from './workspaceTab';
+import { voiceConsent } from './voiceConsent.svelte';
+import { pickScopes, RESET_SCOPE, REUSE_SCOPE, type Scope } from './resetScope';
 import { firstValues, listOf } from '$lib/prefillParams';
-import type { WorkspaceTab, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { NavTab, VideoKind, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
 /** Highest sharpen amount the backend accepts (`MAX_SHARPEN_AMOUNT` in utils/config.py). */
 export const MAX_SHARPEN_AMOUNT = 1.5;
 
-function _canonicalWorkflow(raw: string, ctx: WorkspaceContext): Workflow | null {
+function _canonicalWorkflow(raw: string, ctx: WorkspaceContext): WorkspaceWorkflow | null {
   const workflowValue = raw.trim();
   return ctx.workflow_contract.values.find((workflow) => workflow === workflowValue) ?? null;
 }
@@ -46,8 +49,6 @@ const DEFAULT_DRAFT: DraftState = {
   seed: null,
   loraString: '',
   lorasByFamily: {},
-  lastImageModel: '',
-  lastVideoModel: '',
   referenceImagePath: null,
   referenceImageUpload: null,
   firstFramePath: null,
@@ -95,6 +96,7 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedFrom: null,
   enhancedHistory: [],
   savedText: {},
+  savedSettings: {},
   enhanceSettings: null,
   enhanceSettingsVideo: null,
   enhanceAuto: false,
@@ -105,6 +107,10 @@ const DEFAULT_DRAFT: DraftState = {
   missingSourceVideo: false,
   extendPrefill: null,
   appliedPreset: null,
+  videoKind: 'new',
+  audioKind: 'music',
+  audioModels: { music: '', speech: '', sound: '' },
+  ...AUDIO_FIELD_DEFAULTS,
 };
 
 const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
@@ -191,6 +197,8 @@ const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> =
  * image follows from the tab's start image and whether the model takes one.
  */
 function _withDerivedWorkflow(ctx: WorkspaceContext | null, state: DraftState): DraftState {
+  // The Audio tab's workflow is its kind, whatever the images are.
+  if (isAudioWorkflow(state.workflow)) return state;
   const tab = workspaceTab(state.workflow);
   const workflow = workflowFor(tab, state, imageSupport(ctx, state.model, tab === 'video' ? 'video' : 'image').start);
   return workflow === state.workflow ? state : { ...state, workflow };
@@ -212,14 +220,37 @@ function _textOf(state: DraftState): TabText {
 /**
  * Return the state with the text of the mode a workflow belongs to. Image and Video each keep their own: moving to the other
  * mode saves the open text under the mode being left and brings back what the entered one saved (nothing, for a mode not
- * visited yet). Video and Extend Video share one text, so moving between them changes nothing.
+ * visited yet). Video's two kinds share one text, so moving between them changes nothing.
  */
-function _withTextOfMode(state: DraftState, workflow: Workflow): DraftState {
+function _withTextOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
   const from = workflowMode(state.workflow);
   const to = workflowMode(workflow);
   if (from === to) return state;
   const { [to]: entering, ...rest } = state.savedText;
   return { ...state, ...(entering ?? EMPTY_TEXT), savedText: { ...rest, [from]: _textOf(state) } };
+}
+
+/** The scopes a mode keeps for when it comes back: its Settings pane values, the model with its LoRAs and quantization, and the applied preset. */
+const MODE_MEMORY_SCOPES: readonly Scope[] = ['settings', 'model', 'preset'];
+
+/**
+ * Return the state with the settings of the mode a workflow belongs to. Image and Video each keep their own, with their model
+ * and preset: moving to the other mode saves the open ones under the mode being left and brings back what the entered one saved
+ * (for a mode not visited yet, the model and settings stay for the next hydration to replace with the model's defaults). The Audio tab holds none of these: entering it saves the mode it leaves and changes nothing else, so coming back
+ * to that mode, or on to the other, finds its own.
+ */
+function _withSettingsOfMode(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
+  const from = workflowMode(state.workflow);
+  const to = workflowMode(workflow);
+  if (from === to) return state;
+  const savedSettings = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: pickScopes(state, MODE_MEMORY_SCOPES) };
+  if (to === 'audio') return { ...state, savedSettings };
+  return { ...state, savedSettings, ...savedSettings[to] };
+}
+
+/** Return the state with the text and the settings of the mode a workflow belongs to, as that mode left them. */
+function _withModeOf(state: DraftState, workflow: WorkspaceWorkflow): DraftState {
+  return _withSettingsOfMode(_withTextOfMode(state, workflow), workflow);
 }
 
 /** The draft fields that hold an image path: one per slot, and the reference rows. */
@@ -231,20 +262,6 @@ export function slotPaths(state: Pick<DraftState, (typeof SLOT_KEYS)[number]>, k
     const value = state[key];
     return Array.isArray(value) ? value : value ? [value] : [];
   });
-}
-
-/** The draft fields that hold each tab's images and audio track, with the upload markers and Strength. Extend Video holds only its track. */
-const TAB_IMAGE_KEYS = {
-  image: ['referenceImagePath', 'referenceImageUpload', 'referenceImagePaths', 'referenceImageStrength'],
-  video: ['firstFramePath', 'firstFrameUpload', 'endImagePath', 'endImageUpload', 'audioTrackPath', 'audioTrackUpload', 'audioTrackStart'],
-  extend: ['extendAudioTrackPath', 'extendAudioTrackUpload', 'extendAudioTrackStart'],
-} as const satisfies Record<WorkspaceTab, readonly (keyof DraftState)[]>;
-
-/** The image fields of the tabs other than the open one: what a Reset keeps. */
-function _imagesOfOtherTabs(state: DraftState, tab: WorkspaceTab): Partial<DraftState> {
-  const cleared: readonly (keyof DraftState)[] = TAB_IMAGE_KEYS[tab];
-  const kept = Object.values(TAB_IMAGE_KEYS).flat().filter((key) => !cleared.includes(key));
-  return Object.fromEntries(kept.map((key) => [key, state[key]]));
 }
 
 /** The state's missing-file flags without the one for a replaced path, unless another slot still holds that path. */
@@ -306,7 +323,7 @@ function _applyVideoDefaults(state: DraftState, defaults: VideoModelDefaults): D
   };
 }
 
-function _visibleControlsForWorkflow(ctx: WorkspaceContext, workflow: Workflow): Set<string> {
+function _visibleControlsForWorkflow(ctx: WorkspaceContext, workflow: WorkspaceWorkflow): Set<string> {
   return new Set(ctx.workflow_contract.definitions[workflow]?.visible_controls ?? []);
 }
 
@@ -328,7 +345,7 @@ export const SETTING_KEYS = [
   'postprocessSharpenEnabled', 'postprocessSharpenAmount', 'postprocessContrastEnabled', 'postprocessContrastAmount',
   'postprocessSaturationEnabled', 'postprocessSaturationAmount', 'postprocessTransparent',
   'upscaleEnabled', 'upscaleFactor', 'upscaleDenoise', 'upscaleSteps', 'upscaleGuidance', 'upscaleSharpen', 'upscaleReview',
-  'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor', 'videoUpscaleReview',
+  'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor', 'videoUpscaleReview', 'audioSeconds',
 ] as const satisfies readonly (keyof DraftState)[];
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -338,19 +355,12 @@ function _pickSettings(state: DraftState): SettingDefaults {
   return Object.fromEntries(SETTING_KEYS.map((key) => [key, state[key]])) as SettingDefaults;
 }
 
-function _isVideoWorkflow(workflow: Workflow): boolean {
+function _isVideoWorkflow(workflow: WorkspaceWorkflow): boolean {
   return workflowMode(workflow) === 'video';
 }
 
-/** Remember the state's model as the last one used in its own mode (image or video), whichever workflow is open. */
-function _rememberModel(ctx: WorkspaceContext, state: DraftState): DraftState {
-  if (ctx.video_models.some((model) => model.id === state.model)) return { ...state, lastVideoModel: state.model };
-  if (ctx.image_models.some((model) => model.id === state.model)) return { ...state, lastImageModel: state.model };
-  return state;
-}
-
 /** Return the backend defaults for a model in a workflow's mode, or null when none are known. */
-function _modelDefaultsFor(ctx: WorkspaceContext, workflow: Workflow, model: string): ImageModelDefaults | VideoModelDefaults | null {
+function _modelDefaultsFor(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string): ImageModelDefaults | VideoModelDefaults | null {
   const isVideoMode = _isVideoWorkflow(workflow);
   const defaultsMap = isVideoMode ? ctx.video_model_defaults : ctx.image_model_defaults;
   const fallback = isVideoMode ? ctx.video_defaults : ctx.defaults;
@@ -368,15 +378,22 @@ function _loraFamilyKey(ctx: WorkspaceContext, model: string): string {
 /**
  * Carry LoRAs across a model change: a new family gets back the LoRAs last chosen for it (or none), and the old
  * family's are remembered. Within one family the LoRAs stay. Remembered LoRAs that were since removed are dropped.
+ *
+ * The Audio tab has no LoRAs: entering it remembers the family it comes from and holds none, and leaving it brings back
+ * the LoRAs of the family it goes to, so a visit to Audio never changes what Image and Video remember.
  */
 function _swapFamilyLoras(ctx: WorkspaceContext, state: DraftState, fromModel: string, toModel: string): Partial<DraftState> {
   if (!fromModel || !toModel) return {};
+  const fromAudio = audioModelById(ctx, fromModel) !== null;
+  const toAudio = audioModelById(ctx, toModel) !== null;
+  if (fromAudio && toAudio) return {};
   const fromKey = _loraFamilyKey(ctx, fromModel);
   const toKey = _loraFamilyKey(ctx, toModel);
   if (fromKey === toKey) return {};
+  const lorasByFamily = fromAudio ? state.lorasByFamily : { ...state.lorasByFamily, [fromKey]: state.loraString };
   return {
-    lorasByFamily: { ...state.lorasByFamily, [fromKey]: state.loraString },
-    loraString: keepInstalledLoras(state.lorasByFamily[toKey] ?? '', ctx.loras, downloadStore.loraNames()),
+    lorasByFamily,
+    loraString: toAudio ? '' : keepInstalledLoras(state.lorasByFamily[toKey] ?? '', ctx.loras, downloadStore.loraNames()),
   };
 }
 
@@ -411,6 +428,13 @@ export function stepOptionsFor(ctx: WorkspaceContext, model: string): number[] |
   return options && options.length > 0 ? options : null;
 }
 
+/** Return the most steps a model runs, or null when it has no limit; only video models have one. */
+export function maxStepsFor(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string): number | null {
+  if (!_isVideoWorkflow(workflow)) return null;
+  const maxSteps = (_modelDefaultsFor(ctx, workflow, model) as VideoModelDefaults | null)?.max_steps;
+  return typeof maxSteps === 'number' ? maxSteps : null;
+}
+
 /** Move a step count to the nearest offered one (the higher on a tie), as the server does. */
 export function snapSteps(steps: number, options: number[]): number {
   return options.reduce((best, option) => {
@@ -432,21 +456,21 @@ function _withModelDefaults(ctx: WorkspaceContext, state: DraftState): DraftStat
 }
 
 /** Return a fresh draft for a workflow and model with that model's defaults applied. */
-function _defaultState(ctx: WorkspaceContext, workflow: Workflow, model: string): DraftState {
+function _defaultState(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string): DraftState {
   return _withModelDefaults(ctx, { ...DEFAULT_DRAFT, workflow, model });
 }
 
 /**
  * Return the default value of every setting for the state's workflow and model.
  *
- * Uses the same resolution as `resetSelections`, without touching the draft.
+ * Reads `defaultsFor`, so it resolves exactly as a Reset does, without touching the draft.
  */
 export function settingDefaultsFor(ctx: WorkspaceContext, state: Pick<DraftState, 'workflow' | 'model'>): SettingDefaults {
-  return _pickSettings(_defaultState(ctx, state.workflow, state.model));
+  return _pickSettings(defaultsFor(ctx, { ...DEFAULT_DRAFT, ...state }, null));
 }
 
 /** Return the size presets offered for a ratio; image presets beyond the model's dimension limit are left out. */
-export function offeredSizes(ctx: WorkspaceContext, workflow: Workflow, model: string, ratio: string): string[] {
+export function offeredSizes(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, model: string, ratio: string): string[] {
   if (_isVideoWorkflow(workflow)) return ctx.video_size_options[ratio] ?? [];
   const options = ctx.image_size_options[ratio] ?? [];
   const max = (_modelDefaultsFor(ctx, workflow, model) as ImageModelDefaults | null)?.dimension_max ?? null;
@@ -498,7 +522,7 @@ export function fitDimensions(width: number, height: number, limits: DimensionLi
 }
 
 /** Return the preset of a ratio with the most pixels; presets without known pixel sizes lose to ones with, and the last listed wins a tie. */
-function _largestPreset(ctx: WorkspaceContext, workflow: Workflow, ratio: string, presets: string[]): string {
+function _largestPreset(ctx: WorkspaceContext, workflow: WorkspaceWorkflow, ratio: string, presets: string[]): string {
   const dims = (_isVideoWorkflow(workflow) ? ctx.video_size_dimensions : ctx.image_size_dimensions)?.[ratio] ?? {};
   const area = (size: string): number => (dims[size] ? dims[size][0] * dims[size][1] : 0);
   return presets.reduce((best, size) => (area(size) >= area(best) ? size : best));
@@ -533,13 +557,19 @@ function _fitToModel(ctx: WorkspaceContext, state: DraftState): DraftState {
   const defaults = _modelDefaultsFor(ctx, state.workflow, state.model);
   if (!defaults) return state;
   const fitted = _fitSizeToModel(ctx, state, defaults);
-  const maxSteps = _isVideoWorkflow(state.workflow) ? (defaults as VideoModelDefaults).max_steps : null;
-  return typeof maxSteps === 'number' ? { ...fitted, steps: Math.min(fitted.steps, maxSteps) } : fitted;
+  const maxSteps = maxStepsFor(ctx, state.workflow, state.model);
+  return maxSteps !== null ? { ...fitted, steps: Math.min(fitted.steps, maxSteps) } : fitted;
 }
 
-/** Clear what the state's model cannot use, and align the frame count to its grid. */
-function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftState {
+/**
+ * Clear what the state's model cannot use, and align the frame count to its grid.
+ *
+ * @param sourceFps An extension runs at its source's frame rate, which the draft's store of it holds.
+ */
+function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState, sourceFps: number | null = _sourceFps(state.workflow)): DraftState {
   const { workflow, model } = state;
+  // Nothing of an image or a video applies to a kind of audio.
+  if (isAudioWorkflow(workflow)) return state;
   const isVideoMode = _isVideoWorkflow(workflow);
   const modelDefaults = _modelDefaultsFor(ctx, workflow, model);
   let nextState = state;
@@ -553,7 +583,7 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftS
   if (isVideoMode) {
     nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
     // A kept or restored count may predate snapping; show the count the server will generate.
-    const timing = videoTimingFor(ctx, model, _sourceFps(workflow));
+    const timing = videoTimingFor(ctx, model, sourceFps);
     nextState.fps = timing.fps;
     // An extension has no clip length of its own: its new frames (`extendFrames`) stay multiples of the model's step, not its frame rule.
     if (workflow !== 'extend') nextState.frameCount = alignFrames(nextState.frameCount, timing.frameRule);
@@ -580,6 +610,36 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftS
   return nextState;
 }
 
+/** The workflow each media tab falls to without a start image. */
+const _TEXT_WORKFLOW: Record<MediaTab, Workflow> = { image: 'txt2img', video: 'txt2vid', extend: 'extend' };
+
+/**
+ * Return the defaults of every field for the tab the state has open, resolved in three layers: the static defaults, then the
+ * model's (with the workflow's cleared fields and the capability gates), then the values derived from what the draft holds
+ * (the Extend length from its source's frame rate, the Extend track the source brought, a sound model's default length).
+ * Only the fields of the open tab's scopes are meaningful; a Reset picks them with `RESET_SCOPE`.
+ *
+ * @param extendSource What the server reported about the chosen extend source, or null.
+ */
+export function defaultsFor(ctx: WorkspaceContext, state: DraftState, extendSource: ExtendSourceInfo | null): DraftState {
+  const tab = workspaceTab(state.workflow);
+  if (tab === 'audio') {
+    const { workflow, model, audioKind, audioModels } = state;
+    return hydrateAudio(ctx, { ...DEFAULT_DRAFT, workflow, model, audioKind, audioModels });
+  }
+  const sourceFps = extendSource?.fps ?? null;
+  const modelled = _withModelDefaults(ctx, { ...DEFAULT_DRAFT, promptSource: ctx.default_prompt_source, workflow: _TEXT_WORKFLOW[tab], model: state.model });
+  const defaults = _applyCapabilityGates(ctx, modelled, tab === 'extend' ? sourceFps : null);
+  if (tab !== 'extend') return defaults;
+  // The source stays across a Reset, so the track it filled in comes back with it, from where the source's sound ended.
+  const sourceTrack = state.extendPrefill?.path === state.extendSourcePath ? (state.extendPrefill?.audioTrack ?? null) : null;
+  return {
+    ...defaults,
+    extendFrames: sourceFps ? defaultExtendFrames(sourceFps, extendStepFor(ctx, state.model)) : state.extendFrames,
+    ...(sourceTrack !== null ? trackPatch('extend', { path: sourceTrack.path }, sourceTrack.start) : {}),
+  };
+}
+
 function loadFromStorage(): DraftState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -592,13 +652,24 @@ function loadFromStorage(): DraftState {
   }
 }
 
+/** The uploads held for the tabs a transition resets are forgotten with their fields; a voice takes its consent tick with it. */
+function _clearHeldUploads(scopes: readonly Scope[]): void {
+  if (scopes.includes('slotsImage')) heldUploads.clearTab('image');
+  if (scopes.includes('slotsVideo')) heldUploads.clearTab('video');
+  if (scopes.includes('slotsExtend')) heldUploads.clearTab('extend');
+  if (scopes.includes('voice')) {
+    heldUploads.clearTab('audio');
+    voiceConsent.reset();
+  }
+}
+
 let _draft = $state<DraftState>(loadFromStorage());
 let _authorityReady = $state(false);
 // What the server last reported about the extend source; fetched again on load, so it is not saved with the draft.
 let _extendSource = $state<ExtendSourceInfo | null>(null);
 
 /** The frame rate an extension runs at: its source's, once known. */
-function _sourceFps(workflow: Workflow): number | null {
+function _sourceFps(workflow: WorkspaceWorkflow): number | null {
   return workflow === 'extend' ? _extendSource?.fps ?? null : null;
 }
 
@@ -615,26 +686,43 @@ export const draft = {
   },
 
   /**
-  * Apply URL query/hash params to the draft using canonical workflow values only.
+   * Apply URL query/hash params to the draft using canonical workflow values only.
    * Only fields present in params are updated; absent fields are left unchanged. A param whose control the workflow
    * does not show is skipped, unless `ungated` is set.
+   *
+   * With `exact` (a Reuse, a Load settings; needs a context, and not a Use as), the settings are the take's exactly: the
+   * scopes of `REUSE_SCOPE` for the tab first take their defaults, so what the params omit is the default, not what
+   * the form held, and the size is then fitted to the model. A Use as, a link and a preset apply only what they name.
    *
    * The images go to the slots of the tab the params open (`image_path` is the start image in Image and the first frame in
    * Video). With `replaceSlots`, every slot of that tab is set and one the params do not name is emptied; a Use as
    * (`use_as`) sets only its slot. With a context, the workflow is derived from the images at the end.
    */
-  loadFromUrl(input: PrefillParams, ctx: WorkspaceContext | null = null, options: { ungated?: boolean; replaceSlots?: boolean } = {}): void {
+  loadFromUrl(input: PrefillParams, ctx: WorkspaceContext | null = null, options: { ungated?: boolean; replaceSlots?: boolean; exact?: boolean } = {}): void {
     // A name that repeats (reference_path) arrives as a list; every other parameter reads as its first value.
     const params = firstValues(input);
     const lists = Object.fromEntries(Object.entries(input).map(([key, value]) => [key, listOf(value)]));
     const prefill: WorkspacePrefill = {};
     let workflow = _draft.workflow;
+    const exact = ctx !== null && options.exact === true && params.use_as === undefined;
     if (params.workflow && ctx) {
       const canonical = _canonicalWorkflow(params.workflow, ctx);
       if (canonical) {
         prefill.workflow = canonical;
         workflow = canonical;
       }
+    }
+
+    // The Audio tab has its own fields: its kind opens, and a Use as → Voice or a Reuse sets only what it names.
+    if (isAudioWorkflow(workflow)) {
+      const { patch, voice } = audioPrefill(params, ctx, workflow, options.ungated === true);
+      // The tick follows the voice: a prefill that replaces the voice leaves it for the person to give, and one that does not
+      // (a song or a sound) leaves the voice and its tick alone.
+      if (voice) voiceConsent.reset(voice.exempt);
+      const opened: DraftState = { ..._withModeOf(_draft, workflow), ...(exact ? pickScopes(DEFAULT_DRAFT, REUSE_SCOPE.audio) : {}), ...prefill, ...patch, workflow, audioKind: workflow };
+      const hydrated = ctx ? hydrateAudio(ctx, opened) : opened;
+      _draft = ctx ? { ...hydrated, ..._swapFamilyLoras(ctx, _draft, _draft.model, hydrated.model) } : hydrated;
+      return;
     }
 
     const visibleControls = ctx ? _visibleControlsForWorkflow(ctx, workflow) : null;
@@ -728,7 +816,7 @@ export const draft = {
       if (params.end_image_path && canApply('end_image_path')) Object.assign(prefill, lastSlotPatch({ path: params.end_image_path }));
       else if (replacing) Object.assign(prefill, lastSlotPatch(null));
     }
-    // The audio track belongs to the same tab (Video or Extend Video) and follows the images' rule: a full prefill replaces it,
+    // The audio track belongs to the same tab (Video or Extend) and follows the images' rule: a full prefill replaces it,
     // so a job made without a track clears it. A Use as leaves it alone.
     if (slotTab !== 'image') {
       if (params.audio_track_path && canApply('audio_track_path')) {
@@ -743,7 +831,7 @@ export const draft = {
     // Flags from the slots the prefill replaced are dropped, those of the other slots stay; the Workspace checks the new paths.
     if (SLOT_KEYS.some((key) => key in prefill)) prefill.missingReferencePaths = _flagsOfUntouchedSlots(_draft, prefill);
     // An image Reuse names the finishing settings the asset was made with; Transparent is named on its own too (a viewer-upscaled
-    // asset sends only it), and without Sharpen the rest stay as they were, or Upscale would read the missing `upscale` as off.
+    // asset sends only it), and without Sharpen the rest are left alone, or Upscale would read the missing `upscale` as off.
     if (workflowMode(workflow) === 'image') {
       const finishing: Partial<DraftState> = params.sharpen_enabled !== undefined ? outputSettingsPatch(input, false) : {};
       if (params.transparent !== undefined) finishing.postprocessTransparent = params.transparent !== 'false';
@@ -754,8 +842,8 @@ export const draft = {
     }
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
     if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;
-    // A reused preset the current model does not offer keeps the current preset size instead.
-    if (ctx && prefill.size !== undefined && prefill.size !== 'custom'
+    // A preset the current model does not offer keeps the current preset size instead; an exact Reuse is fitted to the model below.
+    if (ctx && !exact && prefill.size !== undefined && prefill.size !== 'custom'
       && !offeredSizes(ctx, workflow, prefill.model ?? _draft.model, prefill.ratio ?? _draft.ratio).includes(prefill.size)) {
       delete prefill.size;
       delete prefill.ratio;
@@ -772,8 +860,12 @@ export const draft = {
     // A model named here without a re-hydration still swaps LoRAs by family; LoRAs the URL names win over remembered ones.
     const loras = ctx && prefill.model !== undefined ? _swapFamilyLoras(ctx, _draft, _draft.model, prefill.model) : {};
     // Opening the other mode brings back its own text first, so a prefill sets the opened tab's text only.
-    _draft = { ..._withTextOfMode(_draft, workflow), ...loras, ...prefill };
+    const opened = { ..._withModeOf(_draft, workflow), ...loras };
+    // An exact prefill puts the take's scopes back to their defaults for its model first; the source's own track is not a default of a take.
+    const reset = exact ? pickScopes(defaultsFor(ctx, { ...opened, workflow, model: prefill.model ?? opened.model, extendPrefill: null }, _extendSource), REUSE_SCOPE[workspaceTab(workflow)]) : {};
+    _draft = { ...opened, ...reset, ...prefill };
     if (ctx) _draft = _withDerivedWorkflow(ctx, _draft);
+    if (exact) _draft = _fitToModel(ctx, _draft);
   },
 
   /**
@@ -792,16 +884,24 @@ export const draft = {
    * step cap) and takes its own defaults for the rest; the same model keeps everything.
    */
   hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null, options: { keepSettings?: boolean; keepChangedSettings?: boolean } = {}): void {
+    // A machine that cannot extend gives the Extend kind back to New.
+    if (_draft.workflow === 'extend' && !ctx.workflow_contract.values.includes('extend')) _draft = _withDerivedWorkflow(ctx, { ..._draft, workflow: 'txt2vid', videoKind: 'new' });
+    // The Audio tab settles on a kind and one of its models; a machine that runs no audio model gives the tab back to Image.
+    if (isAudioWorkflow(_draft.workflow) && availableKinds(ctx).length === 0) _draft = { ..._draft, workflow: 'txt2img' };
+    if (isAudioWorkflow(_draft.workflow)) {
+      const hydrated = hydrateAudio(ctx, _draft, preferredModel);
+      _draft = { ...hydrated, ..._swapFamilyLoras(ctx, _draft, _draft.model, hydrated.model) };
+      _authorityReady = true;
+      this.saveDraft();
+      return;
+    }
     const workflow = _draft.workflow;
     const isVideoMode = _isVideoWorkflow(workflow);
     const validModels = isVideoMode ? ctx.video_models : ctx.image_models;
-    // The model the draft holds belongs to the mode it came from, which the workflow may just have left: remember it first.
-    _draft = _rememberModel(ctx, _draft);
 
-    // Determine model: preferredModel > current draft model (if still valid) > the model last used in this mode
-    // (if still valid) > context default. An explicit preferredModel that is not valid goes straight to the default.
-    const remembered = isVideoMode ? _draft.lastVideoModel : _draft.lastImageModel;
-    const candidates = preferredModel !== null ? [preferredModel] : [_draft.model, remembered];
+    // Determine model: preferredModel > current draft model (if still valid) > context default. An explicit preferredModel
+    // that is not valid goes straight to the default. Coming back to a mode has already put its own model in the draft.
+    const candidates = preferredModel !== null ? [preferredModel] : [_draft.model];
     const model = candidates.find((id) => id !== '' && validModels.some((m) => m.id === id))
       ?? (isVideoMode ? ctx.current_video_model : ctx.current_image_model)
       ?? validModels[0]?.id
@@ -823,7 +923,9 @@ export const draft = {
     } else if (keepChanged) {
       nextState = _fitToModel(ctx, { ...nextState, ..._changedSinceOldDefaults(ctx, _draft) });
     }
-    nextState = _rememberModel(ctx, _applyCapabilityGates(ctx, nextState));
+    // A model that is gone (a mode's saved model that was removed) takes its defaults: the applied preset no longer describes them.
+    if (!sameModel && preferredModel === null) nextState = { ...nextState, appliedPreset: null };
+    nextState = _applyCapabilityGates(ctx, nextState);
 
     // The workflow follows from the tab and its images, whatever the model: one it cannot start from an image runs from text.
     _draft = _withDerivedWorkflow(ctx, nextState);
@@ -832,15 +934,34 @@ export const draft = {
   },
 
   /**
-   * Open a tab: the workflow becomes the one its images call for. When the tab is of the other mode (image or video) the
-   * applied preset is forgotten and the text swaps to what that mode kept. The model and defaults follow when the Workspace calls `onTabChange` with its context.
+   * Open a tab: the workflow becomes the one its images call for (the Audio tab's is its kind, the Video tab's the kind it was
+   * left on). Opening the other mode (image or video) saves the open mode's text, settings, model and preset and brings back the
+   * ones that mode kept (`_withModeOf`); the Audio tab in between changes none of them. When the mode has none yet, the model and
+   * defaults follow when the Workspace calls `onTabChange` with its context.
    * Without a context the model's capabilities are unknown, so the tab's start image is assumed to be usable.
    */
-  setTab(tab: WorkspaceTab): void {
-    if (tab === workspaceTab(_draft.workflow)) return;
-    const workflow = workflowFor(tab, _draft, true);
-    const leavesMode = workflowMode(workflow) !== workflowMode(_draft.workflow);
-    _draft = { ..._withTextOfMode(_draft, workflow), workflow, ...(leavesMode ? { appliedPreset: null } : {}) };
+  setTab(tab: NavTab): void {
+    if (tab === navTab(_draft.workflow)) return;
+    // Leaving Video notes the kind it was on, so coming back opens it again.
+    const left = videoKindOf(_draft.workflow);
+    const videoKind = left ?? _draft.videoKind;
+    // The Audio tab opens on the kind it was left on, the Video tab on its kind.
+    const workflow = tab === 'audio' ? _draft.audioKind : tab === 'video' && videoKind === 'extend' ? 'extend' : workflowFor(tab, _draft, true);
+    // A mode opened for the first time starts without the preset of the one it comes from; the next hydration gives it its model's defaults.
+    const entersFresh = workflowMode(workflow) !== 'audio' && workflowMode(workflow) !== workflowMode(_draft.workflow) && !_draft.savedSettings[workflowMode(workflow)];
+    _draft = { ..._withModeOf(_draft, workflow), workflow, videoKind, ...(entersFresh ? { appliedPreset: null } : {}) };
+    this.saveDraft();
+  },
+
+  /**
+   * Open a kind of the Video tab: New (a text or first-frame clip) or Extend. Only the workflow changes; each kind keeps its own
+   * inputs, and the text, the model and the settings are shared. The model and defaults follow when the Workspace calls `onTabChange`.
+   *
+   * @param ctx Tells whether the model takes a first frame; without it one is assumed.
+   */
+  setVideoKind(kind: VideoKind, ctx: WorkspaceContext | null): void {
+    const workflow = kind === 'extend' ? 'extend' : workflowFor('video', _draft, imageSupport(ctx, _draft.model, 'video').start);
+    _draft = { ..._draft, workflow, videoKind: kind };
     this.saveDraft();
   },
 
@@ -850,6 +971,12 @@ export const draft = {
    */
   onTabChange(ctx: WorkspaceContext): void {
     this.hydrateFromContext(ctx, null, { keepSettings: true });
+    // The LoRAs a mode comes back with may have been removed since it was left.
+    const loraString = keepInstalledLoras(_draft.loraString, ctx.loras, downloadStore.loraNames());
+    if (loraString !== _draft.loraString) {
+      _draft = { ..._draft, loraString };
+      this.saveDraft();
+    }
   },
 
   /**
@@ -876,12 +1003,36 @@ export const draft = {
   },
 
   /**
-   * Set or clear the audio track of a tab (Video or Extend Video): the draft holds its path or the upload's file name and
+   * Set or clear the audio track of a tab (Video or Extend): the draft holds its path or the upload's file name and
    * the file is held for Generate. A new track starts at 0; clearing puts Start at back to 0.
    */
   setAudioTrack(tab: TrackTab, value: SlotValue): void {
     heldUploads.setTrack(tab, value !== null && 'file' in value ? value.file : null);
     _draft = { ..._draft, ...trackPatch(tab, value) };
+    this.saveDraft();
+  },
+
+  /** Open a kind of the Audio tab: Music, Speech or Sound, on the model last chosen for it. */
+  setAudioKind(kind: AudioWorkflow, ctx: WorkspaceContext | null): void {
+    const opened: DraftState = { ..._withModeOf(_draft, kind), workflow: kind, audioKind: kind, model: _draft.audioModels[kind] };
+    _draft = ctx ? hydrateAudio(ctx, opened) : opened;
+    this.saveDraft();
+  },
+
+  /**
+   * Set or clear the recording the Speech tab's voice follows: the draft holds its path or the upload's file name and the
+   * file is held for Generate. A new recording is a new voice, so the speaker's tick is cleared with it; the transcript the
+   * person typed stays, whatever the recording does. Choosing one switches the voice to *From a recording*.
+   */
+  setVoice(value: SlotValue): void {
+    heldUploads.setVoice(value !== null && 'file' in value ? value.file : null);
+    voiceConsent.reset();
+    _draft = {
+      ..._draft,
+      voicePath: value !== null && 'path' in value ? value.path : null,
+      voiceUpload: value !== null && 'file' in value ? value.file.name : null,
+      voiceMode: value === null ? _draft.voiceMode : 'recording',
+    };
     this.saveDraft();
   },
 
@@ -892,62 +1043,22 @@ export const draft = {
   },
 
   /**
-   * Reset all generation selections to the model's defaults, keeping the
-   * tab, model, LoRAs, quantization, and the prompt inputs of both tabs (including the
-   * Enhanced prompt) untouched. Enhancement options and auto-enhance reset. The applied preset clears, since its
-   * settings are gone. The open tab's images and audio track clear with their upload markers and held files (Image: the
-   * start image, the references and Strength; Video: the first and last frame and the track; Extend Video: its track), so
-   * its workflow falls back to text. The other tabs keep theirs.
+   * Reset the open tab to its defaults: the fields of the scopes `RESET_SCOPE` lists for the tab take the values `defaultsFor`
+   * resolves, and everything else stays. The tab's images and audio track (Image: the start image and references; Video: the
+   * first and last frame and the track; Extend: its track, which returns to the source's own) clear with their upload markers
+   * and held files, so its workflow falls back to text. The Audio tab puts back its length and voice (the held recording
+   * and the tick with it). The batch and the seed are shared by every tab and reset on each. The applied preset clears.
+   * Nothing of another tab or of the other mode changes, and the model, LoRAs, quantization, text, prompt file, extend
+   * source and layout stay.
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
-    const tab = workspaceTab(s.workflow);
-    const kept = { ...DEFAULT_DRAFT, ..._imagesOfOtherTabs(s, tab) };
-    const keptPaths = slotPaths(kept);
-    _draft = {
-      ...kept,
-      missingReferencePaths: s.missingReferencePaths.filter((path) => keptPaths.includes(path)),
-      workflow: s.workflow,
-      model: s.model,
-      loraString: s.loraString,
-      lorasByFamily: s.lorasByFamily,
-      // The model each mode last ran stays, so switching between image and video keeps coming back to it.
-      lastImageModel: s.lastImageModel,
-      lastVideoModel: s.lastVideoModel,
-      quantize: s.quantize,
-      historyCollapsed: s.historyCollapsed,
-      sidebarCollapsed: s.sidebarCollapsed,
-      lastGeneratedAt: s.lastGeneratedAt,
-      // The source is an input, kept like the prompt; its length returns to the 2 s default.
-      extendSourcePath: s.extendSourcePath,
-      missingSourceVideo: s.missingSourceVideo,
-      extendPrefill: s.extendPrefill,
-      extendFrames: _extendSource?.fps ? defaultExtendFrames(_extendSource.fps, extendStepFor(ctx, s.model)) : s.extendFrames,
-    };
-    // Reset empties the open tab's images and track, the uploads held for them included.
-    heldUploads.clearTab(tab);
-    this.hydrateFromContext(ctx, s.model);
-    // Restore prompt inputs after hydration, which re-applies the default prompt source.
-    _draft = {
-      ..._draft,
-      promptSource: s.promptSource,
-      prompt: s.prompt,
-      scene: s.scene,
-      jsonPromptEnabled: s.jsonPromptEnabled,
-      jsonPrompt: s.jsonPrompt,
-      negativePrompt: s.negativePrompt,
-      promptFilePath: s.promptFilePath,
-      promptFileOptionIds: s.promptFileOptionIds,
-      promptFileLoaded: s.promptFileLoaded,
-      enhancedPrompt: s.enhancedPrompt,
-      enhancedScene: s.enhancedScene,
-      enhancedFrom: s.enhancedFrom,
-      enhancedHistory: s.enhancedHistory,
-      savedText: s.savedText,
-    };
-    // The source stays, so the track it filled in comes back with it, from where the source's sound ended.
-    const sourceTrack = tab === 'extend' && s.extendPrefill?.path === s.extendSourcePath ? (s.extendPrefill?.audioTrack ?? null) : null;
-    if (sourceTrack !== null) _draft = { ..._draft, ...trackPatch('extend', { path: sourceTrack.path }, sourceTrack.start) };
+    const scopes = RESET_SCOPE[workspaceTab(s.workflow)];
+    const defaults = defaultsFor(ctx, s, _extendSource);
+    _clearHeldUploads(scopes);
+    const reset = { ...s, ...pickScopes(defaults, scopes) };
+    const kept = new Set(slotPaths(reset));
+    _draft = _withDerivedWorkflow(ctx, { ...reset, missingReferencePaths: s.missingReferencePaths.filter((path) => kept.has(path)) });
     this.saveDraft();
   },
 
@@ -1003,12 +1114,13 @@ export const draft = {
   },
 
   /**
-   * Take a LoRA out of the current chips and out of what each model family remembers, so no later Generate or family
-   * switch can ask for a file that is gone. *installed* lets a chip written as a path be matched by its name.
+   * Take a LoRA out of the current chips and out of what each model family and each mode remembers, so no later Generate,
+   * family switch or tab change can ask for a file that is gone. *installed* lets a chip written as a path be matched by its name.
    */
   removeLora(name: string, installed: LoraInfo[] = []): void {
     const lorasByFamily = Object.fromEntries(Object.entries(_draft.lorasByFamily).map(([key, value]) => [key, withoutLora(value, name, installed)]));
-    _draft = { ..._draft, loraString: withoutLora(_draft.loraString, name, installed), lorasByFamily };
+    const savedSettings = Object.fromEntries(Object.entries(_draft.savedSettings).map(([mode, saved]) => [mode, saved.loraString === undefined ? saved : { ...saved, loraString: withoutLora(saved.loraString, name, installed) }]));
+    _draft = { ..._draft, loraString: withoutLora(_draft.loraString, name, installed), lorasByFamily, savedSettings };
     this.saveDraft();
   },
 
@@ -1091,6 +1203,7 @@ export const draft = {
     _authorityReady = false;
     _extendSource = null;
     heldUploads.clear();
+    voiceConsent.reset();
     localStorage.removeItem(STORAGE_KEY);
   }
 };

@@ -1,6 +1,6 @@
 import { api } from './client';
 import { parseQuery } from '$lib/prefillParams';
-import type { WorkspaceContext, JobContext, JobList, JobSnapshot, GalleryPage, PrefillParams } from '$lib/types';
+import type { WorkspaceContext, JobContext, JobDownloadPlan, JobList, JobSnapshot, GalleryPage, PrefillParams } from '$lib/types';
 
 export function getWorkspaceContext(params?: Record<string, string>): Promise<WorkspaceContext> {
   const query = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -13,6 +13,25 @@ export function getWorkspaceCoreContext(): Promise<WorkspaceContext> {
 
 export function submitGenerate(formData: FormData): Promise<JobContext> {
   return api.post<JobContext>('/api/generate', formData);
+}
+
+/**
+ * The generate form as the download plan reads it: every field as it is, and each uploaded file as an empty part that keeps
+ * its field and file name. The plan depends on the model and the fields, never on what a file holds, so a start image or a
+ * recording goes up once, with the submit.
+ */
+export function planForm(formData: FormData): FormData {
+  const plan = new FormData();
+  for (const [key, value] of formData.entries()) {
+    if (typeof value === 'string' || value.name === '') plan.append(key, value);
+    else plan.append(key, new File([], value.name, { type: value.type }));
+  }
+  return plan;
+}
+
+/** What `submitGenerate` of the same form would download: the missing models, their sizes and the free space. The files are not sent (see `planForm`). */
+export function planGenerate(formData: FormData): Promise<JobDownloadPlan> {
+  return api.post<JobDownloadPlan>('/api/generate/plan', planForm(formData));
 }
 
 export function getJobSnapshot(jobId: string): Promise<JobSnapshot> {

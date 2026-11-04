@@ -13,7 +13,7 @@ from zvisiongenerator.utils import app_db
 
 JOB_LOG_PAGE_SIZE = 50
 JOB_LOG_PROMPT_LIMIT = 500
-LOGGED_JOB_TYPES = frozenset({"image", "video", "upscale"})
+LOGGED_JOB_TYPES = frozenset({"image", "video", "audio", "upscale"})
 JOB_LOG_STATUS_FILTERS = ("all", "failed", "completed", "cancelled")
 
 _VERSION = 1

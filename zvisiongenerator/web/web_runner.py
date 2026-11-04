@@ -16,7 +16,7 @@ import time
 import uuid
 import warnings
 from collections import OrderedDict, deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -26,7 +26,9 @@ from typing import Any
 from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, release_accelerator_memory
+from zvisiongenerator.audio_runner import run_audio_batch
 from zvisiongenerator.built_models import ensure_built_model
+from zvisiongenerator.core.audio_types import AudioGenerationRequest
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.progress_events import exception_message
 from zvisiongenerator.core.video_types import LtxVideoUpscaleRequest, VideoFileUpscaleRequest, VideoGenerationRequest
@@ -38,12 +40,8 @@ from zvisiongenerator.downloads import (
     DownloadReport,
     DownloadTarget,
     describe_refusal,
-    enhancer_plan,
     ensure_downloaded,
-    image_plan,
-    matte_plan,
-    seedvr2_plan,
-    video_plan,
+    require_checked,
 )
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
@@ -52,17 +50,28 @@ from zvisiongenerator.review import review_enabled
 from zvisiongenerator.seedvr2_loader import load_seedvr2
 from zvisiongenerator.upscale_runner import run_upscale, upscale_prompts
 from zvisiongenerator.video_file_upscale_runner import run_ltx_video_upscale, run_video_file_upscale
+from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.matte_models import MATTE_LABEL
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, seedvr2_tier_label
 from zvisiongenerator.web.config import load_web_config
-from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
+from zvisiongenerator.web.gallery import audio_peaks, gallery_asset_for_output_path, gallery_asset_to_json
+from zvisiongenerator.web.job_downloads import (
+    JobDownloadPart,
+    audio_model_part,
+    enhancer_part,
+    image_model_part,
+    ltx_video_upscale_part,
+    matte_part,
+    seedvr2_part,
+    upscale_model_part,
+    video_model_part,
+)
 from zvisiongenerator.web.job_log import JobLog, build_job_log_entry, is_loggable
 from zvisiongenerator.web.job_contract import (
     CANCELLED_TERMINAL_EVENT,
@@ -226,6 +235,8 @@ class _JobRecord:
     control_signal: SkipSignal | None = None
     supported_controls: tuple[str, ...] = ()
     context: dict[str, Any] = field(default_factory=dict)
+    # What the job downloads, as planned when it was submitted; it is on its way until the job ends.
+    planned_targets: tuple[DownloadTarget, ...] = ()
     result_path: str | None = None
     outputs: list[dict[str, Any]] = field(default_factory=list)
     paused: bool = False
@@ -293,6 +304,12 @@ class WebRunner:
         """Return the registry of running model downloads that jobs share."""
         return self._download_flights
 
+    def committed_targets(self) -> tuple[DownloadTarget, ...]:
+        """Return the targets that queued and running jobs download, as planned when each was submitted."""
+        with self._jobs_lock:
+            records = list(self._jobs.values())
+        return tuple(target for record in records if record.status not in self._TERMINAL_STATUSES for target in record.planned_targets)
+
     def submit_image_request_job(
         self,
         *,
@@ -303,6 +320,8 @@ class WebRunner:
         model_ref: str,
         quantize: int | None = None,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
+        planned_targets: Sequence[DownloadTarget] = (),
+        model_part: JobDownloadPart | None = None,
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
         supported_controls: tuple[str, ...] | None = None,
@@ -318,6 +337,7 @@ class WebRunner:
             control_signal=control_signal,
             supported_controls=supported_controls if supported_controls is not None else generation_supported_controls(review=review_enabled(args)),
             context={"output_dir": getattr(args, "output", None), **(context or {})},
+            planned_targets=planned_targets,
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_image_request(
                 request=request,
@@ -326,6 +346,7 @@ class WebRunner:
                 args=args,
                 model_ref=model_ref,
                 quantize=quantize,
+                model_part=model_part,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
                 enhance_by_set=enhance_by_set,
@@ -342,6 +363,8 @@ class WebRunner:
         model_ref: str,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
         scene_by_set: dict[str, list[str | None]] | None = None,
+        planned_targets: Sequence[DownloadTarget] = (),
+        model_part: JobDownloadPart | None = None,
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
         supported_controls: tuple[str, ...] | None = None,
@@ -358,6 +381,7 @@ class WebRunner:
             control_signal=control_signal,
             supported_controls=supported_controls if supported_controls is not None else generation_supported_controls(review=review_enabled(args)),
             context={"output_dir": getattr(args, "output", None), **(context or {})},
+            planned_targets=planned_targets,
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_video_request(
                 request=request,
@@ -365,10 +389,51 @@ class WebRunner:
                 config=config,
                 args=args,
                 model_ref=model_ref,
+                model_part=model_part,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
                 enhance_by_set=enhance_by_set,
                 scene_by_set=scene_by_set,
+            ),
+        )
+
+    def submit_audio_request_job(
+        self,
+        *,
+        request: AudioGenerationRequest,
+        preset: AudioPreset,
+        config: dict[str, Any],
+        runs: int,
+        seed: int | None,
+        output_dir: str,
+        planned_targets: Sequence[DownloadTarget] = (),
+        admission_check: Callable[[], None] | None = None,
+        context: dict[str, Any] | None = None,
+        supported_controls: tuple[str, ...] | None = None,
+    ) -> str:
+        """Queue the audio job; the worker downloads and loads the model once and makes every take of every run.
+
+        The job supports the same controls as an image job without a review. A take that fails ends the job as failed;
+        the takes saved before it stay in the job's outputs. *supported_controls* defaults to those controls.
+        """
+        control_signal = SkipSignal()
+        return self._submit_job(
+            job_type="audio",
+            exclusive=True,
+            control_signal=control_signal,
+            supported_controls=supported_controls if supported_controls is not None else generation_supported_controls(review=False),
+            context={"output_dir": output_dir, **(context or {})},
+            planned_targets=planned_targets,
+            admission_check=admission_check,
+            target_factory=lambda progress_callback: self._run_audio_request(
+                request=request,
+                preset=preset,
+                config=config,
+                runs=runs,
+                seed=seed,
+                output_dir=output_dir,
+                progress_callback=progress_callback,
+                control_signal=control_signal,
             ),
         )
 
@@ -379,6 +444,8 @@ class WebRunner:
         workflow: GenerationWorkflow,
         model_ref: str,
         config: dict[str, Any],
+        planned_targets: Sequence[DownloadTarget] = (),
+        model_part: JobDownloadPart | None = None,
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
     ) -> str:
@@ -393,12 +460,14 @@ class WebRunner:
             control_signal=control_signal,
             supported_controls=UPSCALE_SUPPORTED_CONTROLS,
             context=dict(context or {}),
+            planned_targets=planned_targets,
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_upscale_request(
                 request=request,
                 workflow=workflow,
                 model_ref=model_ref,
                 config=config,
+                model_part=model_part,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
             ),
@@ -408,6 +477,7 @@ class WebRunner:
         self,
         *,
         request: VideoFileUpscaleRequest,
+        planned_targets: Sequence[DownloadTarget] = (),
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
     ) -> str:
@@ -419,6 +489,7 @@ class WebRunner:
             control_signal=control_signal,
             supported_controls=UPSCALE_SUPPORTED_CONTROLS,
             context=dict(context or {}),
+            planned_targets=planned_targets,
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_video_file_upscale_request(request=request, progress_callback=progress_callback, control_signal=control_signal),
         )
@@ -428,6 +499,8 @@ class WebRunner:
         *,
         request: LtxVideoUpscaleRequest,
         config: dict[str, Any],
+        planned_targets: Sequence[DownloadTarget] = (),
+        model_part: JobDownloadPart | None = None,
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
     ) -> str:
@@ -439,8 +512,11 @@ class WebRunner:
             control_signal=control_signal,
             supported_controls=UPSCALE_SUPPORTED_CONTROLS,
             context=dict(context or {}),
+            planned_targets=planned_targets,
             admission_check=admission_check,
-            target_factory=lambda progress_callback: self._run_ltx_video_upscale_request(request=request, config=config, progress_callback=progress_callback, control_signal=control_signal),
+            target_factory=lambda progress_callback: self._run_ltx_video_upscale_request(
+                request=request, config=config, model_part=model_part, progress_callback=progress_callback, control_signal=control_signal
+            ),
         )
 
     def submit_dummy_job(self, *, total_steps: int = 5, delay_seconds: float = 0.25) -> str:
@@ -700,6 +776,7 @@ class WebRunner:
         control_signal: SkipSignal | None = None,
         supported_controls: tuple[str, ...] = (),
         context: dict[str, Any] | None = None,
+        planned_targets: Sequence[DownloadTarget] = (),
         admission_check: Callable[[], None] | None = None,
     ) -> str:
         """Register and dispatch a background task; *admission_check* may raise JobConflictError under the job lock.
@@ -714,6 +791,7 @@ class WebRunner:
             control_signal=control_signal,
             supported_controls=supported_controls,
             context=context or {},
+            planned_targets=tuple(planned_targets),
         )
         progress_callback = self._make_progress_callback(record.job_id)
         with self._jobs_lock:
@@ -786,8 +864,12 @@ class WebRunner:
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
+        model_part: JobDownloadPart | None = None,
     ) -> None:
-        """Run preflight, then load the image model inside the worker thread and run the batch."""
+        """Run preflight, then load the image model inside the worker thread and run the batch.
+
+        *model_part* is the model's download part as planned when the job was submitted; without it the part is planned here.
+        """
         plan = run_preflight(
             prompts_data,
             config,
@@ -797,15 +879,13 @@ class WebRunner:
             enhance_by_set=enhance_by_set,
             control=control_signal,
             progress_callback=progress_callback,
-            ensure_downloads=self._enhancer_download_hook(mode="image", prompts_data=prompts_data, args=args, progress_callback=progress_callback, control_signal=control_signal),
+            ensure_downloads=self._enhancer_download_hook(mode="image", prompts_data=prompts_data, args=args, config=config, progress_callback=progress_callback, control_signal=control_signal),
         )
         if plan.cancelled:
             return
         if not self._ensure_downloads(
-            image_plan(model_ref, family=request.model_family, config=config, platform_key=sys.platform),
+            model_part or image_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, platform_key=sys.platform),
             mode="image",
-            role="model",
-            model=request.model_name or model_ref,
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -836,16 +916,18 @@ class WebRunner:
         config: dict[str, Any],
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
+        model_part: JobDownloadPart | None = None,
     ) -> None:
-        """Load the upscale model inside the worker thread (SeedVR2 or the recorded image model) and run the upscale workflow once."""
+        """Load the upscale model inside the worker thread (SeedVR2 or the recorded image model) and run the upscale workflow once.
+
+        *model_part* is the model's download part as planned when the job was submitted; without it the part is planned here.
+        """
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             return
         if not self._ensure_downloads(
-            self._upscale_download_plan(request, model_ref, config),
+            model_part or upscale_model_part(request, model_ref, config, platform_key=sys.platform),
             mode="image",
-            role="model",
-            model=self._upscale_model_label(request, model_ref),
             total_iterations=1,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -873,10 +955,8 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
         if not self._ensure_downloads(
-            self._seedvr2_download_plan(request.upscale_model),
+            seedvr2_part(request.upscale_model),
             mode="video",
-            role="model",
-            model=self._seedvr2_model_label(request.upscale_model),
             total_iterations=1,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -892,16 +972,18 @@ class WebRunner:
         config: dict[str, Any],
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
+        model_part: JobDownloadPart | None = None,
     ) -> None:
-        """Download and load the LTX model for upscale inside the worker thread, then upscale the video file once; Quit stops it between steps and decoded chunks."""
+        """Download and load the LTX model for upscale inside the worker thread, then upscale the video file once; Quit stops it between steps and decoded chunks.
+
+        *model_part* is the model's download part as planned when the job was submitted; without it the part is planned here.
+        """
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
             return
         if not self._ensure_downloads(
-            video_plan(request.model_ref, family="ltx", config=config, model_name=request.model_name, upscale=True),
+            model_part or ltx_video_upscale_part(request, config),
             mode="video",
-            role="model",
-            model=request.model_name,
             total_iterations=1,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -917,6 +999,40 @@ class WebRunner:
         )
         run_ltx_video_upscale(backend, model, request, progress_callback=progress_callback, skip_signal=control_signal)
 
+    def _run_audio_request(
+        self,
+        *,
+        request: AudioGenerationRequest,
+        preset: AudioPreset,
+        config: dict[str, Any],
+        runs: int,
+        seed: int | None,
+        output_dir: str,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> None:
+        """Download the model (as ``model_downloading`` events), then run the audio batch inside the worker thread: load once, save each take.
+
+        Quit stops the job while queued, during the download and during the load. A take that fails raises out of the batch, after the takes
+        before it were saved and reported with their ``generation_finished`` events.
+        """
+        if control_signal.pending() == "quit":
+            progress_callback({"type": "batch_cancelled", "mode": "audio", "completed_iterations": 0, "total_iterations": runs})
+            return
+        require_ffmpeg()
+        if not self._ensure_downloads(audio_model_part(preset), mode="audio", total_iterations=runs, progress_callback=progress_callback, control_signal=control_signal, files_required=True):
+            return
+        run_audio_batch(
+            request,
+            preset,
+            config,
+            runs=runs,
+            seed=seed,
+            output_dir=output_dir,
+            progress_callback=progress_callback,
+            skip_signal=control_signal,
+        )
+
     def _run_video_request(
         self,
         *,
@@ -929,8 +1045,12 @@ class WebRunner:
         control_signal: SkipSignal,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
         scene_by_set: dict[str, list[str | None]] | None = None,
+        model_part: JobDownloadPart | None = None,
     ) -> None:
-        """Run preflight, then load the video model inside the worker thread and run the batch; Quit stops either."""
+        """Run preflight, then load the video model inside the worker thread and run the batch; Quit stops either.
+
+        *model_part* is the model's download part as planned when the job was submitted; without it the part is planned here.
+        """
         require_ffmpeg()
         plan = run_preflight(
             prompts_data,
@@ -943,7 +1063,7 @@ class WebRunner:
             scene_by_set=scene_by_set,
             control=control_signal,
             progress_callback=progress_callback,
-            ensure_downloads=self._enhancer_download_hook(mode="video", prompts_data=prompts_data, args=args, progress_callback=progress_callback, control_signal=control_signal),
+            ensure_downloads=self._enhancer_download_hook(mode="video", prompts_data=prompts_data, args=args, config=config, progress_callback=progress_callback, control_signal=control_signal),
         )
         if plan.cancelled:
             return
@@ -951,10 +1071,8 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
             return
         if not self._ensure_downloads(
-            video_plan(model_ref, family=request.model_family, config=config, model_name=request.model_name or model_ref, upscale=bool(request.upscale)),
+            model_part or video_model_part(request.model_name or model_ref, model_ref, family=request.model_family, config=config, upscale=bool(request.upscale)),
             mode="video",
-            role="model",
-            model=request.model_name or model_ref,
             total_iterations=len(plan.iterations),
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -987,34 +1105,6 @@ class WebRunner:
             skip_signal=control_signal,
         )
 
-    @staticmethod
-    def _upscale_download_plan(request: ImageGenerationRequest, model_ref: str, config: dict[str, Any]) -> tuple[DownloadTarget, ...] | None:
-        """Return the downloads an upscale job needs: the SeedVR2 tier's files or the creative refinement model's."""
-        if request.upscale_method != UPSCALE_METHOD_SEEDVR2:
-            return image_plan(model_ref, family=request.model_family, config=config, platform_key=sys.platform)
-        return WebRunner._seedvr2_download_plan(request.upscale_model)
-
-    @staticmethod
-    def _upscale_model_label(request: ImageGenerationRequest, model_ref: str) -> str:
-        """Return the model name an upscale job's download events show."""
-        if request.upscale_method != UPSCALE_METHOD_SEEDVR2:
-            return request.model_name or model_ref
-        return WebRunner._seedvr2_model_label(request.upscale_model)
-
-    @staticmethod
-    def _seedvr2_download_plan(model_name: str) -> tuple[DownloadTarget, ...] | None:
-        """Return the files SeedVR2 tier *model_name* needs on this machine, or ``None`` when it has no engine."""
-        upscaler = get_seedvr2_upscaler()
-        if upscaler is None:
-            return None  # the load reports that this platform has no SeedVR2 engine
-        return seedvr2_plan(model_name, models_dir=get_ziv_data_dir() / "models", weights=upscaler.weights)
-
-    @staticmethod
-    def _seedvr2_model_label(model_name: str) -> str:
-        """Return the name of SeedVR2 tier *model_name* that a download event shows."""
-        upscaler = get_seedvr2_upscaler()
-        return seedvr2_tier_label(model_name, upscaler.weights) if upscaler is not None else str(model_name)
-
     def _ensure_matte_downloads(
         self,
         request: ImageGenerationRequest,
@@ -1031,10 +1121,8 @@ class WebRunner:
         if not request.transparent:
             return True
         return self._ensure_downloads(
-            matte_plan(),
+            matte_part(),
             mode="image",
-            role="matte",
-            model=MATTE_LABEL,
             total_iterations=total_iterations,
             progress_callback=progress_callback,
             control_signal=control_signal,
@@ -1046,6 +1134,7 @@ class WebRunner:
         mode: str,
         prompts_data: dict[str, list[tuple[str, str | None]]],
         args: argparse.Namespace,
+        config: dict[str, Any],
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
     ) -> Callable[[str, str | None], bool]:
@@ -1058,10 +1147,8 @@ class WebRunner:
 
         def ensure(repo: str, revision: str | None) -> bool:
             return self._ensure_downloads(
-                enhancer_plan(repo, revision),
+                enhancer_part(repo, revision, config, platform_key=sys.platform),
                 mode=mode,
-                role="enhancer",
-                model=repo,
                 total_iterations=total_iterations,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
@@ -1071,49 +1158,37 @@ class WebRunner:
 
     def _ensure_downloads(
         self,
-        targets: tuple[DownloadTarget, ...] | None,
+        part: JobDownloadPart,
         *,
         mode: str,
-        role: str,
-        model: str,
         total_iterations: int,
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
+        files_required: bool = False,
     ) -> bool:
-        """Download what *targets* still miss, publishing ``model_downloading`` events; return False when the job was cancelled.
+        """Download what *part* still misses, publishing ``model_downloading`` events; return False when the job was cancelled.
 
-        ``None`` (the plan could not be made) and no targets skip the step. A Stop while this job owns the download
+        A part with ``None`` targets (the plan could not be made) or none skips the step. A Stop while this job owns the download
         ends the job with ``download: "stopped"``; a Stop while it only waits on another download, with
-        ``download: "detached"`` (the other download continues).
+        ``download: "detached"`` (the other download continues). With *files_required* (a model that loads only from files on
+        disk) a Hub that could not be reached, with a file missing, ends the job.
 
         Raises:
-            RuntimeError: If a download fails; the message names the repo.
+            RuntimeError: If a download fails; the message names the repo. With *files_required*, also when Hugging Face
+                could not be reached and a file is missing.
         """
-        if not targets:
+        if not part.targets:
             return True
 
         def report(update: DownloadReport) -> None:
-            progress_callback(
-                {
-                    "type": DOWNLOADING_EVENT,
-                    "mode": mode,
-                    "role": role,
-                    "model": model,
-                    "repo": update.repo,
-                    "part": update.part,
-                    "parts": update.parts,
-                    "bytes_done": update.progress.bytes_done,
-                    "bytes_total": update.progress.bytes_total,
-                    "bytes_per_sec": update.progress.bytes_per_sec,
-                    "download_eta_secs": update.progress.eta_secs,
-                    "shared": update.shared,
-                }
-            )
+            progress_callback(_download_event(update, mode=mode, role=part.role, model=part.label))
 
-        outcome = ensure_downloaded(targets, flights=self._download_flights, report=report, cancelled=lambda: control_signal.pending() == "quit")
+        outcome = ensure_downloaded(part.targets, flights=self._download_flights, report=report, cancelled=lambda: control_signal.pending() == "quit")
         if outcome in (STOPPED, DETACHED):
             progress_callback({"type": "batch_cancelled", "mode": mode, "completed_iterations": 0, "total_iterations": total_iterations, "download": outcome})
             return False
+        if files_required:
+            require_checked(outcome, part.targets, part.label)
         return True
 
     def _make_progress_callback(self, job_id: str) -> Callable[[EventPayload], None]:
@@ -1319,6 +1394,24 @@ class WebRunner:
         return event
 
 
+def _download_event(update: DownloadReport, *, mode: str, role: str, model: str) -> EventPayload:
+    """Return the ``model_downloading`` event for a download report of *model* (the ``role`` it plays in a job of *mode*)."""
+    return {
+        "type": DOWNLOADING_EVENT,
+        "mode": mode,
+        "role": role,
+        "model": model,
+        "repo": update.repo,
+        "part": update.part,
+        "parts": update.parts,
+        "bytes_done": update.progress.bytes_done,
+        "bytes_total": update.progress.bytes_total,
+        "bytes_per_sec": update.progress.bytes_per_sec,
+        "download_eta_secs": update.progress.eta_secs,
+        "shared": update.shared,
+    }
+
+
 def _load_image_model_with_progress(
     request: ImageGenerationRequest,
     model_ref: str,
@@ -1420,4 +1513,8 @@ def _output_asset_payload(context: dict[str, Any], output_path: Any) -> dict[str
     asset = gallery_asset_for_output_path(output_dir, output_path)
     if asset is None:
         return None
-    return gallery_asset_to_json(asset, load_web_config())
+    payload = gallery_asset_to_json(asset, load_web_config())
+    if payload.get("media_type") == "audio" and payload.get("peaks") is None:
+        # The job card lands on the finished take's waveform, so a take just made carries its peaks instead of leaving them to a later request.
+        payload["peaks"] = audio_peaks(output_dir, payload["id"]) or []
+    return payload

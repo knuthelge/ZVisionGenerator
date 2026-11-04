@@ -1,6 +1,6 @@
 # Vendored packages
 
-Five upstream projects are copied into `packages/` because they are not on PyPI in a form we can depend on. Never edit them by hand; update them with the make targets below.
+Seven upstream projects are copied into `packages/` because they are not on PyPI in a form we can depend on. Never edit them by hand; update them with the make targets below.
 
 ## LTX (MLX)
 
@@ -66,3 +66,21 @@ Five upstream projects are copied into `packages/` because they are not on PyPI 
 - **Layout.** `make update-birefnet` downloads `birefnet.py` and `BiRefNet_config.py` from that revision, unchanged, and writes its own `__init__.py`. Upstream ships no license file, so none is copied; `THIRD_PARTY_LICENSES.md` cites the model card. The folder is imported as the top-level package `birefnet`.
 - **Update.** It carries no dependencies: the code imports `timm`, `kornia`, `einops` and `torchvision` besides `torch` and `transformers`, which `pyproject.toml` lists for every platform. Check that those versions still import it.
 - **Internals we rely on.** The contract test reads the source as a syntax tree and pins `BiRefNet`, `BiRefNetConfig` (its `model_type` is `SegformerForSemanticSegmentation`, so it is never resolved through `AutoConfig`) and `DeformableConv2d`: its constructor parameters, its `offset_conv`, `modulator_conv` and `regular_conv` layers, the integer `padding` and the `2 * sigmoid` modulator, all of which the `grid_sample` replacement relies on. `Decoder` is defined twice upstream; the later definition is the one in use. One import check proves the file loads against the installed packages.
+
+## YuE2
+
+`packages/yue2` is the inference kit of [`multimodal-art-projection/YuE`](https://github.com/multimodal-art-projection/YuE) (`src/yue2`, Apache-2.0), which the audio backend runs for music. Upstream ships it in its repository and as a wheel inside the model repository, not on PyPI. Never edit it by hand.
+
+- **Pin.** `YUE2_COMMIT` in the `Makefile` names the vendored commit, and `make update-yue2` writes it to `packages/yue2/UPSTREAM_COMMIT`; `tests/contracts/test_yue2_contract.py` checks the two agree. Move the pin only after checking that a take is still bit-identical and fits the measured memory.
+- **Layout.** `make update-yue2` copies `src/yue2/` without `cli.py` and `fast.py` (the command line and the vLLM backend), plus the repository's `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/`. The kit imports itself relatively and is imported as the top-level package `yue2`. `pipeline.py` imports `fast` only for `backend="vllm"`, which we never select. The weights are licensed separately (CC BY-NC 4.0) and are not vendored; `MODEL_LICENSE` stays upstream.
+- **Update.** It does not carry dependencies: the kit needs `torch`, `transformers`, `huggingface-hub`, `safetensors`, `numpy` and `accelerate`, which are already ours (`soundfile` is imported only by the kit's unused `save` helper and is not installed), and `tiktoken`, which `pyproject.toml` lists. Check that the kit still imports and that a take is bit-identical to the stock kit's.
+- **Internals we rely on.** `tests/contracts/test_yue2_contract.py` reads the source as a syntax tree and pins the pipeline entry points, keywords and private parts the CUDA weight swap hooks into, so an update that moves one fails there. One import check proves the package loads against the installed libraries.
+
+## Stable Audio 3
+
+`packages/stable_audio_3` is the inference package of [`Stability-AI/stable-audio-3`](https://github.com/Stability-AI/stable-audio-3) (MIT), which the audio backend runs for sound and ambience. Upstream is not on PyPI and pins `torch==2.7.1`, so it lives in the repository. Never edit it by hand.
+
+- **Pin.** `SA3_COMMIT` in the `Makefile` names the vendored commit, and `make update-sa3` writes it to `packages/stable_audio_3/UPSTREAM_COMMIT`; `tests/contracts/test_stable_audio_3_contract.py` checks the two agree and that it is still the commit the audio backend was measured at.
+- **Layout.** `make update-sa3` copies `stable_audio_3/` without `training/`, `interface/`, `cli.py` and `data/dataset.py`, plus the repository's `LICENSE`. `data/utils.py` stays because `inference/sampling.py` and `inference/audio_utils.py` import it. Nothing comes from Stability AI's gated model repository: the weights and configs are fetched separately. The package imports itself absolutely as `stable_audio_3`, so it is a top-level package.
+- **Update.** It does not carry dependencies: the inference path needs `einops`, `safetensors`, `numpy`, `packaging`, `transformers`, `huggingface-hub`, `tqdm`, `torch` and `torchaudio` (imported at module level by `data/utils.py`), which `pyproject.toml` lists. `torchaudio` comes from the same CUDA index as `torch`. `flash_attn` is optional and absent. Check that `uv lock` adds nothing else.
+- **Internals we rely on.** `tests/contracts/test_stable_audio_3_contract.py` reads the source as a syntax tree and pins the loader and `generate` signatures and the clamp after decoding that the backend works around. One import check proves the inference path loads without the excluded folders.

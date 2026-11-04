@@ -49,6 +49,59 @@ describe('jobStore reconnect contract', () => {
     mockEventSource.close();
   });
 
+  it('follows an audio take through its phases and starts the next take from the first', () => {
+    jobStore.startJob({ job_id: 'take', workflow: 'speech', media_type: 'audio', prompt: 'Hello', model: 'higgs3', runs: 2, created_at: '' });
+    const source = lastEventSource();
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'Hello', run_index: 0, total_runs: 2 });
+    expect(jobStore.current).toMatchObject({ phase: 'generate', audio: null });
+
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Speech tokens', step: 90, total: 1500, part: 2, n_parts: 4, run_index: 0 });
+    expect(jobStore.current).toMatchObject({ status: 'running', phase: 'generate', audio: { phase: 'Speech tokens', step: 90, total: 1500, part: 2, parts: 4 } });
+
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Speech tokens', step: 91, total: null, part: 2, n_parts: 4 });
+    expect(jobStore.current?.audio).toMatchObject({ step: 91, total: null });
+
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'Hello', run_index: 1, total_runs: 2 });
+    expect(jobStore.current?.audio).toBeNull();
+  });
+
+  it('takes the elapsed time and the time left from an audio take\'s progress, and clears the take on a repeat', () => {
+    jobStore.startJob({ job_id: 'take-clock', workflow: 'music', media_type: 'audio', prompt: 'Song', model: 'yue2', runs: 2, created_at: '' });
+    const source = lastEventSource();
+
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Decode', step: 1, total: 1, part: 1, n_parts: 1, elapsed_secs: 42, eta_secs: 18 });
+    expect(jobStore.current).toMatchObject({ elapsed: 42, remaining: 18 });
+
+    // A progress event without an estimate keeps the last one.
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Decode', step: 1, total: 1, part: 1, n_parts: 1, elapsed_secs: 43 });
+    expect(jobStore.current).toMatchObject({ elapsed: 43, remaining: 18 });
+
+    source.emit('generation_repeat', { type: 'generation_repeat', job_id: 'take-clock' });
+    expect(jobStore.current?.audio).toBeNull();
+  });
+
+  it('keeps the takes an audio job saves as its outputs, from each generation and from the end of the job', () => {
+    jobStore.startJob({ job_id: 'take-outputs', workflow: 'music', media_type: 'audio', prompt: 'Song', model: 'yue2', runs: 2, created_at: '' });
+    const source = lastEventSource();
+    const take = (id: string) => ({ id, url: `/media/${id}`, thumbnail_url: `/media/${id}`, filename: id, created_at: '', workflow: 'music', prompt: 'Song', model: 'yue2', media_type: 'audio', reuse_workspace_url: '' });
+
+    source.emit('generation_finished', { type: 'generation_finished', status: 'success', run_index: 0, asset: take('a.flac') });
+    expect(jobStore.current?.outputs.map((output) => output.id)).toEqual(['a.flac']);
+
+    source.emit('job_completed', { type: 'job_completed', job_id: 'take-outputs', total_runs: 2, outputs: [take('a.flac'), take('b.flac')] });
+    expect(jobStore.current?.outputs.map((output) => output.id)).toEqual(['a.flac', 'b.flac']);
+  });
+
+  it('keeps a paused audio job paused while it reports progress', () => {
+    jobStore.startJob({ job_id: 'take-paused', workflow: 'music', media_type: 'audio', prompt: 'Song', model: 'yue2', runs: 1, created_at: '', supported_controls: ['pause', 'resume'] });
+    const source = lastEventSource();
+    source.emit('job_paused', { type: 'job_paused', job_id: 'take-paused' });
+
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Plan', step: 1, total: null, part: 1, n_parts: 1 });
+
+    expect(jobStore.current?.status).toBe('paused');
+  });
+
   it('tracks prompts across YAML groups and repeat runs, retaining context during steps', () => {
     jobStore.startJob({ job_id: 'prompts', workflow: 'txt2img', prompt: 'First', model: 'zit', runs: 2, created_at: '' });
     const source = lastEventSource();

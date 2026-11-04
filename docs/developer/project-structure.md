@@ -5,8 +5,10 @@ zvisiongenerator/
 ├── __init__.py
 ├── image_cli.py                   Image CLI entry point (ziv-image)
 ├── video_cli.py                   Video CLI entry point (ziv-video)
+├── audio_cli.py                   Audio CLI entry point (ziv-audio)
 ├── cli.py                         Unified CLI entry point (ziv)
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model / --enhance-format CLI handling
+├── licence_cli.py                 Shared licence notice of the CLIs and the LTX converter
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── built_models.py                One entry point for the models built on first use: recognise their folders, prepare them, name the step
 ├── ideogram4_instant_builder.py   Build the Ideogram 4 Instant model folder on first use (download, convert, link the base components)
@@ -17,11 +19,12 @@ zvisiongenerator/
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── video_file_upscale_runner.py   Upscale one existing video: check it, run SeedVR2 or LTX (macOS) on it, keep its sound and settings
 ├── review.py                      Shared wait for a review decision
-├── job_controls.py                Shared pause and repeat steps of the image and video runners
+├── job_controls.py                Shared pause and repeat steps of the image, video and audio runners
 ├── matte_room.py                  Memory guard for the background removal chain: swaps the image model out and back in when free memory is short
 ├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
-├── config.yaml                    Default configuration (sizes, model presets)
+├── audio_runner.py                Audio run orchestration: seeds, load once, make and save each take as FLAC, close
+├── config.yaml                    Default configuration (sizes, image, video and audio model presets)
 ├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
 │   ├── matte/                     Background removal on a torch device (CUDA or MPS), one code path for both platforms
@@ -29,6 +32,18 @@ zvisiongenerator/
 │   │   ├── chain.py               The chain: BiRefNet mask, ViTMatte edge, foreground colours; loaded on the first cut-out, closed when the job ends
 │   │   ├── deform_conv.py         Modulated deformable convolution built from `grid_sample`, and the swap into BiRefNet
 │   │   └── vitmatte.py            Load ViTMatte and its image processor from a pinned snapshot
+│   ├── audio/                     Audio models on a torch device (CUDA or MPS), one backend module per family
+│   │   ├── build_cancel.py        Check a Stop while a model is built
+│   │   ├── higgs3.py              Higgs TTS 3 backend: long text read in parts and joined, an optional voice to follow
+│   │   ├── higgs3_codes.py        The delay pattern, the sampler and the rule that ends a take (pure torch)
+│   │   ├── higgs3_config.py       Read the official config.json into the numbers the model needs (no torch)
+│   │   ├── higgs3_generate.py     The generation loop: one prompt in, the codes of one take out, with a callback per frame
+│   │   ├── higgs3_model.py        The network (Qwen3 backbone, fused codebook embedding and head) and its strict weight loader
+│   │   ├── higgs3_prompt.py       The tokenizer and the prompt, with the reference voice's slots
+│   │   ├── sa3.py                 Stable Audio 3 Medium: built in fp16 and filled tensor by tensor, with the output kept from before the library's clamp
+│   │   ├── yue2.py                YuE2: the vendored kit run stage by stage, with song or instrumental from the Lyrics
+│   │   ├── yue2_load.py           Stream YuE2's weights in tensor by tensor
+│   │   └── yue2_swap.py           Keep YuE2's weight groups in pinned CPU memory and put only the running phase's group on the GPU
 │   ├── cuda/                      Windows and Linux (diffusers/CUDA); what image and video share sits here
 │   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
 │   │   ├── download_plan.py       Hugging Face downloads the diffusers image, LTX video and transformers enhancer backends need (no torch import)
@@ -109,12 +124,16 @@ zvisiongenerator/
 │   ├── latent_preview.py          Latent → RGB projection factors shared by live previews
 │   ├── image_types.py             Image request and artifacts
 │   ├── video_types.py             Video request and artifacts, and the extend source, spec and segment
+│   ├── audio_types.py             Audio request, voice reference and the clip a take returns
 │   ├── image_backend.py           Image backend protocol
 │   ├── matte.py                   Background removal chain protocol
 │   ├── video_backend.py           Video backend protocol and the optional VideoExtender protocol
+│   ├── audio_backend.py           Audio backend protocol: load, generate, close
 │   ├── video_family.py            Video family value types (frame rule, capabilities, steps) and the step settling
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
 │   ├── seedvr2.py                 SeedVR2 upscaler protocol
+│   ├── speech_join.py             Join the parts of a long speech take: trim edge silence, even the levels, fade and add a pause
+│   ├── speech_text.py             Split speech text into parts at sentence ends, never inside an expressive tag
 │   └── workflow.py                Unified workflow engine (image + video)
 ├── downloads/                     Hugging Face model downloads shown as progress (see Model Downloads)
 │   ├── check.py                   Dry-run check: files and bytes a target still needs, or None when offline
@@ -122,7 +141,7 @@ zvisiongenerator/
 │   ├── ensure.py                  Skip, wait for or run each part of a plan before a model loads
 │   ├── flights.py                 Single-flight registry: one owner per destination, waiters mirror its progress
 │   ├── hub_access.py              Where the Hugging Face token comes from, and one actionable line for a Hub refusal
-│   ├── plans.py                   Compose a model's targets from the platform planners, Instant sources and SeedVR2 tier files
+│   ├── plans.py                   Compose a model's targets from the platform planners, Instant sources, SeedVR2 tier files and an audio preset's pinned files
 │   ├── presence.py                Offline presence test and partial-file cleanup
 │   ├── progress.py                Byte counting sink for tqdm, speed meter and progress from counts
 │   ├── protocol.py                Wire prefix of the child's stdout messages
@@ -142,8 +161,16 @@ zvisiongenerator/
 │   ├── app_db.py                  The app database `ziv.sqlite3`: path, connections with the standard pragmas, per-component schema versions, corruption quarantine
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
+│   ├── audio_preset.py            Pure parser of the config's `audio_model_presets` section into frozen `AudioPreset` values
+│   ├── audio_fade.py              Fade the end of a clip to silence
+│   ├── audio_console.py           The live progress line of `ziv audio`
+│   ├── audio_level.py             Scale a clip that peaks above a ceiling down to it (`limit_peak`)
+│   ├── audio_peaks.py             The 100 waveform peaks of an audio clip or file, for the gallery
 │   ├── audio_resample.py          Polyphase resampling of multi-channel audio
+│   ├── audio_request.py           The checks of an audio request that `ziv audio` and the Web UI share: the model, the length of a sound and the limits of a speech request
+│   ├── audio_save.py              Write a take as 16-bit FLAC through ffmpeg with its settings in the `zvisiongenerator.config` tag
 │   ├── audio_track.py             Read a user's audio track and build the window sound of an extension
+│   ├── audio_voice.py             Whether a voice recording needs the speaker's consent
 │   ├── color_names.py             Plain colour names for hex codes (nearest by OKLab), for Palette Custom
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
@@ -163,6 +190,9 @@ zvisiongenerator/
 │   ├── image_model_detect.py      Image model type detection
 │   ├── input_images.py            Input images opened upright and on white (`open_image_upright`, `upright_image_copies`), `flatten_alpha` for another backdrop, and the accepted extensions
 │   ├── interactive.py             Keyboard interrupt handling and review state
+│   ├── library_noise.py           Silence the known console noise of the audio models' libraries
+│   ├── licences.py                Pure parser and lookups of the licence records, and the licence notice for a download that is about to start
+│   ├── licences.yaml              The licence records of the models: one per licence, with its supplier, a summary, URLs and the models it covers
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
 │   ├── lora_files.py              Give a loader a LoRA under the tensor names its family reads: the tensors renamed, or a temporary renamed copy of the file for loaders that take only a path
@@ -176,6 +206,7 @@ zvisiongenerator/
 │   ├── matte_models.py            The pinned BiRefNet and ViTMatte repositories and the Models-page row of the background removal models
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
+│   ├── music_mode.py              Song or instrumental: what the Lyrics box of a music take makes (the Web UI's status line mirrors it)
 │   ├── moss_build.py              MOSS-Image's pinned sources, model folders, build records and shared stored copies
 │   ├── page_cache.py              Drop model files from the page cache once written or read
 │   ├── paths.py                   ~/.ziv/ model store resolution
@@ -189,7 +220,7 @@ zvisiongenerator/
 │   ├── prompt_quotes.py           Find quoted text in a prompt and check that a rewrite keeps it exactly
 │   ├── quantized_weights.py       Decode community checkpoints' quantized weights (scaled FP8, INT8, ConvRot, W4A4, W4A8, W6A8, NVFP4, MXFP8) one weight at a time
 │   ├── prompts.py                 Prompt file loading
-│   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
+│   ├── provenance.py              Settings embedded in generated PNG, MP4 and FLAC files: build, embed, read
 │   ├── references.py              Reference images: parse the `--reference` list and check the count and files against what a model takes
 │   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache; reads a header and its metadata in one bounded read
 │   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
@@ -204,6 +235,9 @@ zvisiongenerator/
 │   ├── video_tail.py              Read a clip's last frames, or all its frames, at their displayed size
 │   └── video_upscale.py           LTX video file upscale (macOS): the clips it takes, its steps, menu option, progress units and time left
 ├── web/
+│   ├── audio_job.py               Turn an audio generate form's fields into the request of one take, with the refusals `ziv audio` makes
+│   ├── audio_inventory.py         The audio rows of the Models page
+│   ├── audio_models.py            The audio models that run on this machine and each one's Workspace row
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
@@ -214,10 +248,12 @@ zvisiongenerator/
 │   ├── extend_api.py              Extend routes: check and describe a source video, fit its window to memory, build the rewrite context of an extension
 │   ├── first_run.py               The model the first-run dialog preselects, and the dialog's payload block
 │   ├── gallery.py                 Gallery inventory and response serialization
+│   ├── gallery_audio.py           The audio part of a gallery asset: its facts, JSON and Reuse settings
 │   ├── gallery_index.py           Gallery component of the app database: facts read from gallery files, reconciled with the folder on each listing
 │   ├── hub_client.py              Anonymous, size-capped reads of huggingface.co for Discover, with input validators and a short in-memory cache
 │   ├── instances.py               Record running Web UI servers for --background and --background-stop
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── job_downloads.py           Plan one job's downloads as parts (enhancer, model, background removal, SeedVR2 tier), shared by the runner and the plan routes
 │   ├── job_log.py                 Job log component of the app database: entry builder, filters, paging and the `jobs_entries` store
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
 │   ├── listing_filter.py          The content filter: whether Discover lists a Hugging Face repository, by the words in its names
@@ -228,7 +264,7 @@ zvisiongenerator/
 │   ├── lora_fit.py                Size the LoRAs a Web UI memory estimate covers (MiniMax H3 only), resolved as a job resolves them
 │   ├── lora_sources.py            LoRA sources component of the app database: where each downloaded LoRA came from and its trigger
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
-│   ├── model_download_plan.py     Plan a Models-page row's downloads: targets, whether it needs any, sizes and free space
+│   ├── model_download_plan.py     Plan a Models-page row's downloads and size a job's parts for the download dialog, with the licence records of its models
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── path_browser.py            Host folder listings for the in-app path browser
@@ -241,7 +277,7 @@ zvisiongenerator/
 │   ├── video_clip.py              Resolve the model, steps, size and length a video job runs at, shared by the job and its memory estimate
 │   ├── video_conversion.py        Video checkpoint conversion from the Models page (LTX-2.3, LTX-2.5, MiniMax H3): inspect, then convert as a background job with progress
 │   ├── web_runner.py              Background workers for generation batches
-│   ├── workspace_api.py           Shared SPA payloads for workspace and models routes
+│   ├── workspace_api.py           Shared SPA payloads for workspace and models routes; every model option and row carries its licence records
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
 │   └── server.py                  FastAPI route wiring and request parsing
 └── workflows/
@@ -255,10 +291,10 @@ zvisiongenerator/
 
 | Path | Holds |
 |---|---|
-| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed |
-| `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`) and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
+| `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is in `src/features/workspace/` with its state in `src/lib/state/` |
+| `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`), `audio/` and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
-| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image and BiRefNet code |
+| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image, BiRefNet, YuE2 and Stable Audio 3 code |
 | `docs/` | These docs, built with Zensical from `zensical.toml` |
 | `proposals/` | Write-ups of future work. See [Proposals](index.md#proposals) |
 | `prompts.yaml` | Default prompt definitions |

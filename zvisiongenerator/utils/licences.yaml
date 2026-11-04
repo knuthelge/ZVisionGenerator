@@ -1,0 +1,126 @@
+# The terms models come with: one record per licence, keyed by record id, in the order they are listed. Read by
+# utils/licences.py directly; it is never merged with the user's config.yaml.
+#
+# A record covers one or more models (a model_aliases key, an audio_model_presets key, matte, the background removal
+# models, seedvr2, the SeedVR2 upscale models, or enhancer-fast / enhancer-smart, the prompt enhancer tiers), and a model
+# may be in two records. Every model the app downloads has a record, free licences included. Required: name, supplier,
+# summary (short, plain language), url and models. Optional: url_label (default "Licence") and attribution (a credit line
+# the licence requires, shown only beside the model it belongs to). Links point to the licensor's original repository,
+# never to a mirror the app downloads from. A gated repository, or one that ships no licence file, links its model page
+# (url_label "Model page"); any other links its licence file, pinned to a commit. A contract test refuses any other URL
+# and any record that names an unknown model.
+# Gemma 3 is the text encoder of ltx-4 and ltx-8 on every platform; ltx25-4 uses Gemma 4, which is Apache-2.0, as are the
+# text encoder and latent upscaler of h3, so these three carry no extra record.
+flux-nc:
+  name: "FLUX Non-Commercial License v2.1"
+  supplier: "Black Forest Labs"
+  summary: "Non-commercial use of the model; images may be used commercially"
+  url_label: "Model page"
+  url: "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B"
+  models: [klein9b]
+krea-2-community:
+  name: "Krea 2 Community License Agreement"
+  supplier: "Krea"
+  summary: "Free under $1M revenue, images included; you must filter harmful content"
+  url: "https://cdn.jsdelivr.net/gh/krea-ai/krea-2@db3984fbc6e13b34c0064990fc2d95ac64d00058/assets/hf_samples/LICENSE.pdf"
+  models: [krea2]
+ideogram-4-nc:
+  name: "Ideogram Non-Commercial Model Agreement"
+  supplier: "Ideogram"
+  summary: "Non-commercial, images included: no ads, client work or paid products"
+  url_label: "Model page"
+  url: "https://huggingface.co/ideogram-ai/ideogram-4-fp8"
+  models: [ideo]
+ltx-2-community:
+  name: "LTX-2 Community License Agreement"
+  supplier: "Lightricks"
+  summary: "Free under $10M revenue"
+  url: "https://github.com/Lightricks/LTX-2/blob/a95ab856bf29407b6b066ede0abe1846050db56c/LICENSE-2"
+  models: [ltx-4, ltx-8]
+ltx-2x-community:
+  name: "LTX-2.x Community License Agreement"
+  supplier: "Lightricks"
+  summary: "Free under $10M revenue"
+  url_label: "Model page"
+  url: "https://huggingface.co/Lightricks/LTX-2.5"
+  models: [ltx25-4]
+minimax-h3-community:
+  name: "MiniMax H3 Community License Agreement"
+  supplier: "MiniMax"
+  summary: "Not licensed in the EU, UK, South Korea or the USA; written permission needed over $20M revenue; commercial products show \"MiniMax H3\""
+  url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE"
+  models: [h3]
+yue2-creator-nc:
+  name: "CC BY-NC 4.0 with additional creator permission"
+  supplier: "M-A-P"
+  summary: "Non-commercial; individual creators may monetise their outputs, companies need a licence"
+  url: "https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE"
+  models: [yue2]
+higgs3-nc:
+  name: "Boson Higgs TTS 3 Research and Non-Commercial License"
+  supplier: "Boson AI"
+  summary: "Non-commercial; creators may publish and monetise their own content if they credit Boson AI's Higgs Audio"
+  attribution: "Built with Higgs TTS 3 licensed from Boson AI USA, Inc."
+  url: "https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE"
+  models: [higgs3]
+higgs-audio2-community:
+  name: "Boson Higgs Audio 2 Community License Agreement"
+  supplier: "Boson AI"
+  summary: "Free up to 100,000 annual active users; products credit Boson AI and Meta Llama 3"
+  attribution: "Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved"
+  url: "https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE"
+  models: [higgs3]
+stability-community:
+  name: "Stability AI Community License"
+  supplier: "Stability AI"
+  summary: "Free under $1M revenue; commercial use needs a free registration"
+  url_label: "Model page"
+  url: "https://huggingface.co/stabilityai/stable-audio-3-medium"
+  attribution: "Powered by Stability AI"
+  models: [sa3]
+gemma:
+  name: "Gemma Terms of Use"
+  supplier: "Google"
+  summary: "Free to use, also commercially; Gemma's prohibited use policy applies"
+  url_label: "Model page"
+  url: "https://huggingface.co/google/gemma-3-12b-it"
+  models: [ltx-4, ltx-8, sa3]
+zimage-apache:
+  name: "Apache License 2.0"
+  supplier: "Tongyi-MAI"
+  summary: "Free to use, also commercially"
+  url_label: "Model page"
+  url: "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+  models: [zit]
+flux-klein-apache:
+  name: "Apache License 2.0"
+  supplier: "Black Forest Labs"
+  summary: "Free to use, also commercially"
+  url: "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/e7b7dc27f91deacad38e78976d1f2b499d76a294/LICENSE.md"
+  models: [klein4b]
+moss-apache:
+  name: "Apache License 2.0"
+  supplier: "OpenMOSS"
+  summary: "Free to use, also commercially"
+  url: "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT/blob/f972bd4b4b9e3852133cc5da954d87bc32cd8fb9/LICENSE"
+  models: [moss, moss-sft]
+qwen-apache:
+  name: "Apache License 2.0"
+  supplier: "Qwen"
+  summary: "Free to use, also commercially"
+  url: "https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/LICENSE"
+  models: [enhancer-fast, enhancer-smart]
+seedvr2-apache:
+  name: "Apache License 2.0"
+  supplier: "ByteDance Seed"
+  summary: "Free to use, also commercially"
+  url_label: "Model page"
+  url: "https://huggingface.co/ByteDance-Seed/SeedVR2-7B"
+  models: [seedvr2]
+matte:
+  name: "Research-only training data"
+  supplier: "BiRefNet and ViTMatte authors"
+  summary: "Non-commercial: ViTMatte was trained on Adobe's Deep Image Matting dataset, whose agreement allows models trained on it only for non-commercial use, and BiRefNet (MIT) partly on DIS5K, which is research-only"
+  url_label: "Dataset terms"
+  url: "https://github.com/xuebinqin/DIS/blob/e6455bae3892b3a7d8cf59ca91011a220d1ed606/DIS5K-Dataset-Terms-of-Use.pdf"
+  models: [matte]

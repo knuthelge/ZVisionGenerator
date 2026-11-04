@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import functools
+import importlib
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from zvisiongenerator.core.video_family import VideoCapabilities
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from zvisiongenerator.core.audio_backend import AudioBackend
     from zvisiongenerator.core.matte import MatteChain
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint
@@ -27,6 +29,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "accelerator_free_bytes",
+    "audio_platform_key",
     "convert_h3_checkpoint",
     "convert_ltx_checkpoint",
     "create_matte_chain",
@@ -35,6 +38,7 @@ __all__ = [
     "enhancer_download_plan",
     "estimate_ltx_system_memory",
     "get_accelerator_memory_budget",
+    "get_audio_backend",
     "get_backend",
     "get_backend_name",
     "get_prompt_enhancer_session",
@@ -335,6 +339,45 @@ def create_matte_chain() -> "MatteChain":
     from zvisiongenerator.backends.matte.chain import TorchMatteChain
 
     return TorchMatteChain(device, download=snapshot_download, release_memory=release_accelerator_memory, after_cut_out=after_cut_out)
+
+
+_AUDIO_BACKENDS: Final = {
+    "yue2": ("zvisiongenerator.backends.audio.yue2", "YuE2Backend"),
+    "higgs3": ("zvisiongenerator.backends.audio.higgs3", "Higgs3Backend"),
+    "stable_audio_3": ("zvisiongenerator.backends.audio.sa3", "StableAudio3Backend"),
+}
+"""The module and class of each audio model family's backend, imported only when the family is used."""
+
+
+def audio_platform_key() -> str:
+    """Return the key of this machine for an audio preset's ``platforms`` overrides: ``cuda`` on Windows and Linux, ``mps`` on macOS.
+
+    Raises:
+        RuntimeError: On a platform with neither.
+    """
+    if sys.platform in ("win32", "linux"):
+        return "cuda"
+    if sys.platform == "darwin":
+        return "mps"
+    raise RuntimeError(f"Audio generation needs CUDA or Apple MPS; platform '{sys.platform}' has neither.")
+
+
+def get_audio_backend(family: str) -> "AudioBackend":
+    """Create the audio backend of a model family.
+
+    Args:
+        family: The ``family`` a preset names: ``yue2``, ``higgs3`` or ``stable_audio_3``.
+
+    Returns:
+        A new backend; the caller loads it and closes it.
+
+    Raises:
+        RuntimeError: If no backend is registered for the family; the message lists the known families.
+    """
+    if family not in _AUDIO_BACKENDS:
+        raise RuntimeError(f"No audio backend for model family '{family}'. Known: {list(_AUDIO_BACKENDS)}")
+    module, name = _AUDIO_BACKENDS[family]
+    return getattr(importlib.import_module(module), name)()
 
 
 def get_accelerator_memory_budget() -> MemoryBudget | None:

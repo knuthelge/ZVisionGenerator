@@ -51,6 +51,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getWorkspaceContext: mocks.getWorkspaceContext,
     getWorkspaceCoreContext: mocks.getWorkspaceCoreContext,
     submitGenerate: mocks.submitGenerate,
+    planGenerate: mocks.planGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
     checkReferencePaths: mocks.checkReferencePaths,
@@ -310,7 +311,7 @@ describe('WorkspacePage audio track', () => {
     });
   });
 
-  describe('in Extend Video', () => {
+  describe('in Extend', () => {
     async function mountExtend(): Promise<void> {
       extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ path: '/clips/walk.mp4', audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }));
       draft.setExtendSourcePath('/clips/walk.mp4');
@@ -328,7 +329,7 @@ describe('WorkspacePage audio track', () => {
       expect(draft.state).toMatchObject({ extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackStart: 6.65 });
     });
 
-    it('sends the Extend Video track fields and not the Video track', async () => {
+    it('sends the Extend track fields and not the Video track', async () => {
       await mountExtend();
       draft.setAudioTrack('video', { path: '/audio/video-only.mp3' });
       draft.applyExtendSource(sceneSource({ path: '/clips/walk.mp4', audio_track_path: '/audio/song.mp3', audio_track_end: 6.65 }), trackContext());
@@ -343,7 +344,7 @@ describe('WorkspacePage audio track', () => {
   });
 
   describe('Load settings', () => {
-    it('Load settings of an extension puts its track in Extend Video and leaves the Video track alone', async () => {
+    it('Load settings of an extension puts its track in Extend and leaves the Video track alone', async () => {
       await mountTab('txt2vid');
       draft.setAudioTrack('video', { path: '/audio/video.mp3' });
       await settle();
@@ -352,6 +353,19 @@ describe('WorkspacePage audio track', () => {
       await settle();
 
       expect(draft.state).toMatchObject({ workflow: 'extend', extendAudioTrackPath: '/audio/song.mp3', extendAudioTrackStart: 6.65, audioTrackPath: '/audio/video.mp3' });
+    });
+
+    it('Load settings takes the default of what the job did not record, not what the form held', async () => {
+      const context = trackContext();
+      draft.reset();
+      draft.patch({ workflow: 'txt2img', model: 'zit', quantize: 4, runs: 3, negativePrompt: 'blurry', firstSigma: 0.3 });
+      app = await mountWorkspacePage(context, target);
+      await settle();
+
+      requestJobSettings({ mode: 'image', workflow: 'txt2img', model: 'zit', prompt: 'a fox' });
+      await settle();
+
+      expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'a fox', quantize: null, runs: 1, negativePrompt: '', firstSigma: null });
     });
   });
 });

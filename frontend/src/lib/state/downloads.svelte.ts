@@ -5,9 +5,8 @@
 import { cancelDownload, getDownloadPlan, getDownloads, importLoraHF, startDownload } from '$lib/api/models';
 import { startDiscoverDownload, type DiscoverSource } from '$lib/api/discover';
 import { errorText, isRetryable } from '$lib/api/client';
-import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
 import type { DownloadItem } from '$lib/types';
-import { downloadConfirmText } from './downloadConfirm';
+import { confirmDownloads } from './confirmDownloads';
 import { addToast } from './toasts.svelte';
 
 export type DownloadKind = DownloadItem['kind'];
@@ -161,6 +160,11 @@ export const downloadStore = {
     return _items.find((item) => isActive(item) && item.kind === kind && item.name === name) ?? null;
   },
 
+  /** The queued or running download of a picker *model*: audio models are tracked under their own kind. */
+  activeModel(model: { id: string; type: string }): DownloadItem | null {
+    return downloadStore.active(model.type === 'audio' ? 'audio' : 'model', model.id);
+  },
+
   /** Ids of finished LoRA downloads whose file never appeared in the LoRA list; their chips count as ready. */
   get unlisted(): ReadonlySet<string> { return _unlisted; },
 
@@ -272,9 +276,7 @@ export const downloadStore = {
         notifyDownloaded();
         return 'present';
       }
-      const { info, confirmLabel } = downloadConfirmText(plan);
-      const approved = await requestConfirm({ question: `Download ${plan.label}?`, info, confirmLabel, danger: false });
-      if (!approved) return 'declined';
+      if (!(await confirmDownloads(plan))) return 'declined';
       applyItem(await startDownload(kind, name));
       void refresh();
       return 'queued';

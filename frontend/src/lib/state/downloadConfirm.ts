@@ -1,4 +1,4 @@
-import type { DownloadPlan } from '$lib/types';
+import type { JobDownloadPlan } from '$lib/types';
 import { sizeLabel } from './downloadProgress';
 
 /** What the Download confirmation says about a plan, and what its confirm button is called. */
@@ -7,8 +7,14 @@ export interface DownloadConfirmText {
   confirmLabel: 'Download' | 'Download anyway';
 }
 
+/** What the dialog says when a part could not be sized because Hugging Face could not be reached. */
+export const UNCHECKED_TEXT: DownloadConfirmText = {
+  info: "Couldn't check the size: Hugging Face can't be reached. If the download can't run, the job fails.",
+  confirmLabel: 'Download anyway',
+};
+
 /** Describe a non-empty download plan: its size, parts and the free space on the download drive. */
-export function downloadConfirmText(plan: DownloadPlan): DownloadConfirmText {
+export function downloadConfirmText(plan: Pick<JobDownloadPlan, 'parts' | 'total_bytes' | 'space'>): DownloadConfirmText {
   const { space, parts, total_bytes: total } = plan;
   const inParts = parts.length > 1 ? ` in ${parts.length} parts` : '';
   if (space && !space.enough) {
@@ -23,4 +29,9 @@ export function downloadConfirmText(plan: DownloadPlan): DownloadConfirmText {
     info: space ? `${size} ${sizeLabel(space.free_bytes)} free on ${space.path}.` : size,
     confirmLabel: 'Download',
   };
+}
+
+/** A job plan for a model whose size could not be read, so the dialog still asks and offers Download anyway. */
+export function uncheckedJobPlan(label: string, model: string): JobDownloadPlan {
+  return { parts: [{ label, model, bytes: null }], total_bytes: null, space: null, unchecked: true, licences: [] };
 }

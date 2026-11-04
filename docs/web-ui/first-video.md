@@ -57,7 +57,7 @@ You can add a **Last frame** under it at any time; it is used once there is a fi
 
 ## Make it longer
 
-Open a clip in the viewer and press **Extend** (++e++). The Workspace switches to **Extend Video** with the clip as the source. Write what happens next in Action and generate: you get a new, longer file, and the original stays as it was. See [Extending a video](../concepts/video.md#extending-a-video).
+Open a clip in the viewer and press **Extend** (++e++). The Workspace opens **Video** on its **Extend** kind with the clip as the source. Write what happens next in Action and generate: you get a new, longer file, and the original stays as it was. See [Extending a video](../concepts/video.md#extending-a-video).
 
 ## Next
 

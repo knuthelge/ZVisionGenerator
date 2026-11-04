@@ -22,7 +22,7 @@ The first time, a welcome dialog lists the image models with the size of each do
 Press **Download**. The model becomes your default image model, and its progress shows in the Workspace model picker. You can carry on while it downloads.
 
 !!! tip "Not now?"
-    **Skip** closes the dialog for good. A model you never downloaded downloads by itself the first time a job needs it, and the job card shows the progress. You can also download any model later from the [Models](models.md) page.
+    **Skip** closes the dialog for good. The first time a job needs a model you never downloaded, **Generate** asks to download it. You can also download any model later from the [Models](models.md) page.
 
 ## 3. Write a prompt
 

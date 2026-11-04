@@ -81,7 +81,52 @@ describe('mascotMood', () => {
   });
 });
 
+describe('mascotMood for an audio take', () => {
+  const take = (overrides: Partial<ActiveJobState> = {}) => job('running', 0, 0, { media_type: 'audio', workflow: 'music', ...overrides });
+  const phase = (name: string, step: number, total: number | null) => ({ audio: { phase: name, step, total, part: 1, parts: 1 } });
+
+  it('thinks until the model reports progress', () => {
+    expect(mascotMood({ job: take() })).toBe('thinking');
+    expect(mascotMood({ job: take({ audio: null }) })).toBe('thinking');
+  });
+
+  it('creates once progress arrives, whatever the phase', () => {
+    expect(mascotMood({ job: take(phase('Plan', 12, null)) })).toBe('creating');
+    expect(mascotMood({ job: take(phase('Song tokens', 400, null)) })).toBe('creating');
+    expect(mascotMood({ job: take({ workflow: 'speech', ...phase('Speech tokens', 3, 50) }) })).toBe('creating');
+  });
+
+  it('keeps creating between the takes of a batch', () => {
+    expect(mascotMood({ job: take({ promptNumber: 2, promptCount: 3 }) })).toBe('creating');
+  });
+
+  it('adds the finishing touches on the decode', () => {
+    expect(mascotMood({ job: take(phase('Decode', 1, 4)) })).toBe('finishing');
+    expect(mascotMood({ job: take({ workflow: 'speech', ...phase('Decode', 0, null) }) })).toBe('finishing');
+  });
+
+  it('finishes a sound on its last sampling step, not before', () => {
+    expect(mascotMood({ job: take({ workflow: 'sound', ...phase('Sampling', 7, 8) }) })).toBe('creating');
+    expect(mascotMood({ job: take({ workflow: 'sound', ...phase('Sampling', 8, 8) }) })).toBe('finishing');
+    expect(mascotMood({ job: take({ workflow: 'music', ...phase('Synthesis', 8, 8) }) })).toBe('creating');
+  });
+
+  it('pauses as any job does', () => {
+    expect(mascotMood({ job: take({ status: 'paused', ...phase('Song tokens', 400, null) }) })).toBe('paused');
+  });
+
+  it('drives no canvas from steps it never reports', () => {
+    expect(mascotProgress(take({ ...phase('Sampling', 4, 8), currentStep: 4, totalSteps: 8 }))).toBeUndefined();
+  });
+});
+
 describe('mascotTool', () => {
+  it('wears headphones for every kind of audio', () => {
+    expect(mascotTool('music')).toBe('audio');
+    expect(mascotTool('speech')).toBe('audio');
+    expect(mascotTool('sound')).toBe('audio');
+  });
+
   it('holds a clapperboard for video and a brush otherwise', () => {
     expect(mascotTool('txt2vid')).toBe('clapper');
     expect(mascotTool('img2vid')).toBe('clapper');

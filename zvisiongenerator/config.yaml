@@ -396,6 +396,7 @@ video_model_presets:
     distilled_lora:
       repo: "Lightricks/LTX-2.3@c1521179de480464f366a98a9d9b2acc4cc097b9"
       filename: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+      licence: ltx-2-community  # the licence record (utils/licences.yaml) named before the download
     # macOS: the pinned MLX pack of each quantize level (the ltx-4 and ltx-8 aliases), and the folder a converted
     # checkpoint takes its VAEs, vocoder, upsampler and configs from. A pack is downloaded as exactly the files of
     # mlx_files, at its pinned revision. After changing a pin, list the files of the new revision that the vendored
@@ -429,6 +430,7 @@ video_model_presets:
         distilled_lora:
           repo: "lxxxy6/LTX-2.5@3506f52caf688795fc35edbf0d1b197bc30f3df1"
           filename: "ltx-2.5-22b-distilled-lora-450-bf16.safetensors"
+          licence: ltx-2x-community
         # macOS: the MLX folder a converted LTX-2.5 checkpoint takes its Gemma 4 text encoder, VAEs, duration head,
         # upsampler and configs from (the ltx25-4 repo). It only has q4, and its quantize_config.json is linked at both levels:
         # the MLX loader reads the bits from the weights' shapes.
@@ -551,6 +553,62 @@ video_model_presets:
           - "FL2VA/text_encoder/model-00014-of-00014.safetensors"
       # The text encoder is converted once to this 4-bit form and kept next to the model as <name>@mlx-te4.
       text_encoder: { bits: 4, group_size: 64, layers: 50 }
+
+# --- Audio models ---
+
+# Audio models (music, speech, sound), keyed by model id. Each preset has a label, a kind (music | speech | sound),
+# the backend family, the pinned files to download, limits and settings. A platforms entry (cuda | mps) overrides settings
+# for that accelerator and records the GPU memory peak measured on it (memory_gb; leave it out while unmeasured).
+# docs/concepts/configuration.md describes every key.
+audio_model_presets:
+  yue2:
+    label: "YuE2 3B"
+    kind: music
+    family: yue2
+    files:
+      - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
+        files: [config.json, generation_config.json, yue2_generation_config.json, model.safetensors, modeling_yue2.py, qwen.tiktoken, weights_manifest.json]
+      - repo: "m-a-p/YuE2-Vae@152733a19ad43aa67e367f9b5503ef8075bb5126"
+        files: [config.json, model.safetensors, modeling_vae.py, weights_manifest.json]
+    limits: { max_seconds: 360 }
+    settings:
+      instrumental_sections: "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]"
+      abc_max_tokens: 4096
+      cfg: 1.0
+      ode_steps: 32
+      memory_budget_gib: 24
+      vae_core_frames: 512
+      fade_seconds: 2
+    platforms:
+      cuda: { memory_gb: 6.7 }
+  higgs3:
+    label: "Higgs TTS 3 4B"
+    kind: speech
+    family: higgs3
+    files:
+      - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
+        files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
+      - repo: "bosonai/higgs-audio-v2-tokenizer@815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
+        files: [config.json, model.safetensors, preprocessor_config.json]
+    limits: { max_new_tokens: 1500, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
+    settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
+    platforms:
+      cuda: { memory_gb: 8.2 }
+  sa3:
+    label: "Stable Audio 3 Medium"
+    kind: sound
+    family: stable_audio_3
+    files:
+      - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
+        files: [checkpoints/stable_audio_3_medium.safetensors]
+      - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
+        files: [model_config.json]
+      - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
+        files: ["t5gemma-b-b-ul2/*"]
+    limits: { max_seconds: 380 }
+    settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
+    platforms:
+      cuda: { memory_gb: 6.1 }
 
 # --- Prompt enhancer (local LLM) ---
 

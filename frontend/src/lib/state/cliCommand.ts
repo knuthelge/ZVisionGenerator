@@ -11,7 +11,9 @@ export type CliCaveat =
   /** The first or last frame was uploaded from the browser; the command names the uploaded file, not its path. */
   | 'uploaded_image'
   /** The audio track was uploaded from the browser; the command names the uploaded file, not its path. */
-  | 'uploaded_audio';
+  | 'uploaded_audio'
+  /** The voice recording was uploaded from the browser; the command names the uploaded file, not its path. */
+  | 'uploaded_voice';
 
 export interface CliCommand {
   /** One shell line, with every argument quoted for a POSIX shell. */
@@ -108,14 +110,15 @@ function amountToggle(args: string[], settings: JobSettings, name: string, defau
 }
 
 /**
- * Build the `ziv image` / `ziv video` command that matches the settings a Workspace form would submit.
+ * Build the `ziv image` / `ziv video` / `ziv audio` command that matches the settings a Workspace form would submit.
  *
  * Settings that equal the CLI's own defaults are left out; settings the CLI cannot express are listed as caveats.
  *
- * @throws {Error} When the settings carry no prompt, prompt caption, or prompts file, since the CLI would then
- *   fall back to its default `prompts.yaml`.
+ * @throws {Error} When the settings carry no prompt, prompt caption, or prompts file, since the CLI would then fall
+ *   back to its default `prompts.yaml`; for an audio job, when the text or a recording's transcript is missing.
  */
 export function cliCommand(settings: JobSettings, options: CliCommandOptions = {}): CliCommand {
+  if (first(settings, 'mode') === 'audio') return audioCliCommand(settings, options);
   const isVideo = first(settings, 'mode') === 'video';
   // An extension continues a chosen video and takes its size, frame rate and length from it.
   const isExtend = isVideo && first(settings, 'workflow') === 'extend';
@@ -249,6 +252,61 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   if (!isJson && text(settings, 'enhance_model') === 'smart') args.push('--enhance-model', 'smart');
   if (!isJson && !isVideo && text(settings, 'enhance_format') === 'json') args.push('--enhance-format', 'json');
 
+  if (options.outputDir) args.push('--output', options.outputDir);
+  return { command: args.map(shellQuote).join(' '), caveats };
+}
+
+/** Return a field's first value exactly as typed, or undefined when it is missing or blank (the text of a take keeps its spaces). */
+function untrimmed(settings: JobSettings, key: string): string | undefined {
+  const value = first(settings, key);
+  return value?.trim() ? value : undefined;
+}
+
+const AUDIO_PROMPT_ERRORS: Record<string, string> = {
+  music: 'Write a style first.',
+  speech: 'Write the text to read first.',
+  sound: 'Describe the sound first.',
+};
+
+/**
+ * Build the `ziv audio` command for a music, speech or sound job.
+ *
+ * Lyrics go with music only, the length with sound only, and a voice with speech only, as the form shows them. A
+ * recording from a file or a gallery take is named by its path; `--voice-consent` follows the form's tick, which a
+ * take made in the model's own voice never shows.
+ *
+ * @throws {Error} When the text is blank, or a voice recording has no transcript.
+ */
+function audioCliCommand(settings: JobSettings, options: CliCommandOptions): CliCommand {
+  const kind = text(settings, 'workflow') ?? 'music';
+  const args: string[] = ['ziv', 'audio'];
+  const caveats: CliCaveat[] = [];
+  const flag = (name: string, value: string | undefined): void => {
+    if (value !== undefined) args.push(name, value);
+  };
+
+  flag('--model', text(settings, 'model'));
+  const prompt = untrimmed(settings, 'prompt');
+  if (prompt === undefined) throw new Error(AUDIO_PROMPT_ERRORS[kind] ?? AUDIO_PROMPT_ERRORS.music);
+  args.push('--prompt', prompt);
+  if (kind === 'music') flag('--lyrics', untrimmed(settings, 'lyrics'));
+  if (kind === 'sound') flag('--seconds', text(settings, 'seconds'));
+
+  if (kind === 'speech') {
+    const upload = text(settings, 'voice_file');
+    const voice = upload ?? text(settings, 'voice_path');
+    if (voice !== undefined) {
+      const transcript = text(settings, 'voice_text');
+      if (transcript === undefined) throw new Error('Write what the recording says first.');
+      if (upload !== undefined) caveats.push('uploaded_voice');
+      args.push('--voice', voice, '--voice-text', transcript);
+      if (checked(settings, 'voice_consent')) args.push('--voice-consent');
+    }
+  }
+
+  const runs = numberOrNull(first(settings, 'runs'));
+  if (runs !== null && runs !== 1) args.push('--runs', String(runs));
+  flag('--seed', text(settings, 'seed'));
   if (options.outputDir) args.push('--output', options.outputDir);
   return { command: args.map(shellQuote).join(' '), caveats };
 }

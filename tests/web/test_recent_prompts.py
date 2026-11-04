@@ -20,7 +20,7 @@ CAPTION = '{\n  "high_level_description": "a red fox"\n}'
 
 
 def _build(**overrides) -> dict | None:
-    values = dict(prompt_source=None, prompt="a lake", json_prompt=None, scene=None, negative_prompt=None, mode="image", used_at=100.0)
+    values = dict(prompt_source=None, prompt="a lake", json_prompt=None, scene=None, negative_prompt=None, mode="image", used_at=100.0, lyrics=None)
     values.update(overrides)
     return recent_prompt_entry(**values)
 
@@ -43,6 +43,19 @@ class TestRecentPromptEntry:
 
     def test_a_video_submit_with_only_a_scene_is_kept(self):
         assert _build(mode="video", prompt=None, scene="a pier") == _entry("", scene="a pier", mode="video", used_at=100.0)
+
+    def test_an_audio_submit_is_kept_under_its_kind_with_only_its_prompt(self):
+        entry = _build(mode="sound", prompt=" rain on a roof ", json_prompt=CAPTION, scene="a scene", lyrics="la", negative_prompt="blurry")
+
+        assert entry == _entry("rain on a roof", mode="sound", used_at=100.0)
+
+    def test_a_music_submit_keeps_its_lyrics_in_the_scene(self):
+        entry = _build(mode="music", prompt=" calm piano ", lyrics=" [verse]\r\nla la ")
+
+        assert entry == _entry("calm piano", scene="[verse]\nla la", mode="music", used_at=100.0)
+
+    def test_a_blank_audio_submit_is_not_remembered(self):
+        assert _build(mode="music", prompt="  ", lyrics="[verse]\nla", json_prompt=CAPTION) is None
 
     def test_a_json_caption_is_stored_as_sent_with_the_json_format(self):
         entry = _build(prompt=None, json_prompt=f" {CAPTION} ", negative_prompt="blurry", scene="ignored")
@@ -219,11 +232,30 @@ class TestRecentPromptsRoutes:
         assert [entry["prompt"] for entry in image] == ["a still"]
         assert [(entry["prompt"], entry["scene"]) for entry in video] == [("she waves", "a pier")]
 
-    @pytest.mark.parametrize("params", [{}, {"mode": "audio"}])
+    @pytest.mark.parametrize("params", [{}, {"mode": "hologram"}, {"mode": "audio"}])
     def test_a_missing_or_unknown_mode_is_a_422(self, params):
         with TestClient(web_server.app) as client:
             assert client.get("/api/recent-prompts", params=params).status_code == 422
             assert client.delete("/api/recent-prompts", params=params).status_code == 422
+
+    def test_each_audio_kind_lists_and_clears_its_own_prompts(self):
+        web_server.recent_prompts.record(_entry("calm piano", scene="[verse]\nla", mode="music"))
+        web_server.recent_prompts.record(_entry("Hello there.", mode="speech"))
+        web_server.recent_prompts.record(_entry("rain", mode="sound"))
+        web_server.recent_prompts.record(_entry("a red fox"))
+
+        with TestClient(web_server.app) as client:
+            music = client.get("/api/recent-prompts", params={"mode": "music"}).json()["entries"]
+            speech = client.get("/api/recent-prompts", params={"mode": "speech"}).json()["entries"]
+            deleted = client.delete("/api/recent-prompts", params={"mode": "sound"}).json()
+            sound = client.get("/api/recent-prompts", params={"mode": "sound"}).json()["entries"]
+            image = client.get("/api/recent-prompts", params={"mode": "image"}).json()["entries"]
+
+        assert [(entry["prompt"], entry["scene"]) for entry in music] == [("calm piano", "[verse]\nla")]
+        assert [entry["prompt"] for entry in speech] == ["Hello there."]
+        assert deleted == {"deleted_count": 1} and sound == []
+        assert [entry["prompt"] for entry in image] == ["a red fox"]
+        assert len(_stored("music")) == len(_stored("speech")) == 1
 
     def test_q_filters_on_prompt_and_scene_ignoring_case(self):
         web_server.recent_prompts.record(_entry("a red fox"))

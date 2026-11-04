@@ -29,6 +29,17 @@ describe('recent prompts API', () => {
     expect(init.method ?? 'GET').toBe('GET');
   });
 
+  it('asks for and clears the list of one audio kind', async () => {
+    const fetchMock = stubFetch({ entries: [], deleted_count: 0 });
+
+    await getRecentPrompts('', 'speech');
+    expect(new URL(lastCall(fetchMock)[0], 'http://localhost').searchParams.get('mode')).toBe('speech');
+    await clearRecentPrompts('sound');
+    const [url, init] = lastCall(fetchMock);
+    expect(new URL(url, 'http://localhost').searchParams.get('mode')).toBe('sound');
+    expect(init.method).toBe('DELETE');
+  });
+
   it('clears the list of one mode', async () => {
     const fetchMock = stubFetch({ deleted_count: 3 });
     await expect(clearRecentPrompts('image')).resolves.toEqual({ deleted_count: 3 });

@@ -1,6 +1,6 @@
 /**
  * Pure helpers for the mascot's artwork: latent-noise colours, the little canvas he paints, and the
- * pixel confetti and Zs. Everything is deterministic, so the same inputs always draw the same picture.
+ * pixel confetti, Zs and music notes. Everything is deterministic, so the same inputs always draw the same picture.
  */
 
 /** Blob's body silhouette in the mascot's SVG units (viewBox -14 -18 228 218): a paint dollop with a flicked tip. */
@@ -103,12 +103,26 @@ export function tileStep(progress: number, fraction: number): number {
 /** The thought bubble's picture: 6 x 6 cells in which an idea has half formed out of noise. */
 const BUBBLE_CELLS = 6;
 
-export function bubbleCells(): TileCell[] {
+/** The shape of the half-formed note in the bubble when the idea is a tune. */
+const BUBBLE_NOTE = ['..11..', '..1.1.', '..1..1', '..1...', '111...', '111...'] as const;
+
+/** Amber, the colour the note's cells are drawn in before the noise is mixed in. */
+const NOTE_AMBER: RGB = [251, 191, 36];
+/** The dark teal behind the note's cells. */
+const NOTE_GROUND: RGB = [11, 59, 55];
+
+/** Lay out the thought bubble: a picture (the image and video idea) or a note (the audio idea). */
+export function bubbleCells(kind: 'picture' | 'note' = 'picture'): TileCell[] {
   const n = BUBBLE_CELLS;
   const cells: TileCell[] = [];
   for (let y = 0; y < n; y += 1) {
     for (let x = 0; x < n; x += 1) {
-      cells.push({ x, y, fill: rgb(mix(tilePixel((x + 0.5) / n, (y + 0.5) / n), softNoise(x, y, 303), 0.5)) });
+      if (kind === 'note') {
+        const lit = BUBBLE_NOTE[y]![x] === '1';
+        cells.push({ x, y, fill: rgb(mix(lit ? NOTE_AMBER : NOTE_GROUND, softNoise(x, y, 404), lit ? 0.18 : 0.42)) });
+      } else {
+        cells.push({ x, y, fill: rgb(mix(tilePixel((x + 0.5) / n, (y + 0.5) / n), softNoise(x, y, 303), 0.5)) });
+      }
     }
   }
   return cells;
@@ -143,6 +157,17 @@ export function confettiPieces(count = 16): ConfettiPiece[] {
   }));
 }
 
+/** The top-left corner of every lit cell of a glyph drawn from `(ox, oy)` at `cell` units per cell. */
+function glyphPixels(rows: readonly string[], ox: number, oy: number, cell: number): { x: number; y: number }[] {
+  const pixels: { x: number; y: number }[] = [];
+  rows.forEach((row, gy) => {
+    [...row].forEach((bit, gx) => {
+      if (bit === '1') pixels.push({ x: Number((ox + gx * cell).toFixed(2)), y: Number((oy + gy * cell).toFixed(2)) });
+    });
+  });
+  return pixels;
+}
+
 const Z_GLYPH = ['11111', '00010', '00100', '01000', '11111'] as const;
 
 export interface ZGlyph {
@@ -161,13 +186,70 @@ export function zGlyphs(): ZGlyph[] {
       [162, 30, 4.6, 1.2],
       [182, 6, 5.8, 2.4],
     ] as const
-  ).map(([ox, oy, cell, delay]) => {
-    const pixels: ZGlyph['pixels'] = [];
-    Z_GLYPH.forEach((row, gy) => {
-      [...row].forEach((bit, gx) => {
-        if (bit === '1') pixels.push({ x: Number((ox + gx * cell).toFixed(1)), y: Number((oy + gy * cell).toFixed(1)) });
-      });
-    });
-    return { cell, delay, pixels };
+  ).map(([ox, oy, cell, delay]) => ({ cell, delay, pixels: glyphPixels(Z_GLYPH, ox, oy, cell) }));
+}
+
+/** Pixel music notes: an eighth note (5 x 6) and two beamed eighths (7 x 6). */
+const NOTE_GLYPHS = {
+  eighth: ['..11.', '..1.1', '..1..', '..1..', '111..', '111..'],
+  beamed: ['..11111', '..1...1', '..1...1', '..1...1', '111.111', '111.111'],
+} as const;
+
+type NoteGlyph = keyof typeof NOTE_GLYPHS;
+
+/** The top-left corner of every lit cell of a note drawn from `(ox, oy)` at `cell` units per cell. */
+export function notePixels(glyph: NoteGlyph, ox: number, oy: number, cell: number): { x: number; y: number }[] {
+  return glyphPixels(NOTE_GLYPHS[glyph], ox, oy, cell);
+}
+
+interface RisingNote {
+  cell: number;
+  fill: string;
+  /** Seconds into the loop the note starts, as a negative delay. */
+  delay: number;
+  /** Where the note rests in the reduced-motion still frame, relative to where it starts. */
+  rest: { x: number; y: number };
+  pixels: { x: number; y: number }[];
+}
+
+/** The three notes that rise from behind his head while a take is made, in the ribbon colours of the live preview. */
+export function risingNotes(): RisingNote[] {
+  return (
+    [
+      ['eighth', 148, 52, 4.2, '#fbbf24', 0, 4, -12],
+      ['beamed', 150, 52, 3.4, '#5eead4', -1, 18, -42],
+      ['eighth', 146, 54, 4.6, '#fb8f7c', -2, 30, -70],
+    ] as const
+  ).map(([glyph, x, y, cell, fill, delay, rx, ry]) => ({ cell, fill, delay, rest: { x: rx, y: ry }, pixels: notePixels(glyph, x, y, cell) }));
+}
+
+interface NoteConfettiPiece {
+  cell: number;
+  fill: string;
+  /** Seconds into the loop the piece starts, as a negative delay. */
+  delay: number;
+  /** Sideways drift over its fall, in SVG units. */
+  sway: number;
+  /** Where the piece rests in the reduced-motion still frame. */
+  restY: number;
+  /** The top-left corner of each lit cell. */
+  pixels: { x: number; y: number }[];
+}
+
+const NOTE_CONFETTI_PALETTE = ['#fbbf24', '#fb8f7c', '#5eead4', '#ccfbf1'] as const;
+
+/** Pixel-note confetti, scattered once like the square pieces. */
+export function noteConfetti(): NoteConfettiPiece[] {
+  return Array.from({ length: 8 }, (_, i) => {
+    const glyph: NoteGlyph = i % 3 === 1 ? 'beamed' : 'eighth';
+    const cell = [3, 3.6, 3.2][i % 3]!;
+    return {
+      cell,
+      fill: NOTE_CONFETTI_PALETTE[i % 4]!,
+      delay: -hash(i, 13, 4) * 1.6,
+      sway: Math.round((hash(i, 15, 6) - 0.5) * 28),
+      restY: Math.round(-6 + hash(i, 17, 8) * 104),
+      pixels: notePixels(glyph, -4 + hash(i, 11, 2) * 196, 0, cell),
+    };
   });
 }

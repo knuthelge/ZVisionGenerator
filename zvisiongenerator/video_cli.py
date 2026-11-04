@@ -24,7 +24,8 @@ from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
 from zvisiongenerator.utils.h3_memory import h3_lora_bytes
 from zvisiongenerator.utils.model_memory import clip_memory_fit
-from zvisiongenerator.downloads import describe_refusal, video_model_downloaded
+from zvisiongenerator.downloads import describe_refusal, video_model_downloaded, video_plan
+from zvisiongenerator.licence_cli import print_licence_notice
 from zvisiongenerator.utils.paths import canonical_model_name, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompts import inspect_prompts_file
@@ -594,6 +595,11 @@ def main(*, prog: str = "ziv-video") -> None:
         scene_by_set = inspection.scene_by_set
         prompts_data = inspection.prompts_data
         enhance_by_set = inspection.enhance_by_set
+    # The terms of a model that has them are named before anything downloads, the preflight's enhancer included.
+    try:
+        print_licence_notice(model_name, lambda: video_plan(args.model, family=model_info.family, config=config, model_name=model_name, upscale=bool(args.upscale)))
+    except ValueError as e:
+        parser.error(str(e))
     # The key listener starts after ensure_ffmpeg, whose input() prompt it would compete with, and covers the preflight and
     # model load too, so the keys work while prompts are enhanced.
     skip = SkipSignal()

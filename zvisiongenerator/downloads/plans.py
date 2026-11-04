@@ -21,9 +21,10 @@ from zvisiongenerator.utils.moss_build import is_built as is_moss_built
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
 if TYPE_CHECKING:
+    from zvisiongenerator.utils.audio_preset import AudioPreset
     from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
 
-__all__ = ["built_model_plan", "enhancer_plan", "image_plan", "matte_plan", "seedvr2_plan", "video_model_downloaded", "video_plan"]
+__all__ = ["audio_plan", "built_model_plan", "enhancer_plan", "image_plan", "matte_plan", "seedvr2_plan", "video_model_downloaded", "video_plan"]
 
 
 def image_plan(model_ref: str, *, family: str, config: dict[str, Any] | None, platform_key: str) -> tuple[DownloadTarget, ...] | None:
@@ -130,6 +131,14 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
             mlx_text_encoder=options.get("mlx_text_encoder"),
         )
     )
+
+
+def audio_plan(preset: AudioPreset) -> tuple[DownloadTarget, ...]:
+    """Return one target per repository the audio *preset* loads, at the pinned commit, in the order the preset lists them.
+
+    The plan comes from the config alone, so it needs no connection and is never ``None``.
+    """
+    return tuple(DownloadTarget(files.repo_id, files.revision, files.patterns) for files in preset.files)
 
 
 def video_model_downloaded(

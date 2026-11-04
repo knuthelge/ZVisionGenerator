@@ -1,0 +1,47 @@
+[
+  {
+    "name": "a song from a style and lyrics",
+    "settings": {"mode": "audio", "workflow": "music", "model": "yue2", "prompt": "upbeat synth-pop, female vocal", "lyrics": "[verse]\nHello there\n[chorus]\nLa la la", "runs": "1", "seed": "7"},
+    "command": "ziv audio --model yue2 --prompt 'upbeat synth-pop, female vocal' --lyrics '[verse]\nHello there\n[chorus]\nLa la la' --seed 7",
+    "requests": [{"preset": "yue2", "kind": "music", "prompt": "upbeat synth-pop, female vocal", "lyrics": "[verse]\nHello there\n[chorus]\nLa la la", "seconds": null, "voice": null, "seed": 7}]
+  },
+  {
+    "name": "an instrumental from a style alone",
+    "settings": {"mode": "audio", "workflow": "music", "model": "yue2", "prompt": "calm piano, slow", "lyrics": "", "runs": "1", "seed": "3"},
+    "command": "ziv audio --model yue2 --prompt 'calm piano, slow' --seed 3",
+    "requests": [{"preset": "yue2", "kind": "music", "prompt": "calm piano, slow", "lyrics": "", "seconds": null, "voice": null, "seed": 3}]
+  },
+  {
+    "name": "speech in the model's own voice (Any)",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "Welcome back.", "runs": "1", "seed": "4"},
+    "command": "ziv audio --model higgs3 --prompt 'Welcome back.' --seed 4",
+    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": null, "seed": 4}]
+  },
+  {
+    "name": "speech following a recording, with the speaker's consent",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "Welcome back.", "voice_path": "/voices/me.wav", "voice_text": "Hello, this is me.", "voice_consent": ["false", "on"], "runs": "1", "seed": "4"},
+    "command": "ziv audio --model higgs3 --prompt 'Welcome back.' --voice /voices/me.wav --voice-text 'Hello, this is me.' --voice-consent --seed 4",
+    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/me.wav", "text": "Hello, this is me."}, "seed": 4}]
+  },
+  {
+    "name": "speech following an Any take, which needs no consent",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "More words.", "voice_path": "/voices/any.flac", "voice_text": "Welcome back.", "voice_consent": "false", "runs": "1", "seed": "5"},
+    "command": "ziv audio --model higgs3 --prompt 'More words.' --voice /voices/any.flac --voice-text 'Welcome back.' --seed 5",
+    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "More words.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/any.flac", "text": "Welcome back."}, "seed": 5}]
+  },
+  {
+    "name": "speech following a cloned take, with consent",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "More words.", "voice_path": "/voices/cloned.flac", "voice_text": "Hello, this is me.", "voice_consent": "on", "runs": "1", "seed": "5"},
+    "command": "ziv audio --model higgs3 --prompt 'More words.' --voice /voices/cloned.flac --voice-text 'Hello, this is me.' --voice-consent --seed 5",
+    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "More words.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/cloned.flac", "text": "Hello, this is me."}, "seed": 5}]
+  },
+  {
+    "name": "a sound of a chosen length, two takes",
+    "settings": {"mode": "audio", "workflow": "sound", "model": "sa3", "prompt": "rain on a tin roof, distant thunder", "seconds": "30", "runs": "2", "seed": "3"},
+    "command": "ziv audio --model sa3 --prompt 'rain on a tin roof, distant thunder' --seconds 30 --runs 2 --seed 3",
+    "requests": [
+      {"preset": "sa3", "kind": "sound", "prompt": "rain on a tin roof, distant thunder", "lyrics": "", "seconds": 30, "voice": null, "seed": 3},
+      {"preset": "sa3", "kind": "sound", "prompt": "rain on a tin roof, distant thunder", "lyrics": "", "seconds": 30, "voice": null, "seed": 3}
+    ]
+  }
+]

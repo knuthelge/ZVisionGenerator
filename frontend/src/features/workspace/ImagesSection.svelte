@@ -3,7 +3,8 @@
   import { InspectorNumber } from '$lib/components/atoms';
   import { InspectorRow, InspectorSection } from '$lib/components/molecules';
   import type { ScrubOptions } from '$lib/actions/scrub';
-  import { draft, settingDefaultsFor } from '$lib/state/draft.svelte';
+  import { defaultsFor, draft } from '$lib/state/draft.svelte';
+  import { rowChanged } from './settingRows';
   import { galleryStore } from '$lib/state/gallery.svelte';
   import type { SlotValue } from '$lib/state/imageSlots';
   import type { WorkspaceContext } from '$lib/types';
@@ -36,8 +37,8 @@
   const startNoun = $derived(video ? 'a first frame' : 'a start image');
 
   // --- Strength ---------------------------------------------------------------
-  const defaults = $derived(settingDefaultsFor(context, { workflow: s.workflow, model: s.model }));
-  const strengthChanged = $derived(s.referenceImageStrength !== defaults.referenceImageStrength);
+  const defaults = $derived(defaultsFor(context, s, draft.extendSource));
+  const strengthChanged = $derived(rowChanged('strength', s, defaults));
   const strengthScrub = $derived<ScrubOptions>({ ...SPEC.strength, value: s.referenceImageStrength, onchange: setStrength, disabled: busy });
 
   function setStrength(value: number): void {

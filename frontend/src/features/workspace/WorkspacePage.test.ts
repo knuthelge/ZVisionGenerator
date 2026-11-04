@@ -21,6 +21,7 @@ import { workspaceMemory } from '$lib/state/pageMemory';
 import WorkspacePage from './WorkspacePage.svelte';
 import ControlsSidebar from './ControlsSidebar.svelte';
 import { currentAudioTrackView } from './audioTrackView';
+import { currentAudioView } from './audioView';
 import { currentImagesView } from './imagesView';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
@@ -66,6 +67,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getWorkspaceContext: mocks.getWorkspaceContext,
     getWorkspaceCoreContext: mocks.getWorkspaceCoreContext,
     submitGenerate: mocks.submitGenerate,
+    planGenerate: mocks.planGenerate,
     getJobSnapshot: mocks.getJobSnapshot,
     parseUrlPrefill: mocks.parseUrlPrefill,
     checkReferencePaths: mocks.checkReferencePaths,
@@ -99,7 +101,7 @@ vi.mock('$lib/api/presets', async () => (await import('../../test-utils/workspac
 vi.mock('$lib/api/models', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/models')>();
   const { modelApiMocks } = await import('../../test-utils/workspaceMocks');
-  return { ...actual, getDownloads: modelApiMocks.getDownloads };
+  return { ...actual, getDownloads: modelApiMocks.getDownloads, getDownloadPlan: modelApiMocks.getDownloadPlan };
 });
 
 vi.mock('$lib/api/promptFiles', async () => {
@@ -1355,7 +1357,7 @@ describe('WorkspacePage', () => {
       enhanceApiMocks.enhancePrompt.mockResolvedValue();
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: 'Needs about 9 GB of memory; this machine has 6 GB.' }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: 'Needs about 9 GB of memory; this machine has 6 GB.' }));
       const run = await openEnhanceRun();
       const smart = document.querySelector('[data-choice="smart"]') as HTMLButtonElement;
       expect(smart.getAttribute('aria-disabled')).toBe('true');
@@ -1372,7 +1374,7 @@ describe('WorkspacePage', () => {
       enhanceApiMocks.enhancePrompt.mockResolvedValue();
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: null }));
       const run = await openEnhanceRun();
       expect(document.body.textContent).toContain('First use downloads ≈19 GB.');
       run.click();
@@ -1383,7 +1385,7 @@ describe('WorkspacePage', () => {
     it('pins the Enhancer choice and the first-use hint with the run button in the popover footer', async () => {
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: null }));
       const run = await openEnhanceRun();
       const foot = document.querySelector('#ws-enhance-panel .enhance-popover-foot');
       expect(foot?.contains(run)).toBe(true);
@@ -1395,7 +1397,7 @@ describe('WorkspacePage', () => {
     it('keeps the Enhancer choice in a footer without a run button when auto-enhance is on', async () => {
       draft.update('prompt', 'a fox');
       draft.update('enhanceAuto', true);
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: null, unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: null, unavailable: null }));
       await openEnhanceRun();
       const foot = document.querySelector('#ws-enhance-panel .enhance-popover-foot');
       expect(foot?.querySelector('[data-choice="smart"]')).not.toBeNull();
@@ -1406,7 +1408,7 @@ describe('WorkspacePage', () => {
       layoutProbe.compact = true;
       draft.update('prompt', 'a fox');
       draft.update('enhanceModel', 'smart');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: '19 GB', unavailable: null }));
       await openEnhanceRun();
       const foot = document.querySelector('.sheet-foot');
       expect(foot?.querySelector('[data-choice="smart"]')).not.toBeNull();
@@ -1419,7 +1421,7 @@ describe('WorkspacePage', () => {
       draft.update('enhanceAuto', true);
       draft.update('enhanceModel', 'smart');
       draft.update('enhanceFormat', 'json');
-      await mountWorkspace(ideoEnhancerContext({ download_size_label: null, unavailable: null }));
+      await mountWorkspace(ideoEnhancerContext({ downloaded: false, download_size_label: null, unavailable: null }));
       const submitted = await submitForm(target);
       expect(submitted.get('enhance_model')).toBe('smart');
       expect(submitted.get('enhance_format')).toBe('json');
@@ -2047,7 +2049,7 @@ describe('WorkspacePage', () => {
       target,
       props: {
         context,
-        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); },
+        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, get audio() { return currentAudioView(context); },
         busy: false,
       },
     }));
@@ -2139,7 +2141,7 @@ describe('WorkspacePage', () => {
       target,
       props: {
         context,
-        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); },
+        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, get audio() { return currentAudioView(context); },
         busy: false,
       },
     }));
@@ -2166,6 +2168,35 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(target.querySelector('#ws-negative-prompt')).not.toBeNull();
+  });
+
+  it('keeps the Steps field within the video model\'s limit, so the shown count is the one that runs', async () => {
+    const context = makeContext();
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    draft.hydrateFromContext(context, 'ltx-8');
+    await heldUploads.restore();
+    app = flushSync(() => mount(ControlsSidebar, {
+      target,
+      props: {
+        context,
+        get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, get audio() { return currentAudioView(context); },
+        busy: false,
+      },
+    }));
+    await settle();
+    const steps = target.querySelector('#ws-steps') as HTMLInputElement;
+    const limit = context.video_model_defaults!['ltx-8'].max_steps!;
+    expect((target.querySelector('.mini-range[type="range"]') as HTMLInputElement).max).toBe(String(limit));
+
+    // Typing past the limit holds the limit, in the draft and in the field once it is left.
+    steps.value = String(limit + 4);
+    steps.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(draft.state.steps).toBe(limit);
+    steps.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(steps.value).toBe(String(limit));
   });
 
   it('gates reference image and upscale controls by selected model capabilities', async () => {
@@ -3343,7 +3374,7 @@ describe('WorkspacePage', () => {
     const firstFile = new File(['first-image'], 'first.png', { type: 'image/png' });
     const secondFile = new File(['second-image'], 'second.png', { type: 'image/png' });
     draft.setStartImage('image', { file: firstFile }, context);
-    app = flushSync(() => mount(ControlsSidebar, { target, props: { context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false } }));
+    app = flushSync(() => mount(ControlsSidebar, { target, props: { context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, get audio() { return currentAudioView(context); }, busy: false } }));
     await settle();
 
     draft.setStartImage('image', { file: secondFile }, context);

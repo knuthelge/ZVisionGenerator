@@ -1,19 +1,26 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed, isEnhancedStale, rememberedParts } from './promptEnhance';
 import { presetDiffers } from './presets';
 import { downloadStore } from './downloads.svelte';
-import { changedSettings, draft, extendStepFor, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
+import { changedSettings, draft, extendStepFor, fitDimensions, maxStepsFor, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
 import { heldUploads } from './heldUploads.svelte';
+import { withAudio } from '../../test-utils/audio';
+import { voiceConsent } from './voiceConsent.svelte';
 import { memoryUploadStore } from './uploadStore';
-import { workspaceTab } from './workspaceTab';
+import { navTab, videoKindOf } from './workspaceTab';
 import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults, Workflow } from '$lib/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Open the tab a workflow belongs to the way the top bar and the Workspace do: pick it, then re-hydrate for it. */
 function openTab(workflow: Workflow, ctx: WorkspaceContext): void {
-  draft.setTab(workspaceTab(workflow));
+  const kind = videoKindOf(workflow);
+  if (kind === null) draft.setTab(navTab(workflow));
+  else {
+    draft.setTab('video');
+    draft.setVideoKind(kind, ctx);
+  }
   draft.onTabChange(ctx);
 }
 
@@ -783,6 +790,28 @@ describe('draft store – saved drafts', () => {
   });
 });
 
+describe('draft store – voice recording', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('keeps the typed transcript when the recording is chosen, changed or cleared', () => {
+    draft.update('voiceText', 'typed before the recording');
+    draft.setVoice({ path: '/voices/a.wav' });
+    expect(draft.state.voiceText).toBe('typed before the recording');
+
+    draft.setVoice({ path: '/voices/b.wav' });
+    expect(draft.state.voiceText).toBe('typed before the recording');
+
+    draft.setVoice({ file: new File(['x'], 'c.wav', { type: 'audio/wav' }) });
+    expect(draft.state.voiceText).toBe('typed before the recording');
+
+    draft.setVoice(null);
+    expect(draft.state).toMatchObject({ voicePath: null, voiceUpload: null, voiceText: 'typed before the recording' });
+  });
+});
+
 describe('draft store – prompt enhancer fields', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -1030,19 +1059,19 @@ describe('draft store – prompt enhancer fields', () => {
       expect(draft.state).toMatchObject({ prompt: 'old prompt', scene: 'old scene' });
     });
 
-    it('Extend Video shares the text of Video', () => {
+    it('Extend shares the text of Video', () => {
       const ctx = textContext();
       ctx.workflow_contract.values.push('extend');
       draft.hydrateFromContext(ctx, null);
       draft.patch(imageText);
       openTab('txt2vid', ctx);
       draft.patch(videoText);
-      draft.setTab('extend');
+      draft.setVideoKind('extend', ctx);
       expect(draft.state).toMatchObject({ workflow: 'extend', scene: videoText.scene, prompt: videoText.prompt, enhancedScene: videoText.enhancedScene });
       draft.patch({ prompt: 'what happens next' });
-      draft.setTab('video');
+      draft.setVideoKind('new', ctx);
       expect(draft.state).toMatchObject({ scene: videoText.scene, prompt: 'what happens next' });
-      draft.setTab('extend');
+      draft.setVideoKind('extend', ctx);
       draft.setTab('image');
       expect(draft.state).toMatchObject(imageText);
       expect(draft.state.savedText.video).toMatchObject({ scene: videoText.scene, prompt: 'what happens next' });
@@ -1101,7 +1130,7 @@ describe('draft store – prompt enhancer fields', () => {
     expect(draft.state.enhancedPrompt).toBe('Kept');
   });
 
-  it('resetSelections keeps the Enhanced prompt but resets enhancement options', () => {
+  it('resetSelections keeps the Enhanced prompt and the auto choice but resets the mode\'s enhancement options', () => {
     const ctx = makeContext();
     draft.hydrateFromContext(ctx, null);
     draft.update('enhancedPrompt', 'A fox in snow.');
@@ -1111,7 +1140,7 @@ describe('draft store – prompt enhancer fields', () => {
     draft.resetSelections(ctx);
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
     expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', scene: '', mode: 'image' });
-    expect(draft.state.enhanceAuto).toBe(false);
+    expect(draft.state.enhanceAuto).toBe(true);
     expect(draft.state.enhanceSettings).toBeNull();
   });
 });
@@ -1963,6 +1992,13 @@ describe('hydrateFromContext – keepChangedSettings', () => {
 
     beforeEach(() => draft.update('workflow', 'txt2vid'));
 
+    it('reports the most steps a video model runs, and none for a model without a limit or an image model', () => {
+      const ctx = videoContext();
+      expect(maxStepsFor(ctx, 'txt2vid', 'ltx-2')).toBe(8);
+      expect(maxStepsFor(ctx, 'txt2vid', 'ltx-v-0.9')).toBeNull();
+      expect(maxStepsFor(ctx, 'txt2img', ctx.current_image_model ?? '')).toBeNull();
+    });
+
     it('caps the steps at the new model step limit', () => {
       const ctx = videoContext();
       draft.hydrateFromContext(ctx, 'ltx-v-0.9');
@@ -2175,11 +2211,14 @@ describe('applyPreset', () => {
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
     savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] } },
+    savedSettings: { video: { steps: 9 } },
     enhancedHistory: [{ prompt: 'plain rewrite', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }, { prompt: '{"caption":"x"}', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }],
     enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],
     enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
     extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
     videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
+    videoKind: 'extend', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'higgs3', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
+    audioSeconds: 30, voiceMode: 'recording', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
   };
 
   beforeEach(() => {
@@ -2197,7 +2236,7 @@ describe('applyPreset', () => {
 
     const after = draft.state;
     expect(after).toMatchObject(IMAGE_PRESET_DRAFT);
-    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'lastImageModel', 'lastVideoModel', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
+    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
     // Every key is either marked above or a preset key, so a new draft key must be classified here.
     const unclassified = Object.keys(after).filter((key) => !(key in MARKED) && !presetOwned.has(key) && key !== 'version');
     expect(unclassified).toEqual([]);
@@ -2460,9 +2499,9 @@ describe('applyPreset', () => {
     expect(draft.state.appliedPreset).toBeNull();
     draft.onTabChange(ctx);
     expect(draft.state.appliedPreset).toBeNull();
-    // Video and Extend Video are one mode.
+    // New and Extend are one mode.
     draft.setAppliedPreset('clip');
-    draft.setTab('extend');
+    draft.setVideoKind('extend', ctx);
     expect(draft.state.appliedPreset).toBe('clip');
   });
 
@@ -2576,7 +2615,6 @@ describe('model remembered per mode', () => {
     draft.loadFromUrl(params, ctx);
 
     expect(draft.state.model).toBe('krea');
-    expect(draft.state.lastImageModel).toBe('krea');
   });
 
   it('falls back to the default when the remembered model is no longer offered', () => {
@@ -2772,7 +2810,7 @@ describe('image slots', () => {
     expect(draft.state).toMatchObject({ workflow: 'img2vid', firstFramePath: '/in/first.png', endImagePath: '/in/last.png' });
   });
 
-  it('Image -> Extend Video -> Image keeps the start image', () => {
+  it('Image -> Extend -> Image keeps the start image', () => {
     const ctx = slotContext();
     draft.hydrateFromContext(ctx);
     draft.setStartImage('image', { path: '/in/start.png' }, ctx);
@@ -2911,7 +2949,7 @@ describe('image slots', () => {
       expect(draft.state.workflow).toBe('img2img');
     });
 
-    it('on Extend Video clears no images', () => {
+    it('on Extend clears no images', () => {
       const ctx = slotContext();
       holdImagesOnBothTabs(ctx);
       openTab('extend', ctx);
@@ -2927,7 +2965,7 @@ describe('image slots', () => {
       expect(heldUploads.references).toHaveLength(1);
     });
 
-    it('on Extend Video keeps frames and a start image chosen by path', () => {
+    it('on Extend keeps frames and a start image chosen by path', () => {
       const ctx = slotContext();
       draft.hydrateFromContext(ctx, 'klein');
       openTab('txt2vid', ctx);
@@ -3053,10 +3091,57 @@ describe('image slots', () => {
       draft.setStartImage('video', { path: '/in/first.png' }, null);
       draft.setTab('video');
       expect(draft.state.workflow).toBe('img2vid');
-      draft.setTab('extend');
+      draft.setVideoKind('extend', null);
       expect(draft.state.workflow).toBe('extend');
       draft.setTab('image');
       expect(draft.state.workflow).toBe('txt2img');
+    });
+
+    it('opens Video on the kind it was left on, and keeps each kind\'s own inputs while the kind changes', () => {
+      draft.setStartImage('video', { path: '/in/first.png' }, null);
+      draft.setTab('video');
+      draft.patch({ frameCount: 49 });
+      draft.setVideoKind('extend', null);
+      draft.setExtendSourcePath('/clips/source.mp4');
+      draft.patch({ extendFrames: 48 });
+      draft.setAudioTrack('extend', { path: '/audio/extend.wav' });
+      draft.setVideoKind('new', null);
+      expect(draft.state).toMatchObject({ workflow: 'img2vid', videoKind: 'new', frameCount: 49, firstFramePath: '/in/first.png', extendSourcePath: '/clips/source.mp4', extendFrames: 48, extendAudioTrackPath: '/audio/extend.wav' });
+
+      draft.setVideoKind('extend', null);
+      draft.setTab('audio');
+      draft.setTab('video');
+      expect(draft.state).toMatchObject({ workflow: 'extend', videoKind: 'extend' });
+      draft.setTab('image');
+      draft.setTab('video');
+      expect(draft.state.workflow).toBe('extend');
+
+      draft.setVideoKind('new', null);
+      draft.setTab('image');
+      draft.setTab('video');
+      expect(draft.state.workflow).toBe('img2vid');
+    });
+
+    it('opens Video on the kind a prefill named, once the draft is left and entered again', () => {
+      draft.setTab('video');
+      draft.setVideoKind('new', null);
+      draft.setTab('image');
+      draft.setTab('video');
+      const ctx = makeContext();
+      ctx.workflow_contract.values.push('extend');
+      draft.loadFromUrl({ workflow: 'extend', source_video: '/clips/source.mp4' }, ctx);
+      expect(draft.state.workflow).toBe('extend');
+      draft.setTab('image');
+      draft.setTab('video');
+      expect(draft.state.workflow).toBe('extend');
+    });
+
+    it('gives the Extend kind back to New on a machine that cannot extend', () => {
+      draft.setVideoKind('extend', null);
+      const ctx = makeContext();
+      ctx.workflow_contract.values = ctx.workflow_contract.values.filter((value) => value !== 'extend');
+      draft.hydrateFromContext(ctx, null, { keepSettings: true });
+      expect(draft.state).toMatchObject({ workflow: 'txt2vid', videoKind: 'new' });
     });
   });
 });
@@ -3094,7 +3179,7 @@ describe('audio track', () => {
       expect(heldUploads.audioTrack?.name).toBe('memo.m4a');
     });
 
-    it('keeps Video and Extend Video apart', () => {
+    it('keeps Video and Extend apart', () => {
       draft.setAudioTrack('video', { file: memo('video.m4a') });
       draft.setAudioTrack('extend', { path: '/audio/extend.mp3' });
       draft.setAudioTrackStart('extend', 12);
@@ -3139,7 +3224,7 @@ describe('audio track', () => {
   });
 
   describe('Reset', () => {
-    it('on Video clears the Video track and its held file, and keeps the Extend Video track', () => {
+    it('on Video clears the Video track and its held file, and keeps the Extend track', () => {
       const ctx = trackContext();
       draft.hydrateFromContext(ctx, 'ltx-2');
       openTab('txt2vid', ctx);
@@ -3154,7 +3239,7 @@ describe('audio track', () => {
       expect(heldUploads.audioTrack).toBeNull();
     });
 
-    it('on Extend Video clears the Extend Video track and keeps the Video track', () => {
+    it('on Extend clears the Extend track and keeps the Video track', () => {
       const ctx = trackContext();
       draft.hydrateFromContext(ctx, 'ltx-2');
       openTab('txt2vid', ctx);
@@ -3180,7 +3265,7 @@ describe('audio track', () => {
       expect(draft.state).toMatchObject({ audioTrackPath: '/audio/song.mp3', audioTrackUpload: null, audioTrackStart: 90, extendAudioTrackPath: null });
     });
 
-    it('put the track and Start at in Extend Video for an extension', () => {
+    it('put the track and Start at in Extend for an extension', () => {
       const ctx = trackContext();
       draft.hydrateFromContext(ctx, 'ltx-2');
       draft.setAudioTrack('video', { path: '/audio/video.mp3' });
@@ -3285,5 +3370,148 @@ describe('audio track', () => {
 
       expect(draft.state.extendAudioTrackPath).toBe('/audio/mine.mp3');
     });
+  });
+});
+
+describe('settings kept per mode', () => {
+  const ctxFor = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => withAudio(makeContext({
+    image_models: [{ id: 'krea', label: 'Krea', type: 'image' }, { id: 'klein4b', label: 'Klein 4B', type: 'image' }],
+    video_models: [{ id: 'ltx-a', label: 'LTX A', type: 'video' }, { id: 'ltx-b', label: 'LTX B', type: 'video' }],
+    image_model_defaults: { krea: makeImageDefaults(), klein4b: makeImageDefaults() },
+    video_model_defaults: { 'ltx-a': makeVideoDefaults(), 'ltx-b': makeVideoDefaults() },
+    current_image_model: 'krea',
+    current_video_model: 'ltx-a',
+    loras: [{ name: 'detail', path: '/loras/detail.safetensors' }],
+    ...overrides,
+  }));
+  const IMAGE = { steps: 23, guidance: 4.5, width: 704, height: 1024, dimensionMode: 'custom' as const };
+  const VIDEO = { steps: 31, width: 640, height: 384, dimensionMode: 'custom' as const };
+
+  const openAudio = (ctx: WorkspaceContext): void => { draft.setTab('audio'); draft.onTabChange(ctx); };
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  /** Start on Image with settings and a preset of its own, then give Video others. */
+  function setUp(ctx: WorkspaceContext): void {
+    draft.hydrateFromContext(ctx, 'krea');
+    draft.patch(IMAGE);
+    draft.setAppliedPreset('image look');
+    draft.update('loraString', 'detail:0.7');
+    openTab('txt2vid', ctx);
+    expect(draft.state.model).toBe('ltx-a');
+    expect(draft.state.appliedPreset).toBeNull();
+    draft.patch(VIDEO);
+    draft.setAppliedPreset('video look');
+  }
+
+  it('puts Image back as it was after a visit to Video, with its preset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    openTab('txt2img', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'krea', ...IMAGE, appliedPreset: 'image look', loraString: 'detail:0.7' });
+  });
+
+  it('puts Video back as it was after a visit to Image, with its preset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+    openTab('txt2img', ctx);
+
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'ltx-a', ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('keeps both modes through the Audio tab, in either order', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    openAudio(ctx);
+    openTab('txt2vid', ctx);
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+    openAudio(ctx);
+    openTab('txt2img', ctx);
+    expect(draft.state).toMatchObject({ ...IMAGE, appliedPreset: 'image look', loraString: 'detail:0.7' });
+  });
+
+  it('keeps New and Extend as one video block', () => {
+    const ctx = ctxFor();
+    ctx.workflow_contract.values.push('extend');
+    setUp(ctx);
+
+    openTab('extend', ctx);
+    openTab('txt2img', ctx);
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('leaves the other mode\'s settings alone when one mode is reset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+    openTab('txt2img', ctx);
+
+    draft.resetSelections(ctx);
+    expect(draft.state.steps).not.toBe(IMAGE.steps);
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('applies a reused take exactly, without the saved settings of its mode leaking in', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    draft.loadFromUrl({ workflow: 'txt2img', model: 'krea', prompt: 'a cat' }, ctx, { exact: true });
+
+    expect(draft.state.workflow).toBe('txt2img');
+    expect(draft.state.steps).toBe(makeImageDefaults().steps);
+    expect(draft.state.appliedPreset).toBeNull();
+    openTab('txt2vid', ctx);
+    expect(draft.state).toMatchObject({ ...VIDEO, appliedPreset: 'video look' });
+  });
+
+  it('takes the defaults of a saved model that is no longer offered, and drops its preset', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+    const later = ctxFor({ image_models: [{ id: 'klein4b', label: 'Klein 4B', type: 'image' }], current_image_model: 'klein4b' });
+
+    openTab('txt2img', later);
+
+    expect(draft.state).toMatchObject({ model: 'klein4b', steps: makeImageDefaults().steps, appliedPreset: null });
+  });
+
+  it('drops a LoRA that was removed while its mode was away', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    openTab('txt2img', ctxFor({ loras: [] }));
+
+    expect(draft.state.loraString).toBe('');
+  });
+
+  it('starts a mode visited for the first time on its model\'s defaults and without the other mode\'s preset', () => {
+    const ctx = ctxFor();
+    draft.hydrateFromContext(ctx, 'krea');
+    draft.patch(IMAGE);
+    draft.setAppliedPreset('image look');
+
+    openTab('txt2vid', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'ltx-a', steps: makeVideoDefaults().steps, appliedPreset: null });
+  });
+
+  it('survives a reload', () => {
+    const ctx = ctxFor();
+    setUp(ctx);
+
+    draft.loadDraft();
+    openTab('txt2img', ctx);
+
+    expect(draft.state).toMatchObject({ model: 'krea', ...IMAGE, appliedPreset: 'image look' });
   });
 });

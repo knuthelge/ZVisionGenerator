@@ -1,4 +1,4 @@
-import type { GalleryAsset, GalleryPage, ImageModelDefaults, JobSnapshot, VideoModelDefaults, WorkspaceContext } from '$lib/types';
+import type { GalleryAsset, GalleryPage, ImageModelDefaults, JobSnapshot, ModelLicence, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 
 // Fixtures of the Workspace page tests: a server context with one image and one video model, and the job and asset records a page shows.
 
@@ -87,6 +87,40 @@ export function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): 
   };
 }
 
+/** Licence records as the server sends them (the packaged config's wording), for tests of the marks and the dialog. */
+export const FLUX_LICENCE: ModelLicence = {
+  name: 'FLUX Non-Commercial License v2.1',
+  supplier: 'Black Forest Labs',
+  summary: 'Non-commercial use of the model; images may be used commercially',
+  url: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-9B',
+  url_label: 'Model page',
+  attribution: null,
+};
+export const LTX_LICENCE: ModelLicence = {
+  name: 'LTX-2 Community License Agreement',
+  supplier: 'Lightricks',
+  summary: 'Free under $10M revenue',
+  url: 'https://example.org/ltx/LICENSE',
+  url_label: 'Licence',
+  attribution: null,
+};
+export const GEMMA_LICENCE: ModelLicence = {
+  name: 'Gemma Terms of Use',
+  supplier: 'Google',
+  summary: "Free to use, also commercially; Gemma's prohibited use policy applies",
+  url: 'https://huggingface.co/google/gemma-3-12b-it',
+  url_label: 'Model page',
+  attribution: null,
+};
+export const MATTE_LICENCE: ModelLicence = {
+  name: 'Research-only training data',
+  supplier: 'BiRefNet and ViTMatte authors',
+  summary: "Non-commercial: ViTMatte was trained on Adobe's Deep Image Matting dataset, whose agreement allows models trained on it only for non-commercial use, and BiRefNet (MIT) partly on DIS5K, which is research-only",
+  url: 'https://github.com/xuebinqin/DIS/blob/e6455bae3892b3a7d8cf59ca91011a220d1ed606/DIS5K-Dataset-Terms-of-Use.pdf',
+  url_label: 'Dataset terms',
+  attribution: null,
+};
+
 export function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContext {
   const imageDefaults = makeImageDefaults();
   const alternateImageDefaults = makeImageDefaults({
@@ -104,9 +138,10 @@ export function makeContext(overrides: Partial<WorkspaceContext> = {}): Workspac
   return {
     image_models: [
       { id: 'zit', label: 'zit', type: 'image' },
-      { id: 'flux-lite', label: 'flux-lite', type: 'image' },
+      { id: 'flux-lite', label: 'flux-lite', type: 'image', licences: [FLUX_LICENCE] },
     ],
-    video_models: [{ id: 'ltx-8', label: 'ltx-8', type: 'video' }],
+    video_models: [{ id: 'ltx-8', label: 'ltx-8', type: 'video', licences: [LTX_LICENCE, GEMMA_LICENCE] }],
+    matte_licences: [MATTE_LICENCE],
     loras: [],
     history_assets: [],
     active_job: null,

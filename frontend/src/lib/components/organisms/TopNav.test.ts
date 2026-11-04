@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
 import { jobStore } from '$lib/state/job.svelte';
-import type { Workflow } from '$lib/types';
+import type { Workflow, WorkspaceWorkflow } from '$lib/types';
 
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import TopNav from './TopNav.svelte';
@@ -97,21 +97,35 @@ describe('TopNav workflow tabs', () => {
     return Array.from(target.querySelectorAll('nav[aria-label="Workflow"] button')).map((tab) => tab.textContent?.trim() ?? '');
   }
 
-  it('shows Image and Video until the contract is known, then adds Extend Video when it lists extend', () => {
-    const props = reactiveProps<{ currentPage: string; workflows: Workflow[] | null }>({ currentPage: 'workspace', workflows: null });
+  it('shows Image and Video until the contract is known, then adds Audio when it lists an audio kind', () => {
+    const props = reactiveProps<{ currentPage: string; workflows: WorkspaceWorkflow[] | null }>({ currentPage: 'workspace', workflows: null });
     app = flushSync(() => mount(TopNav, { target, props }));
     expect(workflowTabs()).toEqual(['Image', 'Video']);
 
-    flushSync(() => { props.workflows = [...BASE, 'extend']; });
-    expect(workflowTabs()).toEqual(['Image', 'Video', 'Extend Video']);
+    flushSync(() => { props.workflows = [...BASE, 'extend', 'music']; });
+    expect(workflowTabs()).toEqual(['Image', 'Video', 'Audio']);
   });
 
-  it('shows Extend Video only when the contract lists it', () => {
-    mountNav({ workflows: BASE });
+  it('marks Audio for every kind and opens it on the kind it was left on', () => {
+    mountNav({ workflows: [...BASE, 'music', 'speech', 'sound'] as WorkspaceWorkflow[] });
+    const pressed = () => Array.from(target.querySelectorAll('nav[aria-label="Workflow"] button[aria-pressed="true"]')).map((tab) => tab.textContent?.trim());
+    const tab = (label: string) => Array.from(target.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workflow"] button')).find((button) => button.textContent?.trim() === label)!;
+    draft.update('audioKind', 'sound');
+
+    flushSync(() => tab('Audio').click());
+    expect(draft.state.workflow).toBe('sound');
+    expect(pressed()).toEqual(['Audio']);
+
+    flushSync(() => draft.update('workflow', 'speech'));
+    expect(pressed()).toEqual(['Audio']);
+  });
+
+  it('offers Extend as a kind of Video, never as a tab', () => {
+    mountNav({ workflows: [...BASE, 'extend'] });
     expect(workflowTabs()).toEqual(['Image', 'Video']);
   });
 
-  it('marks Image for both txt2img and img2img, and Video for both video workflows', () => {
+  it('marks Image for both txt2img and img2img, and Video for every video workflow, Extend included', () => {
     mountNav({ workflows: [...BASE, 'extend'] });
     const pressed = () => Array.from(target.querySelectorAll('nav[aria-label="Workflow"] button[aria-pressed="true"]')).map((tab) => tab.textContent?.trim());
     expect(pressed()).toEqual(['Image']);
@@ -121,6 +135,9 @@ describe('TopNav workflow tabs', () => {
 
     flushSync(() => draft.update('workflow', 'img2vid'));
     expect(pressed()).toEqual(['Video']);
+
+    flushSync(() => draft.update('workflow', 'extend'));
+    expect(pressed()).toEqual(['Video']);
   });
 
   it('calls draft.setTab with the clicked tab and marks it pressed', () => {
@@ -128,15 +145,11 @@ describe('TopNav workflow tabs', () => {
     const setTab = vi.spyOn(draft, 'setTab');
     const tab = (label: string) => Array.from(target.querySelectorAll<HTMLButtonElement>('nav[aria-label="Workflow"] button')).find((button) => button.textContent?.trim() === label)!;
 
-    flushSync(() => tab('Extend Video').click());
-    expect(setTab).toHaveBeenCalledWith('extend');
-    expect(draft.state.workflow).toBe('extend');
-    expect(tab('Extend Video').getAttribute('aria-pressed')).toBe('true');
-    expect(tab('Image').getAttribute('aria-pressed')).toBe('false');
-
     flushSync(() => tab('Video').click());
     expect(setTab).toHaveBeenCalledWith('video');
     expect(draft.state.workflow).toBe('txt2vid');
+    expect(tab('Video').getAttribute('aria-pressed')).toBe('true');
+    expect(tab('Image').getAttribute('aria-pressed')).toBe('false');
     setTab.mockRestore();
   });
 

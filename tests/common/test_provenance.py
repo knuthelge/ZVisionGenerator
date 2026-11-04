@@ -23,14 +23,15 @@ from zvisiongenerator.utils.provenance import (
     build_image_config_payload,
     build_video_config_payload,
     build_video_upscale_payload,
+    config_from_probe,
     embed_mp4_config,
+    read_config,
+    mp4_config_args,
     embed_png_config,
     image_prompt_text,
-    mp4_config_from_probe,
     optional_float,
     optional_int,
     optional_text,
-    read_mp4_config,
     read_png_config,
     recorded_settings,
 )
@@ -527,6 +528,15 @@ class TestEmbedMp4Config:
         assert not staging_path(video_path).exists()
 
 
+class TestMp4CommandIsUnchanged:
+    """The container-agnostic embed and read behave for MP4 exactly as the MP4-only functions did."""
+
+    def test_the_mux_options_are_the_same(self):
+        payload = {"prompt": "a"}
+
+        assert mp4_config_args(payload) == ["-movflags", "use_metadata_tags", "-metadata", 'zvisiongenerator.config={"prompt": "a"}']
+
+
 class TestReadMp4Config:
     def test_returns_none_when_config_tag_is_missing(self, tmp_path):
         video_path = tmp_path / "out.mp4"
@@ -535,7 +545,7 @@ class TestReadMp4Config:
         with patch("zvisiongenerator.utils.provenance.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout=json.dumps({"format": {"tags": {"title": "demo"}}}))
 
-            result = read_mp4_config(video_path)
+            result = read_config(video_path)
 
         assert result is None
 
@@ -562,7 +572,7 @@ class TestReadMp4Config:
         with patch("zvisiongenerator.utils.provenance.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout=json.dumps(ffprobe_output))
 
-            result = read_mp4_config(video_path)
+            result = read_config(video_path)
 
         assert result == payload
 
@@ -571,11 +581,11 @@ class TestMp4ConfigFromProbe:
     def test_reads_the_payload_from_the_format_tags(self):
         data = {"streams": [], "format": {"tags": {"zvisiongenerator.config": json.dumps({"prompt": "a sunset"})}}}
 
-        assert mp4_config_from_probe(data) == {"prompt": "a sunset"}
+        assert config_from_probe(data) == {"prompt": "a sunset"}
 
     @pytest.mark.parametrize("data", [{}, {"format": {}}, {"format": {"tags": {}}}, {"format": {"tags": {"title": "x"}}}])
     def test_a_file_without_the_payload_gives_none(self, data):
-        assert mp4_config_from_probe(data) is None
+        assert config_from_probe(data) is None
 
 
 class TestRecordedValueHelpers:

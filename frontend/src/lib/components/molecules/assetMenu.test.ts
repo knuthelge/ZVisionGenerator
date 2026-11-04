@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 
-import { assetMenuEntries, referenceEntries, upscaleEntries } from './assetMenu';
+import { makeSpeechAsset } from '../../../test-utils/audio';
+import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
 
 function option(factor: 2 | 4, overrides: Partial<AssetUpscaleFactor> = {}): AssetUpscaleFactor {
   return { factor, width: 832 * factor, height: 1216 * factor, allowed: true, reason: null, warning: null, ...overrides };
@@ -148,5 +149,32 @@ describe('referenceEntries', () => {
     const menu = assetMenuEntries(usable, { onreference: vi.fn() }, false, { image: { disabled: true, hint: 'Ideogram 4 can\'t use a start image' } });
     expect(menu.find((entry) => entry.kind === 'item' && entry.id === 'reference-image')).toMatchObject({ disabled: true });
     expect(ids(menu)).toContain('reference-last-frame');
+  });
+});
+
+describe('audioUseEntries', () => {
+  const items = (entries: ReturnType<typeof audioUseEntries>) => entries.flatMap((entry) => (entry.kind === 'item' ? [entry] : []));
+
+  it('disables a speech take longer than the model takes as a voice, with the reason as its hint and tooltip', () => {
+    const [, voice] = items(audioUseEntries(makeSpeechAsset({ duration: 44 }), vi.fn(), { voiceMaxSeconds: 30 }));
+
+    expect(voice).toMatchObject({ label: 'Voice', disabled: true });
+    expect(voice!.hint).toContain('30');
+    expect(voice!.title).toBe(voice!.hint);
+  });
+
+  it('reports the chosen target', () => {
+    const onuseaudio = vi.fn();
+    for (const entry of items(audioUseEntries(makeSpeechAsset(), onuseaudio))) entry.onselect?.();
+
+    expect(onuseaudio.mock.calls.map(([, target]) => target)).toEqual(['audio_track', 'voice']);
+  });
+
+  it('puts them in the asset menu under Use as, and offers no upscale or extend for a take', () => {
+    const menu = assetMenuEntries(makeSpeechAsset(), { onreuse: vi.fn(), onuseaudio: vi.fn(), onupscale: vi.fn(), onextend: vi.fn(), ondelete: vi.fn() });
+
+    expect(menu.map((entry) => (entry.kind === 'item' ? entry.id : entry.kind === 'heading' ? entry.label : entry.kind))).toEqual([
+      'reuse', 'separator', 'Use as', 'use-audio-track', 'use-voice', 'separator', 'download', 'separator', 'delete',
+    ]);
   });
 });

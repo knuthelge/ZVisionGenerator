@@ -10,9 +10,10 @@ Every feature of the app is also a command. The CLI suits batch runs, scripts an
 |---|---|
 | `ziv-image` | Generate images |
 | `ziv-video` | Generate and extend videos |
+| `ziv-audio` | Generate music, speech and sound |
 | `ziv-model` | Convert checkpoints, import LoRAs, list what's installed |
 | `ziv-ui` | Start the [Web UI](../web-ui/index.md) |
-| `ziv` | All of the above as subcommands: `ziv image`, `ziv video`, `ziv model`, `ziv ui` |
+| `ziv` | All of the above as subcommands: `ziv image`, `ziv video`, `ziv audio`, `ziv model`, `ziv ui` |
 
 `ziv` on its own prints help. Add `--help` to any command for its options, or see the [command reference](reference.md).
 
@@ -45,6 +46,18 @@ Start from an image:
 ziv-video -m ltx-4 --image photo.jpg --prompt "The camera slowly zooms in"
 ```
 
+## Model licences
+
+Every built-in model comes with terms, such as the non-commercial licence of `klein9b`. Before a model's first download, the command prints its licence, who licenses it, what it allows and a link, and then goes on without asking:
+
+```text
+By downloading you agree to these terms:
+FLUX Non-Commercial License v2.1 (Black Forest Labs): Non-commercial use of the model; images may be used commercially
+  https://huggingface.co/black-forest-labs/FLUX.2-klein-9B
+```
+
+The same goes for the prompt enhancer and the `--transparent` models. See [Licences](../concepts/models.md#licences) for every model's terms.
+
 ## Run many at once
 
 Put prompts in a YAML file and run them all, three times each:
@@ -61,4 +74,4 @@ The terminal button in the Web UI's *Settings* header copies a command with the 
 
 ## Next
 
-[Generate images](images.md){ .md-button .md-button--primary } [Generate videos](video.md){ .md-button } [Command reference](reference.md){ .md-button }
+[Generate images](images.md){ .md-button .md-button--primary } [Generate videos](video.md){ .md-button } [Generate audio](audio.md){ .md-button } [Command reference](reference.md){ .md-button }

@@ -83,6 +83,47 @@ describe('ConfirmDialog', () => {
     expect(onconfirm).not.toHaveBeenCalled();
   });
 
+  it('confirms a list of parts with plain Enter only, not with ⌘ or Ctrl held', () => {
+    const { onconfirm } = mountDialog({ parts: [{ label: 'FLUX.2 Klein 9B', size: '35.1 GB', lines: [] }] });
+
+    expect(press('Enter', { metaKey: true }).defaultPrevented).toBe(true);
+    expect(press('Enter', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(onconfirm).not.toHaveBeenCalled();
+
+    press('Enter');
+    expect(onconfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('still confirms a plain question with ⌘↵', () => {
+    const { onconfirm } = mountDialog();
+
+    press('Enter', { metaKey: true });
+    expect(onconfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists its parts, one block each, with "size unknown" for a missing size', () => {
+    mountDialog({
+      question: 'Download 2 models?',
+      info: '9.0 GB in 2 parts.',
+      parts: [{ label: 'FLUX.2 Klein 9B', size: '35.1 GB', lines: [] }, { label: 'Prompt enhancer', size: null, lines: [] }],
+    });
+
+    const blocks = Array.from(document.querySelectorAll('[data-testid="confirm-part"]'));
+    expect(blocks.map((block) => block.textContent?.replace(/\s+/g, ' ').trim())).toEqual(['FLUX.2 Klein 9B 35.1 GB', 'Prompt enhancer size unknown']);
+    expect(document.body.textContent).not.toContain('agree to the terms');
+  });
+
+  it('leaves Enter on a link in the body to the link', () => {
+    const { onconfirm } = mountDialog({
+      parts: [{ label: 'FLUX.2 Klein 9B', size: null, lines: [{ text: 'Terms', links: [{ label: 'Licence ↗', href: 'https://example.org/licence', ariaLabel: 'Terms licence (opens in a new tab)' }] }] }],
+    });
+    const link = document.querySelector('[data-testid="confirm-part"] a') as HTMLAnchorElement;
+    link.focus();
+
+    expect(press('Enter', {}, link).defaultPrevented).toBe(false);
+    expect(onconfirm).not.toHaveBeenCalled();
+  });
+
   it('keeps keys from reaching the page but lets Tab move focus inside the dialog', () => {
     mountDialog();
     const pageKeys = vi.fn();

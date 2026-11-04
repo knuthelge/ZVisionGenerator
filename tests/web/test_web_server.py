@@ -28,9 +28,10 @@ from tests.web._helpers import post_video, stub_video_submission, make_resolved_
 from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 from zvisiongenerator.web import config_contract as config_contract_module
+from zvisiongenerator.web import job_downloads as job_downloads_module
 from zvisiongenerator.web import model_download_plan as download_plan_module
 from zvisiongenerator.web.download_lane import DownloadLane
-from zvisiongenerator.web.model_download_plan import plan_summary as real_plan_summary
+from zvisiongenerator.web.model_download_plan import parts_summary as real_parts_summary
 from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module
@@ -916,7 +917,7 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
     assert rows == [
         {
             "name": "seedvr2-7b@q8",
-            "label": "seedvr2-7b@q8",
+            "label": "SeedVR2 7B q8",
             "family": "seedvr2",
             "size_label": "7b",
             "source": "seedvr2",
@@ -927,6 +928,16 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
             "disk_size_label": "2.5 GB",
             "download_size_label": "17.0 GB",
             "download_needed": False,
+            "licences": [
+                {
+                    "name": "Apache License 2.0",
+                    "supplier": "ByteDance Seed",
+                    "summary": "Free to use, also commercially",
+                    "url": "https://huggingface.co/ByteDance-Seed/SeedVR2-7B",
+                    "url_label": "Model page",
+                    "attribution": None,
+                }
+            ],
         }
     ]
 
@@ -1907,9 +1918,9 @@ class TestModelDownloadRoutes:
         web_config.app_config["model_labels"] = {"zit": {"name": "Z-Image Turbo"}, "ltx-8": {"name": "LTX-2.3 8-bit"}}
         monkeypatch.setattr(web_server, "download_lane", lane)
         monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-        monkeypatch.setattr(download_plan_module, "image_plan", lambda *a, **k: self._FAKE_PARTS)
-        monkeypatch.setattr(download_plan_module, "video_plan", lambda *a, **k: (DownloadTarget("owner/ltx"),))
-        monkeypatch.setattr(download_plan_module, "enhancer_plan", lambda *a, **k: (DownloadTarget("owner/enhancer"),))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **k: self._FAKE_PARTS)
+        monkeypatch.setattr(job_downloads_module, "video_plan", lambda *a, **k: (DownloadTarget("owner/ltx"),))
+        monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda *a, **k: (DownloadTarget("owner/enhancer"),))
         lane.release = release
         lane.calls = calls
         yield lane
@@ -1991,15 +2002,15 @@ class TestModelDownloadPlanRoute:
         web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
         web_config.app_config["prompt_enhancer"] = {"model": "owner/enhancer"}
         monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-        monkeypatch.setattr(download_plan_module, "image_plan", lambda *a, **k: (DownloadTarget("owner/zit"), DownloadTarget("owner/vae")))
-        monkeypatch.setattr(download_plan_module, "enhancer_plan", lambda *a, **k: (DownloadTarget("owner/enhancer"),))
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **k: (DownloadTarget("owner/zit"), DownloadTarget("owner/vae")))
+        monkeypatch.setattr(job_downloads_module, "enhancer_plan", lambda *a, **k: (DownloadTarget("owner/enhancer"),))
         monkeypatch.setattr(download_plan_module, "target_present_offline", lambda target: False)
         self.checks: dict[str, object] = {"owner/zit": TargetCheck(3, 3_000), "owner/vae": TargetCheck(1, 500), "owner/enhancer": TargetCheck(2, 40)}
         monkeypatch.setattr(
             web_server,
-            "plan_summary",
+            "parts_summary",
             functools.partial(
-                real_plan_summary,
+                real_parts_summary,
                 check=lambda target: self._check(target),
                 present=lambda target: False,
                 space=lambda items, *, cache_dir: SpaceNeed(cache_dir, sum(check.missing_bytes or 0 for _, check in items), 1_000),
@@ -2019,19 +2030,20 @@ class TestModelDownloadPlanRoute:
         response = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"})
 
         assert response.status_code == 200
-        assert response.json() == {
-            "kind": "model",
-            "name": "zit",
+        payload = response.json()
+        assert [(entry["model"], entry["supplier"]) for entry in payload.pop("licences")] == [("zit", "Tongyi-MAI")]
+        assert payload == {
             "label": "zit",
-            "parts": [{"repo": "owner/zit", "files": 3, "bytes": 3_000}, {"repo": "owner/vae", "files": 1, "bytes": 500}],
+            "parts": [{"label": "zit", "model": "zit", "bytes": 3_500}],
             "total_bytes": 3_500,
             "space": {"path": str(tmp_path / "hub"), "needed_bytes": 3_500, "free_bytes": 1_000, "enough": False},
+            "unchecked": False,
         }
 
     def test_an_enhancer_row_is_looked_up_by_tier(self, client):
         payload = client.get("/api/models/download/plan", params={"kind": "enhancer", "name": "fast"}).json()
 
-        assert (payload["kind"], payload["name"], payload["total_bytes"]) == ("enhancer", "fast", 40)
+        assert (payload["label"], payload["parts"][0]["model"], payload["total_bytes"]) == ("Fast enhancer model", "enhancer-fast", 40)
 
     def test_unknown_row_is_404(self, client):
         assert client.get("/api/models/download/plan", params={"kind": "model", "name": "nope"}).status_code == 404
@@ -2050,7 +2062,7 @@ class TestModelDownloadPlanRoute:
         assert response.json()["detail"]
 
     def test_a_plan_that_cannot_be_made_is_503(self, client, monkeypatch):
-        monkeypatch.setattr(download_plan_module, "image_plan", lambda *a, **k: None)
+        monkeypatch.setattr(job_downloads_module, "image_plan", lambda *a, **k: None)
 
         assert client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"}).status_code == 503
 
@@ -2068,7 +2080,7 @@ class TestModelDownloadPlanRoute:
         def refuse(*_args, **_kwargs):
             raise RuntimeError(line)
 
-        monkeypatch.setattr(download_plan_module, "image_plan", refuse)
+        monkeypatch.setattr(job_downloads_module, "image_plan", refuse)
 
         plan = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"})
         queued = client.post("/api/models/download", json={"kind": "model", "name": "zit"})

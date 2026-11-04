@@ -8,11 +8,10 @@ import { galleryStore } from '$lib/state/gallery.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
 import { memoryUploadStore } from '$lib/state/uploadStore';
 import type { GalleryAsset, ModelOption, WorkspaceContext } from '$lib/types';
-import { makeContext, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
+import { FLUX_LICENCE, MATTE_LICENCE, makeContext, makeImageDefaults, makeVideoDefaults } from '../../test-utils/workspace';
 import { currentAudioTrackView } from './audioTrackView';
 import { currentImagesView } from './imagesView';
 import SettingPopover from './SettingPopover.svelte';
-import { TRANSPARENT_TERMS } from './transparent';
 
 const trackApi = vi.hoisted(() => ({ inspectAudioTrack: vi.fn() }));
 vi.mock('$lib/api/audioTrack', () => ({ inspectAudioTrack: trackApi.inspectAudioTrack }));
@@ -113,12 +112,30 @@ describe('SettingPopover model list', () => {
 
       expect(target.querySelector('[data-testid="model-not-downloaded"]')).toBeNull();
     });
+
+    it('reads an audio model\'s download under the audio kind', () => {
+      const audio: ModelOption[] = [{ id: 'yue2', label: 'YuE2 3B', type: 'audio', downloaded: false }];
+      vi.spyOn(downloadStore, 'active').mockImplementation((kind, name) => (
+        kind === 'audio' && name === 'yue2' ? { id: 'd1', kind: 'audio', name: 'yue2', label: 'YuE2 3B', state: 'running', message: null } : null
+      ));
+      app = flushSync(() => mount(SettingPopover, {
+        target,
+        props: {
+          key: 'model', context, get images() { return currentImagesView(context); }, get audioTrack() { return currentAudioTrackView(context); }, busy: false, models: audio, quantizeOptions: null, lastSeed: null,
+          onModelChange: vi.fn(), onclose: vi.fn(),
+        },
+      }));
+
+      expect(target.querySelector('[data-testid="model-not-downloaded"]')).toBeNull();
+      expect(target.querySelector('[data-testid="model-download-status"]')).not.toBeNull();
+    });
   });
 });
 
 describe('SettingPopover Transparent background', () => {
   const imageContext = {
     ...context,
+    matte_licences: [MATTE_LICENCE],
     workflow_contract: { values: ['txt2img'], definitions: { txt2img: { mode: 'image', visible_controls: ['postprocess_transparent'], clear_fields: [] } } },
   } as unknown as WorkspaceContext;
   const onclose = vi.fn();
@@ -135,15 +152,16 @@ describe('SettingPopover Transparent background', () => {
 
   const toggle = () => target.querySelector('[role="switch"][aria-label="Transparent background"]') as HTMLInputElement | null;
 
-  it('holds the switch, the Non-commercial badge and the reason as visible text', () => {
+  it('holds the switch, the labelled licence mark and the reason as visible text', () => {
     mountTransparent();
 
     expect(toggle()).not.toBeNull();
     const reason = target.querySelector('[data-testid="transparent-reason"]') as HTMLElement;
-    expect(reason.querySelector('.ui-badge')).not.toBeNull();
-    expect(reason.textContent).toContain(TRANSPARENT_TERMS);
-    // The reason is on screen already, so the badge needs no tooltip and no tab stop.
-    expect(reason.querySelector('[role="tooltip"]')).toBeNull();
+    const mark = reason.querySelector('button')!;
+    expect(mark.textContent).toContain('Non-commercial');
+    expect(mark.getAttribute('aria-label')).toBe(`Non-commercial. Licence: ${MATTE_LICENCE.name}`);
+    expect(reason.textContent).toContain(`${MATTE_LICENCE.summary}.`);
+    // The mark sits outside the switch's label, so tapping it never flips the switch.
     expect(reason.closest('label')).toBeNull();
   });
 

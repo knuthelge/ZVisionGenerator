@@ -1,17 +1,34 @@
 # Gallery and viewer
 
-The **Gallery** (++g++ ++g++) shows every image and video in your output folder, including ones the CLI made there. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
+The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the CLI made there. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
 
 ![The Gallery page with a grid of images](../assets/screenshots/gallery-page.webp)
 
 ## Browse
 
-- **Filter** with **All media**, **Images only** or **Videos only**, and sort **Newest first** or **Oldest first**.
+- **Filter** with **All media**, **Images only**, **Videos only** or **Audio only**, and sort **Newest first** or **Oldest first**.
 - Scroll down and more load in.
 - Click a tile, or press ++enter++ on it, to open the viewer.
 - Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu.
 - When you come back to the Gallery, it shows what it had, scrolled to the same place, and fetches anything new.
 - Transparent images show over a checkerboard. It is only a display aid; the file holds real transparency.
+
+## Audio
+
+An audio take is a tile with an icon for its kind, the words of the take, a thin waveform and its length. A tile doesn't play; open it for that.
+
+![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/placeholder.svg "gallery-audio")
+
+The viewer shows a player: the take's waveform over the browser's own audio controls. Click or drag the waveform to seek. **Details** lists the kind, model, voice, length, seed and format. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
+
+An audio file without this app's settings, such as one you copied into the output folder, plays but has no **Reuse settings**.
+
+### Use as an audio track or a voice
+
+**Use as** on an audio take offers:
+
+- **Audio track** opens **Video** with the file as the clip's [audio track](workspace.md#audio-track). It is greyed, with the reason, when the video model can't follow a track.
+- **Voice** (speech takes) opens **Audio** on Speech with the take as the recording and its text as **What it says**. It is greyed for a take longer than 30 seconds. This is how to keep one voice across separate takes; see [Voices](../concepts/audio.md#voices).
 
 ## Select and delete
 
@@ -33,8 +50,8 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 |---|---|---|
 | **Details** | Shows the settings the file was made with | ++i++ |
 | **Reuse settings** | Loads those settings into the Workspace | ++r++ |
-| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video | ++e++ |
-| **Extend** | Opens a video in Extend Video | ++e++ |
+| **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track or a speech voice | ++e++ |
+| **Extend** | Opens a video in Video, on its Extend kind | ++e++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
 | **Download** | Saves the file to this device | ++d++ |
 | Copy prompt | Copies the prompt to the clipboard | ++c++ |

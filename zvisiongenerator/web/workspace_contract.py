@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from zvisiongenerator.utils.audio_preset import AUDIO_KINDS
+
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from zvisiongenerator.core.video_family import VideoCapabilities
 
 
 # One repeated form field holds every reference (a file or a host path per row), so the rows keep their order.
 REFERENCE_FIELD = "reference"
 
-CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "txt2vid", "img2vid", "extend")
+AUDIO_WORKFLOW_VALUES = AUDIO_KINDS
+"""The workflows of the audio mode, one per kind of audio (a workflow is named after its kind); the contract lists those a runnable model makes."""
+CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "txt2vid", "img2vid", "extend", *AUDIO_WORKFLOW_VALUES)
 PROMPT_SOURCE_VALUES = ("inline", "file")
 DEFAULT_PROMPT_SOURCE = "inline"
 PROMPT_FILE_CONTRACT = {
@@ -38,6 +44,9 @@ PROMPT_FILE_CONTRACT = {
 
 # The controls of the last-frame slot. Only a family that declares ``end_frame`` offers them.
 END_FRAME_CONTROLS = ("end_image", "end_image_path", "end_image_clear")
+
+# The controls of a speech model's Voice section. Only a model that can follow a voice offers them.
+VOICE_CONTROLS = ("voice", "voice_path", "voice_text", "voice_consent")
 
 # The controls of the Audio track section. Only a family that declares ``audio_track`` offers them.
 AUDIO_TRACK_CONTROLS = ("audio_track", "audio_track_path", "audio_track_start")
@@ -303,6 +312,26 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+def _audio_definition(*controls: str) -> dict[str, Any]:
+    """Return the definition of an audio workflow that shows *controls* between the model and the run controls."""
+    return {
+        "mode": "audio",
+        "model_kind": "audio",
+        "visible_controls": ["workflow", "model", *controls, "runs", "seed"],
+        "requires_reference_image": False,
+        "requires_source_video": False,
+        "clear_fields": [],
+    }
+
+
+AUDIO_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "music": _audio_definition("music_style", "lyrics"),
+    "speech": _audio_definition("speech_text", *VOICE_CONTROLS),
+    "sound": _audio_definition("sound_prompt", "length"),
+}
+WORKFLOW_DEFINITIONS.update(AUDIO_WORKFLOW_DEFINITIONS)
+
 # The workflow controls a video family loses when it lacks a capability, by capability name.
 _CONTROLS_WITHOUT_CAPABILITY = {
     "lora": ("loras",),
@@ -315,17 +344,14 @@ _CONTROLS_WITHOUT_CAPABILITY = {
 }
 
 
+def _hidden_controls(capabilities: object, table: dict[str, tuple[str, ...]]) -> list[str]:
+    """Return the control ids in *table* whose capability *capabilities* lacks, sorted."""
+    return sorted({control for name, controls in table.items() if not getattr(capabilities, name) for control in controls})
+
+
 def hidden_video_controls(capabilities: VideoCapabilities) -> list[str]:
-    """Return the workflow controls a video model does not have, sorted, from what it cannot do.
-
-    Args:
-        capabilities: What the family can do on this platform.
-
-    Returns:
-        Control ids as they appear in ``visible_controls``; empty when the family can do everything.
-    """
-    hidden = {control for name, controls in _CONTROLS_WITHOUT_CAPABILITY.items() if not getattr(capabilities, name) for control in controls}
-    return sorted(hidden)
+    """Return the workflow controls a video model does not have, sorted, from what it cannot do on this platform."""
+    return _hidden_controls(capabilities, _CONTROLS_WITHOUT_CAPABILITY)
 
 
 def canonicalize_workflow(value: Any, *, fallback: str | None = None) -> str | None:
@@ -342,20 +368,24 @@ def default_workflow_for_mode(mode: str) -> str:
 
 
 def workflow_mode(workflow: str) -> str:
-    """Return the media mode for a canonical workflow."""
+    """Return the media mode (``image``, ``video`` or ``audio``) for a workflow."""
+    if workflow in AUDIO_WORKFLOW_VALUES:
+        return "audio"
     return "video" if workflow in {"txt2vid", "img2vid", "extend"} else "image"
 
 
-def build_workflow_contract(*, video_audio: bool = True, video_upscale_review: bool = True, video_extend: bool = True) -> dict[str, Any]:
+def build_workflow_contract(*, video_audio: bool = True, video_upscale_review: bool = True, video_extend: bool = True, audio_kinds: Collection[str] = ()) -> dict[str, Any]:
     """Build the backend-owned workflow and control visibility contract.
 
     Args:
         video_audio: Whether the video backend writes an audio track; without one the Audio control is hidden.
         video_upscale_review: Whether the video backend can pause for review after the half-size render; without it the video Review control is hidden.
         video_extend: Whether the video backend can extend a clip; without it the ``extend`` workflow is left out.
+        audio_kinds: The kinds (``music``, ``speech``, ``sound``) that have a model which runs on this machine. Only their
+            workflows are listed; with none, no audio workflow is listed and the Audio tab stays hidden.
     """
     hidden = frozenset(name for name, hide in (("audio", not video_audio), ("video_upscale_review", not video_upscale_review)) if hide)
-    names = [name for name in CANONICAL_WORKFLOW_VALUES if video_extend or name != "extend"]
+    names = [name for name in CANONICAL_WORKFLOW_VALUES if _is_listed(name, video_extend=video_extend, audio_kinds=audio_kinds)]
     return {
         "values": names,
         "definitions": {name: _definition_for_platform(WORKFLOW_DEFINITIONS[name], hidden=hidden) for name in names},
@@ -364,6 +394,15 @@ def build_workflow_contract(*, video_audio: bool = True, video_upscale_review: b
             "dimensions": "explicit_width_height_overrides_ratio_size",
         },
     }
+
+
+def _is_listed(workflow: str, *, video_extend: bool, audio_kinds: Collection[str]) -> bool:
+    """Return whether the contract lists *workflow*: an extension needs a backend that extends, an audio workflow a runnable model of its kind."""
+    if workflow == "extend":
+        return video_extend
+    if workflow in AUDIO_WORKFLOW_VALUES:
+        return workflow in audio_kinds
+    return True
 
 
 def _definition_for_platform(definition: dict[str, Any], *, hidden: frozenset[str]) -> dict[str, Any]:
