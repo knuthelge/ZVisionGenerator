@@ -4,7 +4,7 @@
 
 ## Idea
 
-[The Audio tab](audio-generation.md) gives each kind one or two text boxes and nothing to steer the result. Images and video have the prompt enhancer, with options like Style and Mood. Audio could get the same, plus controls and edits. Which of these to support is still to be decided.
+[The Audio tab](archive/audio-generation.md) gives each kind one or two text boxes and nothing to steer the result. Images and video have the prompt enhancer, with options like Style and Mood. Audio could get the same, plus controls and edits. Which of these to support is still to be decided.
 
 ## Findings
 
