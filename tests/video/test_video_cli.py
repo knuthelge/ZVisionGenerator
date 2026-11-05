@@ -350,6 +350,7 @@ def _run_cli(
     if local_models is not None:
         monkeypatch.setattr(video_cli, "video_model_downloaded", lambda ref, **_: ref in local_models)
     monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+    monkeypatch.setattr(video_cli, "print_licence_notice", lambda *_args: None)  # its own tests cover it; its plan reads the platform's real download layout
     monkeypatch.setattr(video_cli, "supports_video_extend", lambda: extend_supported)
     monkeypatch.setattr(video_cli, "supports_video_audio", lambda: True)
     monkeypatch.setattr(video_cli, "detect_video_model", detect or (lambda _model: model_info))
