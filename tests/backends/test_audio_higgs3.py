@@ -18,7 +18,9 @@ import torch
 from tests._higgs3_fakes import CODEC_REPO, CONFIG, OFFICIAL_REPO, PRESET, FakeCodec, FakeModel, codes_of, install_fakes
 
 from zvisiongenerator.backends.audio import higgs3 as higgs3_module
+from zvisiongenerator.backends.audio import higgs3_takes
 from zvisiongenerator.backends.audio.higgs3 import SAMPLE_RATE, Higgs3Backend
+from zvisiongenerator.backends.audio.higgs3_takes import estimate_part_frames
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils import audio_request as audio_request_module
@@ -46,7 +48,7 @@ def rig(monkeypatch, tmp_path):
         return real_generate(model_, tokenizer, ids, text, **kwargs)
 
     monkeypatch.setattr(higgs3_module, "generate_speech_codes", spy)
-    monkeypatch.setattr(higgs3_module, "probe_track_seconds", lambda path: 10.0)
+    monkeypatch.setattr(higgs3_takes, "probe_track_seconds", lambda path: 10.0)
     monkeypatch.setattr(audio_request_module, "probe_track_seconds", lambda path: 10.0)
     backend = Higgs3Backend()
     backend.load(PRESET, "cuda")
@@ -286,7 +288,7 @@ class TestParts:
 
     def test_with_a_recording_every_part_follows_it_and_nothing_is_chained(self, rig, monkeypatch):
         read = MagicMock(return_value=np.full((2, 10 * 48000), 0.1, dtype=np.float32))
-        monkeypatch.setattr(higgs3_module, "read_track", read)
+        monkeypatch.setattr(higgs3_takes, "read_track", read)
         rig.codec.waves.extend([_tone(2.0), _tone(0.5), _tone(0.5)])
 
         _generate(rig, _request(THREE_PARTS, voice=VoiceRef("me.wav", "Hello, this is me.")))
@@ -325,7 +327,7 @@ class TestParts:
 
     def test_a_stereo_recording_is_averaged_to_mono_before_it_is_encoded(self, rig, monkeypatch):
         stereo = np.stack([np.full(10 * 48000, 0.2, dtype=np.float32), np.full(10 * 48000, -0.2, dtype=np.float32)])  # opposite channels cancel
-        monkeypatch.setattr(higgs3_module, "read_track", lambda *args: stereo)
+        monkeypatch.setattr(higgs3_takes, "read_track", lambda *args: stereo)
         rig.codec.waves.append(_tone(0.5))
 
         _generate(rig, _request(voice=VoiceRef("me.wav", "Hello, this is me.")))
@@ -337,14 +339,14 @@ class TestParts:
         rig.backend._codec_device = "meta"  # a device other than the model's, which no test machine lacks
         rig.codec.waves.append(_tone(0.1))
 
-        rig.backend._encode(np.zeros(SAMPLE_RATE, dtype=np.float32))
+        rig.backend.encode(np.zeros(SAMPLE_RATE, dtype=np.float32))
         rig.backend._decode(torch.zeros(3, 2, dtype=torch.long))
 
         assert rig.codec.encoded[0].device.type == "meta"
         assert rig.codec.decoded[0].device.type == "meta"
 
     def test_a_recording_with_one_part_is_encoded_once_and_not_chained(self, rig, monkeypatch):
-        monkeypatch.setattr(higgs3_module, "read_track", lambda *args: np.full((2, 10 * 48000), 0.1, dtype=np.float32))
+        monkeypatch.setattr(higgs3_takes, "read_track", lambda *args: np.full((2, 10 * 48000), 0.1, dtype=np.float32))
         rig.codec.waves.append(_tone(0.5))
 
         _generate(rig, _request(voice=VoiceRef("me.wav", "Hello, this is me.")))
@@ -384,7 +386,7 @@ class TestProgress:
 
         _, progress = _generate(rig, _request(PART_1))
 
-        expected = higgs3_module._estimate_part_frames(PART_1, 1500)
+        expected = estimate_part_frames(PART_1, 1500)
         speech = [args for args in progress if args[0] == "Speech tokens"]
         assert 0 < expected < 1500
         assert [total for _, _, total, *_ in speech[:-1]] == [expected] * (len(speech) - 1)
@@ -422,16 +424,16 @@ class TestProgress:
 
 class TestEstimate:
     def test_it_grows_with_the_length_of_the_text(self):
-        short, long = (higgs3_module._estimate_part_frames("a" * length, 1500) for length in (100, 400))
+        short, long = (estimate_part_frames("a" * length, 1500) for length in (100, 400))
 
         assert 0 < short < long < 1500
 
     def test_a_five_hundred_character_part_is_in_the_range_measured_on_real_takes(self):
-        assert 650 <= higgs3_module._estimate_part_frames("a" * 500, 1500) <= 800
+        assert 650 <= estimate_part_frames("a" * 500, 1500) <= 800
 
     def test_it_is_never_below_one_frame_or_above_the_cap(self):
-        assert higgs3_module._estimate_part_frames("", 1500) == 1
-        assert higgs3_module._estimate_part_frames("a" * 5000, 1500) == 1500
+        assert estimate_part_frames("", 1500) == 1
+        assert estimate_part_frames("a" * 5000, 1500) == 1500
 
 
 class TestStop:
@@ -443,7 +445,6 @@ class TestStop:
             _generate(rig, _request(THREE_PARTS), cancelled=lambda: len(rig.calls) >= 1)
 
         assert len(rig.calls) == 1
-        assert rig.backend._progress is None
 
     def test_stopping_before_the_first_part_generates_nothing(self, rig):
         with pytest.raises(AudioCancelled):
@@ -467,7 +468,6 @@ class TestStop:
         assert steps == [1, 10]  # frames 11 and 12 were counted but not reported, and the stop at frame 13 did not wait for frame 20
         assert rig.model.head_calls == 13
         assert rig.codec.decoded == []
-        assert rig.backend._progress is None
 
     def test_the_backend_makes_the_next_take_after_a_stop(self, rig):
         rig.model.takes[:] = [1000, 20]
@@ -545,7 +545,7 @@ class TestClose:
 
         assert made["model"]() is None
         assert made["codec"]() is None
-        assert backend._progress is None and backend._tokenizer is None and backend._ids is None
+        assert backend._tokenizer is None and backend._ids is None
 
     def test_close_frees_a_codec_held_by_the_conv_layer_cache(self, monkeypatch):
         # transformers' codec caches its conv layers in an lru_cache keyed by the codec itself.
