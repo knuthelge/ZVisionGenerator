@@ -31,6 +31,7 @@
   - Sound: type, space, perspective, suggested length.
 - Speech delivery pickers that add Higgs's tags.
 - Tempo and key for music, set through the score.
+- Keep the score with every song take, and show its sections, bars and lyric lines under the waveform in the viewer. In a test, section starts from the score, stretched to the take's length, landed within half a second of the heard ones.
 - Fewer stray voices in instrumentals, through the score.
 - Sound edits: variation, extend, redo a region, seamless loops.
 - Restyle a song, including an instrumental version of it.
