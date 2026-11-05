@@ -319,6 +319,7 @@ class TestVoice:
         monkeypatch.setattr(web_runner_module, "run_audio_batch", lambda *_a, **_k: None)
         monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: None)
         monkeypatch.setattr(web_runner_module, "require_ffmpeg", lambda: None)
+        monkeypatch.setattr(web_runner_module, "ensure_downloaded", lambda *_a, **_k: "ready")
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, job_log=log)
         try:
             job_id = runner.submit_audio_request_job(request=job["request"], preset=job["preset"], config=job["config"], runs=1, seed=None, output_dir=job["output_dir"], context=job["context"])
