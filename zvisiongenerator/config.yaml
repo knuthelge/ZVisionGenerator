@@ -596,7 +596,13 @@ audio_model_presets:
     settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
     platforms:
       cuda: { memory_gb: 8.2 }
-      mps: { memory_gb: 11.0 }
+      # On macOS mlx-audio runs the same checkpoint, with the codec read from it, so only the model repository is needed.
+      mps:
+        family: higgs3_mlx
+        files:
+          - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
+            files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
+        memory_gb: 11.1
   sa3:
     label: "Stable Audio 3 Medium"
     kind: sound

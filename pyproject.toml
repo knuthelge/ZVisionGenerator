@@ -52,6 +52,7 @@ dependencies = [
     "mlx-arsenal>=0.2.4,<0.3; sys_platform == 'darwin'",
     "mlx-lm>=0.32.0,<0.33; sys_platform == 'darwin'",
     "mlx-vlm==0.6.10; sys_platform == 'darwin'",
+    "mlx-audio==0.6.2; sys_platform == 'darwin'",
     "safetensors>=0.8.0",
     "tiktoken>=0.12.0",
     "tqdm>=4.66.0",

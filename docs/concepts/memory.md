@@ -86,7 +86,7 @@ The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux, and a Mac wit
     | Model | GPU memory | Measured at |
     |---|---|---|
     | YuE2 3B (`yue2`) | about 10.5 GiB | A take of the full 6:00 |
-    | Higgs TTS 3 4B (`higgs3`) | about 11.0 GiB | A text read in four parts |
+    | Higgs TTS 3 4B (`higgs3`) | about 11.1 GiB | A text read in four parts |
     | Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
 
 === "Windows and Linux"

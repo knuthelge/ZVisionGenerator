@@ -11,7 +11,7 @@ from tests.audio._helpers import preset
 from zvisiongenerator.utils.audio_memory import audio_memory_fit, memory_need_text, memory_warning_text
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 
-HIGGS3 = preset("higgs3")  # measured at 8.2 GiB on CUDA and 11.0 GiB on MPS
+HIGGS3 = preset("higgs3")  # measured at 8.2 GiB on CUDA and 11.1 GiB on a Mac
 
 
 def _card(gb: float) -> MemoryBudget:

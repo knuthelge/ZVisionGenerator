@@ -32,14 +32,16 @@ zvisiongenerator/
 │   │   ├── chain.py               The chain: BiRefNet mask, ViTMatte edge, foreground colours; loaded on the first cut-out, closed when the job ends
 │   │   ├── deform_conv.py         Modulated deformable convolution built from `grid_sample`, and the swap into BiRefNet
 │   │   └── vitmatte.py            Load ViTMatte and its image processor from a pinned snapshot
-│   ├── audio/                     Audio models on a torch device (CUDA or MPS), one backend module per family
+│   ├── audio/                     Audio models, one backend module per family: torch on CUDA or MPS, and Higgs on MLX on macOS
 │   │   ├── build_cancel.py        Check a Stop while a model is built
-│   │   ├── higgs3.py              Higgs TTS 3 backend: long text read in parts and joined, an optional voice to follow
+│   │   ├── higgs3.py              Higgs TTS 3 on torch: our network and transformers' codec as the engine of `higgs3_takes`
 │   │   ├── higgs3_codes.py        The delay pattern, the sampler and the rule that ends a take (pure torch)
 │   │   ├── higgs3_config.py       Read the official config.json into the numbers the model needs (no torch)
 │   │   ├── higgs3_generate.py     The generation loop: one prompt in, the codes of one take out, with a callback per frame
+│   │   ├── higgs3_mlx.py          Higgs TTS 3 on MLX (macOS): mlx-audio's model run frame by frame as the engine of `higgs3_takes`
 │   │   ├── higgs3_model.py        The network (Qwen3 backbone, fused codebook embedding and head) and its strict weight loader
 │   │   ├── higgs3_prompt.py       The tokenizer and the prompt, with the reference voice's slots
+│   │   ├── higgs3_takes.py        A Higgs take on any engine: text in parts, one voice throughout, frame progress and Stop, the join
 │   │   ├── sa3.py                 Stable Audio 3 Medium: built in fp16 and filled tensor by tensor, with the output kept from before the library's clamp
 │   │   ├── yue2.py                YuE2: the vendored kit run stage by stage, with song or instrumental from the Lyrics
 │   │   ├── yue2_load.py           Stream YuE2's weights in tensor by tensor
