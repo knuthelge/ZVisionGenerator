@@ -2,9 +2,9 @@
 
 A preset is one audio model, keyed by its model id (``-m yue2``). It names what the model is (``kind``), the backend
 family and the pinned files it runs from, its own ceilings (``limits``) and its model knobs (``settings``); a
-``platforms`` entry per accelerator (``cuda``, ``mps``) overrides settings and records the measured memory peak. What a
-model can do follows from its kind: music takes lyrics, sound takes a length, speech follows a voice. The functions here
-are pure: they read a config ``dict`` and do no I/O.
+``platforms`` entry per accelerator (``cuda``, ``mps``) overrides settings, records the measured memory peak, and may name
+its own backend family and files. What a model can do follows from its kind: music takes lyrics, sound takes a length,
+speech follows a voice. The functions here are pure: they read a config ``dict`` and do no I/O.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -88,10 +88,14 @@ class AudioPlatform:
     Attributes:
         memory_gb: The GPU memory the model peaked at when measured on this platform, in GiB, or ``None`` while unmeasured.
         settings: The settings this platform overrides; see :meth:`AudioPreset.settings_for`.
+        family: The backend family this platform runs the model with, or ``None`` for the preset's own.
+        files: The pinned files this platform downloads instead of the preset's, or ``None`` for the preset's own.
     """
 
     memory_gb: float | None = None
     settings: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    family: str | None = None
+    files: tuple[AudioFiles, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +141,13 @@ class AudioPreset:
         """Return the settings that apply on *platform_key* (``cuda`` or ``mps``): the shared ones, overridden by the platform's."""
         override = self.platforms[platform_key].settings if platform_key in self.platforms else {}
         return {**copy.deepcopy(dict(self.settings)), **copy.deepcopy(dict(override))}
+
+    def on_platform(self, platform_key: str) -> AudioPreset:
+        """Return this preset as *platform_key* (``cuda`` or ``mps``) runs it: with that platform's ``family`` and ``files`` when it names them."""
+        platform = self.platforms.get(platform_key)
+        if platform is None or (platform.family is None and platform.files is None):
+            return self
+        return replace(self, family=platform.family or self.family, files=platform.files or self.files)
 
     def memory_gb_for(self, platform_key: str) -> float | None:
         """Return the GPU peak measured on *platform_key* in GiB, or ``None`` while unmeasured there."""
@@ -258,13 +269,15 @@ def _platforms(value: object, where: str) -> Mapping[str, AudioPlatform]:
 
 
 def _platform(value: object, where: str) -> AudioPlatform:
-    """Parse one platform entry: the measured ``memory_gb`` peak and the ``settings`` it overrides, each optional."""
+    """Parse one platform entry: the measured ``memory_gb`` peak, the ``settings`` it overrides, and its own ``family`` and ``files``, each optional."""
     entry = _mapping(value, where)
-    _only_keys(entry, ("memory_gb", "settings"), where)
+    _only_keys(entry, ("memory_gb", "settings", "family", "files"), where)
     memory = entry.get("memory_gb")
     return AudioPlatform(
         memory_gb=None if memory is None else float(_number(memory, f"{where}.memory_gb")),
         settings=_settings(entry.get("settings"), f"{where}.settings"),
+        family=None if entry.get("family") is None else _text(entry["family"], f"{where}.family"),
+        files=None if entry.get("files") is None else _file_list(entry["files"], f"{where}.files"),
     )
 
 

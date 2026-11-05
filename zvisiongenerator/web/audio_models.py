@@ -42,21 +42,21 @@ def _platform_key() -> str:
 def runnable_audio_models(config: Mapping[str, Any]) -> tuple[AudioPreset, ...]:
     """Return the configured audio presets, in config order; a machine with neither CUDA nor MPS runs none."""
     try:
-        _platform_key()
+        platform_key = _platform_key()
     except ValueError:
         return ()
-    return parse_audio_presets(config)
+    return tuple(preset.on_platform(platform_key) for preset in parse_audio_presets(config))
 
 
 def find_audio_model(config: Mapping[str, Any], model: str | None) -> AudioPreset:
-    """Return the audio preset *model* names.
+    """Return the audio preset *model* names, as this machine runs it.
 
     Raises:
         ValueError: If this machine runs no audio models, *model* is ``None`` (a form without its ``model`` field), or it
             names no preset; the message lists the ids.
     """
-    _platform_key()
-    return find_audio_preset(config, model, missing="Field 'model' is required")
+    platform_key = _platform_key()
+    return find_audio_preset(config, model, missing="Field 'model' is required").on_platform(platform_key)
 
 
 def audio_rows(
@@ -78,7 +78,7 @@ def audio_rows(
     present = target_present or target_present_offline
     licences = load_licences()
     rows = []
-    for preset in parse_audio_presets(config):
+    for preset in (item.on_platform(platform_key) for item in parse_audio_presets(config)):
         shared = {"label": preset.label, "kind": preset.kind, "licences": licence_payload(licences, preset.id), **_status(preset, platform_key, budget, present)}
         rows.append({**shared, **fields(preset, shared)})
     return rows

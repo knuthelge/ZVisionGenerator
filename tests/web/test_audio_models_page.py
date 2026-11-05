@@ -328,7 +328,7 @@ class TestDeleteRoute:
 
 
 class TestCacheListing:
-    def test_the_repositories_of_every_preset_are_used_on_every_platform(self):
+    def test_the_repositories_of_every_preset_are_used(self, env):
         used = audio_repo_ids(audio_config())
 
         assert {"m-a-p/YuE2-3B", "m-a-p/YuE2-Vae", "bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer", "Comfy-Org/stable-audio-3"} <= used

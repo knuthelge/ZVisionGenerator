@@ -558,7 +558,8 @@ video_model_presets:
 
 # Audio models (music, speech, sound), keyed by model id. Each preset has a label, a kind (music | speech | sound),
 # the backend family, the pinned files to download, limits and settings. A platforms entry (cuda | mps) overrides settings
-# for that accelerator and records the GPU memory peak measured on it (memory_gb; leave it out while unmeasured).
+# for that accelerator, may name its own family and files, and records the GPU memory peak measured on it (memory_gb;
+# leave it out while unmeasured).
 # docs/concepts/configuration.md describes every key.
 audio_model_presets:
   yue2:
