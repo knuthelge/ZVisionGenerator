@@ -61,8 +61,8 @@ def fake_backend(*clips: AudioClip, events: list | None = None) -> MagicMock:
     return backend
 
 
-def patch_runner(monkeypatch, backend: Any, *, present: bool = True) -> SimpleNamespace:
-    """Patch the runner's surroundings: this machine is CUDA, the backend is *backend*, the model's files are on disk (*present*).
+def patch_runner(monkeypatch, backend: Any, *, present: bool = True, platform: str = "cuda") -> SimpleNamespace:
+    """Patch the runner's surroundings: this machine is *platform*, the backend is *backend*, the model's files are on disk (*present*).
 
     Returns the patched enhancer session and accelerator-memory release mocks.
     """
@@ -70,8 +70,8 @@ def patch_runner(monkeypatch, backend: Any, *, present: bool = True) -> SimpleNa
 
     session = MagicMock()
     release = MagicMock()
-    monkeypatch.setattr(audio_cli, "audio_platform_key", lambda: "cuda")
-    monkeypatch.setattr(audio_runner, "audio_platform_key", lambda: "cuda")
+    monkeypatch.setattr(audio_cli, "audio_platform_key", lambda: platform)
+    monkeypatch.setattr(audio_runner, "audio_platform_key", lambda: platform)
     monkeypatch.setattr(audio_runner, "get_audio_backend", MagicMock(return_value=backend))
     monkeypatch.setattr(audio_runner, "target_present_offline", lambda target: present)
     monkeypatch.setattr(audio_runner, "prompt_enhancer_session", session)

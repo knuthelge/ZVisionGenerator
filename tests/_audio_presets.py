@@ -73,7 +73,7 @@ def higgs3_preset() -> dict[str, Any]:
         "files": higgs3_files(),
         "limits": {"max_new_tokens": 1500, "part_chars": 500, "max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30},
         "settings": {"temperature": 0.7, "top_p": 0.95, "join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, "edge_silence_max_ms": 150},
-        "platforms": {"cuda": {"memory_gb": 8.2}, "mps": {"memory_gb": 11.0}},
+        "platforms": {"cuda": {"memory_gb": 8.2}, "mps": {"family": "higgs3_mlx", "files": higgs3_files()[:1], "memory_gb": 11.1}},
     }
 
 

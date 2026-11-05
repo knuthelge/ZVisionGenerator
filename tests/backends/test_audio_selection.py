@@ -12,8 +12,12 @@ from zvisiongenerator.backends import audio_platform_key, get_audio_backend
 class TestFamilies:
     @pytest.mark.parametrize("family", ["ace_step", ""])
     def test_a_family_without_a_backend_is_refused_with_the_known_ones(self, family):
-        with pytest.raises(RuntimeError, match=r"No audio backend for model family '.*'\. Known: \['yue2', 'higgs3', 'stable_audio_3'\]"):
+        with pytest.raises(RuntimeError, match=r"No audio backend for model family '.*'\. Known: \['yue2', 'higgs3', 'higgs3_mlx', 'stable_audio_3'\]"):
             get_audio_backend(family)
+
+    @pytest.mark.parametrize(("family", "name"), [("higgs3", "Higgs3Backend"), ("higgs3_mlx", "Higgs3MlxBackend")])
+    def test_each_higgs_family_has_its_own_backend(self, family, name):
+        assert type(get_audio_backend(family)).__name__ == name
 
 
 class TestPlatform:
