@@ -344,6 +344,7 @@ def create_matte_chain() -> "MatteChain":
 _AUDIO_BACKENDS: Final = {
     "yue2": ("zvisiongenerator.backends.audio.yue2", "YuE2Backend"),
     "higgs3": ("zvisiongenerator.backends.audio.higgs3", "Higgs3Backend"),
+    "higgs3_mlx": ("zvisiongenerator.backends.audio.higgs3_mlx", "Higgs3MlxBackend"),
     "stable_audio_3": ("zvisiongenerator.backends.audio.sa3", "StableAudio3Backend"),
 }
 """The module and class of each audio model family's backend, imported only when the family is used."""
@@ -366,7 +367,7 @@ def get_audio_backend(family: str) -> "AudioBackend":
     """Create the audio backend of a model family.
 
     Args:
-        family: The ``family`` a preset names: ``yue2``, ``higgs3`` or ``stable_audio_3``.
+        family: The ``family`` a preset names for this platform: ``yue2``, ``higgs3``, ``higgs3_mlx`` or ``stable_audio_3``.
 
     Returns:
         A new backend; the caller loads it and closes it.

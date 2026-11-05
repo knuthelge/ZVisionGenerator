@@ -86,7 +86,7 @@ def run_audio_batch(
 
     Args:
         request: The take to make; its ``seed`` is replaced per take.
-        preset: The audio model of *request*.
+        preset: The audio model of *request*, as this machine runs it (``AudioPreset.on_platform``).
         config: The loaded config (seed bounds).
         runs: How many takes to make.
         seed: The seed of every take, or ``None`` to draw one per take.

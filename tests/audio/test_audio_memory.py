@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from tests.audio._helpers import preset
@@ -9,7 +11,7 @@ from tests.audio._helpers import preset
 from zvisiongenerator.utils.audio_memory import audio_memory_fit, memory_need_text, memory_warning_text
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 
-HIGGS3 = preset("higgs3")  # measured at 8.2 GiB on CUDA, unmeasured on MPS
+HIGGS3 = preset("higgs3")  # measured at 8.2 GiB on CUDA and 11.1 GiB on a Mac
 
 
 def _card(gb: float) -> MemoryBudget:
@@ -24,7 +26,9 @@ class TestFit:
         assert fit == {"status": status, "required_gb": 8.2, "budget_gb": round(card_gb, 1), "kind": "discrete"}
 
     def test_a_model_without_a_measured_peak_or_a_machine_without_a_budget_has_no_fit(self):
-        assert audio_memory_fit(HIGGS3, "mps", MemoryBudget(16 * GIB)) is None
+        unmeasured = dataclasses.replace(HIGGS3, platforms={key: value for key, value in HIGGS3.platforms.items() if key != "mps"})
+
+        assert audio_memory_fit(unmeasured, "mps", MemoryBudget(16 * GIB)) is None
         assert audio_memory_fit(HIGGS3, "cuda", None) is None
 
 

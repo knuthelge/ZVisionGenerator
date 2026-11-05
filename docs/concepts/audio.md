@@ -10,7 +10,7 @@ The app makes music, speech and sound on your own computer. There are three kind
 
 In the [Web UI](../web-ui/workspace.md#the-audio-tab) they are the **Audio** tab; in the [CLI](../cli/audio.md) they are `ziv audio`. Every take is saved as a [FLAC file](#takes-and-files) that you can play in the [Gallery](../web-ui/gallery.md#audio), reuse, or give to a video as its [audio track](video.md#audio-track).
 
-The models run on Windows and Linux with an NVIDIA GPU (10 GB is enough) and are intended to run on macOS with Apple silicon, where they have not been measured. See [Memory](memory.md#audio). Each model downloads the first time you use it. None of the three is free for every use: read the terms in [Licences](models.md#licences) before you use the output.
+The models run on Windows and Linux with an NVIDIA GPU (10 GB is enough) and on macOS with Apple silicon (32 GB of unified memory is enough). See [Memory](memory.md#audio). Each model downloads the first time you use it. None of the three is free for every use: read the terms in [Licences](models.md#licences) before you use the output.
 
 ## Music
 

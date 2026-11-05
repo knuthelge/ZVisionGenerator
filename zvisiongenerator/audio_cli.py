@@ -192,6 +192,7 @@ def main(*, prog: str = "ziv-audio") -> None:
         platform_key = audio_platform_key()
     except RuntimeError as e:
         parser.error(str(e))
+    preset = preset.on_platform(platform_key)
     prompt = (args.prompt or "").strip()
     if not prompt:
         parser.error(_PROMPT_HELP[preset.kind])

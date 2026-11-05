@@ -97,7 +97,9 @@ class TestPlatformSettings:
         assert not [preset.id for preset in presets if {"weight_swap", "codec_device"} & set(preset.settings)]
 
     def test_the_memory_peak_belongs_to_the_platform_it_was_measured_on(self):
-        (yue2,) = parse_audio_presets(audio_config(yue2=yue2_preset()))
+        preset = yue2_preset()
+        del preset["platforms"]["mps"]
+        (yue2,) = parse_audio_presets(audio_config(yue2=preset))
 
         assert yue2.memory_gb_for("cuda") == 6.7
         assert yue2.memory_gb_for("mps") is None
@@ -109,6 +111,23 @@ class TestPlatformSettings:
 
         assert sa3.settings_for("mps") == dict(sa3.settings)
         assert sa3.memory_gb_for("cuda") is None
+
+
+class TestPlatformBackend:
+    MAC_FILES = [{"repo": "m-a-p/YuE2-3B@" + "a" * 40, "files": ["model.safetensors"]}]
+
+    def test_a_platform_runs_its_own_family_and_files(self):
+        (yue2,) = _parse_one(platforms={"mps": {"family": "yue2_mlx", "files": self.MAC_FILES}})
+
+        mac = yue2.on_platform("mps")
+
+        assert (mac.family, [f.patterns for f in mac.files]) == ("yue2_mlx", [("model.safetensors",)])
+        assert yue2.on_platform("cuda") == yue2
+
+    def test_a_platform_that_names_only_its_family_keeps_the_presets_files(self):
+        (yue2,) = _parse_one(platforms={"mps": {"family": "yue2_mlx"}})
+
+        assert (yue2.on_platform("mps").family, yue2.on_platform("mps").files) == ("yue2_mlx", yue2.files)
 
 
 class TestParseOnce:
@@ -140,8 +159,16 @@ class TestRefusals:
             _parse_one(platforms={"rocm": {}})
 
     def test_a_platform_key_that_is_not_an_override(self):
-        with pytest.raises(ValueError, match="platforms.cuda.files is not a known key"):
-            _parse_one(platforms={"cuda": {"files": []}})
+        with pytest.raises(ValueError, match="platforms.cuda.label is not a known key"):
+            _parse_one(platforms={"cuda": {"label": "YuE2 on CUDA"}})
+
+    def test_a_platform_with_an_empty_file_list(self):
+        with pytest.raises(ValueError, match="platforms.mps.files must be a non-empty list"):
+            _parse_one(platforms={"mps": {"files": []}})
+
+    def test_a_platform_file_that_is_not_pinned(self):
+        with pytest.raises(ValueError, match="platforms.mps.files\\[0\\].repo must be pinned"):
+            _parse_one(platforms={"mps": {"files": [{"repo": "m-a-p/YuE2-3B", "files": ["config.json"]}]}})
 
     def test_a_music_model_without_max_seconds(self):
         with pytest.raises(ValueError, match="limits.max_seconds is required for a music model"):

@@ -10,6 +10,7 @@ streamed in tensor by tensor (see :mod:`yue2_load`) and the acoustic part runs i
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
@@ -17,6 +18,7 @@ import numpy as np
 from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.backends.audio.build_cancel import stop_while_building
 from zvisiongenerator.backends.audio.yue2_load import load_model, size_checked_weights
+from zvisiongenerator.backends.audio.yue2_mps import folded_decode_attention, semantic_head
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
 from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled, raise_if_cancelled
 from zvisiongenerator.core.audio_types import AudioClip
@@ -38,6 +40,9 @@ _TOKENS_PER_SECOND: Final = 25
 
 _TOKEN_STRIDE: Final = 10
 """Report every this many tokens, so a long song does not flood the progress callback."""
+
+_MPS_NAR_QUERY_TILE: Final = 1024
+"""Query rows per attention call in the acoustic stage on MPS; the kit's 256 is slower there and the result is the same."""
 
 
 class _CancelProbe:
@@ -157,22 +162,25 @@ class YuE2Backend:
         if swap is not None:
             swap.phase("ar")
         on_progress("Plan", 0, None, 1, 1)
-        plan = pipe.plan(
-            style,
-            lyrics,
-            cot=cot,
-            seed=seed,
-            cfg_scale=settings["cfg"],
-            abc_sampling={"max_tokens": settings["abc_max_tokens"]},
-            cancelled=stop,
-            on_token=_count_tokens("Plan", on_progress),
-        )
+        mps = self._device == "mps"  # the exact MPS speed-ups: folded attention for both token phases, the song-token head for the song
+        with folded_decode_attention() if mps else nullcontext():
+            plan = pipe.plan(
+                style,
+                lyrics,
+                cot=cot,
+                seed=seed,
+                cfg_scale=settings["cfg"],
+                abc_sampling={"max_tokens": settings["abc_max_tokens"]},
+                cancelled=stop,
+                on_token=_count_tokens("Plan", on_progress),
+            )
         on_progress("Plan", len(plan.abc_ids), None, 1, 1)
         on_progress("Song tokens", 0, None, 1, 1)
         cap = {"max_tokens": int(round(_TOKENS_PER_SECOND * self._max_seconds))}
-        semantic = pipe.generate_semantic(plan, sampling=cap, cancelled=stop, on_token=_count_tokens("Song tokens", on_progress))
+        with folded_decode_attention() if mps else nullcontext(), semantic_head(pipe._model) if mps else nullcontext():
+            semantic = pipe.generate_semantic(plan, sampling=cap, cancelled=stop, on_token=_count_tokens("Song tokens", on_progress))
         on_progress("Song tokens", len(semantic.tokens), None, 1, 1)
-        latents = _synthesize(pipe, swap, semantic, on_progress, stop)
+        latents = _synthesize(pipe, swap, semantic, on_progress, stop, query_tile=_MPS_NAR_QUERY_TILE if mps else None)
         stop.raise_if_requested()
         on_progress(DECODE_PHASE, 0, 1, 1, 1)
         if swap is not None:
@@ -198,10 +206,11 @@ def _count_tokens(label: str, on_progress: ProgressCallback) -> Callable[[str, i
     return on_token
 
 
-def _synthesize(pipe: Any, swap: WeightSwap | None, semantic: Any, on_progress: ProgressCallback, stop: _CancelProbe) -> Any:
+def _synthesize(pipe: Any, swap: WeightSwap | None, semantic: Any, on_progress: ProgressCallback, stop: _CancelProbe, *, query_tile: int | None = None) -> Any:
     """Run the kit's ``synthesize`` loop chunk by chunk, reporting every ODE step; return the latents.
 
-    With a *swap*, the prefill and the ODE solve each run in their own swap phase.
+    With a *swap*, the prefill and the ODE solve each run in their own swap phase. *query_tile* is the query rows per
+    attention call, or ``None`` for the kit's default.
     """
     import torch
 
@@ -219,7 +228,7 @@ def _synthesize(pipe: Any, swap: WeightSwap | None, semantic: Any, on_progress: 
             stop.raise_if_requested()
             if swap is not None:
                 swap.phase("prefill")
-            engine = CachedNAR(model, chunk, "sdpa", None)
+            engine = CachedNAR(model, chunk, "sdpa", query_tile)
             try:
                 if swap is not None:
                     swap.phase("ode")

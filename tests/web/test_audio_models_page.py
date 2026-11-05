@@ -328,7 +328,7 @@ class TestDeleteRoute:
 
 
 class TestCacheListing:
-    def test_the_repositories_of_every_preset_are_used_on_every_platform(self):
+    def test_the_repositories_of_every_preset_are_used(self, env):
         used = audio_repo_ids(audio_config())
 
         assert {"m-a-p/YuE2-3B", "m-a-p/YuE2-Vae", "bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer", "Comfy-Org/stable-audio-3"} <= used
@@ -343,3 +343,40 @@ class TestCacheListing:
         unused = workspace_api_module.find_other_downloads(web_config, cache_dir=env.hub)
 
         assert [repo.repo_id for repo in unused] == ["org/unused"]
+
+
+class TestOnAMac:
+    """On a Mac, Higgs runs on its ``mps`` entry: its own family and the model repository only."""
+
+    @pytest.fixture
+    def mac(self, env, monkeypatch):
+        monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: "mps")
+        return env
+
+    def test_the_download_plan_is_the_model_repository_only(self, mac):
+        targets = row_plan("audio", "higgs3", _web_config(mac)).targets
+
+        assert [target.repo_id for target in targets] == ["bosonai/higgs-tts-3-4b"]
+
+    def test_the_row_is_downloaded_with_the_model_repository_alone(self, mac):
+        row = _rows(mac, target_present=lambda target: target.repo_id == "bosonai/higgs-tts-3-4b")["higgs3"]
+
+        assert (row["downloaded"], row["download_needed"]) == (True, False)
+
+    def test_deleting_it_removes_the_model_repository_only(self, mac, monkeypatch):
+        for repo in (HIGGS_REPO, HIGGS_CODEC_REPO):
+            _cache(mac.hub, repo.split("@")[0])
+        web_config = _web_config(mac)
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+
+        with TestClient(web_server.app) as client:
+            assert client.delete("/api/audio-models/higgs3").status_code == 200
+
+        assert not (mac.hub / "models--bosonai--higgs-tts-3-4b").exists()
+        assert (mac.hub / "models--bosonai--higgs-audio-v2-tokenizer").is_dir()
+
+    def test_a_codec_repository_the_mac_does_not_load_is_offered_as_unused(self, mac):
+        used = audio_repo_ids(audio_config())
+
+        assert "bosonai/higgs-tts-3-4b" in used and "bosonai/higgs-audio-v2-tokenizer" not in used

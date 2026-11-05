@@ -387,3 +387,32 @@ def test_the_package_imports_against_the_installed_libraries() -> None:
     importlib.import_module("yue2.modeling_vae")
     assert package.YuE2Pipeline is pipeline.YuE2Pipeline
     assert nar.CachedNAR and nar.Chunk and protocol.CODEC_OFFSET and protocol.MUSIC_END and protocol.CONTEXT
+
+
+def test_attention_calls_the_module_level_sdpa_the_mps_fold_replaces() -> None:
+    """``yue2_mps.folded_decode_attention`` swaps ``modeling_yue2.sdpa``; the layers must look it up by that name."""
+    modeling = _tree("modeling_yue2.py")
+    sdpa = _function(modeling, "sdpa")
+    assert list(_parameters(sdpa)) == ["query", "key", "value", "attn_mask", "is_causal"]
+    assert _keyword_only(sdpa) == ["attn_mask", "is_causal"]
+    forward = _function(_class(modeling, "Attention"), "forward")
+    assert "sdpa" in _call_sources(forward)
+
+
+def test_the_causal_lm_computes_its_logits_through_the_lm_head_attribute() -> None:
+    """``yue2_mps.semantic_head`` replaces ``model.lm_head`` for the song tokens."""
+    forward = _function(_class(_tree("modeling_yue2.py"), "YuE2ForCausalLM"), "forward")
+    assert "self.lm_head" in _call_sources(forward)
+
+
+def test_the_song_phase_samples_only_the_rows_the_mps_head_computes() -> None:
+    """``yue2_mps.semantic_head`` computes codec tokens and the end of music only; the kit's song phase must allow exactly those."""
+    import torch
+    from yue2.protocol import CODEC_OFFSET, CODEC_SIZE, MUSIC_END, Sampling
+    from yue2.sampling import distribution
+
+    sampling = Sampling(temperature=0, top_p=1.0, top_k=10**6, repetition_penalty=1.0, penalty_window=50, min_tokens=0, max_tokens=1)
+    scores = distribution(torch.zeros(1, CODEC_OFFSET + CODEC_SIZE), sampling, [], 10_000, "semantic")
+
+    allowed = torch.isfinite(scores[0]).nonzero().flatten().tolist()
+    assert allowed == [MUSIC_END, *range(CODEC_OFFSET, CODEC_OFFSET + CODEC_SIZE)]

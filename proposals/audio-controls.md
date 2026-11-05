@@ -4,7 +4,7 @@
 
 ## Idea
 
-[The Audio tab](audio-generation.md) gives each kind one or two text boxes and nothing to steer the result. Images and video have the prompt enhancer, with options like Style and Mood. Audio could get the same, plus controls and edits. Which of these to support is still to be decided.
+[The Audio tab](archive/audio-generation.md) gives each kind one or two text boxes and nothing to steer the result. Images and video have the prompt enhancer, with options like Style and Mood. Audio could get the same, plus controls and edits. Which of these to support is still to be decided.
 
 ## Findings
 
@@ -20,6 +20,14 @@
   - Stable Audio ignores negative prompts.
   - YuE2 can't extend a song or redo one section.
   - Higgs can't design a voice from a description or voice several speakers.
+- **Faster speech models with open licences run on MLX through mlx-audio (MIT),** which the Mac already installs for Higgs TTS 3. On Windows and Linux each would need its own torch path. None has been timed or heard here.
+  - Qwen3-TTS (Apache-2.0): 0.6B and 1.7B models for cloning from 3 s, nine built-in voices with emotion instructions, and voice design from a description; 10 languages.
+  - VoxCPM2 (Apache-2.0): voice design and cloning in 30 languages. It lost 3–4 to Higgs in the earlier blind test.
+  - Ming-3.0 TTS (MIT): a 0.5B model with cloning, built-in voices and voice design, reported as about real time on an M4 Pro; a larger "tiny" model adds a two-speaker podcast mode.
+  - Dia 1.6B (Apache-2.0): English dialogue with `[S1]`/`[S2]` turns.
+  - Chatterbox multilingual (MIT, 23 languages) and Kokoro-82M (Apache-2.0, 54 built-in voices, no cloning) are small and fast.
+- **MiniMax Music 3 is the one other song model in mlx-audio:** an 8B model with section tags, up to 6 minutes, stereo at 44.1 kHz. Its community licence allows commercial use with conditions, unlike YuE2's CC BY-NC. MiniMax's card names CUDA only; the MLX port is young, its 4-bit copy is 9.2 GB, and its speed and quality on a Mac are unknown.
+- **mlx-audio has no sound-effects model** that fits 32 GB and no multi-stem separator (only vocals against the rest, from a converted checkpoint).
 - **Ruled out by licence:** MMAudio, HunyuanVideo-Foley and the LTX Foley LoRA for video sound, and SheetSage2 for covers of outside songs.
 - **Others:** Suno, Udio and ElevenLabs offer AI lyric writing, tempo and key in the style, auto-tagging of speech, voice design from a description, extend, inpaint and stems.
 
@@ -38,6 +46,7 @@
 - Even loudness across takes.
 - Voice design from a description (VoxCPM2, Apache-2.0), read by Higgs.
 - Dialogue scripts with a voice per speaker.
+- A faster speech model beside Higgs, and a song model with a commercial-friendly licence (MiniMax Music 3), both on the Mac first.
 - Transcribe a voice recording automatically.
 - Clean a noisy voice recording.
 - Split a song into vocals and instrumental (Demucs, MIT).

@@ -19,5 +19,5 @@ In a test session making a music video and short films with the CLI, `openai/whi
 ## Open
 
 - Model size: `whisper-small` on the CPU, or `large-v3-turbo` (809M) on the GPU through the job queue.
-- macOS: the same `transformers` model on the CPU or MPS.
+- macOS: the same `transformers` model on the CPU or MPS, or Whisper large-v3-turbo on MLX through mlx-audio (MIT), which the Mac already installs for Higgs TTS 3. mlx-audio also runs Parakeet TDT v3 (CC-BY-4.0). Neither has been timed here.
 - Related: "Transcribe a voice recording automatically" in [Audio, the next round](audio-controls.md) is item 1 here.

@@ -12,7 +12,7 @@ Several built-in models come with terms a user has to follow, and the app says s
 
 The moment a user takes on these terms is the download, and that moment is also unannounced in most of the app: the Models page asks before downloading (`downloads.svelte.ts:258-288`), but **Generate downloads whatever the job is missing without asking** (`web_runner._ensure_downloads`, `web/web_runner.py:1020`), which can be 35–107 GB. The only warning is a help line in the model popover (`SettingPopover.svelte:292`).
 
-The audio models ([audio-generation](../audio-generation.md)) add three more licences.
+The audio models ([audio-generation](audio-generation.md)) add three more licences.
 
 ## What the user sees
 

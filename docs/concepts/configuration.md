@@ -196,6 +196,7 @@ audio_model_presets:
       fade_seconds: 2
     platforms:
       cuda: { memory_gb: 6.7 }
+      mps: { memory_gb: 10.5 }
   higgs3:
     label: "Higgs TTS 3 4B"
     kind: speech
@@ -209,6 +210,12 @@ audio_model_presets:
     settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
     platforms:
       cuda: { memory_gb: 8.2 }
+      mps:
+        family: higgs3_mlx
+        files:
+          - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
+            files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
+        memory_gb: 11.1
   sa3:
     label: "Stable Audio 3 Medium"
     kind: sound
@@ -224,17 +231,18 @@ audio_model_presets:
     settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
     platforms:
       cuda: { memory_gb: 6.1 }
+      mps: { memory_gb: 6.1 }
 ```
 
 | Key | Required | Description |
 |---|---|---|
 | `label` | yes | The name the Web UI shows |
 | `kind` | yes | `music`, `speech` or `sound`. The kind decides what the model takes: music takes lyrics, sound takes a length, speech follows a voice recording |
-| `family` | yes | Which engine runs the model: `yue2`, `higgs3` or `stable_audio_3` |
+| `family` | yes | Which engine runs the model: `yue2`, `higgs3` (torch), `higgs3_mlx` (MLX, macOS only) or `stable_audio_3` |
 | `files` | yes | The downloads. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch |
 | `limits` | yes | The model's own ceilings: `max_seconds` for music and sound; for speech `max_new_tokens`, `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
 | `settings` | no | The model's own settings, such as `temperature` or `ode_steps` |
-| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator: `settings` that win over the entry's, and `memory_gb`, the GPU memory the model peaked at in GiB. Leave `memory_gb` out while it is unmeasured; the Web UI then shows no memory badge |
+| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator: `settings` that win over the entry's; `family` and `files`, which replace the entry's there (`higgs3` runs on MLX on a Mac and downloads only the model repository); and `memory_gb`, the GPU memory the model peaked at in GiB. Leave `memory_gb` out while it is unmeasured; the Web UI then shows no memory badge |
 
 The app refuses to start when a required key or limit is missing, when `kind` is unknown, or when a `repo` is not pinned to a commit.
 

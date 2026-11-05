@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 import gc
 import weakref
+from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -302,6 +303,9 @@ def kit(monkeypatch, pinned):
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
     _FakeNar.pipe, _FakeNar.instances = state.pipe, state.nars
     monkeypatch.setattr("yue2.nar.CachedNAR", _FakeNar)
+    # The MPS speed-ups need real weights; TestMpsSpeedups records them instead.
+    monkeypatch.setattr(yue2_module, "folded_decode_attention", nullcontext)
+    monkeypatch.setattr(yue2_module, "semantic_head", lambda model: nullcontext())
     return state
 
 
@@ -632,6 +636,44 @@ class TestGenerate:
 
 
 # ---- stop ---------------------------------------------------------------------------------------------------------
+
+
+class TestMpsSpeedups:
+    @pytest.fixture
+    def speedups(self, kit, monkeypatch):
+        """Record entering and leaving each speed-up among the pipeline's stages."""
+
+        def recorder(name):
+            @contextmanager
+            def speedup(*args):
+                kit.pipe.events.append((f"{name}+", frozenset(), args == (kit.pipe._model,) if args else False))
+                yield
+                kit.pipe.events.append((f"{name}-", frozenset(), False))
+
+            return speedup
+
+        monkeypatch.setattr(yue2_module, "folded_decode_attention", recorder("fold"))
+        monkeypatch.setattr(yue2_module, "semantic_head", recorder("head"))
+        return kit
+
+    def test_on_mps_both_token_phases_fold_and_only_the_song_phase_narrows_the_head(self, speedups):
+        _loaded("mps").generate(_request(), MagicMock(), _never_cancelled)
+
+        stages = [stage for stage, _, _ in speedups.pipe.events if stage in {"fold+", "fold-", "head+", "head-", "plan", "semantic", "prefill", "decode"}]
+        assert stages[:9] == ["fold+", "plan", "fold-", "fold+", "head+", "semantic", "head-", "fold-", "prefill"]
+        head_on_the_pipeline_model = next(on_model for stage, _, on_model in speedups.pipe.events if stage == "head+")
+        assert head_on_the_pipeline_model
+
+    def test_on_mps_the_acoustic_stage_attends_1024_queries_at_a_time(self, speedups):
+        _loaded("mps").generate(_request(), MagicMock(), _never_cancelled)
+
+        assert {nar.args for nar in speedups.nars} == {("sdpa", 1024)}
+
+    def test_on_cuda_the_kit_runs_unchanged(self, speedups):
+        _loaded().generate(_request(), MagicMock(), _never_cancelled)
+
+        assert not {stage for stage, _, _ in speedups.pipe.events} & {"fold+", "head+"}
+        assert {nar.args for nar in speedups.nars} == {("sdpa", None)}
 
 
 class TestCancel:

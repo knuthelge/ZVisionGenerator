@@ -409,6 +409,22 @@ class TestFailures:
         assert "bosonai/higgs-tts-3-4b" in refuses(monkeypatch, capsys, "-m", "higgs3", "--prompt", "x", "-o", str(env.out))
 
 
+class TestOnAMac:
+    """On a Mac, Higgs runs as its ``mps`` entry names it: the MLX backend, and only the model repository to download."""
+
+    def test_higgs_downloads_the_model_repository_only_and_runs_on_mlx(self, env, monkeypatch):
+        from zvisiongenerator import audio_runner
+
+        patch_runner(monkeypatch, env.backend, platform="mps")
+        monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: False)
+
+        make(env, "-m", "higgs3", "--prompt", "Hello there.", monkeypatch=monkeypatch)
+
+        assert [target.repo_id for target in env.ensure.call_args.args[0]] == ["bosonai/higgs-tts-3-4b"]
+        audio_runner.get_audio_backend.assert_called_once_with("higgs3_mlx")
+        assert env.backend.load.call_args.args[0].family == "higgs3_mlx"
+
+
 class TestCopyCli:
     """The command Copy CLI builds (``frontend/src/lib/state/cliCommand.ts``, same fixture in its Vitest) makes the job the form would."""
 

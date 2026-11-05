@@ -7,19 +7,19 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
+from zvisiongenerator.utils.audio_preset import AudioPreset
 from zvisiongenerator.utils.hf_cache import repo_disk_bytes
 from zvisiongenerator.utils.model_files import disk_size_label, huggingface_cache_repo_dir
 from zvisiongenerator.utils.model_memory import MemoryBudget
-from zvisiongenerator.web.audio_models import audio_rows
+from zvisiongenerator.web.audio_models import audio_rows, runnable_audio_models
 from zvisiongenerator.web.model_delete import audio_delete_target
 
 __all__ = ["audio_inventory_rows", "audio_repo_ids"]
 
 
 def audio_repo_ids(config: Mapping[str, Any]) -> frozenset[str]:
-    """Return every repository any audio preset of *config* loads, so the cache listing never offers them as unused."""
-    return frozenset(files.repo_id for preset in parse_audio_presets(config) for files in preset.files)
+    """Return every repository an audio preset of *config* loads on this machine, so the cache listing never offers them as unused."""
+    return frozenset(files.repo_id for preset in runnable_audio_models(config) for files in preset.files)
 
 
 def audio_inventory_rows(
