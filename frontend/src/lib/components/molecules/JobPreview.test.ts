@@ -47,6 +47,20 @@ describe('JobPreview', () => {
     expect(figure.style.aspectRatio.startsWith('1.77')).toBe(true);
   });
 
+  it('shows the full image of the last output between images, not its thumbnail', () => {
+    const output = { id: 'o.png', url: '/media/o.png', thumbnail_url: '/media/o-thumb.png' } as ActiveJobState['outputs'][number];
+    const { target } = mountComponent(JobPreview, { job: makeJob({ status: 'paused', paused: true, itemFinished: true, outputs: [output] }) });
+
+    expect(target.querySelector('img')?.getAttribute('src')).toBe('/media/o.png');
+  });
+
+  it('shows the still of a video output between takes, not the video file', () => {
+    const output = { id: 'o.mp4', url: '/media/o.mp4', thumbnail_url: '/thumbs/o.jpg', media_type: 'video' } as ActiveJobState['outputs'][number];
+    const { target } = mountComponent(JobPreview, { job: makeJob({ status: 'paused', paused: true, itemFinished: true, outputs: [output] }) });
+
+    expect(target.querySelector('img')?.getAttribute('src')).toBe('/thumbs/o.jpg');
+  });
+
   it('puts the checkerboard on a finished transparent output shown between images, never on the live preview', () => {
     const output = { id: 'o.png', url: '/media/o.png', thumbnail_url: '/media/o-thumb.png', transparent: true } as ActiveJobState['outputs'][number];
     const paused = { status: 'paused', paused: true, itemFinished: true, outputs: [output] } as Partial<ActiveJobState>;

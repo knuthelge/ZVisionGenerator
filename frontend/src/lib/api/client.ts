@@ -40,13 +40,14 @@ export function detailFromText(text: string): string {
   return text;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   // FormData sets its own multipart Content-Type; any other body goes as JSON.
   const isForm = body instanceof FormData;
   const response = await fetch(`${BASE}${path}`, {
     method,
     headers: body !== undefined && !isForm ? { 'Content-Type': 'application/json' } : {},
-    body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined
+    body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined,
+    signal
   });
 
   if (!response.ok) {
@@ -58,7 +59,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
+  get: <T>(path: string, signal?: AbortSignal) => request<T>('GET', path, undefined, signal),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   delete: <T>(path: string) => request<T>('DELETE', path)

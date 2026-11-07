@@ -278,7 +278,7 @@ describe('WorkspacePage viewers follow their asset by id', () => {
 
     expect(shown()).toBe(b.url);
     expect(document.querySelector('.viewer-title small')?.textContent).toContain('3 of 3');
-    expect(document.querySelector('.viewer-pane-prev img')?.getAttribute('src')).toBe(a.thumbnail_url);
+    expect(document.querySelector('.viewer-pane-prev img')?.getAttribute('src')).toBe(a.url);
   });
 });
 
@@ -440,8 +440,8 @@ describe('WorkspacePage asset actions and settings', () => {
 
     expect(draft.state.workflow).toBe('img2img');
     expect(draft.state.referenceImagePath).toBe('/outputs/out/first.png');
-    // The start image row previews the known asset.
-    expect(target.querySelector(`[data-section="images"] img[src="${asset.url}"]`)).not.toBeNull();
+    // The start image row previews the file through the server, like a file from any other folder.
+    expect(target.querySelector('[data-section="images"] img[src="/preview/reference_image/outputs/out/first.png"]')).not.toBeNull();
   });
 
   it('deletes an asset from history after confirmation', async () => {
@@ -1058,14 +1058,15 @@ describe('WorkspacePage extend', () => {
       expect(target.querySelector('#ws-generate-reason')).toBeNull();
     });
 
-    it('shows the last frame of a clip inside the output folder as its thumbnail', async () => {
+    it('shows the server\'s last frame of the clip as its thumbnail, for a clip inside the output folder or anywhere else', async () => {
       await mountExtend();
-      await chooseSource(sceneSource({ media_url: '/media/out/walk.mp4', duration_seconds: 4.04 }));
-      expect(target.querySelector('[data-section="source-video"] .reference-thumb video')?.getAttribute('src')).toBe('/media/out/walk.mp4#t=3.99');
+      const thumb = () => target.querySelector('[data-section="source-video"] [data-testid="slot-thumb"] img');
+      await chooseSource(sceneSource({ duration_seconds: 4.04 }));
+      expect(thumb()?.getAttribute('src')).toBe(`/preview/source_video${SOURCE}?frame=last`);
+      expect(target.querySelector('[data-section="source-video"] [data-testid="slot-thumb"] video')).toBeNull();
 
-      await chooseSource(sceneSource({ media_url: null }), '/elsewhere/walk.mp4');
-      expect(target.querySelector('[data-section="source-video"] .reference-thumb video')).toBeNull();
-      expect(target.querySelector('[data-section="source-video"] .reference-thumb svg')).not.toBeNull();
+      await chooseSource(sceneSource(), '/elsewhere/walk.mp4');
+      expect(thumb()?.getAttribute('src')).toBe('/preview/source_video/elsewhere/walk.mp4?frame=last');
     });
 
     it('lists a rejected source\'s problems, keeps Generate off and points to the Source video section', async () => {

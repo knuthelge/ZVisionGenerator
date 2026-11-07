@@ -13,8 +13,8 @@
     filename: string;
     /** The take's length in seconds, used until the browser has read it from the file. */
     duration?: number | null;
-    /** `stage`: the Workspace's panel, with room for the corner actions. `viewer`: the viewer's larger panel. */
-    size?: 'stage' | 'viewer';
+    /** `stage`: the Workspace's panel, with room for the corner actions. `viewer`: the viewer's larger panel. `pane`: the file browser's preview, with a low waveform and no corner actions. */
+    size?: 'stage' | 'viewer' | 'pane';
     class?: string;
   }
 
@@ -121,4 +121,7 @@
   .audio-player[data-compact='true'] { padding: 52px 12px 10px; }
   .audio-player[data-compact='true'][data-size='viewer'] { padding: 12px 12px 10px; }
   .audio-player[data-compact='true'] .audio-wave { height: 120px; }
+  /* The file browser's preview pane, strip and sheet: a low waveform in a narrow box, on every screen. */
+  .audio-player[data-size='pane'], .audio-player[data-size='pane'][data-compact='true'] { gap: 8px; padding: 10px 10px 8px; }
+  .audio-player[data-size='pane'] .audio-wave, .audio-player[data-size='pane'][data-compact='true'] .audio-wave { height: 88px; }
 </style>

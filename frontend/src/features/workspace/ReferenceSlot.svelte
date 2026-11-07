@@ -29,8 +29,6 @@
     path: string | null;
     /** An image uploaded from this device, attached on submit only while it is the slot's image. */
     file: File | null;
-    /** Preview for a path that points at a known asset. */
-    previewUrl: string | null;
     onfilechange: (file: File | null) => void;
     onpathchange: (path: string | null) => void;
     /** The glyph in the thumbnail while the slot is empty. */
@@ -51,12 +49,12 @@
     detail?: string;
     /** The image is kept but not used: the thumbnail fades to grey and the label and name turn muted. */
     unused?: boolean;
-    /** What the slot holds: an image (with a thumbnail) or an audio track (a waveform icon in the thumbnail's place). */
+    /** What the slot holds: an image (a picture of it) or an audio track (the waveform icon in the thumbnail's place). */
     kind?: 'image' | 'audio';
   }
 
   let {
-    idBase, label, names, emptyText, emptyMuted = false, path, file, previewUrl, onfilechange, onpathchange,
+    idBase, label, names, emptyText, emptyMuted = false, path, file, onfilechange, onpathchange,
     emptyIcon = 'reference', clearable = true, onfileschange, dropText, missing = false, error, name = '', detail = '', unused = false, kind = 'image',
   }: Props = $props();
 
@@ -127,13 +125,13 @@
   ondrop={handleDrop}
 >
   <InspectorRow {label} labelId="{idBase}-label">
-    <div class="reference-thumb" class:missing>
+    <div class="reference-thumb" class:missing data-testid="slot-thumb" data-missing={missing}>
       {#if missing}
         <Icon name="alert" size={16} />
       {:else if audio}
         <Icon name="waveform" size={18} />
       {:else}
-        <ReferenceThumbContent {file} url={previewUrl} alt={names.preview} {emptyIcon} />
+        <ReferenceThumbContent {file} {path} alt={names.preview} {emptyIcon} />
       {/if}
     </div>
     {#if dragOver && dropText}

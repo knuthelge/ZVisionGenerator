@@ -76,6 +76,18 @@ describe('layout store', () => {
     expect(layout.coarse).toBe(true);
   });
 
+  it('tells a phone held sideways (short) from an upright one', async () => {
+    const media = installMatchMedia({});
+    const { layout, COMPACT_QUERY, SHORT_QUERY } = await import('./layoutMode.svelte');
+
+    media.set(COMPACT_QUERY, true);
+    expect(layout.compact).toBe(true);
+    expect(layout.short).toBe(false);
+
+    media.set(SHORT_QUERY, true);
+    expect(layout.short).toBe(true);
+  });
+
   it('stays wide without matchMedia, as in a test or server environment', async () => {
     vi.stubGlobal('matchMedia', undefined);
     const { layout } = await import('./layoutMode.svelte');

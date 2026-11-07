@@ -1,7 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { Icon } from '$lib/components/atoms';
-  import { galleryStore } from '$lib/state/gallery.svelte';
   import { splitImageFiles } from '$lib/state/references';
   import type { ImagesView } from './imagesView';
   import ImageSources from './ImageSources.svelte';
@@ -52,7 +51,7 @@
     {#each rows as row, index (index)}
       {@const number = index + 1}
       <div class="refrow" role="group" aria-label="Reference {number}">
-        <span class="ref-thumb" class:missing={row.gone}>{#if row.gone}<Icon name="alert" size={16} />{:else}<ReferenceThumbContent file={row.file} url={galleryStore.previewUrlFor(row.path)} alt="Reference {number} preview" />{/if}</span>
+        <span class="ref-thumb" class:missing={row.gone}>{#if row.gone}<Icon name="alert" size={16} />{:else}<ReferenceThumbContent file={row.file} path={row.path || null} alt="Reference {number} preview" />{/if}</span>
         <span class="ref-text">
           <span class="ref-num">Reference {number}</span>
           <span class="ref-name" class:missing={row.gone} title={row.name}>{row.name}</span>

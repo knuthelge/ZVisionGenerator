@@ -1,7 +1,6 @@
 <script lang="ts">
   import { InspectorNumber } from '$lib/components/atoms';
   import { draft } from '$lib/state/draft.svelte';
-  import { galleryStore } from '$lib/state/gallery.svelte';
   import type { SlotValue } from '$lib/state/imageSlots';
   import type { WorkspaceContext } from '$lib/types';
   import type { ImagesView } from './imagesView';
@@ -39,7 +38,6 @@
         name={start.name}
         path={start.path}
         file={start.file}
-        previewUrl={galleryStore.previewUrlFor(start.path)}
         emptyText={video ? 'No first frame yet' : 'No start image yet'}
         clearLabel={video ? 'Clear first frame' : 'Clear start image'}
         missing={start.gone}
@@ -75,7 +73,6 @@
         name={last.name}
         path={last.path}
         file={last.file}
-        previewUrl={galleryStore.previewUrlFor(last.path)}
         emptyText="No last frame"
         clearLabel="Clear last frame"
         unused={!last.used}

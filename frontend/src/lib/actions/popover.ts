@@ -54,6 +54,8 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
   let options = initial;
   document.body.appendChild(node);
   node.style.position = 'fixed';
+  // Marks the node for a dialog's focus trap, which lets focus rest in a popover layered above it.
+  node.dataset.popover = '';
 
   function place(): void {
     if (!options.anchor) return;
@@ -111,6 +113,7 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
       releaseEscape();
       window.removeEventListener('resize', onViewportChange);
       window.removeEventListener('scroll', onViewportChange, true);
+      delete node.dataset.popover;
       node.remove();
     },
   };

@@ -269,6 +269,42 @@ describe('AssetTile', () => {
     expect(target.querySelector('img')?.getAttribute('src')).toBe(asset.url);
   });
 
+  describe('a video', () => {
+    const clip = () => makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', thumbnail_url: '/thumbs/out/clip.mp4', filename: 'clip.mp4', media_type: 'video' });
+
+    it.each(['card', 'compact'])('is its still with a play badge in a %s tile, never a player', (density) => {
+      mountTile({ asset: clip(), density });
+      expect(target.querySelector('video')).toBeNull();
+      expect(target.querySelector('img')?.getAttribute('src')).toBe('/thumbs/out/clip.mp4');
+      expect(target.querySelector('[data-testid="play-badge"]')).not.toBeNull();
+    });
+
+    it('plays the file itself on the stage', () => {
+      mountTile({ asset: clip(), density: 'stage' });
+      expect(target.querySelector('video')?.getAttribute('src')).toBe('/media/out/clip.mp4');
+      expect(target.querySelector('video')?.getAttribute('poster')).toBe('/thumbs/out/clip.mp4');
+      expect(target.querySelector('img')).toBeNull();
+      expect(target.querySelector('[data-testid="play-badge"]')).toBeNull();
+    });
+
+    it('shows an icon when its still cannot be loaded', () => {
+      mountTile({ asset: clip() });
+      flushSync(() => target.querySelector('img')!.dispatchEvent(new Event('error')));
+      expect(target.querySelector('img')).toBeNull();
+      expect(target.querySelector('[data-testid="video-fallback"]')).not.toBeNull();
+    });
+  });
+
+  it('draws an image from its thumbnail and falls back to the file when that cannot be loaded', () => {
+    const asset = makeAsset();
+    mountTile({ asset });
+    expect(target.querySelector('img')?.getAttribute('src')).toBe(asset.thumbnail_url);
+
+    flushSync(() => target.querySelector('img')!.dispatchEvent(new Event('error')));
+
+    expect(target.querySelector('img')?.getAttribute('src')).toBe(asset.url);
+  });
+
   it('opens the menu on a right-click, but leaves a video its own menu', async () => {
     const asset = makeAsset();
     mountTile({ asset, ondelete: vi.fn() });

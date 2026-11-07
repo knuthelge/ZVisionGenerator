@@ -6,6 +6,8 @@ vi.mock('$lib/state/layoutMode.svelte', () => ({ layout: layoutMock }));
 
 import { mountComponent, settle } from '../../../test-utils/mount';
 import Modal from './Modal.svelte';
+import Host from './ModalSelectHost.test.svelte';
+import { openOptions } from '../../../test-utils/select';
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -111,6 +113,19 @@ describe('Modal', () => {
 
     expect(dialog().contains(document.activeElement)).toBe(true);
     expect(document.activeElement).not.toBe(background);
+  });
+
+  it('lets focus rest in the list of a select opened inside the dialog', async () => {
+    mountComponent(Host, {});
+    await settle();
+
+    const box = dialog().querySelector<HTMLElement>('#choice')!;
+    const [option] = openOptions(box);
+    await settle();
+
+    const list = option.closest('[role="listbox"]')!;
+    expect(dialog().contains(list)).toBe(false);
+    expect(list.contains(document.activeElement)).toBe(true);
   });
 
   it('neither traps Tab nor redirects focus while closed', async () => {

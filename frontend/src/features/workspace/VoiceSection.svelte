@@ -38,7 +38,6 @@
       clearable={voice.set}
       path={voice.path}
       file={voice.file}
-      previewUrl={null}
       name={voice.name}
       detail={voice.length === null ? '' : formatTimestamp(voice.length)}
       dropText={voice.set ? 'Drop to replace' : 'Drop an audio file'}

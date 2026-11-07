@@ -94,8 +94,6 @@
   const fallbackReasons = $derived(asset?.reuse_state?.fallback_reasons ?? []);
   let filmEl = $state<HTMLDivElement | null>(null);
   const NEAR_END = 3;
-  // Videos have no lazy loading; only those near the current asset load their first frame.
-  const FILM_VIDEO_RADIUS = 4;
 
   $effect(() => {
     if (open && assets.length > 0 && index >= assets.length - NEAR_END) onnearend?.();
@@ -843,7 +841,7 @@
             {/if}
             {#if asset.media_type === 'video'}
               <!-- svelte-ignore a11y_media_has_caption because generated videos have no caption tracks -->
-              <video src={asset.url} controls class="viewer-media"></video>
+              <video src={asset.url} poster={thumbOf(asset)} controls class="viewer-media"></video>
             {:else}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions because the zoom is a closer look; the keys and buttons do the rest -->
               <img
@@ -972,12 +970,11 @@
           >
             {#if item.media_type === 'audio'}
               <span class="film-audio" aria-hidden="true"><Waveform peaks={audioPeaks.of(item)} /></span>
-            {:else if item.media_type === 'video' && Math.abs(itemIndex - index) > FILM_VIDEO_RADIUS}
-              <span class="film-video-placeholder" aria-hidden="true">▶</span>
-            {:else if item.media_type === 'video'}
-              <video src={item.thumbnail_url || item.url} muted preload="metadata"></video>
             {:else}
-              <img src={item.thumbnail_url || item.url} alt="" loading="lazy" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)}>
+              <img src={thumbOf(item)} alt="" loading="lazy" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)}>
+              {#if item.media_type === 'video'}
+                <span class="film-play" data-testid="film-play-badge" aria-hidden="true"><Icon name="play" size={8} /></span>
+              {/if}
             {/if}
           </button>
         {/each}
@@ -1031,13 +1028,11 @@
 {/if}
 
 {#snippet neighbour(item: GalleryAsset)}
-  <!-- A neighbour waiting beside the shown asset: its thumbnail, or a video's first frame. -->
+  <!-- A neighbour waiting beside the shown asset: an image in full, so it is sharp once the swipe settles, a video as its still. -->
   {#if item.media_type === 'audio'}
     <span class="viewer-neighbour viewer-neighbour-audio" aria-hidden="true"><Waveform peaks={audioPeaks.of(item)} /></span>
-  {:else if item.media_type === 'video'}
-    <video class="viewer-neighbour" src={thumbOf(item)} muted preload="metadata"></video>
   {:else}
-    <img class="viewer-neighbour" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)} src={thumbOf(item)} alt="">
+    <img class="viewer-neighbour" class:ui-checkerboard={isTransparent(item)} data-transparent={isTransparent(item)} src={item.media_type === 'video' ? thumbOf(item) : item.url} alt="">
   {/if}
 {/snippet}
 
@@ -1111,13 +1106,13 @@
   /* Auto margins centre a short strip but keep a long one scrollable from its first item. */
   .viewer-film > :first-child { margin-left: auto; }
   .viewer-film > :last-child { margin-right: auto; }
-  .viewer-film button { flex: none; width: 44px; height: 44px; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: var(--radius-sm); opacity: 0.55; transition: opacity 0.12s ease; }
+  .viewer-film button { position: relative; flex: none; width: 44px; height: 44px; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: var(--radius-sm); opacity: 0.55; transition: opacity 0.12s ease; }
   @media (hover: hover) { .viewer-film button:hover { opacity: 0.9; } }
   .viewer-film button[aria-current='true'] { border-color: var(--color-primary-main); opacity: 1; }
-  .film-video-placeholder { display: grid; width: 100%; height: 100%; place-items: center; background: var(--color-bg-surface); font-size: var(--text-ui); color: var(--color-text-muted); }
   /* An audio take in the film strip: the no-content tile at 44px, its waveform in the middle. */
   .film-audio { display: grid; width: 100%; height: 100%; place-items: center; padding: 14px 6px; background: var(--color-bg-surface-hover); }
-  .viewer-film img, .viewer-film video { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .film-play { position: absolute; right: 2px; bottom: 2px; display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: color-mix(in srgb, var(--color-bg-base) 78%, transparent); color: var(--color-text-primary); }
+  .viewer-film img { display: block; width: 100%; height: 100%; object-fit: cover; }
   @media (max-width: 767px) {
     .viewer-bar { flex-wrap: wrap; padding: 8px; }
     .viewer-stage { padding: 12px 52px; }

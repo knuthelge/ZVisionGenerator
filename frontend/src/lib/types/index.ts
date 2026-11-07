@@ -161,8 +161,6 @@ export interface VideoMemoryFitInfo {
 export interface ExtendSourceInfo {
   path: string;
   filename: string;
-  /** Where the browser can load the video; null when it lies outside the output folder. */
-  media_url: string | null;
   width: number | null;
   height: number | null;
   rotation: number | null;
@@ -727,6 +725,24 @@ export interface BrowsePurpose {
   kind: 'directory' | 'existing_file';
   label: string;
   accepted_extensions: string[];
+  /** What the browser can preview of a chosen file; null when the purpose has no previews. */
+  preview: BrowsePreviewKind | null;
+}
+
+/** The kinds of file the browser previews (`BrowsePurpose.preview` on the server). */
+export type BrowsePreviewKind = 'image' | 'audio' | 'video';
+
+/** The facts `GET /api/browse/info` returns: width and height for an image or video, the rest by kind. */
+export interface BrowseInfo {
+  width?: number | null;
+  height?: number | null;
+  seconds?: number | null;
+  sample_rate?: number | null;
+  channels?: number | null;
+  fps?: number | null;
+  frames?: number | null;
+  /** Audio only: 100 waveform peaks. */
+  peaks?: number[];
 }
 
 export interface BrowseEntry {

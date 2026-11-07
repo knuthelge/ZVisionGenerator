@@ -943,7 +943,7 @@ describe('WorkspacePage last frame', () => {
 
       expect(actions).toEqual(['reference-image', 'reference-reference', 'reference-video', 'reference-last-frame']);
       expect(draft.state).toMatchObject({ workflow: 'img2vid', endImagePath: '/outputs/out/end.png', firstFramePath: '/in/start.png', prompt: 'my action', scene: '' });
-      expect(target.querySelector(`[data-section="images"] img[src="${asset.url}"]`)).not.toBeNull();
+      expect(target.querySelector('[data-section="images"] img[src="/preview/reference_image/outputs/out/end.png"]')).not.toBeNull();
     });
 
     it('keeps a first frame uploaded from this device when Use as sets the last frame, and the other way round', async () => {

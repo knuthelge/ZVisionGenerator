@@ -5,7 +5,6 @@
   import type { ScrubOptions } from '$lib/actions/scrub';
   import { defaultsFor, draft } from '$lib/state/draft.svelte';
   import { rowChanged } from './settingRows';
-  import { galleryStore } from '$lib/state/gallery.svelte';
   import type { SlotValue } from '$lib/state/imageSlots';
   import type { WorkspaceContext } from '$lib/types';
   import { imagesSummary } from './imagesSummary';
@@ -74,7 +73,6 @@
           clearable={start.set}
           path={start.path}
           file={start.file}
-          previewUrl={galleryStore.previewUrlFor(start.path)}
           name={start.name}
           dropText={start.set ? 'Drop to replace' : 'Drop an image'}
           missing={start.gone}
@@ -104,7 +102,6 @@
             path={row.path || null}
             file={row.file}
             name={row.name}
-            previewUrl={galleryStore.previewUrlFor(row.path)}
             dropText="Drop to replace"
             missing={row.gone}
             error={row.error ?? undefined}
@@ -123,7 +120,6 @@
             clearable={false}
             path={null}
             file={null}
-            previewUrl={null}
             onfilechange={() => {}}
             onfileschange={(chosen) => editor.appendFiles(chosen)}
             onpathchange={(path) => { if (path) editor.append([{ path, file: null }]); }}
@@ -145,7 +141,6 @@
           clearable={last.set}
           path={last.path}
           file={last.file}
-          previewUrl={galleryStore.previewUrlFor(last.path)}
           name={last.name}
           dropText={last.set ? 'Drop to replace' : 'Drop an image'}
           unused={!last.used}

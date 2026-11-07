@@ -51,7 +51,7 @@
 
 <svg class="wave-svg {extraClass}" class:player={played !== null} viewBox="0 0 {width} {HEIGHT}" preserveAspectRatio="none" aria-hidden="true">
   {#each bars as bar, index (index)}
-    <rect class="bar" class:played={index < playedCount} x={bar.x} y={bar.y} width={BAR_WIDTH} height={bar.height} rx={BAR_RADIUS} />
+    <rect class="bar" data-testid="wave-bar" class:played={index < playedCount} x={bar.x} y={bar.y} width={BAR_WIDTH} height={bar.height} rx={BAR_RADIUS} />
   {/each}
 </svg>
 

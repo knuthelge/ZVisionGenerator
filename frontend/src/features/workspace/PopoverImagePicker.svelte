@@ -12,7 +12,6 @@
     name: string;
     path: string | null;
     file: File | null;
-    previewUrl: string | null;
     /** Shown in the name's place while the slot is empty. */
     emptyText: string;
     clearLabel: string;
@@ -30,7 +29,7 @@
     onclear: () => void;
   }
 
-  let { title, name, path, file, previewUrl, emptyText, clearLabel, missing = false, error, unused = false, help, onfile, onpath, onclear }: Props = $props();
+  let { title, name, path, file, emptyText, clearLabel, missing = false, error, unused = false, help, onfile, onpath, onclear }: Props = $props();
 
   function takeFiles(files: File[]): void {
     const { supported, unsupported } = splitImageFiles(files);
@@ -41,7 +40,7 @@
 
 <div class="picker" class:unused data-unused={unused}>
   <div class="picker-row">
-    <span class="picker-thumb" class:missing>{#if missing}<Icon name="alert" size={20} />{:else}<ReferenceThumbContent {file} url={previewUrl} alt="{title} preview" />{/if}</span>
+    <span class="picker-thumb" class:missing data-testid="slot-thumb" data-missing={missing}>{#if missing}<Icon name="alert" size={20} />{:else}<ReferenceThumbContent {file} {path} alt="{title} preview" />{/if}</span>
     <span class="picker-name" class:muted={!name} class:missing title={name}>{name || emptyText}</span>
     {#if name}<button type="button" class="ui-btn ui-btn-icon" aria-label={clearLabel} onclick={onclear}><Icon name="close" size={16} /></button>{/if}
   </div>

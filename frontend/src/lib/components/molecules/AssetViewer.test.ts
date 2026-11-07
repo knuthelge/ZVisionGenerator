@@ -223,6 +223,33 @@ describe('AssetViewer', () => {
     expect(counter()).toContain('3 of 4');
   });
 
+  it('shows a video with its still as the poster until it plays', () => {
+    const clip = makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', thumbnail_url: '/thumbs/out/clip.mp4', filename: 'clip.mp4', media_type: 'video' });
+    mountViewer({ assets: [clip], currentId: clip.id });
+
+    const video = document.querySelector('video');
+    expect(video?.getAttribute('src')).toBe('/media/out/clip.mp4');
+    expect(video?.getAttribute('poster')).toBe('/thumbs/out/clip.mp4');
+  });
+
+  it('draws a video as its still in the strip and beside the shown asset, and an image beside it in full', () => {
+    touch.coarse = true;
+    try {
+      const clip = makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', thumbnail_url: '/thumbs/out/clip.mp4', filename: 'clip.mp4', media_type: 'video' });
+      const photo = makeAsset({ id: 'out/photo.png', url: '/media/out/photo.png', thumbnail_url: '/thumbs/out/photo.png', filename: 'photo.png' });
+      mountViewer({ assets: [clip, photo, makeAsset({ id: 'out/c.png', url: '/media/out/c.png', filename: 'c.png' })], currentId: photo.id });
+
+      expect(document.querySelectorAll('.viewer-film video')).toHaveLength(0);
+      expect(document.querySelector('[data-film-index="0"] img')?.getAttribute('src')).toBe('/thumbs/out/clip.mp4');
+      expect(document.querySelector('[data-film-index="0"] [data-testid="film-play-badge"]')).not.toBeNull();
+      expect(document.querySelectorAll('[data-testid="film-play-badge"]')).toHaveLength(1);
+      expect(document.querySelector('.viewer-pane-prev .viewer-neighbour')?.getAttribute('src')).toBe('/thumbs/out/clip.mp4');
+      expect(document.querySelector('.viewer-pane-next .viewer-neighbour')?.getAttribute('src')).toBe('/media/out/c.png');
+    } finally {
+      touch.coarse = false;
+    }
+  });
+
   it('lists every asset in the thumbnail strip and asks for more near the end', async () => {
     const many = Array.from({ length: 30 }, (_, i) => makeAsset({ id: `out/${i}.png`, url: `/media/out/${i}.png`, filename: `${i}.png` }));
     const onnearend = vi.fn();

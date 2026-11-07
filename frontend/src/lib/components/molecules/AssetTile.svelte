@@ -67,8 +67,22 @@
   const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
+  const thumbnail = $derived(asset.thumbnail_url || asset.url);
+  // A thumbnail that failed to load: an image falls back to the file itself, a video to an icon.
+  let failedThumbnail = $state<string | null>(null);
+  const thumbnailFailed = $derived(failedThumbnail === thumbnail);
   // The stage shows the full-resolution file; small tiles use the thumbnail.
-  const src = $derived(density === 'stage' ? asset.url : (asset.thumbnail_url || asset.url));
+  const src = $derived(density === 'stage' || thumbnailFailed ? asset.url : thumbnail);
+
+  function onImageError(): void {
+    if (src === asset.url) onmediaload?.();
+    else failedThumbnail = thumbnail;
+  }
+
+  function onVideoStillError(): void {
+    failedThumbnail = thumbnail;
+    onmediaload?.();
+  }
 
   // A player has no image to wait for: the stage may show it as soon as it is there.
   $effect(() => {
@@ -119,15 +133,20 @@
   {#snippet media()}
     {#if isAudio}
       {@render audioCover()}
+    {:else if inlineVideo}
+      <video src={asset.url} poster={asset.thumbnail_url} class="asset-tile-img" muted controls preload="metadata" onloadeddata={onmediaload}></video>
+    {:else if isVideo && thumbnailFailed}
+      <span class="video-fallback" data-testid="video-fallback"><Icon name="film" size={28} /></span>
     {:else if isVideo}
-      <video
-        {src}
+      <img
+        src={thumbnail}
+        alt={asset.prompt || asset.filename}
         class="asset-tile-img"
-        muted
-        controls={inlineVideo}
-        preload="metadata"
-        onloadeddata={onmediaload}
-      ></video>
+        loading={eager ? 'eager' : 'lazy'}
+        onload={onmediaload}
+        onerror={onVideoStillError}
+      >
+      <span class="play-badge" data-testid="play-badge" aria-hidden="true"><Icon name="play" size={14} /></span>
     {:else}
       <img
         {src}
@@ -137,7 +156,7 @@
         data-transparent={transparent}
         loading={eager ? 'eager' : 'lazy'}
         onload={onmediaload}
-        onerror={onmediaload}
+        onerror={onImageError}
       >
     {/if}
   {/snippet}
@@ -246,6 +265,11 @@
      scale-down (at most its own size, centred) without painting the letterbox. */
   .asset-tile[data-density='stage'][data-transparent='true'] .asset-tile-media { display: flex; align-items: center; justify-content: center; }
   .asset-tile[data-density='stage'][data-transparent='true'] .asset-tile-img { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: fill; }
+
+  /* A video's still carries a play badge, drawn here so the picture stays a plain still. */
+  .play-badge { position: absolute; right: 8px; bottom: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--color-bg-base) 78%, transparent); color: var(--color-text-primary); pointer-events: none; }
+  .asset-tile[data-density='compact'] .play-badge { right: 4px; bottom: 4px; width: 20px; height: 20px; }
+  .video-fallback { display: grid; place-items: center; width: 100%; height: 100%; background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
 
   /* Top gradient keeps the actions legible on bright images. */
   .asset-tile::after {

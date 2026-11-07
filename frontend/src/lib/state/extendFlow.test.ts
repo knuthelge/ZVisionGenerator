@@ -132,7 +132,6 @@ describe('extend flows', () => {
     const saved = JSON.parse(localStorage.getItem('ziv-workspace-draft-v1') ?? '{}') as Record<string, unknown>;
     expect(saved.extendSourcePath).toBe(SOURCE);
     expect(saved.version).toBe(3);
-    expect(JSON.stringify(saved)).not.toContain('media_url');
     expect(JSON.stringify(saved)).not.toContain('duration_seconds');
   });
 });

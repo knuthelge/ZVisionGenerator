@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
-  import { LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
+  import { FileThumb, LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { defaultsFor, draft, extendStepFor, maxStepsFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
@@ -199,7 +199,6 @@
   const sourcePath = $derived(s.extendSourcePath);
   const sourceName = $derived(info?.filename ?? (sourcePath ? fileName(sourcePath) : null));
   const sourceFacts = $derived(info ? extendSourceFacts(info) : []);
-  const sourceThumbUrl = $derived(info?.media_url ? `${info.media_url}#t=${Math.max(0, (info.duration_seconds ?? 0) - 0.05).toFixed(2)}` : null);
   const latestVideo = $derived(galleryStore.assets.find((asset) => asset.media_type === 'video' && asset.file_path) ?? null);
   let browsingSource = $state(false);
 
@@ -407,7 +406,7 @@
       <AudioTrackPopover track={audioTrack} />
     {:else if key === 'source'}
       <div class="pop-ref">
-        <span class="pop-thumb">{#if sourceThumbUrl}<video src={sourceThumbUrl} muted preload="metadata" aria-hidden="true"></video>{:else}<Icon name="film" size={20} />{/if}</span>
+        <span class="pop-thumb" data-testid="slot-thumb">{#if sourcePath}<FileThumb purpose="source_video" path={sourcePath} kind="video" frame="last" iconSize={20} fallbackIcon="film" />{:else}<Icon name="film" size={20} />{/if}</span>
         <span class="pop-item-text" class:muted={!sourceName} title={sourcePath ?? ''}>{sourceName ?? 'No source video yet'}</span>
         {#if sourcePath !== null && sourceGuard.kind === 'checking'}<Spinner size="sm" />{/if}
         {#if sourcePath !== null}<button type="button" class="ui-btn ui-btn-icon" aria-label="Clear source video" disabled={busy} onclick={() => chooseSource(null)}><Icon name="close" size={16} /></button>{/if}
@@ -460,7 +459,6 @@
   .pop-lora :global(.inspector-number-wrap) { flex: none; width: 170px; }
   .pop-ref { display: flex; align-items: center; gap: 12px; min-height: 56px; font-size: 15px; }
   .pop-thumb { display: grid; flex: none; place-items: center; width: 56px; height: 56px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
-  .pop-thumb video { width: 100%; height: 100%; object-fit: cover; }
   .pop-terms { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; line-height: 1.45; color: var(--color-text-muted); }
   .pop-facts { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .pop-item:disabled { opacity: 0.5; }

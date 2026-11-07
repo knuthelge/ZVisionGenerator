@@ -44,7 +44,8 @@
   // Between takes, paused after one, and once the job failed or was stopped, the slot keeps the waveform of the last take saved; otherwise there is nothing to preview.
   const holdsLast = $derived(audio && phase === 'generate' && (pausedBetween || stopped || (!job.audio && job.outputs.length > 0)));
   const lastPeaks = $derived(holdsLast ? (lastOutput?.peaks ?? []) : []);
-  const src = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? lastOutput?.url ?? null) : job.previewUrl);
+  // Between takes an image shows in full; a video shows its still, since an <img> cannot play the file.
+  const src = $derived(pausedBetween ? ((lastOutput?.media_type === 'video' ? lastOutput.thumbnail_url : lastOutput?.url) ?? null) : job.previewUrl);
   const shown = $derived(!audio && src !== null && failedUrl !== src);
   const wave = $derived(lastPeaks.length > 0);
   // The held take can be played from the slot: a job that waits or ended leaves it no other player on a phone.

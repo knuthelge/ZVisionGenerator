@@ -1,7 +1,7 @@
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
   import { Icon, Spinner } from '$lib/components/atoms';
-  import { InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
+  import { FileThumb, InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { extendSourceFacts, type ExtendGuard } from '$lib/state/extend';
@@ -28,8 +28,6 @@
   const found = $derived(guard.kind === 'ok');
   // The server reports a source it could not find, or Reuse recorded one that has since moved; both ask for another choice.
   const missing = $derived(draft.state.missingSourceVideo || sourceStatus === 'not_found');
-  // The last frame of a file inside the output folder; elsewhere the browser cannot load it, so an icon stands in.
-  const thumbUrl = $derived(info?.media_url ? `${info.media_url}#t=${Math.max(0, (info.duration_seconds ?? 0) - 0.05).toFixed(2)}` : null);
 
   // The path box keeps what is typed; the draft takes it 300 ms after the last keystroke, on Enter, or on leaving the box.
   let pathText = $state(draft.state.extendSourcePath ?? '');
@@ -79,9 +77,9 @@
 
 <InspectorSection id="source-video" title="Source video" summary={name || 'None'} active={found}>
   <InspectorRow label="Video">
-    <div class="reference-thumb">
-      {#if thumbUrl}
-        <video src={thumbUrl} muted preload="metadata" aria-hidden="true"></video>
+    <div class="reference-thumb" data-testid="slot-thumb">
+      {#if sourcePath}
+        <FileThumb purpose="source_video" path={sourcePath} kind="video" frame="last" iconSize={16} fallbackIcon="film" />
       {:else}
         <Icon name="film" size={16} />
       {/if}
@@ -141,7 +139,6 @@
   :global(#ws-source-help > *) { margin: 0 12px 6px; }
 
   .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
-  .reference-thumb video { width: 100%; height: 100%; object-fit: cover; }
   .reference-empty { color: var(--color-text-muted); }
   .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
 </style>

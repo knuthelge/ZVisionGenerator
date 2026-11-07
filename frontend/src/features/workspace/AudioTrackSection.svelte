@@ -28,7 +28,6 @@
       clearable={track.set}
       path={track.path}
       file={track.file}
-      previewUrl={null}
       name={track.name}
       detail={track.length === null ? '' : formatTimestamp(track.length)}
       dropText={track.set ? 'Drop to replace' : 'Drop an audio file'}

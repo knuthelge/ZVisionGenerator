@@ -30,7 +30,9 @@ export default defineConfig({
     // the backend's request guard checks on writes (the string shorthand sets changeOrigin: true).
     proxy: {
       '/api': { target: 'http://localhost:8765', changeOrigin: false },
-      '/jobs': { target: 'http://localhost:8765', changeOrigin: false }
+      '/jobs': { target: 'http://localhost:8765', changeOrigin: false },
+      '/thumbs': { target: 'http://localhost:8765', changeOrigin: false },
+      '/media': { target: 'http://localhost:8765', changeOrigin: false }
     }
   }
 });

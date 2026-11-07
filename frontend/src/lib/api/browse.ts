@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { BrowseListing, BrowsePlaces, BrowsePurposeName } from '$lib/types';
+import type { BrowseInfo, BrowseListing, BrowsePlaces, BrowsePurposeName } from '$lib/types';
 
 /** List one host folder for *purpose*; an empty path opens at the purpose's own place. */
 export function listDirectory(purpose: BrowsePurposeName, path: string, options: { hidden?: boolean; all?: boolean } = {}): Promise<BrowseListing> {
@@ -15,4 +15,26 @@ export function browsePlaces(purpose: BrowsePurposeName): Promise<BrowsePlaces> 
 
 export function createFolder(purpose: BrowsePurposeName, path: string, name: string): Promise<{ path: string }> {
   return api.post<{ path: string }>('/api/browse/folder', { purpose, path, name });
+}
+
+function browseParams(purpose: BrowsePurposeName, path: string): URLSearchParams {
+  return new URLSearchParams({ purpose, path });
+}
+
+/** Return the URL of the WebP preview of an image or video; `frame: 'last'` asks for a video's last frame instead of the one 10% in, and `size: 'large'` for the larger picture the preview pane shows. */
+export function browsePreviewUrl(purpose: BrowsePurposeName, path: string, options: { frame?: 'last'; size?: 'large' } = {}): string {
+  const params = browseParams(purpose, path);
+  if (options.frame) params.set('frame', options.frame);
+  if (options.size) params.set('size', options.size);
+  return `/api/browse/preview?${params}`;
+}
+
+/** Return the URL of an audio or video file itself, for a player. */
+export function browseMediaUrl(purpose: BrowsePurposeName, path: string): string {
+  return `/api/browse/media?${browseParams(purpose, path)}`;
+}
+
+/** Fetch the facts of an image, audio or video file; abort with *signal* when the selection moves on. */
+export function browseInfo(purpose: BrowsePurposeName, path: string, signal?: AbortSignal): Promise<BrowseInfo> {
+  return api.get<BrowseInfo>(`/api/browse/info?${browseParams(purpose, path)}`, signal);
 }

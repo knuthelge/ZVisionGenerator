@@ -451,6 +451,58 @@ describe('SettingPopover images', () => {
   });
 });
 
+describe('SettingPopover thumbnails', () => {
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:img');
+    URL.revokeObjectURL = vi.fn();
+    draft.update('model', 'zit');
+  });
+
+  function open(key: string, ctx: WorkspaceContext): void {
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: { key, context: ctx, get images() { return currentImagesView(ctx); }, get audioTrack() { return currentAudioTrackView(ctx); }, busy: false, models: [], quantizeOptions: null, lastSeed: null, onModelChange: vi.fn(), onclose: vi.fn() },
+    }));
+  }
+
+  /** The purpose and path a thumbnail's server preview asks for. */
+  const asked = (img: Element | null | undefined) => {
+    const url = new URL(img?.getAttribute('src') ?? '', 'http://localhost');
+    return { route: url.pathname, purpose: url.searchParams.get('purpose'), path: url.searchParams.get('path'), frame: url.searchParams.get('frame') };
+  };
+  const imagesContext = () => makeContext({ image_model_defaults: { zit: makeImageDefaults({ max_reference_images: 4 }) } });
+
+  it('shows the pictures of a start image and references outside the output folder', () => {
+    const ctx = imagesContext();
+    draft.setStartImage('image', { path: '/mnt/photos/start.png' }, ctx);
+    draft.patch({ referenceImagePaths: ['/mnt/photos/jacket.png'] });
+    open('images', ctx);
+
+    const pictures = Array.from(target.querySelectorAll('img')).map((img) => asked(img));
+    expect(pictures).toEqual([
+      { route: '/api/browse/preview', purpose: 'reference_image', path: '/mnt/photos/start.png', frame: null },
+      { route: '/api/browse/preview', purpose: 'reference_image', path: '/mnt/photos/jacket.png', frame: null },
+    ]);
+  });
+
+  it('shows the last frame of a source video outside the output folder, from the server', () => {
+    draft.setExtendSourcePath('/mnt/clips/walk.mp4');
+    open('source', makeContext());
+
+    const thumb = target.querySelector('[data-testid="slot-thumb"]')!;
+    expect(asked(thumb.querySelector('img'))).toEqual({ route: '/api/browse/preview', purpose: 'source_video', path: '/mnt/clips/walk.mp4', frame: 'last' });
+    expect(thumb.querySelector('video')).toBeNull();
+  });
+
+  it('keeps the film icon while no source video is chosen', () => {
+    open('source', makeContext());
+
+    const thumb = target.querySelector('[data-testid="slot-thumb"]')!;
+    expect(thumb.querySelector('img')).toBeNull();
+    expect(thumb.querySelector('svg')).not.toBeNull();
+  });
+});
+
 describe('SettingPopover audio track', () => {
   function mountTrack(ctx: WorkspaceContext, onclose = vi.fn()): ReturnType<typeof vi.fn> {
     app = flushSync(() => mount(SettingPopover, {

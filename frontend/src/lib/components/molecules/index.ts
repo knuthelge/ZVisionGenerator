@@ -34,3 +34,4 @@ export { default as KeyValueList, type KeyValueItem } from './KeyValueList.svelt
 export { default as PathBrowser } from './PathBrowser.svelte';
 export { default as PathInput } from './PathInput.svelte';
 export { default as NewPromptFileDialog } from './NewPromptFileDialog.svelte';
+export { default as FileThumb } from './FileThumb.svelte';
