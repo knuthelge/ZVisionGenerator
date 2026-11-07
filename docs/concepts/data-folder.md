@@ -6,7 +6,7 @@ Everything the app keeps lives in one folder, `~/.ziv/`. It survives an update, 
 ~/.ziv/
 ├── models/          Converted models, stored quants and prepared copies (such as `h3@q4`), Ideogram 4 Instant and SeedVR2
 ├── loras/           LoRA .safetensors files
-├── cache/           Temporary files, such as a Mac job's renamed LoRA copies; empty between jobs
+├── cache/           Temporary files, such as a Mac job's renamed LoRA copies, and thumbnails
 ├── outputs/         Images, videos and audio made in the Web UI (the default output folder)
 ├── presets/         Web UI presets: an image and a video folder, one .yaml file each
 ├── logs/            The error log of each command
@@ -14,6 +14,8 @@ Everything the app keeps lives in one folder, `~/.ziv/`. It survives an update, 
 ├── config.yaml      Your settings
 └── ziv.sqlite3      The Web UI's app database: the Gallery index, the job log, recent prompts and LoRA sources
 ```
+
+The thumbnails the file browser and the Gallery show are kept in `cache/browse`, at most 256 MB. They stay after the files they show are deleted, and a backup of the data folder includes them; delete `cache/browse` at any time.
 
 Models downloaded from Hugging Face, such as the built-in aliases, are kept in the Hugging Face cache (`~/.cache/huggingface/hub` by default), which other tools share.
 

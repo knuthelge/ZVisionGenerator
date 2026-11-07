@@ -9,11 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - **Audio.** A new **Audio** tab and `ziv-audio` (`ziv audio`) make songs and instrumentals with YuE2 3B (up to 6 minutes), speech with Higgs TTS 3 (in a voice the model picks, or cloned from a recording you have permission to use) and ambience and sound effects with Stable Audio 3 Medium (up to 380 s). Takes are saved as FLAC with their settings, show a live preview while they are made, and play in the Gallery, which has a new **Audio only** filter. **Use as → Audio track** gives a take to a video, and **Use as → Voice** makes a speech take the voice of the next one. It runs on Windows and Linux with a 10 GB GPU and on macOS with Apple silicon, and needs ffmpeg like video does
 - **Every built-in model shows its licence.** An **ⓘ** beside the model picker, on the Models page and in the download dialog names the licence, what it allows and a link, and the CLIs print the same terms before a first download. The three audio models are non-commercial or limited, so read them before you use the output
+- **Previews in the file browser.** The pickers for images, audio tracks and source videos show thumbnails, can switch to a grid, and have a preview (`Alt+P`) that plays audio and video. Workspace slots show the file they hold. Anyone who can open the Web UI can see and play these files, so use `--host local` only on a network you trust
 
 ### Changed
+- **The Gallery and the Workspace strip load small thumbnails** instead of the full images and videos, so they open faster
 - **The Web UI asks before a job downloads a model**, listing what will download with its size, the free space and its terms
 - **Extend Video is now a kind in the Video tab.** The top bar is Image, Video and Audio, and **Kind** in Video switches between **New** and **Extend**
 - **Reset acts on the open tab only**, and **Reuse settings** and **Load settings** apply a file's settings exactly: what the file didn't record takes its default instead of what the form held
+- **The file browser sorts by name, size or date**, newest first by default, shows the time with dates, and has a phone layout when held sideways
 
 ### Fixed
 - **Image and Video keep their own settings, model and preset** when you switch between them

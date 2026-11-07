@@ -104,6 +104,19 @@ The workspace payload (`GET /api/workspace`) lists `audio_models`, one row per p
 
 `AUDIO_EXTENSIONS` (`.flac`, `.wav`, `.mp3`, `.m4a`, `.ogg`) are gallery media: `/media` serves them with ranges so a player can seek, and `GET /api/gallery?filter=audio` lists only them. `_read_audio_facts` makes one ffprobe call per file for the embedded settings, duration, channels and sample rate, and never decodes it. The 100 waveform peaks are computed lazily: `GET /api/gallery-peaks?id=<asset id>` decodes the file on the first request and stores the result in the file's index row, so later requests and listings decode nothing; the asset JSON carries `peaks: null` until then. A take a job just made carries its peaks in its `generation_finished` asset. The asset JSON (`web/gallery_audio.py`) adds `kind`, `model_label`, `duration`, `peaks`, `channels`, `sample_rate`, `has_reference_voice`, `lyrics`, `cut` and `parts`, with `null` `upscale` and `extend` blocks. A file with this app's settings is reusable; its Reuse URL never carries the consent. A file without them lists and plays but has no Reuse (`has_reusable_config: false`).
 
+## File browser previews
+
+Purposes with a `preview` kind (`BrowsePurpose.preview` in `web/path_browser.py`: images, audio tracks, source videos) get three routes, with the logic in `web/browse_media.py`:
+
+| Route | Returns |
+|---|---|
+| `GET /api/browse/preview?purpose&path[&size=large][&frame=last]` | A WebP of an image or a video still, 384 px (768 with `size=large`) |
+| `GET /api/browse/info?purpose&path` | JSON facts: pixel size, length, format, waveform peaks |
+| `GET /api/browse/media?purpose&path` | The audio or video file, with range requests |
+| `GET /thumbs/{asset_id}` | The 768 px WebP of a gallery image or video, confined like `/media` |
+
+They only serve regular files with an extension the purpose accepts. Images are re-encoded without metadata. Pictures are cached in `<data dir>/cache/browse`; the picker routes refuse cross-site fetches where the browser sends `Sec-Fetch-Site`.
+
 ## Reference images
 
 An image job takes references on top of its start image (`image_path`). The start image and last frame controls are listed on both workflows of a mode (`txt2img` and `img2img`, `txt2vid` and `img2vid`), so the Images section shows the same way in each. No workflow clears `image_path`, `end_image_path` or `image_strength`, because a tab change must not drop an image. The job's `workflow` is derived from the inputs it resolved (a start image or first frame makes it `img2img` or `img2vid`, whatever workflow the form posted), so the history and the job log record what ran; a posted `img2img` or `img2vid` without an image is refused. The Workspace sends `image_path` and `image_strength` only when the tab's start image is set and the model takes one, and `end_image_path` only with a first frame.

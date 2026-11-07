@@ -203,11 +203,13 @@ The terminal button in the *Settings* header copies a `ziv image`, `ziv video` o
 
 ### Paths on the server
 
-Fields that take a path on the server's machine (prompt files, the output folder, checkpoints, LoRAs, source videos) have a folder button. It opens a file browser inside the Web UI, so it works the same on every system and from a phone.
+Fields that take a path on the server's machine (prompt files, the output folder, checkpoints, LoRAs, images, audio tracks, source videos) have a folder button. It opens a file browser inside the Web UI, so it works the same on every system and from a phone.
 
 - It opens at the field's current path or the matching folder, and lists only the files the field accepts. **Show all** lists the rest; **Hidden files** shows names that start with a dot.
 - Your last five choices are under **Recent**.
 - Click the path bar or press ++slash++ to type a path.
+- Click **Name**, **Size** or **Modified** to sort, and again to reverse. The order is remembered, starting with newest first.
+- For images, audio tracks and source videos it shows thumbnails, can switch to a grid, and has a preview (**Preview** or ++alt+p++) that plays audio and video when you press play. Once chosen, the slot shows the file too.
 
 Typing in a path field suggests matching folders and files: ++tab++ takes the first, the arrow keys and ++enter++ pick another, and ++down++ in an empty field suggests recent paths and the usual folders.
 

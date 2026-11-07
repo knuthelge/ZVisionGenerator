@@ -168,7 +168,7 @@ zvisiongenerator/
 │   ├── audio_fade.py              Fade the end of a clip to silence
 │   ├── audio_console.py           The live progress line of `ziv audio`
 │   ├── audio_level.py             Scale a clip that peaks above a ceiling down to it (`limit_peak`)
-│   ├── audio_peaks.py             The 100 waveform peaks of an audio clip or file, for the gallery
+│   ├── audio_peaks.py             The 100 waveform peaks of an audio clip or file, for the gallery and the file browser
 │   ├── audio_resample.py          Polyphase resampling of multi-channel audio
 │   ├── audio_request.py           The checks of an audio request that `ziv audio` and the Web UI share: the model, the length of a sound and the limits of a speech request
 │   ├── audio_save.py              Write a take as 16-bit FLAC through ffmpeg with its settings in the `zvisiongenerator.config` tag
@@ -202,7 +202,7 @@ zvisiongenerator/
 │   ├── lora_install.py            Check a downloaded LoRA's size and SHA-256 and rename it into the LoRA folder in one step
 │   ├── lora_keys.py               Pure rename of a LoRA's tensor names for each family's loaders (PEFT adapter names, Kohya names, prefixes), shared by the detector and every loader
 │   ├── lora_names.py              The local name a downloaded LoRA is saved under: a slug of its repository name, numbered when taken
-│   ├── lora_preview.py            Shrink a Hugging Face preview image to the small WebP kept with a downloaded LoRA
+│   ├── lora_preview.py            Shrink an image to a small WebP: the preview kept with a downloaded LoRA and the file browser's thumbnails
 │   ├── lora_trigger.py            Read a LoRA's trigger text from a model card's instance prompt or a header's single caption
 │   ├── ltx_converted.py           The manifest of a converted LTX model folder (LTX-2.3 or LTX-2.5)
 │   ├── ltx_version.py             The LTX version (2.3 or 2.5) of a video model: its alias, known repo, converted manifest, or a local folder's config files
@@ -241,6 +241,7 @@ zvisiongenerator/
 │   ├── audio_job.py               Turn an audio generate form's fields into the request of one take, with the refusals `ziv audio` makes
 │   ├── audio_inventory.py         The audio rows of the Models page
 │   ├── audio_models.py            The audio models that run on this machine and each one's Workspace row
+│   ├── browse_media.py            Previews, facts and playback of the media files the file browser lists: the file check, the disk cache and the decode limits
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
@@ -270,7 +271,7 @@ zvisiongenerator/
 │   ├── model_download_plan.py     Plan a Models-page row's downloads and size a job's parts for the download dialog, with the licence records of its models
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
-│   ├── path_browser.py            Host folder listings for the in-app path browser
+│   ├── path_browser.py            Host folder listings and the browse purposes (with their preview kind) for the in-app path browser
 │   ├── presets.py                 Settings presets for the Web UI: file format, slugs, validation, and the store (list, write, rename, delete under one lock)
 │   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked), create prompt files, and append a Workspace prompt
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
