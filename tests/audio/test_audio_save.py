@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import json
 import subprocess
+import wave
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from tests._media import REAL
-from tests.audio._helpers import clip, decode, sine
+from tests.audio._helpers import clip, sine
 
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_save import save_flac
+from zvisiongenerator.utils import audio_voice
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
 from zvisiongenerator.utils.provenance import (
     AUDIO_CONFIG_SCHEMA,
@@ -21,56 +23,91 @@ from zvisiongenerator.utils.provenance import (
     config_from_probe,
     read_config,
 )
-from zvisiongenerator.utils.video_probe import ffprobe_json
 
 
-class TestFlacRoundTrip:
-    @REAL
-    def test_a_mono_take_reads_back_with_its_audio_rate_and_settings(self, tmp_path):
-        payload = {"schema": AUDIO_CONFIG_SCHEMA, "kind": "speech", "prompt": "Hello", "seed": 7}
-        samples = sine(0.5, rate=24000, amplitude=0.5)
+def _ffmpeg_that_writes_its_output(seen: dict):
+    """Return a stand-in for ``subprocess.run`` that notes the encode command and the WAV it was given, and writes the output file it names."""
 
-        path = save_flac(samples, 24000, tmp_path / "take.flac", payload)
+    def run(command, **_kwargs):
+        wav = command[command.index("-i") + 1]
+        with wave.open(wav, "rb") as reader:
+            seen.update(
+                command=command,
+                wav_rate=reader.getframerate(),
+                wav_channels=reader.getnchannels(),
+                wav_pcm=np.frombuffer(reader.readframes(reader.getnframes()), dtype=np.int16),
+                destination_when_encoding=Path(command[-1]),
+            )
+        Path(command[-1]).write_bytes(b"encoded")
+        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
 
-        decoded, rate = decode(path)
-        assert path == tmp_path / "take.flac" and rate == 24000 and decoded.shape[0] == 1
-        assert decoded.shape[1] == samples.shape[1]
-        np.testing.assert_allclose(decoded, samples, atol=2 / 32768)
-        assert read_config(path) == payload
+    return run
 
-    @REAL
-    def test_a_stereo_take_keeps_its_rate_and_channels(self, tmp_path):
-        samples = np.stack([sine(0.25, rate=48000, amplitude=0.4)[0], sine(0.25, rate=48000, amplitude=0.2, frequency=330)[0]])
 
-        path = save_flac(samples, 48000, tmp_path / "song.flac", {"kind": "music"})
+def _tag_of(command: list[str]) -> str:
+    """Return the value of the ``zvisiongenerator.config`` tag in an encode command."""
+    values = [command[index + 1] for index, word in enumerate(command) if word == "-metadata"]
+    (value,) = [item.removeprefix("zvisiongenerator.config=") for item in values if item.startswith("zvisiongenerator.config=")]
+    return value
 
-        decoded, rate = decode(path)
-        data = ffprobe_json(path, count_packets=False)
-        assert rate == 48000 and decoded.shape == samples.shape
-        assert data["streams"][0]["codec_name"] == "flac" and data["streams"][0]["bits_per_raw_sample"] == "16"
-        np.testing.assert_allclose(decoded, samples, atol=2 / 32768)
 
-    @REAL
-    def test_lyrics_with_new_lines_and_non_latin_text_survive(self, tmp_path):
-        payload = {"kind": "music", "prompt": "synth-pop", "lyrics": '[verse]\nHei, jeg elsker deg ÆØÅ\n[chorus]\n歌 "quoted" = ; # \\'}
+class TestSaveFlac:
+    @pytest.mark.parametrize(("rate", "channels"), [(24000, 1), (48000, 2)])
+    def test_the_clip_is_encoded_from_a_wav_at_its_own_rate_and_channel_count(self, tmp_path, rate, channels):
+        seen: dict = {}
+        samples = sine(0.25, rate=rate, channels=channels)
 
-        path = save_flac(sine(0.1), 24000, tmp_path / "s.flac", payload)
+        with patch("zvisiongenerator.utils.video_splice.subprocess.run", side_effect=_ffmpeg_that_writes_its_output(seen)):
+            save_flac(samples, rate, tmp_path / "take.flac", {"kind": "music"})
 
-        assert read_config(path) == payload
+        assert (seen["wav_rate"], seen["wav_channels"]) == (rate, channels)
+        assert seen["wav_pcm"].shape[0] == samples.shape[0] * samples.shape[1]
 
-    @REAL
+    def test_the_file_is_16_bit_flac_with_the_inputs_own_tags_dropped(self, tmp_path):
+        seen: dict = {}
+
+        with patch("zvisiongenerator.utils.video_splice.subprocess.run", side_effect=_ffmpeg_that_writes_its_output(seen)):
+            save_flac(sine(0.1), 24000, tmp_path / "take.flac", {})
+
+        command = seen["command"]
+        assert command[0] == "ffmpeg" and command[command.index("-c:a") + 1] == "flac" and command[command.index("-sample_fmt") + 1] == "s16"
+        assert command[command.index("-map_metadata") + 1] == "-1"
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"schema": AUDIO_CONFIG_SCHEMA, "kind": "speech", "prompt": "Hello", "seed": 7},
+            {"kind": "music", "prompt": "synth-pop", "lyrics": '[verse]\nHei, jeg elsker deg ÆØÅ\n[chorus]\n歌 "quoted" = ; # \\'},
+        ],
+        ids=["plain", "new lines and non-latin text"],
+    )
+    def test_the_settings_go_into_the_tag_the_reader_looks_for(self, tmp_path, payload):
+        seen: dict = {}
+
+        with patch("zvisiongenerator.utils.video_splice.subprocess.run", side_effect=_ffmpeg_that_writes_its_output(seen)):
+            save_flac(sine(0.1), 24000, tmp_path / "take.flac", payload)
+
+        assert config_from_probe({"format": {"tags": {"zvisiongenerator.config": _tag_of(seen["command"])}}}) == payload
+
     def test_a_clip_beyond_full_scale_is_clipped_not_wrapped(self, tmp_path):
-        loud = sine(0.1, amplitude=2.0)
+        seen: dict = {}
 
-        decoded, _ = decode(save_flac(loud, 24000, tmp_path / "loud.flac", {}))
+        with patch("zvisiongenerator.utils.video_splice.subprocess.run", side_effect=_ffmpeg_that_writes_its_output(seen)):
+            save_flac(sine(0.1, amplitude=2.0), 24000, tmp_path / "loud.flac", {})
 
-        assert decoded.max() <= 1.0 and decoded.min() >= -1.0 and decoded.max() > 0.99
+        pcm = seen["wav_pcm"]
+        assert pcm.max() == 32767 and pcm.min() == -32767 and (np.abs(pcm) > 30000).sum() > 0.4 * pcm.size
 
-    @REAL
-    def test_no_scratch_file_is_left_beside_the_result(self, tmp_path):
-        save_flac(sine(0.1), 24000, tmp_path / "take.flac", {})
+    def test_the_result_appears_only_when_complete_and_no_scratch_file_is_left_beside_it(self, tmp_path):
+        seen: dict = {}
+        path = tmp_path / "take.flac"
+        path.write_bytes(b"older take")
 
-        assert [item.name for item in tmp_path.iterdir()] == ["take.flac"]
+        with patch("zvisiongenerator.utils.video_splice.subprocess.run", side_effect=_ffmpeg_that_writes_its_output(seen)):
+            save_flac(sine(0.1), 24000, path, {})
+
+        assert seen["destination_when_encoding"] != path and seen["destination_when_encoding"].parent == tmp_path
+        assert path.read_bytes() == b"encoded" and [item.name for item in tmp_path.iterdir()] == ["take.flac"]
 
     def test_a_failed_encode_raises_and_leaves_nothing_behind(self, tmp_path):
         failed = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"boom")
@@ -85,6 +122,34 @@ class TestFlacRoundTrip:
 class TestConfigInAnyContainer:
     def test_the_tag_is_found_whatever_its_case(self):
         assert config_from_probe({"format": {"tags": {"ZVISIONGENERATOR.CONFIG": json.dumps({"a": 1})}}}) == {"a": 1}
+
+
+class TestReadConfig:
+    @staticmethod
+    def _probe_prints(stdout: str, returncode: int = 0):
+        def run(command, **_kwargs):
+            if returncode:
+                raise subprocess.CalledProcessError(returncode, command, stderr="bad")
+            return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+        return patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=run)
+
+    def test_the_settings_are_read_from_the_format_tags_ffprobe_prints(self):
+        printed = json.dumps({"format": {"tags": {"zvisiongenerator.config": json.dumps({"kind": "speech", "seed": 3})}}})
+
+        with self._probe_prints(printed) as probe:
+            config = read_config("take.flac")
+
+        assert config == {"kind": "speech", "seed": 3}
+        assert probe.call_args.args[0][0] == "ffprobe" and "-show_format" in probe.call_args.args[0]
+
+    def test_a_file_without_the_tag_has_no_settings(self):
+        with self._probe_prints(json.dumps({"format": {"tags": {"title": "x"}}})):
+            assert read_config("plain.flac") is None
+
+    def test_a_file_ffprobe_cannot_read_raises(self):
+        with self._probe_prints("", returncode=1), pytest.raises(subprocess.CalledProcessError):
+            read_config("broken.flac")
 
 
 class TestPayload:
@@ -127,14 +192,30 @@ class TestPayload:
 
 
 class TestAnyVoiceTake:
-    @REAL
-    def test_a_file_needs_consent_unless_its_settings_show_an_any_take(self, tmp_path):
-        any_take = save_flac(sine(0.1), 24000, tmp_path / "any.flac", {"kind": "speech", "prompt": "Hi"})
-        cloned = save_flac(sine(0.1), 24000, tmp_path / "cloned.flac", {"kind": "speech", "prompt": "Hi", "voice_path": "~/me.wav"})
-        plain = tmp_path / "plain.wav"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=0.1", str(plain)], check=True)
+    """A file needs the speaker's consent unless its embedded settings show a speech take made without a reference voice."""
 
-        assert not voice_needs_consent(any_take)
-        assert voice_needs_consent(cloned)
-        assert voice_needs_consent(plain)
-        assert voice_needs_consent(tmp_path / "missing.wav")
+    @pytest.mark.parametrize(
+        ("config", "needs_consent"),
+        [
+            ({"kind": "speech", "prompt": "Hi"}, False),
+            ({"kind": "speech", "prompt": "Hi", "voice_path": "~/me.wav"}, True),
+            ({"kind": "music", "prompt": "synth-pop"}, True),
+            (None, True),
+        ],
+        ids=["any take", "cloned take", "not speech", "no settings"],
+    )
+    def test_only_a_speech_take_without_a_reference_voice_is_free(self, monkeypatch, config, needs_consent):
+        monkeypatch.setattr(audio_voice, "read_config", lambda path: config)
+
+        assert voice_needs_consent("voice.flac") is needs_consent
+
+    @pytest.mark.parametrize(
+        "error", [subprocess.CalledProcessError(1, ["ffprobe"]), json.JSONDecodeError("bad", "", 0), FileNotFoundError("missing")], ids=["ffprobe fails", "bad settings", "missing"]
+    )
+    def test_a_file_whose_settings_cannot_be_read_needs_consent(self, monkeypatch, error):
+        def unreadable(path):
+            raise error
+
+        monkeypatch.setattr(audio_voice, "read_config", unreadable)
+
+        assert voice_needs_consent("voice.wav")

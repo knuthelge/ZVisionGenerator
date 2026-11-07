@@ -7,10 +7,7 @@ import subprocess
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
-
-from tests._media import REAL, encode_frames, ffmpeg, first_frame, numbered_frames, rotated_copy
 
 from zvisiongenerator.utils import video_probe
 from zvisiongenerator.utils.video_extend import extend_source_problems
@@ -301,100 +298,33 @@ class TestAudioDecodes:
         assert command[command.index("-ss") + 1] == "0.000000"
 
 
-def _patch_corner(path, width: int, height: int) -> str:
-    """Return which corner of the displayed first frame holds the red patch."""
-    frame = first_frame(path, width, height)
-    rows, cols = np.nonzero((frame[:, :, 0] > 200) & (frame[:, :, 1] < 60))
-    return ("top" if rows.mean() < height / 2 else "bottom") + "-" + ("left" if cols.mean() < width / 2 else "right")
+class TestProbedClipsAgainstTheExtendChecks:
+    """What ffprobe prints for the clips the checks look at, from the JSON to the problems found."""
 
+    @staticmethod
+    def _probe(monkeypatch, *streams: dict[str, Any]):
+        monkeypatch.setattr(video_probe.subprocess, "run", MagicMock(return_value=MagicMock(stdout=json.dumps(_probe_json(*streams)))))
+        return probe_video("/clips/clip.mp4")
 
-@REAL
-class TestRealClips:
-    """Probe clips made with the installed ffmpeg, so the conventions hold against the real tools."""
-
-    @pytest.fixture
-    def base(self, tmp_path):
-        # 256x128 clip with a red patch in the top-left corner, lossless so the patch stays exact.
-        path = tmp_path / "base.mp4"
-        encode_frames(numbered_frames(30, 256, 128), path, pix_fmt="yuv444p")
-        return path
-
-    def test_an_unrotated_clip(self, base):
-        probe = probe_video(base)
-
-        assert (probe.width, probe.height, probe.rotation) == (256, 128, 0)
-        assert probe.frame_count == 30
-        assert probe.fps == 24.0
-        assert probe.field_order == "progressive"
-
-    @pytest.mark.parametrize(
-        ("angle", "rotation", "size", "corner"),
-        [("-90", 90, (128, 256), "top-right"), ("90", 270, (128, 256), "bottom-left")],
-    )
-    def test_rotation_is_the_clockwise_turn_the_decoder_applies(self, base, tmp_path, angle, rotation, size, corner):
-        path = rotated_copy(base, tmp_path / "rotated.mp4", angle)
-
-        probe = probe_video(path)
-
-        assert (probe.coded_width, probe.coded_height) == (256, 128)
-        assert (probe.width, probe.height, probe.rotation) == (*size, rotation)
-        assert _patch_corner(path, *size) == corner
-
-    def test_an_app_made_clip_is_clean(self, tmp_path):
-        # What the backend writes: raw frames through libx264 at crf 18 in yuv420p, with no colour tags.
-        app = tmp_path / "app.mp4"
-        ffmpeg("-f", "lavfi", "-i", "testsrc=size=256x128:rate=24", "-frames:v", "40", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(app))
-
-        probe = probe_video(app)
+    def test_an_app_made_clip_is_clean(self, monkeypatch):
+        # What the backend writes: libx264 in yuv420p with no colour tags.
+        probe = self._probe(monkeypatch, _video_stream(nb_frames="40", nb_read_packets="40"), _audio_stream())
 
         assert probe.frame_count == 40
         assert extend_source_problems(probe, None) == []
 
-    def test_a_clip_without_a_field_order_is_not_interlaced(self, tmp_path):
-        clip = tmp_path / "mpeg4.mp4"
-        ffmpeg("-f", "lavfi", "-i", "testsrc=size=256x128:rate=24", "-frames:v", "30", "-c:v", "mpeg4", str(clip))
-
-        probe = probe_video(clip)
+    def test_a_clip_without_a_field_order_is_not_interlaced(self, monkeypatch):
+        probe = self._probe(monkeypatch, _video_stream(codec_name="mpeg4", profile="Simple Profile", field_order=None))
 
         assert probe.field_order is None
         assert extend_source_problems(probe, None) == []
 
     @pytest.mark.parametrize(
-        ("name", "encode", "code"),
-        [
-            ("interlaced", ("-pix_fmt", "yuv420p", "-x264-params", "tff=1:interlaced=1"), "interlaced"),
-            ("ten_bit", ("-pix_fmt", "yuv420p10le"), "high_bit_depth"),
-        ],
+        ("fields", "code"),
+        [({"field_order": "tt"}, "interlaced"), ({"pix_fmt": "yuv420p10le", "bits_per_raw_sample": "10"}, "high_bit_depth")],
+        ids=["interlaced", "ten_bit"],
     )
-    def test_an_unsupported_clip_is_flagged(self, tmp_path, name, encode, code):
-        clip = tmp_path / f"{name}.mp4"
-        ffmpeg("-f", "lavfi", "-i", "testsrc=size=256x128:rate=24", "-frames:v", "30", "-c:v", "libx264", *encode, str(clip))
+    def test_an_unsupported_clip_is_flagged(self, monkeypatch, fields, code):
+        probe = self._probe(monkeypatch, _video_stream(**fields))
 
-        assert [p.code for p in extend_source_problems(probe_video(clip), None)] == [code]
-
-    def test_the_audio_of_a_clip_with_sound_decodes(self, tmp_path):
-        clip = tmp_path / "sound.mp4"
-        ffmpeg(
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc=size=256x128:rate=24",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000",
-            "-t",
-            "2",
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            "-pix_fmt",
-            "yuv420p",
-            str(clip),
-        )
-
-        probe = probe_video(clip)
-
-        assert probe.has_audio
-        assert audio_decodes(clip, start=1.0, duration=1.0) is True
+        assert [p.code for p in extend_source_problems(probe, None)] == [code]

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
 from tests._factories import make_extend_source
-from tests._media import REAL, ffmpeg
+from tests._fake_media import completed, f32le
 
 from zvisiongenerator.core.video_types import AudioTrack
+from zvisiongenerator.utils import audio_track
 from zvisiongenerator.utils.audio_track import (
     TRACK_UNREADABLE,
     continue_track,
@@ -21,100 +22,193 @@ from zvisiongenerator.utils.audio_track import (
     window_waveform,
 )
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE
-from zvisiongenerator.utils.video_splice import write_pcm16_wav
 
 
-def _steps(path: Path, levels: list[float], *, rate: int = 16000, channels: int = 1) -> Path:
-    """Write a WAV whose every second holds one constant level, so a stretch of it says where it was cut from."""
-    audio = np.repeat(np.array(levels, dtype=np.float32), rate)
-    write_pcm16_wav(np.tile(audio, (channels, 1)), path, rate)
-    return path
+def _arg(command: list[str], flag: str) -> str:
+    return command[command.index(flag) + 1]
 
 
-def _mean(audio: np.ndarray, begin: float, end: float, rate: int = AUDIO_SAMPLE_RATE) -> float:
-    """Return the mean of the first channel between two moments, away from the edges the resampler smooths."""
-    return float(audio[0, round(begin * rate) : round(end * rate)].mean())
+def _stereo(level: float, samples: int) -> np.ndarray:
+    return np.full((2, samples), level, dtype=np.float32)
 
 
-@REAL
+def _decoding(monkeypatch, audio: np.ndarray, *, channels: int = 2, returncode: int = 0, stderr: bytes = b"") -> MagicMock:
+    """Replace ffprobe (it reports *channels*) and ffmpeg (it prints *audio*), and return the ``subprocess.run`` mock."""
+    monkeypatch.setattr(audio_track, "ffprobe_json", lambda *_a, **_k: {"streams": [{"codec_type": "audio", "channels": channels}]})
+    run = MagicMock(return_value=completed(f32le(audio), stderr=stderr, returncode=returncode))
+    monkeypatch.setattr(audio_track.subprocess, "run", run)
+    return run
+
+
 class TestReadTrack:
-    def test_reads_stereo_float32_of_the_asked_length(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.2, 0.4, 0.6])
+    def test_returns_stereo_float32_of_the_asked_length(self, monkeypatch):
+        _decoding(monkeypatch, _stereo(0.2, 72000))
 
-        audio = read_track(AudioTrack(str(track), 0.0), AUDIO_SAMPLE_RATE, 1.5)
+        audio = read_track(AudioTrack("t.wav", 0.0), AUDIO_SAMPLE_RATE, 1.5)
 
         assert audio.dtype == np.float32
         assert audio.shape == (2, 72000)
 
-    def test_a_mono_track_is_doubled_into_both_channels(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.5])
+    def test_asks_ffmpeg_for_the_stretch_at_the_rate_from_the_first_audio_stream(self, monkeypatch):
+        run = _decoding(monkeypatch, _stereo(0.2, 16000))
 
-        audio = read_track(AudioTrack(str(track), 0.0), 16000, 0.5)
+        read_track(AudioTrack("t.wav", 1.25), 16000, 1.0)
 
-        assert np.array_equal(audio[0], audio[1])
-        assert abs(float(audio[0, 2000:6000].mean()) - 0.5) < 0.01
+        command = run.call_args.args[0]
+        assert command[0] == "ffmpeg"
+        assert command.index("-ss") < command.index("-i")
+        assert (_arg(command, "-ss"), _arg(command, "-t")) == ("1.250000", "1.000000")
+        assert (_arg(command, "-map"), _arg(command, "-ar"), _arg(command, "-f")) == ("0:a:0", "16000", "f32le")
+        assert _arg(command, "-i") == "t.wav"
+        assert "-vn" in command
 
-    def test_starts_where_asked(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.2, 0.4, 0.6])
+    def test_a_negative_start_reads_from_the_beginning(self, monkeypatch):
+        run = _decoding(monkeypatch, _stereo(0.2, 100))
 
-        audio = read_track(AudioTrack(str(track), 1.0), AUDIO_SAMPLE_RATE, 1.0)
+        read_track(AudioTrack("t.wav", -3.0), 100, 1.0)
 
-        assert abs(_mean(audio, 0.2, 0.8) - 0.4) < 0.01
+        assert _arg(run.call_args.args[0], "-ss") == "0.000000"
 
-    def test_pads_with_silence_past_the_end_and_after_a_start_beyond_it(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.4, 0.4])
+    def test_a_mono_track_is_copied_to_both_channels_instead_of_ffmpegs_upmix(self, monkeypatch):
+        run = _decoding(monkeypatch, _stereo(0.5, 100), channels=1)
 
-        audio = read_track(AudioTrack(str(track), 1.5), AUDIO_SAMPLE_RATE, 2.0)
+        read_track(AudioTrack("t.wav", 0.0), 100, 1.0)
+
+        command = run.call_args.args[0]
+        assert _arg(command, "-af") == "pan=stereo|c0=c0|c1=c0"
+        assert "-ac" not in command
+
+    def test_a_stereo_track_is_left_to_ffmpeg(self, monkeypatch):
+        run = _decoding(monkeypatch, _stereo(0.5, 100), channels=2)
+
+        read_track(AudioTrack("t.wav", 0.0), 100, 1.0)
+
+        command = run.call_args.args[0]
+        assert _arg(command, "-ac") == "2"
+        assert "-af" not in command
+
+    def test_a_file_ffprobe_cannot_read_is_left_to_ffmpeg_to_report(self, monkeypatch):
+        run = _decoding(monkeypatch, _stereo(0.5, 100))
+        monkeypatch.setattr(audio_track, "ffprobe_json", MagicMock(side_effect=RuntimeError("ffprobe could not read")))
+
+        read_track(AudioTrack("t.wav", 0.0), 100, 1.0)
+
+        assert _arg(run.call_args.args[0], "-ac") == "2"
+
+    def test_pads_with_silence_when_the_file_ends_early(self, monkeypatch):
+        _decoding(monkeypatch, _stereo(0.4, 12000))
+
+        audio = read_track(AudioTrack("t.wav", 1.5), AUDIO_SAMPLE_RATE, 2.0)
 
         assert audio.shape == (2, 96000)
-        assert abs(_mean(audio, 0.1, 0.4) - 0.4) < 0.01
-        assert not audio[:, round(0.6 * AUDIO_SAMPLE_RATE) :].any()
+        assert (audio[:, :12000] == 0.4).all()
+        assert not audio[:, 12000:].any()
 
-        beyond = read_track(AudioTrack(str(track), 5.0), AUDIO_SAMPLE_RATE, 0.5)
+    def test_a_start_beyond_the_end_gives_all_silence(self, monkeypatch):
+        _decoding(monkeypatch, np.zeros((2, 0), dtype=np.float32))
+
+        beyond = read_track(AudioTrack("t.wav", 5.0), AUDIO_SAMPLE_RATE, 0.5)
 
         assert beyond.shape == (2, 24000)
         assert not beyond.any()
 
-    def test_resamples_to_the_asked_rate(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.3, 0.3], rate=44100)
+    def test_extra_samples_are_cut_and_a_partial_trailing_sample_is_dropped(self, monkeypatch):
+        run = _decoding(monkeypatch, np.arange(2 * 150, dtype=np.float32).reshape(150, 2).T)
+        run.return_value = completed(run.return_value.stdout + b"\x00\x00\x00", returncode=0)
 
-        assert read_track(AudioTrack(str(track), 0.0), 32000, 1.0).shape == (2, 32000)
+        audio = read_track(AudioTrack("t.wav", 0.0), 100, 1.0)
 
-    @pytest.mark.parametrize("kind", ["missing", "not-audio"])
-    def test_a_file_that_cannot_be_read_says_so(self, tmp_path, kind):
-        path = tmp_path / "notes.txt"
-        if kind == "not-audio":
-            path.write_text("hello")
+        assert audio.shape == (2, 100)
+        assert audio[0, 5] == 10 and audio[1, 5] == 11  # channels stay interleaved as written
 
-        with pytest.raises(ValueError, match=TRACK_UNREADABLE):
-            read_track(AudioTrack(str(path), 0.0), AUDIO_SAMPLE_RATE, 1.0)
+    def test_asking_for_no_time_does_not_start_ffmpeg(self, monkeypatch):
+        run = _decoding(monkeypatch, _stereo(0.4, 100))
+
+        assert read_track(AudioTrack("t.wav", 0.0), AUDIO_SAMPLE_RATE, 0.0).shape == (2, 0)
+        run.assert_not_called()
+
+    def test_a_file_ffmpeg_cannot_decode_says_so_and_carries_its_message(self, monkeypatch):
+        _decoding(monkeypatch, np.zeros((2, 0), dtype=np.float32), returncode=1, stderr=b"Invalid data found when processing input")
+
+        with pytest.raises(ValueError, match=TRACK_UNREADABLE) as caught:
+            read_track(AudioTrack("notes.txt", 0.0), AUDIO_SAMPLE_RATE, 1.0)
+
+        assert "Invalid data found" in str(caught.value.__cause__)
 
 
-@REAL
+def _probing(monkeypatch, data: dict | Exception, *, decodes: bool = True) -> MagicMock:
+    """Replace ffprobe with *data* (or its failure) and the decode check with *decodes*; return the decode check."""
+    if isinstance(data, Exception):
+        monkeypatch.setattr(audio_track, "ffprobe_json", MagicMock(side_effect=data))
+    else:
+        monkeypatch.setattr(audio_track, "ffprobe_json", MagicMock(return_value=data))
+    check = MagicMock(return_value=decodes)
+    monkeypatch.setattr(audio_track, "audio_decodes", check)
+    return check
+
+
 class TestProbeTrackSeconds:
-    def test_returns_the_length_of_the_audio(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.2] * 4)
+    def test_returns_the_length_of_the_audio_stream(self, monkeypatch):
+        _probing(monkeypatch, {"streams": [{"codec_type": "video"}, {"codec_type": "audio", "duration": "4.000000"}], "format": {"duration": "9.0"}})
 
-        assert probe_track_seconds(str(track)) == pytest.approx(4.0, abs=0.01)
+        assert probe_track_seconds("t.wav") == pytest.approx(4.0)
 
-    @pytest.mark.parametrize("kind", ["missing", "not-audio", "video-without-sound"])
-    def test_a_file_that_cannot_be_read_says_so(self, tmp_path, kind):
-        path = tmp_path / "file.bin"
-        if kind == "not-audio":
-            path.write_text("hello")
-        if kind == "video-without-sound":
-            ffmpeg("-f", "lavfi", "-i", "color=c=red:s=64x64:d=1:r=24", "-pix_fmt", "yuv420p", str(tmp_path / "v.mp4"))
-            path = tmp_path / "v.mp4"
+    def test_falls_back_to_the_containers_length(self, monkeypatch):
+        _probing(monkeypatch, {"streams": [{"codec_type": "audio", "duration": "N/A"}], "format": {"duration": "3.5"}})
+
+        assert probe_track_seconds("t.mka") == pytest.approx(3.5)
+
+    def test_checks_that_the_first_second_decodes(self, monkeypatch):
+        check = _probing(monkeypatch, {"streams": [{"codec_type": "audio", "duration": "4.0"}]})
+
+        probe_track_seconds("t.wav")
+
+        assert check.call_args.args == ("t.wav",)
+        assert check.call_args.kwargs == {"start": 0.0, "duration": 1.0}
+
+    def test_a_shorter_track_is_checked_for_its_whole_length(self, monkeypatch):
+        check = _probing(monkeypatch, {"streams": [{"codec_type": "audio", "duration": "0.4"}]})
+
+        probe_track_seconds("t.wav")
+
+        assert check.call_args.kwargs["duration"] == pytest.approx(0.4)
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            RuntimeError("ffprobe could not read"),
+            {"streams": [{"codec_type": "video"}]},
+            {"streams": []},
+            {},
+            {"streams": [{"codec_type": "audio"}], "format": {}},
+            {"streams": [{"codec_type": "audio", "duration": "0"}], "format": {"duration": "nan"}},
+        ],
+        ids=["unreadable", "no-audio-stream", "no-streams", "empty", "no-length", "zero-length"],
+    )
+    def test_a_file_that_cannot_be_read_says_so(self, monkeypatch, case):
+        _probing(monkeypatch, case)
 
         with pytest.raises(ValueError, match=TRACK_UNREADABLE):
-            probe_track_seconds(str(path))
+            probe_track_seconds("file.bin")
+
+    def test_audio_that_does_not_decode_says_so(self, monkeypatch):
+        _probing(monkeypatch, {"streams": [{"codec_type": "audio", "duration": "4.0"}]}, decodes=False)
+
+        with pytest.raises(ValueError, match=TRACK_UNREADABLE):
+            probe_track_seconds("t.wav")
 
 
 class TestRequireReadableTrack:
-    @REAL
-    def test_a_file_that_cannot_be_read_is_refused(self, tmp_path):
+    def test_a_file_that_cannot_be_read_is_refused(self, monkeypatch):
+        _probing(monkeypatch, RuntimeError("ffprobe could not read"))
+
         with pytest.raises(ValueError, match=TRACK_UNREADABLE):
-            require_readable_track(AudioTrack(str(tmp_path / "missing.mp3"), 0.0))
+            require_readable_track(AudioTrack("missing.mp3", 0.0))
+
+    def test_a_readable_file_passes(self, monkeypatch):
+        _probing(monkeypatch, {"streams": [{"codec_type": "audio", "duration": "4.0"}]})
+
+        require_readable_track(AudioTrack("song.mp3", 0.0))
 
 
 class TestContinueTrack:
@@ -138,76 +232,98 @@ class TestContinueTrack:
         assert continue_track(track, source) == track
 
 
-@REAL
-class TestWindowWaveform:
-    def test_a_silent_source_gives_silence_then_the_track_from_start_at(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.2, 0.4, 0.6])
-        source = make_extend_source(path=tmp_path / "silent.mp4", has_audio=False, frame_count=48)
+def _levels(monkeypatch) -> list[tuple[AudioTrack, int, float]]:
+    """Replace ``read_track`` with a reader whose every sample is the level of its file, and return its calls."""
+    calls: list[tuple[AudioTrack, int, float]] = []
+    levels = {"track.wav": 0.4, "clip.mp4": 0.9}
 
-        window = window_waveform(source, AudioTrack(str(track), 1.0), carry_frames=25, extend_frames=24)
+    def read(track: AudioTrack, rate: int, seconds: float) -> np.ndarray:
+        calls.append((track, rate, seconds))
+        return _stereo(levels[track.path.rsplit("/", 1)[-1]], round(seconds * rate))
+
+    monkeypatch.setattr(audio_track, "read_track", read)
+    return calls
+
+
+class TestWindowWaveform:
+    def test_a_silent_source_gives_silence_then_the_track_from_start_at(self, monkeypatch):
+        calls = _levels(monkeypatch)
+        source = make_extend_source(path="/v/silent.mp4", has_audio=False, frame_count=48)
+
+        window = window_waveform(source, AudioTrack("/m/track.wav", 1.0), carry_frames=25, extend_frames=24)
 
         carried = round(25 * AUDIO_SAMPLE_RATE / 24)
         assert window.shape == (2, carried + AUDIO_SAMPLE_RATE)
         assert not window[:, :carried].any()
-        assert abs(_mean(window[:, carried:], 0.1, 0.9) - 0.4) < 0.01
+        assert (window[:, carried:] == 0.4).all()
+        assert calls == [(AudioTrack("/m/track.wav", 1.0), AUDIO_SAMPLE_RATE, pytest.approx(1.0))]
 
-    def test_a_source_with_sound_gives_its_last_frames_sound_then_the_track(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.2, 0.4, 0.6])
-        clip = tmp_path / "clip.mp4"
-        ffmpeg(
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=blue:s=64x64:d=2:r=24",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000:duration=2",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            str(clip),
-        )
-        source = make_extend_source(path=clip, has_audio=True, frame_count=48)
+    def test_a_source_with_sound_gives_the_sound_under_its_last_frames_then_the_track(self, monkeypatch):
+        calls = _levels(monkeypatch)
+        source = make_extend_source(path="/v/clip.mp4", has_audio=True, frame_count=48, fps=24.0, video_start=0.5)
 
-        window = window_waveform(source, AudioTrack(str(track), 0.0), carry_frames=25, extend_frames=24)
+        window = window_waveform(source, AudioTrack("/m/track.wav", 0.0), carry_frames=24, extend_frames=24)
 
-        carried = round(25 * AUDIO_SAMPLE_RATE / 24)
-        assert window[:, :carried].std() > 0.05  # the sine, whose amplitude is 0.125
-        assert abs(_mean(window[:, carried:], 0.1, 0.9) - 0.2) < 0.01
+        assert window.shape == (2, 2 * AUDIO_SAMPLE_RATE)
+        assert (window[:, :AUDIO_SAMPLE_RATE] == 0.9).all()
+        assert (window[:, AUDIO_SAMPLE_RATE:] == 0.4).all()
+        carried, new = calls
+        # The carried sound starts at the first carried frame, counted from the start of the file, not of the video.
+        assert carried == (AudioTrack("/v/clip.mp4", pytest.approx(0.5 + 24 / 24)), AUDIO_SAMPLE_RATE, pytest.approx(1.0))
+        assert new[0] == AudioTrack("/m/track.wav", 0.0)
+
+    def test_carrying_more_frames_than_the_source_has_starts_at_its_first_frame(self, monkeypatch):
+        calls = _levels(monkeypatch)
+        source = make_extend_source(path="/v/clip.mp4", has_audio=True, frame_count=10, fps=24.0, video_start=0.0)
+
+        window_waveform(source, AudioTrack("/m/track.wav", 0.0), carry_frames=25, extend_frames=24)
+
+        assert calls[0][0].start == 0.0
+
+    def test_the_rate_is_passed_on(self, monkeypatch):
+        calls = _levels(monkeypatch)
+        source = make_extend_source(path="/v/clip.mp4", has_audio=True, frame_count=48)
+
+        window = window_waveform(source, AudioTrack("/m/track.wav", 0.0), carry_frames=24, extend_frames=24, rate=16000)
+
+        assert window.shape == (2, 32000)
+        assert {rate for _, rate, _ in calls} == {16000}
 
 
-@REAL
 class TestExtensionAudio:
-    def test_the_new_part_of_a_silent_source_is_the_track_span(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.2, 0.4, 0.6])
-        source = make_extend_source(path=tmp_path / "silent.mp4", has_audio=False, frame_count=48)
+    def test_the_new_part_of_a_silent_source_is_the_track_span(self, monkeypatch):
+        _levels(monkeypatch)
+        source = make_extend_source(path="/v/silent.mp4", has_audio=False, frame_count=48)
 
-        audio, lead = extension_audio(source, AudioTrack(str(track), 1.0), carry_frames=25, extend_frames=24)
+        audio, lead = extension_audio(source, AudioTrack("/m/track.wav", 1.0), carry_frames=25, extend_frames=24)
 
         assert lead == round(0.25 * AUDIO_SAMPLE_RATE)
         assert audio.shape == (2, lead + AUDIO_SAMPLE_RATE)
         assert not audio[:, :lead].any()
-        assert abs(_mean(audio[:, lead:], 0.1, 0.9) - 0.4) < 0.01
+        assert (audio[:, lead:] == 0.4).all()
 
-    def test_a_window_that_carries_less_than_the_lead_has_a_shorter_lead(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.4, 0.4])
-        source = make_extend_source(path=tmp_path / "silent.mp4", has_audio=False, frame_count=48)
+    def test_the_lead_is_the_end_of_the_sources_own_sound(self, monkeypatch):
+        _levels(monkeypatch)
+        source = make_extend_source(path="/v/clip.mp4", has_audio=True, frame_count=48, video_start=0.0)
 
-        audio, lead = extension_audio(source, AudioTrack(str(track), 0.0), carry_frames=2, extend_frames=24)
+        audio, lead = extension_audio(source, AudioTrack("/m/track.wav", 0.0), carry_frames=25, extend_frames=24)
+
+        assert (audio[:, :lead] == 0.9).all()
+        assert (audio[:, lead:] == 0.4).all()
+
+    def test_a_window_that_carries_less_than_the_lead_has_a_shorter_lead(self, monkeypatch):
+        _levels(monkeypatch)
+        source = make_extend_source(path="/v/silent.mp4", has_audio=False, frame_count=48)
+
+        audio, lead = extension_audio(source, AudioTrack("/m/track.wav", 0.0), carry_frames=2, extend_frames=24)
 
         assert lead == round(2 * AUDIO_SAMPLE_RATE / 24)
         assert audio.shape[1] == lead + AUDIO_SAMPLE_RATE
 
-    def test_a_track_that_ends_early_still_fills_the_whole_segment(self, tmp_path):
-        track = _steps(tmp_path / "t.wav", [0.4])
-        source = make_extend_source(path=tmp_path / "silent.mp4", has_audio=False, frame_count=48)
+    def test_a_longer_segment_is_as_long_as_its_new_frames(self, monkeypatch):
+        _levels(monkeypatch)
+        source = make_extend_source(path="/v/silent.mp4", has_audio=False, frame_count=48)
 
-        audio, lead = extension_audio(source, AudioTrack(str(track), 0.5), carry_frames=25, extend_frames=48)
+        audio, lead = extension_audio(source, AudioTrack("/m/track.wav", 0.5), carry_frames=25, extend_frames=48)
 
         assert audio.shape == (2, lead + 2 * AUDIO_SAMPLE_RATE)
-        assert abs(_mean(audio[:, lead:], 0.1, 0.4) - 0.4) < 0.01
-        assert not audio[:, lead + round(0.6 * AUDIO_SAMPLE_RATE) :].any()

@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import io
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.datastructures import UploadFile
 
 import zvisiongenerator.utils.audio_track as audio_track_module
-from tests._media import REAL
 from tests.web._helpers import stub_video_submission
 from zvisiongenerator.web import server as web_server
 
@@ -119,8 +119,8 @@ class TestInspectRoute:
         assert response.json()["name"] == "song.mp3"
         assert seen == [str(Path("~/song.mp3").expanduser())]
 
-    @REAL
-    def test_a_file_that_cannot_be_read_is_refused_with_the_track_message(self, tmp_path):
+    def test_a_file_that_cannot_be_read_is_refused_with_the_track_message(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(web_server, "probe_track_seconds", MagicMock(side_effect=ValueError("Can't read the audio track")))
         response = self._post({"path": str(tmp_path / "gone.mp3")})
 
         assert response.status_code == 422

@@ -65,10 +65,7 @@ Raise `ValueError`, `FileNotFoundError` or `RuntimeError` with a descriptive mes
 - Download tests never use the network: `check_target` and the worker take a fake `snapshot_download`, `run_in_child` takes a fake `popen`, and `ensure_downloaded` and `DownloadLane` take fake `present`, `check`, `run` and `ensure` callables and a fake clock.
 - Pattern pins that need mflux, mlx-lm or diffusers skip themselves where those aren't installed.
 - An autouse guard fails any test that reaches `huggingface_hub.hf_hub_download` or `snapshot_download` unmocked, even when the code under test swallows the error. Use the `hub_offline` fixture for a test whose subject is "nothing cached, no network", or mock the function in the test.
-
-### Tests that need tools
-
-Tests that run the real `ffmpeg` and `ffprobe` (`tests/video/test_video_probe.py`, `tests/video/test_video_splice.py`, `tests/video/test_video_tail.py`) skip when the tools are missing. Run them locally with ffmpeg installed before changing how extensions are joined.
+- No test runs `ffmpeg` or `ffprobe`. An autouse guard hides both from `shutil.which` and fails any test that starts either, so every machine behaves like CI, which has no ffmpeg. Mock the seam instead: `tests/_fake_media.py` has fake processes and PCM and frame bytes, and `tests/_fake_audio.py` stands in for saving, probing and reading takes. Test the commands we build, how we parse given output, and the error paths, not what ffmpeg makes of them.
 
 ## Web UI
 

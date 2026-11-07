@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from tests._audio_presets import audio_config
 from tests._factories import load_packaged_config
-from tests._media import REAL
+from tests._fake_audio import fake_read_config, install_fake_audio, write_fake_audio
 from tests._paths import FIXTURES
 from tests.audio._helpers import case_request, clip, fake_backend, patch_runner, voice_folder
 from tests.web._helpers import make_web_config, wait_for_status
@@ -26,7 +26,6 @@ from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadProgress, TargetCheck
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
-from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import model_download_plan as plan_module
@@ -52,6 +51,7 @@ def env(monkeypatch, tmp_path):
     submitted: list[dict] = []
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
     monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
+    install_fake_audio(monkeypatch)
     monkeypatch.setattr(web_server.web_runner, "submit_audio_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
     _set_platform(monkeypatch, "cuda")
     with TestClient(web_server.app) as client:
@@ -171,7 +171,6 @@ class TestNormalisation:
         assert env.submitted[0]["request"].seconds == 10.0
 
 
-@REAL
 class TestFormMatchesCopyCli:
     """The form posts what Copy CLI reads, so the job it queues makes the takes the printed command makes (same fixture as the CLI and Vitest tests)."""
 
@@ -234,7 +233,6 @@ class TestRefusals:
         _refused(env.post(model="sa3", prompt="x", seconds="long"), "'seconds' must be a number")
 
 
-@REAL
 class TestVoice:
     @pytest.fixture
     def voices(self, tmp_path):
@@ -268,7 +266,7 @@ class TestVoice:
 
     def test_a_voice_outside_three_to_thirty_seconds_is_refused(self, env, tmp_path):
         short = tmp_path / "short.flac"
-        save_flac(clip(1.5).samples, 24000, short, {"kind": "speech", "prompt": "x"})
+        write_fake_audio(clip(1.5).samples, 24000, short, {"kind": "speech", "prompt": "x"})
 
         _refused(env.post(model="higgs3", prompt="x", voice_path=str(short), voice_text="Hi"), "The voice recording is 1.5 seconds long; use one between 3 and 30 seconds.")
 
@@ -334,7 +332,6 @@ class TestVoice:
     def test_the_tick_reaches_no_store_from_the_form_to_the_saved_file(self, env, voices, monkeypatch):
         """Trace one ticked submit through every place it is kept: the job's context, the recent prompts and the take's embedded settings."""
         from zvisiongenerator.audio_runner import run_audio_batch
-        from zvisiongenerator.utils.provenance import read_config
 
         patch_runner(monkeypatch, fake_backend(clip(0.2)))
         response = self.speak(env, voices, "cloned.flac", voice_consent=["false", "on"])
@@ -345,7 +342,7 @@ class TestVoice:
         assert "consent" not in json.dumps(job["context"]).lower()
         remembered = web_server.recent_prompts.search("", "speech")
         assert [entry["prompt"] for entry in remembered] == ["More words."] and "consent" not in json.dumps(remembered).lower()
-        assert not any("consent" in key for key in read_config(saved[0]))
+        assert not any("consent" in key for key in fake_read_config(saved[0]))
 
     def test_a_loaded_or_retried_cloned_job_must_be_ticked_again(self, env, voices):
         self.speak(env, voices, "cloned.flac", voice_consent="on")
@@ -521,7 +518,6 @@ class TestRunner:
     def events(runner, job_id):
         return [dict(event) for event in runner._get_job(job_id).history]
 
-    @REAL
     def test_a_job_makes_each_take_and_reports_the_runners_events(self, runner, monkeypatch, tmp_path):
         backend = fake_backend(clip(0.3, rate=44100, channels=2))
 
@@ -573,7 +569,6 @@ class TestRunner:
         assert len(snapshot["outputs"]) == 2 and len(list(tmp_path.glob("*.flac"))) == 2
         assert events[-1]["outputs"] == snapshot["outputs"]
 
-    @REAL
     def test_a_failed_take_ends_the_job_failed_and_keeps_the_takes_before_it(self, runner, monkeypatch, tmp_path):
         backend = fake_backend(clip(0.3, rate=44100, channels=2))
         takes = iter([clip(0.3, rate=44100, channels=2), RuntimeError("Stable Audio 3 Medium ran out of GPU memory. Close other apps that use the GPU and try again.")])

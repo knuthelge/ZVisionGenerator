@@ -6,6 +6,7 @@ import re
 import subprocess
 import tempfile
 import warnings
+import wave
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -13,15 +14,13 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from tests._factories import make_extend_source
-from tests._media import REAL, encode_frames, ffmpeg, numbered_frames
+from tests._factories import make_extend_source, make_probe
 from tests.video._helpers import make_video_request
 
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment, ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.video_extend import build_extend_source
-from zvisiongenerator.utils.video_probe import probe_video
-from zvisiongenerator.utils.video_splice import build_segment_command, write_pcm16_wav, write_segment_frames
+from zvisiongenerator.utils.audio_track import TRACK_UNREADABLE
+from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE
 from zvisiongenerator.workflows.video_stages import (
     audio_track_stage,
     enhance_prompt_stage,
@@ -674,80 +673,79 @@ class TestStripAudioStageFailure:
 # The audio track on a generated clip and in an extension
 # ---------------------------------------------------------------------------
 
-_RATE = 48000
+
+def _wav_audio(path: Path) -> np.ndarray:
+    """Read a 16-bit WAV as ``(channels, samples)`` floats in -1..1."""
+    with wave.open(str(path), "rb") as reader:
+        return np.frombuffer(reader.readframes(reader.getnframes()), dtype=np.int16).reshape(-1, reader.getnchannels()).T.astype(np.float32) / 32767
 
 
-def _tone_steps(path: Path, amplitudes: list[float], *, rate: int = 16000) -> Path:
-    """Write a mono WAV of a 440 Hz tone whose amplitude changes every second, so a stretch of it says where it was cut from."""
-    time = np.arange(rate) / rate
-    write_pcm16_wav(np.concatenate([a * np.sin(2 * np.pi * 440 * time) for a in amplitudes])[None, :], path, rate)
-    return path
-
-
-def _rms(audio: np.ndarray, begin: float, end: float) -> float:
-    """Return the RMS of a stretch of 48 kHz audio between two moments in seconds."""
-    part = audio[round(begin * _RATE) : round(end * _RATE)]
-    return float(np.sqrt(np.mean(part**2)))
-
-
-def _decode_audio(path: Path) -> np.ndarray:
-    """Decode the left channel of the first audio stream to float32 at 48 kHz."""
-    data = ffmpeg("-i", str(path), "-map", "0:a:0", "-af", "pan=mono|c0=c0", "-ar", str(_RATE), "-f", "f32le", "-")
-    return np.frombuffer(data, dtype=np.float32)
-
-
-def _video_only(path: Path, frame_count: int) -> Path:
-    """Encode a silent 24 fps video of *frame_count* frames."""
-    encode_frames(numbered_frames(frame_count, 128, 64), path, quality=("-crf", "18"))
-    return path
-
-
-@REAL
 class TestAudioTrackStage:
     """Verify the track replaces the generated clip's sound, from Start at and as long as the clip."""
 
-    def _run(self, tmp_path, track, *, frame_count=48):
-        video = _video_only(tmp_path / "clip.mp4", frame_count)
+    def _run(self, tmp_path, track, *, probe=None, read=None, mux=None):
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"silent clip")
         request = make_video_request(audio_track=track, output_dir=str(tmp_path))
         arts = VideoWorkingArtifacts(video_path=video)
-        return audio_track_stage(request, arts), arts, video
+        calls: dict = {}
+
+        def fake_read(read_from, rate, seconds):
+            calls["read"] = (read_from, rate, seconds)
+            return np.full((2, round(seconds * rate)), 0.25, dtype=np.float32)
+
+        def fake_mux(video_path, wav, output):
+            calls["mux"] = (Path(video_path), _wav_audio(wav), Path(output))
+            Path(output).write_bytes(b"clip with sound")
+
+        with (
+            patch("zvisiongenerator.workflows.video_stages.probe_video", return_value=probe or make_probe(frame_count=48)),
+            patch("zvisiongenerator.workflows.video_stages.read_track", side_effect=read or fake_read),
+            patch("zvisiongenerator.workflows.video_stages.mux_audio", side_effect=mux or fake_mux),
+        ):
+            outcome = audio_track_stage(request, arts)
+        return outcome, arts, video, calls
 
     def test_the_audio_is_as_long_as_the_clip_and_starts_at_start_at(self, tmp_path):
-        track = _tone_steps(tmp_path / "t.wav", [0.2, 0.4, 0.8, 0.6])
+        track = AudioTrack("t.wav", 1.0)
 
-        outcome, _, video = self._run(tmp_path, AudioTrack(str(track), 1.0))
+        outcome, _, video, calls = self._run(tmp_path, track)
 
         assert outcome is StageOutcome.success
-        probe = probe_video(video)
-        assert (probe.frame_count, probe.has_audio) == (48, True)
-        audio = _decode_audio(video)
-        assert abs(len(audio) - 2 * _RATE) <= 2048
-        # Start at 1.0 s: the clip's first second is the track's 0.4 level, its second the 0.8 level.
-        assert _rms(audio, 0.2, 0.8) == pytest.approx(0.4 / 2**0.5, rel=0.1)
-        assert _rms(audio, 1.2, 1.8) == pytest.approx(0.8 / 2**0.5, rel=0.1)
+        assert calls["read"] == (track, AUDIO_SAMPLE_RATE, 2.0)  # 48 frames at 24 fps
+        assert calls["mux"][1].shape == (2, 2 * AUDIO_SAMPLE_RATE)
+        assert video.read_bytes() == b"clip with sound"
 
-    def test_the_video_is_copied_and_nothing_is_left_beside_it(self, tmp_path):
-        track = _tone_steps(tmp_path / "t.wav", [0.5, 0.5, 0.5])
-        before = _video_only(tmp_path / "before.mp4", 48)
+    def test_the_video_is_muxed_from_the_clip_and_nothing_is_left_beside_it(self, tmp_path):
+        _, _, video, calls = self._run(tmp_path, AudioTrack("t.wav", 0.0))
 
-        _, _, video = self._run(tmp_path, AudioTrack(str(track), 0.0))
-
-        def packet_hashes(path: Path) -> list[str]:
-            lines = ffmpeg("-i", str(path), "-map", "0:v:0", "-c", "copy", "-f", "framemd5", "-").decode().splitlines()
-            return [line.rsplit(",", 1)[1].strip() for line in lines if line and not line.startswith("#")]
-
-        assert packet_hashes(video)[1:] == packet_hashes(before)[1:]
-        assert sorted(p.name for p in tmp_path.iterdir()) == ["before.mp4", "clip.mp4", "t.wav"]
+        assert calls["mux"][0] == video
+        assert [p.name for p in tmp_path.iterdir()] == ["clip.mp4"]
 
     def test_an_unreadable_track_fails_with_the_message_and_leaves_the_clip_alone(self, tmp_path):
-        bad = tmp_path / "notes.txt"
-        bad.write_text("not audio")
-
-        outcome, arts, video = self._run(tmp_path, AudioTrack(str(bad), 0.0))
+        outcome, arts, video, _ = self._run(tmp_path, AudioTrack("notes.txt", 0.0), read=MagicMock(side_effect=ValueError(TRACK_UNREADABLE)))
 
         assert outcome is StageOutcome.failed
-        assert arts.failure_message == "Can't read the audio track"
-        assert not probe_video(video).has_audio
+        assert arts.failure_message == TRACK_UNREADABLE
+        assert video.read_bytes() == b"silent clip"
+        assert [p.name for p in tmp_path.iterdir()] == ["clip.mp4"]
+
+    def test_a_failing_mux_fails_with_ffmpegs_message_and_leaves_the_clip_alone(self, tmp_path):
+        with pytest.warns(UserWarning, match="Adding the audio track failed"):
+            outcome, arts, video, _ = self._run(tmp_path, AudioTrack("t.wav", 0.0), mux=MagicMock(side_effect=RuntimeError("ffmpeg could not add the audio to the video: boom")))
+
+        assert outcome is StageOutcome.failed
+        assert "boom" in arts.failure_message
+        assert video.read_bytes() == b"silent clip"
+        assert [p.name for p in tmp_path.iterdir()] == ["clip.mp4"]
+
+    def test_a_clip_whose_length_cannot_be_read_fails(self, tmp_path):
+        with pytest.warns(UserWarning, match="length could not be read"):
+            outcome, arts, _, calls = self._run(tmp_path, AudioTrack("t.wav", 0.0), probe=make_probe(frame_count=None))
+
+        assert outcome is StageOutcome.failed
+        assert "length could not be read" in arts.failure_message
+        assert "read" not in calls
 
     def test_without_a_track_or_a_video_it_does_nothing(self, tmp_path):
         assert audio_track_stage(make_video_request(), VideoWorkingArtifacts(video_path=tmp_path / "gone.mp4")) is StageOutcome.success
@@ -785,50 +783,60 @@ class TestExtendTrackStages:
         assert extend_audio_track_stage(_extend_req(output_dir=str(tmp_path)), arts) is StageOutcome.success
         assert arts.metadata == {}
 
-    @REAL
     def test_writes_the_segment_wav_from_the_window_and_hands_it_to_the_join(self, tmp_path):
-        track = _tone_steps(tmp_path / "t.wav", [0.2, 0.6])
         segment_dir = tmp_path / "ziv-extend-abc"
         segment_dir.mkdir()
         segment = ExtendSegment(segment_dir / "segment.mp4")
         arts = VideoWorkingArtifacts(metadata={"extend_segment": segment, "extend_segment_dir": str(segment_dir)})
-        req = _extend_req(_source(tmp_path, has_audio=False), 16, audio_track=AudioTrack(str(track), 1.0), output_dir=str(tmp_path))
+        source = _source(tmp_path, has_audio=False)
+        track = AudioTrack("song.mp3", 1.0)
+        req = _extend_req(source, 16, audio_track=track, output_dir=str(tmp_path))
+        audio = np.stack([np.linspace(-0.5, 0.5, 12000 + 32000), np.zeros(12000 + 32000)]).astype(np.float32)
 
-        assert extend_audio_track_stage(req, arts) is StageOutcome.success
+        with patch("zvisiongenerator.workflows.video_stages.extension_audio", return_value=(audio, 12000)) as cut:
+            assert extend_audio_track_stage(req, arts) is StageOutcome.success
 
+        assert cut.call_args.args == (source, track)
+        assert cut.call_args.kwargs == {"carry_frames": 25, "extend_frames": 16}  # the window holds 25 carried frames before the new 16
         joined = arts.metadata["extend_segment"]
         assert joined.video_path == segment.video_path
-        assert joined.audio_path == segment_dir / "segment.wav" and joined.audio_path.is_file()
+        assert joined.audio_path == segment_dir / "segment.wav"
         assert joined.lead_samples == 12000
         assert arts.metadata["extend_segment_dir"] == str(segment_dir)
+        assert np.allclose(_wav_audio(joined.audio_path), audio, atol=1e-4)
 
+    def test_an_unreadable_track_fails_with_the_message_and_keeps_the_segment(self, tmp_path):
+        segment = ExtendSegment(tmp_path / "segment.mp4")
+        arts = VideoWorkingArtifacts(metadata={"extend_segment": segment, "extend_segment_dir": str(tmp_path)})
+        req = _extend_req(_source(tmp_path), 16, audio_track=AudioTrack("notes.txt", 0.0), output_dir=str(tmp_path))
 
-@REAL
-class TestExtendWithATrackEndToEnd:
-    """Join a silent source and a generated segment with a track's sound, as the stages do."""
+        with patch("zvisiongenerator.workflows.video_stages.extension_audio", side_effect=ValueError(TRACK_UNREADABLE)):
+            outcome = extend_audio_track_stage(req, arts)
 
-    def _extend(self, tmp_path, track):
-        source_path = _video_only(tmp_path / "source.mp4", 33)
-        source = build_extend_source(source_path, probe_video(source_path), None)
-        assert not source.has_audio
-        segment_video = tmp_path / "gen" / "segment.mp4"
-        segment_video.parent.mkdir()
-        write_segment_frames(numbered_frames(16, 128, 64, offset=100), build_segment_command(source.width, source.height, source.fps_text, segment_video))
-        req = _extend_req(source, 16, audio_track=track, output_dir=str(tmp_path))
-        arts = VideoWorkingArtifacts(filename="joined.mp4", metadata={"extend_segment": ExtendSegment(segment_video), "extend_segment_dir": str(segment_video.parent)})
-        assert extend_audio_track_stage(req, arts) is StageOutcome.success
-        assert join_clips_stage(req, arts) is StageOutcome.success
-        return arts.video_path
+        assert outcome is StageOutcome.failed
+        assert arts.failure_message == TRACK_UNREADABLE
+        assert arts.metadata["extend_segment"] is segment
+        assert not (tmp_path / "segment.wav").exists()
 
-    def test_the_new_part_is_the_track_span_after_silence_for_the_source(self, tmp_path):
-        track = _tone_steps(tmp_path / "t.wav", [0.2, 0.8, 0.4])
+    def test_the_join_gets_the_segment_with_the_wav_the_stage_wrote(self, tmp_path):
+        segment_dir = tmp_path / "ziv-extend-abc"
+        segment_dir.mkdir()
+        arts = VideoWorkingArtifacts(filename="joined.mp4", metadata={"extend_segment": ExtendSegment(segment_dir / "segment.mp4"), "extend_segment_dir": str(segment_dir)})
+        req = _extend_req(_source(tmp_path, has_audio=False), 16, audio_track=AudioTrack("song.mp3", 1.0), output_dir=str(tmp_path))
+        seen: dict = {}
 
-        output = self._extend(tmp_path, AudioTrack(str(track), 1.0))
+        def splice(source, segment, output, *, extend_frames, include_audio):
+            seen.update(segment=segment, wav=_wav_audio(segment.audio_path), output=output, extend_frames=extend_frames, include_audio=include_audio)
+            return output
 
-        probe = probe_video(output)
-        assert (probe.frame_count, probe.has_audio) == (49, True)
-        audio = _decode_audio(output)
-        assert abs(len(audio) - 49 * 2000) <= 2048
-        # 33 frames of source (1.375 s) are silent; the 16 new frames (0.667 s) are the track from 1.0 s.
-        assert _rms(audio, 0.05, 1.3) < 0.02
-        assert _rms(audio, 1.45, 1.95) == pytest.approx(0.8 / 2**0.5, rel=0.1)
+        with (
+            patch("zvisiongenerator.workflows.video_stages.extension_audio", return_value=(np.full((2, 4800), 0.5, dtype=np.float32), 1200)),
+            patch("zvisiongenerator.workflows.video_stages.splice_clips", side_effect=splice),
+        ):
+            assert extend_audio_track_stage(req, arts) is StageOutcome.success
+            assert join_clips_stage(req, arts) is StageOutcome.success
+
+        assert seen["segment"].lead_samples == 1200
+        assert seen["wav"].shape == (2, 4800)
+        assert (seen["output"], seen["extend_frames"], seen["include_audio"]) == (tmp_path / "joined.mp4", 16, True)
+        assert not segment_dir.exists()

@@ -18,6 +18,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from tests._paths import FIXTURES
+from tests.web._helpers import ffprobe_cannot_read_files
 
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.upscale import WORK_DIR_PREFIX
@@ -36,6 +37,12 @@ from zvisiongenerator.web.gallery import (
     resolve_output_asset_path,
 )
 from zvisiongenerator.web.gallery_index import GALLERY_INDEX_VERSION, GalleryIndex
+
+
+@pytest.fixture(autouse=True)
+def _no_ffprobe(monkeypatch):
+    """List video and audio files without starting ffprobe; a test that needs a probe result patches ``gallery.ffprobe_json`` itself."""
+    ffprobe_cannot_read_files(monkeypatch)
 
 
 def _make_png_with_config(path: Path, payload: dict) -> None:

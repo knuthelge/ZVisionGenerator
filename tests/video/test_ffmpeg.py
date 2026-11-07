@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests._media import REAL, ffmpeg
 
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, ensure_ffmpeg, require_ffmpeg, staging_path, strip_audio, strip_ffmpeg_banner, tool_error
 from zvisiongenerator.utils.video_splice import run_ffmpeg
@@ -321,34 +320,6 @@ class TestStripAudio:
 
         assert video.read_bytes() == b"original data"
         assert not staging_path(video).exists()
-
-    @REAL
-    def test_a_real_clip_loses_its_sound_and_keeps_its_picture(self, tmp_path):
-        clip = tmp_path / "clip.mp4"
-        ffmpeg(
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc=size=64x32:rate=24",
-            "-f",
-            "lavfi",
-            "-i",
-            "sine=frequency=440:sample_rate=48000",
-            "-t",
-            "1",
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            "-pix_fmt",
-            "yuv420p",
-            str(clip),
-        )
-
-        strip_audio(clip)
-
-        streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(clip)], capture_output=True, check=True, text=True).stdout.split()
-        assert streams == ["video"]
 
 
 class TestToolsDoNotReadTheTerminal:

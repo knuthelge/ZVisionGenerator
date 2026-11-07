@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -11,10 +10,10 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from tests._audio_presets import audio_config
+from tests._fake_audio import decode_fake, fake_save_flac, install_fake_audio
 
 from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
-from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.utils.video_splice import write_pcm16_wav
 
 
@@ -34,14 +33,9 @@ def clip(seconds: float = 0.5, rate: int = 24000, amplitude: float = 0.5, channe
     return AudioClip(samples=sine(seconds, rate, amplitude, channels=channels), sample_rate=rate, **fields)
 
 
-def decode(path: Path, channels: int = 1) -> tuple[np.ndarray, int]:
-    """Decode an audio file with ffmpeg to float32 ``(channels, frames)`` and return it with the file's sample rate."""
-    probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate,channels", "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=True
-    )
-    rate, found = (int(part) for part in probe.stdout.strip().split(","))
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-"], capture_output=True, check=True).stdout
-    return np.frombuffer(raw, dtype=np.float32).reshape(-1, found).T.copy(), rate
+def decode(path: Path) -> tuple[np.ndarray, int]:
+    """Return the float32 ``(channels, frames)`` samples of a take saved by the fake FLAC writer, with its sample rate."""
+    return decode_fake(path)
 
 
 def fake_backend(*clips: AudioClip, events: list | None = None) -> MagicMock:
@@ -64,16 +58,20 @@ def fake_backend(*clips: AudioClip, events: list | None = None) -> MagicMock:
 def patch_runner(monkeypatch, backend: Any, *, present: bool = True, platform: str = "cuda") -> SimpleNamespace:
     """Patch the runner's surroundings: this machine is *platform*, the backend is *backend*, the model's files are on disk (*present*).
 
+    Takes are saved by the fake FLAC writer and audio files are probed by the fakes in ``tests/_fake_audio.py``; no ffmpeg or ffprobe starts.
+
     Returns the patched enhancer session and accelerator-memory release mocks.
     """
     from zvisiongenerator import audio_cli, audio_runner
 
+    install_fake_audio(monkeypatch)
     session = MagicMock()
     release = MagicMock()
     monkeypatch.setattr(audio_cli, "audio_platform_key", lambda: platform)
     monkeypatch.setattr(audio_runner, "audio_platform_key", lambda: platform)
     monkeypatch.setattr(audio_runner, "get_audio_backend", MagicMock(return_value=backend))
     monkeypatch.setattr(audio_runner, "target_present_offline", lambda target: present)
+    monkeypatch.setattr("zvisiongenerator.downloads.presence.target_present_offline", lambda target: present)
     monkeypatch.setattr(audio_runner, "prompt_enhancer_session", session)
     monkeypatch.setattr(audio_runner, "release_accelerator_memory", release)
     monkeypatch.setattr(audio_runner, "accelerator_memory_budget_or_none", lambda: None)
@@ -82,13 +80,13 @@ def patch_runner(monkeypatch, backend: Any, *, present: bool = True, platform: s
 
 
 def voice_folder(root: Path) -> Path:
-    """Return a folder under *root* with a recording (``me.wav``), an *Any* take (``any.flac``) and a cloned take (``cloned.flac``), each 4 s."""
+    """Return a folder under *root* of fake takes (see ``tests/_fake_audio.py``) with a recording (``me.wav``), an *Any* take (``any.flac``) and a cloned take (``cloned.flac``), each 4 s."""
     folder = root / "voices"
     folder.mkdir()
     tone = sine(4.0, rate=24000)
     write_pcm16_wav(tone, folder / "me.wav", 24000)
-    save_flac(tone, 24000, folder / "any.flac", {"kind": "speech", "prompt": "Welcome back."})
-    save_flac(tone, 24000, folder / "cloned.flac", {"kind": "speech", "prompt": "x", "voice_path": "~/me.wav", "voice_text": "Hello, this is me."})
+    fake_save_flac(tone, 24000, folder / "any.flac", {"kind": "speech", "prompt": "Welcome back."})
+    fake_save_flac(tone, 24000, folder / "cloned.flac", {"kind": "speech", "prompt": "x", "voice_path": "~/me.wav", "voice_text": "Hello, this is me."})
     return folder
 
 

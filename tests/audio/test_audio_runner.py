@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from tests._audio_presets import audio_config
-from tests._media import REAL
+from tests._fake_audio import fake_read_config as read_config
 from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
 from tests.audio._helpers import clip, decode, fake_backend, patch_runner, preset, sine
 
@@ -20,7 +20,6 @@ from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
-from zvisiongenerator.utils.provenance import read_config
 
 CONFIG = audio_config()
 YUE2, HIGGS3, SA3 = preset("yue2"), preset("higgs3"), preset("sa3")
@@ -158,7 +157,6 @@ class TestLifecycle:
 
 
 class TestSaving:
-    @REAL
     def test_each_take_is_a_flac_with_its_settings_and_its_own_seed(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip(0.5)))
 
@@ -170,7 +168,6 @@ class TestSaving:
         assert configs[0]["prompt"] == "synth-pop" and configs[0]["lyrics"] == "[verse]\nla la" and configs[0]["model"] == "yue2"
         assert configs[0]["seed"] != configs[1]["seed"]
 
-    @REAL
     def test_a_fixed_seed_is_used_for_every_take_and_passed_to_the_backend(self, monkeypatch, tmp_path):
         backend = fake_backend(clip(0.2))
         patch_runner(monkeypatch, backend)
@@ -181,7 +178,6 @@ class TestSaving:
         assert read_config(saved[0])["seed"] == 42
         assert saved[0] != saved[1]
 
-    @REAL
     def test_the_output_folder_is_created_and_a_cut_take_says_so(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip(0.2, cut=True)))
 
@@ -189,7 +185,6 @@ class TestSaving:
 
         assert saved[0].parent == tmp_path / "deep" / "er" and read_config(saved[0])["generation"]["cut"] is True
 
-    @REAL
     def test_the_console_says_when_a_take_was_cut_at_the_models_limit_and_only_then(self, monkeypatch, tmp_path, capsys):
         patch_runner(monkeypatch, fake_backend(clip(0.2, cut=True), clip(0.2)))
 
@@ -197,7 +192,6 @@ class TestSaving:
 
         assert capsys.readouterr().out.count(audio_runner._CUT_NOTE) == 1
 
-    @REAL
     def test_a_speech_take_records_the_full_text_and_the_number_of_parts(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip(0.2)))
         sentence = "This sentence has a fair number of characters in it, give or take. "
@@ -210,19 +204,17 @@ class TestSaving:
         assert config["voice_path"].endswith("me.wav") and config["voice_text"] == "Hello, this is me."
         assert not any("consent" in key for key in config)
 
-    @REAL
     def test_a_sound_records_the_length_asked_for(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip(0.5, rate=44100, channels=2)))
 
         saved = _run(_sound(), SA3, tmp_path)
 
         config = read_config(saved[0])
-        _, rate = decode(saved[0], channels=2)
+        _, rate = decode(saved[0])
         assert config["seconds"] == 2.0 and config["generation"]["duration"] == 0.5 and rate == 44100
 
 
 class TestLevel:
-    @REAL
     def test_a_take_that_peaks_over_full_scale_is_brought_to_minus_1_dbfs(self, monkeypatch, tmp_path):
         loud = sine(0.3, rate=44100, amplitude=10 ** (6.3 / 20))
         patch_runner(monkeypatch, fake_backend(clip_from(loud, 44100)))
@@ -232,7 +224,6 @@ class TestLevel:
         decoded, _ = decode(saved[0])
         assert 20 * np.log10(np.abs(decoded).max()) == pytest.approx(-1.0, abs=0.01)
 
-    @REAL
     def test_a_take_that_stays_within_full_scale_is_saved_as_it_is(self, monkeypatch, tmp_path):
         samples = sine(0.3, rate=44100, amplitude=0.95)
         patch_runner(monkeypatch, fake_backend(clip_from(samples, 44100)))
@@ -274,7 +265,6 @@ class TestTiming:
     def test_there_is_no_estimate_before_a_take_has_finished(self):
         assert self._eta(gen_times=[], takes_left=2, ran_secs=5)["eta_secs"] is None
 
-    @REAL
     def test_the_second_take_of_a_job_counts_down_from_the_first_ones_time(self, monkeypatch, tmp_path):
         events: list[dict] = []
         backend = fake_backend(clip(0.1))
@@ -295,7 +285,6 @@ class TestTiming:
 
 
 class TestConsole:
-    @REAL
     def test_the_first_take_header_follows_the_loading_line_and_later_takes_are_set_off_by_a_blank_row(self, monkeypatch, tmp_path, capsys):
         patch_runner(monkeypatch, fake_backend(clip(0.2), clip(0.2)))
 
@@ -306,7 +295,6 @@ class TestConsole:
         assert lines[first - 1].startswith("Loading ")
         assert lines[second - 1] == ""
 
-    @REAL
     def test_a_phase_is_named_once_on_a_console_that_is_not_a_terminal(self, monkeypatch, tmp_path, capsys):
         backend = fake_backend(clip(0.2))
         original = backend.generate.side_effect
@@ -518,7 +506,6 @@ class TestQuitWhileLoading:
 
 
 class TestJobControls:
-    @REAL
     def test_next_drops_the_running_take_and_goes_on_with_the_next(self, monkeypatch, tmp_path):
         control = SkipSignal()
         events: list[dict] = []
@@ -542,7 +529,6 @@ class TestJobControls:
         assert [e["status"] for e in events if e["type"] == "generation_finished"] == ["skipped", "success"]
         assert events[-1]["type"] == "batch_completed"
 
-    @REAL
     def test_repeat_makes_the_take_again_with_a_new_seed(self, monkeypatch, tmp_path):
         control = SkipSignal()
         backend = fake_backend(clip(0.2))
@@ -563,7 +549,6 @@ class TestJobControls:
         seeds = [call.args[0].seed for call in backend.generate.call_args_list]
         assert len(saved) == 2 and seeds[0] == 1 and seeds[1] != 1
 
-    @REAL
     def test_pause_waits_for_resume_between_takes(self, monkeypatch, tmp_path):
         control = SkipSignal()
         backend = fake_backend(clip(0.2))
@@ -582,7 +567,6 @@ class TestJobControls:
 
         assert paused.call_count == 2 and paused.call_args.kwargs["mode"] == "audio"
 
-    @REAL
     @pytest.mark.parametrize(("queued_on_resume", "takes"), [("repeat", 2), ("skip", 1), (None, 1)])
     def test_a_pause_after_a_take_then_honours_what_was_queued_while_paused(self, monkeypatch, tmp_path, queued_on_resume, takes):
         control = SkipSignal()
@@ -607,7 +591,6 @@ class TestJobControls:
         assert len(saved) == takes
         assert [e["type"] for e in events].count("generation_repeat") == takes - 1
 
-    @REAL
     def test_a_quit_queued_while_paused_after_a_take_stops_the_batch(self, monkeypatch, tmp_path):
         control = SkipSignal()
         events: list[dict] = []
@@ -626,7 +609,6 @@ class TestJobControls:
 
         assert len(saved) == 1 and events[-1]["type"] == "batch_cancelled"
 
-    @REAL
     def test_the_batch_reports_the_takes_made_against_the_takes_planned_including_repeats(self, monkeypatch, tmp_path):
         control = SkipSignal()
         events: list[dict] = []
@@ -648,7 +630,6 @@ class TestJobControls:
         done = events[-1]
         assert (done["type"], done["completed_iterations"], done["total_iterations"]) == ("batch_completed", 3, 3)
 
-    @REAL
     def test_events_follow_the_batch_and_carry_the_backends_progress(self, monkeypatch, tmp_path):
         events: list[dict] = []
         backend = fake_backend(clip(0.2))

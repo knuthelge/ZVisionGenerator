@@ -11,7 +11,6 @@ import pytest
 from huggingface_hub.errors import GatedRepoError
 
 from tests._factories import make_extend_source
-from tests._media import HAS_FFMPEG
 from tests.video._helpers import make_ltx_info, patch_video_cli_for_preflight
 
 from zvisiongenerator import video_cli
@@ -1181,10 +1180,12 @@ class TestVideoCliAudioTrack:
         assert "Audio track not found" in capsys.readouterr().err
         backend.load_model.assert_not_called()
 
-    @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg and ffprobe are needed")
     def test_a_file_that_is_not_audio_says_it_cannot_be_read(self, monkeypatch, tmp_path, capsys):
+        import zvisiongenerator.utils.audio_track as audio_track_module
+
         notes = tmp_path / "notes.mp3"
         notes.write_text("hello")
+        monkeypatch.setattr(audio_track_module, "probe_track_seconds", MagicMock(side_effect=ValueError(audio_track_module.TRACK_UNREADABLE)))
         backend = MagicMock()
 
         with pytest.raises(SystemExit, match="2"):

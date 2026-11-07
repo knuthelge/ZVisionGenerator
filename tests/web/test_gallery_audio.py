@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import subprocess
 import time
 from contextlib import closing
 from pathlib import Path
@@ -15,12 +14,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests._audio_presets import audio_config, yue2_preset
-from tests._media import REAL
+from tests._fake_audio import install_fake_audio, write_fake_audio
 from tests.audio._helpers import sine
 from tests.web._helpers import make_web_config
 
 from zvisiongenerator.utils import app_db
-from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import gallery
 from zvisiongenerator.web import server as web_server
@@ -55,6 +53,12 @@ def _cuda(monkeypatch):
     monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: "cuda")
 
 
+@pytest.fixture(autouse=True)
+def _fake_audio_tools(monkeypatch):
+    """Read the files this module writes through the fakes in ``tests/_fake_audio.py``; ffmpeg and ffprobe never start."""
+    install_fake_audio(monkeypatch)
+
+
 def _web_config(**presets) -> SimpleNamespace:
     config = make_web_config()
     config.app_config.update(audio_config(**presets) if presets else audio_config())
@@ -62,12 +66,9 @@ def _web_config(**presets) -> SimpleNamespace:
 
 
 def _take(root: Path, name: str, config: dict | None, *, seconds: float = 1.0, rate: int = 24000) -> Path:
-    """Write a real FLAC under *root*, with *config* embedded when given."""
+    """Write a fake take under *root*, with *config* embedded when given (a file without this app's settings when ``None``)."""
     path = root / name
-    if config is None:
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"sine=duration={seconds}", "-c:a", "flac", str(path)], check=True)
-    else:
-        save_flac(sine(seconds, rate=rate), rate, path, config)
+    write_fake_audio(sine(seconds, rate=rate), rate, path, config)
     return path
 
 
@@ -113,7 +114,6 @@ class TestListing:
         assert list_gallery_assets(str(tmp_path)) == []
 
 
-@REAL
 class TestAssetJson:
     def test_the_model_is_named_by_its_preset_label_while_model_stays_the_id(self, tmp_path):
         _take(tmp_path, "song.flac", _SONG)
@@ -270,7 +270,6 @@ class TestFilter:
         assert {asset["filename"] for asset in body["assets"]} == {"c.flac", "d.wav"} and body["total_count"] == 2
 
 
-@REAL
 class TestIndex:
     def test_an_audio_files_facts_are_stored_and_not_read_again(self, tmp_path, monkeypatch):
         path = _take(tmp_path, "song.flac", _SONG)
@@ -302,7 +301,7 @@ class TestIndex:
         assert reads == ["bad.flac", "bad.flac"]
 
     def test_reading_the_facts_of_an_audio_file_decodes_nothing(self, tmp_path, monkeypatch):
-        path = save_flac(sine(0.2, rate=24000), 24000, tmp_path / "t.flac", {"kind": "sound"})
+        path = write_fake_audio(sine(0.2, rate=24000), 24000, tmp_path / "t.flac", {"kind": "sound"})
         monkeypatch.setattr(gallery, "read_waveform_peaks", lambda _path: pytest.fail("the scan decoded the file"))
 
         read = gallery._read_audio_facts(path)
@@ -311,7 +310,6 @@ class TestIndex:
         assert read.facts["config"] == {"kind": "sound"}
 
 
-@REAL
 class TestPeaks:
     @pytest.fixture
     def decodes(self, monkeypatch):
@@ -361,7 +359,7 @@ class TestPeaks:
         path = self._settled(tmp_path, seconds=1.0)
         list_gallery_assets(str(tmp_path))
         gallery.audio_peaks(str(tmp_path), "song.flac")
-        save_flac(sine(3.0, rate=24000, amplitude=0.9), 24000, path, _SONG)
+        write_fake_audio(sine(3.0, rate=24000, amplitude=0.9), 24000, path, _SONG)
         os.utime(path, (time.time() - 30, time.time() - 30))
         list_gallery_assets(str(tmp_path))
 

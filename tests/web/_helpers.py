@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -21,6 +22,22 @@ from zvisiongenerator.web import video_clip as video_clip_module
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.hub_client import HubResponse
+
+
+def ffprobe_cannot_read_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every media file unreadable to our ffprobe wrapper, so a test that lists or checks files never starts ffprobe.
+
+    ``ffprobe_json`` raises the ``RuntimeError`` it raises for a file ffprobe fails on; a test that needs a file to read patches
+    the reader it cares about afterwards.
+    """
+    from zvisiongenerator.utils import audio_track, video_probe
+    from zvisiongenerator.web import browse_media, gallery
+
+    def unreadable(path, *, count_packets: bool = True, timeout: float | None = None):
+        raise RuntimeError(f"ffprobe could not read {path}")
+
+    for module in (video_probe, audio_track, gallery, browse_media):
+        monkeypatch.setattr(module, "ffprobe_json", unreadable)
 
 
 def make_web_config() -> SimpleNamespace:

@@ -743,7 +743,8 @@ def test_gallery_source_outside_output_root_has_no_id(tmp_path):
 def test_gallery_video_has_no_upscale_field_without_a_seedvr2_setup(tmp_path):
     (tmp_path / "clip.mp4").write_bytes(b"")
 
-    assert _asset_json(tmp_path, "clip.mp4")["upscale"] is None
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", side_effect=RuntimeError("ffprobe could not read the file")):
+        assert _asset_json(tmp_path, "clip.mp4")["upscale"] is None
 
 
 # ── Videos ──────────────────────────────────────────────────────────────────

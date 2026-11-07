@@ -11,7 +11,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from tests._factories import load_packaged_config
-from tests.web._helpers import make_resolved_image_defaults, make_web_config, patch_image_submit_dependencies, stub_video_submission
+from tests.web._helpers import ffprobe_cannot_read_files, make_resolved_image_defaults, make_web_config, patch_image_submit_dependencies, stub_video_submission
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
@@ -366,6 +366,7 @@ class TestPlanWithoutFileBodies:
 
     @pytest.fixture
     def video_env(self, plan_env, monkeypatch):
+        ffprobe_cannot_read_files(monkeypatch)  # no track in these tests is a readable file
         stub_video_submission(monkeypatch, plan_env.root)
         monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: plan_env.submitted.append(kwargs) or "job-123")
         return plan_env

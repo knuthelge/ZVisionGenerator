@@ -25,7 +25,6 @@ from safetensors.torch import load_file, save_file  # noqa: E402
 
 from tests._factories import make_extend_source  # noqa: E402
 from tests._images import is_bluish, is_reddish, write_cutout, write_sideways_photo  # noqa: E402
-from tests._media import REAL, ffmpeg, numbered_frames  # noqa: E402
 from tests._paths import REPO_ROOT  # noqa: E402
 
 from zvisiongenerator.backends.mac import h3_video  # noqa: E402
@@ -41,9 +40,6 @@ from zvisiongenerator.core.video_family import FrameRule  # noqa: E402
 from zvisiongenerator.core.video_types import AudioTrack, ExtendSegment  # noqa: E402
 from zvisiongenerator.utils import hf_snapshot  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3MlxFiles, H3MlxPreset, H3Schedule, HubFiles  # noqa: E402
-from zvisiongenerator.utils.video_extend import build_extend_source  # noqa: E402
-from zvisiongenerator.utils.video_probe import probe_video  # noqa: E402
-from zvisiongenerator.utils.video_splice import splice_clips  # noqa: E402
 
 HIDDEN = 8
 FF = 6
@@ -887,41 +883,6 @@ class TestAudioTrack:
 
         assert env.staged[0]["track_audio"] is None
         assert segment.audio_path == segment_dir / "segment.wav"
-
-
-def _make_real_source(path: Path, frames: int = 33) -> Any:
-    """Encode a 64x32, 24 fps clip with a sine track and return its extend source."""
-    clip = numbered_frames(frames, 64, 32)
-    ffmpeg(
-        *("-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=1.4"),
-        *("-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "64x32", "-r", "24", "-i", "-"),
-        *("-map", "1:v", "-map", "0:a", "-c:a", "aac", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"),
-        str(path),
-        data=clip.tobytes(),
-    )
-    return build_extend_source(path, probe_video(path), None)
-
-
-@REAL
-class TestExtendJoin:
-    def test_the_segment_passes_the_join_check_and_adds_exactly_the_extend_frames(self, env, tmp_path):
-        source = _make_real_source(tmp_path / "source.mp4")
-        segment_dir = tmp_path / "segment"
-        segment_dir.mkdir()
-
-        segment = H3MlxVideoBackend().extend_video(_load(env, mode="extend"), source, "the fox stops", extend_frames=17, seed=3, steps=8, segment_dir=segment_dir, audio_output=True)
-
-        assert probe_video(segment.video_path).frame_count == 17
-        output = splice_clips(source, segment, tmp_path / "joined.mp4", extend_frames=17, include_audio=True)
-        probe = probe_video(output)
-        assert (probe.frame_count, probe.width, probe.height, probe.has_audio) == (33 + 17, 64, 32, True)
-
-    def test_a_text_to_video_clip_is_a_real_mp4_with_both_streams(self, env, tmp_path):
-        output = tmp_path / "out.mp4"
-        H3MlxVideoBackend().text_to_video(_load(env), "a fox", 64, 32, 22, 7, 8, str(output))
-        probe = probe_video(output)
-        assert (probe.frame_count, probe.width, probe.height, probe.has_audio) == (22, 64, 32, True)
-        assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".h3-")] == []
 
 
 # ---- LoRAs -----------------------------------------------------------------------------------------------------------

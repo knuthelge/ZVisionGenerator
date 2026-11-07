@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
 
 from tests._factories import load_packaged_config
 from tests._factories import make_extend_source
-from tests._media import REAL
 
 import zvisiongenerator.backends as backends_module
 from zvisiongenerator.utils.config import load_config
@@ -581,10 +581,12 @@ class TestAudioTrack:
 
         assert submitted == []
 
-    @REAL
-    def test_a_track_that_cannot_be_read_fails_before_the_job_is_submitted(self, tmp_path, submitted):
+    def test_a_track_that_cannot_be_read_fails_before_the_job_is_submitted(self, tmp_path, submitted, monkeypatch):
+        import zvisiongenerator.utils.audio_track as audio_track_module
+
         notes = tmp_path / "notes.mp3"
         notes.write_text("hello")
+        monkeypatch.setattr(audio_track_module, "probe_track_seconds", MagicMock(side_effect=ValueError(audio_track_module.TRACK_UNREADABLE)))
 
         with pytest.raises(ValueError, match="Can't read the audio track"):
             _submit(tmp_path, model="ltx-8", audio_track_path=str(notes))

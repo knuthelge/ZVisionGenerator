@@ -8,13 +8,11 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from tests._media import REAL
 from tests.audio._helpers import sine
 
 from zvisiongenerator.utils.audio_level import limit_peak, peak_of
 from zvisiongenerator.utils import audio_peaks
 from zvisiongenerator.utils.audio_peaks import PEAK_COUNT, PEAK_SAMPLE_RATE, read_waveform, read_waveform_peaks, waveform_peaks
-from zvisiongenerator.utils.audio_save import save_flac
 
 
 def _db(level: float) -> float:
@@ -46,21 +44,6 @@ class TestWaveformPeaks:
 
         assert waveform_peaks(samples, count=2) == [0, 255]
 
-    @REAL
-    def test_peaks_are_read_from_a_file(self, tmp_path):
-        path = save_flac(sine(1.0, rate=44100, amplitude=0.4), 44100, tmp_path / "tone.flac", {"kind": "sound"})
-
-        peaks = read_waveform_peaks(path)
-
-        assert len(peaks) == PEAK_COUNT and min(peaks) >= 240 and max(peaks) == 255
-
-    @REAL
-    def test_an_unreadable_file_raises(self, tmp_path):
-        (tmp_path / "bad.flac").write_bytes(b"not audio")
-
-        with pytest.raises(RuntimeError, match="could not decode"):
-            read_waveform_peaks(tmp_path / "bad.flac")
-
 
 class TestReadWaveform:
     def test_the_length_is_the_decoded_samples_over_the_peak_rate(self, monkeypatch):
@@ -72,6 +55,43 @@ class TestReadWaveform:
 
         assert (len(peaks), seconds) == (PEAK_COUNT, 3.0)
         assert run.call_count == 1 and run.call_args.kwargs["timeout"] == 5
+
+    def test_the_first_audio_stream_is_decoded_to_mono_float_samples_at_the_peak_rate(self, monkeypatch):
+        run = MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout=b"", stderr=b""))
+        monkeypatch.setattr(audio_peaks.subprocess, "run", run)
+
+        read_waveform("song.wav")
+
+        command = run.call_args.args[0]
+        assert command[0] == "ffmpeg" and command[command.index("-i") + 1] == "song.wav"
+        assert command[command.index("-map") + 1] == "0:a:0" and "-vn" in command
+        assert command[command.index("-ac") + 1] == "1" and command[command.index("-ar") + 1] == str(PEAK_SAMPLE_RATE)
+        assert command[command.index("-f") + 1] == "f32le" and command[-1] == "-"
+
+    def test_peaks_come_from_the_decoded_samples_of_a_file(self, monkeypatch):
+        samples = np.concatenate([np.full(PEAK_SAMPLE_RATE, 0.25, dtype=np.float32), np.full(PEAK_SAMPLE_RATE, 0.5, dtype=np.float32)])
+        monkeypatch.setattr(audio_peaks.subprocess, "run", MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout=samples.tobytes(), stderr=b"")))
+
+        peaks = read_waveform_peaks("song.wav")
+
+        assert len(peaks) == PEAK_COUNT and peaks[0] == 128 and peaks[-1] == 255
+
+    def test_a_trailing_partial_sample_is_dropped(self, monkeypatch):
+        data = np.full(PEAK_SAMPLE_RATE, 0.5, dtype=np.float32).tobytes() + b"\x00\x01"
+        monkeypatch.setattr(audio_peaks.subprocess, "run", MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout=data, stderr=b"")))
+
+        _, seconds = read_waveform("song.wav")
+
+        assert seconds == 1.0
+
+    def test_a_failed_decode_is_a_runtime_error_that_names_the_file_and_ffmpegs_message(self, monkeypatch):
+        failed = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"ffmpeg version 7.0 Copyright (c) the FFmpeg developers\nsong.wav: Invalid data found when processing input\n")
+        monkeypatch.setattr(audio_peaks.subprocess, "run", MagicMock(return_value=failed))
+
+        with pytest.raises(RuntimeError, match="could not decode song.wav") as error:
+            read_waveform_peaks("song.wav")
+
+        assert "Invalid data found" in str(error.value) and "ffmpeg version" not in str(error.value)
 
     def test_a_timeout_is_a_runtime_error(self, monkeypatch):
         monkeypatch.setattr(audio_peaks.subprocess, "run", MagicMock(side_effect=subprocess.TimeoutExpired("ffmpeg", 5)))

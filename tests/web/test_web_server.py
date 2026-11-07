@@ -1075,6 +1075,7 @@ def test_gallery_assets_without_model_metadata_do_not_reuse_media_kind_as_model(
     web_config = make_web_config()
     web_config.output_dir = str(tmp_path)
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr("zvisiongenerator.web.gallery.ffprobe_json", MagicMock(side_effect=RuntimeError("ffprobe could not read the placeholder")))
 
     image_path = tmp_path / "image-only.png"
     video_path = tmp_path / "video-only.mp4"

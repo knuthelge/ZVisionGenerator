@@ -105,6 +105,41 @@ def _no_hub_downloads(monkeypatch):
         pytest.fail("Test reached the Hugging Face Hub unmocked: " + ", ".join(calls), pytrace=False)
 
 
+_MEDIA_TOOLS = frozenset({"ffmpeg", "ffprobe"})
+
+
+@pytest.fixture(autouse=True)
+def _no_media_tools(monkeypatch):
+    """Fail any test that starts ``ffmpeg`` or ``ffprobe``, and hide both from ``shutil.which``.
+
+    Every machine then sees the tools as missing, as CI does. The process start raises ``FileNotFoundError`` and is
+    recorded; the test fails afterwards if any was, because app code often catches the error. Mock the seam instead.
+    """
+    import shutil
+    import subprocess
+
+    calls: list[str] = []
+    real_which = shutil.which
+    real_execute = subprocess.Popen._execute_child
+
+    def _which(cmd, *args, **kwargs):
+        return None if Path(str(cmd)).name in _MEDIA_TOOLS else real_which(cmd, *args, **kwargs)
+
+    def _execute(self, args, *rest, **kwargs):
+        argv = [args] if isinstance(args, (str, bytes, os.PathLike)) else list(args)
+        name = Path(os.fsdecode(argv[0])).name if argv else ""
+        if name in _MEDIA_TOOLS:
+            calls.append(name)
+            raise FileNotFoundError(2, f"Tests must not run {name}; mock it.", name)
+        return real_execute(self, args, *rest, **kwargs)
+
+    monkeypatch.setattr(shutil, "which", _which)
+    monkeypatch.setattr(subprocess.Popen, "_execute_child", _execute)
+    yield
+    if calls:
+        pytest.fail("Test started a media tool: " + ", ".join(calls), pytrace=False)
+
+
 @pytest.fixture
 def torch_flags_guard():
     """Put the process-wide PyTorch flags back after a test that sets them."""
