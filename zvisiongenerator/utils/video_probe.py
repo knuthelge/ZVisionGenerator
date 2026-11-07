@@ -140,21 +140,24 @@ def parse_probe(data: dict[str, Any]) -> VideoProbe:
     )
 
 
-def ffprobe_json(path: str | Path, *, count_packets: bool = True) -> dict[str, Any]:
+def ffprobe_json(path: str | Path, *, count_packets: bool = True, timeout: float | None = None) -> dict[str, Any]:
     """Return ffprobe's JSON for a file's streams and container (``-show_streams -show_format``).
 
     Args:
         path: The media file.
         count_packets: Whether ffprobe also counts the video packets, which reads the whole file (the container's frame
             count can be missing or wrong); off for a quick look at the metadata.
+        timeout: Seconds ffprobe may run before it is stopped; ``None`` waits as long as it takes.
 
     Raises:
-        RuntimeError: If ffprobe cannot read the file or prints something that is not JSON.
+        RuntimeError: If ffprobe cannot read the file, runs past *timeout* or prints something that is not JSON.
     """
     command = ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", *(["-count_packets"] if count_packets else []), str(path)]
     try:
-        result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True)
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True, timeout=timeout)
         return json.loads(result.stdout)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"ffprobe took longer than {timeout:g} s to read {path}") from exc
     except subprocess.CalledProcessError as exc:
         raise tool_error(f"ffprobe could not read {path}", exc.stderr, limit=500) from exc
     except json.JSONDecodeError as exc:

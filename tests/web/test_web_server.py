@@ -1060,6 +1060,7 @@ def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatc
     assert listed_asset["id"] == asset_id
     assert "path" not in listed_asset
     assert listed_asset["url"] == "/media/nested/asset%20one.png"
+    assert listed_asset["thumbnail_url"] == "/thumbs/nested/asset%20one.png"
     assert not listed_asset["id"].startswith("/")
 
     assert media_response.status_code == 200

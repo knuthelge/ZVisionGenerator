@@ -32,7 +32,6 @@ from zvisiongenerator.web.gallery import (
     gallery_asset_for_output_path,
     gallery_asset_to_json,
     list_gallery_assets,
-    output_media_url,
 )
 from zvisiongenerator.web.gallery_index import GALLERY_INDEX_VERSION
 
@@ -107,13 +106,6 @@ class TestListing:
         assert payload["media_type"] == "audio" and payload["duration"] is None and payload["peaks"] is None and payload["has_reusable_config"] is False
         assert payload["file_bytes"] == len(b"not audio")
 
-    def test_the_media_url_of_an_audio_file_is_served(self, tmp_path):
-        (tmp_path / "sub").mkdir()
-        take = tmp_path / "sub" / "a take.flac"
-        take.write_bytes(b"x")
-
-        assert output_media_url(tmp_path, take) == "/media/sub/a%20take.flac"
-
     def test_the_staging_folder_for_uploads_is_not_listed(self, tmp_path):
         (tmp_path / ".web_uploads" / "abc").mkdir(parents=True)
         (tmp_path / ".web_uploads" / "abc" / "voice.flac").write_bytes(b"x")
@@ -142,7 +134,8 @@ class TestAssetJson:
         assert payload["peaks"] is None  # the waveform is computed on the first request for it, not by the listing
         assert (payload["has_reference_voice"], payload["lyrics"], payload["cut"]) == (False, "[verse]\nHello there", False)
         assert (payload["prompt"], payload["model"], payload["seed"], payload["has_reusable_config"]) == ("upbeat synth-pop", "yue2", 7, True)
-        assert payload["url"] == "/media/song.flac" and payload["file_path"] == str(tmp_path / "song.flac")
+        assert payload["url"] == payload["thumbnail_url"] == "/media/song.flac"
+        assert payload["file_path"] == str(tmp_path / "song.flac")
         assert _params(payload) == {"workflow": "music", "model": "yue2", "prompt": "upbeat synth-pop", "lyrics": "[verse]\nHello there", "seed": "7"}
         assert payload["reuse_state"] == {
             "requested_workflow": "music",

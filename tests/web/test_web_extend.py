@@ -123,14 +123,6 @@ def test_inspect_route_reports_the_facts_recorded_prompts_and_defaults_of_a_good
     assert payload == {**fixture, "path": str(clip.path.resolve())}
 
 
-def test_inspect_route_gives_no_media_url_outside_the_output_root(clip, monkeypatch, tmp_path):
-    other_root = tmp_path / "elsewhere"
-    other_root.mkdir()
-    monkeypatch.setattr(web_server, "_media_output_root", lambda: other_root)
-
-    assert _inspect({"path": str(clip.path)}).json()["media_url"] is None
-
-
 def test_inspect_route_shows_the_displayed_size_of_a_rotated_source(clip):
     clip.probe = {"coded_width": 512, "coded_height": 256, "width": 256, "height": 512, "rotation": 90}
 
@@ -611,7 +603,6 @@ def test_inspect_route_resolves_the_path_it_reports(clip, tmp_path):
     payload = _inspect({"path": str(tmp_path / "sub" / ".." / "clip.mp4")}).json()
 
     assert payload["path"] == str(clip.path.resolve())
-    assert payload["media_url"] == "/media/clip.mp4"
 
 
 _UNALIGNED_CLIP = {"steps": 8, "width": 720, "height": 450, "num_frames": 52}

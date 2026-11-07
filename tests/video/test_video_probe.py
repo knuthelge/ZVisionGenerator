@@ -216,6 +216,15 @@ class TestFfprobeJson:
         assert "-count_packets" in counted and "-count_packets" not in quick
         assert {"-show_streams", "-show_format"} <= set(quick)
 
+    def test_the_timeout_is_passed_on_and_a_timeout_is_a_runtime_error(self, monkeypatch):
+        run = MagicMock(side_effect=video_probe.subprocess.TimeoutExpired("ffprobe", 10))
+        monkeypatch.setattr(video_probe.subprocess, "run", run)
+
+        with pytest.raises(RuntimeError, match="took longer than 10 s"):
+            ffprobe_json("/clips/clip.mp4", timeout=10)
+
+        assert run.call_args.kwargs["timeout"] == 10
+
     def test_returns_the_parsed_json(self, monkeypatch):
         data = _probe_json(_video_stream(), _audio_stream())
         monkeypatch.setattr(video_probe.subprocess, "run", MagicMock(return_value=MagicMock(stdout=json.dumps(data))))

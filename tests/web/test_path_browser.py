@@ -209,7 +209,25 @@ def test_places_route_lists_places(client):
 
     assert [place["id"] for place in payload["places"]] == ["home", "output", "models", "loras"]
     assert [place["id"] for place in payload["places"] if place["default"]] == ["models"]
-    assert payload["purpose"] == {"name": "checkpoint_file", "kind": "existing_file", "label": "Checkpoint file", "accepted_extensions": [".safetensors"]}
+    assert payload["purpose"] == {"name": "checkpoint_file", "kind": "existing_file", "label": "Checkpoint file", "accepted_extensions": [".safetensors"], "preview": None}
+
+
+@pytest.mark.parametrize(
+    ("purpose", "preview"),
+    [
+        ("reference_image", "image"),
+        ("audio_track", "audio"),
+        ("source_video", "video"),
+        ("output_directory", None),
+        ("prompt_file", None),
+        ("prompt_file_folder", None),
+        ("checkpoint_file", None),
+        ("lora_file", None),
+    ],
+)
+def test_each_purpose_names_its_preview_kind_and_the_places_route_returns_it(client, purpose, preview):
+    assert resolve_purpose(purpose).preview == preview
+    assert client.get("/api/browse/places", params={"purpose": purpose}).json()["purpose"]["preview"] == preview
 
 
 def test_folder_route_creates_and_reports_conflicts(client, tree):

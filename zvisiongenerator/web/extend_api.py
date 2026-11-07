@@ -30,7 +30,6 @@ from zvisiongenerator.utils.video_extend import (
 )
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
-from zvisiongenerator.web.gallery import output_media_url
 from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.path_browser import SOURCE_VIDEO_EXTENSIONS
@@ -133,7 +132,7 @@ def _resolve_video_model(model: str | None, app_config: dict[str, Any]) -> tuple
     return resolved, detect_video_model(resolved).family
 
 
-def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Path, *, downloading_loras: Mapping[str, int] | None = None) -> dict[str, Any]:
+def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading_loras: Mapping[str, int] | None = None) -> dict[str, Any]:
     """Build the ``POST /api/extend/source`` response for a request body.
 
     The optional ``steps`` are the steps the job would run; they set MiniMax H3's estimated time. The optional ``lora`` is the
@@ -174,7 +173,6 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Pa
     return {
         "path": str(path),
         "filename": path.name,
-        "media_url": output_media_url(media_root, path),
         "width": probe.width if probe is not None else None,
         "height": probe.height if probe is not None else None,
         "rotation": probe.rotation if probe is not None else None,

@@ -20,10 +20,12 @@ class BrowsePurpose:
     accepted_extensions: tuple[str, ...] = ()
     # The place the browser opens at when the field is empty (a ``BrowsePlace.id``).
     default_place: str = "home"
+    # What the browser can preview of a chosen file: "image", "audio" or "video"; None when the purpose has no previews.
+    preview: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        """Convert the purpose to the JSON API contract the browser shows (title, folder or file mode, filter)."""
-        return {"name": self.name, "kind": self.kind, "label": self.label, "accepted_extensions": list(self.accepted_extensions)}
+        """Convert the purpose to the JSON API contract the browser shows (title, folder or file mode, filter, preview kind)."""
+        return {"name": self.name, "kind": self.kind, "label": self.label, "accepted_extensions": list(self.accepted_extensions), "preview": self.preview}
 
 
 @dataclass(frozen=True)
@@ -90,9 +92,9 @@ _PURPOSES: dict[str, BrowsePurpose] = {
     "prompt_file_folder": BrowsePurpose(name="prompt_file_folder", kind="directory", label="Prompt file folder"),
     "checkpoint_file": BrowsePurpose(name="checkpoint_file", kind="existing_file", label="Checkpoint file", accepted_extensions=(".safetensors",), default_place="models"),
     "lora_file": BrowsePurpose(name="lora_file", kind="existing_file", label="LoRA file", accepted_extensions=(".safetensors",), default_place="loras"),
-    "reference_image": BrowsePurpose(name="reference_image", kind="existing_file", label="Image", accepted_extensions=IMAGE_EXTENSIONS, default_place="output"),
-    "audio_track": BrowsePurpose(name="audio_track", kind="existing_file", label="Audio track", accepted_extensions=AUDIO_TRACK_EXTENSIONS, default_place="output"),
-    "source_video": BrowsePurpose(name="source_video", kind="existing_file", label="Source video", accepted_extensions=SOURCE_VIDEO_EXTENSIONS, default_place="output"),
+    "reference_image": BrowsePurpose(name="reference_image", kind="existing_file", label="Image", accepted_extensions=IMAGE_EXTENSIONS, default_place="output", preview="image"),
+    "audio_track": BrowsePurpose(name="audio_track", kind="existing_file", label="Audio track", accepted_extensions=AUDIO_TRACK_EXTENSIONS, default_place="output", preview="audio"),
+    "source_video": BrowsePurpose(name="source_video", kind="existing_file", label="Source video", accepted_extensions=SOURCE_VIDEO_EXTENSIONS, default_place="output", preview="video"),
 }
 
 

@@ -234,6 +234,12 @@ def _video_reuse(tmp_path, config_overrides: dict) -> tuple[dict, dict[str, str]
     return payload, _reuse_params(payload)
 
 
+def test_a_video_thumbnail_is_served_from_thumbs_while_its_url_stays_the_file(tmp_path):
+    payload, _ = _video_reuse(tmp_path, {})
+
+    assert (payload["url"], payload["thumbnail_url"]) == ("/media/clip.mp4", "/thumbs/clip.mp4")
+
+
 @pytest.mark.parametrize(
     ("overrides", "params_include", "params_absent", "payload_include"),
     [
@@ -519,24 +525,6 @@ def test_other_dot_directories_keep_listing_their_assets(tmp_path):
     (tmp_path / ".archive" / "old.mp4").write_bytes(b"\x00" * 8)
 
     assert [asset.id for asset in list_gallery_assets(str(tmp_path))] == [".archive/old.mp4"]
-
-
-def test_output_media_url_is_only_given_for_served_files_under_the_root(tmp_path):
-    from zvisiongenerator.web.gallery import output_media_url
-
-    served = tmp_path / "sub dir" / "clip.mp4"
-    served.parent.mkdir()
-    served.write_bytes(b"\x00")
-    (tmp_path / "other.m4v").write_bytes(b"\x00")
-    staging = tmp_path / ".web_uploads" / "clip.mp4"
-    staging.parent.mkdir()
-    staging.write_bytes(b"\x00")
-    outside = tmp_path.parent / "outside.mp4"
-
-    assert output_media_url(tmp_path, served) == "/media/sub%20dir/clip.mp4"
-    assert output_media_url(tmp_path, tmp_path / "other.m4v") is None
-    assert output_media_url(tmp_path, staging) is None
-    assert output_media_url(tmp_path, outside) is None
 
 
 def test_a_video_that_cannot_be_extended_says_why(tmp_path, monkeypatch):

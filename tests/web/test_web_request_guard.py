@@ -40,6 +40,14 @@ def test_rebound_host_is_rejected_on_reads(client):
 
 
 @pytest.mark.parametrize(
+    ("fetch_site", "cross_site"),
+    [("cross-site", True), ("same-site", True), ("Cross-Site", True), ("same-origin", False), ("none", False), ("", False), (None, False)],
+)
+def test_cross_site_fetch_by_header_value(fetch_site, cross_site):
+    assert request_guard.is_cross_site_fetch(fetch_site) is cross_site
+
+
+@pytest.mark.parametrize(
     "headers",
     [
         {"Origin": "https://evil.example", "Content-Type": "text/plain"},

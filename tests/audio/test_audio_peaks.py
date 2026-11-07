@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 
@@ -9,7 +12,8 @@ from tests._media import REAL
 from tests.audio._helpers import sine
 
 from zvisiongenerator.utils.audio_level import limit_peak, peak_of
-from zvisiongenerator.utils.audio_peaks import PEAK_COUNT, read_waveform_peaks, waveform_peaks
+from zvisiongenerator.utils import audio_peaks
+from zvisiongenerator.utils.audio_peaks import PEAK_COUNT, PEAK_SAMPLE_RATE, read_waveform, read_waveform_peaks, waveform_peaks
 from zvisiongenerator.utils.audio_save import save_flac
 
 
@@ -56,6 +60,24 @@ class TestWaveformPeaks:
 
         with pytest.raises(RuntimeError, match="could not decode"):
             read_waveform_peaks(tmp_path / "bad.flac")
+
+
+class TestReadWaveform:
+    def test_the_length_is_the_decoded_samples_over_the_peak_rate(self, monkeypatch):
+        samples = np.full(PEAK_SAMPLE_RATE * 3, 0.5, dtype=np.float32)
+        run = MagicMock(return_value=subprocess.CompletedProcess([], 0, stdout=samples.tobytes(), stderr=b""))
+        monkeypatch.setattr(audio_peaks.subprocess, "run", run)
+
+        peaks, seconds = read_waveform("song.wav", timeout=5)
+
+        assert (len(peaks), seconds) == (PEAK_COUNT, 3.0)
+        assert run.call_count == 1 and run.call_args.kwargs["timeout"] == 5
+
+    def test_a_timeout_is_a_runtime_error(self, monkeypatch):
+        monkeypatch.setattr(audio_peaks.subprocess, "run", MagicMock(side_effect=subprocess.TimeoutExpired("ffmpeg", 5)))
+
+        with pytest.raises(RuntimeError, match="took longer than 5 s"):
+            read_waveform("song.wav", timeout=5)
 
 
 class TestLimitPeak:

@@ -63,6 +63,14 @@ def is_allowed_host(host_header: str | None) -> bool:
     return True
 
 
+def is_cross_site_fetch(fetch_site: str | None) -> bool:
+    """Return whether a ``Sec-Fetch-Site`` value says another site (or another site of the same registrable domain) made the request.
+
+    Browsers send the header only to trustworthy origins (HTTPS and ``localhost``), so an absent header passes.
+    """
+    return (fetch_site or "").lower() in _CROSS_SITE_FETCH_VALUES
+
+
 def is_same_origin_request(method: str, host_header: str | None, origin: str | None, fetch_site: str | None) -> bool:
     """Return whether a state-changing request originates from this server's own pages."""
     if method.upper() in _SAFE_METHODS:
@@ -74,7 +82,7 @@ def is_same_origin_request(method: str, host_header: str | None, origin: str | N
             return False
         return parsed.scheme in {"http", "https"} and bool(host_header) and parsed.netloc.lower() == host_header.lower()
     # Browsers always send Origin on cross-origin writes; this covers older ones that only send Fetch Metadata.
-    return (fetch_site or "").lower() not in _CROSS_SITE_FETCH_VALUES
+    return not is_cross_site_fetch(fetch_site)
 
 
 class LocalRequestGuardMiddleware:

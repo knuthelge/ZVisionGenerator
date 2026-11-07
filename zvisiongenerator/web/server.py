@@ -27,7 +27,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -101,6 +101,7 @@ from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_se
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_LTX, UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.input_images import IMAGE_EXTENSIONS
+from zvisiongenerator.utils.lora_preview import LARGE_PREVIEW_EDGE, PREVIEW_EDGE
 from zvisiongenerator.utils.references import check_reference_count, check_reference_files, missing_reference_files
 from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_FACTOR
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
@@ -161,7 +162,8 @@ from zvisiongenerator.web.path_browser import (
     list_directory,
     resolve_purpose,
 )
-from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
+from zvisiongenerator.web import browse_media
+from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware, is_cross_site_fetch
 from zvisiongenerator.web.upscale_api import plan_ltx_video_upscale, plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
@@ -339,6 +341,62 @@ async def api_browse_folder(request: Request) -> dict[str, str]:
     return {"path": str(created)}
 
 
+def _refuse_cross_site_fetch(request: Request) -> None:
+    """Refuse a request another site made, so a page elsewhere can't embed a local file's preview or player."""
+    if is_cross_site_fetch(request.headers.get("sec-fetch-site")):
+        raise HTTPException(status_code=403, detail="Cross-site requests are not allowed.")
+
+
+async def _browse_media_file(purpose: str, path: str, kinds: tuple[str, ...]) -> browse_media.MediaFile:
+    """Check that *path* is a file *purpose* may show through a route serving *kinds*."""
+    browse_purpose = _browse_purpose(purpose)
+    try:
+        return await run_in_threadpool(browse_media.media_file, browse_purpose, path, kinds)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/browse/preview", dependencies=[Depends(_refuse_cross_site_fetch)])
+async def api_browse_preview(request: Request, purpose: str, path: str, frame: Literal["tenth", "last"] = "tenth", size: Literal["small", "large"] = "small") -> Response:
+    """Return a WebP picture (at most 384 px, or 768 px with ``size=large``) of an image, or of a video's frame 10% in or, with ``frame=last``, its last frame."""
+    media = await _browse_media_file(purpose, path, browse_media.PREVIEW_KINDS)
+    if frame == "last" and media.kind != "video":
+        raise HTTPException(status_code=422, detail="Only a video has a last frame.")
+    edge = LARGE_PREVIEW_EDGE if size == "large" else PREVIEW_EDGE
+    return await browse_media.serve_preview(request, media, frame=frame, cache_dir=browse_media.cache_directory(get_ziv_data_dir()), edge=edge)
+
+
+@app.get("/api/browse/info", dependencies=[Depends(_refuse_cross_site_fetch)])
+async def api_browse_info(request: Request, purpose: str, path: str) -> Response:
+    """Return the facts of an image, audio or video file as JSON."""
+    media = await _browse_media_file(purpose, path, browse_media.INFO_KINDS)
+    return await browse_media.serve_info(request, media)
+
+
+@app.get("/api/browse/media", dependencies=[Depends(_refuse_cross_site_fetch)])
+async def api_browse_media(purpose: str, path: str) -> FileResponse:
+    """Return an audio or video file itself, with range requests, for the browser's players."""
+    media = await _browse_media_file(purpose, path, browse_media.MEDIA_KINDS)
+    return browse_media.serve_media(media)
+
+
+@app.get("/thumbs/{asset_path:path}")
+async def output_thumbnail(request: Request, asset_path: str) -> Response:
+    """Serve the large WebP thumbnail of a generated image, or of a video's frame 10% in, by output-root-relative asset ID."""
+    candidate = resolve_output_asset_path(_media_output_root(), asset_path)
+    suffix = candidate.suffix.lower() if candidate is not None else ""
+    kind = "image" if suffix in IMAGE_EXTENSIONS else "video" if suffix in VIDEO_EXTENSIONS else None
+    if candidate is None or kind is None:
+        raise HTTPException(status_code=404, detail=f"Unknown media asset: {asset_path}")
+    try:
+        media = await run_in_threadpool(browse_media.confined_media_file, candidate, kind)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return await browse_media.serve_preview(request, media, frame="tenth", cache_dir=browse_media.cache_directory(get_ziv_data_dir()), edge=LARGE_PREVIEW_EDGE)
+
+
 def _browse_purpose(name: str) -> BrowsePurpose:
     try:
         return resolve_purpose(name)
@@ -365,7 +423,7 @@ async def api_extend_source(request: Request) -> dict[str, Any]:
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
     try:
-        return await run_in_threadpool(extend_source_response, payload, load_web_config(), _media_output_root(), downloading_loras=lora_installer.pending_sizes())
+        return await run_in_threadpool(extend_source_response, payload, load_web_config(), downloading_loras=lora_installer.pending_sizes())
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

@@ -367,7 +367,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
     return {
         "id": asset.id,
         "url": asset.media_url,
-        "thumbnail_url": asset.media_url,
+        "thumbnail_url": f"/thumbs/{quote(asset.id, safe='/')}",
         "filename": asset.name,
         "created_at": created_at,
         "workflow": requested_workflow,
@@ -448,17 +448,6 @@ def _seconds_param(seconds: float) -> str:
 def _source_video_exists(path: str | None) -> bool:
     """Return whether the recorded source video of an extension is still a file."""
     return bool(path) and is_existing_file(path)
-
-
-def output_media_url(root: Path, path: Path) -> str | None:
-    """Return the ``/media`` URL of a media file inside the output root, or ``None`` when the server would not serve it."""
-    try:
-        asset_id = path.resolve().relative_to(root.resolve()).as_posix()
-    except OSError, ValueError:
-        return None
-    if normalize_asset_id(asset_id) is None or path.suffix.lower() not in GALLERY_MEDIA_EXTENSIONS:
-        return None
-    return f"/media/{quote(asset_id, safe='/')}"
 
 
 def _reuse_image_finishing_params(asset: GalleryAsset, *, img2img: bool) -> dict[str, str]:

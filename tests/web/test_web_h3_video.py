@@ -249,9 +249,9 @@ class TestExtendMemoryFit:
         self._stub_an_inspected_source(tmp_path, monkeypatch)
         lora = str(_lora_file(tmp_path, "style", 700))
 
-        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "lora": lora}, _web_config(tmp_path), tmp_path)
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "lora": lora}, _web_config(tmp_path))
         with pytest.raises(ValueError, match="lora must be a string"):
-            extend_api_module.extend_source_response({"path": "clip.mp4", "lora": 5}, _web_config(tmp_path), tmp_path)
+            extend_api_module.extend_source_response({"path": "clip.mp4", "lora": 5}, _web_config(tmp_path))
 
         assert [call["loras_bytes"] for call in calls] == [700]
 
@@ -263,9 +263,7 @@ class TestExtendMemoryFit:
         self._stub_an_inspected_source(tmp_path, monkeypatch)
         monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path)
 
-        extend_api_module.extend_source_response(
-            {"path": "clip.mp4", "extend_frames": 17, "model": "h3", "lora": "pending_style"}, _web_config(tmp_path), tmp_path, downloading_loras={"pending_style": 321}
-        )
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "lora": "pending_style"}, _web_config(tmp_path), downloading_loras={"pending_style": 321})
 
         assert [call["loras_bytes"] for call in calls] == [321]
 
@@ -313,8 +311,8 @@ class TestExtendMemoryFit:
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
         monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
 
-        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "steps": 4}, _web_config(tmp_path), tmp_path)
-        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3"}, _web_config(tmp_path), tmp_path)
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "steps": 4}, _web_config(tmp_path))
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3"}, _web_config(tmp_path))
 
         assert [call["forwards"] for call in calls] == [4, 8]
 
@@ -324,7 +322,7 @@ class TestExtendMemoryFit:
         monkeypatch.setattr(extend_api_module, "_inspect_source", lambda _path: SimpleNamespace(probe=None, recorded=None, problems=(), source=None))
         self._stub_a_source(tmp_path, monkeypatch)
 
-        payload = extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 51, "model": "h3"}, _web_config(tmp_path), tmp_path)
+        payload = extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 51, "model": "h3"}, _web_config(tmp_path))
 
         assert (payload["extend_frames"], payload["window_frames"]) == (51, 56)
 
@@ -350,11 +348,10 @@ class TestExtendMemoryFit:
         self._stub_a_source(tmp_path, monkeypatch)
 
         with pytest.raises(ValueError, match="steps must be a positive integer"):
-            extend_api_module.extend_source_response({"path": "clip.mp4", "model": "h3", "steps": steps}, _web_config(tmp_path), tmp_path)
+            extend_api_module.extend_source_response({"path": "clip.mp4", "model": "h3", "steps": steps}, _web_config(tmp_path))
 
     def _stub_a_source(self, tmp_path, monkeypatch):
         monkeypatch.setattr(extend_api_module, "_source_video_path", lambda *_a, **_k: tmp_path / "clip.mp4")
-        monkeypatch.setattr(extend_api_module, "output_media_url", lambda *_a, **_k: None)
         monkeypatch.setattr(extend_api_module, "detect_video_model", lambda path: SimpleNamespace(family="h3" if "h3" in path or "H3" in path else "ltx"))
 
     def _stub_an_inspected_source(self, tmp_path, monkeypatch):
@@ -368,7 +365,7 @@ class TestExtendMemoryFit:
         monkeypatch.setattr(extend_api_module, "_inspect_source", lambda _path: SimpleNamespace(probe=None, recorded=None, problems=(), source=None))
         self._stub_a_source(tmp_path, monkeypatch)
 
-        payload = extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3"}, _web_config(tmp_path), tmp_path)
+        payload = extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3"}, _web_config(tmp_path))
 
         assert (payload["extend_frames"], payload["window_frames"]) == (17, 39)
 

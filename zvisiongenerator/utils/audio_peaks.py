@@ -13,7 +13,7 @@ from zvisiongenerator.utils.ffmpeg import tool_error
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-__all__ = ["PEAK_COUNT", "PEAK_MAX", "PEAK_SAMPLE_RATE", "read_waveform_peaks", "waveform_peaks"]
+__all__ = ["PEAK_COUNT", "PEAK_MAX", "PEAK_SAMPLE_RATE", "read_waveform", "read_waveform_peaks", "waveform_peaks"]
 
 PEAK_COUNT: Final = 100
 """How many peaks a file's waveform has."""
@@ -58,15 +58,35 @@ def waveform_peaks(samples: NDArray[np.float32], count: int = PEAK_COUNT) -> lis
     return [int(value) for value in np.rint(peaks / loudest * PEAK_MAX)]
 
 
+def read_waveform(path: str | Path, count: int = PEAK_COUNT, *, timeout: float | None = None) -> tuple[list[int], float]:
+    """Decode the first audio stream of *path* to mono at 8 kHz with one ffmpeg call and return its :func:`waveform_peaks` and its length in seconds.
+
+    The length is the decoded sample count over ``PEAK_SAMPLE_RATE``, so it costs nothing beyond the decode.
+
+    Args:
+        path: The audio file.
+        count: How many peaks to return.
+        timeout: Seconds ffmpeg may run before it is stopped; ``None`` waits as long as it takes.
+
+    Raises:
+        RuntimeError: If ffmpeg cannot decode the file or runs past *timeout*.
+    """
+    command = ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(PEAK_SAMPLE_RATE), "-f", "f32le", "-"]
+    try:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"ffmpeg took longer than {timeout:g} s to decode {path}") from exc
+    if result.returncode != 0:
+        raise tool_error(f"ffmpeg could not decode {path}", result.stderr)
+    data = result.stdout
+    samples = np.frombuffer(data[: len(data) - len(data) % 4], dtype=np.float32)
+    return waveform_peaks(samples, count), samples.shape[0] / PEAK_SAMPLE_RATE
+
+
 def read_waveform_peaks(path: str | Path, count: int = PEAK_COUNT) -> list[int]:
     """Decode the first audio stream of *path* to mono at 8 kHz with one ffmpeg call and return its :func:`waveform_peaks`.
 
     Raises:
         RuntimeError: If ffmpeg cannot decode the file.
     """
-    command = ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(PEAK_SAMPLE_RATE), "-f", "f32le", "-"]
-    result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, check=False)
-    if result.returncode != 0:
-        raise tool_error(f"ffmpeg could not decode {path}", result.stderr)
-    data = result.stdout
-    return waveform_peaks(np.frombuffer(data[: len(data) - len(data) % 4], dtype=np.float32), count)
+    return read_waveform(path, count)[0]
