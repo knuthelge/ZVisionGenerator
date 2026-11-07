@@ -86,9 +86,8 @@ The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux, and a Mac wit
     | Model | GPU memory | Measured at |
     |---|---|---|
     | YuE2 3B (`yue2`) | about 10.5 GiB | A take of the full 6:00 |
+    | Qwen3-TTS 1.7B (`qwen3_tts`) | about 12.0 GiB | A text read in parts, in a built-in voice or a recording |
     | Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
-
-    Qwen3-TTS 1.7B (`qwen3_tts`) has no measured figure on a Mac yet, so the Web UI shows no memory badge for it there.
 
 === "Windows and Linux"
 

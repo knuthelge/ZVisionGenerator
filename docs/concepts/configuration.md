@@ -225,7 +225,7 @@ audio_model_presets:
     settings: { language: auto, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
     platforms:
       cuda: { memory_gb: 6.0 }
-      mps: { family: qwen3_tts_mlx }
+      mps: { family: qwen3_tts_mlx, memory_gb: 12.0 }
   sa3:
     label: "Stable Audio 3 Medium"
     kinds: [sound, music]

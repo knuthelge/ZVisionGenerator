@@ -1,14 +1,17 @@
 # Steer audio before it's generated: settings and an enhancer
 
-**Status:** In progress (2026-11-07): the build is done on branch `feat/audio-controls`; only the Mac checks are still open (see below), and the proposal is archived after them
+**Status:** In progress (2026-11-08): built and on `main`; the Mac checks pass (see below). Open: the owner's listening to the Mac takes and the Fit to time follow-up, then the proposal is archived
 
-## Still open: the Mac checks
+## Mac checks (2026-11-08)
 
-- **M-S1, Qwen3-TTS on MLX:** the model loads, the built-in voices and cloning work, the same seed gives the same take, and the memory figure for `qwen3_tts.platforms.mps.memory_gb` is measured.
-- **M1:** the YuE2 score steering (tempo, key, silenced Vocal line) on MPS.
-- **M2:** Delivery on MLX.
-- **M3:** Stable Audio 3 on MPS.
-- **M4:** the helpers (Describe it, Fill in, Lyrics and Script helpers) on the MLX 4-bit enhancer, including the new presence penalty.
+On a 32 GB M5 Mac, through the app's own backends, CLI and Web UI; tempo and key measured with librosa as on CUDA.
+
+- **M-S1, Qwen3-TTS on MLX: pass.** Both checkpoints download from their pinned file lists and load with the speech tokenizer; all nine built-in voices are known. The same seed gives a bit-identical take in one process and across two; another seed gives a different take. Cloning works from a 7 s and a 26 s recording, not cut, at a normal reading rate. **Memory: 12.0 GiB** at the peak (MLX peak, a built-in voice reading four parts of about 450 characters at Very slow; a clone from the 26 s recording peaked at 11.7 GiB, a short line at 6.0 GiB). No growth across parts: 4.3 GiB stays resident and each long part peaks 6–7.7 GiB above it, so the figure follows the longest part.
+- **M1, YuE2 on MPS: pass.** 90 BPM A minor measures 91 BPM in C (its relative, as on CUDA); the instrumental at 100 BPM D minor measures 100 BPM in D minor, and every Vocal line of its score is rests. Neither take has a planning note.
+- **M2, Delivery on MLX: pass.** Every value tried makes a take with nothing cut. Normal reads at 14.1 characters a second (the table's 14); the pace factors (very slow 0.76, slow 0.68, fast 1.12, very fast 1.10, three seeds) are within 20% of the CUDA ones, so the shared table stays. Pitch moves the median pitch (162, 204, 248 Hz). Marks split the text into parts as on CUDA.
+- **M3, Stable Audio 3 on MPS: pass.** Music at 120 BPM measures 120 BPM and is 30.0 s; a Sound on Auto is 12 s.
+- **M4, the helpers on the MLX 4-bit enhancer: pass, with Fit to time weak.** The bench (all cases, two seeds, plus the three messy sets): Fill in usable 152 of 152; Lyrics usable 148 of 164 (the rest "No changes"); Sound and Style usable 38 of 38. With the presence penalty, repeated choruses stay word for word in 72 of 75 songs and no verse is copied. Fit to time reads within 15% of the target in 19 of 42 runs, and once (Fit to 20 s, Fast) the answer was the script followed by the model's own character counting, kept with only "Came out at about 1:34". Image and Video Enhance answer as before (usable 250 of 250 and 35 of 36).
+- **Web UI, one server session: pass.** Fill in then Generate (the enhancer is released first), the helpers unavailable while a take runs, built-in, clone and built-in takes in one process with no memory growth, Lyrics Improve, Stable Audio under Music, Sound Enhance and Image Enhance.
 
 ## Done after the build
 
@@ -23,7 +26,7 @@
 
 The Safari audio player fix has been verified on a Mac. The MiniMax Music 3 follow-up is its own proposal, [minimax-music3.md](minimax-music3.md).
 
-**After the Mac checks:** archive this proposal.
+**After the owner's listening and the Fit to time follow-up:** archive this proposal.
 
 ## Scope
 

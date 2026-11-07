@@ -63,7 +63,7 @@ def qwen3_tts_preset() -> dict[str, Any]:
         "voices": [{"id": voice, "label": label, "language": language} for voice, label, language in QWEN_VOICES],
         "limits": {"max_new_tokens": 1200, "part_chars": 500, "max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30},
         "settings": {"language": "auto", "join_pause_ms": 300, "join_fade_ms": 10, "part_level_match_db": 3, "edge_silence_max_ms": 150},
-        "platforms": {"cuda": {"memory_gb": 6.0}, "mps": {"family": "qwen3_tts_mlx"}},
+        "platforms": {"cuda": {"memory_gb": 6.0}, "mps": {"family": "qwen3_tts_mlx", "memory_gb": 12.0}},
     }
 
 

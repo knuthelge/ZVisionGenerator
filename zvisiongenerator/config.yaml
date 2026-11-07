@@ -613,8 +613,8 @@ audio_model_presets:
     platforms:
       cuda: { memory_gb: 6.0 }
       # On macOS mlx-audio runs the same official checkpoints (it converts the PyTorch convolution layouts while loading), so the files
-      # and voice_files above are used as they are. memory_gb is left out until the peak is measured on a Mac.
-      mps: { family: qwen3_tts_mlx }
+      # and voice_files above are used as they are.
+      mps: { family: qwen3_tts_mlx, memory_gb: 12.0 }
   sa3:
     label: "Stable Audio 3 Medium"
     kinds: [sound, music]

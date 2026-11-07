@@ -11,7 +11,7 @@ from tests.audio._helpers import preset
 from zvisiongenerator.utils.audio_memory import audio_memory_fit, memory_need_text, memory_warning_text
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 
-QWEN = preset("qwen3_tts")  # measured at 6.0 GiB on CUDA, not yet on a Mac
+QWEN = preset("qwen3_tts")  # measured at 6.0 GiB on CUDA and 12.0 GiB on a Mac
 
 
 def _card(gb: float) -> MemoryBudget:
