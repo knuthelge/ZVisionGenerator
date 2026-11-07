@@ -76,7 +76,7 @@ MiniMax H3 can't be published: its licence allows distribution only within an Ap
 
 ## Ranked by value
 
-1. **Prompt enhancer on Windows/Linux.** NF4 snapshots of the two pinned repos, so 3 GB and 6.5 GB instead of 9 GB and 19 GB, and no quantize step on every load. macOS already downloads MLX 4-bit. Apache-2.0, the smallest repos, and no format of our own: transformers reads `quantization_config` from the checkpoint. Every Windows/Linux user who enhances benefits.
+1. **Prompt enhancer on Windows/Linux (on hold until [enhancer-fast-runtime.md](enhancer-fast-runtime.md) picks the runtime; a llama.cpp GGUF would replace the NF4 snapshots).** NF4 snapshots of the two pinned repos, so 3 GB and 6.5 GB instead of 9 GB and 19 GB, and no quantize step on every load. macOS already downloads MLX 4-bit. Apache-2.0, the smallest repos, and no format of our own: transformers reads `quantization_config` from the checkpoint. Every Windows/Linux user who enhances benefits.
 2. **LTX-2.3 on Windows/Linux (`ltx-4`, `ltx-8`).** The largest saving: ~103 GB down to ~31 GB, and the alias fixes the level, so the copy is exactly what runs. It also takes the bulk of the download off `Lightricks/LTX-2.3`, a repo that has deleted and moved files before. The licence allows it with conditions (see Licences).
 3. **LTX-2.5 on Windows/Linux (`ltx25-4`).** 71 GB down to ~31 GB, the same licence and format as 2. macOS already downloads a quantized pack, so parity holds without work there.
 4. **Image models on macOS: pin `mflux-community`'s q4/q8 repos.** Saves 11–27 GB for users who run at q4 or q8, with no hosting by us. Weaker than 1–3, because the default level is unquantized: a user who never picks q4/q8 downloads the original anyway.

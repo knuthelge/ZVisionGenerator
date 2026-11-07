@@ -1,20 +1,29 @@
 # Steer audio before it's generated: settings and an enhancer
 
-**Status:** In progress (2026-11-07): the build is done on branch `feat/audio-controls`; the Mac checks and the owner's listening backlog are still open (see below), and the proposal is archived after the Mac checks
+**Status:** In progress (2026-11-07): the build is done on branch `feat/audio-controls`; only the Mac checks are still open (see below), and the proposal is archived after them
 
-## Still open after the build
-
-**Mac checks:**
+## Still open: the Mac checks
 
 - **M-S1, Qwen3-TTS on MLX:** the model loads, the built-in voices and cloning work, the same seed gives the same take, and the memory figure for `qwen3_tts.platforms.mps.memory_gb` is measured.
 - **M1:** the YuE2 score steering (tempo, key, silenced Vocal line) on MPS.
 - **M2:** Delivery on MLX.
 - **M3:** Stable Audio 3 on MPS.
-- **M4:** the helpers (Describe it, Fill in, Lyrics and Script helpers) on the MLX 4-bit enhancer.
+- **M4:** the helpers (Describe it, Fill in, Lyrics and Script helpers) on the MLX 4-bit enhancer, including the new presence penalty.
 
-**The owner's listening backlog:** the `step1`, `qwen-gs` and `qwen-eager-smoke` takes decide which Delivery values are cut; the same listening settles Laugh, the Sound shell (`TrackType: SFX`) and the clone quality.
+## Done after the build
 
-**After the Mac checks:** archive this proposal, and write the MiniMax Music 3 follow-up as a proposal of its own.
+**The owner's listening (2026-11-07):**
+
+- Laugh ("haha") keeps, 4 of 4.
+- Clone quality is 5 of 5 on both clones, with no artefacts.
+- Delivery: 33 of 34 values were picked correctly in a blind test, so all are kept. Very slow could not be told from Slow, but it stays.
+- Long pause was heard as longer only 3 of 8 times; it stays.
+- The Sound shell (`TrackType: SFX`) made no difference in 6 of 6 pairs and is dropped.
+- English against Auto language was split 1-1, with no change.
+
+The Safari audio player fix has been verified on a Mac. The MiniMax Music 3 follow-up is its own proposal, [minimax-music3.md](minimax-music3.md).
+
+**After the Mac checks:** archive this proposal.
 
 ## Scope
 
@@ -37,7 +46,7 @@ The Audio tab gets what Image and Video already have: **settings that shape a ta
 - New large models: voice design (VoxCPM2), stem splitting (Demucs), transcription.
 - Other or faster models. Each would be one more adapter later; none has been timed or heard here:
   - Speech models with open licences on MLX through mlx-audio (MIT), which the Mac already installs for Higgs TTS 3; on Windows and Linux each would need its own torch path. Qwen3-TTS (Apache-2.0; 0.6B and 1.7B, cloning from 3 s, nine built-in voices with emotion instructions, voice design, 10 languages), VoxCPM2 (Apache-2.0; voice design and cloning in 30 languages; lost 3–4 to Higgs in the earlier blind test), Ming-3.0 TTS (MIT; 0.5B, about real time on an M4 Pro), Dia 1.6B (Apache-2.0; English dialogue with `[S1]`/`[S2]` turns), Chatterbox multilingual (MIT, 23 languages) and Kokoro-82M (Apache-2.0, 54 voices, no cloning).
-  - MiniMax Music 3, the one other song model in mlx-audio: 8B, section tags, up to 6 minutes, stereo at 44.1 kHz, a community licence that allows commercial use with conditions (YuE2 is CC BY-NC). CUDA only on MiniMax's card; the MLX port is young and its 4-bit copy is 9.2 GB. mlx-audio has no sound-effects model that fits 32 GB.
+  - MiniMax Music 3, the one other song model in mlx-audio: 8B planner (about 11B in total), section tags, up to 6 minutes, stereo at 44.1 kHz, a community licence that allows commercial use with conditions (YuE2 is CC BY-NC). MiniMax's own server needs two GPUs, and diffusers and community GGML builds run it elsewhere; the MLX port is young and its 4-bit copy is 9.2 GB. mlx-audio has no sound-effects model that fits 32 GB.
 - Showing a take's score in the viewer (sections, bars and lyric lines under the waveform). Planning from a written header keeps the score, so this becomes possible: in a test, section starts from the score, stretched to the take's length, landed within half a second of the heard ones.
 - Dialogue with several voices, and a soundtrack for a video.
 
@@ -53,7 +62,7 @@ The same answer for all three kinds. What a user wants to say is shared across m
 |---|---|---|
 | Music | Genre, mood, instruments, singer (gender, timbre), song or instrumental, language, section list with lyrics. Tempo and key are real inputs only in some models (ACE-Step, MiniMax Music 3); elsewhere caption words with unmeasured adherence | **YuE2**: style is a comma descriptor list; tempo and key live in the ABC score header (`Q:`, `K:`), not the prompt; the planning mode (`full` for songs, `melody` for instrumentals); the kit accepts a finished score (`SongRequest.abc`) and skips planning; no length input, length follows the sections |
 | Speech | Emotion (a small set) and intensity, pace, pauses, whisper or shout, common non-verbal sounds (laugh, sigh, breath, cough) | **Higgs TTS 3**: its exact 43-tag vocabulary in `<\|cat:value\|>` form (21 emotions, style, 4 speeds, pitch, pauses, expressiveness, 9 sounds); emotion, style and prosody tags go at the start, pauses and sounds inline; a sound tag must be followed by its onomatopoeia (`<\|sfx:laughter\|>Haha`); no free-text instruction, no voice design, no multi-speaker |
-| Sound | A plain description of source, material, space, distance, motion and density; length in seconds | **Stable Audio 3**: caption shell `TrackType: SFX, …` with a `Length: X seconds` suffix and at most 45 words; length up to 380 s; distilled checkpoints run at CFG 1, so a negative prompt does nothing |
+| Sound | A plain description of source, material, space, distance, motion and density; length in seconds | **Stable Audio 3**: caption with a `Length: X seconds` suffix (no `TrackType` prefix for a sound) and at most 45 words; length up to 380 s; distilled checkpoints run at CFG 1, so a negative prompt does nothing |
 
 Our backends today pass only the raw text: YuE2 gets style and lyrics and discards the score it plans (`backends/audio/yue2.py` `_take`); Higgs gets the text as typed; Stable Audio gets prompt and length (`backends/audio/sa3.py`). `AudioGenerationRequest` has no settings beyond prompt, lyrics, length, voice and seed.
 
@@ -62,7 +71,7 @@ Our backends today pass only the raw text: YuE2 gets style and lyrics and discar
 - **YuE2-3B** (CC BY-NC 4.0): prompt is `instruction / [Tags] style / [Lyrics] lyrics`; style examples on the model card are comma descriptors ("Jazz, expressive lead vocal, piano, tenor saxophone, upright bass, brushed drums, no guitar"). No published caption provenance: **the earlier claim that YuE2 learned from captions written by Qwen is unconfirmed** (that is documented for ACE-Step). Until a source turns up, the enhancer copies the model card's style. https://huggingface.co/m-a-p/YuE2-3B
 - **ACE-Step 1.5** (MIT): caption, lyrics, explicit BPM, key, time signature and duration; ships its own Qwen3 planner (0.6/1.7/4B) that writes metadata, caption and lyrics. Training captions: Gemini 2.5 Pro on a seed set, then a fine-tuned Qwen2.5-Omni captioner. https://github.com/ace-step/ACE-Step-1.5, https://arxiv.org/html/2602.00744
 - **SongGeneration / LeVo 2** (Tencent): "comma-separated tags, not sentences", BPM written as "the bpm is 110", typed sections with `;`.
-- **MiniMax Music 3** (open weights, Aug 2026, ~11B): structured caption (genre, BPM, key, arrangement), optional caption rewriter. Too big for 10 GB without slow streaming.
+- **MiniMax Music 3** (open weights, Aug 2026, about 11B in total (8B planner)): structured caption (genre, BPM, key, arrangement), optional caption rewriter. Too big for 10 GB without slow streaming.
 - **HeartMuLa 3B** (Apache-2.0): tags without spaces; **DiffRhythm** needs timestamped LRC; **JAM** word timings; **SongBloom** needs an audio prompt.
 - No model publishes tempo or key adherence numbers.
 
@@ -209,7 +218,7 @@ The owner listened to MiniMax Music 3 and Qwen3-TTS and wants both supported: ev
 - **Length** is a maximum (up to 6 minutes); the song ends where the lyrics end.
 - Seed works (MLX and torch don't match each other). Caption and lyrics together are capped at 5,000 tokens.
 - **Licence:** the MiniMax-Music3 community licence allows commercial use; "MiniMax-Music3" must be shown in the interface, and revenue over USD 20M a year needs permission.
-- **For its test:** on a 10 GB card it only runs with the model streamed from system memory (guides call 12 GB the floor; nobody has timed it); on a 32 GB Mac the 8-bit copy (13.9 GB) is the one that keeps the lyrics accurate. Output is 32 kHz stereo on torch and 44.1 kHz through mlx-audio.
+- **For its test:** on a 10 GB card it only runs with the model streamed from system memory (guides call 12 GB the floor; nobody has timed it); on a 32 GB Mac the 8-bit copy (13.9 GB) is the one that keeps the lyrics accurate. Output is 44.1 kHz stereo on both (the vocoder's native rate; the 32 kHz in the model card and ComfyUI is MiniMax's server resampling).
 
 **Qwen3-TTS (Speech): it steers very differently from Higgs.** Sources: the [repository](https://github.com/QwenLM/Qwen3-TTS) and its issues, mlx-audio's port.
 
@@ -358,8 +367,8 @@ Run through the app's own backends (YuE2, Qwen3-TTS with the built-in voice Ryan
 - **YuE2 instrumentals: pass on the score, the owner listens for a voice.** 100 D minor measures 103 BPM in D minor; 112 F measures 112 BPM in F. Every Vocal line of the score is rests.
 - **YuE2 fallbacks: pass.** A key with tempo on Auto plans twice (E minor at the planned 142 BPM, B-flat at 108, both landing). A header plan forced to be cut off, and one forced to be unreadable, both fall back to YuE2's own plan with the note.
 - **Delivery sweep: every value makes a take, none cut; the owner listens for values that never land.** Emotion alone moves the length of the same line from 6.6 s to 10.8 s (neutral 9.1 s). Pace, measured on a 329-character paragraph over six seeds against Normal (13.2 characters a second): very slow 0.72, slow 0.81, fast 1.17, very fast 1.22 (spread about ±0.15). These replace the provisional factors; 14 characters a second at Normal stays. The "very" steps add little.
-- **Marks and pauses: marks split as designed; Long pause fails the measurement.** `[sad]`, `[whisper]` and `[as set]` give four parts with one instruction each. A line break adds a pause, but not a longer one than "…" (longest pause 0.46 against 0.56 s and 0.31 against 0.29 s on two sentences; longer in only 6 of 14 seeds). Unless the owner's blind listen disagrees, Long pause leaves the Insert menu. Laugh ("haha") waits for the owner's ears.
-- **Stable Audio Sound: the owner's blind pairs decide** whether the `TrackType: SFX` shell helps (ambience, effect, one-shot, two seeds).
+- **Marks and pauses: marks split as designed; Long pause fails the measurement.** `[sad]`, `[whisper]` and `[as set]` give four parts with one instruction each. A line break adds a pause, but not a longer one than "…" (longest pause 0.46 against 0.56 s and 0.31 against 0.29 s on two sentences; longer in only 6 of 14 seeds). The owner's blind listen heard Long pause as longer in 3 of 8 and kept it; Laugh ("haha") keeps, 4 of 4.
+- **Stable Audio Sound: the `TrackType: SFX` shell is dropped.** The owner's blind pairs (ambience, effect, one-shot, two seeds) showed no difference in 6 of 6.
 - **Stable Audio Music: tempo passes, key mixed.** 80 BPM measures 81, 140 measures 136 and 144, 120 measures 117; the key is right or its relative in 3 of 6. "No vocals" by ear.
 
 ## Build order
