@@ -31,6 +31,7 @@ Every module, function, and class should be **atomic**: a single, self-contained
 - Future work is written up as proposals in `proposals/` (see its README). Check there before larger work. When a proposal ships or is rejected, update its status and move it to `proposals/archive/`. Files in `docs/` never link to proposals.
 - User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`. Explain a feature once in Concepts; the Web UI and CLI pages show how to use it and link there. New settings go in `docs/concepts/configuration.md` and new flags in `docs/cli/reference.md`. See [Writing docs](docs/developer/docs.md).
 - Commits follow Conventional Commits: `type(scope): imperative summary` (types: feat, fix, perf, refactor, docs, test, build, ci, chore; scope is the product area, e.g. web, image, video, enhance). Add a body with a short list of high-level changes, not file-by-file detail. Mark breaking changes with `!` and a `BREAKING CHANGE:` line. Release commits are `chore(release): v<version>`.
+- Work happens on a branch as a series of commits, and is rebased onto the newest main before it lands. Never create merge commits. On a fork, the branch goes in as a pull request. In this repository itself, fast-forward main to the branch (`git merge --ff-only`).
 - Never create or push `v*` tags or cut a release unless the user explicitly asks; a tag push publishes to PyPI and cannot be undone (see [Releasing](docs/developer/releasing.md)).
 
 ## Build & Test
