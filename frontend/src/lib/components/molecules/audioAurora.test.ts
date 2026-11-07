@@ -7,6 +7,7 @@ import {
   AURORA_BANDS,
   AURORA_STAGES,
   auroraHead,
+  auroraNote,
   auroraProgress,
   auroraStage,
   easeToward,
@@ -54,16 +55,16 @@ describe('the estimated progress of a take', () => {
     expect(auroraProgress('music', at('Synthesis', 0, null))).toBeCloseTo(0.72 + 0.24 / 2);
   });
 
-  it('counts a speech part by its frames against the part\'s own total, and the parts by their number', () => {
-    expect(auroraProgress('speech', at('Speech tokens', 0, 700, 1, 2))).toBe(0);
-    expect(auroraProgress('speech', at('Speech tokens', 350, 700, 1, 2))).toBeCloseTo(0.95 / 4);
-    expect(auroraProgress('speech', at('Speech tokens', 700, 700, 2, 2))).toBeCloseTo((1 + 0.95) / 2);
+  it('counts the one part of a speech take as 0 before it is read and 1 after', () => {
+    expect(auroraProgress('speech', at('Speech', 0, 1, 1, 1))).toBe(0);
+    expect(auroraProgress('speech', at('Speech', 1, 1, 1, 1))).toBe(1);
   });
 
-  it('lets a speech take reach 1 at the end of its last decode, and not before', () => {
-    expect(auroraProgress('speech', at('Speech tokens', 700, 700, 2, 2))).toBeLessThan(1);
-    expect(auroraProgress('speech', at('Decode', 0, 1, 2, 2))).toBeLessThan(1);
-    expect(auroraProgress('speech', at('Decode', 1, 1, 2, 2))).toBeCloseTo(1);
+  it('counts the parts of a longer speech take by their number', () => {
+    expect(auroraProgress('speech', at('Speech', 0, 1, 1, 4))).toBe(0);
+    expect(auroraProgress('speech', at('Speech', 1, 1, 1, 4))).toBeCloseTo(0.25);
+    expect(auroraProgress('speech', at('Speech', 0, 1, 3, 4))).toBeCloseTo(0.5);
+    expect(auroraProgress('speech', at('Speech', 1, 1, 4, 4))).toBe(1);
   });
 
   it('counts a sound by its steps out of their total, then by its decode', () => {
@@ -75,6 +76,18 @@ describe('the estimated progress of a take', () => {
   it('is 0 before the first event and for a phase it does not know', () => {
     expect(auroraProgress('music', null)).toBe(0);
     expect(auroraProgress('music', at('Elsewhere', 5, 10))).toBe(0);
+  });
+});
+
+describe('the note of a speech take', () => {
+  it('reads Reading, with no clock, for a take of one part', () => {
+    expect(auroraNote('speech', at('Speech', 0, 1, 1, 1))).toBe('Reading');
+    expect(auroraNote('speech', at('Speech', 1, 1, 1, 1))).toBe('Reading');
+  });
+
+  it('names the part of a take of several', () => {
+    expect(auroraNote('speech', at('Speech', 0, 1, 2, 3))).toBe('Reading part 2 of 3');
+    expect(auroraNote('speech', at('Speech', 1, 1, 3, 3))).toBe('Reading part 3 of 3');
   });
 });
 
@@ -93,7 +106,7 @@ describe('the playhead', () => {
   });
 
   it('follows the parts of speech', () => {
-    expect(auroraHead('speech', at('Speech tokens', 350, 700, 2, 2))).toBeGreaterThan(auroraHead('speech', at('Speech tokens', 350, 700, 1, 2)));
+    expect(auroraHead('speech', at('Speech', 0, 1, 2, 2))).toBeGreaterThan(auroraHead('speech', at('Speech', 0, 1, 1, 2)));
   });
 });
 
@@ -236,10 +249,10 @@ describe('the stage of the sky', () => {
     expect(phases.map((phase) => auroraStage(phase))).toEqual(['plan', 'write', 'synth', 'decode']);
   });
 
-  it('takes speech through writing and decode, again for each part', () => {
-    const parts = [at('Speech tokens', 100, 700, 1, 2), at('Decode', 0, 1, 1, 2), at('Speech tokens', 100, 700, 2, 2), at('Decode', 0, 1, 2, 2)];
+  it('takes speech through the writing of each part', () => {
+    const phases = [at('Speech', 0, 1, 1, 2), at('Speech', 1, 1, 1, 2), at('Speech', 0, 1, 2, 2)];
 
-    expect(parts.map((part) => auroraStage(part))).toEqual(['write', 'decode', 'write', 'decode']);
+    expect(phases.map((phase) => auroraStage(phase))).toEqual(['write', 'write', 'write']);
   });
 
   it('takes a sound through its sampling, which is writing, and its decode', () => {
@@ -258,7 +271,7 @@ describe('the stage of the sky', () => {
     expect(plan('music', at('Plan', 300, null))).toBeCloseTo(0.5);
     expect(plan('music', at('Plan', 9000, null))).toBe(1);
     expect(plan('music', at('Song tokens', 1, null))).toBe(1);
-    expect(plan('speech', at('Speech tokens', 1, 700))).toBe(0);
+    expect(plan('speech', at('Speech', 0, 1))).toBe(0);
   });
 });
 

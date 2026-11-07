@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FilledMark from './FilledMark.svelte';
   import { Icon } from '$lib/components/atoms';
   import type { ChipKey, SettingChip } from './settingsChips';
 
@@ -56,7 +57,7 @@
         data-applied={chip.applied}
         aria-expanded={activeKey === chip.key}
         aria-haspopup={chip.key === 'preset' ? 'menu' : undefined}
-        aria-label="{chip.label || chip.key}: {chip.value}"
+        aria-label="{chip.label || chip.key}: {chip.value}{chip.filled ? ' (filled from your idea)' : ''}"
         disabled={pending}
         onclick={() => onopen(chip.key)}
       >
@@ -68,6 +69,7 @@
         {#if chip.download?.kind === 'downloading'}<Icon name="download" size={12} class="setchip-dl" />{:else if chip.download?.kind === 'failed'}<Icon name="alert" size={12} class="setchip-bad" />{/if}
         {#if chip.label}<span class="setchip-k">{chip.label}</span>{/if}
         <span class="setchip-v" class:on={chip.on}>{chip.value}</span>
+        {#if chip.filled}<FilledMark />{/if}
         {#if chip.warn}<Icon name="alert" size={12} class="setchip-warn" />{/if}
       </button>
     {/each}

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 import torch
 
-from tests._audio_presets import audio_config
+from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_two_kind_preset
 from tests._fake_audio import fake_read_config as read_config
 from tests._torch_flags import current_flags, set_app_flags, set_kit_flags
 from tests.audio._helpers import clip, decode, fake_backend, patch_runner, preset, sine
@@ -18,11 +20,12 @@ from zvisiongenerator import audio_runner
 from zvisiongenerator.audio_runner import run_audio_batch
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
+from zvisiongenerator.utils.audio_preset import parse_audio_presets
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
 
 CONFIG = audio_config()
-YUE2, HIGGS3, SA3 = preset("yue2"), preset("higgs3"), preset("sa3")
+YUE2, QWEN, SA3 = preset("yue2"), preset("qwen3_tts"), preset("sa3")
 
 
 def _music(**fields) -> AudioGenerationRequest:
@@ -30,7 +33,7 @@ def _music(**fields) -> AudioGenerationRequest:
 
 
 def _speech(text: str = "Hello there.", **fields) -> AudioGenerationRequest:
-    return AudioGenerationRequest(preset="higgs3", kind="speech", prompt=text, **fields)
+    return AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt=text, **fields)
 
 
 def _sound(**fields) -> AudioGenerationRequest:
@@ -99,6 +102,104 @@ class TestFilesOnDisk:
         patch_runner(monkeypatch, fake_backend(clip()))
 
         assert len(_run(_music(), YUE2, tmp_path)) == 1
+
+
+class TestCloningFilesOnDisk:
+    """A Qwen3-TTS take with a recording also needs the cloning checkpoint on disk; a built-in voice take does not."""
+
+    CONFIG = audio_config(qwen3_tts=qwen3_tts_preset())
+    QWEN = next(item for item in parse_audio_presets(CONFIG) if item.id == "qwen3_tts")
+
+    @staticmethod
+    def _only_customvoice(monkeypatch):
+        monkeypatch.setattr(audio_runner, "target_present_offline", lambda target: target.repo_id.endswith("CustomVoice"))
+
+    def test_a_built_in_voice_take_runs_with_customvoice_alone(self, monkeypatch, tmp_path):
+        patch_runner(monkeypatch, fake_backend(clip()))
+        self._only_customvoice(monkeypatch)
+
+        assert len(_run(AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi."), self.QWEN, tmp_path)) == 1
+
+    def test_a_take_with_a_recording_is_refused_before_the_load_while_the_cloning_checkpoint_is_missing(self, monkeypatch, tmp_path):
+        backend = fake_backend(clip())
+        patch_runner(monkeypatch, backend)
+        self._only_customvoice(monkeypatch)
+        request = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi.", voice=VoiceRef("/voices/me.wav", "Hello"))
+
+        with pytest.raises(FileNotFoundError, match="Qwen3-TTS 1.7B is not downloaded"):
+            _run(request, self.QWEN, tmp_path)
+
+        assert backend.load.call_count == 0
+
+
+class TestCheckpoint:
+    """The runner decides which checkpoint a batch loads: the backend loads ``files[0]`` of the preset it is handed, once."""
+
+    CONFIG = audio_config(qwen3_tts=qwen3_tts_preset())
+    QWEN = next(item for item in parse_audio_presets(CONFIG) if item.id == "qwen3_tts")
+    VOICE = VoiceRef("/voices/me.wav", "Hello")
+
+    def _loaded_preset(self, monkeypatch, tmp_path, request, preset=None, **overrides):
+        backend = fake_backend(clip())
+        patch_runner(monkeypatch, backend)
+        _run(request, preset or self.QWEN, tmp_path, **overrides)
+        backend.load.assert_called_once()
+        return backend.load.call_args.args[0]
+
+    def test_a_built_in_voice_batch_loads_the_files_of_the_preset(self, monkeypatch, tmp_path):
+        loaded = self._loaded_preset(monkeypatch, tmp_path, _speech())
+
+        assert loaded is self.QWEN
+        assert loaded.files[0].repo_id.endswith("CustomVoice")
+
+    def test_a_batch_that_follows_a_recording_loads_the_voice_files_in_place_of_the_files(self, monkeypatch, tmp_path):
+        loaded = self._loaded_preset(monkeypatch, tmp_path, _speech(voice=self.VOICE))
+
+        assert loaded.files == self.QWEN.voice_files
+        assert loaded.files[0].repo_id.endswith("Base")
+        assert (loaded.id, loaded.family, loaded.label, loaded.limits) == (self.QWEN.id, self.QWEN.family, self.QWEN.label, self.QWEN.limits)
+
+    def test_every_take_of_a_cloning_batch_runs_on_the_one_load(self, monkeypatch, tmp_path):
+        backend = fake_backend(clip())
+        patch_runner(monkeypatch, backend)
+
+        _run(_speech(voice=self.VOICE), self.QWEN, tmp_path, runs=3)
+
+        assert backend.load.call_count == 1 and backend.generate.call_count == 3
+        assert {call.args[0].voice for call in backend.generate.call_args_list} == {self.VOICE}
+
+    def test_a_preset_without_voice_files_follows_a_recording_with_its_own_files(self, monkeypatch, tmp_path):
+        single = replace(self.QWEN, voice_files=())
+
+        loaded = self._loaded_preset(monkeypatch, tmp_path, _speech(voice=self.VOICE), preset=single)
+
+        assert loaded is single
+
+    def test_the_download_check_still_asks_for_both_checkpoints_of_a_cloning_batch(self, monkeypatch, tmp_path):
+        backend = fake_backend(clip())
+        patch_runner(monkeypatch, backend)
+        asked: list[str] = []
+        monkeypatch.setattr(audio_runner, "target_present_offline", lambda target: asked.append(target.repo_id) or True)
+
+        _run(_speech(voice=self.VOICE), self.QWEN, tmp_path)
+
+        assert [repo.rsplit("/", 1)[1].split("@")[0] for repo in asked] == ["Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen3-TTS-12Hz-1.7B-Base"]
+
+    def test_a_skip_queued_during_the_load_does_not_stop_it_and_the_take_is_still_made(self, monkeypatch, tmp_path):
+        control = SkipSignal()
+        backend = fake_backend(clip())
+        seen: list[bool] = []
+
+        def load(loaded, device, cancelled=None):
+            control.queue_action("skip")
+            seen.append(cancelled())
+
+        backend.load.side_effect = load
+        patch_runner(monkeypatch, backend)
+
+        saved = _run(_speech(voice=self.VOICE), self.QWEN, tmp_path, skip_signal=control)
+
+        assert seen == [False] and len(saved) == 1
 
 
 class TestLifecycle:
@@ -192,17 +293,41 @@ class TestSaving:
 
         assert capsys.readouterr().out.count(audio_runner._CUT_NOTE) == 1
 
+    def test_the_notes_of_a_take_print_under_it_and_a_take_without_notes_prints_none(self, monkeypatch, tmp_path, capsys):
+        patch_runner(monkeypatch, fake_backend(clip(0.2, notes=("The model sets its own tempo.", "Marks were not read.")), clip(0.2)))
+
+        _run(_music(), YUE2, tmp_path, runs=2)
+
+        out = capsys.readouterr().out
+        assert out.count("  The model sets its own tempo.") == 1 and out.count("  Marks were not read.") == 1
+
     def test_a_speech_take_records_the_full_text_and_the_number_of_parts(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip(0.2)))
         sentence = "This sentence has a fair number of characters in it, give or take. "
         text = sentence * 20  # about 1,340 characters: three parts of up to 500
 
-        saved = _run(_speech(text, voice=VoiceRef("me.wav", "Hello, this is me.")), HIGGS3, tmp_path)
+        saved = _run(_speech(text, voice=VoiceRef("me.wav", "Hello, this is me.")), QWEN, tmp_path)
 
         config = read_config(saved[0])
         assert config["prompt"] == text and config["generation"]["parts"] == 3
         assert config["voice_path"].endswith("me.wav") and config["voice_text"] == "Hello, this is me."
         assert not any("consent" in key for key in config)
+
+    def test_a_marked_speech_text_records_the_parts_the_marks_make_and_keeps_its_marks(self, monkeypatch, tmp_path):
+        patch_runner(monkeypatch, fake_backend(clip(0.2)))
+        text = "Hello there. [sad] Oh no. [as set] Fine now."
+
+        saved = _run(_speech(text), QWEN, tmp_path)
+
+        config = read_config(saved[0])
+        assert config["prompt"] == text and config["generation"]["parts"] == 3
+
+    def test_a_recordings_marks_do_not_add_parts(self, monkeypatch, tmp_path):
+        patch_runner(monkeypatch, fake_backend(clip(0.2)))
+
+        saved = _run(_speech("Hello there. [sad] Oh no.", voice=VoiceRef("me.wav", "Hi")), QWEN, tmp_path)
+
+        assert read_config(saved[0])["generation"]["parts"] == 1
 
     def test_a_sound_records_the_length_asked_for(self, monkeypatch, tmp_path):
         patch_runner(monkeypatch, fake_backend(clip(0.5, rate=44100, channels=2)))
@@ -245,7 +370,7 @@ class TestTiming:
         events: list[dict] = []
         console = MagicMock()
         report = audio_runner._progress_reporter(
-            events.append, {"mode": "audio"}, console, batch_start=time.time() - 100, take_began=time.monotonic() - ran_secs, gen_times=gen_times, takes_left=takes_left
+            events.append, {"mode": "audio"}, console, batch_start=time.time() - 100, began=time.monotonic() - ran_secs, gen_times=gen_times, takes_left=takes_left
         )
 
         report("Sampling", 1, 2, 1, 1)
@@ -261,6 +386,30 @@ class TestTiming:
 
     def test_the_time_left_is_never_below_zero(self):
         assert self._eta(gen_times=[20.0], takes_left=1, ran_secs=500)["eta_secs"] == 0.0
+
+    def test_the_time_of_a_take_is_the_time_it_ran_and_not_the_load_before_it(self, monkeypatch, tmp_path):
+        now = [1000.0]
+        monkeypatch.setattr(audio_runner, "time", SimpleNamespace(monotonic=lambda: now[0], time=time.time))
+        backend = fake_backend(clip(0.1))
+        original = backend.generate.side_effect
+
+        def load(*args, **kwargs):
+            now[0] += 30.0  # the checkpoint loads, before the first take begins
+
+        def generate(request, on_progress, cancelled):
+            now[0] += 5.0  # the take itself
+            return original(request, on_progress, cancelled)
+
+        backend.load.side_effect = load
+        backend.generate.side_effect = generate
+        patch_runner(monkeypatch, backend)
+        events: list[dict] = []
+
+        (saved,) = _run(_music(), YUE2, tmp_path, progress_callback=events.append)
+
+        assert read_config(saved)["generation"]["time"] == 5.0
+        (finished,) = [e for e in events if e["type"] == "generation_finished" and e.get("status") == "success"]
+        assert finished["generation_time"] == 5.0
 
     def test_there_is_no_estimate_before_a_take_has_finished(self):
         assert self._eta(gen_times=[], takes_left=2, ran_secs=5)["eta_secs"] is None
@@ -338,7 +487,7 @@ class TestOutOfMemory:
         ("request_", "model", "model_name"),
         [
             (_music(), YUE2, "YuE2 3B"),
-            (_speech(), HIGGS3, "Higgs TTS 3 4B"),
+            (_speech(), QWEN, "Qwen3-TTS 1.7B"),
             (_sound(), SA3, "Stable Audio 3 Medium"),
         ],
         ids=["music", "speech", "sound"],
@@ -355,6 +504,23 @@ class TestOutOfMemory:
         assert model_name in str(raised.value) and "GPU memory" in str(raised.value)
         assert raised.value.__cause__ is error
         backend.close.assert_called_once()
+
+    def test_only_music_that_takes_lyrics_is_told_to_shorten_them(self, monkeypatch, tmp_path):
+        (two_kinds,) = parse_audio_presets(audio_config(sa3=sa3_two_kind_preset()))
+        advice = {}
+        for name, model, request_ in (
+            ("song", YUE2, _music()),
+            ("music without lyrics", two_kinds, AudioGenerationRequest(preset="sa3", kind="music", prompt="piano", seconds=30.0)),
+            ("sound", two_kinds, _sound()),
+        ):
+            backend = fake_backend(clip())
+            backend.generate.side_effect = torch.OutOfMemoryError("out of memory")
+            patch_runner(monkeypatch, backend)
+            with pytest.raises(RuntimeError) as raised:
+                _run(request_, model, tmp_path)
+            advice[name] = "shorten the lyrics" in str(raised.value)
+
+        assert advice == {"song": True, "music without lyrics": False, "sound": False}
 
     def test_running_out_of_memory_while_loading_gives_the_same_message(self, monkeypatch, tmp_path):
         backend = fake_backend(clip())
@@ -373,9 +539,9 @@ class TestOutOfMemory:
         monkeypatch.setattr(audio_runner, "accelerator_memory_budget_or_none", lambda: MemoryBudget(8 * GIB, system_bytes=64 * GIB))
 
         with pytest.raises(RuntimeError) as raised:
-            _run(_speech(), HIGGS3, tmp_path)
+            _run(_speech(), QWEN, tmp_path)
 
-        assert "8.2 GB" in str(raised.value) and "8 GB" in str(raised.value)
+        assert "about 6 GB" in str(raised.value) and "8 GB" in str(raised.value)
 
     def test_another_runtime_error_is_not_rewritten(self, monkeypatch, tmp_path):
         backend = fake_backend(clip())
@@ -399,11 +565,11 @@ class TestClosing:
 
     def test_the_backend_is_closed_when_loading_fails(self, monkeypatch, tmp_path):
         backend = fake_backend(clip())
-        backend.load.side_effect = FileNotFoundError("Higgs TTS 3 needs bosonai/higgs-tts-3-4b, which is not downloaded.")
+        backend.load.side_effect = FileNotFoundError("Qwen3-TTS needs Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice, which is not downloaded.")
         patch_runner(monkeypatch, backend)
 
         with pytest.raises(FileNotFoundError):
-            _run(_speech(), HIGGS3, tmp_path)
+            _run(_speech(), QWEN, tmp_path)
 
         backend.close.assert_called_once()
 

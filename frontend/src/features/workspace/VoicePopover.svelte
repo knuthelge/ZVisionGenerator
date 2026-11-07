@@ -1,11 +1,11 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
-  import { Segmented } from '$lib/components/molecules';
+  import { Select } from '$lib/components/molecules';
   import { autogrow } from '$lib/actions/autogrow';
   import { formatTimestamp, takeAudioFiles } from '$lib/state/audioTrack';
   import { draft } from '$lib/state/draft.svelte';
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
-  import { VOICE_WORDS, type VoiceView } from './audioView';
+  import { chooseVoice, VOICE_WORDS, type VoiceView } from './audioView';
   import ImageSources from './ImageSources.svelte';
 
   interface Props {
@@ -21,16 +21,9 @@
 </script>
 
 <div class="voice-pop">
-  <Segmented
-    label="Voice"
-    class="pop-seg"
-    value={voice.recording ? 'recording' : 'any'}
-    options={VOICE_WORDS.modes}
-    onchange={(mode) => draft.update('voiceMode', mode)}
-  />
-  {#if !voice.recording}
-    <p class="ui-help">{VOICE_WORDS.anyHint}</p>
-  {:else}
+  <Select class="pop-select" triggerClass="pop-select-trigger" label="Voice" testId="pop-voice-select" value={voice.choice} options={voice.options} onchange={(choice) => chooseVoice(voice, choice)} />
+  {#if voice.recording}
+    {#if voice.cloneDownload}<p class="ui-help" data-testid="pop-voice-download-hint">{VOICE_WORDS.downloadHint}</p>{/if}
     <div class="pop-group" role="group" aria-labelledby="pop-voice-group">
       <h4 id="pop-voice-group" class="ui-area-label pop-group-label">Recording</h4>
       <div class="picker-row">
@@ -67,8 +60,8 @@
 
 <style>
   .voice-pop { display: flex; flex-direction: column; gap: 16px; }
-  .voice-pop :global(.pop-seg) { display: flex; width: 100%; }
-  .voice-pop :global(.pop-seg > button) { flex: 1; height: 44px; font-size: 14px; }
+  .voice-pop :global(.pop-select) { display: flex; width: 100%; }
+  .voice-pop :global(.pop-select-trigger) { height: 44px; font-size: 15px; }
   .pop-group { display: flex; flex-direction: column; gap: 8px; padding: 0 2px; }
   .pop-group-label { padding: 0; }
   .picker-row { display: flex; align-items: center; gap: 12px; min-height: 56px; font-size: 15px; }

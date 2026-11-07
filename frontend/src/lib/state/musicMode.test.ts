@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { musicMode, musicStatus, sectionTags } from './musicMode';
+import { isSectionLine, musicMode, musicStatus, sectionTags } from './musicMode';
 
 interface Case {
   name: string;
@@ -26,6 +26,13 @@ describe('musicMode', () => {
 
   it('keeps tags in order and as written', () => {
     expect(sectionTags('[Intro] la [Verse 2]\n[x]')).toEqual(['[Intro]', '[Verse 2]', '[x]']);
+  });
+});
+
+describe('isSectionLine', () => {
+  it('is a line of one tag, with spaces allowed around it', () => {
+    expect(['[verse]', '  [Chorus 2] ', '[Pre-Chorus]'].map(isSectionLine)).toEqual([true, true, true]);
+    expect(['[Chorus] oh', 'oh [Chorus]', '[a][b]', '[unclosed', '[]', '[[x]]', ''].map(isSectionLine)).toEqual([false, false, false, false, false, false, false]);
   });
 });
 

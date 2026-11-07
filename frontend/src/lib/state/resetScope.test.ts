@@ -33,6 +33,8 @@ function openTab(workflow: Workflow | AudioWorkflow): void {
   if (isAudioWorkflow(workflow)) draft.setAudioKind(workflow, ctx);
 }
 
+const EMPTY = { text: '', from: null, history: [] };
+
 const SETTINGS: EnhanceSettings = { style: 'cinematic', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
 
 /** A distinctive value for every field of the draft; the compiler fails when a field is missing. */
@@ -53,13 +55,20 @@ const MARKED: DraftState = {
   videoUpscaleEnabled: true, videoUpscaleFactor: 4, videoUpscaleReview: true,
   enhancedPrompt: 'enhanced prompt', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
   enhancedHistory: [{ prompt: 'plain rewrite', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }],
-  savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] } },
+  enhancedScratched: null,
+  savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [], enhancedScratched: null } },
   savedSettings: { video: { steps: 31, model: 'ltx-8' } },
-  enhanceSettings: SETTINGS, enhanceSettingsVideo: { ...SETTINGS, style: 'dreamy', partsByWorkflow: {} }, enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
+  enhanceSettings: SETTINGS, enhanceSettingsVideo: { ...SETTINGS, style: 'dreamy', partsByWorkflow: {} }, enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
   extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
-  appliedPreset: 'look', videoKind: 'new', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'higgs3', sound: 'sa3' },
+  appliedPreset: 'look', videoKind: 'new', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' },
   audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain', audioSeconds: 30,
-  voiceMode: 'recording', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
+  audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
+  speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
+  voiceMode: 'recording', speechSpeaker: 'vivian', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
+  audioRewrites: { style: EMPTY, sound: { text: 'Heavy rain.', from: { input: 'rain', model: 'sa3', task: 'sound' }, history: [] }, text: EMPTY },
+  lyricsVersions: [{ text: 'my words', mine: true }, { text: 'better words', mine: false }], lyricsCurrent: 1,
+  enhanceSettingsAudio: { sound: { space: 'forest' }, style: null },
+  audioDescribe: { music: { text: 'a sad song', marked: ['tempo'], filled: { tempo: '84' }, undo: null, folded: true }, speech: { text: '', marked: [], filled: {}, undo: null, folded: null } },
 };
 
 /** What each tab's draft looks like when that tab is open: its workflow and the model of its mode. */
@@ -67,12 +76,12 @@ const OPEN: Record<WorkspaceTab, Partial<DraftState>> = {
   image: {},
   video: { workflow: 'img2vid', model: 'ltx-8', quantize: null, videoKind: 'new' },
   extend: { workflow: 'extend', model: 'ltx-8', quantize: null, videoKind: 'extend' },
-  audio: { workflow: 'speech', model: 'higgs3' },
+  audio: { workflow: 'speech', model: 'qwen3_tts' },
 };
 
 const TEXT_WORKFLOW: Record<WorkspaceTab, string> = { image: 'txt2img', video: 'txt2vid', extend: 'extend', audio: 'speech' };
 
-const AUDIO_TAB_KEYS = ['audioKind', 'audioModels', 'audioStyle', 'lyrics', 'speechText', 'soundPrompt', 'audioSeconds', 'voiceMode', 'voicePath', 'voiceUpload', 'voiceText'] as const;
+const AUDIO_TAB_KEYS = ['audioKind', 'audioModels', 'audioStyle', 'lyrics', 'speechText', 'soundPrompt', 'audioSeconds', 'audioTempo', 'audioKey', 'musicSeconds', 'soundType', 'speechDelivery', 'voiceMode', 'speechSpeaker', 'voicePath', 'voiceUpload', 'voiceText', 'audioRewrites', 'lyricsVersions', 'lyricsCurrent', 'enhanceSettingsAudio', 'audioDescribe'] as const;
 
 beforeEach(() => {
   localStorage.clear();
@@ -316,7 +325,7 @@ describe('round trips between the tabs (G3, M2, M3)', () => {
     draft.onTabChange(ctx);
     expect(draft.state).toMatchObject({ workflow: 'extend', videoKind: 'extend', extendSourcePath: '/clips/source.mp4' });
     openTab('music');
-    expect(draft.state).toMatchObject({ workflow: 'music', audioStyle: 'calm', speechText: 'say this', voicePath: '/voices/me.wav', voiceText: 'hi', audioModels: { music: 'yue2', speech: 'higgs3', sound: '' } });
+    expect(draft.state).toMatchObject({ workflow: 'music', audioStyle: 'calm', speechText: 'say this', voicePath: '/voices/me.wav', voiceText: 'hi', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: '' } });
   });
 
   it('M2: each mode gets its own LoRAs back after a visit to Audio from the other mode', () => {
@@ -367,7 +376,7 @@ describe('the speaker\'s tick follows the voice (G4)', () => {
 
   it('is cleared by a prefill that replaces the voice, and by a new recording', () => {
     speechWithTickedVoice();
-    draft.loadFromUrl({ workflow: 'speech', model: 'higgs3', prompt: 'Welcome', voice_path: '/voices/other.wav', voice_text: 'Hi' }, ctx);
+    draft.loadFromUrl({ workflow: 'speech', model: 'qwen3_tts', prompt: 'Welcome', voice_path: '/voices/other.wav', voice_text: 'Hi' }, ctx);
     expect(voiceConsent.ticked).toBe(false);
 
     voiceConsent.ticked = true;
@@ -385,22 +394,16 @@ describe('SETTING_KEYS', () => {
 });
 
 describe('the length of a sound', () => {
-  it('starts at the default of the sound model and is left alone on a model that makes none', () => {
-    const slower = withAudio(makeContext(), AUDIO_MODELS.map((model) => (model.kind === 'sound' ? { ...model, limits: { ...model.limits, default_seconds: 25 } } : model)));
-    const open = (workflow: AudioWorkflow) => ({ ...draft.state, workflow, audioKind: workflow, audioModels: { music: 'yue2', speech: 'higgs3', sound: 'sa3' }, model: { music: 'yue2', speech: 'higgs3', sound: 'sa3' }[workflow] });
+  it('is Auto (0) by default, so it is not shown as changed, and stays so when the sound kind opens', () => {
+    const open = (workflow: AudioWorkflow) => ({ ...draft.state, workflow, audioKind: workflow, audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, model: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }[workflow] });
+    expect(defaultsFor(ctx, open('sound'), null).audioSeconds).toBe(0);
 
-    expect(defaultsFor(slower, open('sound'), null).audioSeconds).toBe(25);
-    expect(defaultsFor(slower, open('music'), null).audioSeconds).not.toBe(25);
-  });
-
-  it('is the default from the first time the sound kind opens, so it is not shown as changed', () => {
-    const slower = withAudio(makeContext(), AUDIO_MODELS.map((model) => (model.kind === 'sound' ? { ...model, limits: { ...model.limits, default_seconds: 25 } } : model)));
     draft.reset();
-    draft.hydrateFromContext(slower);
+    draft.hydrateFromContext(ctx);
+    draft.setAudioKind('sound', ctx);
 
-    draft.setAudioKind('sound', slower);
-
-    expect(draft.state.audioSeconds).toBe(25);
-    expect(draft.state.audioSeconds).toBe(defaultsFor(slower, draft.state, null).audioSeconds);
+    expect(draft.state.audioSeconds).toBe(0);
+    expect(draft.state.audioSeconds).toBe(defaultsFor(ctx, draft.state, null).audioSeconds);
   });
 });
+

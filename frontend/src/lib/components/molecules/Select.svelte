@@ -3,6 +3,10 @@
     value: string;
     label: string;
     disabled?: boolean;
+    /** A second line under the label, in the muted shade. */
+    hint?: string;
+    /** The column the option sits in when the list lays its groups out side by side (`groupColumns`). */
+    group?: string;
   }
 
   /** How the closed control looks: a form field, a toolbar shell, or unstyled for the caller to style. */
@@ -48,6 +52,11 @@
     testId?: string;
     /** Custom content for the closed control; gets the chosen option. */
     trigger?: Snippet<[SelectOption | undefined]>;
+    /**
+     * Lay the options that have a `group` out as one titled column per group, side by side, under the options that have none.
+     * Up and Down walk the options in their order, Left and Right move to the same row of the next column.
+     */
+    groupColumns?: boolean;
     onchange?: (value: string) => void;
   }
 
@@ -67,6 +76,7 @@
     triggerClass = '',
     testId,
     trigger,
+    groupColumns = false,
     onchange,
   }: Props = $props();
 
@@ -83,6 +93,29 @@
 
   const selected = $derived(options.find((option) => option.value === value));
   const listLabel = $derived(label ?? ariaLabel ?? triggerEl?.labels?.[0]?.textContent?.trim() ?? 'Choose');
+
+  /** In column mode: the options with no group (listed first, full width), and the groups, each with the options' indexes. */
+  const columns = $derived.by(() => {
+    if (!groupColumns) return null;
+    const plain: number[] = [];
+    const groups = new Map<string, number[]>();
+    options.forEach((option, index) => {
+      if (option.group === undefined) plain.push(index);
+      else groups.set(option.group, [...(groups.get(option.group) ?? []), index]);
+    });
+    return { plain, groups: [...groups.entries()].map(([name, indexes]) => ({ name, indexes })) };
+  });
+
+  /** The enabled option in the column beside the active one, at the same row (or the nearest below it); -1 when there is none. */
+  function sideways(direction: 1 | -1): number {
+    if (!columns) return -1;
+    const here = columns.groups.findIndex((group) => group.indexes.includes(active));
+    const next = columns.groups[here + direction];
+    if (here < 0 || !next) return -1;
+    const row = columns.groups[here].indexes.indexOf(active);
+    const target = next.indexes[Math.min(row, next.indexes.length - 1)];
+    return options[target].disabled ? -1 : target;
+  }
 
   function enabledIndex(from: number, step: 1 | -1): number {
     for (let index = from; index >= 0 && index < options.length; index += step) {
@@ -153,6 +186,8 @@
   function onListKeydown(event: KeyboardEvent): void {
     if (event.key === 'ArrowDown') { event.preventDefault(); moveTo(enabledIndex(active + 1, 1)); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); moveTo(enabledIndex(active - 1, -1)); }
+    else if (event.key === 'ArrowRight' && columns) { event.preventDefault(); moveTo(sideways(1)); }
+    else if (event.key === 'ArrowLeft' && columns) { event.preventDefault(); moveTo(sideways(-1)); }
     else if (event.key === 'Home') { event.preventDefault(); moveTo(enabledIndex(0, 1)); }
     else if (event.key === 'End') { event.preventDefault(); moveTo(enabledIndex(options.length - 1, -1)); }
     else if (event.key === 'Enter') { event.preventDefault(); choose(active); }
@@ -232,6 +267,28 @@
   <p id="{id}-error" class="ui-help ui-help-error mt-1">{error}</p>
 {/if}
 
+{#snippet optionRow(option: SelectOption, index: number)}
+  <!-- Focus stays on the listbox, which takes the keys and points at the active option (aria-activedescendant). -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
+  <div
+    id="{listId}-{index}"
+    class="ui-select-option"
+    role="option"
+    aria-selected={option.value === value}
+    aria-disabled={option.disabled ? 'true' : undefined}
+    data-active={index === active}
+    data-value={option.value}
+    onpointermove={() => { if (!option.disabled) active = index; }}
+    onclick={() => choose(index)}
+  >
+    <span class="min-w-0 flex-1 truncate">
+      {option.label}
+      {#if option.hint}<small class="ui-select-hint">{option.hint}</small>{/if}
+    </span>
+    {#if option.value === value}<Icon name="check" size={14} class="shrink-0 text-primary-main" />{/if}
+  </div>
+{/snippet}
+
 {#if open}
   <!-- Right at the field on every screen. On a touch screen the rows are finger-sized, and the list stays open when
        the keyboard sliding away scrolls or resizes the page. -->
@@ -241,6 +298,7 @@
       id={listId}
       class="ui-select-list"
       class:touch={layout.coarse}
+      class:columns={columns !== null}
       role="listbox"
       tabindex="-1"
       aria-label={listLabel}
@@ -248,24 +306,25 @@
       onkeydown={onListKeydown}
     onkeyup={onListKeyup}
     >
-      {#each options as option, index (option.value)}
-        <!-- Focus stays on the listbox, which takes the keys and points at the active option (aria-activedescendant). -->
-        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
-        <div
-          id="{listId}-{index}"
-          class="ui-select-option"
-          role="option"
-          aria-selected={option.value === value}
-          aria-disabled={option.disabled ? 'true' : undefined}
-          data-active={index === active}
-          data-value={option.value}
-          onpointermove={() => { if (!option.disabled) active = index; }}
-          onclick={() => choose(index)}
-        >
-          <span class="min-w-0 flex-1 truncate">{option.label}</span>
-          {#if option.value === value}<Icon name="check" size={14} class="shrink-0 text-primary-main" />{/if}
+      {#if columns}
+        {#each columns.plain as index (options[index].value)}
+          {@render optionRow(options[index], index)}
+        {/each}
+        <div class="ui-select-columns" class:many={columns.groups.length > 2} style:--columns={columns.groups.length}>
+          {#each columns.groups as group (group.name)}
+            <div class="ui-select-column" role="group" aria-label={group.name}>
+              <p class="ui-select-group ui-area-label" aria-hidden="true">{group.name}</p>
+              {#each group.indexes as index (options[index].value)}
+                {@render optionRow(options[index], index)}
+              {/each}
+            </div>
+          {/each}
         </div>
-      {/each}
+      {:else}
+        {#each options as option, index (option.value)}
+          {@render optionRow(option, index)}
+        {/each}
+      {/if}
     </div>
   </div>
 {/if}
@@ -280,11 +339,19 @@
 
   .ui-select-popover { z-index: var(--z-menu); max-width: min(28rem, calc(100vw - 16px)); }
   .ui-select-list { max-height: min(60vh, 22rem); overflow-y: auto; padding: 4px; outline: none; }
+  /* Twelve rows to a column: tall enough to see the whole list without scrolling where the screen allows. */
+  .ui-select-list.columns { max-height: min(75vh, 30rem); }
   .ui-select-option { display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm); padding: 6px 8px; font-size: var(--text-ui); color: var(--color-text-secondary); cursor: pointer; user-select: none; }
   .ui-select-option[aria-selected='true'] { color: var(--color-text-primary); }
   .ui-select-option[data-active='true'] { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
   .ui-select-list:focus-visible .ui-select-option[data-active='true'] { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
   .ui-select-option[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+  .ui-select-hint { display: block; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .ui-select-columns { display: grid; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); gap: 0 4px; min-width: 15rem; }
+  /* More than two groups side by side do not fit a finger's rows or a phone's width: they wrap to two columns. */
+  .touch .ui-select-columns.many { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 30rem) { .ui-select-columns.many { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .ui-select-group { padding: 8px 8px 4px; }
   .touch .ui-select-option { min-height: 44px; padding: 0 12px; font-size: 15px; }
   /* A finger has no pointer to follow, so the active row only shows while keys move it; the tick marks the choice. */
   .touch:not(:focus-visible) .ui-select-option[data-active='true'] { background: none; }

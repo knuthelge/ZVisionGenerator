@@ -30,7 +30,7 @@ This installs the app and opens the Web UI in your browser. It needs Python 3.14
 
 - **Images** from a prompt, with Z-Image, FLUX.2 Klein, Krea 2 Turbo, Ideogram 4 Instant and MOSS-Image.
 - **Videos with sound** from a prompt or a starting image, with LTX-2.3, LTX-2.5 and MiniMax H3. End on a chosen last frame with H3, and extend a clip to make it longer.
-- **Audio**: songs and instrumentals up to six minutes with YuE2, speech with Higgs TTS 3 in a voice the model picks or one that follows a recording, and ambience and sound effects with Stable Audio 3. Use any take as a video's audio track.
+- **Audio**: songs and instrumentals up to six minutes with YuE2, speech with Qwen3-TTS in one of nine built-in voices or one that follows a recording, and ambience, sound effects and instrumentals with Stable Audio 3. Use any take as a video's audio track.
 - **A prompt enhancer** that runs on your machine and turns a short idea into a detailed prompt.
 - **Upscaling** of new and existing images, of video as it's made, and of existing videos on Windows and Linux.
 - **Prompt files** with random choices, reusable snippets and batch runs.

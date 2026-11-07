@@ -8,6 +8,7 @@
   import { MEMORY_FIT_CONSEQUENCES, clipTimeNote, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { generateBlock } from '$lib/state/generateBlock.svelte';
+  import { textWriting } from '$lib/state/textWriting.svelte';
   import { chipDownload, failureText, waitText } from '$lib/state/loraDownloads';
   import { downloadStore } from '$lib/state/downloads.svelte';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
@@ -17,9 +18,11 @@
   import { randomSeed } from './seed';
   import AudioTrackSection from './AudioTrackSection.svelte';
   import type { AudioView } from './audioView';
-  import { clampSeconds, secondsRange } from '$lib/state/audioDraft';
   import type { AudioTrackView } from './audioTrackView';
   import VoiceSection from './VoiceSection.svelte';
+  import MusicSection from './MusicSection.svelte';
+  import SoundSection from './SoundSection.svelte';
+  import DeliverySection from './DeliverySection.svelte';
   import ImagesSection from './ImagesSection.svelte';
   import type { ImagesView } from './imagesView';
   import SourceVideoSection from './SourceVideoSection.svelte';
@@ -77,16 +80,6 @@
     if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
   }
 
-  // --- Length of a sound: from the shortest sound to the model's longest ---
-  const lengthSpec = $derived.by(() => {
-    const range = secondsRange(audio.model);
-    return range && { step: 1, ...range };
-  });
-
-  function setLength(seconds: number): void {
-    draft.update('audioSeconds', clampSeconds(seconds, audio.model));
-  }
-
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
   const stepOptions = $derived(caps.isImageMode ? null : stepOptionsFor(context, model));
   const maxSteps = $derived(caps.isImageMode ? null : maxStepsFor(context, s.workflow, model));
@@ -135,6 +128,11 @@
   // --- Changes from defaults ------------------------------------------------
   const isChanged = (id: RowId): boolean => rowChanged(id, s, defaults);
   const resetRow = (id: RowId): void => draft.patch(rowDefaults(id, defaults));
+  // The voice's recording is held outside the draft, with the speaker's tick: clearing them goes through the store.
+  function resetVoice(): void {
+    draft.setVoice(null);
+    resetRow('voice');
+  }
   const changedRows = $derived(changedRowCount(caps, s, defaults));
 
   // --- Section summaries ----------------------------------------------------
@@ -145,7 +143,6 @@
       caps.showSteps ? `${s.steps} steps` : null,
       caps.showGuidance ? `cfg ${s.guidance}` : null,
       caps.showSeed ? (s.seed !== null ? `seed ${s.seed}` : 'random seed') : null,
-      caps.showLength ? `${s.audioSeconds} s` : null,
     ].filter(Boolean).join(' · ')
   );
   const postprocessOn = $derived(
@@ -182,10 +179,10 @@
   const waitFull = $derived(block.waiting ? waitText(block.waiting, false).full : null);
   const imageBlock = $derived(images.block);
   const trackBlock = $derived(audioTrack.block);
-  const submitDisabled = $derived(busy || audio.reason !== null || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked);
+  const submitDisabled = $derived(busy || audio.reason !== null || textWriting.reason !== null || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked || imageBlock !== null || trackBlock !== null || block.blocked);
   // One reason at a time, linked to Generate: the source comes first, then the images, the audio track, then the prompt file.
-  // On the Audio tab the one reason is its own, in the order the boxes are read.
-  const generateReason = $derived(audio.active ? audio.reason : (sourceGuard.note ?? imageBlock ?? trackBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null)));
+  // On the Audio tab the one reason is its own, in the order the boxes are read. A run that is writing the text Generate sends comes before any other reason.
+  const generateReason = $derived(audio.active ? audio.reason : (textWriting.reason ?? sourceGuard.note ?? imageBlock ?? trackBlock ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null)));
 
   function resetAll(): void {
     draft.resetSelections(context);
@@ -263,19 +260,25 @@
     {/if}
 
     {#if caps.showVoice}
-      <VoiceSection voice={audio.voice} />
+      <VoiceSection voice={audio.voice} changed={isChanged('voice')} onreset={resetVoice} />
+    {/if}
+
+    {#if caps.offersDelivery && context.audio_settings}
+      <DeliverySection vocabulary={context.audio_settings} recording={!caps.showDelivery} changed={isChanged('delivery')} onreset={() => resetRow('delivery')} />
+    {/if}
+
+    {#if caps.audioKind === 'music' && context.audio_settings && (caps.showTempo || caps.showKey || caps.showLength)}
+      <MusicSection vocabulary={context.audio_settings} model={audio.model} shown={audio.shown} {busy} changed={isChanged} onreset={resetRow} />
+    {/if}
+
+    {#if caps.audioKind === 'sound' && context.audio_settings && (caps.showSoundType || caps.showLength)}
+      <SoundSection vocabulary={context.audio_settings} model={audio.model} shown={audio.shown} {busy} changed={isChanged} onreset={resetRow} />
     {/if}
 
     <InspectorSection id="sampling" title="Sampling" summary={samplingSummary}>
       {#if caps.showRuns}
         <InspectorRow label="Batch size" forId="ws-runs" scrubber={scrubber(s.runs, SPEC.runs, (v) => draft.update('runs', v))} changed={isChanged('runs')} onreset={() => resetRow('runs')}>
           <InspectorNumber id="ws-runs" name="runs" value={s.runs} {...SPEC.runs} onchange={(v) => v !== null && draft.update('runs', v)} />
-        </InspectorRow>
-      {/if}
-      {#if caps.showLength && lengthSpec}
-        <InspectorRow label="Length (s)" forId="ws-length" scrubber={scrubber(s.audioSeconds, lengthSpec, setLength)} changed={isChanged('length')} onreset={() => resetRow('length')}>
-          <InspectorNumber id="ws-length" value={s.audioSeconds} {...lengthSpec} commitOnly onchange={(v) => v !== null && setLength(v)} />
-          <span class="frame-count" data-testid="length-max">max {lengthSpec.max}</span>
         </InspectorRow>
       {/if}
       {#if caps.showFrameCount}
@@ -575,7 +578,7 @@
         type="button"
         disabled={busy}
         onclick={resetAll}
-        title={audio.active ? 'Put back the Audio tab\'s length, voice, batch and seed (keeps the kind, the models and the text)' : 'Reset settings and images to model defaults (keeps model, LoRAs, quantization and prompt)'}
+        title={audio.active ? 'Put back the Audio tab\'s tempo, key, type, length, voice, batch and seed (keeps the kind, the models and the text)' : 'Reset settings and images to model defaults (keeps model, LoRAs, quantization and prompt)'}
         aria-label="Reset settings"
         class="ui-btn"
       >

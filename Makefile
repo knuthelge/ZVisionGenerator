@@ -177,6 +177,34 @@ update-sa3: ## Update vendored stable_audio_3 inference package (Stable Audio 3)
 	rm -rf $(TMP)
 	@echo "✓ Vendored stable_audio_3 updated to $(SA3_COMMIT)"
 
+QWEN_TTS_REPO   ?= https://github.com/andimarafioti/Qwen3-TTS.git
+# distribution/qwen-tts-hf, "Prepare qwen-tts-hf 0.1.1.post1": the sources of the qwen-tts-hf 0.1.1.post1 wheel
+QWEN_TTS_COMMIT ?= a466278d04ce9693395947906a949f744acd41e8
+FASTER_QWEN3_TTS_REPO   ?= https://github.com/andimarafioti/faster-qwen3-tts.git
+# v0.5.4 (release commit of the faster-qwen3-tts 0.5.4 wheel)
+FASTER_QWEN3_TTS_COMMIT ?= 1094aabd83b367b1b29942769141b0524bed245d
+
+.PHONY: update-qwen3-tts
+
+update-qwen3-tts: ## Update vendored qwen_tts and faster_qwen3_tts (Qwen3-TTS speech on Windows/Linux)
+	$(eval TMP := $(shell mktemp -d))
+	git clone --quiet $(QWEN_TTS_REPO) $(TMP)/qwen_tts
+	cd $(TMP)/qwen_tts && git checkout --quiet $(QWEN_TTS_COMMIT)
+	git clone --quiet $(FASTER_QWEN3_TTS_REPO) $(TMP)/faster_qwen3_tts
+	cd $(TMP)/faster_qwen3_tts && git checkout --quiet $(FASTER_QWEN3_TTS_COMMIT)
+	rm -rf packages/qwen_tts packages/faster_qwen3_tts
+	cp -r $(TMP)/qwen_tts/qwen_tts packages/qwen_tts
+	rm -rf packages/qwen_tts/cli packages/qwen_tts/__main__.py
+	cp $(TMP)/qwen_tts/LICENSE packages/qwen_tts/LICENSE
+	printf '%s\n' $(QWEN_TTS_COMMIT) > packages/qwen_tts/UPSTREAM_COMMIT
+	cp -r $(TMP)/faster_qwen3_tts/faster_qwen3_tts packages/faster_qwen3_tts
+	rm -f packages/faster_qwen3_tts/cli.py
+	cp $(TMP)/faster_qwen3_tts/LICENSE packages/faster_qwen3_tts/LICENSE
+	printf '%s\n' $(FASTER_QWEN3_TTS_COMMIT) > packages/faster_qwen3_tts/UPSTREAM_COMMIT
+	find packages/qwen_tts packages/faster_qwen3_tts -name __pycache__ -type d -prune -exec rm -rf {} +
+	rm -rf $(TMP)
+	@echo "✓ Vendored qwen_tts updated to $(QWEN_TTS_COMMIT) and faster_qwen3_tts to $(FASTER_QWEN3_TTS_COMMIT)"
+
 # ——— Frontend ————————————————————————————————————————————
 
 .PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-hover-check frontend-test frontend-dev

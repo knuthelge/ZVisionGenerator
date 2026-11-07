@@ -1115,9 +1115,9 @@ describe('ModelsPage downloads', () => {
   describe('audio models panel', () => {
     const YUE_LICENCE = { name: 'CC BY-NC 4.0', supplier: 'M-A-P', summary: 'Non-commercial, credit required', url: 'https://example.org/yue2/LICENSE', url_label: 'Licence', attribution: null };
     const gpuFit = { kind: 'discrete' as const, budget_gb: 10, by_quantize: { none: { status: 'tight' as const, required_gb: 8.8 } } };
-    const yue2: AudioModelEntry = { name: 'yue2', label: 'YuE2 3B', kind: 'music', downloaded: false, download_needed: true, memory_fit: gpuFit, delete: null, disk_size_label: null, licences: [YUE_LICENCE] };
-    const higgs: AudioModelEntry = { name: 'higgs3', label: 'Higgs TTS 3', kind: 'speech', downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'bosonai/higgs-tts-3-4b', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '9.1 GB' };
-    const sa3: AudioModelEntry = { name: 'sa3', label: 'Stable Audio 3 Medium', kind: 'sound', downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'Comfy-Org/stable-audio-3', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '5.4 GB' };
+    const yue2: AudioModelEntry = { name: 'yue2', label: 'YuE2 3B', kinds: ['music'], downloaded: false, download_needed: true, memory_fit: gpuFit, delete: null, disk_size_label: null, licences: [YUE_LICENCE] };
+    const qwen: AudioModelEntry = { name: 'qwen3_tts', label: 'Qwen3-TTS 1.7B', kinds: ['speech'], downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '9.1 GB' };
+    const sa3: AudioModelEntry = { name: 'sa3', label: 'Stable Audio 3 Medium', kinds: ['sound'], downloaded: true, download_needed: false, memory_fit: null, delete: { kind: 'huggingface', repo_id: 'Comfy-Org/stable-audio-3', linked_by: [], stored_quants: [], source_repos: [] }, disk_size_label: '5.4 GB' };
     const rows = () => Array.from(target.querySelectorAll<HTMLElement>('[data-testid="audio-row"]'));
     const row = (name: string) => rows().find((item) => item.dataset.model === name)!;
     const audioPlan = (overrides: Partial<RowDownloadPlan> = {}) => plan({ label: 'YuE2 3B', parts: [{ label: 'YuE2 3B', model: 'yue2', bytes: 7e9 }], total_bytes: 7e9, licences: [{ ...YUE_LICENCE, model: 'yue2' }], ...overrides });
@@ -1133,23 +1133,29 @@ describe('ModelsPage downloads', () => {
     });
 
     it('lists one row per model, with its label, kind, size and memory badge', async () => {
-      await mountPage(inventoryWith({ audio_models: [yue2, higgs, sa3] }));
+      await mountPage(inventoryWith({ audio_models: [yue2, qwen, sa3] }));
 
       expect(rows().map((item) => [item.querySelector('[data-testid="model-name"]')?.textContent, item.querySelector('[data-testid="audio-kind"]')?.textContent, item.querySelector('[data-testid="disk-size"]')?.textContent ?? null])).toEqual([
         ['YuE2 3B', 'Music', null],
-        ['Higgs TTS 3', 'Speech', '9.1 GB'],
+        ['Qwen3-TTS 1.7B', 'Speech', '9.1 GB'],
         ['Stable Audio 3 Medium', 'Sound', '5.4 GB'],
       ]);
       expect(row('yue2').querySelector('[data-testid="model-memory-fit"]')?.textContent).toContain('Tight');
     });
 
+    it('lists every kind of a model in its kind cell, in the model\'s order', async () => {
+      await mountPage(inventoryWith({ audio_models: [{ ...sa3, kinds: ['sound', 'music'] }, { ...yue2, kinds: ['music'] }] }));
+
+      expect(rows().map((item) => item.querySelector('[data-testid="audio-kind"]')?.textContent)).toEqual(['Sound · Music', 'Music']);
+    });
+
     it('offers Download on a row that needs files and Delete on a row with files, never both missing', async () => {
-      await mountPage(inventoryWith({ audio_models: [yue2, higgs, sa3] }));
+      await mountPage(inventoryWith({ audio_models: [yue2, qwen, sa3] }));
 
       expect(row('yue2').querySelector('[data-testid="download-button"]')?.getAttribute('aria-label')).toBe('Download YuE2 3B');
       expect(row('yue2').querySelector('[data-testid="delete-button"]')).toBeNull();
-      expect(row('higgs3').querySelector('[data-testid="download-button"]')).toBeNull();
-      expect(row('higgs3').querySelector('[data-testid="delete-button"]')?.getAttribute('aria-label')).toContain('Higgs TTS 3');
+      expect(row('qwen3_tts').querySelector('[data-testid="download-button"]')).toBeNull();
+      expect(row('qwen3_tts').querySelector('[data-testid="delete-button"]')?.getAttribute('aria-label')).toContain('Qwen3-TTS 1.7B');
       expect(row('sa3').querySelector('[data-testid="delete-button"]')).not.toBeNull();
     });
 
@@ -1185,18 +1191,18 @@ describe('ModelsPage downloads', () => {
     });
 
     it('deletes the downloads of a model after confirmation, by its id', async () => {
-      modelApiMocks.deleteAudioModel.mockResolvedValue({ status: 'ok', tone: 'success', message: 'Deleted the downloads of Higgs TTS 3.' });
-      await mountPage(inventoryWith({ audio_models: [higgs] }));
+      modelApiMocks.deleteAudioModel.mockResolvedValue({ status: 'ok', tone: 'success', message: 'Deleted the downloads of Qwen3-TTS 1.7B.' });
+      await mountPage(inventoryWith({ audio_models: [qwen] }));
 
-      row('higgs3').querySelector<HTMLButtonElement>('[data-testid="delete-button"]')!.click();
+      row('qwen3_tts').querySelector<HTMLButtonElement>('[data-testid="delete-button"]')!.click();
       await tickFor();
-      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Higgs TTS 3');
+      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Qwen3-TTS 1.7B');
       expect(document.querySelector('[data-testid="delete-audio"]')?.textContent).toContain('Frees 9.1 GB');
       expect(modelApiMocks.deleteAudioModel).not.toHaveBeenCalled();
 
       (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
       await tickFor();
-      expect(modelApiMocks.deleteAudioModel).toHaveBeenCalledWith('higgs3');
+      expect(modelApiMocks.deleteAudioModel).toHaveBeenCalledWith('qwen3_tts');
     });
   });
 

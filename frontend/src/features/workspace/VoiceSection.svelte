@@ -1,34 +1,42 @@
 <script lang="ts">
-  import { InspectorRow, InspectorSection, Segmented } from '$lib/components/molecules';
+  import { InspectorRow, InspectorSection, Select } from '$lib/components/molecules';
   import { autogrow } from '$lib/actions/autogrow';
   import { formatTimestamp } from '$lib/state/audioTrack';
   import { draft } from '$lib/state/draft.svelte';
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
-  import { VOICE_WORDS, type VoiceView } from './audioView';
+  import { chooseVoice, VOICE_WORDS, type VoiceView } from './audioView';
   import ReferenceSlot from './ReferenceSlot.svelte';
 
   interface Props {
     /** The voice of the open Speech tab, computed once by the Workspace. */
     voice: VoiceView;
+    /** The voice differs from its default: the row shows its changed mark and its reset. */
+    changed: boolean;
+    /** Put the voice back: a built-in voice of the model's default, with no recording. */
+    onreset: () => void;
   }
 
-  let { voice }: Props = $props();
+  let { voice, changed, onreset }: Props = $props();
 </script>
 
 <InspectorSection id="voice" title="Voice" summary={voice.summary.text} active={voice.summary.tone === 'active'} error={voice.summary.tone === 'error'}>
-  <InspectorRow label="Voice">
-    <Segmented
-      size="sm"
+  <InspectorRow label="Voice" forId="ws-voice-select" changed={changed} onreset={onreset}>
+    <Select
+      id="ws-voice-select"
+      variant="bare"
+      class="flex-1"
+      triggerClass="inspector-select"
       label="Voice"
-      class="voice-mode"
-      value={voice.recording ? 'recording' : 'any'}
-      options={VOICE_WORDS.modes}
-      onchange={(mode) => draft.update('voiceMode', mode)}
+      testId="voice-select"
+      value={voice.choice}
+      options={voice.options}
+      onchange={(choice) => chooseVoice(voice, choice)}
     />
   </InspectorRow>
-  {#if !voice.recording}
-    <p class="row-hint" data-testid="voice-any-hint">{VOICE_WORDS.anyHint}</p>
-  {:else}
+  {#if voice.recording}
+    {#if voice.cloneDownload}
+      <p class="row-hint" data-testid="voice-download-hint">{VOICE_WORDS.downloadHint}</p>
+    {/if}
     <ReferenceSlot
       idBase="ws-voice"
       kind="audio"
@@ -71,8 +79,6 @@
 
 
 <style>
-  :global(.voice-mode) { flex: 1; min-width: 0; }
-  :global(.voice-mode > button) { flex: 1; min-width: 0; padding: 0 2px; }
   .voice-text { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px 4px; }
   .voice-required { margin-left: 6px; font-size: var(--text-meta); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-muted); }
   .voice-field { min-height: 52px; max-height: 104px; resize: none; padding: 6px 8px; font-size: var(--text-ui); line-height: 1.45; }

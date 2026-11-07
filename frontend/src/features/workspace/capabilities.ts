@@ -1,4 +1,5 @@
 import { trackOf, trackSet } from '$lib/state/audioTrack';
+import { audioModelById } from '$lib/state/audioDraft';
 import { imageSupport } from '$lib/state/imageSlots';
 import { isAudioWorkflow, workspaceTab } from '$lib/state/workspaceTab';
 import type { AudioWorkflow, DraftState, ImageModelDefaults, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext } from '$lib/types';
@@ -10,8 +11,20 @@ export interface WorkspaceCapabilities {
   isAudio: boolean;
   /** The kind the Audio tab shows (its workflow), or null on any other tab. */
   audioKind: AudioWorkflow | null;
-  /** Sound, on a model that takes a length: the Length (s) row. */
+  /** A sound, or a song on a model that sets its length (its row does not hide `length`): the Length (s) row. */
   showLength: boolean;
+  /** Music, on a model that sings lyrics: the Lyrics box. */
+  showLyrics: boolean;
+  /** Music: the Tempo row. */
+  showTempo: boolean;
+  /** Music: the Key row. */
+  showKey: boolean;
+  /** Speech on a model that steers its delivery: the Delivery section, which holds one line instead of its controls for a voice that follows a recording. */
+  offersDelivery: boolean;
+  /** Speech in a built-in voice: the Delivery controls. A voice that follows a recording reads as recorded, so it has none. */
+  showDelivery: boolean;
+  /** Sound: the Sound Type row. */
+  showSoundType: boolean;
   /** Speech, on a model that can follow a recording: the Voice section. */
   showVoice: boolean;
   supportsNegativePrompt: boolean;
@@ -76,8 +89,10 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   const isImageMode = definition?.mode === 'image';
   const isAudio = definition?.mode === 'audio';
   const videoDefaults = context?.video_model_defaults?.[state.model] as VideoModelDefaults | undefined;
-  // A video model that lacks a control (low memory, upscale, ...) does not show it, whatever the workflow offers. An audio workflow offers what its kind takes.
-  const hidden = new Set(isImageMode || isAudio ? [] : (videoDefaults?.hidden_controls ?? []));
+  // A model that lacks a control (low memory, upscale, Lyrics, ...) does not show it, whatever the workflow offers. An audio model's are those of its row for the open kind.
+  const audioKind = isAudio && isAudioWorkflow(state.workflow) ? state.workflow : null;
+  const audioModel = audioKind === null ? null : audioModelById(context, state.model, audioKind);
+  const hidden = new Set(isImageMode ? [] : isAudio ? (audioModel?.hidden_controls ?? []) : (videoDefaults?.hidden_controls ?? []));
   const visible = new Set((definition?.visible_controls ?? []).filter((control) => !hidden.has(control)));
   const imageDefaults = isImageMode
     ? ((context?.image_model_defaults?.[state.model] ?? context?.defaults) as ImageModelDefaults | undefined)
@@ -103,8 +118,14 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   return {
     isImageMode,
     isAudio,
-    audioKind: isAudio && isAudioWorkflow(state.workflow) ? state.workflow : null,
+    audioKind,
     showLength: visible.has('length'),
+    showLyrics: visible.has('lyrics'),
+    showTempo: visible.has('tempo'),
+    showKey: visible.has('key'),
+    offersDelivery: visible.has('delivery'),
+    showDelivery: visible.has('delivery') && state.voiceMode !== 'recording',
+    showSoundType: visible.has('sound_type'),
     showVoice: visible.has('voice') && visible.has('voice_path') && visible.has('voice_text'),
     supportsNegativePrompt,
     supportsJsonPrompt: isImageMode && (imageDefaults?.supports_json_prompt ?? false),

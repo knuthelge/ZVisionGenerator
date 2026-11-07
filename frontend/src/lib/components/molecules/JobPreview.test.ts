@@ -186,6 +186,34 @@ describe('JobPreview', () => {
       play.mockRestore();
     });
 
+    it('shows Play, not Pause, once another take is held while one plays', async () => {
+      // A real element goes back to paused when its source changes, without a `pause` event.
+      const playing = new WeakSet<HTMLMediaElement>();
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+        playing.add(this);
+        this.dispatchEvent(new Event('play'));
+        return Promise.resolve();
+      });
+      vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+        if (playing.delete(this)) this.dispatchEvent(new Event('pause'));
+      });
+      const props = reactiveProps({ job: takeJob({ status: 'paused', paused: true, itemFinished: true, outputs: [makeAudioAsset()] }) });
+      const { target } = mountComponent(JobPreview, props);
+      const button = () => figure(target).querySelector('.job-preview-play') as HTMLButtonElement;
+
+      button().click();
+      await settle();
+      expect(button().getAttribute('aria-label')).toBe('Pause the last take');
+
+      props.job = takeJob({ status: 'paused', paused: true, itemFinished: true, outputs: [makeAudioAsset({ id: 'out/other.flac', url: '/media/out/other.flac' })] });
+      await settle();
+
+      expect(figure(target).querySelector('audio')?.getAttribute('src')).toBe('/media/out/other.flac');
+      expect(button().getAttribute('aria-label')).toBe('Play the last take');
+      expect(button().getAttribute('aria-pressed')).toBe('false');
+      vi.restoreAllMocks();
+    });
+
     it('plays the take the Aurora has landed on while the job is paused after it', () => {
       const progress = { phase: 'Decode', step: 1, total: 1, part: 1, parts: 1 };
       const paused = mountComponent(JobPreview, { job: takeJob({ audio: progress, status: 'paused', paused: true, itemFinished: true, outputs: [makeAudioAsset()] }) });

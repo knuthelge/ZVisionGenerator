@@ -86,8 +86,9 @@ The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux, and a Mac wit
     | Model | GPU memory | Measured at |
     |---|---|---|
     | YuE2 3B (`yue2`) | about 10.5 GiB | A take of the full 6:00 |
-    | Higgs TTS 3 4B (`higgs3`) | about 11.1 GiB | A text read in four parts |
     | Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
+
+    Qwen3-TTS 1.7B (`qwen3_tts`) has no measured figure on a Mac yet, so the Web UI shows no memory badge for it there.
 
 === "Windows and Linux"
 
@@ -96,7 +97,7 @@ The [audio models](audio.md) fit a 10 GB GPU on Windows and Linux, and a Mac wit
     | Model | GPU memory | Measured at |
     |---|---|---|
     | YuE2 3B (`yue2`) | about 6.7 GiB | A take of the full 6:00 |
-    | Higgs TTS 3 4B (`higgs3`) | about 8.2 GiB | A part of the longest the app allows |
+    | Qwen3-TTS 1.7B (`qwen3_tts`) | about 6.0 GiB | A text read in parts, in a built-in voice or a recording |
     | Stable Audio 3 Medium (`sa3`) | about 6.1 GiB | A sound of the full 380 s |
 
     System memory matters too: YuE2 peaks at about 11 GiB while it loads or runs, which leaves a computer with 16 GB of RAM little to spare. YuE2 keeps its weights in system memory and moves the part it needs to the GPU, which is how it fits a 10 GB card. This adds a few seconds when the model loads and does not change the result.

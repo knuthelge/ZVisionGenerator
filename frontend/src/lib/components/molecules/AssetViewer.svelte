@@ -25,7 +25,7 @@
   import { takeWords, wordBlocks } from '$lib/state/audioAsset';
   import { audioPeaks } from '$lib/state/audioPeaks.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { AudioModelOption, GalleryAsset, UpscaleFactor } from '$lib/types';
+  import type { AudioModelOption, AudioSettingsVocabulary, GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
   import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
@@ -53,6 +53,8 @@
     useAs?: UseAsState;
     /** The audio models this machine runs, which name the model of a take; without them the id the file records shows. */
     audioModels?: readonly AudioModelOption[];
+    /** The vocabulary of the audio settings, which names a take's key, delivery and sound type. */
+    audioVocabulary?: AudioSettingsVocabulary;
     /** Called when the viewer nears the end of the list, so a paged source can load more. */
     onnearend?: () => void;
     onclose: () => void;
@@ -69,6 +71,7 @@
     deletingIds = new Set<string>(),
     useAs = {},
     audioModels,
+    audioVocabulary,
     onnearend,
     onclose,
     onnavigate,
@@ -521,7 +524,7 @@
     if (drag && !drag.moved) toggleZoomAt(event.clientX, event.clientY, 1);
   }
 
-  const sections = $derived(asset ? assetDetailSections(asset, audioModels) : null);
+  const sections = $derived(asset ? assetDetailSections(asset, audioModels, audioVocabulary) : null);
   const source = $derived(asset?.details?.source ?? null);
   // A scene-only video carries its scene as its prompt; show it once, and a separate Scene section only when it differs.
   const sceneOnly = $derived(Boolean(asset?.scene) && asset?.scene === asset?.prompt);
@@ -903,6 +906,7 @@
             <h4 class="viewer-h ui-area-label">{sceneOnly ? 'Scene' : 'Prompt'}</h4>
             <p class="viewer-prompt">{asset.prompt || 'No prompt recorded.'}</p>
           </section>
+          {/if}
           {#if asset.enhance}
             <section data-testid="viewer-enhance">
               <h4 class="viewer-h ui-area-label">Enhanced with</h4>
@@ -922,7 +926,6 @@
               <h4 class="viewer-h ui-area-label">Negative prompt</h4>
               <p class="viewer-prompt">{sections.negativePrompt}</p>
             </section>
-          {/if}
           {/if}
           {#if source}
             <section data-testid="viewer-source">
@@ -1042,7 +1045,7 @@
       <h4 class="viewer-h ui-area-label">{title}</h4>
       <dl class="viewer-facts">
         {#each facts as fact (fact.label)}
-          <div class:wide={fact.wide}>
+          <div class:wide={fact.wide} class:wrap={fact.wrap}>
             <dt>{fact.label}</dt>
             <dd title={fact.title ?? fact.value}>{fact.value}</dd>
           </div>
@@ -1100,6 +1103,7 @@
   .viewer-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .viewer-facts div { min-width: 0; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--color-bg-base); }
   .viewer-facts .wide { grid-column: span 2; }
+  .viewer-facts .wrap dd { white-space: normal; overflow-wrap: anywhere; }
   .viewer-facts dt { font-size: var(--text-meta); color: var(--color-text-muted); }
   .viewer-facts dd { margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-primary); }
   .viewer-film { display: flex; flex: none; gap: 6px; overflow-x: auto; padding: 8px 12px 12px; }

@@ -12,8 +12,42 @@ export interface JobSettingsPrefill {
   patch: Partial<DraftState>;
 }
 
-/** The fields of an audio job's settings the Audio tab loads back (the speaker's consent is never recorded, so it is never among them). */
-const AUDIO_PREFILL_KEYS = ['workflow', 'model', 'prompt', 'lyrics', 'seconds', 'voice_path', 'voice_text', 'seed', 'runs'] as const;
+/** The fields of an audio job's settings the Audio tab loads back, as a Reuse link names them (the speaker's consent is never recorded, so it is never among them). `prompt_input` and `enhance_record` are read apart: see `audioJobPrefill`. */
+const AUDIO_PREFILL_KEYS = [
+  ...['workflow', 'model', 'prompt', 'lyrics', 'seconds', 'tempo', 'key', 'speaker'],
+  ...['emotion', 'manner', 'pace', 'pitch', 'expressiveness', 'sound_type', 'voice_path', 'voice_text', 'seed', 'runs'],
+] as const;
+
+/** Whether an audio job recorded how its text was written: its `enhance_record` field holds a non-empty JSON object. Not whether `prompt_input` is truthy, as the user's own text may be empty. */
+function hasEnhanceRecord(value: string | undefined): value is string {
+  if (value === undefined) return false;
+  try {
+    const record: unknown = JSON.parse(value);
+    return typeof record === 'object' && record !== null && Object.keys(record).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The prefill params of an audio job, named as a Reuse link names them. A job that used Enhanced text (it sent an
+ * `enhance_record`) ran the Enhanced text as `prompt`: the user's own text, which may be empty, is the `prompt` param,
+ * the text that ran is `enhanced_prompt` and the record is `enhance`. Any other job's `prompt` is its text.
+ */
+function audioJobPrefill(settings: JobSettings): PrefillParams {
+  const params: PrefillParams = { prompt: '' };
+  for (const key of AUDIO_PREFILL_KEYS) {
+    const value = first(settings, key);
+    if (value !== undefined) params[key] = value;
+  }
+  const record = first(settings, 'enhance_record');
+  if (hasEnhanceRecord(record)) {
+    params.enhanced_prompt = params.prompt as string;
+    params.prompt = first(settings, 'prompt_input') ?? '';
+    params.enhance = record;
+  }
+  return params;
+}
 
 /** Whether a job was submitted from the form, so its settings can be loaded back (an upscale was not). */
 export function hasJobSettings(settings: JobSettings | null | undefined): boolean {
@@ -90,7 +124,7 @@ export function outputSettingsPatch(settings: JobSettings, isVideo: boolean): Pa
 /**
  * Turn the form fields a job was submitted with back into workspace state, so the form can be refilled from it.
  *
- * An audio job fills the Audio tab's kind, model, text, lyrics, length, voice, seed and batch.
+ * An audio job fills the Audio tab's kind, model, text, lyrics, length, tempo, key, voice, delivery, sound type, seed and batch.
  *
  * @param rememberedParts The Rewrite choice the draft remembers for each video workflow; the job's own workflow takes the job's.
  * @param extendStep The step between the lengths the job's model can extend by.
@@ -98,12 +132,7 @@ export function outputSettingsPatch(settings: JobSettings, isVideo: boolean): Pa
 export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: EnhanceSettings['partsByWorkflow'], extendStep: number = EXTEND_FRAME_STEP): JobSettingsPrefill {
   // An audio job fills the Audio tab's boxes like a Reuse does; its tick stays unticked, as nothing records it.
   if (first(settings, 'mode') === 'audio') {
-    const audio: PrefillParams = { prompt: '' };
-    for (const key of AUDIO_PREFILL_KEYS) {
-      const value = first(settings, key);
-      if (value !== undefined) audio[key] = value;
-    }
-    return { params: audio, patch: {} };
+    return { params: audioJobPrefill(settings), patch: {} };
   }
   const params: PrefillParams = {};
   for (const key of PREFILL_KEYS) {

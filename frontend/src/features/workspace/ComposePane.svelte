@@ -1,15 +1,15 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, enhancedStaleReason, isJsonCaption, runParts, workflowMode } from '$lib/state/promptEnhance';
   import { extendModelSupport, isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { Icon } from '$lib/components/atoms';
-  import type { IconName } from '$lib/components/atoms/Icon.svelte';
-  import { PromptFileField, Segmented } from '$lib/components/molecules';
-  import { rewriteStepper } from '$lib/state/rewriteHistory';
+  import { HelpLine, PromptFileField, PromptTools, Segmented, TextBoxHeader } from '$lib/components/molecules';
+  import { clearRewritesPatch, editEnhancedPatch, rewriteStepper, scratchRewritePatch, stepRewritePatch } from '$lib/state/rewriteHistory';
+  import { ClearUndo } from '$lib/state/clearUndo.svelte';
   import { parseLoraString } from '$lib/state/loras';
   import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
   import type { DraftState, PromptSource, RecentPrompt, WorkspaceContext } from '$lib/types';
@@ -50,20 +50,32 @@
   const caps = $derived(workspaceCapabilities(context, s));
   const promptFileMode = $derived(s.promptSource === 'file');
   const jsonMode = $derived(caps.showPromptInline && caps.supportsJsonPrompt && s.jsonPromptEnabled);
-  const showTabs = $derived(caps.showPromptInline && caps.showEnhance && !jsonMode);
+  /** A box with one view only: JSON on, or Enhance each image on. It has a "Prompt" heading and no tabs or marks. */
+  const singleView = $derived(caps.showPromptInline && caps.showEnhance && (jsonMode || s.enhanceAuto));
+  const showTabs = $derived(caps.showPromptInline && caps.showEnhance && !singleView);
   const enhancedUsed = $derived(anyEnhancedUsed(s));
-  const stale = $derived(isEnhancedStale(s));
+  const staleReason = $derived(enhancedStaleReason(s));
+  const stale = $derived(staleReason !== null);
 
-  let activeTab = $state<'prompt' | 'enhanced'>('prompt');
+  let activeTab = $state<'mine' | 'enhanced'>('mine');
+  // Image and Video share this choice, but Enhanced text belongs to the mode it was written in: a change between them opens on your own text.
+  // A run in progress carries on, so the pane is not remounted.
+  let lastMode = workflowMode(draft.state.workflow);
+  $effect(() => {
+    const mode = workflowMode(s.workflow);
+    if (mode === lastMode) return;
+    lastMode = mode;
+    activeTab = 'mine';
+    cleared.forget();
+  });
   let enhancer = $state<ReturnType<typeof PromptEnhancer> | null>(null);
   let enhancing = $state(false);
   let streamingText = $state('');
   let streamingScene = $state('');
+  /** An error or the last result's note: one help line under the box, cleared on the next edit or run. */
   let errorText = $state<string | null>(null);
   let noteText = $state<string | null>(null);
   let statusText = $state<string | null>(null);
-  /** A result announced in the status line until the next edit or enhancement: a part switched to your text, a clip text restored. */
-  let noticeText = $state<string | null>(null);
   let promptEl = $state<HTMLTextAreaElement | null>(null);
   let recentsButton = $state<HTMLButtonElement | null>(null);
   let recentsOpen = $state(false);
@@ -73,36 +85,13 @@
   /** Video workflows write a Scene beside the Prompt; the tabs then switch the pair. Images keep one prompt box. */
   const pairMode = $derived(caps.showScene && !promptFileMode && caps.showPromptInline);
   const showingEnhanced = $derived(showTabs && activeTab === 'enhanced');
-  const enhancedValue = $derived(enhancing ? streamingText : (s.enhanceAuto ? '' : s.enhancedPrompt));
-  const enhancedSceneValue = $derived(enhancing ? streamingScene : (s.enhanceAuto ? '' : s.enhancedScene));
-  const visibleText = $derived(jsonMode ? s.jsonPrompt : showingEnhanced ? enhancedValue : s.prompt);
-  const visibleScene = $derived(pairMode ? (showingEnhanced ? enhancedSceneValue : s.scene) : '');
-  const wordCount = $derived(countWords(`${visibleScene} ${visibleText}`));
+  const enhancedValue = $derived(enhancing ? streamingText : s.enhancedPrompt);
+  const enhancedSceneValue = $derived(enhancing ? streamingScene : s.enhancedScene);
   const saveSelection = $derived(
     promptToSave(s, { enhancedView: showingEnhanced, enhancing, jsonMode, pairMode, showNegative: caps.showNegativePrompt })
   );
-  /** Where the shown rewrite sits among the last five; only in the Enhanced view and while nothing is enhancing. */
-  const stepper = $derived(showingEnhanced && !enhancing ? rewriteStepper(s) : null);
-  type StatusKind = 'transient' | 'json' | 'auto' | 'stale' | 'used' | 'none';
-  /** What each fixed status says, with the icon and its tone where it has one. */
-  const STATUS_MESSAGES: Partial<Record<StatusKind, { text: string; icon?: IconName; tone?: 'on' | 'warn' }>> = {
-    json: { text: 'JSON object; replaces the prompt' },
-    auto: { text: 'Enhanced when the job runs', icon: 'sparkle', tone: 'on' },
-    stale: { text: 'Out of date', icon: 'alert', tone: 'warn' },
-    used: { text: 'Generate uses the Enhanced text', icon: 'check', tone: 'on' },
-  };
-  /** What the status line says, first match wins: progress, out of date, a result notice, JSON, auto-enhance, the Enhanced text in use. */
-  const statusKind = $derived<StatusKind>(
-    statusText ? 'transient'
-      : showTabs && !s.enhanceAuto && stale ? 'stale'
-      : noticeText ? 'transient'
-      : jsonMode ? 'json'
-      : showTabs && s.enhanceAuto ? 'auto'
-      : showTabs && enhancedUsed && !pairMode ? 'used'
-      : 'none'
-  );
-  const fixedStatus = $derived(STATUS_MESSAGES[statusKind]);
-  const statusMessage = $derived(statusKind === 'transient' ? statusText || noticeText || '' : fixedStatus?.text ?? '');
+  /** Where the shown version sits among the last five, or "– of N" after Scratch; only in the Enhanced view and while nothing is enhancing. */
+  const stepper = $derived(rewriteStepper(s, enhancing));
   // A video needs a scene or an action; Enhanced text in either box stands in for both.
   const textMissing = $derived(!enhancedUsed && !canSubmitText(s));
 
@@ -124,47 +113,76 @@
   const scenePlaceholder = $derived(legacySource ? LEGACY_SCENE_PLACEHOLDER : fromImage ? IMAGE_SCENE_PLACEHOLDER : SCENE_PLACEHOLDER);
   // Shown from the prefill until the Prompt is edited; it never blocks Generate.
   const originalPromptShown = $derived(extending && !promptFileMode && isOriginalLegacyPrompt(s, draft.extendSource));
-  // The parts a part's Enhanced box stands for, so its placeholder tells what Generate does with it.
-  const sceneUsed = $derived(pairMode && enhancedPartUsed(s, 'scene'));
-  const actionUsed = $derived(pairMode && enhancedPartUsed(s, 'action'));
+  // The parts whose Enhanced text Generate sends: in your view such a part's text is grey, and one the rewrite skipped stays bright.
+  const sceneUsed = $derived(enhancedPartUsed(s, 'scene'));
+  const actionUsed = $derived(enhancedPartUsed(s, 'action'));
   const rewritesScene = $derived(runParts(s) === 'both');
-  const enhancedScenePlaceholder = $derived(
-    (enhancing || s.enhanceAuto) && rewritesScene ? (enhancing ? 'Enhancing…' : 'Enhanced when the job runs') : 'Not enhanced. Generate uses your scene.'
-  );
+  const enhancedScenePlaceholder = $derived(enhancing && rewritesScene ? statusText || 'Enhancing…' : 'Not rewritten. Generate sends your scene.');
   const enhancedPromptPlaceholder = $derived(
-    pairMode
-      ? (enhancing ? 'Enhancing…' : s.enhanceAuto ? 'Enhanced when the job runs' : 'Not enhanced. Generate uses your action.')
-      : (s.enhanceAuto ? 'Generated per image when the job runs.' : s.prompt || 'Enhance the prompt, or type a variant here. When this has text, it is what gets generated.')
+    enhancing ? statusText || 'Enhancing…' : pairMode ? 'Not rewritten. Generate sends your action.' : 'No enhanced text. Generate sends your Prompt.'
   );
   // An extension's clip link: put back what the clip recorded. A legacy clip recorded one prompt and no scene.
   const clipScene = $derived(extending && pairMode ? (draft.extendSource?.scene ?? '').trim() : '');
   const showClipScene = $derived(clipScene !== '' && s.scene.trim() !== clipScene);
   const clipPrompt = $derived(legacySource && pairMode ? (draft.extendSource?.prompt ?? '') : '');
   const showClipPrompt = $derived(clipPrompt.trim() !== '' && normalizePromptText(s.prompt) !== normalizePromptText(clipPrompt));
-  const OUT_OF_DATE_TITLE = 'Your text changed after this was enhanced. It is still used until you choose Use mine or re-enhance.';
   const DEFAULT_SCENE_HELP = 'Used for prompts in the file that have no scene: of their own.';
 
   // The trigger words of the LoRAs in use, marked where the text Generate sends already holds them; null when there is nothing to offer.
   const triggers = $derived(triggerMenu({ state: s, modes: triggerModes(caps, s), chips: parseLoraString(s.loraString, context.loras), installed: context.loras, pending: pendingTriggers.all }));
   /** The box each draft field is shown in, and the tab that holds it. */
-  const FIELD_BOXES = { scene: ['ws-scene', 'prompt'], enhancedScene: ['ws-enhanced-scene', 'enhanced'], prompt: ['ws-prompt', 'prompt'], enhancedPrompt: ['ws-enhanced-prompt', 'enhanced'] } as const;
+  const FIELD_BOXES = { scene: ['ws-scene', 'mine'], enhancedScene: ['ws-enhanced-scene', 'enhanced'], prompt: ['ws-prompt', 'mine'], enhancedPrompt: ['ws-enhanced-prompt', 'enhanced'] } as const;
 
   /** Put a trigger word at the start of the text Generate sends, and show that text (the Enhanced tab when that is what is sent). */
   function insertTrigger(word: string): void {
     const patch = insertWordPatch(s, triggerModes(caps, s), word);
     const keys = Object.keys(patch) as (keyof typeof FIELD_BOXES)[];
-    draft.patch(patch);
-    noticeText = null;
-    // Text edited by hand is no longer what the enhancer wrote.
-    if (keys.some((key) => key.startsWith('enhanced'))) forgetEnhanceRecord();
+    // Enhanced text changes through the one path every writer of it takes: a version edited in place, its record dropped.
+    draft.patch(keys.some((key) => key.startsWith('enhanced')) ? editEnhancedPatch(s, { prompt: patch.enhancedPrompt ?? s.enhancedPrompt, scene: patch.enhancedScene ?? s.enhancedScene }) : patch);
+    clearMessages();
     const [id, tab] = FIELD_BOXES[keys[0]];
     // A finger would raise the keyboard over the result: the tab still changes, the focus stays.
     if (!layout.coarse) void focusField(id, tab);
     else if (showTabs) activeTab = tab;
   }
 
-  function countWords(text: string): number {
-    return text.trim() ? text.trim().split(/\s+/).length : 0;
+  /** The help line says only the last result: an edit or a run clears it, and so goes the Undo of a Clear. */
+  function clearMessages(): void {
+    errorText = null;
+    noteText = null;
+    cleared.forget();
+  }
+
+  /** The Clear of the prompt box, and the tab it showed. */
+  const cleared = new ClearUndo<'mine' | 'enhanced'>();
+  /** The id of the Undo on the help line, which a finger is given the focus on. */
+  const UNDO_ID = 'ws-prompt-clear-undo';
+  /** The words the Clear names: the one box, or a video's scene and action together. */
+  const clearWhat = $derived(jsonMode ? 'JSON prompt' : pairMode ? 'scene and action' : 'prompt');
+  /** The box holds something to clear: your text, an Enhanced text or its versions; with JSON on, the JSON prompt. */
+  const holdsText = $derived(
+    jsonMode
+      ? s.jsonPrompt !== ''
+      : s.prompt !== '' || (pairMode && s.scene !== '') || s.enhancedPrompt !== '' || s.enhancedScene !== '' || s.enhancedHistory.length > 0
+  );
+
+  /** Empty the box: your text, the Enhanced text and every version (the JSON prompt, with JSON on). Undo puts them back. */
+  function clearPrompt(): void {
+    const patch: Partial<DraftState> = jsonMode ? { jsonPrompt: '' } : { prompt: '', ...(pairMode ? { scene: '' } : {}), ...clearRewritesPatch() };
+    const view = activeTab;
+    clearMessages();
+    cleared.clear(patch, view);
+    activeTab = 'mine';
+    // A finger would raise the keyboard over the result: it gets the Undo, a mouse the empty text.
+    void tick().then(() => document.getElementById(layout.coarse ? UNDO_ID : jsonMode ? 'ws-json-prompt' : 'ws-prompt')?.focus());
+  }
+
+  /** Put back what Clear took, with the tab it showed. */
+  function undoClear(): void {
+    const undone = cleared.undo();
+    if (undone === null) return;
+    activeTab = undone.view;
+    if (!layout.coarse) void focusField(jsonMode ? 'ws-json-prompt' : undone.view === 'enhanced' ? 'ws-enhanced-prompt' : 'ws-prompt', undone.view);
   }
 
   // A video accepts a scene in place of a prompt, so its message names both. Declarative, so it clears itself once either has text.
@@ -175,60 +193,48 @@
   const SOURCE_LABELS: Record<PromptSource, string> = { inline: 'Inline', file: 'Prompt file' };
 
   function onPromptInput(value: string): void {
-    noticeText = null;
+    clearMessages();
     draft.update('prompt', value);
   }
 
   function onSceneInput(value: string): void {
-    noticeText = null;
+    clearMessages();
     draft.update('scene', value);
   }
 
   function onEnhancedInput(value: string): void {
-    draft.update('enhancedPrompt', value);
-    // Hand-typed text (no source) is never "out of date"; edits to a generated rewrite keep its source.
-    if (value.trim() === '' && (!pairMode || s.enhancedScene.trim() === '')) draft.update('enhancedFrom', null);
-    else forgetEnhanceRecord();
+    clearMessages();
+    draft.patch(editEnhancedPatch(s, { prompt: value, scene: s.enhancedScene }));
   }
 
   function onEnhancedSceneInput(value: string): void {
-    draft.update('enhancedScene', value);
-    if (value.trim() === '' && s.enhancedPrompt.trim() === '') draft.update('enhancedFrom', null);
-    else forgetEnhanceRecord();
-  }
-
-  /** Text edited by hand is no longer what the enhancer wrote: the asset must not record the enhancer's options and model for it. */
-  function forgetEnhanceRecord(): void {
-    if (!s.enhancedFrom?.record) return;
-    const { record: _record, ...source } = s.enhancedFrom;
-    draft.update('enhancedFrom', source);
+    clearMessages();
+    draft.patch(editEnhancedPatch(s, { prompt: s.enhancedPrompt, scene: value }));
   }
 
   // An empty prompt can fail validation while the Enhanced tab hides it; bring it forward so the message shows.
   function showPromptForValidation(event: Event): void {
     if (!showingEnhanced) return;
-    activeTab = 'prompt';
+    activeTab = 'mine';
     const field = event.currentTarget as HTMLTextAreaElement;
     void tick().then(() => field.reportValidity());
   }
 
-  function clearEnhanced(): void {
-    draft.patch({ enhancedPrompt: '', enhancedScene: '', enhancedFrom: null });
-    noteText = null;
-    noticeText = null;
-    activeTab = 'prompt';
+  /** Empty the Enhanced text, so Generate sends your text; the header shows your tab. */
+  function scratch(): void {
+    clearMessages();
+    draft.patch(scratchRewritePatch(s));
   }
 
-  /** Show rewrite *index* (1-based); Generate then sends it. */
+  /** Show version *index* (1-based); Generate then sends it. */
   function showRewrite(index: number): void {
-    noticeText = null;
-    const entry = s.enhancedHistory[index - 1];
-    draft.patch({ enhancedPrompt: entry.prompt, enhancedScene: entry.scene, enhancedFrom: entry.from });
+    clearMessages();
+    draft.patch(stepRewritePatch(s, index));
   }
 
-  /** Bring a recent prompt back: its text into the boxes this workflow has, and no Enhanced text left over from the previous one. */
+  /** Bring a recent prompt back: its text into the boxes this workflow has, and no Enhanced text or versions left over from the previous one. */
   function pickRecent(entry: RecentPrompt): void {
-    const patch: Partial<DraftState> = { enhancedPrompt: '', enhancedScene: '', enhancedFrom: null };
+    const patch: Partial<DraftState> = clearRewritesPatch();
     if (entry.format === 'json') {
       patch.jsonPromptEnabled = true;
       patch.jsonPrompt = entry.prompt;
@@ -239,12 +245,11 @@
     }
     if (caps.showNegativePrompt) patch.negativePrompt = entry.negative_prompt;
     draft.patch(patch);
-    activeTab = 'prompt';
-    noteText = null;
-    noticeText = null;
+    activeTab = 'mine';
+    clearMessages();
     recentsOpen = false;
     // A finger would raise the keyboard over the result.
-    if (!layout.coarse) void focusField(entry.format === 'json' ? 'ws-json-prompt' : 'ws-prompt', 'prompt');
+    if (!layout.coarse) void focusField(entry.format === 'json' ? 'ws-json-prompt' : 'ws-prompt', 'mine');
   }
 
   // Alt+↑ in an empty prompt (and, for a video, an empty scene) opens the recent prompts; with text in it the browser keeps its caret movement.
@@ -257,35 +262,19 @@
   }
 
   /** Bring a field forward on the tab that shows it, then focus it. */
-  async function focusField(id: string, tab: 'prompt' | 'enhanced'): Promise<void> {
+  async function focusField(id: string, tab: 'mine' | 'enhanced'): Promise<void> {
     if (showTabs) activeTab = tab;
     await tick();
     document.getElementById(id)?.focus();
-  }
-
-  /** Empty one part's Enhanced box, so Generate sends your text for it. */
-  function useMine(part: 'scene' | 'action'): void {
-    const scene = part === 'scene' ? '' : s.enhancedScene;
-    const action = part === 'action' ? '' : s.enhancedPrompt;
-    draft.patch({ enhancedScene: scene, enhancedPrompt: action, ...(scene.trim() === '' && action.trim() === '' ? { enhancedFrom: null } : {}) });
-    noticeText = part === 'scene' ? 'Scene now uses your text.' : 'Action now uses your text.';
-    void focusField(showingEnhanced ? `ws-enhanced-${part === 'scene' ? 'scene' : 'prompt'}` : part === 'scene' ? 'ws-scene' : 'ws-prompt', showingEnhanced ? 'enhanced' : 'prompt');
   }
 
   /** Replace the Scene or Prompt with the text the clip recorded. */
   function restoreClip(part: 'scene' | 'prompt'): void {
     const recorded = draft.extendSource?.[part];
     if (!recorded) return;
+    clearMessages();
     draft.update(part, recorded);
-    noticeText = `${part === 'scene' ? 'Scene' : 'Prompt'} restored from the clip.`;
-    void focusField(`ws-${part}`, 'prompt');
-  }
-
-  function selectTab(tab: 'prompt' | 'enhanced', event: KeyboardEvent | MouseEvent): void {
-    activeTab = tab;
-    if (event instanceof KeyboardEvent) {
-      queueMicrotask(() => document.getElementById(tab === 'prompt' ? 'ws-tab-prompt' : 'ws-tab-enhanced')?.focus());
-    }
+    void focusField(`ws-${part}`, 'mine');
   }
 
   // ⌘E / Ctrl+E enhances the prompt, even while typing in it.
@@ -301,70 +290,44 @@
     document.addEventListener('keydown', handleKeydown);
     return () => document.removeEventListener('keydown', handleKeydown);
   });
-
-  function onTabKeydown(event: KeyboardEvent): void {
-    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-      event.preventDefault();
-      selectTab(activeTab === 'prompt' ? 'enhanced' : 'prompt', event);
-    }
-  }
 </script>
 
-{#snippet tabRow()}
-  <div class="prompt-tab-row" class:pair-tabs={pairMode}>
-    <div class="prompt-tabs" role="tablist" aria-label={pairMode ? 'Text version' : 'Prompt version'}>
-      <button
-        type="button"
-        role="tab"
-        id="ws-tab-prompt"
-        class="prompt-tab"
-        aria-selected={activeTab === 'prompt'}
-        aria-controls={pairMode ? 'ws-text-panel' : 'ws-prompt'}
-        tabindex={activeTab === 'prompt' ? 0 : -1}
-        onclick={(e) => selectTab('prompt', e)}
-        onkeydown={onTabKeydown}
-      >{pairMode ? 'Your text' : 'Prompt'}</button>
-      <button
-        type="button"
-        role="tab"
-        id="ws-tab-enhanced"
-        class="prompt-tab"
-        aria-selected={activeTab === 'enhanced'}
-        aria-controls={pairMode ? 'ws-text-panel' : 'ws-enhanced-prompt'}
-        tabindex={activeTab === 'enhanced' ? 0 : -1}
-        onclick={(e) => selectTab('enhanced', e)}
-        onkeydown={onTabKeydown}
-      >Enhanced</button>
-    </div>
-    {#if stepper}
-      <div class="rewrite-stepper" role="group" aria-label="Rewrites" title="Earlier rewrites of this text">
-        <button type="button" class="ui-btn ui-btn-sm ui-btn-icon ui-btn-quiet" aria-label="Previous rewrite" disabled={stepper.index <= 1} onclick={() => showRewrite(stepper.index - 1)}><Icon name="chevleft" size={14} /></button>
-        <span class="rewrite-count" aria-live="polite"><span class="sr-only">Rewrite </span>{stepper.index} of {stepper.count}</span>
-        <button type="button" class="ui-btn ui-btn-sm ui-btn-icon ui-btn-quiet" aria-label="Next rewrite" disabled={stepper.index >= stepper.count} onclick={() => showRewrite(stepper.index + 1)}><Icon name="chevright" size={14} /></button>
-      </div>
-    {/if}
-  </div>
+{#snippet header()}
+  {#if singleView}
+    <TextBoxHeader heading="Prompt" bare={pairMode} mineId="ws-tab-prompt" enhancedId="ws-tab-enhanced" mineControls="ws-prompt" enhancedControls="ws-enhanced-prompt" />
+  {:else if showTabs}
+    <TextBoxHeader
+      bind:view={activeTab}
+      label="Prompt"
+      tablistLabel={pairMode ? 'Text version' : 'Prompt version'}
+      mineId="ws-tab-prompt"
+      enhancedId="ws-tab-enhanced"
+      mineControls={pairMode ? 'ws-text-panel' : 'ws-prompt'}
+      enhancedControls={pairMode ? 'ws-text-panel' : 'ws-enhanced-prompt'}
+      bare={pairMode}
+      used={enhancedUsed}
+      {stale}
+      running={enhancing}
+      {stepper}
+      onstep={showRewrite}
+      onscratch={scratch}
+      onstop={() => enhancer?.stop()}
+    />
+  {/if}
 {/snippet}
 
 {#snippet partLabel(part: 'scene' | 'action')}
-  {@const used = part === 'scene' ? sceneUsed : actionUsed}
   {@const name = part === 'scene' ? 'Scene' : 'Action'}
   {@const mine = part === 'scene' ? 'ws-scene' : 'ws-prompt'}
   <div class="label-row">
     <label class="ui-label" for={mine} hidden={showingEnhanced}>{name}</label>
     {#if showTabs}<label class="ui-label" for={`ws-enhanced-${part === 'scene' ? 'scene' : 'prompt'}`} hidden={!showingEnhanced}>{name}</label>{/if}
-    {#if (part === 'scene' ? showClipScene : showClipPrompt) || used}
+    {#if part === 'scene' ? showClipScene : showClipPrompt}
       <span class="label-extras">
-        {#if part === 'scene' && showClipScene}
+        {#if part === 'scene'}
           <button type="button" class="prompt-link" title="Replace your scene with the one recorded in the clip" onclick={() => restoreClip('scene')}>Use the clip's scene</button>
-        {:else if part === 'action' && showClipPrompt}
+        {:else}
           <button type="button" class="prompt-link" title="Replace your action with the clip's recorded prompt" onclick={() => restoreClip('prompt')}>Use the clip's prompt</button>
-        {/if}
-        {#if used}
-          <span id={`ws-${part}-marker`} class="label-marker">
-            <span class="ui-badge ui-badge-info" title={`Generate uses the enhanced ${part}`}>Uses enhanced</span>
-          </span>
-          <button type="button" class="prompt-link" title={`Clear the enhanced ${part}; Generate uses yours`} onclick={() => useMine(part)}>Use mine</button>
         {/if}
       </span>
     {/if}
@@ -393,7 +356,8 @@
       role={showTabs && !pairMode ? 'tabpanel' : undefined}
       aria-labelledby={showTabs && !pairMode ? 'ws-tab-prompt' : undefined}
       placeholder={promptPlaceholder}
-      aria-describedby={[originalPromptShown ? 'ws-prompt-original' : '', actionUsed ? 'ws-action-marker' : ''].filter(Boolean).join(' ') || undefined}
+      data-unsent={actionUsed && !showingEnhanced ? '' : undefined}
+      aria-describedby={originalPromptShown ? 'ws-prompt-original' : undefined}
       required={textMissing}
       hidden={showingEnhanced}
       oninvalid={showPromptForValidation}
@@ -411,8 +375,6 @@
         aria-labelledby={pairMode ? undefined : 'ws-tab-enhanced'}
         hidden={!showingEnhanced}
         placeholder={enhancedPromptPlaceholder}
-        aria-describedby={actionUsed ? 'ws-action-marker' : undefined}
-        disabled={s.enhanceAuto}
         readonly={enhancing}
         aria-busy={enhancing}
         value={enhancedValue}
@@ -424,7 +386,7 @@
 {/snippet}
 
 {#snippet toolsRow()}
-  <div class="ui-prompt-tools">
+  <PromptTools onclear={holdsText && !enhancing ? clearPrompt : undefined} {clearWhat}>
     {#if caps.showEnhance && caps.enhancer && !jsonMode}
       <PromptEnhancer
         bind:this={enhancer}
@@ -438,62 +400,49 @@
         variant="inline"
         {busy}
         {jobsActive}
+        {stale}
+        {staleReason}
         endImage={images.sent.end !== null}
         references={images.references?.rows.length ?? 0}
         track={caps.audioTrackInEffect}
         jsonCapable={caps.supportsJsonPrompt}
         extendSupport={extendModelSupport(context, s.model)}
         maxWords={caps.enhanceMaxWords}
-        onstart={() => { activeTab = 'enhanced'; noticeText = null; }}
+        onstart={() => { activeTab = 'enhanced'; clearMessages(); }}
+        onfail={() => { activeTab = 'mine'; }}
       />
     {/if}
     {#if caps.supportsJsonPrompt}
       <button
         type="button"
         id="ws-json-prompt-toggle"
-        class="ui-btn ui-btn-sm"
+        class="ui-btn ui-btn-sm ui-btn-icon"
         aria-pressed={s.jsonPromptEnabled}
         disabled={busy}
-        title="Structured JSON caption: replaces the normal prompt"
+        aria-label="JSON caption"
+        title="JSON caption: replaces the normal prompt"
         onclick={() => draft.update('jsonPromptEnabled', !s.jsonPromptEnabled)}
-      >{'{ }'} JSON</button>
+      ><Icon name="braces" size={14} /></button>
     {/if}
-    <span class="tools-spacer"></span>
-    {#if triggers}<TriggerMenu menu={triggers} onpick={insertTrigger} />{/if}
-    <button
-      bind:this={recentsButton}
-      type="button"
-      id="ws-recent-prompts"
-      class="ui-btn ui-btn-sm ui-btn-icon"
-      aria-label="Recent prompts"
-      aria-haspopup="dialog"
-      aria-expanded={recentsOpen}
-      title="Recent prompts (Alt+↑ in an empty prompt)"
-      onclick={() => { recentsReturn = null; recentsOpen = !recentsOpen; }}
-    ><Icon name="history" size={14} /></button>
-    <RecentPromptsMenu open={recentsOpen} anchor={recentsButton} returnFocus={recentsReturn ?? recentsButton} mode={caps.isImageMode ? 'image' : 'video'} jsonCapable={caps.supportsJsonPrompt} onpick={pickRecent} onclose={() => { recentsOpen = false; }} />
-    {#if !jsonMode}
-      <SavePromptMenu selection={saveSelection} workspaceFile={s.promptFilePath} enhancedView={showingEnhanced} />
-    {/if}
-  </div>
-{/snippet}
-
-{#snippet statusLine()}
-  <!-- One line under the box that says what Generate sends. Its height is fixed, so no message moves what is below it. -->
-  <div class="prompt-statusline" data-testid="prompt-statusline" data-state={statusKind}>
-    <span class="statusline-msg">
-      {#if fixedStatus?.icon}<Icon name={fixedStatus.icon} size={12} class={`statusline-icon-${fixedStatus.tone}`} />{/if}
-      <!-- The region stays in the page, so assistive technology announces each message that fills it. -->
-      <span class="statusline-text" class:sr-only={!statusMessage} class:statusline-warn={statusKind === 'stale'} role="status" title={statusKind === 'stale' ? OUT_OF_DATE_TITLE : undefined}>{statusMessage}</span>
-      {#if statusKind === 'stale'}
-        <button type="button" class="prompt-link" disabled={busy || jobsActive || enhancing} onclick={() => enhancer?.runEnhance()}>Re-enhance</button>
+    {#snippet end()}
+      {#if triggers}<TriggerMenu menu={triggers} onpick={insertTrigger} />{/if}
+      <button
+        bind:this={recentsButton}
+        type="button"
+        id="ws-recent-prompts"
+        class="ui-btn ui-btn-sm ui-btn-icon"
+        aria-label="Recent prompts"
+        aria-haspopup="dialog"
+        aria-expanded={recentsOpen}
+        title="Recent prompts (Alt+↑ in an empty prompt)"
+        onclick={() => { recentsReturn = null; recentsOpen = !recentsOpen; }}
+      ><Icon name="history" size={14} /></button>
+      <RecentPromptsMenu open={recentsOpen} anchor={recentsButton} returnFocus={recentsReturn ?? recentsButton} mode={caps.isImageMode ? 'image' : 'video'} jsonCapable={caps.supportsJsonPrompt} onpick={pickRecent} onclose={() => { recentsOpen = false; }} />
+      {#if !jsonMode}
+        <SavePromptMenu selection={saveSelection} workspaceFile={s.promptFilePath} enhancedView={showingEnhanced} />
       {/if}
-      {#if (statusKind === 'stale' || statusKind === 'used') && !pairMode}
-        <button type="button" class="prompt-link" onclick={clearEnhanced}>Use mine</button>
-      {/if}
-    </span>
-    <span class="word-count">{wordCount} words</span>
-  </div>
+    {/snippet}
+  </PromptTools>
 {/snippet}
 
 <section class="compose-pane" class:audio-compose={caps.isAudio} aria-labelledby="ws-compose-title">
@@ -519,12 +468,12 @@
   </div>
 
   {#if caps.isAudio}
-    <AudioCompose view={audio} />
+    <AudioCompose view={audio} enhancer={context.prompt_enhancer ?? null} vocabulary={context.audio_settings} {busy} {jobsActive} />
   {/if}
 
   {#if !promptFileMode && caps.showPromptInline}
     {#if pairMode}
-      {#if showTabs}{@render tabRow()}{/if}
+      {@render header()}
       <div
         id="ws-text-panel"
         class="text-pair"
@@ -539,8 +488,8 @@
               name="scene"
               class="prompt-text scene-text"
               class:scene-legacy={legacySource && s.scene === ''}
+              data-unsent={sceneUsed && !showingEnhanced ? '' : undefined}
               placeholder={scenePlaceholder}
-              aria-describedby={sceneUsed ? 'ws-scene-marker' : undefined}
               value={s.scene}
               use:autogrow={[s.scene, showingEnhanced]}
               oninput={(e) => onSceneInput(e.currentTarget.value)}
@@ -552,8 +501,6 @@
                 id="ws-enhanced-scene"
                 class="prompt-text scene-text"
                 placeholder={enhancedScenePlaceholder}
-                aria-describedby={sceneUsed ? 'ws-scene-marker' : undefined}
-                disabled={s.enhanceAuto}
                 readonly={enhancing}
                 aria-busy={enhancing}
                 value={enhancedSceneValue}
@@ -573,13 +520,12 @@
       </div>
     {:else}
       <div class="ui-prompt-box">
-        {#if showTabs}{@render tabRow()}{/if}
+        {@render header()}
         {@render promptFields()}
         {@render toolsRow()}
       </div>
     {/if}
 
-    {@render statusLine()}
     <!-- The region stays in the page so assistive technology announces the warning when it appears. -->
     <div aria-live="polite">
       {#if originalPromptShown}
@@ -588,12 +534,7 @@
         </p>
       {/if}
     </div>
-    {#if errorText}
-      <p class="ui-help ui-help-error" role="alert">{errorText}</p>
-    {/if}
-    {#if noteText}
-      <p class="ui-help">{noteText}</p>
-    {/if}
+    <HelpLine error={errorText} note={noteText} undo={cleared.offered ? { what: clearWhat, id: UNDO_ID, onundo: undoClear } : null} />
   {/if}
 
   {#if promptFileMode && caps.showScene && caps.showPromptFileControls}
@@ -667,33 +608,18 @@
   @media (max-width: 639px) {
     .collapse-toggle { display: none; }
   }
-  /* The tab row: the tablist, then the rewrite stepper at the right end outside it. Its height is reserved for the
-     stepper from the start (control height plus the tab row's padding), so the stepper appearing moves nothing. */
-  .prompt-tab-row { display: flex; align-items: flex-end; gap: 4px; min-height: calc(var(--spacing-control-sm) + 6px); padding: 4px 4px 0; border-bottom: 1px solid var(--color-border-subtle); }
-  .prompt-tabs { display: flex; flex: 1; min-width: 0; align-items: center; gap: 2px; }
-  /* The buttons and the counter share a centre line: the counter's line box is trimmed to the digit height, so no font's metrics shift it. */
-  .rewrite-stepper { display: flex; flex: none; align-self: center; align-items: center; gap: 2px; height: var(--spacing-control-sm); }
-  .rewrite-stepper :global(svg) { display: block; }
-  .rewrite-count { display: block; min-width: 3.25em; font-family: var(--font-mono); font-size: var(--text-meta); line-height: 1; text-align: center; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; text-box: trim-both cap alphabetic; }
-  .prompt-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 6px; border-radius: 6px 6px 0 0; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); }
-  @media (hover: hover) { .prompt-tab:hover { color: var(--color-text-primary); } }
-  .prompt-tab:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
-  .prompt-tab[aria-selected='true'] { color: var(--color-text-primary); }
-  .prompt-tab[aria-selected='true']::after { content: ''; position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--color-primary-main); }
-  /* Video: the tabs sit above the Scene and Prompt boxes and line up with them. */
-  .pair-tabs { margin: 0 -4px; }
   .text-pair { display: flex; flex-direction: column; gap: 8px; }
   .field label[hidden] { display: none; }
-  /* The label sits left; clip links and the enhanced marker are pushed right and wrap rather than being cut. */
+  /* The label sits left; the clip link is pushed right and wraps rather than being cut. */
   .label-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 22px; margin-bottom: 4px; }
   .label-extras { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 6px; margin-left: auto; }
-  .label-marker { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
   .prompt-text { display: block; width: 100%; min-height: 88px; max-height: 180px; overflow-y: auto; resize: none; padding: 9px 10px; border: 0; background: transparent; font-size: var(--text-content); line-height: 1.5; color: var(--color-text-primary); }
   .prompt-text[hidden] { display: none; }
   /* The focus ring belongs to the prompt box, not the textarea. */
   .prompt-text:focus, .prompt-text:focus-visible { outline: none; }
   .prompt-text::placeholder { color: var(--color-zinc-600); }
-  .prompt-text:disabled { opacity: 0.6; }
+  /* Your text steps back to secondary while the Enhanced text is what Generate sends. */
+  .prompt-text[data-unsent] { color: var(--color-text-secondary); }
   /* The Scene box is the smaller of the two: two lines, growing to four, then it scrolls. */
   .scene-text { min-height: 58px; max-height: 98px; }
   /* The long legacy placeholder takes three lines while the box is empty, so it is never cut off. */
@@ -703,15 +629,6 @@
   .prompt-link { font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); }
   @media (hover: hover) { .prompt-link:hover { color: var(--color-text-primary); } }
   .prompt-link:disabled { opacity: 0.5; }
-  .tools-spacer { flex: 1; }
-  /* The status line under the box: a fixed-height row, the message on the left and the word count on the right. */
-  .prompt-statusline { display: flex; align-items: center; gap: 8px; min-height: var(--spacing-control-sm); margin-top: -2px; padding: 0 4px; font-size: var(--text-meta); color: var(--color-text-muted); }
-  .statusline-msg { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; white-space: nowrap; }
-  .statusline-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-secondary); }
-  .prompt-statusline :global(.statusline-icon-on) { color: var(--color-primary-main); }
-  .prompt-statusline :global(.statusline-icon-warn) { color: var(--color-warning); }
-  .statusline-warn { font-weight: 600; color: var(--color-warning); }
-  .word-count { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .negative-text { min-height: 34px; max-height: 96px; resize: none; }
   /* Touch: 16px text, below which iOS zooms into a field as it focuses. */
   @media (pointer: coarse) {

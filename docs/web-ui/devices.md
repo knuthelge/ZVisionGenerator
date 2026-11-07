@@ -49,7 +49,7 @@ The preview is the screen:
 
 Under the preview, a strip shows one chip per setting with its value. Tap a chip to change that setting, or **All** for every setting. The first chip is the [preset](workspace.md#presets). The **Images** chip holds the images the run uses: see [Images on a phone](#images-on-a-phone).
 
-The prompt sits at the bottom beside **Generate**. Tap it to edit, with the same tabs, enhancer and prompt-file controls as on a computer. Press and hold **Generate**, or tap the arrow beside it, to run with a new seed.
+The prompt sits at the bottom beside **Generate**. Tap it to edit, with the same tabs, enhancer and prompt-file controls as on a computer. On a tablet or phone the Sound and Music **Enhance** options open as a sheet, with your text at the top, and the phone's folded prompt reads **Enhanced** when the box has an Enhanced text. Press and hold **Generate**, or tap the arrow beside it, to run with a new seed.
 
 While a job runs, a bar over the preview shows its progress with **Pause**. **⋯** on the bar opens the job's details, with **Skip**, **Repeat** and **Cancel**.
 
@@ -78,7 +78,7 @@ The workflow menu in the top strip has **Image**, **Video** and **Audio**. In **
 
 ### Audio on a phone
 
-**Audio** is the third choice in the workflow menu. The chips are **Kind**, **Model**, **Voice** (Speech) or **Length** (Sound), **Seed** and **Batch**, then **All**; see [The Audio tab](workspace.md#the-audio-tab) for what each does. The finished take is a player on the preview, and its **⋯** button opens the same menu as an image's, with **Use as** → **Audio track** and **Voice**.
+**Audio** is the third choice in the workflow menu. Its chips are **Kind**, **Model**, the settings of the open kind (**Tempo** and **Key** for Music, **Voice** and **Delivery** for Speech, **Type** and **Length** for Sound), **Seed**, **Batch** and **All**. Each chip opens a sheet with the same control as the desktop's setting and a **Reset**. A chip shows a dot once it differs from its default, and a ✦ when [Describe it](workspace.md#describe-it) filled it. The [script helper](workspace.md#script-helper), the [lyrics helper](workspace.md#lyrics-helper) and **Insert** open as sheets on a tablet or phone. Reorder [song blocks](workspace.md#song-blocks) with **Move up** and **Move down** in a block's **⋯** menu. The finished take is a player on the preview, and its **⋯** button opens the same menu as an image's, with **Use as** → **Audio track** and **Voice**.
 
 ### The viewer on a phone
 

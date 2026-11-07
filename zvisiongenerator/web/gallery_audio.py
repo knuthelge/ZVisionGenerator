@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from zvisiongenerator.utils.audio_preset import AUDIO_KINDS, parse_audio_presets
+from zvisiongenerator.utils.audio_settings import DELIVERY_FIELDS
+from zvisiongenerator.utils.enhance_record import enhance_record_summary, enhance_reuse_param
 from zvisiongenerator.utils.paths import expand_home
 from zvisiongenerator.utils.provenance import optional_float, optional_int, optional_text
 from zvisiongenerator.web.audio_models import runnable_audio_models
@@ -34,14 +36,19 @@ def audio_asset_facts(config: Mapping[str, Any] | None, facts: Mapping[str, Any]
 
     Keys: ``kind`` (``music``, ``speech``, ``sound``, or ``None`` for a file without this app's settings), ``duration``
     (seconds, from the file, else the recorded one), ``peaks`` (100 values of 0-255, or ``None`` while they are not
-    computed yet: the gallery computes them on the first request, see ``gallery.audio_peaks``), ``channels``, ``sample_rate``, ``has_reference_voice``, ``lyrics``, ``seconds`` (the length asked for),
-    ``voice_path`` (``~`` expanded), ``voice_text``, ``cut`` and ``parts``.
+    computed yet: the gallery computes them on the first request, see ``gallery.audio_peaks``), ``channels``, ``sample_rate``, ``has_reference_voice``, ``lyrics``, ``seconds`` (the length of the take), ``requested_seconds`` (the length asked for, ``None`` for Auto),
+    ``tempo``, ``key``, ``speaker`` (the built-in voice id of a speech take), ``emotion``, ``manner``, ``pace``, ``pitch``, ``expressiveness``
+    (the delivery of a speech take in a built-in voice), ``sound_type``, ``voice_path`` (``~`` expanded), ``voice_text``, ``enhanced`` (the take
+    records how its text was written), ``prompt_input`` (the user's own text of an enhanced take, ``""`` allowed, else ``None``), ``enhance`` (the record of how it was written, else ``None``), ``cut``, ``notes`` (what the model noted about the take, else ``[]``) and ``parts``.
     """
     reusable = is_reusable_audio_config(config)
     recorded = config if reusable and config is not None else {}
     generation = recorded.get("generation") if isinstance(recorded.get("generation"), Mapping) else {}
     read = facts or {}
     voice_path = optional_text(recorded.get("voice_path"))
+    # A take is enhanced when it records how its text was written; its own text may be empty, so a truthy ``prompt_input`` says nothing.
+    enhanced = isinstance(recorded.get("enhance"), Mapping) and bool(recorded["enhance"])
+    own_text = recorded.get("prompt_input")
     return {
         "kind": recorded.get("kind") if reusable else None,
         "duration": optional_float(read.get("duration")) or optional_float(generation.get("duration")),
@@ -51,15 +58,27 @@ def audio_asset_facts(config: Mapping[str, Any] | None, facts: Mapping[str, Any]
         "has_reference_voice": voice_path is not None,
         "lyrics": optional_text(recorded.get("lyrics")),
         "seconds": optional_float(recorded.get("seconds")),
+        "requested_seconds": optional_float(recorded.get("requested_seconds")),
+        "tempo": optional_int(recorded.get("tempo")),
+        "key": optional_text(recorded.get("key")),
+        "speaker": optional_text(recorded.get("speaker")),
+        **{field: optional_text(recorded.get(field)) for field in (*DELIVERY_FIELDS, "sound_type")},
         "voice_path": expand_home(voice_path) if voice_path is not None else None,
         "voice_text": optional_text(recorded.get("voice_text")),
+        "enhanced": enhanced,
+        "prompt_input": (own_text if isinstance(own_text, str) else "") if enhanced else None,
+        "enhance": dict(recorded["enhance"]) if enhanced else None,
         "cut": generation.get("cut") is True,
+        "notes": [note for note in generation.get("notes", ()) if isinstance(note, str) and note] if isinstance(generation.get("notes"), list) else [],
         "parts": optional_int(generation.get("parts")),
     }
 
 
 def audio_asset_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]:
     """Convert an audio gallery asset to the SPA JSON shape: the common keys, ``media_type: "audio"``, ``model_label`` and the audio facts.
+
+    The facts include the recorded ``tempo``, ``key``, the five delivery values and ``sound_type`` (``None`` for what the take did not record), and
+    ``enhance`` (the summary, the user's own ``prompt_input`` and the record of an enhanced take, else ``None``).
 
     ``reuse_workspace_url`` restores the recorded settings and never the speaker's consent.
     """
@@ -87,11 +106,23 @@ def audio_asset_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, 
         "has_reference_voice": audio["has_reference_voice"],
         "lyrics": audio["lyrics"],
         "cut": audio["cut"],
+        "notes": audio["notes"],
+        "tempo": audio["tempo"],
+        "key": audio["key"],
+        **{field: audio[field] for field in (*DELIVERY_FIELDS, "sound_type")},
+        "enhance": _enhance_json(audio),
         "has_reusable_config": asset.has_reusable_config,
         "reuse_state": reuse["state"],
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse['params'])}",
         "details": {"recorded_workflow": asset.workflow, "generation": _generation(audio)},
     }
+
+
+def _enhance_json(audio: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return how the take's text was written, for the viewer: the one-line summary, the user's own text and the record; ``None`` when it was not enhanced."""
+    if not audio["enhanced"]:
+        return None
+    return {"summary": enhance_record_summary(audio["enhance"]), "prompt_input": audio["prompt_input"], "scene_input": None, **audio["enhance"]}
 
 
 def _model_label(model_id: str, web_config: WebUiConfig) -> str | None:
@@ -119,7 +150,7 @@ def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]
     model_available = any(preset.id == asset.model_label for preset in runnable)
     requested_model = None if asset.model_label == "Unavailable" else asset.model_label
     resolved_model = requested_model if model_available else None
-    workflow_available = any(preset.kind == workflow for preset in runnable)
+    workflow_available = any(preset.has_kind(workflow) for preset in runnable)
     fallback_reasons: list[str] = []
     if not workflow_available:
         fallback_reasons.append("no_audio_model")
@@ -141,20 +172,36 @@ def _reuse_state(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]
 
 
 def _reuse_params(asset: GalleryAsset, model: str | None) -> dict[str, str]:
-    """Return the Reuse query params of a take with settings: the fields of the form, never the consent."""
+    """Return the Reuse query params of a take with settings: the fields of the form, never the consent.
+
+    An enhanced take puts the user's own text (which may be empty) in ``prompt``, the recorded text in ``enhanced_prompt`` and how it was written in ``enhance``;
+    any other take puts the recorded text in ``prompt``. A setting the take did not record is left out, so it reuses as Auto or the default.
+    """
     audio = asset.audio
     params: dict[str, str] = {}
     if model:
         params["model"] = model
-    params["prompt"] = asset.prompt
+    if audio["enhanced"]:
+        params["prompt"] = audio["prompt_input"]
+        params["enhanced_prompt"] = asset.prompt
+        params.update(enhance_reuse_param(audio["enhance"]))
+    else:
+        params["prompt"] = asset.prompt
     if audio["lyrics"]:
         params["lyrics"] = audio["lyrics"]
-    if audio["seconds"] is not None:
-        params["seconds"] = f"{audio['seconds']:g}"
+    if audio["requested_seconds"] is not None:
+        params["seconds"] = f"{audio['requested_seconds']:g}"
+    if audio["tempo"] is not None:
+        params["tempo"] = str(audio["tempo"])
+    for name in ("key", *DELIVERY_FIELDS, "sound_type"):
+        if audio[name]:
+            params[name] = audio[name]
     if audio["voice_path"]:
         params["voice_path"] = audio["voice_path"]
         if audio["voice_text"]:
             params["voice_text"] = audio["voice_text"]
+    elif audio["speaker"]:
+        params["speaker"] = audio["speaker"]
     if asset.seed is not None:
         params["seed"] = str(asset.seed)
     return params

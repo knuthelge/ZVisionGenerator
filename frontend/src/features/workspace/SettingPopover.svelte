@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
-  import { FileThumb, LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
+  import { FileThumb, LicenceMark, ModelStatusBadges, PathBrowser, PathInput, Segmented, Select } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { defaultsFor, draft, extendStepFor, maxStepsFor, offeredSizes, snapSteps, stepOptionsFor, videoTimingFor } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
@@ -16,7 +16,7 @@
   import { durationSpec, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
   import type { ModelOption, WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
-  import { chipKeys } from './settingRows';
+  import { chipKeys, settingChanged } from './settingRows';
   import { randomSeed } from './seed';
   import { rangeFill, SPEC, stepsSpec } from './settingsSpec';
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
@@ -29,7 +29,12 @@
   import type { AudioView } from './audioView';
   import type { AudioWorkflow, VideoKind } from '$lib/types';
   import VoicePopover from './VoicePopover.svelte';
-  import { availableKinds, clampSeconds, secondsRange } from '$lib/state/audioDraft';
+  import DeliveryControls from './DeliveryControls.svelte';
+  import FilledMark from './FilledMark.svelte';
+  import { markedFields } from '$lib/state/audioFill';
+  import { availableKinds, clampSeconds, musicSecondsShown, secondsRange, settleMusicSeconds } from '$lib/state/audioDraft';
+  import { autoSecondsText, autoSoundSeconds, soundTypeLabel } from '$lib/state/soundSettings';
+  import { keyOptions } from '$lib/state/musicSettings';
   import { videoKinds } from '$lib/state/workspaceTab';
   import ImagesPopover from './ImagesPopover.svelte';
   import type { ImagesView } from './imagesView';
@@ -60,18 +65,20 @@
   let { key, context, busy, images, audioTrack, audio, models, quantizeOptions, lastSeed, onModelChange, onclose, ondiscover }: Props = $props();
 
   const s = $derived(draft.state);
+  /** The music fields Describe it wrote that are still as written. */
+  const marked = $derived(markedFields(s, 'music'));
   const caps = $derived(workspaceCapabilities(context, s));
   const defaults = $derived(defaultsFor(context, s, draft.extendSource));
   const TITLES: Record<ChipKey, string> = {
     seconds: 'Clip length', extendSeconds: 'Extend by', steps: 'Steps', guidance: 'Guidance', seed: 'Seed', runs: 'Batch size',
     source: 'Source video', images: 'Images', track: 'Audio track', size: 'Size', audio: 'Video', loras: 'LoRAs', upscale: 'Upscale', transparent: 'Transparent background', model: 'Model',
-    kind: 'Kind', voice: 'Voice', length: 'Length',
+    kind: 'Kind', voice: 'Voice', delivery: 'Delivery', length: 'Length', tempo: 'Tempo', key: 'Key', soundType: 'Type',
     // The Preset chip opens the preset menu, never a popover; the entry only completes the record.
     preset: 'Preset',
   };
   /** The settings a popover's Reset puts back: those of its chip's rows in `SETTING_ROWS`; none for the ones that have no default (model, LoRAs, files). */
   const resetKeys = $derived(chipKeys(key, caps, s));
-  const canReset = $derived(resetKeys.some((k) => !Object.is(s[k], defaults[k])));
+  const canReset = $derived(resetKeys.some((k) => settingChanged(k, s, defaults)));
 
   function reset(): void {
     // The voice's recording is held outside the draft, with the speaker's tick: clearing them goes through the store.
@@ -114,17 +121,29 @@
     if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameRule));
   }
 
-  // --- Length of a sound ---
+  // --- Length of a sound, or of a song on a model that sets it ---
   const lengthRange = $derived(secondsRange(audio.model));
+  const lengthValue = $derived(caps.audioKind === 'music' ? (musicSecondsShown(s.musicSeconds, audio.model) ?? 0) : s.audioSeconds);
   const kindChoice = $derived<KindChoice>(
     caps.isAudio
       ? { kinds: availableKinds(context), info: AUDIO_KIND_INFO, value: s.workflow, pick: (kind) => draft.setAudioKind(kind as AudioWorkflow, context) }
       : { kinds: videoKinds(context.workflow_contract.values), info: VIDEO_KIND_INFO, value: s.workflow === 'extend' ? 'extend' : 'new', pick: (kind) => draft.setVideoKind(kind as VideoKind, context) },
   );
 
+  // A sound's length is blank on Auto: the field shows what the type will use, and typing or sliding locks a number.
+  const autoLength = $derived(caps.audioKind === 'sound' && context.audio_settings ? autoSoundSeconds(s.soundType, context.audio_settings) : null);
+  const lockedLength = $derived(s.audioSeconds > 0 ? s.audioSeconds : null);
+
   function setLength(seconds: number | null): void {
-    if (seconds !== null) draft.update('audioSeconds', clampSeconds(seconds, audio.model));
+    if (caps.audioKind === 'music') {
+      if (seconds !== null) draft.update('musicSeconds', settleMusicSeconds(seconds, audio.model));
+    } else draft.update('audioSeconds', seconds === null ? 0 : clampSeconds(seconds, audio.model));
   }
+
+  // --- Tempo and Key of a song ---
+  const vocabulary = $derived(context.audio_settings);
+  const tempoSpec = $derived(vocabulary ? { step: 1, min: vocabulary.tempo.min, max: vocabulary.tempo.max } : null);
+  const keySelect = $derived(keyOptions(vocabulary));
 
   // --- Steps: a model that offers only some counts (4 or 8) steps between them ---
   const stepOptions = $derived(caps.isImageMode ? null : stepOptionsFor(context, s.model));
@@ -192,6 +211,11 @@
   $effect(() => {
     if (key === 'voice' && !caps.showVoice) onclose();
   });
+  // --- Delivery ---
+  // A voice that follows a recording reads as recorded: the popover has nothing to show.
+  $effect(() => {
+    if (key === 'delivery' && !caps.showDelivery) onclose();
+  });
   const title = $derived(TITLES[key]);
 
   // --- Source video ---
@@ -245,7 +269,7 @@
   }
 </script>
 
-<div class="setting-popover ui-sheet" class:image-pop={key === 'images' || key === 'track' || key === 'voice'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
+<div class="setting-popover ui-sheet" class:image-pop={key === 'images' || key === 'track' || key === 'voice' || key === 'delivery'} use:sheetDrag={{ onclose }} use:popoverRoom in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={title} data-testid="setting-popover" data-key={key}>
   <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
   <div class="ui-sheet-head" data-sheet-handle>
     <h3 class="ui-area-label">{title}</h3>
@@ -275,14 +299,30 @@
       <p class="ui-help">{s.frameCount} frames at {timing.fps} fps.</p>
       {#if clipTime}<p class="ui-help">{clipTime}</p>{/if}
       {#if clipNote}<p class="ui-help ui-help-warning"><Icon name="alert" size={12} />{clipNote.text}</p>{/if}
+    {:else if key === 'length' && lengthRange && autoLength !== null && vocabulary}
+      <InspectorNumber ariaLabel="Length in seconds, empty for Auto" value={lockedLength} step={1} min={lengthRange.min} max={lengthRange.max} nullable nudgeFrom={autoLength} placeholder="auto · {autoSecondsText(s.soundType, vocabulary)}" stepper size="lg" commitOnly onchange={setLength} />
+      <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={lockedLength ?? autoLength} style:--fill={rangeFill(lockedLength ?? autoLength, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
+      <p class="ui-help">From {lengthRange.min} to {lengthRange.max} seconds. Empty is Auto: {autoSecondsText(s.soundType, vocabulary)} for {soundTypeLabel(s.soundType, vocabulary)}.</p>
     {:else if key === 'length' && lengthRange}
-      <InspectorNumber ariaLabel="Length in seconds" value={s.audioSeconds} step={1} min={lengthRange.min} max={lengthRange.max} stepper size="lg" commitOnly onchange={setLength} />
-      <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={s.audioSeconds} style:--fill={rangeFill(s.audioSeconds, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
+      <InspectorNumber ariaLabel="Length in seconds" value={lengthValue} step={1} min={lengthRange.min} max={lengthRange.max} stepper size="lg" commitOnly onchange={setLength} />
+      <input class="ui-range pop-range" type="range" aria-label="Length" min={lengthRange.min} max={lengthRange.max} step={1} value={lengthValue} style:--fill={rangeFill(lengthValue, lengthRange)} oninput={(e) => setLength(Number(e.currentTarget.value))}>
       <p class="ui-help">From {lengthRange.min} to {lengthRange.max} seconds.</p>
+    {:else if key === 'tempo' && tempoSpec}
+      <InspectorNumber ariaLabel="Tempo in BPM" value={s.audioTempo} {...tempoSpec} nullable placeholder="Auto" stepper size="lg" commitOnly onchange={(v) => draft.update('audioTempo', v)} />
+      <input class="ui-range pop-range" type="range" aria-label="Tempo" min={tempoSpec.min} max={tempoSpec.max} step={1} value={s.audioTempo ?? tempoSpec.min} style:--fill={rangeFill(s.audioTempo ?? tempoSpec.min, tempoSpec)} oninput={(e) => draft.update('audioTempo', Number(e.currentTarget.value))}>
+      {#if marked.includes('tempo')}<p class="pop-filled"><FilledMark label="From your idea" /></p>{/if}
+      <p class="ui-help">From {tempoSpec.min} to {tempoSpec.max} BPM. Empty is Auto, where the model picks.</p>
+    {:else if key === 'key' && vocabulary}
+      <Select class="pop-select" triggerClass="pop-select-trigger" label="Key" testId="pop-key-select" value={s.audioKey ?? ''} options={keySelect} groupColumns onchange={(item) => draft.update('audioKey', item === '' ? null : item)} />
+      {#if marked.includes('key')}<p class="pop-filled"><FilledMark label="From your idea" /></p>{/if}
+      <p class="ui-help">Auto lets the model pick the key.</p>
+    {:else if key === 'soundType' && vocabulary}
+      <Segmented label="Type" class="pop-seg" testId="pop-sound-type" options={vocabulary.sound_types.map((type) => ({ value: type.id, label: type.label }))} value={s.soundType} onchange={(type) => draft.update('soundType', type)} />
+      <p class="ui-help">Auto length follows the type: about {autoSoundSeconds('one-shot', vocabulary)} s for a one-shot, {autoSoundSeconds('effect', vocabulary)} s for an effect, {autoSoundSeconds('ambience', vocabulary)} s for ambience.</p>
     {:else if key === 'kind'}
       <div class="pop-list" role="radiogroup" aria-label="Kind">
         {#each kindChoice.kinds as kind (kind)}
-          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === kindChoice.value} onclick={() => { if (kind !== kindChoice.value) kindChoice.pick(kind); }}>
+          <button type="button" class="pop-item pop-kind" role="radio" aria-checked={kind === kindChoice.value} onclick={() => { if (kind !== kindChoice.value) kindChoice.pick(kind); onclose(); }}>
             <Icon name={kindChoice.info[kind].icon} size={16} />
             <span class="pop-item-text">{kindChoice.info[kind].label}</span>
             <small>{kindChoice.info[kind].description}</small>
@@ -291,6 +331,8 @@
       </div>
     {:else if key === 'voice'}
       <VoicePopover voice={audio.voice} />
+    {:else if key === 'delivery' && vocabulary}
+      <DeliveryControls {vocabulary} recording={false} popover={true} />
     {:else if key === 'extendSeconds'}
       <InspectorNumber ariaLabel="Extend by, in seconds" value={shownExtendSeconds} {...extendSecondsSpec} stepper size="lg" commitOnly disabled={sourceFps === null} onchange={setExtendSeconds} />
       <p class="ui-help">{sourceFps === null ? 'Choose a video to extend first.' : extendLength ? `Total ${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames${s.extendFrames !== null ? ` · +${s.extendFrames} new` : ''}` : ''}</p>
@@ -434,9 +476,12 @@
      the page measured (`--pop-room`) and its body scrolls, so the title, Reset and Close stay under the top bar. */
   .setting-popover.image-pop { max-height: var(--pop-room, none); }
   .image-pop .pop-body { flex: 1 1 auto; min-height: 0; max-height: none; }
+  .pop-filled { margin: 0; }
   .pop-range { width: 100%; height: 36px; }
   .pop-range::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10px; }
   .pop-range::-moz-range-thumb { width: 24px; height: 24px; }
+  .pop-body :global(.pop-select) { display: flex; width: 100%; }
+  .pop-body :global(.pop-select-trigger) { height: 44px; font-size: 15px; }
   .pop-body :global(.pop-seg) { display: flex; width: 100%; }
   .pop-body :global(.pop-seg > button) { flex: 1; height: 36px; font-size: 14px; }
   .pop-dims { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DraftState, VideoModelDefaults, WorkspaceContext } from '$lib/types';
+import { AUDIO_MODELS, withAudio } from '../../test-utils/audio';
+import { makeContext } from '../../test-utils/workspace';
+import type { AudioModelOption, DraftState, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 import { workspaceCapabilities } from './capabilities';
 import { stepsSpec, SPEC } from './settingsSpec';
 
@@ -256,5 +258,65 @@ describe('workspaceCapabilities for the audio track', () => {
 
     expect([withTrack.showVideoUpscale, withTrack.showVideoUpscaleFactor, withTrack.showVideoUpscaleReview, withTrack.showLowMemory]).toEqual([false, false, false, true]);
     expect([without.showVideoUpscale, without.showVideoUpscaleFactor, without.showVideoUpscaleReview]).toEqual([true, true, true]);
+  });
+});
+
+describe('workspaceCapabilities for an audio model', () => {
+  const sa3Sound = AUDIO_MODELS[2];
+  // Stable Audio as music: it has a length but no lyrics, so its row hides the Lyrics box and (here) lists a length control.
+  const sa3Music: AudioModelOption = { ...sa3Sound, kind: 'music', hidden_controls: ['lyrics'], limits: { min_seconds: 1, max_seconds: 380, default_seconds: 30 } };
+  const base = withAudio(makeContext(), [...AUDIO_MODELS, sa3Music]);
+  const context = {
+    ...base,
+    workflow_contract: {
+      ...base.workflow_contract,
+      definitions: {
+        ...base.workflow_contract.definitions,
+        music: { ...base.workflow_contract.definitions.music!, visible_controls: [...base.workflow_contract.definitions.music!.visible_controls, 'length'] },
+      },
+    },
+  } as WorkspaceContext;
+  const audioState = (workflow: 'music' | 'speech' | 'sound', model: string): DraftState => ({ workflow, audioKind: workflow, model }) as unknown as DraftState;
+
+  it('hides the controls the row of the model lists for the open kind', () => {
+    expect(workspaceCapabilities(context, audioState('music', 'yue2')).showLength).toBe(false); // the lyrics set a song's length
+    expect(workspaceCapabilities(context, audioState('music', 'sa3')).showLength).toBe(true);
+    expect(workspaceCapabilities(context, audioState('sound', 'sa3')).showLength).toBe(true);
+  });
+
+  it('reads the row of the kind, not another row of the same model', () => {
+    const noLength = { ...sa3Sound, hidden_controls: ['length'] } as AudioModelOption;
+    const mixed = { ...context, audio_models: [noLength, { ...sa3Music, hidden_controls: [] }] } as WorkspaceContext;
+
+    expect(workspaceCapabilities(mixed, audioState('sound', 'sa3')).showLength).toBe(false);
+    expect(workspaceCapabilities(mixed, audioState('music', 'sa3')).showLength).toBe(true);
+  });
+
+  it('hides nothing for a model the context does not list', () => {
+    expect(workspaceCapabilities(context, audioState('music', 'nope')).showLength).toBe(true);
+  });
+
+  it('shows the Tempo and Key of music, the Delivery of speech and the Sound Type of sound, each only on its kind', () => {
+    const flags = (kind: 'music' | 'speech' | 'sound', model: string, overrides: Partial<DraftState> = {}) => {
+      const caps = workspaceCapabilities(context, { ...audioState(kind, model), voiceMode: 'builtin', ...overrides } as DraftState);
+      return [caps.showTempo, caps.showKey, caps.showDelivery, caps.showSoundType];
+    };
+
+    expect(flags('music', 'yue2')).toEqual([true, true, false, false]);
+    expect(flags('speech', 'qwen3_tts')).toEqual([false, false, true, false]);
+    expect(flags('sound', 'sa3')).toEqual([false, false, false, true]);
+  });
+
+  it('shows no Delivery controls for a voice that follows a recording, but still offers the section, which says why', () => {
+    const caps = workspaceCapabilities(context, { ...audioState('speech', 'qwen3_tts'), voiceMode: 'recording' } as DraftState);
+
+    expect(caps.showDelivery).toBe(false);
+    expect(caps.offersDelivery).toBe(true);
+    expect(workspaceCapabilities(context, audioState('music', 'yue2')).offersDelivery).toBe(false);
+  });
+
+  it('shows the Lyrics box only where the row of the model does not hide it', () => {
+    expect(workspaceCapabilities(context, audioState('music', 'yue2')).showLyrics).toBe(true);
+    expect(workspaceCapabilities(context, audioState('music', 'sa3')).showLyrics).toBe(false);
   });
 });

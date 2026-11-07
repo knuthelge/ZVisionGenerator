@@ -14,7 +14,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from zvisiongenerator.utils.audio_writers import WRITER_TASKS, FillResult, render_fill, run_writer
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext, enhance_context, enhance_prompt, resolve_enhance_ceiling, word_count
+from zvisiongenerator.utils.prompt_enhance_audio import enhance_audio_caption
 from zvisiongenerator.utils.prompt_enhance_caption import enhance_caption
 from zvisiongenerator.utils.prompt_enhance_video import enhance_video_prompt
 
@@ -100,13 +102,22 @@ def case_context(case: Case) -> EnhanceContext:
     )
 
 
+def _ceiling(case: Case, config: dict[str, Any]) -> int:
+    """Return the word ceiling of an image or video case; an audio case has none (its family's rules set the range)."""
+    return 0 if case.is_audio else resolve_enhance_ceiling(config, family=case.family, mode=case.media)
+
+
 def run_case(enhancer: RecordingEnhancer, case: Case, seed: int, *, config: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
-    """Enhance *case* once with *seed* through the entry point preflight uses, and return its scored result record."""
-    ceiling = resolve_enhance_ceiling(config, family=case.family, mode=case.media)
+    """Enhance *case* once with *seed* through the entry point preflight uses, and return its scored result record.
+
+    An audio case runs through ``enhance_audio_caption`` with the token budget of its family's caption rules; a lyrics case runs the lyrics task with
+    the budget of its length.
+    """
+    ceiling = _ceiling(case, config)
     shared = dict(
         seed=seed,
         ceiling=ceiling,
-        context=case_context(case),
+        context=None if case.is_audio else case_context(case),
         length_cfg=options["length"],
         temperature=options["temperature"],
         max_tokens=options["max_new_tokens"],
@@ -116,7 +127,13 @@ def run_case(enhancer: RecordingEnhancer, case: Case, seed: int, *, config: dict
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         try:
-            if case.mode == "video":
+            if case.is_audio and case.task in WRITER_TASKS:
+                result = run_writer(case.task, enhancer, case.prompt, case.settings, context=case.audio_context, family=case.family, seed=seed, temperature=options["temperature"], cancelled=None)
+                output = render_fill(result.fields, instrumental=result.instrumental) if isinstance(result, FillResult) else result.prompt
+            elif case.is_audio:
+                result = enhance_audio_caption(enhancer, case.prompt, case.settings, task=case.task, family=case.family, context=case.audio_context, seed=seed, temperature=options["temperature"])
+                output = result.prompt
+            elif case.mode == "video":
                 pair = enhance_video_prompt(enhancer, case.scene, case.prompt, case.settings, **shared)
                 output, scene, format_ok = pair.prompt, pair.scene, not pair.format_fallback
             elif case.mode == "caption":
@@ -127,7 +144,7 @@ def run_case(enhancer: RecordingEnhancer, case: Case, seed: int, *, config: dict
         except Exception as exc:  # noqa: BLE001 - a failed rewrite is a result to record, not a crash
             error = str(exc) or type(exc).__name__
     calls = list(enhancer.calls)
-    checks, plan_record = _score(case, output=output, scene=scene, error=error, attempts=len(calls), format_ok=format_ok, ceiling=ceiling, options=options)
+    checks, plan_record = _score(case, output=output, scene=scene, error=error, attempts=len(calls), format_ok=format_ok, ceiling=ceiling, options=options, first_raw=calls[0]["raw"] if calls else "")
     first = calls[0]["messages"] if calls else []
     return {
         "case": case.id,
@@ -147,12 +164,17 @@ def run_case(enhancer: RecordingEnhancer, case: Case, seed: int, *, config: dict
     }
 
 
-def _score(case: Case, *, output: str, scene: str, error: str | None, attempts: int, format_ok: bool | None, ceiling: int, options: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Return the checks of one result and the length plan they measured against (None for captions and failures)."""
+def _score(
+    case: Case, *, output: str, scene: str, error: str | None, attempts: int, format_ok: bool | None, ceiling: int, options: dict[str, Any], first_raw: str = ""
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Return the checks of one result and the length plan they measured against (None for captions and failures).
+
+    *first_raw* is the model's first raw answer, which the fill checks read to tell what it got right before any retry.
+    """
     if error is not None:
         return failed_checks(), None
     plan, measures = length_plan(case, ceiling=ceiling, length_cfg=options["length"])
-    checks = score_output(case, output=output, scene=scene, attempts=attempts, format_ok=format_ok, plan=plan, measures=measures)
+    checks = score_output(case, output=output, scene=scene, attempts=attempts, format_ok=format_ok, plan=plan, measures=measures, first_raw=first_raw)
     plan_record = None if plan is None else {"measures": measures, "target": plan.target, "lo": plan.lo, "hi": plan.hi, "clamped": plan.clamped}
     return checks, plan_record
 
@@ -163,8 +185,18 @@ def rescore_record(record: dict[str, Any], case: Case, *, config: dict[str, Any]
     A video's format (whether the pair parsed without fallback) cannot be told from the stored text, so it is kept.
     """
     format_ok = caption_format(record["output"]) if case.mode == "caption" else record["checks"].get("format")
-    ceiling = resolve_enhance_ceiling(config, family=case.family, mode=case.media)
-    checks, plan_record = _score(case, output=record["output"], scene=record["scene"], error=record["error"], attempts=len(record["attempts"]), format_ok=format_ok, ceiling=ceiling, options=options)
+    ceiling = _ceiling(case, config)
+    checks, plan_record = _score(
+        case,
+        output=record["output"],
+        scene=record["scene"],
+        error=record["error"],
+        attempts=len(record["attempts"]),
+        format_ok=format_ok,
+        ceiling=ceiling,
+        options=options,
+        first_raw=record["attempts"][0]["raw"] if record["attempts"] else "",
+    )
     return {**record, "tags": list(case.tags), "checks": checks, "plan": plan_record}
 
 

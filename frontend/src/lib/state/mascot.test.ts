@@ -93,7 +93,7 @@ describe('mascotMood for an audio take', () => {
   it('creates once progress arrives, whatever the phase', () => {
     expect(mascotMood({ job: take(phase('Plan', 12, null)) })).toBe('creating');
     expect(mascotMood({ job: take(phase('Song tokens', 400, null)) })).toBe('creating');
-    expect(mascotMood({ job: take({ workflow: 'speech', ...phase('Speech tokens', 3, 50) }) })).toBe('creating');
+    expect(mascotMood({ job: take({ workflow: 'speech', ...phase('Speech', 0, 1) }) })).toBe('creating');
   });
 
   it('keeps creating between the takes of a batch', () => {

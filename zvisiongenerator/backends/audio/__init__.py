@@ -15,15 +15,12 @@ __all__ = ["snapshot_dir"]
 
 
 def snapshot_dir(files: AudioFiles) -> Path:
-    """Return the cached snapshot folder that holds every literal file of *files* (the download step fetched them).
-
-    A folder pattern such as ``t5gemma-b-b-ul2/*`` is not checked file by file. Loading never downloads.
+    """Return the cached snapshot folder that holds every file of *files* (the download step fetched them). Loading never downloads.
 
     Raises:
         FileNotFoundError: If no cached snapshot at the pinned revision holds the files.
     """
-    literal = tuple(name for name in files.patterns if "*" not in name)
-    folder = cached_snapshot(HubFiles(files.repo_id, files.revision, literal))
+    folder = cached_snapshot(HubFiles(files.repo_id, files.revision, files.patterns))
     if folder is None:
         raise FileNotFoundError(f"{files.repo_id} at {files.revision} is not downloaded.")
     return folder

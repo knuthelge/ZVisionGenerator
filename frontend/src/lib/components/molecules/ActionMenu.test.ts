@@ -37,6 +37,13 @@ describe('ActionMenu', () => {
     expect(row('plain')?.hasAttribute('aria-checked')).toBe(false);
   });
 
+  it('says what a choice does in a description under its label', () => {
+    mountMenu([{ kind: 'item', id: 'smart', label: 'Smart', description: 'Follows your idea more closely.', checked: false }]);
+
+    expect(row('smart')?.querySelector('.action-menu-name')?.textContent).toBe('Smart');
+    expect(row('smart')?.querySelector('.action-menu-description')?.textContent).toBe('Follows your idea more closely.');
+  });
+
   it('shows a hint after the label', () => {
     mountMenu([{ kind: 'item', id: 'a', label: 'Alpha', hint: 'Klein 9B' }]);
     expect(row('a')?.textContent).toContain('Alpha');
@@ -151,6 +158,12 @@ describe('ActionMenu', () => {
       mountMenu(entries(true));
       expect(row('more')?.getAttribute('aria-expanded')).toBe('true');
       expect(row('g1')).not.toBeNull();
+    });
+
+    it('shows a heading inside a group that is not a row', () => {
+      mountMenu([{ kind: 'group', id: 'more', label: 'More', defaultOpen: true, items: [{ kind: 'heading', label: 'Warm' }, { kind: 'item', id: 'g1', label: 'G1' }] }]);
+      expect(Array.from(menu()?.querySelectorAll('.action-menu-heading') ?? []).map((node) => node.textContent)).toEqual(['Warm']);
+      expect(menu()?.querySelectorAll('[role="menuitem"]')).toHaveLength(2);
     });
 
     it('closes the menu when a grouped item is chosen', () => {

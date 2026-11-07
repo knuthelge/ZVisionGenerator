@@ -1,10 +1,6 @@
 import type { AudioModelOption, GalleryAsset } from '$lib/types';
 import { formatClock } from './clock';
-
-/** Whether a lyric line only names a section: `[verse]`, `[chorus 2]`. */
-function isSectionLine(line: string): boolean {
-  return /^\[[^\]]*\]$/.test(line.trim());
-}
+import { isSectionLine } from './musicMode';
 
 /** The lyric lines a tile shows: every non-blank line that is not a `[section]` marker. */
 export function lyricLines(lyrics: string | null | undefined): string[] {
@@ -36,9 +32,14 @@ export function hasNoWords(asset: GalleryAsset): boolean {
   return tileWords(asset) === '';
 }
 
+/** The row of the model that made a take, as the kind it made: a model of several kinds has one row each, with their own limits. A take without a kind (a file the app did not make) matches by id alone. */
+export function audioRowOf(asset: Pick<GalleryAsset, 'model'> & Partial<Pick<GalleryAsset, 'kind'>>, models: readonly AudioModelOption[] | undefined): AudioModelOption | undefined {
+  return models?.find((item) => item.id === asset.model && (asset.kind == null || item.kind === asset.kind));
+}
+
 /** The name of the model that made a take: the label the server gives it, else the label this machine's model list has, else the id the file records. */
-export function audioModelLabel(asset: Pick<GalleryAsset, 'model' | 'model_label'>, models: readonly AudioModelOption[] | undefined): string {
-  return asset.model_label || models?.find((item) => item.id === asset.model)?.label || asset.model;
+export function audioModelLabel(asset: Pick<GalleryAsset, 'model' | 'model_label'> & Partial<Pick<GalleryAsset, 'kind'>>, models: readonly AudioModelOption[] | undefined): string {
+  return asset.model_label || audioRowOf(asset, models)?.label || asset.model;
 }
 
 /** What a cut take's badge and tooltip say. */
@@ -53,7 +54,7 @@ interface CutNote {
  */
 export function cutNote(asset: GalleryAsset, models: readonly AudioModelOption[] | undefined): CutNote | null {
   if (asset.cut !== true) return null;
-  const model = models?.find((item) => item.id === asset.model);
+  const model = audioRowOf(asset, models);
   const cap = (model && model.kind !== 'speech' ? model.limits.max_seconds : null) ?? asset.duration ?? null;
   if (cap === null) return null;
   const at = formatClock(cap);

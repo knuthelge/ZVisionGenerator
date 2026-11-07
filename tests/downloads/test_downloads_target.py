@@ -30,6 +30,7 @@ class TestDownloadTarget:
         [
             DownloadTarget("o/r"),
             DownloadTarget("o/r", anonymous=True),
+            DownloadTarget("o/r", allow_patterns=("a.json", "vae/*")),
             DownloadTarget("o/r", revision="abc", allow_patterns=("vae/*", "a.json"), ignore_patterns=("*.bin",), local_dir="/tmp/x"),
             DownloadTarget("o/r", allow_patterns=()),
         ],

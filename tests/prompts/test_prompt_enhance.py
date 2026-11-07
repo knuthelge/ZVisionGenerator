@@ -39,6 +39,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     framing_rules,
     framing_view,
     image_enhance_entries,
+    is_echo,
     is_unusable,
     labelled_prompt,
     length_instruction,
@@ -457,6 +458,14 @@ class TestMessages:
     def test_echo_ignores_case_and_punctuation(self):
         assert is_unusable("The cat knocks an apple off the counter.", "the cat knocks an apple off the counter")
         assert not is_unusable("The cat swats the apple off the counter.", "the cat knocks an apple off the counter")
+
+    def test_is_echo_compares_words_only(self):
+        assert is_echo("A  fox, in snow!", "a fox in snow")
+        assert not is_echo("A fox in deep snow", "a fox in snow")
+        assert is_echo("\u2026", "") and is_echo("", "")
+
+    def test_a_refusal_is_not_an_echo_but_is_still_unusable_for_the_caption_tasks(self):
+        assert not is_echo("I can't help with that.", "a red fox") and is_unusable("I can't help with that.", "a red fox")
 
     def test_mood_line(self):
         assert MOOD_AXIS.option("keep").instruction in _system(EnhanceSettings())

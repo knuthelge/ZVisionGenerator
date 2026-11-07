@@ -14,15 +14,17 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from tests._factories import _make_args, make_extend_source
+from tests._factories import _make_args, load_packaged_config, make_extend_source
 from tests.web._helpers import make_web_config, patch_image_submit_dependencies
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.audio_writers import FITTED_NOTHING_TO_ADD_NOTE, LYRICS_UNCHANGED_MESSAGE, NOTHING_TO_ADD_MESSAGE, SECTIONS_CHANGED_MESSAGE
 from zvisiongenerator.utils.prompt_enhance import QUOTES_CHANGED_WARNING, EnhanceContext, EnhanceSettings
 from zvisiongenerator.utils.prompt_enhance_video import split_scene_action
 from zvisiongenerator.utils.video_extend import ExtendInspection, ExtendProblem
+from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
@@ -190,9 +192,9 @@ class TestEnhanceEndpoint:
         with pytest.raises(ValueError, match=key):
             web_server._validate_enhance_body({"prompt": "a fox", "settings": {"style": "photo"}, key: value})
 
-    def test_audio_is_refused_and_not_run_as_an_image(self):
+    def test_an_unknown_mode_is_refused_and_not_run_as_an_image(self):
         with pytest.raises(ValueError, match="mode"):
-            web_server._validate_enhance_body({"prompt": "a fox", "mode": "audio", "settings": {"style": "photo"}})
+            web_server._validate_enhance_body({"prompt": "a fox", "mode": "text", "settings": {"style": "photo"}})
 
     def test_smart_resolves_the_smart_model(self, monkeypatch):
         monkeypatch.setattr(web_server, "smart_budget_bytes", lambda choice: 64 * 2**30)
@@ -286,7 +288,7 @@ class TestEnhanceEndpoint:
             ({"prompt": " ", "scene": " ", "mode": "video", "settings": {}}, "Enter a scene or a prompt"),
             ({"prompt": "a fox", "scene": 3, "mode": "video", "settings": {}}, "scene must be a string"),
             ({"prompt": "a fox", "settings": {"style": "nope"}}, "Unknown style"),
-            ({"prompt": "a fox", "mode": "audio"}, "mode must be"),
+            ({"prompt": "a fox", "mode": "text"}, "mode must be 'image', 'video' or 'audio'"),
             ({"prompt": "a fox", "max_words": 0}, "max_words"),
             ([1, 2], "JSON object"),
             ({"prompt": "a fox", "context": "video"}, "context must be"),
@@ -380,6 +382,537 @@ class TestEnhanceEndpoint:
 
 
 # ── /api/generate enhance fields ────────────────────────────────────────────
+
+
+# ── /api/prompt/enhance, audio ──────────────────────────────────────────────
+
+
+@pytest.fixture
+def audio_models(monkeypatch):
+    """Make this machine a CUDA one that runs the packaged audio models, and serve the packaged config to the enhance endpoint."""
+    monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: "cuda")
+    config = load_packaged_config()
+    monkeypatch.setattr(web_server, "load_config", lambda: config)
+    return config
+
+
+def _audio_body(**overrides) -> dict:
+    return {"mode": "audio", "task": "sound", "model": "sa3", "kind": "sound", "prompt": "rain on a tin roof", "settings": {}, **overrides}
+
+
+class TestAudioEnhanceEndpoint:
+    def test_a_sound_streams_status_text_and_a_done_frame_with_its_fields(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["Heavy rain falls on a corrugated tin roof, steady and close."])
+        session = _FakeSession(enhancer)
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: session)
+        body = _audio_body(settings={"space": "small-room", "note": "keep it dry"}, context={"sound_type": "ambience", "seconds": 12})
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=body)
+
+        frames = _frames(response)
+        assert response.status_code == 200 and response.headers["content-type"].startswith("application/x-ndjson")
+        assert frames[:2] == [{"type": "status", "phase": "loading"}, {"type": "status", "phase": "generating"}]
+        texts = [frame for frame in frames if frame["type"] == "text"]
+        assert texts and all(frame["task"] == "sound" and frame["fields"] == {"prompt": frame["text"]} for frame in texts)
+        assert texts[-1]["text"] == "Heavy rain falls on a corrugated tin roof, steady and close."
+        assert _without_model(frames[-1]) == {"type": "done", "task": "sound", "fields": {"prompt": "Heavy rain falls on a corrugated tin roof, steady and close."}, "clamped": False}
+        system = enhancer.messages[0][0]["content"]
+        assert "one sentence of at most 45 words" in system and "Space: a small room" in system and "This is an ambience" in system and "keep it dry" in system
+        assert enhancer.messages[0][1]["content"] == "Prompt: rain on a tin roof"
+
+    def test_a_style_is_written_for_the_family_of_the_model(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["Folk, piano, wistful vocal, no drums", "Warm folk music with a soft piano and a gentle, wistful mood."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        with TestClient(web_server.app) as client:
+            yue2 = _frames(client.post("/api/prompt/enhance", json=_audio_body(task="style", model="yue2", kind="music", prompt="sad folk", settings={"genre": "folk", "without": ["drums"]})))
+            sa3 = _frames(client.post("/api/prompt/enhance", json=_audio_body(task="style", model="sa3", kind="music", prompt="sad folk")))
+
+        assert yue2[-1]["fields"] == {"style": "Folk, piano, wistful vocal, no drums"} and sa3[-1]["fields"] == {"style": "Warm folk music with a soft piano and a gentle, wistful mood."}
+        assert "comma-separated descriptors" in enhancer.messages[0][0]["content"] and "no drums" in enhancer.messages[0][0]["content"]
+        assert "one sentence of at most 45 words" in enhancer.messages[1][0]["content"]
+
+    def test_a_style_is_rewritten_with_the_take_facts_as_context(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["Folk, acoustic guitar, wistful"])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = _audio_body(task="style", model="yue2", kind="music", prompt="a sad folk song about leaving the coast", context={"instrumental": True, "tempo": 90, "key": "Am"})
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        assert frames[-1]["fields"] == {"style": "Folk, acoustic guitar, wistful"}
+        assert enhancer.messages[0][1]["content"] == "Prompt: a sad folk song about leaving the coast"
+        assert "The song is instrumental" in enhancer.messages[0][0]["content"] and "BPM: 90" not in enhancer.messages[0][0]["content"]  # the tempo is a setting, not part of the rewrite
+
+    def test_the_smart_enhancer_can_be_chosen(self, monkeypatch, audio_models):
+        monkeypatch.setattr(web_server, "smart_budget_bytes", lambda choice: 64 * 2**30)
+
+        job = web_server._validate_enhance_body(_audio_body(enhance_model="smart"))
+
+        assert job["repo"] != web_server._validate_enhance_body(_audio_body())["repo"]
+
+    def test_the_job_carries_the_task_family_context_and_settings(self, audio_models):
+        job = web_server._validate_enhance_body(
+            _audio_body(task="style", model="yue2", kind="music", prompt="folk", settings={"genre": "folk"}, context={"lyrics": "x" * 900, "tempo": "90", "sound_type": "effect"})
+        )
+
+        assert (job["mode"], job["task"], job["kind"], job["model"], job["family"], job["prompt"]) == ("audio", "style", "music", "yue2", "yue2", "folk")
+        assert job["settings"].genre == "folk"
+        assert (len(job["context"].lyrics), job["context"].tempo, job["context"].sound_type) == (600, 90, "effect")
+        assert {"repo", "revision", "options", "idle_seconds"} <= set(job)
+
+    def test_the_kind_defaults_to_the_one_of_the_task(self, audio_models):
+        body = _audio_body(task="style", model="sa3")
+        del body["kind"]
+
+        assert web_server._validate_enhance_body(body)["kind"] == "music"
+
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [
+            (_audio_body(task="poem"), "task must be one of: sound, style, lyrics, script, fill"),
+            ({k: v for k, v in _audio_body().items() if k != "task"}, "task must be one of"),
+            (_audio_body(model="nope"), "Unknown audio model 'nope'"),
+            ({k: v for k, v in _audio_body().items() if k != "model"}, "Field 'model' is required"),
+            (_audio_body(model=3), "model must be an audio model id"),
+            (_audio_body(model="yue2"), "does not make sound"),
+            (_audio_body(kind="music"), "The sound task works on sound, not music"),
+            (_audio_body(kind="radio"), "kind must be one of"),
+            (_audio_body(prompt="  "), "Enter a sound to enhance"),
+            (_audio_body(task="style", kind="music", prompt=""), "Enter a style to enhance"),
+            (_audio_body(task="style", kind="music", prompt="  "), "Enter a style to enhance"),
+            (_audio_body(prompt=3), "prompt must be a string"),
+            (_audio_body(prompt="x" * 1001), "too long"),
+            (_audio_body(settings={"genre": "folk"}), "only applies to music"),
+            (_audio_body(settings={"space": "nowhere"}), "Unknown space"),
+            (_audio_body(settings="forest"), "must be a mapping"),
+            (_audio_body(context="loud"), "context must be a JSON object"),
+            (_audio_body(context={"seconds": 0}), "context.seconds must be a positive number"),
+            (_audio_body(context={"seconds": True}), "context.seconds"),
+            (_audio_body(context={"sound_type": "song"}), "Sound type must be one of"),
+            (_audio_body(task="style", kind="music", model="yue2", context={"tempo": 300}), "Tempo must be 40 to 220 BPM"),
+            (_audio_body(task="style", kind="music", model="yue2", context={"key": "H"}), "Key must be one of"),
+            (_audio_body(enhance_model="turbo"), "enhance_model must be one of"),
+        ],
+    )
+    def test_a_malformed_audio_request_is_a_422_in_words_the_user_sees(self, body, message, no_active_job, audio_models):
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=body)
+
+        assert response.status_code == 422
+        assert message in response.json()["detail"]
+
+    def test_a_machine_without_audio_models_refuses_the_request(self, monkeypatch, no_active_job, audio_models):
+        monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: (_ for _ in ()).throw(RuntimeError("Audio models need an NVIDIA GPU or Apple Silicon.")))
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=_audio_body())
+
+        assert response.status_code == 422 and "Audio models need" in response.json()["detail"]
+
+    def test_the_request_is_refused_with_409_while_a_job_runs(self, monkeypatch, audio_models):
+        def _job_running(admit, *, busy_message):
+            raise web_runner_module.JobConflictError(busy_message)
+
+        monkeypatch.setattr(web_server.web_runner, "admit_exclusive", _job_running)
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=_audio_body())
+
+        assert response.status_code == 409 and "all jobs have finished" in response.json()["detail"]
+
+    def test_a_running_audio_job_refuses_the_request_through_the_real_admission(self, monkeypatch, audio_models):
+        """The runner's own check (not a stub) turns an active exclusive job into the 409, and the enhancer slot is not taken."""
+        session = _FakeSession(_FakeEnhancer(["unused"]))
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: session)
+        monkeypatch.setattr(web_server.web_runner, "_find_active_exclusive_job_id", lambda: "audio-job")
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=_audio_body())
+
+        assert response.status_code == 409 and "all jobs have finished" in response.json()["detail"]
+        assert session.acquired == []
+
+    def test_a_running_enhancement_refuses_a_job_through_the_real_admission_check(self, monkeypatch):
+        monkeypatch.setattr(web_server.web_runner, "_find_active_exclusive_job_id", lambda: None)
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
+
+        with pytest.raises(web_runner_module.JobConflictError, match="Prompt enhancement in progress"):
+            web_server._reject_while_busy()
+
+    def test_the_request_is_refused_with_409_while_another_enhancement_runs(self, monkeypatch, no_active_job, audio_models):
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
+        with TestClient(web_server.app) as client:
+            assert client.post("/api/prompt/enhance", json=_audio_body()).status_code == 409
+
+    def test_unusable_output_is_an_error_frame(self, monkeypatch, no_active_job, audio_models):
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(_FakeEnhancer(["", "rain on a tin roof"])))
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_audio_body()))
+
+        assert frames[-1]["type"] == "error" and "no usable rewrite" in frames[-1]["detail"]
+
+    def test_a_changed_quote_ends_in_a_done_frame_with_a_warning(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["A door shuts and a voice says go away.", "A door shuts and a voice says go away again."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_audio_body(prompt='a door shuts, a voice says "Go Away"')))
+
+        assert frames[-1]["type"] == "done" and frames[-1]["warning"] == QUOTES_CHANGED_WARNING
+
+    def test_the_done_frame_of_each_mode_keeps_its_shape(self):
+        image = web_server._enhance_done_frame("image", web_server.EnhanceResult(prompt="A fox.", clamped=False), model="org/m")
+        audio = web_server._enhance_done_frame("audio", web_server.EnhanceResult(prompt="Rain.", clamped=False, warning="careful"), model="org/m", task="sound")
+
+        assert image == {"type": "done", "prompt": "A fox.", "clamped": False, "model": "org/m"}
+        assert audio == {"type": "done", "task": "sound", "fields": {"prompt": "Rain."}, "clamped": False, "model": "org/m", "warning": "careful"}
+
+    def test_image_and_video_requests_are_unchanged(self, monkeypatch, no_active_job):
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(_FakeEnhancer(["A fox in snow.", "SCENE: A snowy field.\nACTION: A fox trots."])))
+        with TestClient(web_server.app) as client:
+            image = _frames(client.post("/api/prompt/enhance", json={"prompt": "a fox", "settings": {}}))[-1]
+            video = _frames(client.post("/api/prompt/enhance", json={"prompt": "a fox", "scene": "a field", "mode": "video", "settings": {}}))[-1]
+
+        assert _without_model(image) == {"type": "done", "prompt": "A fox in snow.", "clamped": False}
+        assert set(video) == {"type", "scene", "prompt", "clamped", "model"} and "fields" not in video and "task" not in video
+
+
+_SONG = "[Verse]\nThe porch light flickers, the street is wet\nI still keep your coat by the door\n\n[Chorus]\nCome back home\n\n[Bridge]\n\n[Outro]\n"
+_SHORTER = "[Verse]\nPorch light flickers, street is wet\nI keep your coat by the door\n\n[Chorus]\nCome home\n\n[Bridge]\n\n[Outro]\n"
+
+
+def _lyrics_body(**overrides) -> dict:
+    return _audio_body(**{"task": "lyrics", "model": "yue2", "kind": "music", "prompt": _SONG, "settings": {"improve": ["tighten"]}, **overrides})
+
+
+class TestLyricsEnhanceEndpoint:
+    def test_the_whole_song_is_improved_and_comes_back_in_the_lyrics_field(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer([_SHORTER])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = _lyrics_body(settings={"improve": ["tighten", "rhymes"], "note": "more hopeful"}, context={"style": "warm folk, piano"})
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=body)
+
+        frames = _frames(response)
+        assert response.status_code == 200 and frames[:2] == [{"type": "status", "phase": "loading"}, {"type": "status", "phase": "generating"}]
+        assert not [frame for frame in frames if frame["type"] == "text"]
+        assert _without_model(frames[-1]) == {"type": "done", "task": "lyrics", "fields": {"lyrics": _SHORTER}, "clamped": False}
+        system, user = (message["content"] for message in enhancer.messages[0])
+        assert "Tighten" in system and "Smooth rhymes" in system and "more hopeful" in system and "warm folk, piano" in system
+        assert user == f"Lyrics:\n{_SONG}"
+
+    def test_one_section_is_improved_and_the_whole_song_comes_back(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["Come home"])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_lyrics_body(settings={"improve": ["simpler"], "section": 1})))
+
+        assert frames[-1]["fields"] == {"lyrics": _SONG.replace("Come back home", "Come home")}
+        assert "Section to edit: [Chorus]" in enhancer.messages[0][1]["content"]
+
+    def test_an_empty_section_is_written_to_fit_the_rest(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["The night is long\nbut I am still here"])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_lyrics_body(settings={"action": "write", "section": 2})))
+
+        assert frames[-1]["fields"] == {"lyrics": _SONG.replace("[Bridge]\n", "[Bridge]\nThe night is long\nbut I am still here\n")}
+        assert "Empty section to write: [Bridge]" in enhancer.messages[0][1]["content"]
+
+    def test_changed_sections_end_the_stream_in_an_error_frame_after_one_retry(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["[Verse]\nonly this", "[Verse]\nstill only this"])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_lyrics_body()))
+
+        assert frames[-1] == {"type": "error", "detail": SECTIONS_CHANGED_MESSAGE} and len(enhancer.messages) == 2
+
+    def test_lyrics_left_as_they_were_end_the_stream_in_a_no_change_frame_the_client_can_tell_apart(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer([_SONG, _SONG])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_lyrics_body()))
+
+        assert frames[-1] == {"type": "error", "detail": LYRICS_UNCHANGED_MESSAGE, "no_change": True}
+
+    def test_the_job_carries_the_lyrics_settings_the_style_and_the_music_kind(self, audio_models):
+        job = web_server._validate_enhance_body(_lyrics_body(settings={"improve": ["fit"], "note": " calm "}, context={"style": "x" * 900, "lyrics": "ignored"}))
+
+        assert (job["task"], job["kind"], job["model"], job["family"], job["prompt"]) == ("lyrics", "music", "yue2", "yue2", _SONG)
+        assert (job["settings"].improve, job["settings"].note, job["settings"].section) == (("fit",), "calm", None)
+        assert len(job["context"].style) == 400
+
+    def test_the_kind_defaults_to_music(self, audio_models):
+        body = _lyrics_body()
+        del body["kind"]
+
+        assert web_server._validate_enhance_body(body)["kind"] == "music"
+
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [
+            (_lyrics_body(prompt=""), "Nothing to improve yet"),
+            (_lyrics_body(prompt="[Verse]\n\n[Chorus]"), "Nothing to improve yet"),
+            (_lyrics_body(prompt="a" * 4001), "too long"),
+            (_lyrics_body(prompt=3), "prompt must be a string"),
+            (_lyrics_body(model="sa3"), "does not take lyrics"),
+            (_lyrics_body(kind="sound"), "The lyrics task works on music, not sound"),
+            (_lyrics_body(settings={"improve": ["louder"]}), "Unknown improvement"),
+            (_lyrics_body(settings={"action": "write"}), "name the section"),
+            (_lyrics_body(settings={"section": 9}), "no section 10"),
+            (_lyrics_body(settings={"section": 2}), "has no words yet: use Write"),
+            (_lyrics_body(settings={"action": "write", "section": 0}), "already has words: use Improve"),
+            (_lyrics_body(settings={"genre": "folk"}), "Unknown lyrics setting"),
+            (_lyrics_body(settings="tighten"), "must be a mapping"),
+            (_lyrics_body(context={"style": 3}), "context.style must be text"),
+        ],
+    )
+    def test_a_malformed_lyrics_request_is_a_422_in_words_the_user_sees(self, body, message, no_active_job, audio_models):
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=body)
+
+        assert response.status_code == 422
+        assert message in response.json()["detail"]
+
+
+_SCRIPT = "I never told anyone. Not even you. The door was open."
+_MARKED = "[whisper] I never told anyone. …\nNot even you. [as set] The door was open."
+
+
+def _script_body(**overrides) -> dict:
+    return _audio_body(**{"task": "script", "model": "qwen3_tts", "kind": "speech", "prompt": _SCRIPT, "settings": {"actions": ["delivery"]}, **overrides})
+
+
+class TestScriptEnhanceEndpoint:
+    def test_delivery_is_added_and_the_script_comes_back_in_the_script_field(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer([_MARKED])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=_script_body())
+
+        frames = _frames(response)
+        assert response.status_code == 200 and frames[:2] == [{"type": "status", "phase": "loading"}, {"type": "status", "phase": "generating"}]
+        assert not [frame for frame in frames if frame["type"] == "text"]
+        assert _without_model(frames[-1]) == {"type": "done", "task": "script", "fields": {"script": _MARKED}, "clamped": False}
+        assert "model" in frames[-1]
+        system, user = (message["content"] for message in enhancer.messages[0])
+        assert "[whisper]" in system and "Never change the words" in system and user == f"Script:\n{_SCRIPT}"
+
+    def test_a_script_is_fitted_to_a_time_at_a_pace(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["y" * 227])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = _script_body(prompt="The harbour was quiet that morning. " * 20, settings={"actions": ["fit"], "seconds": 20, "pace": "slow"})
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        assert frames[-1]["fields"] == {"script": "y" * 227} and "warning" not in frames[-1]
+        assert "to about 227 characters" in enhancer.messages[0][0]["content"]
+
+    def test_both_actions_are_one_request_that_fits_then_marks_up_with_one_done_frame(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["The harbour was quiet. The tide came in.", "The harbour was quiet. …\n[sad] The tide came in."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = _script_body(prompt="The harbour was quiet that morning. " * 20, settings={"actions": ["fit", "delivery"], "seconds": 3})
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        done = [frame for frame in frames if frame["type"] == "done"]
+        assert len(done) == 1 and done[0]["fields"] == {"script": "The harbour was quiet. …\n[sad] The tide came in."} and "warning" not in done[0]
+        assert len(enhancer.messages) == 2
+
+    def test_a_delivery_that_adds_nothing_after_a_fit_keeps_the_fitted_script_with_a_note(self, monkeypatch, no_active_job, audio_models):
+        fitted = "The harbour was quiet. The tide came in."
+        enhancer = _FakeEnhancer([fitted, fitted, fitted])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = _script_body(prompt="The harbour was quiet that morning. " * 20, settings={"actions": ["fit", "delivery"], "seconds": 3})
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        assert frames[-1]["type"] == "done" and frames[-1]["fields"] == {"script": fitted} and frames[-1]["warning"] == FITTED_NOTHING_TO_ADD_NOTE
+
+    def test_a_fit_far_from_its_time_carries_the_time_it_came_out_at(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["y" * 700, "y" * 600])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = _script_body(prompt="The harbour was quiet that morning. " * 20, settings={"actions": ["fit"], "seconds": 20})
+
+        with TestClient(web_server.app) as client, pytest.warns(UserWarning, match="Came out at about 0:43"):
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        assert frames[-1]["warning"] == "Came out at about 0:43."
+
+    def test_an_answer_that_adds_nothing_ends_the_stream_in_an_error_frame_after_one_retry(self, monkeypatch, no_active_job, audio_models):
+        body = _script_body()
+        enhancer = _FakeEnhancer([body["prompt"], body["prompt"]])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        assert frames[-1] == {"type": "error", "detail": NOTHING_TO_ADD_MESSAGE, "no_change": True} and len(enhancer.messages) == 2
+
+    def test_words_the_helper_changed_come_back_as_the_scripts_own(self, monkeypatch, no_active_job, audio_models):
+        body = _script_body()
+        enhancer = _FakeEnhancer(["[sad] Nobody was told."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        assert frames[-1]["fields"] == {"script": f"[sad] {body['prompt']}"}
+
+    def test_the_text_the_helper_sends_back_never_holds_a_mark_the_server_would_refuse(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["[Sad] I never told anyone. [sighs] Not even you. The door was open."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_script_body()))
+
+        assert frames[-1]["fields"] == {"script": "[sad] I never told anyone. Not even you. The door was open."}
+
+    def test_the_job_carries_the_script_settings_and_the_speech_kind(self, audio_models):
+        job = web_server._validate_enhance_body(_script_body(settings={"actions": ["fit"], "seconds": 30}))
+
+        assert (job["task"], job["kind"], job["model"], job["family"], job["prompt"]) == ("script", "speech", "qwen3_tts", "qwen3_tts", _SCRIPT)
+        assert (job["settings"].actions, job["settings"].seconds, job["settings"].pace) == (("fit",), 30, "normal")
+
+    def test_the_kind_defaults_to_speech(self, audio_models):
+        body = _script_body()
+        del body["kind"]
+
+        assert web_server._validate_enhance_body(body)["kind"] == "speech"
+
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [
+            (_script_body(prompt=""), "Nothing to work on yet"),
+            (_script_body(prompt="[sad] …"), "Nothing to work on yet"),
+            (_script_body(prompt="a" * 4001), "too long"),
+            (_script_body(prompt=3), "prompt must be a string"),
+            (_script_body(model="yue2"), "does not make speech"),
+            (_script_body(kind="music"), "The script task works on speech, not music"),
+            (_script_body(settings={}), "actions must list each"),
+            (_script_body(settings={"actions": ["fit"]}), "whole number from 3 to 600"),
+            (_script_body(settings={"actions": ["fit"], "seconds": 5000}), "whole number from 3 to 600"),
+            (_script_body(settings={"actions": ["fit"], "seconds": 20, "pace": "warp"}), "pace must be one of"),
+            (_script_body(settings={"actions": ["delivery"], "seconds": 20}), "takes no reading time"),
+            (_script_body(settings={"actions": ["delivery"], "genre": "folk"}), "Unknown script setting"),
+            (_script_body(settings="fit"), "must be a mapping"),
+        ],
+    )
+    def test_a_malformed_script_request_is_a_422_in_words_the_user_sees(self, body, message, no_active_job, audio_models):
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=body)
+
+        assert response.status_code == 422
+        assert message in response.json()["detail"]
+
+
+_IDEA = "a sad folk song about leaving the coast"
+_FILLED = "STYLE: folk, acoustic guitar, wistful vocal\nTEMPO: 84\nKEY: A minor\nLYRICS:\n[Verse]\nI pack the boat at dawn\n\n[Chorus]\nGoodbye to the coast"
+
+
+def _fill_body(**overrides) -> dict:
+    return _audio_body(**{"task": "fill", "model": "yue2", "kind": "music", "prompt": _IDEA, "settings": {"fields": ["style", "tempo", "key", "lyrics"]}, **overrides})
+
+
+class TestFillEnhanceEndpoint:
+    def test_one_call_writes_several_fields_into_one_done_frame(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer([_FILLED])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=_fill_body())
+
+        frames = _frames(response)
+        assert response.status_code == 200 and frames[:2] == [{"type": "status", "phase": "loading"}, {"type": "status", "phase": "generating"}]
+        assert not [frame for frame in frames if frame["type"] == "text"]
+        assert _without_model(frames[-1]) == {
+            "type": "done",
+            "task": "fill",
+            "fields": {"style": "folk, acoustic guitar, wistful vocal", "tempo": "84", "key": "Am", "lyrics": "[Verse]\nI pack the boat at dawn\n\n[Chorus]\nGoodbye to the coast"},
+            "clamped": False,
+        }
+        assert "model" in frames[-1] and len(enhancer.messages) == 1
+        assert enhancer.messages[0][1]["content"] == f"Idea:\n{_IDEA}"
+
+    def test_a_speech_fill_writes_a_text_and_a_vibe_and_what_is_set_is_context(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["VIBE: whispered-secret"])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = _fill_body(model="qwen3_tts", kind="speech", prompt="read it as a secret", settings={"fields": ["vibe"]}, context={"text": "Come closer."})
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+
+        assert frames[-1]["fields"] == {"vibe": "whispered-secret"}
+        assert "Text (start): Come closer." in enhancer.messages[0][1]["content"]
+
+    def test_a_field_the_helper_gets_wrong_is_left_out_with_a_warning(self, monkeypatch, no_active_job, audio_models):
+        enhancer = _FakeEnhancer(["STYLE: folk\nTEMPO: 900", "STYLE: folk\nTEMPO: 1000"])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client, pytest.warns(UserWarning, match="Left empty: Tempo"):
+            frames = _frames(client.post("/api/prompt/enhance", json=_fill_body(settings={"fields": ["style", "tempo"]})))
+
+        assert frames[-1]["fields"] == {"style": "folk"} and frames[-1]["warning"] == "Left empty: Tempo."
+
+    def test_nothing_usable_ends_the_stream_in_an_error_frame(self, monkeypatch, no_active_job, audio_models):
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(_FakeEnhancer(["no", "still no"])))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_fill_body()))
+
+        assert frames[-1]["type"] == "error" and "couldn't fill anything" in frames[-1]["detail"]
+
+    def test_the_kind_defaults_to_music_and_the_job_carries_the_fields_and_context(self, audio_models):
+        body = _fill_body(context={"style": "x" * 900, "lyrics": "y" * 900, "text": "z" * 900, "tempo": 100, "key": "Em"})
+        del body["kind"]
+        job = web_server._validate_enhance_body(body)
+
+        assert (job["task"], job["kind"], job["model"], job["family"], job["prompt"]) == ("fill", "music", "yue2", "yue2", _IDEA)
+        assert (job["settings"].kind, job["settings"].fields) == ("music", ("style", "tempo", "key", "lyrics"))
+        assert (len(job["context"].style), len(job["context"].lyrics), len(job["context"].text), job["context"].tempo, job["context"].key) == (400, 600, 600, 100, "Em")
+
+    def test_a_model_that_cannot_sing_takes_a_fill_without_lyrics(self, audio_models):
+        job = web_server._validate_enhance_body(_fill_body(model="sa3", settings={"fields": ["style", "tempo", "key"]}))
+
+        assert job["family"] == "stable_audio_3" and job["settings"].fields == ("style", "tempo", "key")
+
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [
+            (_fill_body(prompt=""), "Describe what you want first"),
+            (_fill_body(prompt="   "), "Describe what you want first"),
+            (_fill_body(prompt="x" * 1001), "description is too long"),
+            (_fill_body(prompt=3), "prompt must be a string"),
+            (_fill_body(kind="sound", model="sa3"), "fills music and speech, not sound"),
+            (_fill_body(model="sa3"), "does not take lyrics"),
+            (_fill_body(model="qwen3_tts", kind="speech", settings={"fields": ["text", "lyrics"]}), "Unknown speech field"),
+            (_fill_body(model="yue2", kind="speech", settings={"fields": ["text"]}), "does not make speech"),
+            (_fill_body(settings={}), "fields must list what to fill"),
+            (_fill_body(settings={"fields": ["mood"]}), "Unknown music field"),
+            (_fill_body(settings={"fields": ["style"], "note": "x"}), "Unknown fill setting"),
+            (_fill_body(settings="style"), "must be a mapping"),
+            (_fill_body(context={"text": 3}), "context.text must be text"),
+        ],
+    )
+    def test_a_malformed_fill_request_is_a_422_in_words_the_user_sees(self, body, message, no_active_job, audio_models):
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=body)
+
+        assert response.status_code == 422
+        assert message in response.json()["detail"]
+
+    def test_the_done_frame_of_a_fill_is_its_fields(self):
+        from zvisiongenerator.utils.audio_writers import FillResult
+
+        frame = web_server._enhance_done_frame("audio", FillResult(fields={"tempo": "84"}, warning="Left empty: Key."), model="org/m", task="fill")
+
+        assert frame == {"type": "done", "task": "fill", "fields": {"tempo": "84"}, "clamped": False, "model": "org/m", "warning": "Left empty: Key."}
 
 
 class TestGenerateFields:
@@ -626,6 +1159,18 @@ class TestWorkspaceContract:
         assert contract["downloaded"] is False and contract["download_size_label"] in ("2.4 GB", "9 GB")
         assert contract["matrix"]["defaults"]["length"] == "same"
         assert contract["default_max_words"] == 300
+
+    def test_the_audio_option_matrix_is_served_beside_the_image_one(self):
+        contract = workspace_api_module.build_prompt_enhancer_contract(self._config(), downloaded=lambda repo, rev: False)
+
+        assert [axis["key"] for axis in contract["audio_matrix"]["axes"]] == ["genre", "music_mood", "instruments", "without", "singer", "production", "space", "distance", "over_time", "movement"]
+        assert contract["audio_matrix"]["defaults"]["genre"] == "keep"
+        assert "genre" not in {axis["key"] for axis in contract["matrix"]["axes"]}
+
+    def test_the_audio_option_matrix_is_served_even_without_an_enhancer_model(self):
+        contract = workspace_api_module.build_prompt_enhancer_contract(SimpleNamespace(app_config={}), downloaded=lambda repo, rev: False)
+
+        assert contract["audio_matrix"]["axes"]
 
     def test_downloaded_hides_size(self, tmp_path):
         contract = workspace_api_module.build_prompt_enhancer_contract(self._config(), downloaded=lambda repo, rev: True)

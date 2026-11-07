@@ -47,7 +47,7 @@ export function placePopover(anchor: Box, popover: Box, viewport: { width: numbe
  * Show an element as a popover next to its anchor.
  *
  * Moves the element to `<body>` so scrolling or overflow on its ancestors cannot clip it, fixes it
- * beside the anchor, and closes it on an outside click, Escape (returning focus to the anchor, or to `returnFocus`), or
+ * beside the anchor, re-places it when its size changes, and closes it on an outside click, Escape (returning focus to the anchor, or to `returnFocus`), or
  * when the page scrolls or resizes, since a fixed popover cannot follow its anchor.
  */
 export function popover(node: HTMLElement, initial: PopoverOptions): { update: (next: PopoverOptions) => void; destroy: () => void } {
@@ -97,6 +97,10 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
     options.onclose();
   }
 
+  // A popover that grows or shrinks after it opens (a group expanding in a menu) needs a new spot: it may now run
+  // off the bottom of the viewport. Placement moves only top and left, so it cannot retrigger this on its own.
+  const sizeWatch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place());
+  sizeWatch?.observe(node);
   place();
   document.addEventListener('pointerdown', onPointerDown, true);
   const releaseEscape = pushEscapeLayer(onEscape);
@@ -109,6 +113,7 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
       place();
     },
     destroy(): void {
+      sizeWatch?.disconnect();
       document.removeEventListener('pointerdown', onPointerDown, true);
       releaseEscape();
       window.removeEventListener('resize', onViewportChange);

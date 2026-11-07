@@ -26,6 +26,7 @@ from zvisiongenerator.utils.config import (
     video_companion_repos,
     video_family,
 )
+from zvisiongenerator.utils.audio_settings import audio_settings_contract
 from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.h3_converted import CONVERTED_H3_STORAGES, read_converted_h3
@@ -43,6 +44,7 @@ from zvisiongenerator.utils.model_files import (
 )
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
+from zvisiongenerator.utils.prompt_enhance_audio import audio_matrix_contract
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label, seedvr2_tier_label
 from zvisiongenerator.utils.video_extend import extend_step
@@ -166,6 +168,7 @@ def build_workspace_response(
         "image_models": image_models,
         "video_models": video_models,
         "audio_models": audio_models,
+        "audio_settings": audio_settings_contract(),
         "loras": loras,
         "history_assets": history_assets,
         "active_job": active_job,
@@ -210,7 +213,7 @@ def build_prompt_enhancer_contract(
     downloaded: Callable[[str, str | None], bool] = is_model_downloaded,
     budget_bytes: Callable[[], int | None] | None = None,
 ) -> dict[str, Any]:
-    """Describe the prompt enhancer for the SPA: option matrix, effective (Fast or custom) model, download state, and Smart.
+    """Describe the prompt enhancer for the SPA: option matrix, the audio option matrix (``audio_matrix``), effective (Fast or custom) model, download state, and Smart.
 
     ``smart`` is ``None`` when a custom model is configured (no Fast/Smart choice); otherwise it holds whether the Smart
     model is ``downloaded``, its first-download size label (``None`` once downloaded) and ``unavailable``, the reason it cannot run here, or ``None``.
@@ -222,6 +225,7 @@ def build_prompt_enhancer_contract(
     section = app_config.get("prompt_enhancer") or {}
     contract: dict[str, Any] = {
         "matrix": matrix_contract(),
+        "audio_matrix": audio_matrix_contract(),
         "model": None,
         "revision": None,
         "downloaded": False,

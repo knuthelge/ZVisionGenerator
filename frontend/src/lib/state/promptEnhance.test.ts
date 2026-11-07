@@ -15,7 +15,7 @@ import {
   submittedCaption,
   enhancedPartUsed,
   hasAudio,
-  isEnhancedStale,
+  enhancedStaleReason,
   rememberedParts,
   runParts,
   settingsPayload,
@@ -31,6 +31,7 @@ import {
   reusedEnhance,
 } from './promptEnhance';
 import { createNdjsonParser } from '$lib/api/promptEnhance';
+import { EMPTY_AUDIO_MATRIX } from '../../test-utils/workspace';
 import type { DraftState, EnhanceFrame, EnhanceSettings, PromptEnhancerContract } from '$lib/types';
 
 function state(overrides: Partial<DraftState> = {}): DraftState {
@@ -53,7 +54,7 @@ const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', 
 
 describe('Fast/Smart and Text/JSON', () => {
   const contract = (smart: PromptEnhancerContract['smart']): PromptEnhancerContract =>
-    ({ matrix: { axes: [], defaults: SETTINGS }, model: 'fast/m', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, smart, error: null }) as PromptEnhancerContract;
+    ({ matrix: { axes: [], defaults: SETTINGS }, audio_matrix: EMPTY_AUDIO_MATRIX, model: 'fast/m', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, smart, error: null }) as PromptEnhancerContract;
 
   it('runs Smart only when chosen and available', () => {
     const available = contract({ downloaded: false, download_size_label: '19 GB', unavailable: null });
@@ -99,17 +100,31 @@ describe('submission rule', () => {
   });
 });
 
-describe('isEnhancedStale', () => {
+describe('enhancedStaleReason', () => {
   const made = { prompt: 'a fox', scene: '', mode: 'image' as const };
+  const video = { workflow: 'txt2vid' as const, enhancedPrompt: 'x', enhancedScene: 'y' };
 
   it.each([
-    ['hand-typed text', { enhancedPrompt: 'typed', enhancedFrom: null }, false],
-    ['prompt and mode match', { enhancedPrompt: 'x', enhancedFrom: made }, false],
-    ['the prompt changes', { prompt: 'a cat', enhancedPrompt: 'x', enhancedFrom: made }, true],
-    ['the workflow mode changes', { workflow: 'txt2vid' as const, enhancedPrompt: 'x', enhancedFrom: made }, true],
-    ['the box is empty', { prompt: 'a cat', enhancedPrompt: '', enhancedFrom: made }, false],
-  ])('is stale only when the text it was made from changed: %s', (_name, overrides, stale) => {
-    expect(isEnhancedStale(state(overrides))).toBe(stale);
+    ['the prompt changed in an image', { prompt: 'a cat', enhancedPrompt: 'x', enhancedFrom: made }, 'Your Prompt changed since this was written.'],
+    ['the action changed in a video', { ...video, prompt: 'a cat', enhancedFrom: { ...made, mode: 'video' as const } }, 'Your Action changed since this was written.'],
+    ['the scene changed in a video', { ...video, scene: 'a hall', enhancedFrom: { ...made, mode: 'video' as const } }, 'Your Scene changed since this was written.'],
+    ['the scene and the action changed in a video', { ...video, scene: 'a hall', prompt: 'a cat', enhancedFrom: { ...made, mode: 'video' as const } }, 'Your Scene and Action changed since this was written.'],
+    ['the workflow went from image to video', { ...video, enhancedFrom: made }, 'The workflow changed since this was written.'],
+    ['the extension changed', { workflow: 'extend' as const, enhancedPrompt: 'x', enhancedFrom: { ...made, mode: 'video' as const, sourceVideoPath: '/a.mp4' }, extendSourcePath: '/b.mp4' }, 'The extension changed since this was written.'],
+  ])('names what changed when %s', (_name, overrides, reason) => {
+    expect(enhancedStaleReason(state(overrides))).toBe(reason);
+  });
+
+  it('says nothing while the text matches, for hand-typed text and for an empty box', () => {
+    expect(enhancedStaleReason(state({ enhancedPrompt: 'x', enhancedFrom: made }))).toBeNull();
+    expect(enhancedStaleReason(state({ prompt: 'a cat', enhancedPrompt: 'x', enhancedFrom: null }))).toBeNull();
+    expect(enhancedStaleReason(state({ prompt: 'a cat', enhancedPrompt: '', enhancedFrom: made }))).toBeNull();
+  });
+
+  it('says nothing with Enhance each image on: no Enhanced text is sent, so none is out of date', () => {
+    const changed = { prompt: 'a cat', enhancedPrompt: 'x', enhancedFrom: made };
+    expect(enhancedStaleReason(state(changed))).not.toBeNull();
+    expect(enhancedStaleReason(state({ ...changed, enhanceAuto: true }))).toBeNull();
   });
 });
 
@@ -337,7 +352,9 @@ describe('scene and prompt pair', () => {
       ['the workflow mode changes', { workflow: 'txt2img' as const, prompt: 'a knight', enhancedPrompt: 'x', enhancedFrom: made }, true],
       ['only an Enhanced scene exists and the scene changes', { scene: 'A harbour.', enhancedScene: 'A castle at dusk.', enhancedFrom: { ...made, prompt: 'a fox' } }, true],
     ])('is stale only when the text it was made from changed: %s', (_name, overrides, stale) => {
-      expect(isEnhancedStale(video(overrides))).toBe(stale);
+      const reason = enhancedStaleReason(video(overrides));
+      if (stale) expect(reason).not.toBeNull();
+      else expect(reason).toBeNull();
     });
   });
 });
@@ -395,18 +412,20 @@ describe('extend', () => {
       ['the length changes', { extendFrames: 56 }, true],
       ['the workflow is no longer an extension', { workflow: 'txt2vid' as const }, true],
     ])('is out of date only when %s', (_name, overrides, stale) => {
-      expect(isEnhancedStale({ ...enhanced(), ...overrides })).toBe(stale);
+      const reason = enhancedStaleReason({ ...enhanced(), ...overrides });
+      if (stale) expect(reason).not.toBeNull();
+      else expect(reason).toBeNull();
     });
 
     it('is out of date when text made for another video workflow is used to extend', () => {
       const made = state({ workflow: 'txt2vid', prompt: 'She waves.', enhancedPrompt: 'x', enhancedFrom: enhancedSourceFor(state({ workflow: 'txt2vid', prompt: 'She waves.' })) });
-      expect(isEnhancedStale(made)).toBe(false);
-      expect(isEnhancedStale({ ...made, workflow: 'extend', extendSourcePath: '/clips/walk.mp4', extendFrames: 48 })).toBe(true);
+      expect(enhancedStaleReason(made)).toBeNull();
+      expect(enhancedStaleReason({ ...made, workflow: 'extend', extendSourcePath: '/clips/walk.mp4', extendFrames: 48 })).not.toBeNull();
     });
 
     it('is not out of date for a video record that carries no extension source', () => {
       const old = state({ workflow: 'txt2vid', prompt: 'p', enhancedPrompt: 'x', enhancedFrom: { prompt: 'p', mode: 'video', scene: '' } });
-      expect(isEnhancedStale(old)).toBe(false);
+      expect(enhancedStaleReason(old)).toBeNull();
     });
   });
 });

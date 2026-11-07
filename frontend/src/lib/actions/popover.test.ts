@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { placePopover, popover } from './popover';
 
@@ -66,5 +66,62 @@ describe('popover', () => {
     first.destroy();
     second.destroy();
     anchor.remove();
+  });
+
+  describe('when its size changes', () => {
+    const observers: { callback: () => void; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }[] = [];
+
+    class FakeResizeObserver {
+      observe = vi.fn();
+      disconnect = vi.fn();
+      constructor(callback: () => void) {
+        observers.push({ callback, observe: this.observe, disconnect: this.disconnect });
+      }
+    }
+
+    afterEach(() => {
+      observers.length = 0;
+      vi.unstubAllGlobals();
+    });
+
+    it('places a popover that grew after opening again, flipped above its anchor', () => {
+      vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+      vi.stubGlobal('innerHeight', 600);
+      vi.stubGlobal('innerWidth', 1000);
+      const anchor = document.createElement('button');
+      anchor.getBoundingClientRect = () => box(100, 500, 80, 26) as DOMRect;
+      const panel = document.createElement('div');
+      let height = 40;
+      panel.getBoundingClientRect = () => box(0, 0, 200, height) as DOMRect;
+      document.body.append(anchor);
+      const handle = popover(panel, { anchor, onclose: vi.fn() });
+
+      expect(panel.style.top).toBe('532px');
+      height = 300;
+      observers[0].callback();
+      expect(panel.style.top).toBe('194px');
+
+      height = 40;
+      observers[0].callback();
+      expect(panel.style.top).toBe('532px');
+
+      handle.destroy();
+      anchor.remove();
+    });
+
+    it('stops watching the size when it is destroyed', () => {
+      vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+      const anchor = document.createElement('button');
+      const panel = document.createElement('div');
+      document.body.append(anchor);
+      const handle = popover(panel, { anchor, onclose: vi.fn() });
+
+      expect(observers[0].observe).toHaveBeenCalledWith(panel);
+      expect(observers[0].disconnect).not.toHaveBeenCalled();
+      handle.destroy();
+      expect(observers[0].disconnect).toHaveBeenCalledTimes(1);
+
+      anchor.remove();
+    });
   });
 });

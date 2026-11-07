@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import { popover } from '$lib/actions/popover';
   import { autogrow } from '$lib/actions/autogrow';
+  import { insertAt } from '$lib/state/caretInsert';
   import type { DocumentSnippet } from '$lib/types';
   import { canMakeChoice, choiceAt, choiceOptions, replaceChoice, snippetQueryAt, tokenizePrompt, valueAsText, type TextPart } from './document';
 
@@ -119,13 +120,12 @@
   async function insertSnippet(name: string): Promise<void> {
     if (!textareaEl) return;
     const caret = textareaEl.selectionStart;
-    const start = caret - query.length;
-    const next = textareaEl.value.slice(0, start) + name + textareaEl.value.slice(caret);
+    const { text: next, caret: after } = insertAt(textareaEl.value, caret - query.length, caret, name);
     ontype(next);
     suggestions = [];
     await tick();
     textareaEl.value = next;
-    textareaEl.setSelectionRange(start + name.length, start + name.length);
+    textareaEl.setSelectionRange(after, after);
     textareaEl.focus();
   }
 

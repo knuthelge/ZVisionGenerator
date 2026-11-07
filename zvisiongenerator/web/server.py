@@ -111,6 +111,8 @@ from zvisiongenerator.utils.video_extend import apply_extend_args, extend_step, 
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow, generation_prompt
+from zvisiongenerator.utils.audio_writers import FillResult, NoChangeError
+from zvisiongenerator.web.audio_enhance import AUDIO_MODE, audio_done_frame, audio_text_frame, run_audio_enhance, validate_audio_enhance_body
 from zvisiongenerator.web.audio_models import find_audio_model, runnable_audio_models
 from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
 from zvisiongenerator.web.planned_upload import PlannedUpload, planned_form, planned_upload_path
@@ -572,7 +574,8 @@ async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
     """Stream an on-demand prompt enhancement as NDJSON frames: ``status`` → ``text``* → ``done`` | ``error``.
 
     Image frames carry ``text`` / ``prompt``. Video frames also carry the split ``scene`` and ``prompt`` parts: ``text`` frames
-    ``{text, scene, prompt}`` and the ``done`` frame ``{scene, prompt, clamped, warning?}``.
+    ``{text, scene, prompt}`` and the ``done`` frame ``{scene, prompt, clamped, warning?}``. Audio (``mode: "audio"`` with a ``task``) frames
+    carry the written texts in ``fields``: ``text`` frames ``{task, text, fields}`` and the ``done`` frame ``{task, fields, clamped, model, warning?}``.
     """
     try:
         body = await request.json()
@@ -655,8 +658,10 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise ValueError("Request body must be a JSON object.")
     mode = body.get("mode", "image")
-    if mode not in ("image", "video"):
-        raise ValueError("mode must be 'image' or 'video'.")
+    if mode not in ("image", "video", AUDIO_MODE):
+        raise ValueError("mode must be 'image', 'video' or 'audio'.")
+    if mode == AUDIO_MODE:
+        return _validate_audio_enhance_body(body)
     prompt = body.get("prompt")
     scene = ""
     if mode == "video":
@@ -698,6 +703,16 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
         "options": options,
         "idle_seconds": options["idle_release_seconds"],
     }
+
+
+def _validate_audio_enhance_body(body: dict[str, Any]) -> dict[str, Any]:
+    """Validate an audio enhance body (see :func:`~zvisiongenerator.web.audio_enhance.validate_audio_enhance_body`) and add the enhancer it runs on."""
+    tier = _body_choice(body, "enhance_model", ENHANCER_TIERS)
+    app_config = load_config()
+    job = validate_audio_enhance_body(body, app_config=app_config)
+    options = enhance_options(app_config)
+    repo, revision = resolve_enhancer_model(app_config, platform_key=sys.platform, cli_model=tier, budget_bytes=smart_budget_bytes(tier))
+    return {**job, "repo": repo, "revision": revision, "options": options, "idle_seconds": options["idle_release_seconds"]}
 
 
 def _body_choice(body: dict[str, Any], key: str, allowed: tuple[str, ...]) -> str | None:
@@ -761,7 +776,10 @@ def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], c
             with session.acquire(job["repo"], job["revision"], idle_seconds=job["idle_seconds"], on_phase=lambda phase: frames.put({"type": "status", "phase": phase})) as enhancer:
                 frames.put({"type": "status", "phase": "generating_cpu" if runs_on_cpu(enhancer) else "generating"})
                 result = _enhance_for_job(job, enhancer, frames, cancelled)
-        frames.put(_enhance_done_frame(job["mode"], result, model=model_reference(job["repo"], job["revision"])))
+        frames.put(_enhance_done_frame(job["mode"], result, model=model_reference(job["repo"], job["revision"]), task=job.get("task")))
+    except NoChangeError as exc:
+        # A writer that left the text as it was: the Web UI shows it as a note, not an error.
+        frames.put({"type": "error", "detail": str(exc), "no_change": True})
     except (RuntimeError, ValueError) as exc:
         frames.put({"type": "error", "detail": str(exc)})
     except Exception as exc:  # noqa: BLE001 - any loader/runtime failure must still end the stream
@@ -772,9 +790,18 @@ def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], c
             get_prompt_enhancer_session().cancel_reservation(reservation)
 
 
-def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dict[str, Any]], cancelled: threading.Event) -> EnhanceResult | EnhancePairResult:
-    """Run the enhancement for *job*, pushing ``text`` frames (video frames carry the split ``scene`` and ``prompt``)."""
+def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dict[str, Any]], cancelled: threading.Event) -> EnhanceResult | EnhancePairResult | FillResult:
+    """Run the enhancement for *job*, pushing ``text`` frames (video frames carry the split ``scene`` and ``prompt``, audio frames their ``fields``)."""
     options = job["options"]
+    if job["mode"] == AUDIO_MODE:
+        return run_audio_enhance(
+            job,
+            enhancer,
+            seed=random.randint(0, 2**31 - 1),
+            temperature=options["temperature"],
+            on_text=lambda text: frames.put(audio_text_frame(job["task"], text)),
+            cancelled=cancelled.is_set,
+        )
     common = {
         "seed": random.randint(0, 2**31 - 1),
         "ceiling": job["ceiling"],
@@ -799,12 +826,14 @@ def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dic
     return enhance_video_prompt(enhancer, scene, expand_random_choices(job["prompt"]), job["settings"], on_text=_on_text, **common)
 
 
-def _enhance_done_frame(mode: str, result: EnhanceResult | EnhancePairResult, *, model: str) -> dict[str, Any]:
-    """Return the terminal ``done`` frame: ``{prompt, clamped, model, warning?}`` for images, plus ``scene`` for video.
+def _enhance_done_frame(mode: str, result: EnhanceResult | EnhancePairResult | FillResult, *, model: str, task: str | None = None) -> dict[str, Any]:
+    """Return the terminal ``done`` frame: ``{prompt, clamped, model, warning?}`` for images, plus ``scene`` for video, ``{task, fields, ...}`` for audio.
 
     ``model`` is the enhancer that wrote it (``REPO[@REVISION]``), which the client sends back with Generate so the asset
     records it. A video frame's ``scene`` is ``""`` when the scene was not rewritten (action only), so the client keeps the user's scene.
     """
+    if mode == AUDIO_MODE and task is not None:
+        return audio_done_frame(task, result, model=model)
     frame: dict[str, Any] = {"type": "done", "prompt": result.prompt, "clamped": result.clamped, "model": model}
     if isinstance(result, EnhancePairResult):
         frame = {"type": "done", "scene": result.scene, **{key: frame[key] for key in ("prompt", "clamped", "model")}}
@@ -885,7 +914,7 @@ def _generate_plan_from_form(form: Any) -> dict[str, Any]:
         mode = _generate_mode(form)
         if mode == "audio":
             audio = _parse_audio_job(form, web_config, planning=True)
-            parts = (audio_model_part(audio.preset),)
+            parts = (audio_model_part(audio.preset, voice=audio.request.voice is not None),)
         else:
             parsed = _parse_video_job(form, web_config) if mode == "video" else _parse_image_job(form, web_config)
             parts = job_download_parts(parsed.request, parsed.config, platform_key=sys.platform, model_ref=parsed.model_ref, args=parsed.args, enhance_by_set=parsed.enhance_by_set)
@@ -1399,7 +1428,7 @@ def _build_workflow_contract(app_config: dict[str, Any] | None = None) -> dict[s
         video_audio=supports_video_audio(),
         video_upscale_review=supports_video_upscale_review(),
         video_extend=supports_video_extend(),
-        audio_kinds={preset.kind for preset in audio_models},
+        audio_kinds={kind for preset in audio_models for kind in preset.kinds},
     )
 
 
@@ -1815,7 +1844,7 @@ def _submit_audio_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         runs=parsed.runs,
         seed=parsed.seed,
         output_dir=parsed.output_dir,
-        planned_targets=planned_targets((audio_model_part(parsed.preset),)),
+        planned_targets=planned_targets((audio_model_part(parsed.preset, voice=parsed.request.voice is not None),)),
         admission_check=_reject_while_busy,
         context=parsed.context,
         supported_controls=parsed.supported_controls,
@@ -1829,14 +1858,15 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
     With *planning* (the download plan) the voice recording is never read: not for the speaker's consent, not for its length.
     The submit checks both.
 
-    The fields are the ones Copy CLI reads (``workflow``, ``model``, ``prompt``, ``lyrics``, ``seconds``, ``voice_path`` or the
-    ``voice_file`` upload, ``voice_text``, ``voice_consent``, ``seed`` and ``runs``) and the request is the one ``ziv audio`` builds.
+    The fields are the ones Copy CLI reads (``workflow``, ``model``, ``prompt``, ``lyrics``, ``seconds``, ``tempo``, ``key``, ``voice_path`` or the
+    ``voice_file`` upload, ``voice_text``, ``voice_consent``, ``speaker``, the delivery fields ``emotion``, ``manner``, ``pace``, ``pitch`` and
+    ``expressiveness``, ``sound_type``, ``seed`` and ``runs``) and the request is the one ``ziv audio`` builds.
 
-    The job's workflow is the model's kind.
+    The job's workflow is the form's ``workflow`` (the kind of the take; the model's first kind when the form names none).
 
     Raises:
-        ValueError: If the form is invalid: no runnable model, a seed no model takes, a blank prompt, a length out of range,
-            a voice without its transcript or consent, or speech over the model's limits.
+        ValueError: If the form is invalid: no runnable model, a seed no model takes, a blank prompt, a length or tempo out of range,
+            an unknown key, delivery value or sound type, a voice without its transcript or consent, a built-in voice the model lacks, or speech over the model's limits.
     """
     # Before anything reads a recording: a missing ffmpeg must not surface as a failed probe or a false consent refusal.
     try:
@@ -1845,7 +1875,7 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
         raise ValueError(str(exc)) from exc
     app_config = web_config.app_config
     preset = find_audio_model(app_config, _optional_text(form, "model"))
-    workflow = preset.kind
+    workflow = _optional_text(form, "workflow") or preset.default_kind
     runs = _optional_int(form, "runs") or 1
     if runs < 1:
         raise ValueError("Runs must be at least 1.")
@@ -1856,12 +1886,23 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
         prompt=_untrimmed_text(form, "prompt"),
         lyrics=_untrimmed_text(form, "lyrics"),
         seconds=_optional_float(form, "seconds"),
-        voice_path=_resolve_voice_file(form, output_dir) if preset.kind == "speech" else None,
+        voice_path=_resolve_voice_file(form, output_dir) if preset.follows_voice(workflow) else None,
         voice_text=_optional_text(form, "voice_text"),
         voice_consent=_checkbox(form, "voice_consent"),
+        speaker=_optional_text(form, "speaker"),
+        tempo=_optional_text(form, "tempo"),
+        key=_optional_text(form, "key"),
+        emotion=_optional_text(form, "emotion"),
+        manner=_optional_text(form, "manner"),
+        pace=_optional_text(form, "pace"),
+        pitch=_optional_text(form, "pitch"),
+        expressiveness=_optional_text(form, "expressiveness"),
+        sound_type=_optional_text(form, "sound_type"),
+        prompt_input=_untrimmed_text(form, "prompt_input"),
+        enhance_record=_enhance_record_from_form(form, mode="audio", app_config=app_config),
         voice_unread=planning,
     )
-    request = audio_request_from_fields(preset, fields)
+    request = audio_request_from_fields(preset, workflow, fields)
     context = _public_job_context(
         form,
         job_type=workflow.capitalize(),
@@ -2887,7 +2928,7 @@ def api_delete_audio_model(name: str) -> dict[str, Any]:
     if target is None or not target.on_disk:
         raise not_downloaded
     # Every repository of the plan counts, also one the running download has not created in the cache yet.
-    _ensure_not_downloading(repo_ids=tuple(files.repo_id for files in preset.files), paths=(target.path,))
+    _ensure_not_downloading(repo_ids=tuple(files.repo_id for files in (*preset.files, *preset.voice_files)), paths=(target.path,))
     try:
         delete_model(target)
     except FileNotFoundError as exc:

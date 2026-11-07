@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -142,10 +142,14 @@ def build_audio_config_payload(request: AudioGenerationRequest, clip: AudioClip,
 
     The top-level keys are the reusable settings: ``workflow`` and ``kind`` (``music``, ``speech`` or ``sound``), the
     ``model``, the ``prompt`` (the song's style, the user's full text or the sound's description, never the parts a long
-    text was read in), the ``lyrics`` (music), the requested ``seconds`` (sound), the ``voice_path`` and ``voice_text``
-    of a cloned voice, and the ``seed``. A take read in the model's own voice has no voice keys. The speaker's consent
-    is never recorded. ``generation`` records how the file was made: the ``time`` it took, the actual ``duration`` in
-    seconds, the number of ``parts`` of a speech take, and ``cut`` when the model reached its length limit.
+    text was read in), the ``lyrics`` (music), the ``seconds`` the take was made at (the resolved length, for a sound or
+    music of a model that sets its length) and the ``requested_seconds`` (only when the length was set, so Reuse leaves a length on Auto), the ``tempo`` and ``key`` of a song (each only when set), the ``sound_type``
+    (sound), the ``speaker`` (the built-in voice of a speech take) with its delivery (``emotion``, ``manner``, ``pace``,
+    ``pitch`` and ``expressiveness``), the ``voice_path`` and ``voice_text`` of a cloned voice, and the ``seed``. A take
+    read in a built-in voice has no ``voice_*`` keys, and one that follows a recording has no ``speaker`` or delivery. A
+    take whose text was written by the enhancer records how as ``enhance`` and the user's own text as ``prompt_input``,
+    which is saved even when it is empty. The speaker's consent is never recorded. ``generation`` records how the file was made: the ``time`` it took, the actual ``duration`` in
+    seconds, the number of ``parts`` of a speech take, ``cut`` when the model reached its length limit, and the ``notes`` the model left about the take.
     """
     voice = request.voice
     payload = {
@@ -156,6 +160,12 @@ def build_audio_config_payload(request: AudioGenerationRequest, clip: AudioClip,
         "prompt": request.prompt,
         "lyrics": request.lyrics or None,
         "seconds": request.seconds,
+        "requested_seconds": request.requested_seconds,
+        "tempo": request.tempo,
+        "key": request.key,
+        "sound_type": request.sound_type,
+        "speaker": request.speaker,
+        **(asdict(request.delivery) if request.delivery is not None else {}),
         "voice_path": _portable_path(voice.path) if voice is not None else None,
         "voice_text": voice.text if voice is not None else None,
         "seed": request.seed,
@@ -165,10 +175,16 @@ def build_audio_config_payload(request: AudioGenerationRequest, clip: AudioClip,
                 "duration": round(clip.seconds, 2),
                 "parts": parts,
                 "cut": True if clip.cut else None,
+                "notes": list(clip.notes) or None,
             }
         ),
     }
-    return _drop_unserializable(_drop_empty(payload))
+    payload = _drop_empty(payload)
+    if request.enhance_record:
+        # Whether a take is enhanced is whether it records how; the user's own text is kept even when empty.
+        payload.update(_enhance_fields(request.enhance_record))
+        payload["prompt_input"] = request.prompt_input or ""
+    return _drop_unserializable(payload)
 
 
 def _audio_track_fields(request: VideoGenerationRequest) -> dict[str, Any]:

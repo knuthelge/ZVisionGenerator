@@ -13,7 +13,7 @@ import pytest
 
 from tests.audio._helpers import clip, sine
 
-from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
+from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDelivery, VoiceRef
 from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.utils import audio_voice
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
@@ -155,19 +155,32 @@ class TestReadConfig:
 class TestPayload:
     def test_a_speech_take_records_the_full_text_and_its_part_count(self):
         text = "Sentence one. " * 100
-        request = AudioGenerationRequest(preset="higgs3", kind="speech", prompt=text, seed=5)
+        request = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt=text, seed=5)
 
         payload = build_audio_config_payload(request, clip(2.0), parts=3, generation_time=12.34)
 
         assert payload["prompt"] == text
         assert payload["generation"] == {"time": 12.3, "duration": 2.0, "parts": 3}
-        assert (payload["schema"], payload["workflow"], payload["kind"], payload["model"], payload["seed"]) == (AUDIO_CONFIG_SCHEMA, "speech", "speech", "higgs3", 5)
+        assert (payload["schema"], payload["workflow"], payload["kind"], payload["model"], payload["seed"]) == (AUDIO_CONFIG_SCHEMA, "speech", "speech", "qwen3_tts", 5)
         assert "voice_path" not in payload and "voice_text" not in payload and "lyrics" not in payload
+
+    def test_a_built_in_voice_take_records_its_speaker(self):
+        request = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi", seed=1, speaker="vivian")
+
+        payload = build_audio_config_payload(request, clip(), parts=1, generation_time=1.0)
+
+        assert payload["speaker"] == "vivian"
+        assert "voice_path" not in payload and "voice_text" not in payload
+
+    def test_a_take_with_a_recording_records_no_speaker(self):
+        request = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi", voice=VoiceRef("/home/someone/me.wav", "Hello"), seed=1)
+
+        assert "speaker" not in build_audio_config_payload(request, clip(), parts=1, generation_time=1.0)
 
     def test_a_cloned_voice_records_its_path_and_text_but_never_consent(self, monkeypatch):
         monkeypatch.setenv("HOME", "/home/someone")
         monkeypatch.setenv("USERPROFILE", "/home/someone")
-        request = AudioGenerationRequest(preset="higgs3", kind="speech", prompt="Hi", voice=VoiceRef("/home/someone/me.wav", "Hello, this is me."), seed=1)
+        request = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi", voice=VoiceRef("/home/someone/me.wav", "Hello, this is me."), seed=1)
 
         payload = build_audio_config_payload(request, clip(), parts=1, generation_time=1.0)
 
@@ -182,6 +195,15 @@ class TestPayload:
         assert (payload["prompt"], payload["lyrics"]) == ("synth-pop", "[verse]\nla")
         assert payload["generation"] == {"duration": 1.0, "cut": True}
 
+    def test_the_notes_of_a_take_are_recorded_and_left_out_when_there_are_none(self):
+        request = AudioGenerationRequest(preset="yue2", kind="music", prompt="synth-pop", seed=2)
+
+        noted = build_audio_config_payload(request, clip(1.0, notes=("Couldn't plan.", "Voice stays.")), parts=None, generation_time=0.0)
+        plain = build_audio_config_payload(request, clip(1.0), parts=None, generation_time=0.0)
+
+        assert noted["generation"]["notes"] == ["Couldn't plan.", "Voice stays."]
+        assert "notes" not in plain["generation"]
+
     def test_a_sound_records_the_length_asked_for_and_the_length_made(self):
         request = AudioGenerationRequest(preset="sa3", kind="sound", prompt="rain", seconds=2.0, seed=9)
 
@@ -189,6 +211,53 @@ class TestPayload:
 
         assert payload["seconds"] == 2.0 and payload["generation"]["duration"] == 1.5
         assert "parts" not in payload["generation"] and "cut" not in payload["generation"]
+
+    def test_a_song_records_its_tempo_and_key_only_when_set(self):
+        set_ = AudioGenerationRequest(preset="yue2", kind="music", prompt="pop", tempo=92, key="F#m", seed=2)
+        auto = AudioGenerationRequest(preset="yue2", kind="music", prompt="pop", seed=2)
+
+        payload = build_audio_config_payload(set_, clip(), parts=None, generation_time=1.0)
+
+        assert (payload["tempo"], payload["key"]) == (92, "F#m")
+        assert not {"tempo", "key"} & build_audio_config_payload(auto, clip(), parts=None, generation_time=1.0).keys()
+
+    def test_music_of_a_model_that_sets_its_length_records_the_length_it_was_made_at(self):
+        request = AudioGenerationRequest(preset="sa3", kind="music", prompt="pad", seconds=30.0, seed=2)
+
+        assert build_audio_config_payload(request, clip(), parts=None, generation_time=1.0)["seconds"] == 30.0
+
+    def test_a_sound_records_its_type_and_the_resolved_length(self):
+        request = AudioGenerationRequest(preset="sa3", kind="sound", prompt="door", seconds=5.0, sound_type="effect", seed=9)
+
+        payload = build_audio_config_payload(request, clip(), parts=None, generation_time=1.0)
+
+        assert (payload["sound_type"], payload["seconds"]) == ("effect", 5.0)
+
+    def test_speech_in_a_built_in_voice_records_all_five_delivery_values_and_a_recording_none(self):
+        delivery = SpeechDelivery(emotion="sad", manner="whisper", pace="slow", pitch="low", expressiveness="high")
+        built_in = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi", speaker="vivian", delivery=delivery, seed=1)
+        neutral = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi", speaker="ryan", delivery=SpeechDelivery(), seed=1)
+        recording = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hi", voice=VoiceRef("/a/me.wav", "Hello"), seed=1)
+
+        payload = build_audio_config_payload(built_in, clip(), parts=1, generation_time=1.0)
+        fields = ("emotion", "manner", "pace", "pitch", "expressiveness")
+
+        assert [payload[name] for name in fields] == ["sad", "whisper", "slow", "low", "high"]
+        assert [build_audio_config_payload(neutral, clip(), parts=1, generation_time=1.0)[name] for name in fields] == ["neutral", "natural", "normal", "normal", "normal"]
+        assert not set(fields) & build_audio_config_payload(recording, clip(), parts=1, generation_time=1.0).keys()
+
+    def test_an_enhanced_take_records_how_and_the_own_text_even_when_empty(self):
+        record = {"settings": {"note": ""}, "model": "fast", "tier": "fast", "format": "text", "task": "style"}
+        request = AudioGenerationRequest(preset="yue2", kind="music", prompt="dreamy lo-fi", prompt_input="", enhance_record=record, seed=2)
+
+        payload = build_audio_config_payload(request, clip(), parts=None, generation_time=1.0)
+
+        assert (payload["enhance"], payload["prompt_input"], payload["prompt"]) == (record, "", "dreamy lo-fi")
+
+    def test_a_take_the_user_wrote_records_neither_enhance_nor_own_text(self):
+        request = AudioGenerationRequest(preset="yue2", kind="music", prompt="dreamy lo-fi", prompt_input="lo-fi", seed=2)
+
+        assert not {"enhance", "prompt_input"} & build_audio_config_payload(request, clip(), parts=None, generation_time=1.0).keys()
 
 
 class TestAnyVoiceTake:

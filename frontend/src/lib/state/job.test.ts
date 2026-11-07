@@ -50,16 +50,16 @@ describe('jobStore reconnect contract', () => {
   });
 
   it('follows an audio take through its phases and starts the next take from the first', () => {
-    jobStore.startJob({ job_id: 'take', workflow: 'speech', media_type: 'audio', prompt: 'Hello', model: 'higgs3', runs: 2, created_at: '' });
+    jobStore.startJob({ job_id: 'take', workflow: 'speech', media_type: 'audio', prompt: 'Hello', model: 'qwen3_tts', runs: 2, created_at: '' });
     const source = lastEventSource();
     source.emit('prompt_started', { type: 'prompt_started', prompt: 'Hello', run_index: 0, total_runs: 2 });
     expect(jobStore.current).toMatchObject({ phase: 'generate', audio: null });
 
-    source.emit('audio_progress', { type: 'audio_progress', phase: 'Speech tokens', step: 90, total: 1500, part: 2, n_parts: 4, run_index: 0 });
-    expect(jobStore.current).toMatchObject({ status: 'running', phase: 'generate', audio: { phase: 'Speech tokens', step: 90, total: 1500, part: 2, parts: 4 } });
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Speech', step: 0, total: 1, part: 2, n_parts: 4, run_index: 0 });
+    expect(jobStore.current).toMatchObject({ status: 'running', phase: 'generate', audio: { phase: 'Speech', step: 0, total: 1, part: 2, parts: 4 } });
 
-    source.emit('audio_progress', { type: 'audio_progress', phase: 'Speech tokens', step: 91, total: null, part: 2, n_parts: 4 });
-    expect(jobStore.current?.audio).toMatchObject({ step: 91, total: null });
+    source.emit('audio_progress', { type: 'audio_progress', phase: 'Speech', step: 1, total: null, part: 2, n_parts: 4 });
+    expect(jobStore.current?.audio).toMatchObject({ step: 1, total: null });
 
     source.emit('prompt_started', { type: 'prompt_started', prompt: 'Hello', run_index: 1, total_runs: 2 });
     expect(jobStore.current?.audio).toBeNull();

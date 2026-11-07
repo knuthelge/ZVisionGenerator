@@ -86,6 +86,22 @@ class TestQuotedTexts:
         assert find_text('Hikers pass a sign reading "Hi".', "Hi") == 28
         assert find_text("Hikers pass.", "Hi") == -1
 
+    @pytest.mark.parametrize(
+        ("spans", "output"),
+        [
+            (("She said \u201cwait, Marie\u201d",), 'She said "wait, Marie"'),
+            (('She said "wait, Marie"',), "She said \u201cwait, Marie\u201d"),
+            (("don\u2019t go",), "Please don't go"),
+            (("don't go",), "Please don\u2019t go"),
+            (("\u2018quiet\u2019 day",), "a 'quiet' day"),
+        ],
+    )
+    def test_curly_and_straight_quote_marks_are_the_same_quote(self, spans, output):
+        assert missing_quotes(spans, output) == ()
+
+    def test_a_changed_word_is_still_missing_whatever_the_quote_marks(self):
+        assert missing_quotes(("\u201cwait here\u201d",), '"wait there"') == ("\u201cwait here\u201d",)
+
     def test_missing_quotes_needs_exact_case_and_ignores_spacing(self):
         spans = ("OPEN 24 HOURS", "Café Nord")
         assert missing_quotes(spans, 'Neon reads "OPEN   24 HOURS" over "Café Nord".') == ()

@@ -135,15 +135,129 @@ Action only needs a scene; with a blank one, both parts are written. Style, Mood
 
 ## In the Web UI
 
-- **Enhance now:** click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. Enhancing again always starts from your text; **Use mine** drops the Enhanced text.
-- **The popover** groups the options as **Look** (Style, Mood, Theme), **Framing** (Shot, Angle), **Color** (Palette), **Focus on**, **Motion** and **Sound** for video, and **Output** (Rewrite or Write as, and Length), then Direction. With **Custom**, a row of colour dots appears under **Palette**: **+** adds a colour (up to five), tap a dot to change it, and **×** removes it. The popover scrolls when it doesn't fit, with **Enhance prompt** pinned at the bottom. **Reset** puts every option back. **Enhancer** (Fast or Smart) sits next to **Enhance prompt**. Images and video remember their own options.
-- **What Generate sends:** for each part, the Enhanced text when it has any, otherwise your text. The line under the prompt box says **Generate uses the Enhanced text**, with **Use mine** to go back to yours. In video, each part that uses its Enhanced text shows **Uses enhanced** with its own **Use mine**.
-- **Out of date:** if you change your text or switch tabs afterwards, the line under the box says **Out of date**, in either tab. The Enhanced text is still used until you choose **Use mine** or **Re-enhance**.
-- **The last five rewrites:** each time you enhance the same text, the rewrite is kept, up to five. In the **Enhanced** tab, `‹ 2 of 3 ›` steps back and forward through them, and Generate sends the one shown, recording how it was written. The stepper is hidden while auto-enhance is on, while the text is out of date and after you edit the Enhanced text by hand. Enhancing a different text starts a new list. The rewrites are kept in the browser with the rest of the form, not on the server.
+- **Enhance now:** click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. Enhancing always starts from your text, never from the Enhanced text.
+- **The popover** groups the options as **Look** (Style, Mood, Theme), **Framing** (Shot, Angle), **Color** (Palette), **Focus on**, **Motion** and **Sound** for video, and **Output** (Rewrite or Write as, and Length), then Direction. With **Custom**, a row of colour dots appears under **Palette**: **+** adds a colour (up to five), tap a dot to change it, and **×** removes it. **Reset** puts every option back. **Enhancer** (Fast or Smart) sits next to **Enhance prompt**. Images and video remember their own options.
+- **What Generate sends:** for each part, the Enhanced text when it has any, otherwise your text. A dot on the **Enhanced** tab means Generate sends the Enhanced text; no mark anywhere means it sends your text. In video one header and one stepper cover the scene and the action, because one Enhance writes both.
+- **Out of date:** once your text changes after the rewrite was written, or you pick another model, the **Enhanced** tab shows ⚠ and the panel opens on **Enhance again**, with the reason beside it. The Enhanced text is still sent until you scratch it or enhance again. With **Enhance each image when generating** on, nothing is out of date: Generate sends your text and each image is enhanced as its job runs.
+- **The last five versions:** each Enhance, or **Enhance again** after your text changed, adds a version and keeps the earlier ones, up to five. In the **Enhanced** tab, `‹ 2 of 3 ›` steps through them, and Generate sends the one shown. Typing in a shown version edits that version. The versions are kept in the browser with the rest of the form, not on the server.
+- **Scratch:** **✕** after the open **Enhanced** tab empties the Enhanced text, so Generate sends your text again; ‹ brings the scratched version back.
+- **Running:** a stop ring (or the panel's **Stop**) ends a run, and **Generate** waits while Enhance, a helper or Fill in is writing the text it sends.
+- **Messages:** an error, or the note about the last result, shows as one line under the box. A run that fails shows your own text again.
+- **Switching between Image and Video** opens the prompt box on your own tab; the Enhanced text is kept for its mode.
 - **Random choices** are picked before the rewrite, so the Enhanced prompt has none left. Enhance again for a different pick.
 - **Enhance each image when generating** rewrites every image's prompt as part of the job, after its random choices are picked. It works with inline prompts and prompt files. The job card shows *Enhancing prompt N of M*; a prompt that couldn't be enhanced is generated from the original.
 
 The Enhance button is unavailable while jobs are running or queued, because it needs the same memory.
+
+## Audio
+
+On the Audio tab the enhancer rewrites the text of a take into the shape its model was trained on, so a short idea becomes a caption the model follows. It works on a **Sound** prompt and on a **Music** style. The enhancer never rewrites Music's Lyrics as part of a style: a separate [lyrics helper](#lyrics-helper) polishes them. Speech's text is read as written, with a separate [script helper](#script-helper) to mark it up or fit it to a time. A take is written from an idea in one place only, [Describe it](#describe-it-and-fill-in). `ziv audio --enhance` does the same for a sound's prompt and a song's style; see [Generate audio](../cli/audio.md#enhance-the-prompt). Every audio helper is unavailable while a take is being made, because the enhancer needs the same memory.
+
+- **Sound** is rewritten into one short sentence for Stable Audio 3, at most 45 words, with no brackets, markdown, length or tempo. It describes only what is heard: the source, what it hits, the space, how it changes and how it moves. It adds no music or speech unless you ask for it.
+- **The take's Type and Length** go along as context. An effect or a one-shot is written as one event, an ambience as a steady bed, and the rewrite describes only what fits in the take's length.
+- **A Music style** takes the shape of the open model, so the same idea reads differently for each:
+
+| Model | The style is written as | Example |
+|---|---|---|
+| YuE2 | One line of comma-separated descriptors: short noun phrases, no sentences, no period | *Jazz, expressive lead vocal, piano, tenor saxophone, upright bass, brushed drums, warm* |
+| Stable Audio 3 | One sentence of at most 45 words, plain English, with no singing: instruments carry the melody | *A warm jazz tune led by tenor saxophone and piano over upright bass and brushed drums.* |
+
+  What you leave out is written as "no" and the instrument (*no guitar*). A style never holds lyrics, a title, section tags, a tempo, a key or a length: Tempo, Key and Length are set in Settings. The enhancer is told whether the song is instrumental, so it describes no singer then; for a song YuE2 sings, the start of your lyrics tells it what the words are about, and it never copies them into the style. Stable Audio cannot sing, so it is never told the lyrics and a style for it describes no voice.
+
+Sound has four options, and Music has six:
+
+| Option | Choose | Values | Key |
+|---|---|---|---|
+| Space (Sound) | one | Keep, Small room, Large hall, Street, Open country, Forest, Underwater | `space` |
+| Distance (Sound) | one | Keep, Close, Medium, Far | `distance` |
+| Over time (Sound) | one | Keep, Steady, Builds, Hit then tail | `over_time` |
+| Movement (Sound) | one | Keep, Still, Passing, Approaching, Receding | `movement` |
+| Genre (Music) | one | Keep, then 32 genres in eight groups: Pop & rock, Electronic, Hip-hop & R&B, Jazz & blues, Folk & country, Classical & cinematic, World, Lo-fi & ambient | `genre` |
+| Mood (Music) | one | Keep, Serene, Joyful, Romantic, Nostalgic, Melancholic, Mysterious, Dark, Dramatic, Epic, Hopeful, Energetic, Dreamy | `music_mood` |
+| Instruments (Music) | any | Guitar, Piano, Drums, Bass, Strings, Synth, Brass, Saxophone, Violin, Flute, Organ, Percussion | `instruments` |
+| Without (Music) | any | The same twelve; an instrument you ask for cannot also be left out | `without` |
+| Singer (Music) | one | Keep, Female, Male, Duet, Choir | `singer` |
+| Production (Music) | one | Keep, Polished, Lo-fi, Live, Vintage, Cinematic | `production` |
+| Direction | free text | For example *keep the thunder far off* (up to 300 characters) | `note` |
+
+**Singer** is offered only for a song the model sings: a model without lyrics (Stable Audio) and a song with no lyrics, or only `[section]` tags, are instrumental, and have no singer to choose.
+
+Nothing is picked by default. With every choice at Keep the enhancer still rewrites your text into the model's shape.
+
+The rewrite is made for the open model. It is kept as the **Enhanced** text beside your own, and it is out of date once your text changes or you pick another model: a Music style written for YuE2 shows ⚠ on its **Enhanced** tab when you switch to Stable Audio, and **Enhance again** writes it again in that model's shape. The Fast and Smart choice, the marks, Scratch, the stop ring and the last five versions work as they do for images (see [In the Web UI](#in-the-web-ui)).
+
+The take keeps your own text and how it was enhanced: the options, the enhancer model and the kind of rewrite. **Reuse settings**, **Retry** and **Load settings** bring both back, with the rewrite in the **Enhanced** tab.
+
+### Describe it and Fill in
+
+**Describe it** is the one place that writes from an idea. A sentence such as *a sad folk song about leaving the coast* goes to the enhancer in a single request, and **Fill in** writes the fields you have left empty. Music and Speech have the box; Sound has none, since its prompt is already the idea.
+
+| Take | Fill in can write | A field is empty when |
+|---|---|---|
+| Music on YuE2 | Style, Lyrics, Tempo, Key | It has no text (an Enhanced style does not count), or is Auto |
+| Music on Stable Audio | Style, Tempo, Key (the model sings no lyrics) | The same |
+| Speech | Text, Vibe | The text is blank, or the Delivery values are all at their defaults |
+
+What it does:
+
+- **It fills only what is empty.** A field you have written or set is left alone, and goes to the enhancer as context so the new fields suit it. The idea takes at most 1,000 characters.
+- **The Style lands in your own Style box,** like Speech's Text, so it is yours to edit and Generate sends it as your text. **Enhance** then starts from it.
+- **Names and quotes are copied exactly** into the lyrics and the text.
+- **Your sections are kept.** When the Lyrics hold only `[section]` tags, Fill in follows those sections where it can, and **Undo fill** brings the tags back.
+- **An instrumental has no lyrics.** If the idea asks for one, the Lyrics stay empty.
+- **Speech** gets a Text in plain words and a Vibe. A mark such as `[sad]` appears only where the feeling clearly changes.
+
+The Tempo and Key Fill in wrote, and the Vibe, carry a ✦ until you change them: edit the field and it is yours, and **Fill in again** rewrites only the fields that are empty or still marked. **Undo fill** puts back what the fill replaced, for the fields still marked. The take keeps the Style as your own text; the idea itself is not saved with it. Fill in uses the Fast or Smart enhancer chosen for the Audio tab.
+
+### Lyrics helper
+
+The lyrics helper works on the words you already have. It polishes your lyrics and fills an empty section to fit the rest; new lyrics from an idea come from Describe it, not from this helper. On a song of only `[section]` tags, the helper offers **Fill in from Describe it**, which writes the words into those sections. It is offered for a model that sings lyrics (YuE2); Stable Audio takes none.
+
+**Improve lyrics** works on the whole song or on one section. **Tighten** is picked when the helper opens. Pick any of these, add a direction, or clear every pick for a general polish of rhythm and flow:
+
+| Improvement | What it does |
+|---|---|
+| Tighten | Cuts filler and repeated ideas so each line is shorter and easier to sing, and keeps the meaning of every line |
+| Fit the sections | Makes each section's length and weight suit its role (verses carry the story, choruses are short and catchy, a bridge is brief); whole song only |
+| Smooth rhymes | Gives the line endings a clear, steady rhyme without bending the meaning |
+| Simpler words | Swaps rare or formal words for plain ones that are easy to sing |
+
+**Write** fills one section that has no words so that it fits the rest of the song: its language, voice, theme, line length and rhyme style, and about as many lines as the song's sections of the same name. A second chorus is written as a repeat of the first. A section is written only when the rest of the song has words to fit; on a song with none, Write points to Fill in.
+
+What it keeps:
+
+- **The sections.** Improving the whole song keeps your `[section]` tags as you wrote them, each on its own line, and a title above the first tag. A song without tags gets none, and a section without words stays without words. If the answer merges or drops sections, nothing changes and the helper says so.
+- **Your names and quotes.** Names, dates, places and anything in double quotes are kept exactly.
+- **Your language.** The words are written in the language of the lyrics.
+- **One section.** Improving or writing one section changes only that section; the rest of the song is given as context.
+
+The song's style (the Enhanced style when the take uses one, else your own) goes along as context, so the words suit it. Tempo, key and length are settings and do not go along.
+
+Each result is a version of the lyrics, up to five with yours first, and Generate uses the one shown. The lyrics take at most 4,000 characters.
+
+### Script helper
+
+The script helper works on the script you already have in Speech's Text box. It marks the script up with delivery, or shortens or lengthens it to a reading time; a script written from an idea comes from Describe it, not from this helper. It is offered whenever the prompt enhancer is set up.
+
+| Action | What it does |
+|---|---|
+| Fit to time | Shortens or lengthens the script so it reads in about the time you give, at the Pace in Settings |
+| Add delivery | Adds delivery marks (`[sad]`, `[whisper]`, `[as set]`, ...), pauses (`…`) and line breaks where the meaning asks for them, and nothing else |
+
+Pick either or both. With both, one request fits your Text and then adds delivery to the fitted text, so a run makes one version with one record and one **Stop**. When the delivery finds no place for a mark or pause, the fitted text is kept with a note.
+
+What it keeps:
+
+- **Your words.** Add delivery never changes a word, a quote mark or a bracket of yours: the result is your own text with only the marks, pauses and line breaks the helper added between your words. Marks and pauses you already wrote stay.
+- **Only marks the app knows.** The helper adds only the marks the Insert menu offers (the emotions, `[whisper]`, `[shout]` and `[as set]`), at the start of a sentence or a line. A pause is `…`.
+- **Your names and quotes.** A fit keeps names, numbers, dates and anything in double quotes as written.
+- **Your language.** The script is edited in its own language.
+
+**Fit to time** counts the characters that are read, not the marks, at the Pace in Settings. It starts at the script's current reading time rounded to the nearest five seconds, and takes 3 to 600 seconds. A fit that lands far from the time is kept and says so (*Came out at about 1:40.*). A voice that follows a recording is read as recorded, so its time is counted at a Normal pace, and Add delivery is not offered for it.
+
+Each result is a **version** in the **Written** tab beside your own text, up to five, with a stepper. The helper always starts from your own Text, whichever tab is shown, and Generate sends the Written text. The Written text is out of date once your own text changes or you pick another model, and is still sent until you scratch it. The script takes at most 4,000 characters.
+
+The take keeps your own text and what the helper did (the actions, and with a fit the time and Pace). **Reuse settings**, **Retry** and **Load settings** bring both back, with the script in the **Written** tab.
 
 ## In prompt files
 

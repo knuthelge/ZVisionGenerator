@@ -174,9 +174,10 @@ def audio_delete_target(preset: AudioPreset) -> DeleteTarget | None:
     """Return what deleting the audio model *preset* removes, or ``None`` when nothing of it is on disk.
 
     The target is the model's repositories in the Hugging Face cache (a partial download counts, so an interrupted first
-    use can be cleared too). No other model loads an audio model's repositories, so none is kept.
+    use can be cleared too). The cloning files of a speech model count with it. No other model loads an audio model's
+    repositories, so none is kept.
     """
-    repos = tuple(dict.fromkeys(files.repo_id for files in preset.files if huggingface_cache_repo_dir(files.repo_id).is_dir()))
+    repos = tuple(dict.fromkeys(files.repo_id for files in (*preset.files, *preset.voice_files) if huggingface_cache_repo_dir(files.repo_id).is_dir()))
     if not repos:
         return None
     return DeleteTarget("huggingface", huggingface_cache_repo_dir(repos[0]), repo_id=repos[0], companion_repos=repos[1:])

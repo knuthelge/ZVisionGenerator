@@ -5,7 +5,7 @@ description = "Z-Vision Generator — cross-platform AI image and video generato
 readme = "README.md"
 requires-python = ">=3.14"
 license = "AGPL-3.0-or-later"
-license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md", "licenses/boson-higgs-tts-3.txt", "licenses/sglang-omni-apache-2.0.txt"]
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Knut Risheim" }]
 keywords = ["ai", "image-generation", "video-generation", "z-image", "flux", "mlx", "diffusers", "stable-diffusion"]
 classifiers = [
@@ -31,9 +31,11 @@ dependencies = [
     "fastapi>=0.162.0",
     "huggingface-hub>=1.33.0,<2.0",
     "kornia>=0.9.0",
+    "librosa>=1.0.0; sys_platform != 'darwin'",
     "mflux>=0.24.0,<0.25; sys_platform == 'darwin'",
     "numpy>=2.0.0",
     "omegaconf>=2.3.0; sys_platform != 'darwin'",
+    "onnxruntime>=1.31.1; sys_platform != 'darwin'",
     "opencv-python-headless>=4.10.0; sys_platform != 'darwin'",
     "peft>=0.21.2; sys_platform != 'darwin'",
     "Pillow>=13.0.0,<14",
@@ -42,11 +44,13 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rotary-embedding-torch>=0.5.3; sys_platform != 'darwin'",
     "scipy>=1.17.0",
+    "sox>=1.5.0; sys_platform != 'darwin'",
+    "soundfile>=0.14.0; sys_platform != 'darwin'",
     "timm>=1.0.30",
     "torch>=2.14.0",
     "torchaudio>=2.11.1",
     "torchvision>=0.29.0",
-    "transformers>=5.19.0",
+    "transformers>=5.19.0,<5.23",
     "uvicorn>=0.54.0",
     "mlx>=0.32.4,<0.33; sys_platform == 'darwin'",
     "mlx-arsenal>=0.2.4,<0.3; sys_platform == 'darwin'",
@@ -127,7 +131,7 @@ version-file = "zvisiongenerator/_version.py"
 exclude = ["scripts/docs_demo"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx", "packages/minimax_h3_mlx", "packages/seedvr2_torch", "packages/moss_image", "packages/birefnet", "packages/yue2", "packages/stable_audio_3"]
+packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx", "packages/minimax_h3_mlx", "packages/seedvr2_torch", "packages/moss_image", "packages/birefnet", "packages/yue2", "packages/stable_audio_3", "packages/qwen_tts", "packages/faster_qwen3_tts"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "zvisiongenerator/config.yaml" = "zvisiongenerator/config.yaml"

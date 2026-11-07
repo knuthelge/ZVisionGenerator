@@ -12,7 +12,7 @@ graph TD
   SEL["backends/__init__.py<br/>picks the platform"]
   MAC["backends/mac<br/>mflux · MLX · mlx-lm"]
   CUDA["backends/cuda<br/>diffusers · PyTorch · transformers"]
-  AUD["backends/audio<br/>YuE2 · Higgs TTS 3 · Stable Audio 3<br/>PyTorch on CUDA or MPS"]
+  AUD["backends/audio<br/>YuE2 · Qwen3-TTS · Stable Audio 3<br/>PyTorch on CUDA or MPS"]
   DL["downloads/<br/>plan, check and fetch models"]
   UT["utils/<br/>config, prompts, provenance, paths"]
 

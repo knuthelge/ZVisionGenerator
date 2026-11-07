@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GalleryAsset } from '$lib/types';
 import AssetViewer from './AssetViewer.svelte';
-import { LYRICS, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../../test-utils/audio';
+import { AUDIO_MODELS, LYRICS, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../../test-utils/audio';
 import { mountComponent } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 
@@ -102,8 +102,33 @@ describe('AssetViewer with audio', () => {
     expect(document.querySelector('[data-testid="viewer-enhance"]')).toBeNull();
   });
 
-  const voiceOf = (asset: ReturnType<typeof makeSpeechAsset>): string | null | undefined => {
-    mountViewer({ assets: [asset] });
+  it('shows how an enhanced take was written, with the user\'s own text, as it does for an image', () => {
+    const enhance = { summary: 'Fast · Style · Folk', tier: 'fast' as const, prompt_input: 'sad folk', scene_input: null, settings: {}, model: 'org/fast', format: 'text' as const };
+    mountViewer({ assets: [makeAudioAsset({ enhance })] });
+    flushSync(() => action('details')!.click());
+
+    const block = document.querySelector('[data-testid="viewer-enhance"]');
+    expect(block?.textContent).toContain('Fast · Style · Folk');
+    expect(block?.textContent).toContain('sad folk');
+  });
+
+  it('shows the notes of a take as one Note fact, and none for a take without', () => {
+    mountViewer({ assets: [makeAudioAsset({ notes: ["YuE2 couldn't plan with this tempo and key.", 'The voice stays.'] })] });
+    flushSync(() => action('details')!.click());
+    const note = () => Array.from(document.querySelectorAll('.viewer-facts > div')).find((row) => row.querySelector('dt')?.textContent === 'Note');
+
+    expect(note()?.querySelector('dd')?.textContent).toBe("YuE2 couldn't plan with this tempo and key. The voice stays.");
+  });
+
+  it('shows no Note fact for a take without notes', () => {
+    mountViewer({ assets: [makeAudioAsset({ notes: [] })] });
+    flushSync(() => action('details')!.click());
+
+    expect(Array.from(document.querySelectorAll('.viewer-facts dt')).map((label) => label.textContent)).not.toContain('Note');
+  });
+
+  const voiceOf = (asset: ReturnType<typeof makeSpeechAsset>, audioModels = AUDIO_MODELS): string | null | undefined => {
+    mountViewer({ assets: [asset], audioModels });
     flushSync(() => action('details')!.click());
     return Array.from(document.querySelectorAll('.viewer-facts > div')).find((row) => row.querySelector('dt')?.textContent === 'Voice')?.querySelector('dd')?.textContent;
   };
@@ -114,8 +139,20 @@ describe('AssetViewer with audio', () => {
     expect(voiceOf(cloned)).toBe('mine.wav');
   });
 
-  it('says Any for a take the model chose the voice of', () => {
-    expect(voiceOf(talk)).toBe('Any');
+  it('names the built-in voice a take was read in, by its name', () => {
+    const voiced = makeSpeechAsset({ reuse_workspace_url: '#/workspace?workflow=speech&model=qwen3_tts&speaker=vivian' });
+
+    expect(voiceOf(voiced)).toBe('Vivian');
+  });
+
+  it('shows the id of a built-in voice this machine does not list', () => {
+    const voiced = makeSpeechAsset({ reuse_workspace_url: '#/workspace?workflow=speech&model=qwen3_tts&speaker=vivian' });
+
+    expect(voiceOf(voiced, [])).toBe('vivian');
+  });
+
+  it('shows a dash for a take that records no voice', () => {
+    expect(voiceOf(talk)).toBe('—');
   });
 
   it('keeps playing when the list is replaced by a fresh copy holding the same take', async () => {

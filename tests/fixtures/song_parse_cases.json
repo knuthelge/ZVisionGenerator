@@ -1,0 +1,408 @@
+[
+ {
+  "text": "",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "\n",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 2
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "\n\n\n",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 4
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "   ",
+  "song": {
+   "lead": {
+    "text": "   ",
+    "blank": 0
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "la la la",
+  "song": {
+   "lead": {
+    "text": "la la la",
+    "blank": 0
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "la la\n",
+  "song": {
+   "lead": {
+    "text": "la la",
+    "blank": 1
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "words before\n\n[Verse]\nfirst\n\n[Chorus]\nsecond",
+  "song": {
+   "lead": {
+    "text": "words before",
+    "blank": 1
+   },
+   "blocks": [
+    {
+     "tag": "[Verse]",
+     "text": "first",
+     "blank": 1
+    },
+    {
+     "tag": "[Chorus]",
+     "text": "second",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "words before\n[Verse]\nfirst",
+  "song": {
+   "lead": {
+    "text": "words before",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[Verse]",
+     "text": "first",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "[Verse]",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[Verse]",
+     "text": "",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "[Verse]\n\n",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[Verse]",
+     "text": "",
+     "blank": 2
+    }
+   ]
+  }
+ },
+ {
+  "text": "[A]\n\n[B]\n\n\n[C]\n",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[A]",
+     "text": "",
+     "blank": 1
+    },
+    {
+     "tag": "[B]",
+     "text": "",
+     "blank": 2
+    },
+    {
+     "tag": "[C]",
+     "text": "",
+     "blank": 1
+    }
+   ]
+  }
+ },
+ {
+  "text": "\n[A]\n",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 1
+   },
+   "blocks": [
+    {
+     "tag": "[A]",
+     "text": "",
+     "blank": 1
+    }
+   ]
+  }
+ },
+ {
+  "text": "  [Intro]  \n\t[Verse]\t\nla",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "  [Intro]  ",
+     "text": "",
+     "blank": 0
+    },
+    {
+     "tag": "\t[Verse]\t",
+     "text": "la",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "[Chorus] oh oh\nmore",
+  "song": {
+   "lead": {
+    "text": "[Chorus] oh oh\nmore",
+    "blank": 0
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "x [Chorus]\n[Bridge] y",
+  "song": {
+   "lead": {
+    "text": "x [Chorus]\n[Bridge] y",
+    "blank": 0
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "[Verse\nstill words\n]",
+  "song": {
+   "lead": {
+    "text": "[Verse\nstill words\n]",
+    "blank": 0
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "[]\n[ ]\n[[x]]\n[a][b]",
+  "song": {
+   "lead": {
+    "text": "[]",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[ ]",
+     "text": "[[x]]\n[a][b]",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "[Verse 2]\r\nline one\r\n\r\n[Chorus]\r\nline two\r\n",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[Verse 2]",
+     "text": "line one",
+     "blank": 1
+    },
+    {
+     "tag": "[Chorus]",
+     "text": "line two",
+     "blank": 1
+    }
+   ]
+  }
+ },
+ {
+  "text": "a\rb\r[Verse]\rc",
+  "song": {
+   "lead": {
+    "text": "a\rb\r[Verse]\rc",
+    "blank": 0
+   },
+   "blocks": []
+  }
+ },
+ {
+  "text": "ÆØÅ [verse]\n日本語\n [chorus] \n🎵",
+  "song": {
+   "lead": {
+    "text": "ÆØÅ [verse]\n日本語",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": " [chorus] ",
+     "text": "🎵",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "\n\n[Verse]\n\n\nla\n\n\n",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 2
+   },
+   "blocks": [
+    {
+     "tag": "[Verse]",
+     "text": "\n\nla",
+     "blank": 3
+    }
+   ]
+  }
+ },
+ {
+  "text": " [Verse] \nx",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": " [Verse] ",
+     "text": "x",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": " \n[Verse]\n \n",
+  "song": {
+   "lead": {
+    "text": " ",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[Verse]",
+     "text": " ",
+     "blank": 1
+    }
+   ]
+  }
+ },
+ {
+  "text": "[Verse]\n \n\n[Chorus]",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[Verse]",
+     "text": " ",
+     "blank": 1
+    },
+    {
+     "tag": "[Chorus]",
+     "text": "",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "[verse]\n[chorus]\n[verse]\n[chorus]",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[verse]",
+     "text": "",
+     "blank": 0
+    },
+    {
+     "tag": "[chorus]",
+     "text": "",
+     "blank": 0
+    },
+    {
+     "tag": "[verse]",
+     "text": "",
+     "blank": 0
+    },
+    {
+     "tag": "[chorus]",
+     "text": "",
+     "blank": 0
+    }
+   ]
+  }
+ },
+ {
+  "text": "[Pre-Chorus]\nbuilding\n[Chorus]\nbig",
+  "song": {
+   "lead": {
+    "text": "",
+    "blank": 0
+   },
+   "blocks": [
+    {
+     "tag": "[Pre-Chorus]",
+     "text": "building",
+     "blank": 0
+    },
+    {
+     "tag": "[Chorus]",
+     "text": "big",
+     "blank": 0
+    }
+   ]
+  }
+ }
+]

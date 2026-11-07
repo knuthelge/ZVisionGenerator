@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
-import { anyEnhancedUsed, isEnhancedStale, rememberedParts } from './promptEnhance';
+import { anyEnhancedUsed, enhancedStaleReason, rememberedParts } from './promptEnhance';
 import { presetDiffers } from './presets';
 import { downloadStore } from './downloads.svelte';
 import { changedSettings, draft, extendStepFor, fitDimensions, maxStepsFor, offeredSizes, settingDefaultsFor, snapDimension, stepOptionsFor, videoTimingFor } from './draft.svelte';
@@ -927,7 +927,7 @@ describe('draft store – prompt enhancer fields', () => {
       expect(draft.state).toMatchObject({ workflow: 'img2vid', scene: 'a red fox', prompt: '', enhancedScene: '', enhancedPrompt: '', enhancedFrom: null, firstFramePath: '/in/a.png' });
       openTab('txt2img', ctx);
       expect(draft.state).toMatchObject({ ...image, scene: '' });
-      expect(isEnhancedStale(draft.state)).toBe(false);
+      expect(enhancedStaleReason(draft.state)).toBeNull();
     });
 
     it('first frame replaces an earlier scene, Action and Enhanced text of Video', () => {
@@ -1025,14 +1025,14 @@ describe('draft store – prompt enhancer fields', () => {
 
       openTab('txt2img', ctx);
       expect(draft.state).toMatchObject({ ...imageText, scene: '', enhancedHistory: [] });
-      expect(isEnhancedStale(draft.state)).toBe(false);
+      expect(enhancedStaleReason(draft.state)).toBeNull();
 
       draft.loadDraft();
       expect(draft.state).toMatchObject(imageText);
       openTab('txt2vid', ctx);
       expect(draft.state).toMatchObject({ ...videoText, negativePrompt: '' });
       expect(draft.state.enhancedHistory).toHaveLength(1);
-      expect(isEnhancedStale(draft.state)).toBe(false);
+      expect(enhancedStaleReason(draft.state)).toBeNull();
     });
 
     it('keeps the JSON caption and its toggle with Image', () => {
@@ -1057,6 +1057,15 @@ describe('draft store – prompt enhancer fields', () => {
       expect(draft.state).toMatchObject({ prompt: '', scene: '' });
       draft.setTab('image');
       expect(draft.state).toMatchObject({ prompt: 'old prompt', scene: 'old scene' });
+    });
+
+    it('a stored draft without the audio settings opens them on Auto and at their defaults', () => {
+      localStorage.setItem('ziv-workspace-draft-v1', JSON.stringify({ version: 3, audioStyle: 'calm', audioSeconds: 20 }));
+      draft.loadDraft();
+      expect(draft.state).toMatchObject({
+        audioStyle: 'calm', audioSeconds: 20, audioTempo: null, audioKey: null, musicSeconds: 0, soundType: 'auto',
+        speechDelivery: { emotion: 'neutral', manner: 'natural', pace: 'normal', pitch: 'normal', expressiveness: 'normal' },
+      });
     });
 
     it('Extend shares the text of Video', () => {
@@ -1120,7 +1129,7 @@ describe('draft store – prompt enhancer fields', () => {
       openTab('txt2img', ctx);
       expect(draft.state).toMatchObject({ enhancedPrompt: imageText.enhancedPrompt, enhancedScene: '', enhancedFrom: imageText.enhancedFrom, enhanceSettings: imageSettings });
       expect(draft.state.enhanceSettingsVideo?.style).toBe('dreamy');
-      expect(isEnhancedStale(draft.state)).toBe(false);
+      expect(enhancedStaleReason(draft.state)).toBeNull();
     });
   });
 
@@ -2210,15 +2219,23 @@ describe('applyPreset', () => {
     extendAudioTrackPath: '/audio/other.mp3', extendAudioTrackUpload: 'extend.m4a', extendAudioTrackStart: 12, frameCount: 33, fps: 30, audio: true, lowMemory: true,
     historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
     enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
-    savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] } },
+    savedText: { video: { prompt: 'an action', scene: 'a video scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [], enhancedScratched: null } },
     savedSettings: { video: { steps: 9 } },
     enhancedHistory: [{ prompt: 'plain rewrite', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }, { prompt: '{"caption":"x"}', scene: '', from: { prompt: 'a prompt', scene: 'a scene', mode: 'image' } }],
+    enhancedScratched: 1,
     enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],
-    enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
+    enhanceAuto: true, enhanceModel: 'smart', describeTier: 'smart', enhanceFormat: 'json',
     extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
     videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
-    videoKind: 'extend', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'higgs3', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
-    audioSeconds: 30, voiceMode: 'recording', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
+    videoKind: 'extend', audioKind: 'speech', audioModels: { music: 'yue2', speech: 'qwen3_tts', sound: 'sa3' }, audioStyle: 'a style', lyrics: '[verse]\nla', speechText: 'some text', soundPrompt: 'rain',
+    audioSeconds: 30, audioTempo: 96, audioKey: 'F#m', musicSeconds: 45, soundType: 'effect',
+    speechDelivery: { emotion: 'sad', manner: 'whisper', pace: 'slow', pitch: 'low', expressiveness: 'high' },
+    voiceMode: 'recording', speechSpeaker: 'vivian', voicePath: '/voices/me.wav', voiceUpload: 'me.wav', voiceText: 'hello',
+    audioRewrites: { style: { text: '', from: null, history: [] }, sound: { text: 'Heavy rain.', from: { input: 'rain', model: 'sa3', task: 'sound' }, history: [] }, text: { text: '', from: null, history: [] } },
+    lyricsVersions: [{ text: 'my words', mine: true }, { text: 'better words', mine: false }],
+    lyricsCurrent: 1,
+    enhanceSettingsAudio: { sound: { space: 'forest' }, style: null },
+    audioDescribe: { music: { text: 'a sad song', marked: ['tempo'], filled: { tempo: '96' }, undo: null, folded: true }, speech: { text: '', marked: [], filled: {}, undo: null, folded: null } },
   };
 
   beforeEach(() => {

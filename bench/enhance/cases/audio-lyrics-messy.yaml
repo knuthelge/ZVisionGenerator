@@ -1,0 +1,975 @@
+# Messy, realistic Lyrics-box contents for the lyrics helper (improve the whole song, improve one section, write one empty section).
+# Everything here is original text written for the bench. Run with:
+#   python -m bench.enhance run --cases-file bench/enhance/cases/audio-lyrics-messy.yaml --label NAME --model fast|smart
+# The cause tags say what makes the input messy: untagged, tagstyle, refusal-open, repeat, quotes, short, long, blanks, language, odd.
+
+cases:
+  # ---- whole song: no tags --------------------------------------------------------------------------------------------------------
+  - id: ml-untagged-short
+    tags: [audio, lyrics, messy, whole, untagged]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      Rain on the window, I'm counting the hours
+      You said you'd be here by nine
+      The kettle is singing, the cat's on the sofa
+      And I keep on checking the time
+    settings: {}
+  - id: ml-untagged-two-stanzas-tighten
+    tags: [audio, lyrics, messy, whole, untagged]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      We drove all night along the coast road with the windows rolled right down
+      The radio was playing something old from some forgotten town
+      You had your feet up on the dashboard and your hair was in your eyes
+      And I was thinking that I never saw a prettier sunrise
+
+      Now the road is long behind us and the summer's turning cold
+      I still keep that old cassette tape though the music's getting old
+      Sometimes I play it in the evening when the house is dark and still
+      And I'm back there on that coast road, and I always will
+    settings: {improve: [tighten]}
+  - id: ml-untagged-long-rhymes
+    tags: [audio, lyrics, messy, whole, untagged, long]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      The baker opens early when the town is fast asleep
+      He kneads the dough and hums a tune, the oven's warm and deep
+      A woman with a bicycle goes rattling down the lane
+      She leaves a basket by the door and then she's gone again
+
+      The schoolkids come at half past eight, they crowd around the glass
+      They point at all the sugar buns and push to be first in class
+      The old man with the newspaper takes the table by the wall
+      He's been here every morning since before the leaves would fall
+
+      By noon the bread is nearly gone, the shelves are looking bare
+      The baker wipes his floury hands and sits down in a chair
+      He thinks about his father and the shop that he once ran
+      And how the smell of rising bread is how the day began
+    settings: {improve: [rhymes]}
+  - id: ml-untagged-simpler
+    tags: [audio, lyrics, messy, whole, untagged]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      Thy countenance doth illuminate the firmament of my despair
+      Behold, the nocturnal luminary ascendeth o'er the verdant dell
+      I implore thee, tarry yet a moment in this tranquil solitude
+      For mine heart doth palpitate with an ineffable fervour
+    settings: {improve: [simpler]}
+  - id: ml-untagged-open-cant
+    tags: [audio, lyrics, messy, whole, untagged, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      I can't sleep when the thunder rolls over the roof
+      I can't find the words that would give me some proof
+      That the dark has an end and the morning will come
+      And the storm will blow over and leave me my own
+    settings: {}
+  - id: ml-untagged-open-wont
+    tags: [audio, lyrics, messy, whole, untagged, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      I won't go back to the town where we met
+      I won't hear the bells that I can't quite forget
+      I won't write a letter, I won't make a call
+      I won't be the one who is holding the wall
+    settings: {improve: [tighten]}
+  - id: ml-untagged-open-sorry
+    tags: [audio, lyrics, messy, whole, untagged, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      I'm sorry for the things I said last night
+      I'm sorry that I walked out in the cold
+      I'm sorry that I never made it right
+      I'm sorry that I'm not as brave as I'm told
+    settings: {}
+  - id: ml-untagged-open-cannot
+    tags: [audio, lyrics, messy, whole, untagged, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      I cannot hold the ocean in my hand
+      I cannot count the grains of golden sand
+      I cannot stop the tide from rolling in
+      But I can stand beside you where we've been
+    settings: {improve: [rhymes]}
+  # ---- whole song: tags in other styles --------------------------------------------------------------------------------------------
+  - id: ml-verse-colon-labels
+    tags: [audio, lyrics, messy, whole, tagstyle]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      Verse 1:
+      Streetlights hum a lullaby
+      Footsteps echo on the stone
+      I am walking home alone
+      Underneath a quiet sky
+
+      Chorus:
+      Take me home, take me home
+      Where the porch light's always on
+
+      Verse 2:
+      Windows glow along the lane
+      Someone's laughing down the street
+      I can hear the kettle sing
+      I am almost home again
+    settings: {}
+  - id: ml-paren-labels
+    tags: [audio, lyrics, messy, whole, tagstyle]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      (Verse)
+      Paper boats on a puddle sea
+      You and I at the edge of the world
+      (Chorus)
+      Sail away, sail away
+      Nothing's ever as big as the sky
+      (Verse)
+      Dandelions on the school yard wall
+      Every wish in a single breath
+    settings: {improve: [tighten]}
+  - id: ml-numbered-brackets
+    tags: [audio, lyrics, messy, whole, tagstyle, repeat]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse 1]
+      The lighthouse keeper lights the lamp
+      And watches for the ships
+      The wind is cold, the sea is damp
+      And salt is on his lips
+
+      [Chorus]
+      Shine on, shine on, over the water
+      Bring them home, bring them home
+
+      [Verse 2]
+      The fishing boats come in at dawn
+      With silver in their nets
+      The keeper yawns and the lamp goes out
+      And he sleeps without regrets
+
+      [Chorus]
+      Shine on, shine on, over the water
+      Bring them home, bring them home
+
+      [Bridge]
+      Storm clouds gather in the east
+      But he knows the way
+
+      [Chorus]
+      Shine on, shine on, over the water
+      Bring them home, bring them home
+    settings: {}
+  - id: ml-caps-chorus-labels
+    tags: [audio, lyrics, messy, whole, tagstyle]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      VERSE
+      Every Sunday we would walk the dog
+      Down the path beside the old canal
+      CHORUS
+      Walk on, walk on, the sun is coming up
+      Walk on, walk on, we are not alone
+      VERSE
+      Now the dog is gone and so are you
+      But I still take the path beside the canal
+    settings: {improve: [tighten]}
+  - id: ml-prechorus-bridge-outro
+    tags: [audio, lyrics, messy, whole, tagstyle]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Neon signs are flickering in the rain
+      I'm waiting on a train that never came
+
+      [Pre-Chorus]
+      And I know, I know
+      Something's got to give
+
+      [Chorus]
+      Run, run, run to the light
+      Hold on, hold on tight
+
+      [Bridge]
+      Maybe I was wrong about it all
+      Maybe I was right
+
+      [Outro]
+      Run, run, run
+    settings: {}
+  - id: ml-uppercase-tags
+    tags: [audio, lyrics, messy, whole, tagstyle]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [VERSE]
+      Midnight snow on the empty street
+      Footprints fading under my feet
+
+      [CHORUS]
+      Cold, cold, cold is the night
+      But your name keeps me warm
+
+      [VERSE]
+      Chimney smoke and a yellow light
+      Somebody's waiting up for me tonight
+    settings: {improve: [tighten]}
+  - id: ml-custom-tags
+    tags: [audio, lyrics, messy, whole, tagstyle]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Hook]
+      Hey, hey, we are the night
+      Hey, hey, hold the light
+
+      [Verse 1: Marie]
+      I was born on a Tuesday in a town with no name
+      Everybody knew me but nobody knew my game
+
+      [Verse 2: Joao]
+      I came with a suitcase and a song in my head
+      And a map that I drew on the back of the bread
+    settings: {}
+  - id: ml-words-on-tag-line
+    tags: [audio, lyrics, messy, whole, tagstyle]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Intro] ooh, ooh, ooh
+      [Verse] Dust on the dashboard, sand in my shoes
+      Nothing to lose and nothing to prove
+      [Chorus] Roll on, roll on, down the highway
+      Roll on, roll on, anyway
+    settings: {improve: [tighten]}
+  - id: ml-lrc-timestamps
+    tags: [audio, lyrics, messy, whole, tagstyle, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [00:12.30]The morning bus is late again
+      [00:16.10]I'm standing in the drizzling rain
+      [00:20.45]My coffee's cold, my shoes are wet
+      [00:24.80]But I'm not finished with the day just yet
+    settings: {}
+  - id: ml-chord-sheet
+    tags: [audio, lyrics, messy, whole, tagstyle, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Am]
+      Sitting on the steps outside
+      [G]
+      Watching all the people pass
+      [F]
+      Nobody knows where they're going
+      [E]
+      Nobody wants to be last
+    settings: {}
+  - id: ml-title-line
+    tags: [audio, lyrics, messy, whole, tagstyle, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      Last Train Home
+
+      [Verse]
+      The platform's empty, the clock says two
+      I've got a ticket and nothing to do
+
+      [Chorus]
+      Last train home, last train home
+      Carry me over the river
+    settings: {improve: [tighten]}
+  # ---- whole song: repeats, quotes, size, blank lines --------------------------------------------------------------------------------
+  - id: ml-chorus-three-times
+    tags: [audio, lyrics, messy, whole, repeat]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Chorus]
+      Dance, dance, dance in the kitchen light
+      Dance, dance, dance till the morning's bright
+
+      [Verse]
+      Flour on the counter and your hands in my hair
+      Nobody's watching, we don't care
+
+      [Chorus]
+      Dance, dance, dance in the kitchen light
+      Dance, dance, dance till the morning's bright
+
+      [Verse]
+      Spoons for microphones and pots for drums
+      The neighbours bang the wall but still it comes
+
+      [Chorus]
+      Dance, dance, dance in the kitchen light
+      Dance, dance, dance till the morning's bright
+    settings: {improve: [rhymes]}
+  - id: ml-chorus-near-repeat
+    tags: [audio, lyrics, messy, whole, repeat]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      The river's high and the bridge is out
+      We'll wait it through, there's no doubt
+
+      [Chorus]
+      Hold on, hold on, the water will fall
+      Hold on, hold on, we'll weather it all
+
+      [Verse]
+      Neighbours bring blankets and bread
+      Candles are burning in every shed
+
+      [Chorus]
+      Hold on, hold on, the water will fall
+      Hold on, hold on, we'll weather it all, all, all
+    settings: {improve: [tighten]}
+  - id: ml-curly-quotes
+    tags: [audio, lyrics, messy, whole, quotes]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      She said “Don’t wait up” and I didn’t
+      The door clicked shut, the hallway went dark
+      I’m reading “Wuthering” by candlelight
+      And I’ve forgotten what I’m reading for
+
+      [Chorus]
+      “Don’t wait up,” you said
+      “Don’t wait up,” I heard
+    settings: {improve: [tighten]}
+  - id: ml-straight-apostrophes
+    tags: [audio, lyrics, messy, whole, quotes]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      I'm gonna sing it 'til the rooftops fall
+      'Cause rock 'n' roll ain't dead at all
+      We're all just kids in a travelling show
+      Don't know where we're goin', but we're gonna go
+
+      [Chorus]
+      Rock 'n' roll, rock 'n' roll
+      Ain't nobody gonna steal my soul
+    settings: {improve: [simpler]}
+  - id: ml-double-quoted-title
+    tags: [audio, lyrics, messy, whole, quotes]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      We argued over "Blue Monday" in the back of the van
+      You said it was a masterpiece, I said it was a plan
+      To make us all feel old before our time
+
+      [Chorus]
+      Play "Blue Monday" one more time
+      Play it till the stars align
+    settings: {improve: [rhymes]}
+  - id: ml-two-lines
+    tags: [audio, lyrics, messy, whole, short]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Hold me close
+      Don't let go
+    settings: {}
+  - id: ml-one-word-hook
+    tags: [audio, lyrics, messy, whole, short]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Hook]
+      Hey
+    settings: {improve: [tighten]}
+  - id: ml-single-line-untagged
+    tags: [audio, lyrics, messy, whole, short, untagged]
+    mode: audio-lyrics
+    family: yue2
+    prompt: Take me down to the river where the willow trees grow
+    settings: {}
+  - id: ml-very-long-tighten
+    tags: [audio, lyrics, messy, whole, long]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse 1]
+      I packed my bags in the early light of a Monday morning in June
+      Said goodbye to the garden and the cat and the afternoon
+      I took the bus to the station where the pigeons gather round
+      And I bought a ticket to a place I'd only heard the name of
+      I watched the fields go by in rows of yellow and of green
+      And I thought about the life I left, the quiet and the clean
+
+      [Chorus]
+      Oh, I'm leaving, I'm leaving, I'm leaving for the sea
+      There's nothing in this valley that is calling out to me
+      Oh, I'm leaving, I'm leaving, I'm leaving all behind
+      And the only thing I'm taking is the music in my mind
+
+      [Verse 2]
+      The city came in sudden like a wave against the glass
+      With all its shouting voices and its crowds that never pass
+      I found a little room above a shop that sold old books
+      With a window on the rooftops and a stove that never cooks
+      I lived on bread and coffee and the kindness of a friend
+      And I wrote a hundred letters that I never thought to send
+
+      [Chorus]
+      Oh, I'm leaving, I'm leaving, I'm leaving for the sea
+      There's nothing in this valley that is calling out to me
+      Oh, I'm leaving, I'm leaving, I'm leaving all behind
+      And the only thing I'm taking is the music in my mind
+
+      [Verse 3]
+      Years went by like pages in a book I couldn't close
+      I learned the names of all the streets and where the river goes
+      I met a girl who painted and she taught me how to see
+      The colours in the shadows of an ordinary tree
+      We married in the springtime on a hill above the town
+      And we watched the sun go slowly, slowly down
+
+      [Bridge]
+      And sometimes in the evening when the lamplight turns to gold
+      I think about the valley and the stories I was told
+      I think about the garden and the cat that used to wait
+      And I wonder if the door is still unlatched upon the gate
+
+      [Chorus]
+      Oh, I'm leaving, I'm leaving, I'm leaving for the sea
+      There's nothing in this valley that is calling out to me
+      Oh, I'm leaving, I'm leaving, I'm leaving all behind
+      And the only thing I'm taking is the music in my mind
+
+      [Outro]
+      Oh, I'm leaving, I'm leaving
+      I'm leaving for the sea
+    settings: {improve: [tighten]}
+  - id: ml-blank-lines-triple
+    tags: [audio, lyrics, messy, whole, blanks]
+    mode: audio-lyrics
+    family: yue2
+    prompt: "\n\n[Verse]\nSunday coffee, Sunday rain\nSomeone's playing a piano again\n\n\n\n[Chorus]\nSlow down, slow down\nThe week can wait\n\n\n[Verse]\nBlankets on the windowsill\nThe whole world's hushed and still\n\n\n"
+    settings: {}
+  - id: ml-no-blank-between
+    tags: [audio, lyrics, messy, whole, blanks]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Dishes in the sink and a song on the radio
+      Nowhere that we have to be, nowhere left to go
+      [Chorus]
+      Stay a little longer, stay a little more
+      Stay a little longer, I'm not out the door
+      [Verse]
+      Clothes upon the line and the sunlight on the floor
+      I could do this all day long and then a little more
+    settings: {improve: [tighten]}
+  - id: ml-crlf-indented-tags
+    tags: [audio, lyrics, messy, whole, blanks]
+    mode: audio-lyrics
+    family: yue2
+    prompt: "  [Verse]  \r\nThe ferry leaves at half past six\r\nThe gulls are loud, the engines kick\r\n\r\n  [Chorus]\r\nCarry me over, carry me through\r\nCarry me back to the arms of you\r\n"
+    settings: {}
+  - id: ml-blank-inside-verse
+    tags: [audio, lyrics, messy, whole, blanks]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Autumn leaves on the garden wall
+      Smoke from a chimney, a distant call
+
+      Mothers calling their kids inside
+      Nowhere to run and nowhere to hide
+
+      [Chorus]
+      Come in, come in, the lamp is lit
+      Come in, come in, and stay a bit
+    settings: {improve: [tighten]}
+  - id: ml-trailing-spaces-tabs
+    tags: [audio, lyrics, messy, whole, blanks]
+    mode: audio-lyrics
+    family: yue2
+    prompt: "[Verse]   \nBright balloons above the fair  \n\tCotton candy in the air   \n \n[Chorus]\t\nRound and round the carousel goes\nRound and round and nobody knows\n"
+    settings: {}
+  # ---- whole song: other languages ----------------------------------------------------------------------------------------------------
+  - id: ml-norwegian-tagged
+    tags: [audio, lyrics, messy, whole, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Snøen laver ned over fjell og fjord
+      Jeg går alene på den gamle vei
+      Husene sover, og alt er stille
+      Bare vinden synger sangen sin til meg
+
+      [Chorus]
+      Å, kom og hent meg, før det blir for sent
+      Jeg venter ved kaia i lyset fra en lykt
+    settings: {improve: [tighten]}
+  - id: ml-norwegian-untagged
+    tags: [audio, lyrics, messy, whole, language, untagged]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      Du var der da sola gikk ned over Lofoten
+      Vi satt på en brygge og delte en brødskive
+      Mågene skrek, og det luktet av tang og sjø
+      Og jeg tenkte at livet aldri blir bedre enn dette
+    settings: {}
+  - id: ml-spanish-tagged
+    tags: [audio, lyrics, messy, whole, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verso]
+      ¿Dónde estás, amor, que no te encuentro?
+      La noche es larga y yo sigo esperando
+      Las calles callan, el viento no sopla
+      Y mi guitarra llora, ya no sé cantando
+
+      [Coro]
+      ¡Vuelve, vuelve, que el mar te llama!
+      ¡Vuelve, vuelve, a mi ventana!
+    settings: {improve: [rhymes]}
+  - id: ml-mixed-norwegian-english
+    tags: [audio, lyrics, messy, whole, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Jeg våknet opp i morges med en sang i hodet
+      Den handlet om en by jeg aldri har besøkt
+
+      [Chorus]
+      Take me to the city where the lights are always on
+      Take me to the city, I'll be gone before the dawn
+
+      [Verse]
+      Mamma sa at livet er et eventyr og et strev
+      Jeg tror hun hadde rett, men jeg vil se det selv
+    settings: {}
+  - id: ml-ad-libs
+    tags: [audio, lyrics, messy, whole, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Summer's here (oh-oh) and the sky is blue (hey)
+      I've got nothing to do (nothing!) but think of you (x2)
+
+      [Chorus]
+      Na na na na, na na na na
+      (Sing it loud!) Na na na na, na na na na
+    settings: {improve: [tighten]}
+  - id: ml-all-caps
+    tags: [audio, lyrics, messy, whole, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [VERSE]
+      WE ARE THE ONES WHO NEVER SLEEP
+      WE ARE THE ONES WHO NEVER WEEP
+
+      [CHORUS]
+      LOUDER, LOUDER, TURN IT UP
+      LOUDER, LOUDER, FILL MY CUP
+    settings: {}
+  - id: ml-questions-and-commands
+    tags: [audio, lyrics, messy, whole, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Can you tell me where you've been?
+      Please turn the music down
+      Write me a letter, send it in the post
+      Why did you leave this town?
+
+      [Chorus]
+      Tell me what to do, tell me what to say
+      Tell me what to do, I'll do it your way
+    settings: {}
+  - id: ml-emoji-feat
+    tags: [audio, lyrics, messy, whole, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      🎵 Midnight Drive (feat. Sofia) 🎵
+
+      [Verse]
+      Windows down and the engine hums 🚗
+      City lights like falling stars ✨
+
+      [Chorus]
+      Drive, drive, drive me home
+      Drive, drive, I'm not alone
+    settings: {improve: [tighten]}
+  # ---- whole song: Fit the sections, directions -----------------------------------------------------------------------------------------
+  - id: ml-fit-sprawling
+    tags: [audio, lyrics, messy, whole, fit, long]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      I woke up in the morning with the sunlight on my face and the smell of coffee drifting up the stairs from somewhere down below
+      I put my feet upon the floor and wandered to the window to see what kind of day it was and where the day would go
+      The neighbour's dog was barking at a squirrel in the garden
+
+      [Chorus]
+      Oh what a beautiful morning, oh what a beautiful day, oh what a beautiful feeling that nobody can ever take away from me today
+
+      [Bridge]
+      Maybe
+
+      [Verse]
+      Now the afternoon is fading and the shadows start to stretch
+    settings: {improve: [fit]}
+  - id: ml-fit-untagged
+    tags: [audio, lyrics, messy, whole, fit, untagged]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      She walks along the harbour wall in the evening when the fishing boats are coming slowly home with their lanterns lit and swaying
+      She counts the gulls and counts the stars and counts the days since he went out to sea with a promise that he'd be back by the spring
+      And the tide comes in, and the tide goes out
+    settings: {improve: [fit]}
+  - id: ml-note-hopeful
+    tags: [audio, lyrics, messy, whole, direction]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      The funeral was Tuesday and the rain came down in sheets
+      I stood beside the casket in my father's borrowed shoes
+
+      [Chorus]
+      Goodbye, goodbye, the light is leaving
+      Goodbye, goodbye, I'm still believing
+    settings: {note: "make it sound hopeful, not sad", improve: [tighten]}
+    context: {style: "gentle acoustic ballad"}
+  - id: ml-note-in-norwegian
+    tags: [audio, lyrics, messy, whole, direction, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      The harbour lights are low tonight
+      The boats are tied and still
+
+      [Chorus]
+      Come home, come home to me
+      Come home before the sea
+    settings: {note: "gjør det mer romantisk", improve: []}
+  # ---- one section: improve ---------------------------------------------------------------------------------------------------------
+  - id: ml-sec-open-cant
+    tags: [audio, lyrics, messy, section, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      I can't find the key and I can't find the door
+      I can't hear the music like I did before
+      I can't see the stars in the city's glow
+      I can't tell you where I want to go
+
+      [Chorus]
+      Lead me out, lead me out
+      Into the open air
+    settings: {improve: [tighten], section: 0}
+  - id: ml-sec-open-sorry
+    tags: [audio, lyrics, messy, section, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Rain is falling on the roof tonight
+      I've been thinking of the way we fought
+
+      [Chorus]
+      I'm sorry, I'm sorry, I'm sorry for it all
+      I'm sorry, I'm sorry, I let you fall
+    settings: {improve: [rhymes], section: 1}
+  - id: ml-sec-open-wont
+    tags: [audio, lyrics, messy, section, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      I won't be broken by a winter's night
+      I won't be shaken by the thunder's might
+      I won't be silent when the choir sings
+      I won't forget the joy that morning brings
+
+      [Chorus]
+      Rise up, rise up
+      Rise up, rise up
+    settings: {section: 0}
+  - id: ml-sec-second-chorus
+    tags: [audio, lyrics, messy, section, repeat]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Sunrise on the water, sunrise on the sand
+      Footprints in the shallows, a shell in my hand
+
+      [Chorus]
+      Sing it to the ocean, sing it to the shore
+      Sing it to the morning, sing it evermore
+
+      [Verse]
+      Salt upon my shoulders, wind across my face
+      Nowhere else on earth is quite this place
+
+      [Chorus]
+      Sing it to the ocean, sing it to the shore
+      Sing it to the morning, sing it evermore
+    settings: {improve: [rhymes], section: 3}
+  - id: ml-sec-norwegian
+    tags: [audio, lyrics, messy, section, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Vi møttes en kveld i en liten bar
+      Du lo så høyt at hele rommet stoppet opp
+
+      [Chorus]
+      Å, bli hos meg, bli hos meg i natt
+      Å, bli hos meg til morgenen kommer
+    settings: {improve: [tighten], section: 0}
+  - id: ml-sec-curly-quotes
+    tags: [audio, lyrics, messy, section, quotes]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      You said “I’ll call you tomorrow”
+      But tomorrow never came
+      I’m still holding on to “maybe”
+      And I’m calling out your name
+
+      [Chorus]
+      Call me, call me, call me back
+    settings: {improve: [tighten], section: 0}
+  - id: ml-sec-with-title-lead
+    tags: [audio, lyrics, messy, section, odd]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      Paper Planes
+
+      [Verse]
+      We folded up our worries into paper planes
+      And launched them from the roof into the rain
+
+      [Chorus]
+      Fly, fly, fly away
+      Fly, fly, fly away
+    settings: {improve: [simpler], section: 0}
+  # ---- one section: write -------------------------------------------------------------------------------------------------------------
+  - id: ml-write-bridge-baseline
+    tags: [audio, lyrics, messy, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      The porch light flickers, the street is wet
+      I still keep your coat by the door
+
+      [Chorus]
+      Come back home, come back home
+      The light is on for you
+
+      [Bridge]
+
+      [Chorus]
+      Come back home, come back home
+      The light is on for you
+    settings: {action: write, section: 2}
+    context: {style: "warm acoustic folk, fingerpicked guitar, wistful"}
+  - id: ml-write-apology-verse
+    tags: [audio, lyrics, messy, write, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+
+      [Chorus]
+      Please forgive me, please forgive
+      I was wrong and I will live
+      With the weight of what I did
+
+      [Verse]
+      I said the words I couldn't take back
+      You walked away and left the door ajar
+    settings: {action: write, section: 0}
+    context: {style: "sad piano ballad, regret"}
+  - id: ml-write-defiance-chorus
+    tags: [audio, lyrics, messy, write, refusal-open]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      They told me to be quiet, to sit down in my place
+      They said I'd never make it with a smile upon my face
+
+      [Chorus]
+
+      [Verse]
+      They closed the door behind me, they turned the music down
+      But I found a little stage in a corner of the town
+    settings: {action: write, section: 1}
+    context: {style: "defiant rock anthem, stomping drums"}
+  - id: ml-write-first-verse
+    tags: [audio, lyrics, messy, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+
+      [Chorus]
+      Way down south where the water is warm
+      We'll find shelter from the storm
+
+      [Verse]
+      Pack a bag and pour the wine
+      Everything will be just fine
+    settings: {action: write, section: 0}
+  - id: ml-write-outro
+    tags: [audio, lyrics, messy, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Footsteps in the hallway, voices in the hall
+      The house is full of people but I can't hear them at all
+
+      [Chorus]
+      Hush now, hush now, let the evening fall
+      Hush now, hush now, hush now, that is all
+
+      [Outro]
+    settings: {action: write, section: 2}
+  - id: ml-write-intro
+    tags: [audio, lyrics, messy, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Intro]
+
+      [Verse]
+      Boots by the door and a map on the wall
+      Dreaming of the mountains and the waterfall
+
+      [Chorus]
+      Up, up, up we go
+      Higher than the clouds
+    settings: {action: write, section: 0}
+    context: {style: "uplifting folk-pop, handclaps"}
+  - id: ml-write-norwegian-verse
+    tags: [audio, lyrics, messy, write, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Jeg bor i et hus ved en grønn liten bukt
+      Der måkene skriker og bølgene suser
+
+      [Chorus]
+      Hjem, hjem, hjem til havet
+      Hjem, hjem, hjem til deg
+
+      [Verse]
+    settings: {action: write, section: 2}
+  - id: ml-write-spanish-chorus
+    tags: [audio, lyrics, messy, write, language, repeat]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verso]
+      La luna sube sobre el viejo puerto
+      Y yo te espero con la luz del alba
+
+      [Coro]
+      Baila, baila, baila conmigo
+      Baila hasta que salga el sol
+
+      [Verso]
+      Las olas cuentan historias antiguas
+      De marineros y de amores lejanos
+
+      [Coro]
+    settings: {action: write, section: 3}
+  - id: ml-write-after-untagged-lead
+    tags: [audio, lyrics, messy, write, untagged]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      Bicycle bells and a morning train
+      Sunlight sliding down the window pane
+      Coffee steam and a crossword clue
+      Everything's quiet, just me and you
+
+      [Chorus]
+    settings: {action: write, section: 0}
+  - id: ml-write-verse-two
+    tags: [audio, lyrics, messy, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse 1]
+      Grandma's kitchen smelled of cinnamon and rain
+      She sang to the radio, a half-forgotten refrain
+
+      [Verse 2]
+
+      [Chorus]
+      Home is where the oven's warm
+      Home is where you're safe from harm
+    settings: {action: write, section: 1}
+  - id: ml-write-with-note
+    tags: [audio, lyrics, messy, write, direction]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Streetlamps buzz above the empty square
+      A paper cup is rolling in the air
+
+      [Bridge]
+
+      [Chorus]
+      Go on, go on, the night is still young
+      Go on, go on, the best is yet to come
+    settings: {action: write, section: 1, note: "something unexpected, a tiny shift in perspective"}
+    context: {style: "indie pop, glossy synths"}
+  - id: ml-write-crlf
+    tags: [audio, lyrics, messy, write, blanks]
+    mode: audio-lyrics
+    family: yue2
+    prompt: "[Verse]\r\nClouds roll over the quiet bay\r\nFishermen are heading in\r\n\r\n[Bridge]\r\n\r\n[Chorus]\r\nBring me back to the place I know\r\nWhere the evening breezes blow\r\n"
+    settings: {action: write, section: 1}

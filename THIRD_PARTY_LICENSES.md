@@ -66,6 +66,18 @@ The Stable Audio 3 inference package (`packages/stable_audio_3`, used for sound 
 
 MIT License, Copyright (c) 2026 Stability AI. The full license text ships with the vendored code as `packages/stable_audio_3/LICENSE`. The model weights are not vendored and are licensed separately by Stability AI.
 
+## qwen_tts
+
+The Qwen3-TTS Python package (`packages/qwen_tts`, used for speech on Windows and Linux) is vendored from [andimarafioti/Qwen3-TTS](https://github.com/andimarafioti/Qwen3-TTS), branch `distribution/qwen-tts-hf` (the `qwen-tts-hf` build of [QwenLM/Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) for Transformers 5), at commit a466278d04ce9693395947906a949f744acd41e8, without its demo (`cli/` and `__main__.py`).
+
+Licensed under the Apache License, Version 2.0, Copyright 2026 Alibaba Cloud. The full license text ships with the vendored code as `packages/qwen_tts/LICENSE`, and at http://www.apache.org/licenses/LICENSE-2.0.
+
+## faster_qwen3_tts
+
+The faster-qwen3-tts package (`packages/faster_qwen3_tts`, used for speech on Windows and Linux) is vendored from [andimarafioti/faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts) at commit 1094aabd83b367b1b29942769141b0524bed245d (release v0.5.4), without its command-line tool (`cli.py`).
+
+MIT License, Copyright (c) 2026 Andres Marafioti. The full license text ships with the vendored code as `packages/faster_qwen3_tts/LICENSE`.
+
 ## MiniMax H3 latent upscaler (network code)
 
 The network code of the MiniMax H3 upscale (`zvisiongenerator/backends/cuda/video/h3/latent_upsampler.py`, used on Windows and Linux) is ported from [LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) (`nodes/minimax_h3_latent_upscaler_3d.py`), matching upstream commit 98934c0b5f4a213323c4d1d0e47eb3d2f27cb743, without its ComfyUI node code.
@@ -100,31 +112,13 @@ The MiniMax H3 weights are downloaded from Hugging Face on first use and are not
 
 The upscaler weights are downloaded from Hugging Face on the first upscale and are not distributed with this package: [`LBH-123-AI/Minimax_h3_latent_Upscaler`](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler), licensed under the Apache License 2.0.
 
-## sglang-omni (Higgs TTS 3 model code)
+## mlx-audio (speech on macOS)
 
-Parts of the Higgs TTS 3 speech code are adapted from [sgl-project/sglang-omni](https://github.com/sgl-project/sglang-omni), matching upstream commit d80161dc34d7b900e7a0869481fa79d35ed618d9:
+On macOS, speech models run on [mlx-audio](https://github.com/Neywa-Labs/mlx-audio), installed as a dependency (MIT License, Copyright (c) 2024 Prince Canuma). The app calls its public `mlx_audio.tts` API and does not copy its code.
 
-- `zvisiongenerator/backends/audio/higgs3_model.py`: the fused multi-codebook embedding and head, from `sglang_omni/models/higgs_tts/modeling.py`.
-- `zvisiongenerator/backends/audio/higgs3_codes.py`: the delay pattern from `sglang_omni/models/higgs_tts/utils.py` (`apply_delay_pattern`), the de-delay from `sglang_omni/utils/codec_delay.py` (`reverse_delay_pattern`), and the sampler and the frame rule from `sglang_omni/models/higgs_tts/sampler.py`.
-- `zvisiongenerator/backends/audio/higgs3_prompt.py`: the prompt layout, from `sglang_omni/models/higgs_tts/text_tokenizer.py`.
+## Qwen3-TTS models (downloaded at runtime, not bundled)
 
-Each file's header names its source and what was changed. The network around them is transformers' Apache-2.0 `Qwen3Model`.
-
-Licensed under the Apache License 2.0, Copyright 2025-2026 SGLang-Omni Team. Upstream publishes no NOTICE file. The full license text, copied from upstream's `LICENSE` at that commit, ships with this package as `licenses/sglang-omni-apache-2.0.txt`.
-
-## mlx-audio (Higgs TTS 3 on macOS)
-
-On macOS, Higgs TTS 3 runs on [mlx-audio](https://github.com/Neywa-Labs/mlx-audio), installed as a dependency (MIT License, Copyright (c) 2024 Prince Canuma). The frame loop in `zvisiongenerator/backends/audio/higgs3_mlx.py` (`_generate_rows`) follows the loop of mlx-audio 0.6.2's `mlx_audio/tts/models/higgs_audio_v3/model.py` (`Model.generate`), with a callback on every frame and without its fades.
-
-## Higgs TTS 3 models (downloaded at runtime, not bundled)
-
-The Higgs TTS 3 weights are downloaded from Hugging Face on first use and are not distributed with this package: [`bosonai/higgs-tts-3-4b`](https://huggingface.co/bosonai/higgs-tts-3-4b), licensed under the [Boson Higgs TTS 3 Research and Non-Commercial License](https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE), which allows research and non-commercial use only, with a limited exception for digital creators. A copy of that license ships with this package as `licenses/boson-higgs-tts-3.txt`. The audio codec, [`bosonai/higgs-audio-v2-tokenizer`](https://huggingface.co/bosonai/higgs-audio-v2-tokenizer), is likewise downloaded on Windows and Linux (on macOS the codec is read from the Higgs TTS 3 checkpoint), and is licensed under the [Boson Higgs Audio 2 Community License Agreement](https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE). That license is based upon the Meta Llama 3 Community License Agreement and incorporates Meta's Acceptable Use Policy. It requires this credit line on a related website, user interface, blogpost, about page or product documentation:
-
-> Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved
-
-This file serves as the NOTICE file the Boson license asks for:
-
-> Boson Higgs TTS 3 is licensed under the Boson Higgs TTS 3 Research and Non-Commercial License, Copyright (c) Boson AI USA, Inc. All Rights Reserved.
+The Qwen3-TTS weights are downloaded from Hugging Face on first use and are not distributed with this package: [`Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice) for the built-in voices and [`Qwen/Qwen3-TTS-12Hz-1.7B-Base`](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base) for cloning a voice recording, both licensed under the Apache License 2.0.
 
 ## Stable Audio 3 models (downloaded at runtime, not bundled)
 

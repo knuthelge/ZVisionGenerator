@@ -487,7 +487,7 @@ describe('JobCard', () => {
     });
 
     it('shows speech as one row whose bar is the take\'s progress', () => {
-      render(take({ workflow: 'speech', audio: { phase: 'Speech tokens', step: 250, total: 500, part: 2, parts: 4 } }));
+      render(take({ workflow: 'speech', audio: { phase: 'Speech', step: 1, total: 1, part: 2, parts: 4 } }));
 
       expect(phases()).toEqual(['current']);
       const bar = bars()[0];
@@ -497,7 +497,7 @@ describe('JobCard', () => {
     });
 
     it('reports a single take\'s header bar by how far the take is, not by takes done', () => {
-      render(take({ runs: 1, workflow: 'speech', audio: { phase: 'Speech tokens', step: 250, total: 500, part: 1, parts: 1 } }));
+      render(take({ runs: 1, workflow: 'speech', audio: { phase: 'Speech', step: 1, total: 1, part: 1, parts: 1 } }));
 
       const header = target.querySelector('.job-head [role="progressbar"]')!;
       const now = Number(header.getAttribute('aria-valuenow'));

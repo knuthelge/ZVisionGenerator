@@ -88,6 +88,44 @@ describe('AudioPlayer', () => {
     await page.unmount();
     expect(pause).toHaveBeenCalledTimes(2);
   });
+  it('shows a stopped player, not the playing one, when another take is shown while one plays', () => {
+    // A real element is paused or not; one that is playing when its source changes goes back to paused without a `pause` event.
+    const playing = new WeakSet<HTMLMediaElement>();
+    vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function (this: HTMLMediaElement) { return !playing.has(this); });
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { playing.delete(this); });
+    const props = reactiveProps({ src: '/media/out/a.flac', peaks: PEAKS, filename: 'a.flac', duration: 100 });
+    const page = mountComponent(AudioPlayer, props);
+    target = page.target;
+    flushSync();
+    const first = audio();
+    playing.add(first);
+    first.dispatchEvent(new Event('play'));
+
+    props.src = '/media/out/b.flac';
+    flushSync();
+
+    expect(audio().getAttribute('src')).toBe('/media/out/b.flac');
+    expect(audio()).not.toBe(first);
+    expect(audio().paused).toBe(true);
+    expect(first.paused).toBe(true);
+    expect(target.querySelectorAll('audio')).toHaveLength(1);
+  });
+
+  it('keeps the same player when a fresh copy of the same take arrives', () => {
+    const props = reactiveProps({ src: '/media/out/a.flac', peaks: PEAKS, filename: 'a.flac', duration: 100 });
+    const page = mountComponent(AudioPlayer, props);
+    target = page.target;
+    flushSync();
+    const first = audio();
+    pause.mockClear();
+
+    props.peaks = [...PEAKS];
+    flushSync();
+
+    expect(audio()).toBe(first);
+    expect(pause).not.toHaveBeenCalled();
+  });
+
   describe('with another player', () => {
     function mountTwo(): { first: HTMLAudioElement; second: HTMLAudioElement; paused: HTMLAudioElement[] } {
       const paused: HTMLAudioElement[] = [];

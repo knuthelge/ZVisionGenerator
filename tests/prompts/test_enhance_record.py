@@ -9,8 +9,17 @@ import pytest
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.enhance_record import build_enhance_record, enhance_record_summary, enhancer_tier, parse_enhance_record, planned_enhance_record
+from zvisiongenerator.utils.enhance_record import (
+    build_audio_enhance_record,
+    build_enhance_record,
+    enhance_record_summary,
+    enhance_reuse_param,
+    enhancer_tier,
+    parse_enhance_record,
+    planned_enhance_record,
+)
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance_audio import AudioEnhanceSettings, audio_settings_from_mapping
 from zvisiongenerator.utils.provenance import build_image_config_payload, build_video_config_payload, recorded_settings
 
 _CONFIG = {
@@ -116,6 +125,112 @@ class TestParse:
     def test_malformed_record_is_rejected(self, raw):
         with pytest.raises(ValueError):
             parse_enhance_record(raw, mode="image")
+
+
+class TestAudioRecord:
+    def test_a_record_holds_the_task_and_only_the_audio_options_that_are_not_defaults(self):
+        settings = audio_settings_from_mapping({"genre": "folk", "instruments": ["piano"], "note": "sparse"}, task="style")
+
+        record = build_audio_enhance_record(settings, task="style", repo="org/fast", revision="r1", tier="fast")
+
+        assert record == {"settings": {"genre": "folk", "instruments": ["piano"], "note": "sparse"}, "model": "org/fast@r1", "tier": "fast", "format": "text", "task": "style"}
+        assert build_audio_enhance_record(AudioEnhanceSettings(), task="sound", repo="org/fast", revision=None, tier="fast")["settings"] == {}
+
+    def test_a_local_model_folder_is_recorded_under_home_as_tilde(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        record = build_audio_enhance_record(AudioEnhanceSettings(), task="style", repo=str(tmp_path / "models" / "fast"), revision=None, tier="custom")
+
+        assert record["model"] == "~/models/fast"
+
+    def test_parsing_normalizes_a_record_and_works_out_the_tier(self):
+        raw = {"settings": {"genre": "folk", "note": ""}, "model": "org/smart", "tier": "fast", "format": "text", "task": "style"}
+
+        record = parse_enhance_record(raw, mode="audio", config=_CONFIG, platform_key="linux")
+
+        assert record == {"settings": {"genre": "folk"}, "model": "org/smart", "tier": "smart", "format": "text", "task": "style"}
+        assert parse_enhance_record(record, mode="audio") == record
+
+    def test_the_task_decides_which_options_a_record_may_hold(self):
+        with pytest.raises(ValueError, match="only applies to music"):
+            parse_enhance_record({"settings": {"genre": "folk"}, "model": "org/fast", "task": "sound"}, mode="audio")
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            {"settings": {}, "model": "org/fast"},
+            {"settings": {}, "model": "org/fast", "task": "poem"},
+            {"settings": {}, "model": "org/fast", "task": "fill"},
+            {"settings": {}, "model": "org/fast", "task": "style", "format": "json"},
+            {"settings": {"genre": "nope"}, "model": "org/fast", "task": "style"},
+            {"settings": {}, "model": "org/fast", "task": "style", "tier": "turbo"},
+            {"settings": {}, "task": "style"},
+        ],
+    )
+    def test_a_malformed_audio_record_is_rejected(self, raw):
+        with pytest.raises(ValueError):
+            parse_enhance_record(raw, mode="audio")
+
+    def test_a_script_record_holds_what_the_helper_did_and_reads_back_unchanged(self):
+        raw = {"settings": {"actions": ["fit"], "seconds": 20, "pace": "slow"}, "model": "org/fast@r1", "format": "text", "task": "script"}
+
+        record = parse_enhance_record(raw, mode="audio", config=_CONFIG, platform_key="linux")
+
+        assert record == {**raw, "tier": "fast"}
+        assert parse_enhance_record(record, mode="audio") == record
+        assert parse_enhance_record({**raw, "settings": {"actions": ["delivery"]}}, mode="audio")["settings"] == {"actions": ["delivery"]}
+
+    def test_a_script_record_of_both_actions_lists_them_in_the_order_they_ran(self):
+        raw = {"settings": {"actions": ["delivery", "fit"], "seconds": 20}, "model": "org/fast@r1", "format": "text", "task": "script"}
+
+        record = parse_enhance_record(raw, mode="audio", config=_CONFIG, platform_key="linux")
+
+        assert record["settings"] == {"actions": ["fit", "delivery"], "seconds": 20}
+        assert enhance_record_summary(record) == "Fast · Script · Fit to 20 s, Add delivery"
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {},
+            {"actions": ["poem"]},
+            {"action": "fit", "seconds": 20},
+            {"actions": ["fit"]},
+            {"actions": ["fit"], "seconds": 2},
+            {"actions": ["delivery"], "seconds": 20},
+            {"actions": ["fit"], "seconds": 20, "genre": "folk"},
+        ],
+    )
+    def test_a_script_record_with_settings_the_helper_cannot_make_is_rejected(self, settings):
+        with pytest.raises(ValueError):
+            parse_enhance_record({"settings": settings, "model": "org/fast", "task": "script"}, mode="audio")
+
+    def test_the_summary_says_what_the_script_helper_did(self):
+        record = {"model": "org/fast", "tier": "fast", "format": "text", "task": "script"}
+
+        assert enhance_record_summary({**record, "settings": {"actions": ["delivery"]}}) == "Fast · Script · Add delivery"
+        assert enhance_record_summary({**record, "settings": {"actions": ["fit"], "seconds": 20}}) == "Fast · Script · Fit to 20 s"
+        assert enhance_record_summary({**record, "settings": {"actions": ["fit"], "seconds": 90, "pace": "very-slow"}, "tier": "smart"}) == "Smart · Script · Fit to 90 s, very slow pace"
+
+    def test_an_image_record_is_not_read_as_an_audio_one(self):
+        with pytest.raises(ValueError, match="task must be one of"):
+            parse_enhance_record({"settings": {"style": "film"}, "model": "org/fast"}, mode="audio")
+        assert "task" not in parse_enhance_record({"settings": {"style": "film"}, "model": "org/fast"}, mode="image")
+
+    def test_the_summary_names_the_enhancer_the_task_and_the_audio_options(self):
+        record = {"settings": {"music_mood": "melancholic", "genre": "folk"}, "model": "org/fast", "tier": "fast", "format": "text", "task": "style"}
+
+        assert enhance_record_summary(record) == "Fast · Style · Folk, Melancholic"
+        assert enhance_record_summary({**record, "settings": {}, "tier": "smart", "task": "sound"}) == "Smart · Sound · General rewrite"
+        assert enhance_record_summary({**record, "settings": {"space": "forest", "note": "wet"}, "task": "sound", "tier": "custom"}) == 'Custom model · Sound · Forest, "wet"'
+
+    def test_an_image_summary_has_no_task(self):
+        assert enhance_record_summary({"settings": {"style": "film"}, "model": "org/fast", "tier": "fast"}) == "Fast · Analog film"
+
+    def test_the_reuse_param_is_the_record_as_compact_json(self):
+        record = {"settings": {}, "model": "org/fast", "tier": "fast", "format": "text", "task": "sound"}
+
+        assert enhance_reuse_param(record) == {"enhance": '{"settings":{},"model":"org/fast","tier":"fast","format":"text","task":"sound"}'}
+        assert enhance_reuse_param(None) == {} and enhance_reuse_param({}) == {}
 
 
 def _image_request(**overrides):

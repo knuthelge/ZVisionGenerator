@@ -254,6 +254,37 @@ class TestCudaH3PlanPresence:
         assert [target_present_offline(target) for target in plan] == [False, False, False]
 
 
+class TestHalfFinishedLiteralTargets:
+    """A target of literal files (the audio plans) is absent while any one of its files is missing from the snapshot."""
+
+    _FILES = ("config.json", "model.safetensors", "t5gemma-b-b-ul2/model.safetensors")
+
+    @staticmethod
+    def _cached_file(snapshot: Path):
+        def cached_file(repo_id, filename, *, revision=None):
+            return str(snapshot / filename)
+
+        return cached_file
+
+    def _snapshot(self, cache: Path, *, skip: tuple[str, ...] = ()) -> Path:
+        snapshot = cache_snapshot_dir(cache)
+        for name in self._FILES:
+            if name not in skip:
+                touch(snapshot / name)
+        return snapshot
+
+    def test_a_complete_snapshot_is_present(self, cache):
+        snapshot = self._snapshot(cache)
+
+        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=self._FILES), cached_file=self._cached_file(snapshot)) is True
+
+    @pytest.mark.parametrize("skip", [("config.json",), ("t5gemma-b-b-ul2/model.safetensors",)], ids=["top-level-file", "file-in-a-folder"])
+    def test_a_snapshot_missing_a_file_is_absent(self, cache, skip):
+        snapshot = self._snapshot(cache, skip=skip)
+
+        assert target_present_offline(DownloadTarget("owner/repo", allow_patterns=self._FILES), cached_file=self._cached_file(snapshot)) is False
+
+
 class TestGlobCacheTargets:
     def test_optional_literal_files_are_not_checked(self, cache):
         _components_snapshot(cache_snapshot_dir(cache))

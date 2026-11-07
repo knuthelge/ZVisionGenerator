@@ -65,10 +65,18 @@ def _is_speech(text: str, start: int) -> bool:
     return _SPEECH_BEFORE_RE.search(before) is not None
 
 
+_STRAIGHT_QUOTES = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"'})
+
+
+def _fold_quotes(text: str) -> str:
+    """Return *text* with curly single and double quotes written straight, so typography alone is not a change."""
+    return text.translate(_STRAIGHT_QUOTES)
+
+
 def missing_quotes(spans: tuple[str, ...], output: str) -> tuple[str, ...]:
-    """Return the *spans* that *output* does not keep exactly: case and punctuation kept, spacing ignored (see ``contains_text``)."""
-    flat = _SPACE_RE.sub(" ", output)
-    return tuple(span for span in spans if not contains_text(flat, span))
+    """Return the *spans* that *output* does not keep exactly: case and punctuation kept, spacing and curly versus straight quotes ignored (see ``contains_text``)."""
+    flat = _fold_quotes(_SPACE_RE.sub(" ", output))
+    return tuple(span for span in spans if not contains_text(flat, _fold_quotes(span)))
 
 
 def contains_text(text: str, span: str) -> bool:

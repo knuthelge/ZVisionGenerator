@@ -92,7 +92,7 @@ const triggersButton = () => target.querySelector('#ws-triggers') as HTMLButtonE
 const triggersMenu = () => document.querySelector('[role="menu"][aria-label="Triggers"]') as HTMLElement | null;
 const triggerItems = () => Array.from(triggersMenu()?.querySelectorAll('[role="menuitemradio"]') ?? []) as HTMLElement[];
 const triggerWords = () => triggerItems().map((el) => `${el.getAttribute('aria-checked') === 'true' ? '+' : '-'}${el.textContent?.trim()}`);
-/** The count on the Triggers button, or '' when it reads just Triggers. */
+/** The count on the Triggers button, or '' when it is the tag icon alone. */
 const triggersCount = () => triggersButton()?.querySelector('.triggers-count')?.textContent ?? '';
 const openTriggers = async (): Promise<void> => { flushSync(() => triggersButton()!.click()); await settle(); };
 const useSwitch = () => drawer()!.querySelector('input[role="switch"]') as HTMLInputElement;
@@ -419,19 +419,19 @@ describe('The Triggers menu in the prompt box', () => {
     expect(triggersButton()).toBeNull();
   });
 
-  it('sits in the tool row by the history and Save buttons and counts the words the prompt lacks, reading just Triggers at 0', async () => {
+  it('sits in the tool row by the history and Save buttons and counts the words the prompt lacks, reading as the tag icon alone at 0', async () => {
     await mountWorkspace(triggerContext());
     type('ws-prompt', 'a lighthouse');
     draft.update('loraString', 'tech:1,clay:1');
     await settle();
 
-    expect(triggersButton()!.textContent?.trim()).toBe('Triggers3');
+    expect(triggersButton()!.getAttribute('aria-label')).toBe('Trigger words, 3 not in the prompt');
     expect(triggersCount()).toBe('3');
     const row = triggersButton()!.parentElement!;
     expect(row.contains(target.querySelector('#ws-recent-prompts'))).toBe(true);
     type('ws-prompt', 't3chnic4lly, Clay animation, clay');
     await settle();
-    expect(triggersButton()!.textContent?.trim()).toBe('Triggers');
+    expect(triggersButton()!.getAttribute('aria-label')).toBe('Trigger words');
     expect(triggersCount()).toBe('');
   });
 
@@ -489,6 +489,26 @@ describe('The Triggers menu in the prompt box', () => {
     expect(draft.state.enhancedPrompt).toBe('t3chnic4lly, a lighthouse at dusk');
     expect(draft.state.prompt).toBe('mine');
     expect(target.querySelector('#ws-tab-enhanced')?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('puts a word into a shown version the way typing does: that version is edited in place and loses its record', async () => {
+    await mountWorkspace(withEnhancer(triggerContext()));
+    type('ws-prompt', 'mine');
+    const record = { settings: {}, model: 'org/fast@r1', format: 'text' as const };
+    const from = { prompt: 'mine', scene: '', mode: 'image' as const, record };
+    const versions = [{ prompt: 'a lighthouse at dusk', scene: '', from }, { prompt: 'a lighthouse at dawn', scene: '', from }];
+    draft.patch({ enhancedPrompt: 'a lighthouse at dawn', enhancedFrom: from, enhancedHistory: versions, loraString: 'tech:1' });
+    await settle();
+    await openTriggers();
+
+    flushSync(() => triggerItems()[0].click());
+    await settle();
+
+    expect(draft.state.enhancedPrompt).toBe('t3chnic4lly, a lighthouse at dawn');
+    expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['a lighthouse at dusk', 't3chnic4lly, a lighthouse at dawn']);
+    expect(draft.state.enhancedHistory[1].from.record).toBeUndefined();
+    expect(draft.state.enhancedHistory[0].from.record).toEqual(record);
+    expect(draft.state.enhancedFrom?.record).toBeUndefined();
   });
 
   it('is hidden for a prompt from a file', async () => {

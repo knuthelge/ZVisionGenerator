@@ -10,6 +10,34 @@ from zvisiongenerator.utils.config import model_reference
 
 _UNSUPPORTED_TYPE_RE = re.compile(r"Model type (\S+) not supported")
 _END_TOKEN = "<|im_end|>"
+# Subtracted once from the logit of every token already generated in this request; stops songs from repeating a verse.
+_PRESENCE_PENALTY = 1.5
+
+
+def _presence_penalty_processor(penalty: float) -> Callable[[Any, Any], Any]:
+    """Return an mlx-lm logits processor that subtracts *penalty* once from each token generated so far.
+
+    It runs on the raw logits before mlx-lm's sampler applies temperature, as the CUDA processor does.
+
+    mlx-lm's own presence penalty looks at a sliding window that includes the prompt, so it cannot be used here. The
+    processor sees the whole token history on every call; its first call holds only the prompt and fixes where
+    generated tokens begin.
+    """
+    prompt_len: int | None = None
+
+    def processor(tokens: Any, logits: Any) -> Any:
+        nonlocal prompt_len
+        import mlx.core as mx
+
+        if prompt_len is None:
+            prompt_len = len(tokens)
+            return logits
+        generated = tokens[prompt_len:]
+        # Counting then clamping to 1 penalises a repeated token once, not once per occurrence.
+        counts = mx.zeros((logits.shape[-1],), dtype=logits.dtype).at[generated].add(1)
+        return logits - penalty * mx.minimum(counts, 1)
+
+    return processor
 
 
 def _load(repo: str, revision: str | None) -> tuple[Any, Any]:
@@ -66,7 +94,14 @@ class MlxPromptEnhancer:
         release_memory()
         prompt = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
         mx.random.seed(seed)
-        for response in stream_generate(self._model, self._tokenizer, prompt, max_tokens=max_tokens, sampler=make_sampler(temp=temperature)):
+        for response in stream_generate(
+            self._model,
+            self._tokenizer,
+            prompt,
+            max_tokens=max_tokens,
+            sampler=make_sampler(temp=temperature),
+            logits_processors=[_presence_penalty_processor(_PRESENCE_PENALTY)],
+        ):
             if cancelled is not None and cancelled():
                 return
             if response.text:

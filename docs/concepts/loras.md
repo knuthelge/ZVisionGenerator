@@ -26,7 +26,7 @@ Hugging Face leaves content filtering to its community, so Discover filters out 
 
 ## Trigger words
 
-Some LoRAs need a trigger word in the prompt. The app never adds one for you: pick it from the **Triggers** menu in the prompt box, which lists the words of the LoRAs in use and counts the ones the prompt doesn't have yet. The word goes at the start of the text Generate sends. The menu is hidden for a JSON caption and a prompt file.
+Some LoRAs need a trigger word in the prompt. The app never adds one for you: pick it from the **Triggers** menu (the tag icon) in the prompt box, which lists the words of the LoRAs in use and shows the number the prompt does not have yet. The word goes at the start of the text Generate sends. The menu is hidden for a JSON caption and a prompt file.
 
 A LoRA's trigger comes from its curated entry, its Hugging Face model card or the file itself. **Edit** in the LoRA's detail in Discover sets your own.
 

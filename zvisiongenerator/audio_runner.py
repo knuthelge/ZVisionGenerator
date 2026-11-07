@@ -31,7 +31,7 @@ from zvisiongenerator.utils.audio_save import save_flac
 from zvisiongenerator.utils.filename import generate_filename, unique_output_path
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import build_audio_config_payload
-from zvisiongenerator.utils.speech_text import split_speech_text
+from zvisiongenerator.utils.speech_text import request_speech_parts
 from zvisiongenerator.utils.torch_flags import preserved_torch_flags
 
 __all__ = ["QUIT_MESSAGE", "run_audio_batch"]
@@ -109,13 +109,13 @@ def run_audio_batch(
     started = time.time()
 
     prompt_enhancer_session.release_resident_enhancer()
-    _require_downloaded(preset)
+    _require_downloaded(preset, voice=request.voice is not None)
 
     os.makedirs(output_dir, exist_ok=True)
     backend = get_audio_backend(preset.family)
     fit = audio_memory_fit(preset, platform_key, accelerator_memory_budget_or_none())
     with _backend_session(backend):
-        if _load_unless_quit(backend, preset, platform_key, fit, skip=skip, progress_callback=progress_callback):
+        if _load_unless_quit(backend, preset, request, platform_key, fit, skip=skip, progress_callback=progress_callback):
             emit_progress(progress_callback, "batch_started", mode="audio", total_iterations=runs, total_runs=runs)
             outcome = _make_takes(backend, request, preset, seeds, output_dir=output_dir, skip=skip, progress_callback=progress_callback, seed_range_=(seed_min, seed_max), memory_fit=fit)
         else:
@@ -135,6 +135,7 @@ def run_audio_batch(
 def _load_unless_quit(
     backend: AudioBackend,
     preset: AudioPreset,
+    request: AudioGenerationRequest,
     platform_key: str,
     fit: dict[str, Any] | None,
     *,
@@ -143,29 +144,42 @@ def _load_unless_quit(
 ) -> bool:
     """Load the model unless Quit is queued, before the load or while it runs; return whether it is loaded.
 
-    The backend checks Quit between the tensors it reads, so a stop during a long load ends it early; the caller's backend
-    session then frees what was loaded.
+    The backend checks Quit (and only Quit: Skip leaves the load alone) between the tensors it reads, so a stop during a long
+    load ends it early; the caller's backend session then frees what was loaded.
     """
     if skip.pending() == "quit":
         return False
     print(f"Loading {preset.label}...", flush=True)
     emit_progress(progress_callback, "model_loading", mode="audio", model=preset.label)
     try:
-        with _friendly_oom(preset, fit):
-            backend.load(preset, platform_key, cancelled=lambda: skip.pending() == "quit")
+        with _friendly_oom(preset, request.kind, fit):
+            backend.load(_preset_to_load(preset, request), platform_key, cancelled=lambda: skip.pending() == "quit")
     except AudioCancelled:
         return False
     return True
 
 
-def _require_downloaded(preset: AudioPreset) -> None:
+def _preset_to_load(preset: AudioPreset, request: AudioGenerationRequest) -> AudioPreset:
+    """Return the preset the backend loads: for a take that follows a recording, one whose ``files`` are the preset's ``voice_files``.
+
+    The checkpoint is fixed for the whole batch (every take is the request with its own seed), so the backend loads
+    ``files[0]`` once and never chooses. A preset without ``voice_files`` follows a recording with its own files and loads as it is.
+    """
+    if request.voice is not None and preset.voice_files:
+        return replace(preset, files=preset.voice_files)
+    return preset
+
+
+def _require_downloaded(preset: AudioPreset, *, voice: bool = False) -> None:
     """Refuse a model whose files are not on disk, before anything loads: the backend only reads the cache.
+
+    A take that follows a voice recording (*voice*) needs the model's cloning files as well.
 
     Raises:
         FileNotFoundError: When a file is missing. A caller whose download step could not reach Hugging Face says so first
             (see :func:`~zvisiongenerator.downloads.ensure.require_checked`).
     """
-    if not all(target_present_offline(target) for target in audio_plan(preset)):
+    if not all(target_present_offline(target) for target in audio_plan(preset, voice=voice)):
         raise FileNotFoundError(f"{preset.label} is not downloaded: some of its files are missing from the cache.")
 
 
@@ -233,9 +247,9 @@ def _make_takes(
             began = time.monotonic()
             console = ConsoleProgress()
             try:
-                with _friendly_oom(preset, memory_fit):
+                with _friendly_oom(preset, request.kind, memory_fit):
                     clip = backend.generate(
-                        take, _progress_reporter(progress_callback, context, console, batch_start=batch_start, take_began=began, gen_times=gen_times, takes_left=total - ran + 1), skip.check
+                        take, _progress_reporter(progress_callback, context, console, batch_start=batch_start, began=began, gen_times=gen_times, takes_left=total - ran + 1), skip.check
                     )
             except AudioCancelled:
                 if skip.consume() == "quit":
@@ -254,6 +268,8 @@ def _make_takes(
             print(f"  Saved {path}")
             if clip.cut:
                 print(f"  {_CUT_NOTE}")
+            for note in clip.notes:
+                print(f"  {note}")
             emit_generation_finished(progress_callback, event_context={**context, "seed": seed}, status="success", filename=path.name, generation_time=elapsed, output_path=str(path))
 
             action = skip.consume()
@@ -274,19 +290,19 @@ def _progress_reporter(
     console: ConsoleProgress,
     *,
     batch_start: float,
-    take_began: float,
+    began: float,
     gen_times: Sequence[float],
     takes_left: int,
 ) -> Callable[[str, int, int | None, int, int], None]:
     """Return the backend's ``on_progress``: it shows the progress on the console and sends an ``audio_progress`` event for every call.
 
     Each event carries ``elapsed_secs`` (since the first take began) and ``eta_secs``: the average time of the takes made so far
-    times the *takes_left* (this one included), less the time this take (begun at *take_began*, monotonic) has already run, never
-    below zero; ``None`` before a take has finished.
+    times the *takes_left* (this one included), less the time this take has already run (since *began*, on the monotonic clock),
+    never below zero; ``None`` before a take has finished.
     """
 
     def _report(phase: str, step: int, total: int | None, part: int, n_parts: int) -> None:
-        eta = max(0.0, sum(gen_times) / len(gen_times) * takes_left - (time.monotonic() - take_began)) if gen_times else None
+        eta = max(0.0, sum(gen_times) / len(gen_times) * takes_left - (time.monotonic() - began)) if gen_times else None
         console(phase, step, total, part, n_parts, eta)
         emit_progress(progress_callback, "audio_progress", **context, phase=phase, step=step, total=total, part=part, n_parts=n_parts, elapsed_secs=time.time() - batch_start, eta_secs=eta)
 
@@ -306,33 +322,33 @@ def _save(clip: AudioClip, request: AudioGenerationRequest, parts: int | None, g
 
 def _speech_parts(request: AudioGenerationRequest, preset: AudioPreset) -> int | None:
     """Return how many parts the speech text is read in, or ``None`` for other kinds."""
-    if preset.kind != "speech":
+    if request.kind != "speech":
         return None
-    return len(split_speech_text(request.prompt, int(preset.limits.part_chars), max_text_chars=int(preset.limits.max_text_chars)))
+    return len(request_speech_parts(request, part_chars=int(preset.limits.part_chars), max_text_chars=int(preset.limits.max_text_chars)))
 
 
 @contextmanager
-def _friendly_oom(preset: AudioPreset, fit: dict[str, Any] | None) -> Iterator[None]:
+def _friendly_oom(preset: AudioPreset, kind: str, fit: dict[str, Any] | None) -> Iterator[None]:
     """Turn an out-of-memory error raised inside the block into the model's message."""
     try:
         yield
     except AudioCancelled:
         raise
     except Exception as exc:
-        friendly = _out_of_memory_error(exc, preset, fit)
+        friendly = _out_of_memory_error(exc, preset, kind, fit)
         if friendly is None:
             raise
         raise friendly from exc
 
 
-def _out_of_memory_error(exc: BaseException, preset: AudioPreset, fit: dict[str, Any] | None) -> RuntimeError | None:
+def _out_of_memory_error(exc: BaseException, preset: AudioPreset, kind: str, fit: dict[str, Any] | None) -> RuntimeError | None:
     """Return the user-facing error for a GPU out-of-memory *exc* (CUDA's, or the MPS ``RuntimeError``), else ``None``.
 
     With a memory *fit* the message says what the model needs against what the GPU has.
     """
     if not _is_out_of_memory(exc):
         return None
-    advice = f"{_OUT_OF_MEMORY_HINT} or shorten the lyrics" if preset.kind == "music" else _OUT_OF_MEMORY_HINT
+    advice = f"{_OUT_OF_MEMORY_HINT} or shorten the lyrics" if preset.takes_lyrics(kind) else _OUT_OF_MEMORY_HINT
     sizes = f" ({memory_need_text(fit)})" if fit else ""
     return RuntimeError(f"{preset.label} ran out of GPU memory{sizes}. {advice}.")
 

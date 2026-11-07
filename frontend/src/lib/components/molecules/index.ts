@@ -1,6 +1,10 @@
 export { default as EnhanceOptions } from './EnhanceOptions.svelte';
 export { default as EnhanceRewrite } from './EnhanceRewrite.svelte';
 export { default as EnhanceChoice } from './EnhanceChoice.svelte';
+export { default as RewriteStepper } from './RewriteStepper.svelte';
+export { default as TextBoxHeader } from './TextBoxHeader.svelte';
+export { default as PromptTools } from './PromptTools.svelte';
+export { default as HelpLine } from './HelpLine.svelte';
 export { default as EnhancePicker } from './EnhancePicker.svelte';
 export { default as ColorSwatches } from './ColorSwatches.svelte';
 export { default as FormField } from './FormField.svelte';

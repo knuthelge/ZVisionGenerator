@@ -148,7 +148,8 @@ def snapshots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checkpoint_tensor
     (config_dir / "model_config.json").write_text(json.dumps(_config_json()), encoding="utf-8")
     # The text encoder repository has a model_config.json of its own, which must not be used.
     (encoder_dir / "model_config.json").write_text("{}", encoding="utf-8")
-    (encoder_dir / "t5gemma-b-b-ul2" / "config.json").write_text("{}", encoding="utf-8")
+    for name in ("config.json", "generation_config.json", "model.safetensors", "special_tokens_map.json", "tokenizer.json", "tokenizer_config.json"):
+        (encoder_dir / "t5gemma-b-b-ul2" / name).write_text("{}", encoding="utf-8")
     save_file(checkpoint_tensors, str(checkpoint_dir / "checkpoints" / "stable_audio_3_medium.safetensors"))
 
     def snapshot_dirs(repo_id: str, revision: str | None) -> list[Path]:
@@ -341,9 +342,27 @@ class TestGenerate:
         _take(_loaded(preset), _request(seconds=30, seed=11))
 
         call = generated[0]
-        assert (call["prompt"], call["duration"], call["steps"], call["cfg_scale"], call["seed"]) == ("steady rain on a tin roof", 30.0, 8, 1.0, 11)
+        assert (call["prompt"], call["duration"], call["steps"], call["cfg_scale"], call["seed"]) == ("steady rain on a tin roof. Length: 30 seconds", 30.0, 8, 1.0, 11)
         assert call["sample_size"] == SAMPLE_SIZE
         assert call["disable_tqdm"] is True
+
+    def test_a_sound_is_sent_with_its_length_and_no_track_type(self, preset, snapshots, built, generated):
+        _take(_loaded(preset), AudioGenerationRequest(preset="sa3", kind="sound", prompt="a door slam", seconds=2.5, sound_type="one-shot"))
+
+        assert generated[0]["prompt"] == "a door slam. Length: 2.5 seconds"
+
+    def test_music_is_sent_with_its_tempo_and_key_as_caption_words(self, preset, snapshots, built, generated):
+        request = AudioGenerationRequest(preset="sa3", kind="music", prompt="warm lo-fi beat", seconds=45, tempo=84, key="F#m")
+        _take(_loaded(preset), request)
+
+        assert generated[0]["prompt"] == "TrackType: Music, warm lo-fi beat, 84 BPM, F# minor, no vocals. Length: 45 seconds"
+        assert generated[0]["duration"] == 45.0
+
+    def test_a_long_prompt_is_sent_whole(self, preset, snapshots, built, generated):
+        prompt = " ".join(["rain"] * 300)
+        _take(_loaded(preset), AudioGenerationRequest(preset="sa3", kind="sound", prompt=prompt, seconds=10))
+
+        assert prompt in generated[0]["prompt"]
 
     def test_a_380_second_request_is_not_capped(self, preset, snapshots, built, generated):
         clip = _take(_loaded(preset), _request(seconds=380))

@@ -1,25 +1,16 @@
-<script lang="ts" module>
-  import { SvelteSet } from 'svelte/reactivity';
-  import type { EnhancerTier } from '$lib/types';
-
-  /** Enhancer models downloaded during this session, so their first-use size stops showing. */
-  const downloadedTiers = new SvelteSet<EnhancerTier>();
-</script>
-
 <script lang="ts">
+  import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { ApiError } from '$lib/api/client';
-  import { getDownloadPlan } from '$lib/api/models';
   import { enhancePrompt } from '$lib/api/promptEnhance';
-  import { confirmDownloads } from '$lib/state/confirmDownloads';
-  import { uncheckedJobPlan } from '$lib/state/downloadConfirm';
+  import { confirmEnhancerDownload as confirmDownload, downloadedTiers, tierMissing } from '$lib/state/enhancerDownload.svelte';
   import { extendEnhanceHint, extendGuard, type ExtendModelSupport } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { pushRewrite } from '$lib/state/rewriteHistory';
+  import { rewriteResultPatch } from '$lib/state/rewriteHistory';
   import { EnhanceChoice, EnhanceOptions, EnhanceRewrite, InspectorRow } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { textWriting } from '$lib/state/textWriting.svelte';
   import Sheet from '$lib/components/molecules/Sheet.svelte';
   import {
     clampedNote,
@@ -42,7 +33,7 @@
     withRememberedParts,
     workflowMode,
   } from '$lib/state/promptEnhance';
-  import type { EnhanceFormat, EnhanceParts, EnhanceSettings, PromptEnhancerContract } from '$lib/types';
+  import type { EnhanceFormat, EnhanceParts, EnhanceSettings, EnhancerTier, PromptEnhancerContract } from '$lib/types';
 
   interface Props {
     contract: PromptEnhancerContract;
@@ -63,8 +54,14 @@
     errorText?: string | null;
     noteText?: string | null;
     statusText?: string | null;
+    /** The Enhanced text is out of date: the button's icon is ⚠ and the panel opens on "Enhance again". */
+    stale?: boolean;
+    /** Why it is out of date, in a sentence; the panel says it beside "Enhance again". */
+    staleReason?: string | null;
     /** Called when an enhancement starts, so the Enhanced tab can come forward. */
     onstart?: () => void;
+    /** Called when a run ended in an error, so the box can show your own text again instead of an empty Enhanced tab. */
+    onfail?: () => void;
     /** Whether the chosen video model can extend a clip; an extension waits for a model that can. */
     extendSupport?: ExtendModelSupport | null;
     /** The clip also ends on a last-frame image, so the rewrite must not invent a different ending. */
@@ -94,10 +91,15 @@
     errorText = $bindable(null),
     noteText = $bindable(null),
     statusText = $bindable(null),
+    stale = false,
+    staleReason = null,
     onstart,
+    onfail,
   }: Props = $props();
 
   const mode = $derived(workflowMode(draft.state.workflow));
+  /** What the server is asked to write: this enhancer serves the Image and Video tabs; audio text has its own request. */
+  const requestMode = $derived<'image' | 'video'>(mode === 'video' ? 'video' : 'image');
   const settings = $derived(effectiveEnhanceSettings(draft.state, contract));
   // A blank Scene means both parts, whatever is remembered; the file variant has no single scene to wait for.
   const rewriteBlocked = $derived(variant === 'inline' && actionOnlyBlocked(draft.state));
@@ -128,6 +130,8 @@
   let toggleEl = $state<HTMLButtonElement | null>(null);
   let phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' | null = null;
   let abort: AbortController | null = null;
+  /** Ends this run's hold on Generate (see `textWriting`). */
+  let release: (() => void) | null = null;
 
   const downloadSize = $derived(downloadedTiers.has(tier) ? null : (tier === 'smart' ? contract.smart?.download_size_label : contract.download_size_label) ?? null);
   const fastUndownloaded = $derived(tier === 'fast' && !contract.downloaded && !downloadedTiers.has('fast'));
@@ -163,41 +167,40 @@
     updateSettings(withRememberedParts(settings, draft.state.workflow, parts));
   }
 
-  /** Whether the model of *runTier* is missing from the disk, so the first enhancement would download it. */
-  function tierMissing(runTier: EnhancerTier): boolean {
-    if (downloadedTiers.has(runTier)) return false;
-    return runTier === 'smart' ? contract.smart?.downloaded === false : !contract.downloaded;
-  }
-
   /** Ask before the enhancement downloads its model; true when nothing is missing or the user agrees. Says why in the note when the plan can't be read. */
   async function confirmEnhancerDownload(runTier: EnhancerTier): Promise<boolean> {
-    if (!tierMissing(runTier)) return true;
-    // A custom model (no Fast/Smart choice) is the Models page's `custom` row.
-    const name = runTier === 'smart' ? 'smart' : contract.smart === null ? 'custom' : 'fast';
+    if (!tierMissing(contract, runTier)) return true;
     asking = true;
     try {
-      return await confirmDownloads(await getDownloadPlan('enhancer', name));
-    } catch (error) {
-      // Hugging Face can't be reached to size it: still ask, and let the user go ahead.
-      if (error instanceof ApiError && error.status === 503) return await confirmDownloads(uncheckedJobPlan(`${name.charAt(0).toUpperCase()}${name.slice(1)} enhancer model`, name));
-      errorText = error instanceof Error ? error.message : 'Could not check the enhancer model download.';
-      return false;
+      const { confirmed, error } = await confirmDownload(contract, runTier);
+      if (error !== null) errorText = error;
+      return confirmed;
     } finally {
       asking = false;
     }
   }
 
-  /** Run the enhancer on the current prompt; also used by the prompt box's Re-enhance link. */
+  /** Close the panel and put the focus on the Enhance button: the control that had it is closing with the panel. */
+  function closePanel(): void {
+    panelOpen = false;
+    void tick().then(() => toggleEl?.focus());
+  }
+
+  /** Run the enhancer on the current prompt; also used by the Enhance shortcut. */
   export async function runEnhance(): Promise<void> {
     if (enhanceDisabled) return;
     errorText = null;
     if (!(await confirmEnhancerDownload(tier))) return;
+    // The box shows the rewrite as it streams in, so the popover or sheet gets out of its way.
+    if (panelOpen) closePanel();
     onstart?.();
     const source = enhancedSourceFor(draft.state);
     const requested = runSettings;
     const runTier = tier;
     const runCaption = caption;
     enhancing = true;
+    release = textWriting.begin('Enhancing');
+    let failed = false;
     streamingText = '';
     streamingScene = '';
     errorText = null;
@@ -209,7 +212,7 @@
         {
           prompt: source.prompt,
           ...(mode === 'video' ? { scene: source.scene } : {}),
-          mode,
+          mode: requestMode,
           settings: settingsPayload(requested, mode, audio),
           max_words: maxWords,
           context: enhanceContext(draft.state, audioSupported, sourceHasAudio, endImage, references, track),
@@ -230,29 +233,37 @@
             const record = frame.model ? { settings: settingsPayload(requested, mode, audio), model: frame.model, format: runCaption ? ('json' as const) : ('text' as const) } : undefined;
             const scene = source.mode === 'video' ? frame.scene ?? '' : '';
             const from = record ? { ...source, record } : source;
-            draft.patch({ enhancedPrompt: prompt, enhancedScene: scene, enhancedFrom: from, enhancedHistory: pushRewrite(draft.state.enhancedHistory, { prompt, scene, from }) });
+            draft.patch(rewriteResultPatch(draft.state, { prompt, scene, from }));
             const notes = [frame.clamped ? clampedNote(requested.length) : null, frame.warning ?? null].filter((note) => note !== null);
             noteText = notes.length > 0 ? notes.join(' ') : null;
             downloadedTiers.add(runTier);
           } else if (frame.type === 'error') {
+            failed = true;
             errorText = frame.detail;
           }
         },
         abort.signal,
       );
     } catch (error) {
-      if (!abort?.signal.aborted) errorText = error instanceof Error ? error.message : 'Prompt enhancement failed.';
+      if (!abort?.signal.aborted) {
+        failed = true;
+        errorText = error instanceof Error ? error.message : 'Prompt enhancement failed.';
+      }
     } finally {
       enhancing = false;
+      release?.();
+      release = null;
       phase = null;
       statusText = null;
       streamingText = '';
       streamingScene = '';
       abort = null;
     }
+    if (failed) onfail?.();
   }
 
-  function stopEnhance(): void {
+  /** Stop the running enhancement; the header's stop ring and the panel's Stop both call it. */
+  export function stop(): void {
     // A download or model load cannot be interrupted; it finishes in the background and then stops.
     if (phase === 'downloading' || phase === 'loading') {
       noteText = phase === 'downloading'
@@ -262,10 +273,24 @@
     abort?.abort();
   }
 
+  /** The panel's Stop: stop, and close the panel with the focus back on the Enhance button (Stop is gone with the run). */
+  function stopFromPanel(): void {
+    stop();
+    closePanel();
+  }
+
+  // An out-of-date text opens the panel on its fix: the run button, which then reads "Enhance again".
+  $effect(() => {
+    if (!panelOpen || !stale) return;
+    void tick().then(() => document.getElementById('ws-enhance-run')?.focus());
+  });
+
   // The live state is bound into the prompt box, which outlives this component (JSON toggle,
   // prompt source switch); stop the request and hand back idle state so nothing stays stuck.
   $effect(() => () => {
     abort?.abort();
+    release?.();
+    release = null;
     enhancing = false;
     streamingText = '';
     streamingScene = '';
@@ -293,9 +318,10 @@
   aria-haspopup="dialog"
   aria-expanded={panelOpen}
   aria-controls="ws-enhance-panel"
+  aria-label={stale ? 'Enhance (out of date)' : undefined}
   onclick={() => { panelOpen = !panelOpen; }}
 >
-  <Icon name="sparkle" size={13} />Enhance{draft.state.enhanceAuto ? ' · each image' : ''}<Icon name="chevdown" size={12} />
+  {#if stale}<Icon name="alert" size={13} class="ui-icon-warn" />{:else}<Icon name="sparkle" size={13} />{/if}Enhance{draft.state.enhanceAuto ? ' · each image' : ''}<Icon name="chevdown" size={12} />
 </button>
 
 {#snippet body(titled: boolean)}
@@ -327,7 +353,7 @@
     {#if variant === 'inline' && !draft.state.enhanceAuto}
       <span class="enhance-spacer"></span>
       {#if enhancing}
-        <button type="button" class="ui-btn ui-btn-danger" onclick={stopEnhance}>Stop</button>
+        <button type="button" class="ui-btn ui-btn-danger" onclick={stopFromPanel}>Stop</button>
       {:else}
         <button type="button" id="ws-enhance-run" class="ui-btn ui-btn-primary" disabled={enhanceDisabled} onclick={runEnhance}>
           {#if caption}
@@ -337,6 +363,9 @@
           {/if}
         </button>
       {/if}
+    {/if}
+    {#if variant === 'inline' && !draft.state.enhanceAuto && !enhancing && staleReason}
+      <p class="ui-help enhance-hint" data-testid="enhance-stale">{staleReason}</p>
     {/if}
     {#if variant === 'inline' && !draft.state.enhanceAuto && !enhancing}
       {#if disabledHint}

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from tests._audio_presets import audio_config, higgs3_preset, sa3_preset, yue2_preset
+from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset, yue2_preset
 from tests._factories import load_packaged_config
 from tests._licences import use_licences
 from tests.web._helpers import make_web_config, make_workspace_bootstrap_view
 
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
+from zvisiongenerator.utils.audio_settings import audio_settings_contract
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -65,7 +66,12 @@ class TestListedWorkflows:
         _on(monkeypatch, "cuda")
 
         assert web_server._build_workflow_contract(audio_config(sa3=sa3_preset()))["values"] == [*_VIDEO_AND_IMAGE, "sound"]
-        assert web_server._build_workflow_contract(audio_config(yue2=yue2_preset(), higgs3=higgs3_preset()))["values"] == [*_VIDEO_AND_IMAGE, "music", "speech"]
+        assert web_server._build_workflow_contract(audio_config(yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset()))["values"] == [*_VIDEO_AND_IMAGE, "music", "speech"]
+
+    def test_a_model_of_two_kinds_lists_both_workflows(self, monkeypatch):
+        _on(monkeypatch, "cuda")
+
+        assert web_server._build_workflow_contract(audio_config(sa3=sa3_two_kind_preset()))["values"] == [*_VIDEO_AND_IMAGE, "music", "sound"]
 
     def test_a_machine_with_neither_cuda_nor_mps_lists_nothing(self, monkeypatch):
         def refuse():
@@ -101,9 +107,9 @@ class TestVisibleControls:
         return build_workflow_contract(audio_kinds={"music", "speech", "sound"})["definitions"]
 
     def test_each_workflow_shows_its_own_boxes(self, definitions):
-        assert definitions["music"]["visible_controls"] == ["workflow", "model", "music_style", "lyrics", "runs", "seed"]
-        assert definitions["speech"]["visible_controls"] == ["workflow", "model", "speech_text", "voice", "voice_path", "voice_text", "voice_consent", "runs", "seed"]
-        assert definitions["sound"]["visible_controls"] == ["workflow", "model", "sound_prompt", "length", "runs", "seed"]
+        assert definitions["music"]["visible_controls"] == ["workflow", "model", "music_style", "lyrics", "tempo", "key", "length", "runs", "seed"]
+        assert definitions["speech"]["visible_controls"] == ["workflow", "model", "speech_text", "voice", "voice_path", "voice_text", "voice_consent", "delivery", "runs", "seed"]
+        assert definitions["sound"]["visible_controls"] == ["workflow", "model", "sound_prompt", "sound_type", "length", "runs", "seed"]
 
     def test_no_audio_workflow_offers_an_image_video_or_prompt_file_control(self, definitions):
         image_and_video = {control for name in _VIDEO_AND_IMAGE for control in WORKFLOW_DEFINITIONS[name]["visible_controls"]} - {"workflow", "model", "runs", "seed"}
@@ -183,8 +189,20 @@ class TestWorkspacePayload:
         workspace = self.build(web_config, monkeypatch)
 
         rows = {row["id"]: row for row in workspace["audio_models"]}
-        assert list(rows) == ["yue2", "higgs3", "sa3"]
-        assert [len(rows[model]["licences"]) for model in rows] == [1, 2, 2]
+        assert list(rows) == ["yue2", "qwen3_tts", "sa3"]
+        assert [len(rows[model]["licences"]) for model in rows] == [1, 1, 2]
+
+    def test_the_packaged_config_offers_stable_audio_under_music_and_sound(self, monkeypatch):
+        web_config = make_web_config()
+        web_config.app_config.update(load_packaged_config())
+        _on(monkeypatch, "cuda")
+
+        rows = {(row["id"], row["kind"]): row for row in self.build(web_config, monkeypatch)["audio_models"]}
+
+        assert [model for model, kind in rows if kind == "music"] == ["yue2", "sa3"]
+        assert rows["sa3", "music"]["hidden_controls"] == ["lyrics"]
+        assert rows["sa3", "music"]["limits"]["default_seconds"] == 30.0
+        assert rows["sa3", "sound"]["hidden_controls"] == []
 
     def test_each_runnable_preset_is_a_row_in_config_order(self, monkeypatch, tmp_path):
         web_config = make_web_config()
@@ -208,13 +226,14 @@ class TestWorkspacePayload:
         workspace = self.build(web_config, monkeypatch)
 
         rows = {row["id"]: row for row in workspace["audio_models"]}
-        assert list(rows) == ["yue2", "higgs3", "sa3"]
+        assert list(rows) == ["yue2", "qwen3_tts", "sa3"]
         assert rows["yue2"] == {
             "id": "yue2",
             "label": "YuE2 3B",
             "kind": "music",
             "type": "audio",
             "limits": {"max_seconds": 360},
+            "hidden_controls": ["length"],
             "instrumental_sections": "[Intro] [Instrumental] [Solo] [Instrumental] [Solo] [Bridge] [Instrumental] [Outro]",
             "licences": [
                 {
@@ -229,11 +248,81 @@ class TestWorkspacePayload:
             "downloaded": True,
             "memory_fit": {"kind": "discrete", "budget_gb": 10.0, "by_quantize": {"none": {"status": "fits", "required_gb": 6.7}}},
         }
-        assert rows["higgs3"]["limits"] == {"max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30}
-        assert rows["sa3"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0, "default_seconds": 10.0}
-        assert rows["higgs3"]["instrumental_sections"] is None and rows["sa3"]["instrumental_sections"] is None
+        assert rows["qwen3_tts"]["limits"] == {"max_text_chars": 10000, "min_voice_seconds": 3, "max_voice_seconds": 30}
+        assert rows["sa3"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0, "default_seconds": 12.0}
+        assert [rows[model]["hidden_controls"] for model in rows] == [["length"], [], []]
+        assert rows["qwen3_tts"]["instrumental_sections"] is None and rows["sa3"]["instrumental_sections"] is None
         assert rows["sa3"]["downloaded"] is False  # none of its repositories is under m-a-p/
         assert rows["sa3"]["licences"] == []
+
+    def test_the_payload_serves_the_audio_settings_vocabulary(self, monkeypatch):
+        web_config = make_web_config()
+        web_config.app_config.update(audio_config())
+        _on(monkeypatch, "cuda")
+
+        settings = self.build(web_config, monkeypatch)["audio_settings"]
+
+        assert settings == audio_settings_contract()
+        assert settings["tempo"] == {"min": 40, "max": 220} and settings["auto_seconds"]["effect"] == 5.0
+
+    def test_a_model_of_two_kinds_is_a_row_per_kind_in_its_kind_order(self, monkeypatch):
+        web_config = make_web_config()
+        web_config.app_config.update(audio_config(yue2=yue2_preset(), sa3=sa3_two_kind_preset()))
+        _on(monkeypatch, "cuda")
+
+        workspace = self.build(web_config, monkeypatch)
+
+        assert [(row["id"], row["kind"]) for row in workspace["audio_models"]] == [("yue2", "music"), ("sa3", "sound"), ("sa3", "music")]
+        assert all("kinds" not in row for row in workspace["audio_models"])
+
+    def test_a_music_row_hides_what_its_model_lacks(self, monkeypatch):
+        web_config = make_web_config()
+        web_config.app_config.update(audio_config(yue2=yue2_preset(), sa3=sa3_two_kind_preset()))
+        _on(monkeypatch, "cuda")
+
+        rows = {(row["id"], row["kind"]): row for row in self.build(web_config, monkeypatch)["audio_models"]}
+
+        assert rows["yue2", "music"]["hidden_controls"] == ["length"]  # the lyrics set a song's length
+        assert rows["sa3", "music"]["hidden_controls"] == ["lyrics"]  # no lyrics; the length is chosen
+        assert rows["sa3", "sound"]["hidden_controls"] == []
+
+    def test_a_length_setting_music_row_carries_the_length_limits_and_no_section_list(self, monkeypatch):
+        web_config = make_web_config()
+        web_config.app_config.update(audio_config(sa3=sa3_two_kind_preset()))
+        _on(monkeypatch, "cuda")
+
+        rows = {row["kind"]: row for row in self.build(web_config, monkeypatch)["audio_models"]}
+
+        assert rows["music"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0, "default_seconds": 30.0}
+        assert rows["sound"]["limits"] == {"max_seconds": 380, "min_seconds": 1.0, "default_seconds": 12.0}
+        assert rows["music"]["instrumental_sections"] is None
+
+    def test_the_section_list_goes_only_to_the_rows_that_take_lyrics(self, monkeypatch):
+        preset = sa3_two_kind_preset()
+        preset["settings"] = {**preset["settings"], "instrumental_sections": "[Intro]"}
+        web_config = make_web_config()
+        web_config.app_config.update(audio_config(sa3=preset, yue2=yue2_preset()))
+        _on(monkeypatch, "cuda")
+
+        rows = {(row["id"], row["kind"]): row for row in self.build(web_config, monkeypatch)["audio_models"]}
+
+        assert rows["sa3", "music"]["instrumental_sections"] is None
+        assert rows["yue2", "music"]["instrumental_sections"] is not None
+
+    def test_a_speech_row_lists_the_built_in_voices_the_default_and_whether_cloning_is_downloaded(self, monkeypatch):
+        web_config = make_web_config()
+        web_config.app_config.update(audio_config())
+        _on(monkeypatch, "cuda")
+        monkeypatch.setattr(audio_models_module, "target_present_offline", lambda target: "Base" not in target.repo_id)
+
+        workspace = self.build(web_config, monkeypatch)
+
+        rows = {row["id"]: row for row in workspace["audio_models"]}
+        speech = rows["qwen3_tts"]
+        assert [(voice["id"], voice["label"], voice["language"]) for voice in speech["voices"]][:3] == [("ryan", "Ryan", "English"), ("aiden", "Aiden", "English"), ("vivian", "Vivian", "Chinese")]
+        assert len(speech["voices"]) == 9 and speech["default_voice"] == "ryan"
+        assert speech["voice_download"] == {"downloaded": False}
+        assert not {"voices", "default_voice", "voice_download"} & (rows["yue2"].keys() | rows["sa3"].keys())
 
     def test_a_status_that_cannot_be_read_leaves_the_row_with_unknown_status(self, monkeypatch):
         web_config = make_web_config()

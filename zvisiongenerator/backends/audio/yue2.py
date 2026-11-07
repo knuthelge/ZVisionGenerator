@@ -9,6 +9,7 @@ streamed in tensor by tensor (see :mod:`yue2_load`) and the acoustic part runs i
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Final
@@ -19,6 +20,7 @@ from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.backends.audio.build_cancel import stop_while_building
 from zvisiongenerator.backends.audio.yue2_load import load_model, size_checked_weights
 from zvisiongenerator.backends.audio.yue2_mps import folded_decode_attention, semantic_head
+from zvisiongenerator.backends.audio.yue2_score import planned_meter, planned_tempo, reads_as_score, score_header, silence_vocal
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
 from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled, raise_if_cancelled
 from zvisiongenerator.core.audio_types import AudioClip
@@ -40,6 +42,12 @@ _TOKENS_PER_SECOND: Final = 25
 
 _TOKEN_STRIDE: Final = 10
 """Report every this many tokens, so a long song does not flood the progress callback."""
+
+_HEADER_NOTE: Final = "YuE2 couldn't plan with this tempo and key; the take uses its own."
+_VOICE_NOTE: Final = "YuE2 couldn't silence the voice in this instrumental; the take may have a voice in it."
+
+_OPENING_PROBE_TOKENS: Final = 64
+"""Tokens of a plan the model writes to read its meter and tempo, which the score declares near its start; the kit's ABC sampling needs at least 32."""
 
 _MPS_NAR_QUERY_TILE: Final = 1024
 """Query rows per attention call in the acoustic stage on MPS; the kit's 256 is slower there and the result is the same."""
@@ -127,12 +135,11 @@ class YuE2Backend:
         """
         settings = self._settings
         lyrics, kind, _ = music_mode(request.lyrics, settings["instrumental_sections"])
-        cot = "melody" if kind == INSTRUMENTAL else "full"
         if self._swap is not None:
             self._swap.restore_resident()
         stop = _CancelProbe(cancelled)
         try:
-            return self._take(request.prompt, lyrics, cot, request.seed, on_progress, stop)
+            return self._take(request, lyrics, kind == INSTRUMENTAL, on_progress, stop)
         except InterruptedError as error:
             if stop.requested:
                 raise AudioCancelled(str(error)) from error
@@ -157,23 +164,14 @@ class YuE2Backend:
             if device == "cuda":
                 _lift_memory_fraction()
 
-    def _take(self, style: str, lyrics: str, cot: str, seed: int, on_progress: ProgressCallback, stop: _CancelProbe) -> AudioClip:
+    def _take(self, request: AudioGenerationRequest, lyrics: str, instrumental: bool, on_progress: ProgressCallback, stop: _CancelProbe) -> AudioClip:
         pipe, swap, settings = self._pipe, self._swap, self._settings
         if swap is not None:
             swap.phase("ar")
         on_progress("Plan", 0, None, 1, 1)
         mps = self._device == "mps"  # the exact MPS speed-ups: folded attention for both token phases, the song-token head for the song
         with folded_decode_attention() if mps else nullcontext():
-            plan = pipe.plan(
-                style,
-                lyrics,
-                cot=cot,
-                seed=seed,
-                cfg_scale=settings["cfg"],
-                abc_sampling={"max_tokens": settings["abc_max_tokens"]},
-                cancelled=stop,
-                on_token=_count_tokens("Plan", on_progress),
-            )
+            plan, notes = _plan_score(pipe, request, lyrics, instrumental, settings, on_progress, stop)
         on_progress("Plan", len(plan.abc_ids), None, 1, 1)
         on_progress("Song tokens", 0, None, 1, 1)
         cap = {"max_tokens": int(round(_TOKENS_PER_SECOND * self._max_seconds))}
@@ -189,8 +187,94 @@ class YuE2Backend:
         on_progress(DECODE_PHASE, 1, 1, 1, 1)
         samples = np.ascontiguousarray(audio.T, dtype=np.float32)
         if semantic.truncated:
-            return AudioClip(fade_out(samples, SAMPLE_RATE, float(settings["fade_seconds"])), SAMPLE_RATE, cut=True)
-        return AudioClip(samples, SAMPLE_RATE)
+            return AudioClip(fade_out(samples, SAMPLE_RATE, float(settings["fade_seconds"])), SAMPLE_RATE, cut=True, notes=notes)
+        return AudioClip(samples, SAMPLE_RATE, notes=notes)
+
+
+def _plan_score(
+    pipe: Any, request: AudioGenerationRequest, lyrics: str, instrumental: bool, settings: dict[str, Any], on_progress: ProgressCallback, stop: _CancelProbe
+) -> tuple[Any, tuple[str, ...]]:
+    """Plan the song's score, steering it by the request's tempo and key and silencing the Vocal voice of an instrumental.
+
+    Without a tempo, a key or an instrumental this is the kit's own plan. Tempo and key are written as the start of the score
+    before the model plans the rest. The meter and note length are the ones the model opens its own plan with, and so is
+    the tempo when it is left to the model. An instrumental's Vocal voice is replaced by rests. A score made or edited here
+    is handed back to the kit as the score to use. When a step cannot be done, the take goes on with the plan it has and
+    the reason comes back as a note.
+
+    Returns:
+        The kit's plan and the notes for the clip.
+    """
+    cot = "melody" if instrumental else "full"
+    seed, cfg = request.seed, settings["cfg"]
+
+    def plain() -> Any:
+        return pipe.plan(
+            request.prompt, lyrics, cot=cot, seed=seed, cfg_scale=cfg, abc_sampling={"max_tokens": settings["abc_max_tokens"]}, cancelled=stop, on_token=_count_tokens("Plan", on_progress)
+        )
+
+    tempo, key = request.tempo, request.key
+    if tempo is None and key is None and not instrumental:
+        return plain(), ()
+    from yue2.protocol import SongRequest
+
+    song = SongRequest(style=request.prompt, lyrics=lyrics, cot=cot, seed=seed, cfg_scale=cfg)
+    notes: list[str] = []
+    score: str | None = None
+    if tempo is not None or key is not None:
+        opening = _probe_opening(pipe, song, stop)
+        meter, unit = planned_meter(opening)
+        tempo = tempo if tempo is not None else planned_tempo(opening)
+        if tempo is not None:
+            score = _plan_from_header(pipe, song, score_header(tempo, key, meter, unit), settings, on_progress, stop)
+        if score is None:
+            notes.append(_HEADER_NOTE)
+    plan = plain() if score is None else None
+    if instrumental:
+        text = score if plan is None else plan.abc
+        try:
+            silenced = silence_vocal(text)
+        except ValueError:
+            notes.append(_VOICE_NOTE)
+        else:
+            score = silenced if silenced != text else score
+    if score is None:
+        return plan, tuple(notes)
+    return pipe.plan(request=dataclasses.replace(song, abc=score)), tuple(notes)
+
+
+def _probe_opening(pipe: Any, song: Any, stop: _CancelProbe) -> str:
+    """Return the complete lines the model opens a plan of *song* with: its meter, note length and, if it gets that far, tempo.
+
+    This is the kit's own planning step stopped after :data:`_OPENING_PROBE_TOKENS` tokens, with the same prefix, sampling and
+    seed as an ordinary plan, so it opens the way the full plan would. Only complete lines are returned, because a line cut
+    off in the middle of a number would read as a different one. It reports no token progress.
+    """
+    from yue2.protocol import resolve_sampling, token_prefixes
+
+    tokenizer = pipe.tokenizer
+    sampling = resolve_sampling({"max_tokens": _OPENING_PROBE_TOKENS}, pipe.generation_config.abc)
+    ids, _timing, _truncated = pipe._generate(token_prefixes(song, tokenizer), sampling, song.seed, "abc", cancelled=stop)
+    text = tokenizer.decode(ids)
+    return text[: text.rfind("\n") + 1]
+
+
+def _plan_from_header(pipe: Any, song: Any, header: str, settings: dict[str, Any], on_progress: ProgressCallback, stop: _CancelProbe) -> str | None:
+    """Let the model continue the score *header*; return the whole score, or ``None`` if it cannot be read.
+
+    A score cut off at the token limit is used as it is, as the kit uses a plan it cut off.
+
+    This is the kit's own planning step with the header added to the prompt, so it runs the same sampling, the same seed
+    and the same model loading (and so the CUDA weight swap) as an ordinary plan.
+    """
+    from yue2.protocol import resolve_sampling, token_prefixes
+
+    tokenizer = pipe.tokenizer
+    prefix = token_prefixes(song, tokenizer) + tokenizer.encode(header)
+    sampling = resolve_sampling({"max_tokens": settings["abc_max_tokens"]}, pipe.generation_config.abc)
+    ids, _timing, _truncated = pipe._generate(prefix, sampling, song.seed, "abc", cancelled=stop, on_token=_count_tokens("Plan", on_progress))
+    score = header + tokenizer.decode(ids)
+    return score if reads_as_score(score) else None
 
 
 def _count_tokens(label: str, on_progress: ProgressCallback) -> Callable[[str, int], None]:

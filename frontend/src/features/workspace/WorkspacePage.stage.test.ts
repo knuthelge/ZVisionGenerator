@@ -19,7 +19,7 @@ import WorkspacePage from './WorkspacePage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { lastEventSource } from '../../test-utils/eventSource';
 import { makeAudioAsset, makeSpeechAsset } from '../../test-utils/audio';
-import { makeAsset, makeContext, makeGalleryPage, makeImageDefaults } from '../../test-utils/workspace';
+import { EMPTY_AUDIO_MATRIX, makeAsset, makeContext, makeGalleryPage, makeImageDefaults } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, fakeDebounceTimers, field, holdInspection, mockClipboard, mountWorkspacePage, openEnhanceRun, resetWorkspaceTest, runEnhance, settle, type, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, enhanceApiMocks, extendApiMocks, galleryApiMocks, layoutProbe, presetApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
@@ -910,6 +910,7 @@ describe('WorkspacePage extend', () => {
       ],
       defaults: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: ['action'], sound: [], note: '' },
     },
+    audio_matrix: EMPTY_AUDIO_MATRIX,
     model: 'owner/llm',
     revision: null,
     downloaded: true,
@@ -1441,11 +1442,13 @@ describe('WorkspacePage extend', () => {
       await chooseSource(sceneSource());
       await runEnhance();
       expect(draft.state.enhancedFrom).toMatchObject({ mode: 'video', sourceVideoPath: SOURCE, extendFrames: 48 });
-      expect(target.textContent).not.toContain('Out of date');
+      const enhanceLabel = () => target.querySelector('#ws-enhance-toggle')?.getAttribute('aria-label');
+      expect(enhanceLabel()).toBeNull();
 
       draft.update('extendFrames', 72);
       await settle();
-      expect(target.textContent).toContain('Out of date');
+      // The Enhanced tab is open, so the warning is on the fix.
+      expect(enhanceLabel()).toBe('Enhance (out of date)');
     });
 
     describe('Action only', () => {
@@ -1487,7 +1490,7 @@ describe('WorkspacePage extend', () => {
         expect(field('ws-enhanced-prompt').value).toBe('She waves sl');
         expect(field('ws-enhanced-prompt').getAttribute('aria-busy')).toBe('true');
         expect(field('ws-enhanced-scene').value).toBe('');
-        expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
+        expect(field('ws-enhanced-scene').placeholder).toBe('Not rewritten. Generate sends your scene.');
         release();
         await settle();
       });
@@ -1497,9 +1500,7 @@ describe('WorkspacePage extend', () => {
 
   describe('restoring the clip text', () => {
     const link = (label: string) => Array.from(target.querySelectorAll('.label-extras button')).find((el) => el.textContent?.trim() === label) as HTMLButtonElement | undefined;
-    const status = () => target.querySelector('[role="status"]')?.textContent?.trim();
-
-    it('offers the clip\'s scene only while the Scene differs, and restores it with a status and focus', async () => {
+    it('offers the clip\'s scene only while the Scene differs, and restores it with the focus and no notice', async () => {
       await mountExtend();
       await chooseSource(sceneSource());
       expect(link("Use the clip's scene")).toBeUndefined();
@@ -1513,12 +1514,12 @@ describe('WorkspacePage extend', () => {
 
       expect(field('ws-scene').value).toBe('A woman on a rainy street.');
       expect(draft.state.scene).toBe('A woman on a rainy street.');
-      expect(status()).toBe('Scene restored from the clip.');
+      expect(target.textContent).not.toContain('restored from the clip');
       expect(document.activeElement).toBe(field('ws-scene'));
       expect(link("Use the clip's scene")).toBeUndefined();
     });
 
-    it('clears Out of date when the clip\'s scene is restored', async () => {
+    it('clears the out-of-date mark when the clip\'s scene is restored', async () => {
       enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
         (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: '', prompt: 'She waves slowly.', clamped: false });
       });
@@ -1530,10 +1531,11 @@ describe('WorkspacePage extend', () => {
 
       type('ws-scene', 'A woman on a sunny street.');
       await settle();
-      expect(target.textContent).toContain('Out of date');
+      const enhanceLabel = () => target.querySelector('#ws-enhance-toggle')?.getAttribute('aria-label');
+      expect(enhanceLabel()).toBe('Enhance (out of date)');
       link("Use the clip's scene")!.click();
       await settle();
-      expect(target.textContent).not.toContain('Out of date');
+      expect(enhanceLabel()).toBeNull();
     });
 
     it('offers the clip\'s prompt for a legacy clip, beside Action, and brings back the original-prompt warning', async () => {

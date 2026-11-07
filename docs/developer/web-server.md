@@ -85,12 +85,38 @@ The Discover LoRAs routes serve the curated list (`utils/curated_loras.py`, see 
 
 **Plan without files.** The Workspace posts the generate form to `/api/generate/plan` with each upload as an empty part that keeps its field and file name (`planForm`), then posts the real form once to `/api/generate`. `_generate_plan_from_form` swaps every upload for a `PlannedUpload` before it parses, so the plan route never reads or saves a file. The file helpers still check extensions, so the user is never asked to approve a download for a job that cannot run; what needs a file's content is left to the submit.
 
-- **Form.** The field names are the ones Copy CLI reads (`frontend/src/lib/state/cliCommand.ts`, with the shared fixture `tests/fixtures/audio_cli_cases.json`): `workflow` (`music`, `speech` or `sound`), `model`, `prompt`, `lyrics`, `seconds`, `voice_path` or the `voice_file` upload, `voice_text`, `voice_consent`, `seed` and `runs`. A field that belongs to another kind than the model's is ignored.
+- **Form.** The field names are the ones Copy CLI reads (`frontend/src/lib/state/cliCommand.ts`, with the shared fixture `tests/fixtures/audio_cli_cases.json`): `workflow` (`music`, `speech` or `sound`), `model`, `prompt`, `lyrics`, `seconds`, `tempo`, `key`, `speaker`, the five delivery fields (`emotion`, `manner`, `pace`, `pitch`, `expressiveness`), `sound_type`, `voice_path` or the `voice_file` upload, `voice_text`, `voice_consent`, `seed` and `runs`. A text the enhancer wrote adds `prompt_input` (the user's own text, which may be empty) and `enhance_record` (JSON, see below). A field that belongs to another kind than the model's is ignored; a blank `tempo`, `key` or `seconds` is Auto.
 - **The request is the CLI's.** `web/audio_job.audio_request_from_fields` builds the `AudioGenerationRequest` the way `ziv audio` does, using the same checks in `utils/audio_request.py`, so a form and a command word their refusals alike. Refusals are a 422.
 - **Consent.** A voice recording needs `voice_consent`, unless it is a gallery take made without a reference voice (`audio_voice.voice_needs_consent`). The consent is checked and never saved: the job's recorded settings drop it, so a loaded or retried job comes back unticked.
 - **Events.** The runner is `audio_runner.run_audio_batch`. Besides the events of the other runners, a job publishes `model_downloading` (`mode: "audio"`) and `model_loading`, and per take any number of `audio_progress` events (`phase`, `step`, `total` or `null`, `part`, `n_parts`, `elapsed_secs`, `eta_secs`). A Stop is honoured at every step, also while the model loads: the load polls a Quit check between tensors. A take that fails ends the job `job_failed`; the takes before it are saved. The job's context carries `media_type: "audio"` and no `width` or `height`.
 
 The workspace payload (`GET /api/workspace`) lists `audio_models`, one row per preset that runs on this machine, in config order (`web/audio_models.py`): `id`, `label`, `kind`, `limits`, `instrumental_sections` (a music model's section list), `licences`, `downloaded` and `memory_fit`. The workflow contract lists `music`, `speech` and `sound` only for kinds with a runnable model, so a config with no audio preset leaves the Audio tab hidden.
+
+### Audio text enhancement
+
+`POST /api/prompt/enhance` takes `mode: "audio"` beside `image` and `video`; it shares the endpoint's NDJSON stream, its Fast/Smart choice (`enhance_model`) and its admission: a running job or another enhancement gives a 409, because the enhancer and the audio models never share the GPU. `web/audio_enhance.py` owns the audio side. The rules of each task live in `utils/prompt_enhance_audio.py` (the caption rewrites `sound` and `style`, written by the preset's backend family) and `utils/audio_writers.py` (the writer tasks `lyrics`, `script` and `fill`; `speech_realign.py` holds the script helper's word matching). A `task` that is not in `audio_enhance.ENHANCE_TASKS` is a 422.
+
+**Request.** `task`, `model` (the audio preset id, which must make the kind), `kind`, `prompt`, `settings` and `context`. A bad value is a 422 in the user's words.
+
+| Task | Does | `kind` | `prompt` | `settings` |
+|---|---|---|---|---|
+| `sound` | Rewrites a Sound prompt | `sound` | The prompt, 1 to 1,000 characters | `space`, `distance`, `over_time`, `movement`, `note` |
+| `style` | Rewrites a Music style | `music` | The style, 1 to 1,000 characters | `genre`, `music_mood`, `instruments`, `without`, `singer`, `production`, `note` |
+| `lyrics` | Edits a song's lyrics; the model must take lyrics | `music` | The song as the Lyrics box holds it, up to 4,000 characters | `{action: "improve" \| "write", improve: [...], note, section}` |
+| `script` | Edits a speech text | `speech` | The Text with its marks, up to 4,000 characters | `{actions: ["fit", "delivery"], seconds?, pace?}` |
+| `fill` | Writes several fields from an idea | `music` (default) or `speech` | The idea, up to 1,000 characters | `{fields: [...]}` |
+
+`context` holds `lyrics` and `text`, `style`, `instrumental`, `tempo`, `key`, `seconds` and `sound_type`; each task reads what it needs. An axis of the other kind, an unknown slug or an instrument in both Instruments and Without is a 422.
+
+- **`lyrics`.** `improve` lists `tighten`, `fit`, `rhymes` or `simpler` (none is a general polish; `fit` is for the whole song). `section` is the index among the `[section]` tags from 0, `null` for the whole song; a `write` needs a section with no words in a song that has some. The `done` frame's `fields.lyrics` is always the whole song. The lyrics text is not a record and is not saved with the take.
+- **`script`.** `actions` lists each of `fit` and `delivery` at most once, and runs fit first; `seconds` is a whole number from 3 to 600 and required with `fit`; `pace` is one of the Pace values (default `normal`). With both actions, one request makes one `done` frame and one record. `delivery` never changes the script's words. The `done` frame's `fields.script` is the whole script.
+- **`fill`.** `fields` lists the ones the client found empty: `style`, `tempo`, `key`, `lyrics` for music (`lyrics` needs a model that takes lyrics) and `vibe`, `text` for speech. One enhancer call answers them all, and each is validated on its own; fields still missing are named in the `warning`. The `done` frame's `fields` holds each valid field as text (`tempo` as the number, `key` as the ABC id, `vibe` as the Vibe id).
+
+**Frames.** `status` frames as for images. `text` frames are `{type, task, text, fields}` and the `done` frame is `{type, task, fields, clamped, model, warning?}`: `fields` maps each written field to its text (`prompt` for `sound`, `style` for `style`). `model` is the enhancer that wrote it (`REPO[@REVISION]`), which the client sends back as part of `enhance_record`. A changed quoted text is a `warning` on the `done` frame. A writer whose answer left the text as it was ends in `{type: "error", detail, no_change: true}`, so the client shows a note instead of an error.
+
+**Saved record.** `enhance_record` is `{settings, model, tier, format: "text", task}`, where `settings` holds only the options that are not defaults. For the script helper `task` is `script` and `settings` is what it did; the Written text is the take's `prompt` and the user's own text its `prompt_input`. `_parse_audio_job` reads it with `parse_enhance_record(mode="audio")`: a record that cannot be read is dropped with a warning instead of failing the take. A take with a record saves `prompt_input` (even `""`) and `enhance` in its FLAC settings; Reuse gives back `prompt` (the user's own text), `enhanced_prompt` and `enhance` (the record as JSON). Fill in writes into the user's own fields and leaves no record.
+
+`prompt_enhancer.audio_matrix` lists the audio axes (`key`, `label`, `multi`, `kind`, `vocal`, `options`, `default`) for the Workspace.
 
 ### Audio models on the Models page
 

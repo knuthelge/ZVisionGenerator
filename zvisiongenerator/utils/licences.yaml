@@ -56,20 +56,6 @@ yue2-creator-nc:
   summary: "Non-commercial; individual creators may monetise their outputs, companies need a licence"
   url: "https://github.com/multimodal-art-projection/YuE/blob/3acdec8cf1b97603bb696e4c6c4560348ffbb0b7/MODEL_LICENSE"
   models: [yue2]
-higgs3-nc:
-  name: "Boson Higgs TTS 3 Research and Non-Commercial License"
-  supplier: "Boson AI"
-  summary: "Non-commercial; creators may publish and monetise their own content if they credit Boson AI's Higgs Audio"
-  attribution: "Built with Higgs TTS 3 licensed from Boson AI USA, Inc."
-  url: "https://huggingface.co/bosonai/higgs-tts-3-4b/blob/239f63fb7b02b1aa085f98d9efae5e35cc5523e8/LICENSE"
-  models: [higgs3]
-higgs-audio2-community:
-  name: "Boson Higgs Audio 2 Community License Agreement"
-  supplier: "Boson AI"
-  summary: "Free up to 100,000 annual active users; products credit Boson AI and Meta Llama 3"
-  attribution: "Built with Higgs Materials licensed from Boson AI USA, Inc., Copyright Boson AI USA, Inc., All Rights Reserved and Meta Llama 3 licensed under the Meta Llama 3 Community License, Copyright Meta Platforms, Inc., All Right Reserved"
-  url: "https://huggingface.co/bosonai/higgs-audio-v2-tokenizer/blob/815a03f1b57dcb5ae918db415f22cd0c8a6f0f54/LICENSE"
-  models: [higgs3]
 stability-community:
   name: "Stability AI Community License"
   supplier: "Stability AI"
@@ -110,6 +96,12 @@ qwen-apache:
   summary: "Free to use, also commercially"
   url: "https://huggingface.co/Qwen/Qwen3.5-9B/blob/c202236235762e1c871ad0ccb60c8ee5ba337b9a/LICENSE"
   models: [enhancer-fast, enhancer-smart]
+qwen3-tts-apache:
+  name: "Apache License 2.0"
+  supplier: "Qwen"
+  summary: "Free to use, also commercially"
+  url: "https://github.com/QwenLM/Qwen3-TTS/blob/022e286b98fbec7e1e916cb940cdf532cd9f488e/LICENSE"
+  models: [qwen3_tts]
 seedvr2-apache:
   name: "Apache License 2.0"
   supplier: "ByteDance Seed"

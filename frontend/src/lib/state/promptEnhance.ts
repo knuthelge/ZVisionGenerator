@@ -285,16 +285,24 @@ export function submittedPrompt(state: DraftState): string {
   return submittedPair(state).prompt;
 }
 
-/** Whether the Enhanced text was produced from a different scene, prompt, workflow mode or, for an extension, source or length than the current one. */
-export function isEnhancedStale(state: DraftState): boolean {
+/**
+ * Why the Enhanced text is out of date, in a sentence ("Your Action changed since this was written."), or null while it is not: it was produced from
+ * a different scene, prompt, workflow mode or, for an extension, source or length than the current one. With *Enhance each image* on no Enhanced text is
+ * sent (Generate sends your text and the job enhances it), so nothing is out of date.
+ */
+export function enhancedStaleReason(state: DraftState): string | null {
   const source = state.enhancedFrom;
-  if (source === null) return false;
+  if (source === null || state.enhanceAuto) return null;
   const mode = workflowMode(state.workflow);
-  if (state.enhancedPrompt.trim() === '' && (mode !== 'video' || state.enhancedScene.trim() === '')) return false;
-  if (source.prompt !== state.prompt || source.mode !== mode || (mode === 'video' && source.scene !== state.scene)) return true;
+  if (state.enhancedPrompt.trim() === '' && (mode !== 'video' || state.enhancedScene.trim() === '')) return null;
+  const video = mode === 'video';
+  const parts = [video && source.scene !== state.scene ? 'Scene' : null, source.prompt !== state.prompt ? (video ? 'Action' : 'Prompt') : null].filter((part) => part !== null);
+  if (source.mode !== mode && parts.length === 0) return 'The workflow changed since this was written.';
+  if (parts.length > 0) return `Your ${parts.join(' and ')} changed since this was written.`;
   // Outside an extension the source and length mean nothing, so an Enhanced pair made for one is out of date once the workflow is another.
   const extending = state.workflow === 'extend';
-  return (source.sourceVideoPath ?? null) !== (extending ? state.extendSourcePath : null) || (source.extendFrames ?? null) !== (extending ? state.extendFrames : null);
+  const extension = (source.sourceVideoPath ?? null) !== (extending ? state.extendSourcePath : null) || (source.extendFrames ?? null) !== (extending ? state.extendFrames : null);
+  return extension ? 'The extension changed since this was written.' : null;
 }
 
 /** Status line for an enhancement phase; *caption* runs write a JSON caption. */

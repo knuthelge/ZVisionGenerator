@@ -11,7 +11,14 @@ export interface MusicMode {
 }
 
 // One `[tag]`: no brackets or line breaks inside, so an unclosed bracket is a word.
-const TAG = /\[[^[\]\n]+\]/g;
+const TAG_SOURCE = String.raw`\[[^[\]\n]+\]`;
+const TAG = new RegExp(TAG_SOURCE, 'g');
+const SECTION_LINE = new RegExp(`^${TAG_SOURCE}$`);
+
+/** Whether a lyric line only names a section: `[verse]`, `[chorus 2]`, with spaces around it. Shares its tag rule with `sectionTags`. */
+export function isSectionLine(line: string): boolean {
+  return SECTION_LINE.test(line.trim());
+}
 
 /** Return the `[section]` tags of *text*, in order and as written. */
 export function sectionTags(text: string): string[] {

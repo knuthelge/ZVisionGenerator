@@ -1,0 +1,13 @@
+[
+  {"text": "", "unknown": []},
+  {"text": "[sad] Goodbye.", "unknown": []},
+  {"text": "[ sad ]Hi [Whisper]there[AS  SET] again", "unknown": []},
+  {"text": "A [sadd] day [Whisper] [really quiet] [x] [1] ([whispr])", "unknown": ["[sadd]", "[really quiet]", "[whispr]"]},
+  {"text": "[laughs] Hello.", "unknown": ["[laughs]"]},
+  {"text": "[Laughs] and [laughs] again", "unknown": ["[Laughs]", "[laughs]"]},
+  {"text": "[  ] nothing but spaces", "unknown": []},
+  {"text": "[ab] two letters", "unknown": ["[ab]"]},
+  {"text": "[abcdefghijklmnopqrst] and [abcdefghijklmnopqrstu]", "unknown": ["[abcdefghijklmnopqrst]"]},
+  {"text": "[café] [sad-ish] [two\nlines] [a1]", "unknown": []},
+  {"text": "[sad][shout][as set]", "unknown": []}
+]

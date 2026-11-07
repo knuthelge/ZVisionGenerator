@@ -8,7 +8,7 @@ import { isOriginalLegacyPrompt } from './extend';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import reuseFixture from '../../../../tests/fixtures/extend_reuse_params.json';
 import { jobSettingsPrefill } from './jobSettings';
-import { isEnhancedStale } from './promptEnhance';
+import { enhancedStaleReason } from './promptEnhance';
 
 // End-to-end flows through the draft: the params a gallery action or Reuse builds, then the server's answer for the source.
 
@@ -73,7 +73,7 @@ describe('extend flows', () => {
     });
     draft.applyExtendSource(sceneSource());
     expect(draft.state).toMatchObject({ scene: 'My street.', prompt: 'She waves.', enhancedScene: 'A wet street.', enhancedPrompt: 'She waves slowly.', extendFrames: 48 });
-    expect(isEnhancedStale(draft.state)).toBe(false);
+    expect(enhancedStaleReason(draft.state)).toBeNull();
   });
 
   it('edits survive a second inspection, a new source and are replaced only on request', () => {
@@ -107,7 +107,7 @@ describe('extend flows', () => {
     draft.loadFromUrl(params);
     draft.patch(patch);
     expect(draft.state).toMatchObject({ enhancedScene: 'A wet street.', enhancedPrompt: 'She waves slowly.', extendSourcePath: SOURCE, extendFrames: 48 });
-    expect(isEnhancedStale(draft.state)).toBe(false);
+    expect(enhancedStaleReason(draft.state)).toBeNull();
   });
 
   // tests/fixtures/extend_reuse_params.json is also checked by pytest against the gallery's `reuse_params` output.
@@ -117,7 +117,7 @@ describe('extend flows', () => {
       workflow: 'extend', extendSourcePath: '/clips/walk.mp4', extendFrames: 48, missingSourceVideo: true,
       scene: 'My street.', prompt: 'She waves.', enhancedScene: 'A wet street at night.', enhancedPrompt: 'She waves slowly.',
     });
-    expect(isEnhancedStale(draft.state)).toBe(false);
+    expect(enhancedStaleReason(draft.state)).toBeNull();
   });
 
   it("keeps the blank text of the server's Reuse params through the inspection of the source", () => {

@@ -73,9 +73,9 @@ Press **Save** or ++ctrl+s++.
 
 ## Save a Workspace prompt
 
-You can also add a prompt to a file from the Workspace. **Save…** in the prompt box's tools row appends the prompt you are looking at to a prompt file. It shows when the prompt source is **Inline**.
+You can also add a prompt to a file from the Workspace. The save button (file icon, named *Save to prompt file…*) in the prompt box's tools row appends the prompt you are looking at to a prompt file. It shows when the prompt source is **Inline**.
 
-- **What is saved:** the text in the box. In the **Prompt** tab (**Your text** for video) that's your own text; in the **Enhanced** tab it's the rewrite. Video also saves the scene, and the negative prompt is saved when it's shown.
+- **What is saved:** the text in the box. In the **Prompt** tab that's your own text; in the **Enhanced** tab it's the rewrite. Video also saves the scene, and the negative prompt is saved when it's shown.
 - **Where it goes:** the end of the set named `prompts`, added at the end of the file when missing. Choose a **Recent** file, **Browse…** for one, or **New file…**.
 - **The file:** comments are kept. A file with errors, such as an undefined `$snippet`, is left unchanged and the message says what to fix.
 

@@ -31,6 +31,7 @@ const realSetTimeout = globalThis.setTimeout;
 export function resetWorkspaceTest(): void {
   layoutProbe.compact = false;
   layoutProbe.coarse = false;
+  layoutProbe.tall = false;
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();

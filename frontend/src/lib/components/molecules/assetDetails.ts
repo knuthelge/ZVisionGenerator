@@ -1,13 +1,18 @@
 import { reuseParams, workflowLabel } from '$lib/state/assetActions';
-import { audioModelLabel, formatFact, kindFact, lengthFact } from '$lib/state/audioAsset';
+import { audioModelLabel, audioRowOf, formatFact, kindFact, lengthFact } from '$lib/state/audioAsset';
 import { formatTimestamp } from '$lib/state/audioTrack';
 import { sizeLabel } from '$lib/state/downloadProgress';
-import type { AudioModelOption, GalleryAsset, UpscaleMethod } from '$lib/types';
+import { keyNameOf } from '$lib/state/musicSettings';
+import { DELIVERY_FIELDS } from '$lib/state/audioDraft';
+import { deliverySummary } from '$lib/state/speechDelivery';
+import type { AudioModelOption, AudioSettingsVocabulary, GalleryAsset, SpeechDeliveryValues, UpscaleMethod } from '$lib/types';
 
 export interface DetailFact {
   label: string;
   value: string;
   wide?: boolean;
+  /** Let a long value run over several lines instead of cutting it short. */
+  wrap?: boolean;
   /** Hover text when it differs from the value, e.g. a full path. */
   title?: string;
 }
@@ -20,8 +25,8 @@ export interface AssetDetailSections {
 }
 
 /** Group everything recorded about an asset into the viewer's detail sections; unrecorded fields are left out. */
-export function assetDetailSections(asset: GalleryAsset, audioModels?: readonly AudioModelOption[]): AssetDetailSections {
-  if (asset.media_type === 'audio') return audioDetailSections(asset, audioModels);
+export function assetDetailSections(asset: GalleryAsset, audioModels?: readonly AudioModelOption[], vocabulary?: AudioSettingsVocabulary): AssetDetailSections {
+  if (asset.media_type === 'audio') return audioDetailSections(asset, audioModels, vocabulary);
   const details = asset.details ?? {};
   const generation = details.generation ?? {};
   const upscale = generation.upscale;
@@ -65,7 +70,7 @@ export function assetDetailSections(asset: GalleryAsset, audioModels?: readonly 
 }
 
 /** Group what is recorded about an audio take: how it was made, and its file. A file without this app's settings has no Generation. */
-function audioDetailSections(asset: GalleryAsset, audioModels: readonly AudioModelOption[] | undefined): AssetDetailSections {
+function audioDetailSections(asset: GalleryAsset, audioModels: readonly AudioModelOption[] | undefined, vocabulary: AudioSettingsVocabulary | undefined): AssetDetailSections {
   const recorded = asset.kind != null;
   return {
     negativePrompt: null,
@@ -73,9 +78,13 @@ function audioDetailSections(asset: GalleryAsset, audioModels: readonly AudioMod
       ? compact([
           { label: 'Kind', value: kindFact(asset) },
           { label: 'Model', value: audioModelLabel(asset, audioModels) || '—' },
-          asset.kind === 'speech' ? { label: 'Voice', value: voiceFact(asset) } : null,
+          asset.kind === 'speech' ? { label: 'Voice', value: voiceFact(asset, audioModels) } : null,
           { label: 'Length', value: lengthFact(asset) },
+          musicFact(asset, vocabulary),
+          deliveryFact(asset, vocabulary),
+          soundTypeFact(asset, vocabulary),
           { label: 'Seed', value: asset.seed != null ? String(asset.seed) : '—' },
+          asset.notes?.length ? { label: 'Note', value: asset.notes.join(' '), wide: true, wrap: true } : null,
         ])
       : [],
     postProcessing: [],
@@ -87,11 +96,37 @@ function audioDetailSections(asset: GalleryAsset, audioModels: readonly AudioMod
   };
 }
 
-/** The Voice fact of a speech take: "Any" when the model picked the voice, else the recording's file name. */
-function voiceFact(asset: GalleryAsset): string {
-  if (asset.has_reference_voice !== true) return 'Any';
-  const path = reuseParams(asset).voice_path;
-  return typeof path === 'string' && path !== '' ? fileName(path) : 'A recording';
+/** The Tempo · Key fact of a song, with only the parts the take set (`92 BPM · A minor`); null when it set neither. */
+function musicFact(asset: GalleryAsset, vocabulary: AudioSettingsVocabulary | undefined): DetailFact | null {
+  const tempo = asset.tempo != null ? `${asset.tempo} BPM` : null;
+  const key = asset.key ? keyNameOf(vocabulary, asset.key) : null;
+  const parts = [tempo, key].filter((part) => part !== null);
+  if (parts.length === 0) return null;
+  return { label: tempo !== null && key !== null ? 'Tempo · Key' : tempo !== null ? 'Tempo' : 'Key', value: parts.join(' · ') };
+}
+
+/** The Delivery fact of a speech take read in a built-in voice: the Vibe it matches, else Custom; null when it recorded none of the five values or the vocabulary is not at hand. */
+function deliveryFact(asset: GalleryAsset, vocabulary: AudioSettingsVocabulary | undefined): DetailFact | null {
+  if (asset.kind !== 'speech' || vocabulary === undefined || DELIVERY_FIELDS.every((field) => !asset[field])) return null;
+  const values: SpeechDeliveryValues = { ...vocabulary.delivery_defaults };
+  for (const field of DELIVERY_FIELDS) values[field] = asset[field] || values[field];
+  return { label: 'Delivery', value: deliverySummary(values, vocabulary) };
+}
+
+/** The Sound type fact of a sound: its label in the vocabulary, else its id; null when the take recorded none. */
+function soundTypeFact(asset: GalleryAsset, vocabulary: AudioSettingsVocabulary | undefined): DetailFact | null {
+  if (!asset.sound_type) return null;
+  return { label: 'Sound type', value: vocabulary?.sound_types.find((type) => type.id === asset.sound_type)?.label ?? asset.sound_type };
+}
+
+/** The Voice fact of a speech take: the recording's file name, else the name of the built-in voice it was read in (its id when this machine does not list it), else a dash. */
+function voiceFact(asset: GalleryAsset, audioModels: readonly AudioModelOption[] | undefined): string {
+  const params = reuseParams(asset);
+  if (asset.has_reference_voice === true) return typeof params.voice_path === 'string' && params.voice_path !== '' ? fileName(params.voice_path) : 'A recording';
+  const speaker = typeof params.speaker === 'string' && params.speaker !== '' ? params.speaker : null;
+  if (speaker === null) return '—';
+  const model = audioRowOf(asset, audioModels);
+  return (model?.kind === 'speech' ? model.voices.find((voice) => voice.id === speaker)?.label : undefined) ?? speaker;
 }
 
 /** Describe the track a clip followed: `song.mp3 · 1:30–1:34.2`, or `song.mp3 · from 1:30` when the end was not recorded. */

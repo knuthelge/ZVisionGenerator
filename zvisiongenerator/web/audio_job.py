@@ -8,10 +8,12 @@ is kept as typed, and a field that belongs to another kind is ignored, as the fo
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
 from zvisiongenerator.utils.audio_preset import AudioPreset
-from zvisiongenerator.utils.audio_request import check_speech_request, resolve_sound_seconds
+from zvisiongenerator.utils.audio_request import check_speech_request, resolve_audio_seconds, resolve_speaker
+from zvisiongenerator.utils.audio_settings import DELIVERY_FIELDS, parse_delivery, parse_key, parse_sound_type, parse_tempo
 from zvisiongenerator.utils.audio_voice import voice_needs_consent
 
 __all__ = ["AudioFields", "audio_request_from_fields"]
@@ -32,10 +34,17 @@ class AudioFields:
     Attributes:
         prompt: The style, the text or the description, as submitted.
         lyrics: The lyrics, as submitted; blank for none.
-        seconds: The requested length of a sound, or ``None``.
+        seconds: The requested length of a sound or of music from a model that sets its length, or ``None`` for Auto.
         voice_path: The recording to follow (a typed path, or the saved upload), or ``None``.
         voice_text: What the recording says, trimmed, or ``None``.
         voice_consent: Whether the consent box was ticked.
+        speaker: The built-in voice the form chose (an id of the preset's ``voices``), or ``None`` for the preset's default; ignored with a recording.
+        tempo: The tempo of a song in BPM (a number, or text from a form), or ``None``/blank for Auto; music only.
+        key: The key of a song as an ABC id (``F#m``), or ``None``/blank for Auto; music only.
+        emotion: The emotion of a speech take in a built-in voice, or ``None`` for the default; the same for ``manner``, ``pace``, ``pitch`` and ``expressiveness``.
+        sound_type: The type of a sound (``auto``, ``ambience``, ``effect`` or ``one-shot``), or ``None`` for ``auto``; sound only.
+        prompt_input: The user's own text when ``prompt`` is a rewrite of it (it may be ``""``); kept only with an ``enhance_record``.
+        enhance_record: How ``prompt`` was written (options, model, tier, format), or ``None`` for text the user wrote.
         voice_unread: Whether the recording is a stand-in that was never uploaded (a download plan), so its file is neither
             read for the speaker's consent nor measured; both are checked when the form is submitted.
     """
@@ -46,34 +55,60 @@ class AudioFields:
     voice_path: str | None = None
     voice_text: str | None = None
     voice_consent: bool = False
+    speaker: str | None = None
+    tempo: int | str | None = None
+    key: str | None = None
+    emotion: str | None = None
+    manner: str | None = None
+    pace: str | None = None
+    pitch: str | None = None
+    expressiveness: str | None = None
+    sound_type: str | None = None
+    prompt_input: str | None = None
+    enhance_record: dict[str, Any] | None = None
     voice_unread: bool = False
 
 
-def audio_request_from_fields(preset: AudioPreset, fields: AudioFields) -> AudioGenerationRequest:
-    """Check *fields* against *preset* and return the request of one take (its seed is set per take by the runner).
+def audio_request_from_fields(preset: AudioPreset, kind: str, fields: AudioFields) -> AudioGenerationRequest:
+    """Check *fields* against *preset* as a *kind* take and return the request of one take (its seed is set per take by the runner).
 
-    Lyrics count for music only, the length for sound only and the voice for speech only. Line breaks are the browser's
+    Lyrics count for music of a model that sings them, the length for a (model, kind) that sets it, the tempo and key for music, the sound type for sound,
+    and the voice for speech only. Line breaks are the browser's
     CRLF made LF again. A voice needs its transcript and the speaker's consent, except a speech take of this app made
     without a reference voice; speech is checked against the model's limits (text length, voice length, readable voice).
+    A speech take without a recording is read in the built-in voice the form chose, else the model's default; with a
+    recording it has no built-in voice, and so no delivery. A length left blank is the Auto length of the kind (of the sound type for a sound).
 
     Raises:
-        ValueError: If the style, text or description is blank, the length is out of range, the voice has no transcript or
-            no consent, or the speech request is over the model's limits.
+        ValueError: If the model does not make *kind*, the style, text or description is blank, the length, tempo, key, delivery or sound type is out of range or
+            unknown, the voice has no transcript or no consent, the built-in voice is not one of the model's, or the speech request is over the model's limits.
     """
-    kind = preset.kind
+    if not preset.has_kind(kind):
+        raise ValueError(f"{preset.label} makes {' and '.join(preset.kinds)}, not {kind}.")
     prompt = _line_breaks(fields.prompt)
     if not prompt.strip():
         raise ValueError(_PROMPT_REQUIRED[kind])
-    lyrics = _line_breaks(fields.lyrics) if kind == "music" and fields.lyrics.strip() else ""
+    lyrics = _line_breaks(fields.lyrics) if preset.takes_lyrics(kind) and fields.lyrics.strip() else ""
     voice_path = fields.voice_path if kind == "speech" else None
-    seconds = fields.seconds if kind == "sound" else None
+    voice = _voice(fields, voice_path)
+    sound_type = parse_sound_type(fields.sound_type) if kind == "sound" else None
+    seconds = resolve_audio_seconds(fields.seconds, preset, kind, sound_type, name="seconds")
+    enhance_record = fields.enhance_record or None
     request = AudioGenerationRequest(
         preset=preset.id,
         kind=kind,
         prompt=prompt if kind == "speech" else prompt.strip(),
         lyrics=lyrics,
-        seconds=resolve_sound_seconds(seconds, preset, name="seconds") if kind == "sound" else None,
-        voice=_voice(fields, voice_path),
+        seconds=seconds,
+        requested_seconds=seconds if fields.seconds is not None else None,
+        voice=voice,
+        speaker=resolve_speaker(preset, fields.speaker) if kind == "speech" and voice is None else None,
+        tempo=parse_tempo(fields.tempo) if kind == "music" else None,
+        key=parse_key(fields.key) if kind == "music" else None,
+        delivery=parse_delivery({name: getattr(fields, name) for name in DELIVERY_FIELDS}) if kind == "speech" and voice is None else None,
+        sound_type=sound_type,
+        prompt_input=_line_breaks(fields.prompt_input or "") if enhance_record else None,
+        enhance_record=enhance_record,
     )
     if kind == "speech":
         check_speech_request(request, preset.limits, check_voice_file=not fields.voice_unread)

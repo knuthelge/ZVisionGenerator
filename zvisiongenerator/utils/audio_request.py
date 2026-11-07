@@ -11,17 +11,23 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
+from zvisiongenerator.utils.audio_settings import AUTO_SOUND_SECONDS, DEFAULT_MUSIC_SECONDS
 from zvisiongenerator.utils.audio_track import probe_track_seconds
-from zvisiongenerator.utils.speech_text import split_speech_text
+from zvisiongenerator.utils.speech_text import request_speech_parts, unknown_mark_message, unknown_marks
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.audio_types import AudioGenerationRequest
     from zvisiongenerator.utils.audio_preset import AudioLimits, AudioPreset
 
-__all__ = ["DEFAULT_SOUND_SECONDS", "MIN_SOUND_SECONDS", "check_seed", "check_speech_request", "find_audio_preset", "resolve_sound_seconds"]
-
-DEFAULT_SOUND_SECONDS = 10.0
-"""The length of a sound when none is given."""
+__all__ = [
+    "MIN_SOUND_SECONDS",
+    "auto_seconds",
+    "check_seed",
+    "check_speech_request",
+    "find_audio_preset",
+    "resolve_audio_seconds",
+    "resolve_speaker",
+]
 
 MIN_SOUND_SECONDS = 1.0
 """The shortest sound a model makes, in seconds."""
@@ -63,24 +69,46 @@ def find_audio_preset(config: Mapping[str, Any], model: str | None, *, missing: 
     return preset
 
 
-def resolve_sound_seconds(seconds: float | None, preset: AudioPreset, *, name: str) -> float | None:
-    """Return the length of a sound (the default when none is given), or ``None`` for a model that sets its own length.
+def auto_seconds(kind: str, sound_type: str | None = None) -> float:
+    """Return the length a *kind* take has when its length is left on Auto: the type's length for a sound (``auto`` when *sound_type* is ``None``), ``DEFAULT_MUSIC_SECONDS`` for music."""
+    if kind == "music":
+        return DEFAULT_MUSIC_SECONDS
+    return AUTO_SOUND_SECONDS[sound_type or "auto"]
+
+
+def resolve_audio_seconds(seconds: float | None, preset: AudioPreset, kind: str, sound_type: str | None, *, name: str) -> float | None:
+    """Return the length of a *kind* take (its Auto length when none is given), or ``None`` for a (model, kind) that sets its own length.
 
     Args:
-        seconds: The length the user asked for, or ``None``.
+        seconds: The length the user asked for, or ``None`` for Auto.
         preset: The audio model.
+        kind: The kind of the take.
+        sound_type: The type of a sound (it sets the Auto length); ignored for any other kind.
         name: How the field is called in the message (``--seconds`` or ``seconds``).
 
     Raises:
         ValueError: If the length is not a number within ``MIN_SOUND_SECONDS`` to the model's ``max_seconds``.
     """
-    if not preset.sets_length:
+    if not preset.sets_length(kind):
         return None
-    chosen = DEFAULT_SOUND_SECONDS if seconds is None else seconds
+    chosen = auto_seconds(kind, sound_type) if seconds is None else seconds
     longest = float(preset.limits.max_seconds)
     if not math.isfinite(chosen) or not MIN_SOUND_SECONDS <= chosen <= longest:
-        raise ValueError(f"{name} must be between {MIN_SOUND_SECONDS:g} and {longest:g}; {preset.label} makes sounds of that length.")
+        raise ValueError(f"{name} must be between {MIN_SOUND_SECONDS:g} and {longest:g}; {preset.label} makes {'songs' if kind == 'music' else 'sounds'} of that length.")
     return float(chosen)
+
+
+def resolve_speaker(preset: AudioPreset, speaker: str | None) -> str | None:
+    """Return the built-in voice a speech take without a recording reads in: *speaker*, else the preset's default (``None`` for a model without built-in voices).
+
+    Raises:
+        ValueError: If *speaker* is not one of the preset's voices.
+    """
+    if speaker is None or speaker == "":
+        return preset.default_voice
+    if speaker not in {voice.id for voice in preset.voices}:
+        raise ValueError(f"Pick one of {preset.label}'s voices.")
+    return speaker
 
 
 def check_speech_request(request: AudioGenerationRequest, limits: AudioLimits, *, check_voice_file: bool = True) -> None:
@@ -92,12 +120,16 @@ def check_speech_request(request: AudioGenerationRequest, limits: AudioLimits, *
         check_voice_file: Whether to read and measure the voice recording; ``False`` checks the text only.
 
     Raises:
-        ValueError: If the text is empty or longer than ``max_text_chars``, or the voice recording cannot be read
+        ValueError: If the text is empty or longer than ``max_text_chars`` (marks not counted), holds a bracketed word that is
+            not a Delivery mark, or the voice recording cannot be read
             (``utils.audio_track.TRACK_UNREADABLE``) or is outside ``min_voice_seconds``..``max_voice_seconds``.
     """
     if not request.prompt.strip():
         raise ValueError("Write the text to read.")
-    split_speech_text(request.prompt, int(limits.part_chars), max_text_chars=int(limits.max_text_chars))
+    if unknown := unknown_marks(request.prompt):
+        raise ValueError(unknown_mark_message(unknown[0]))
+    if not request_speech_parts(request, part_chars=int(limits.part_chars), max_text_chars=int(limits.max_text_chars)):
+        raise ValueError("Write the text to read.")
     if request.voice is None or not check_voice_file:
         return
     seconds = probe_track_seconds(request.voice.path)

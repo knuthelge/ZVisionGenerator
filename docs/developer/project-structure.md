@@ -32,20 +32,19 @@ zvisiongenerator/
 │   │   ├── chain.py               The chain: BiRefNet mask, ViTMatte edge, foreground colours; loaded on the first cut-out, closed when the job ends
 │   │   ├── deform_conv.py         Modulated deformable convolution built from `grid_sample`, and the swap into BiRefNet
 │   │   └── vitmatte.py            Load ViTMatte and its image processor from a pinned snapshot
-│   ├── audio/                     Audio models, one backend module per family: torch on CUDA or MPS, and Higgs on MLX on macOS
+│   ├── audio/                     Audio models, one backend module per family: torch on CUDA or MPS, and Qwen3-TTS on MLX on macOS
 │   │   ├── build_cancel.py        Check a Stop while a model is built
-│   │   ├── higgs3.py              Higgs TTS 3 on torch: our network and transformers' codec as the engine of `higgs3_takes`
-│   │   ├── higgs3_codes.py        The delay pattern, the sampler and the rule that ends a take (pure torch)
-│   │   ├── higgs3_config.py       Read the official config.json into the numbers the model needs (no torch)
-│   │   ├── higgs3_generate.py     The generation loop: one prompt in, the codes of one take out, with a callback per frame
-│   │   ├── higgs3_mlx.py          Higgs TTS 3 on MLX (macOS): mlx-audio's model run frame by frame as the engine of `higgs3_takes`
-│   │   ├── higgs3_model.py        The network (Qwen3 backbone, fused codebook embedding and head) and its strict weight loader
-│   │   ├── higgs3_prompt.py       The tokenizer and the prompt, with the reference voice's slots
-│   │   ├── higgs3_takes.py        A Higgs take on any engine: text in parts, one voice throughout, frame progress and Stop, the join
+│   │   ├── qwen3_tts.py           Qwen3-TTS 1.7B on CUDA through faster-qwen3-tts: CustomVoice for built-in voices, Base for a recording, one checkpoint at a time
+│   │   ├── qwen3_tts_instruct.py  Turn a Delivery into Qwen3-TTS's one instruction sentence per call
+│   │   ├── qwen3_tts_mlx.py       Qwen3-TTS 1.7B on MLX (macOS) through mlx-audio, with the same checkpoints and take logic
+│   │   ├── qwen3_tts_shim.py      The one-time patch that lets `qwen_tts` load on the locked transformers
 │   │   ├── sa3.py                 Stable Audio 3 Medium: built in fp16 and filled tensor by tensor, with the output kept from before the library's clamp
+│   │   ├── sa3_caption.py         The caption Stable Audio 3 is given: the metadata shell it was trained on around the user's words, with the music settings as caption words
+│   │   ├── speech_takes.py        A speech take on any engine: text in parts, one voice throughout, progress per part and Stop, the join
 │   │   ├── yue2.py                YuE2: the vendored kit run stage by stage, with song or instrumental from the Lyrics
 │   │   ├── yue2_load.py           Stream YuE2's weights in tensor by tensor
 │   │   ├── yue2_mps.py            Exact speed-ups for YuE2's token phases on MPS: folded decode attention and the song-token head
+│   │   ├── yue2_score.py          Edit YuE2's ABC score as text: write the header it plans from, read the tempo it planned, silence the Vocal voice
 │   │   └── yue2_swap.py           Keep YuE2's weight groups in pinned CPU memory and put only the running phase's group on the GPU
 │   ├── cuda/                      Windows and Linux (diffusers/CUDA); what image and video share sits here
 │   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
@@ -135,8 +134,6 @@ zvisiongenerator/
 │   ├── video_family.py            Video family value types (frame rule, capabilities, steps) and the step settling
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
 │   ├── seedvr2.py                 SeedVR2 upscaler protocol
-│   ├── speech_join.py             Join the parts of a long speech take: trim edge silence, even the levels, fade and add a pause
-│   ├── speech_text.py             Split speech text into parts at sentence ends, never inside an expressive tag
 │   └── workflow.py                Unified workflow engine (image + video)
 ├── downloads/                     Hugging Face model downloads shown as progress (see Model Downloads)
 │   ├── check.py                   Dry-run check: files and bytes a target still needs, or None when offline
@@ -171,6 +168,7 @@ zvisiongenerator/
 │   ├── audio_peaks.py             The 100 waveform peaks of an audio clip or file, for the gallery and the file browser
 │   ├── audio_resample.py          Polyphase resampling of multi-channel audio
 │   ├── audio_request.py           The checks of an audio request that `ziv audio` and the Web UI share: the model, the length of a sound and the limits of a speech request
+│   ├── audio_settings.py          The vocabulary of the audio settings (tempo, key, speech delivery, sound type): the parsers, and the contract the Workspace payload serves to the Web UI
 │   ├── audio_save.py              Write a take as 16-bit FLAC through ffmpeg with its settings in the `zvisiongenerator.config` tag
 │   ├── audio_track.py             Read a user's audio track and build the window sound of an extension
 │   ├── audio_voice.py             Whether a voice recording needs the speaker's consent
@@ -220,6 +218,8 @@ zvisiongenerator/
 │   ├── prompt_enhance.py          Prompt-enhancement settings, length plans, chat messages, run, and post-processing (no model I/O)
 │   ├── prompt_enhance_video.py    Video prompts as a scene and an action: word plans, chat messages, output parsing and the run (no model I/O)
 │   ├── prompt_enhance_caption.py  Ideogram 4 JSON captions: the model writes labelled lines, code builds the caption (no model I/O)
+│   ├── prompt_enhance_audio.py    Audio text (a Sound prompt, a Music style): option axes, caption rules per model family, the output cleaner and the run (no model I/O)
+│   ├── audio_writers.py           Audio writer tasks that edit a longer text (the lyrics and script helpers): the song as sections, the checked run, settings and chat messages (no model I/O)
 │   ├── prompt_quotes.py           Find quoted text in a prompt and check that a rewrite keeps it exactly
 │   ├── quantized_weights.py       Decode community checkpoints' quantized weights (scaled FP8, INT8, ConvRot, W4A4, W4A8, W6A8, NVFP4, MXFP8) one weight at a time
 │   ├── prompts.py                 Prompt file loading
@@ -227,6 +227,9 @@ zvisiongenerator/
 │   ├── references.py              Reference images: parse the `--reference` list and check the count and files against what a model takes
 │   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache; reads a header and its metadata in one bounded read
 │   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
+│   ├── speech_join.py             Join the parts of a long speech take: trim edge silence, even the levels, fade and add a pause
+│   ├── speech_text.py             Split speech text into parts at sentence ends and into its Delivery marks; find unknown marks and word their refusal
+│   ├── speech_realign.py          Merge the marks, pauses and line breaks of a model's Add delivery answer into the script's own text, word for word
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling, and the write-once stored-copy routine
 │   ├── subprocess_env.py          Environment for Python child processes whose output is piped or discarded
 │   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options (images and video), the video batch size and denoise defaults
@@ -238,6 +241,7 @@ zvisiongenerator/
 │   ├── video_tail.py              Read a clip's last frames, or all its frames, at their displayed size
 │   └── video_upscale.py           LTX video file upscale (macOS): the clips it takes, its steps, menu option, progress units and time left
 ├── web/
+│   ├── audio_enhance.py           The audio side of the prompt-enhance endpoint: request validation, the run and the stream frames
 │   ├── audio_job.py               Turn an audio generate form's fields into the request of one take, with the refusals `ziv audio` makes
 │   ├── audio_inventory.py         The audio rows of the Models page
 │   ├── audio_models.py            The audio models that run on this machine and each one's Workspace row
@@ -298,7 +302,7 @@ zvisiongenerator/
 | `frontend/` | The Web UI's source: Svelte 5, TypeScript, pnpm. Built into `zvisiongenerator/web/static/app/`, which is committed. The Audio tab is in `src/features/workspace/` with its state in `src/lib/state/` |
 | `tests/` | The pytest suite, grouped by area: `web/`, `video/`, `image/`, `prompts/`, `downloads/`, `converters/`, `contracts/`, `backends/` (with `cuda/` and `mac/`), `audio/` and `common/`. `conftest.py` holds the autouse guards and fixtures, `_factories.py` and the other `_*.py` files the helpers shared between areas, and `fixtures/` the JSON the frontend tests also read. See [Conventions](conventions.md#tests) |
 | `bench/enhance/` | The [prompt-enhancer bench](enhancer-bench.md); not packaged |
-| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image, BiRefNet, YuE2 and Stable Audio 3 code |
+| `packages/` | [Vendored](vendored.md) LTX MLX, SeedVR2, MiniMax H3 MLX, MOSS-Image, BiRefNet, YuE2, Stable Audio 3 and Qwen3-TTS code |
 | `docs/` | These docs, built with Zensical from `zensical.toml` |
 | `proposals/` | Write-ups of future work. See [Proposals](index.md#proposals) |
 | `prompts.yaml` | Default prompt definitions |

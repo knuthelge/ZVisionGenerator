@@ -53,6 +53,7 @@
   import { waitForListing } from '$lib/state/loraListing';
   import { addLoraChip, removeLoraChip } from '$lib/state/loraActions';
   import { generateBlock } from '$lib/state/generateBlock.svelte';
+  import { textWriting } from '$lib/state/textWriting.svelte';
   import { dockHeight } from '$lib/actions/dockHeight';
   import { pendingTriggers } from '$lib/state/loraTriggers.svelte';
   import DiscoverDrawer, { type LoraUse } from './discover/DiscoverDrawer.svelte';
@@ -71,7 +72,11 @@
   import { imagesSummary } from './imagesSummary';
   import { currentAudioTrackView } from './audioTrackView';
   import { audioFormData, currentAudioView } from './audioView';
-  import { AUDIO_TEXT_KEYS, audioModelsOf, availableKinds, replacesVoice } from '$lib/state/audioDraft';
+  import { AUDIO_TEXT_KEYS, audioModelsOf, availableKinds, musicSecondsShown, replacesVoice } from '$lib/state/audioDraft';
+  import { AUDIO_BOX_OF_KIND, rewriteUsed } from '$lib/state/audioRewrites';
+  import { keyNameOf } from '$lib/state/musicSettings';
+  import { autoSoundSeconds, soundTypeLabel } from '$lib/state/soundSettings';
+  import { deliverySummary } from '$lib/state/speechDelivery';
   import { voiceConsent } from '$lib/state/voiceConsent.svelte';
   import { AUDIO_KIND_INFO, VIDEO_KIND_INFO, type KindChoice } from './kindInfo';
   import { currentImagesView } from './imagesView';
@@ -311,6 +316,8 @@
   // What the Audio tab sends and why Generate is off on it: the kind's text, the voice and the speaker's tick.
   const audio = $derived(context === null ? null : currentAudioView(context));
   const audioReason = $derived(audio?.reason ?? null);
+  // The one reason on the phone's composer: the Audio tab's own, else a run that is writing the text Generate sends.
+  const composerReason = $derived(audio?.active ? audioReason : textWriting.reason);
   // A voice recording's length is read once it is chosen: it must be within what the model follows.
   $effect(() => {
     if (audio?.voice.recording && audio.voice.set) trackLengths.ensure(audio.voice.path, audio.voice.file);
@@ -423,6 +430,10 @@
     const caps = workspaceCapabilities(context, s);
     const defaults = defaultsFor(context, s, draft.extendSource);
     if (caps.isAudio && caps.audioKind && audio) {
+      const soundVocabulary = context.audio_settings;
+      // A sound on Auto shows the length its type will use; a song shows its own, and a take that sets none has no length.
+      const lengthAuto = caps.audioKind === 'sound' && soundVocabulary !== undefined && s.audioSeconds === 0;
+      const seconds = caps.audioKind === 'music' ? musicSecondsShown(s.musicSeconds, audio.model) : lengthAuto ? autoSoundSeconds(s.soundType, soundVocabulary!) : s.audioSeconds;
       return audioChips({
         kind: caps.audioKind,
         state: s,
@@ -431,7 +442,13 @@
         voice: caps.showVoice ? audio.voice : null,
         voiceBlocks: audio.reasonFromVoice,
         changed: (chip) => chipChanged(chip, caps, s, defaults),
+        delivery: { shown: caps.showDelivery && context.audio_settings !== undefined, summary: context.audio_settings ? deliverySummary(s.speechDelivery, context.audio_settings) : '' },
         showLength: caps.showLength,
+        seconds,
+        lengthAuto,
+        soundType: { shown: caps.showSoundType && soundVocabulary !== undefined, label: soundVocabulary ? soundTypeLabel(s.soundType, soundVocabulary) : '' },
+        tempo: { shown: caps.showTempo },
+        key: { shown: caps.showKey, name: s.audioKey === null ? null : keyNameOf(context.audio_settings, s.audioKey) },
         showSeed: caps.showSeed,
         showRuns: caps.showRuns,
       });
@@ -471,6 +488,9 @@
     // The Audio tab's composer reads the open kind's own text.
     if (isAudioWorkflow(s.workflow)) {
       const kind = { music: { label: 'Style · Lyrics', empty: 'Describe the style…' }, speech: { label: 'Text', empty: 'What to say…' }, sound: { label: 'Prompt', empty: 'Describe the sound…' } }[s.workflow];
+      // Generate sends the Enhanced text when the box has one, so the dock reads it too.
+      const rewrite = s.audioRewrites[AUDIO_BOX_OF_KIND[s.workflow]];
+      if (rewriteUsed(rewrite)) return { label: 'Enhanced', text: rewrite.text, empty: false };
       const text = s[AUDIO_TEXT_KEYS[s.workflow]];
       return { label: kind.label, text: text || kind.empty, empty: !text };
     }
@@ -480,7 +500,7 @@
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
   });
-  const compactSubmitDisabled = $derived(busy || !authorityReady || audioReason !== null || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || trackBlock !== null || block.blocked);
+  const compactSubmitDisabled = $derived(busy || !authorityReady || composerReason !== null || promptChoiceMissing() || currentExtendGuard().blocked || imageBlock !== null || trackBlock !== null || block.blocked);
   // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
   const controlsPending = $derived(!context || !authorityReady);
 
@@ -1396,7 +1416,7 @@
     // A LoRA chip whose file is downloading (or failed) holds every run back, the keyboard's included.
     if (block.blocked) return;
     // The Audio tab's one reason (a missing text, a recording that is not ready, a tick not given) holds every run back, the keyboard's included.
-    if (audioReason !== null) return;
+    if (audioReason !== null || textWriting.reason !== null) return;
     await settleExtendSource();
     if (extendBlocked()) return;
     const refusal = imageBlock ?? trackBlock;
@@ -1981,10 +2001,10 @@
             </p>
           {/if}
           {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
-          <!-- The Audio tab's one reason, above the row, so a disabled Generate says why. -->
-          {#if audioReason}
-            <p id="ws-generate-reason-compact" class="ui-alert ui-alert-warning composer-error" data-testid="audio-reason">
-              <span class="min-w-0 flex-1 break-words">{audioReason}</span>
+          <!-- The one reason (the Audio tab's, or a run writing the text), above the row, so a disabled Generate says why. -->
+          {#if composerReason}
+            <p id="ws-generate-reason-compact" class="ui-alert ui-alert-warning composer-error" data-testid={audio?.active ? 'audio-reason' : 'generate-reason'}>
+              <span class="min-w-0 flex-1 break-words">{composerReason}</span>
               {#if audio?.reasonFromVoice}<button type="button" class="ui-btn ui-btn-sm" data-testid="audio-reason-voice" onclick={() => { activeChip = 'voice'; }}>Voice</button>{/if}
             </p>
           {/if}
@@ -2001,7 +2021,7 @@
                 class:ui-btn-wait={block.waiting !== null}
                 style:--p={block.waiting ? `${block.waiting.percent ?? 0}%` : undefined}
                 disabled={compactSubmitDisabled}
-                aria-describedby={audioReason ? 'ws-generate-reason-compact' : undefined}
+                aria-describedby={composerReason ? 'ws-generate-reason-compact' : undefined}
                 title={block.waiting ? waitFull : 'Hold for more'}
                 aria-label={block.waiting ? waitFull : undefined}
                 use:hold={{ onhold: () => { generateMenuOpen = true; } }}
@@ -2036,7 +2056,7 @@
                 class:ui-btn-wait={block.waiting !== null}
                 style:--p={block.waiting ? `${block.waiting.percent ?? 0}%` : undefined}
                 disabled={compactSubmitDisabled}
-                aria-describedby={audioReason ? 'ws-generate-reason-compact' : undefined}
+                aria-describedby={composerReason ? 'ws-generate-reason-compact' : undefined}
                 aria-label={block.waiting ? waitFull : undefined}
                 title={block.waiting ? waitFull : undefined}
               >{#if block.waiting}<WaitingLabel waiting={block.waiting} compact />{:else}<Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}{/if}</button>
@@ -2143,6 +2163,7 @@
   onextend={extendAsset}
   {useAs}
   audioModels={context?.audio_models}
+  audioVocabulary={context?.audio_settings}
   onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}
 />

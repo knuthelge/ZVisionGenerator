@@ -127,6 +127,8 @@ def fake_transformers(monkeypatch):
     module.TextIteratorStreamer = MagicMock()
     module.StoppingCriteria = type("StoppingCriteria", (), {})
     module.StoppingCriteriaList = list
+    module.LogitsProcessor = type("LogitsProcessor", (), {})
+    module.LogitsProcessorList = list
     monkeypatch.setitem(sys.modules, "transformers", module)
     return module
 

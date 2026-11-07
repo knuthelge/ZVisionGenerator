@@ -10,7 +10,7 @@ The **Models** page (++g++ ++m++) lists every model and LoRA the app can use. He
 |---|---|
 | **Image models** | Built-in models such as FLUX.2 Klein 9B, and models you converted |
 | **Video models** | `ltx-4`, `ltx-8` and converted LTX fine-tunes |
-| **Audio models** | YuE2 3B, Higgs TTS 3 4B and Stable Audio 3 Medium, with the kind each makes. See [Audio](../concepts/audio.md) |
+| **Audio models** | YuE2 3B, Qwen3-TTS 1.7B and Stable Audio 3 Medium, with the kind each makes. See [Audio](../concepts/audio.md) |
 | **LoRAs** | The files in `~/.ziv/loras/` |
 | **Prompt enhancer** | **Fast**, **Smart** and, when set on the Config page, **Custom** |
 | **Background removal** | The cut-out models of [Transparent background](../concepts/images.md#transparent-background), as one row (548 MB) |
@@ -22,7 +22,7 @@ Every built-in model has an **ⓘ** after its name. Hover or press it to read th
 
 The **Audio models** table has a **Kind** column (**Music**, **Speech** or **Sound**).
 
-![The Audio models table with YuE2 3B, Higgs TTS 3 4B and Stable Audio 3 Medium](../assets/screenshots/placeholder.svg "models-audio")
+![The Audio models table with YuE2 3B, Qwen3-TTS 1.7B and Stable Audio 3 Medium](../assets/screenshots/placeholder.svg "models-audio")
 
 **Size** is the disk the model uses. For a built-in model that's its Hugging Face download; for a converted model it's its own folder, without the base-model files it links to. Quantized copies count with their model.
 

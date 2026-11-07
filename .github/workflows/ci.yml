@@ -37,3 +37,6 @@ jobs:
 
       - name: Lint, format-check, and test
         run: make check
+
+      - name: Check the wheel resolves on Linux, Windows and macOS
+        run: scripts/check_wheel_resolves.sh

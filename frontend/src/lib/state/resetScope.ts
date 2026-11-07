@@ -11,9 +11,10 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  * - `model`: the model, its LoRAs and the quantization.
  * - `text`: the open mode's typed text, its Enhanced text and its prompt source.
  * - `promptFile`: the prompts file and the prompts chosen from it.
- * - `enhanceImage`, `enhanceVideo`: the enhancement options of each mode.
+ * - `enhanceImage`, `enhanceVideo`, `enhanceAudio`: the enhancement options of each mode (Audio keeps one set per task).
  * - `extendSource`: the video an extension continues.
- * - `audioText`, `audioSettings`, `voice`: the four texts of the Audio tab, its length and the Speech voice.
+ * - `audioText`, `audioSettings`, `audioDelivery`, `voice`: the four texts of the Audio tab with the Enhanced text of its boxes, its settings (the lengths, the Tempo and
+ *   Key, the Sound Type), the Speech delivery and the Speech voice.
  * - `memory`: what the draft remembers for coming back to a tab or a mode.
  * - `ui`: layout flags and bookkeeping.
  * - `preset`: the settings preset the form started from.
@@ -21,7 +22,7 @@ import type { DraftState, WorkspaceTab } from '$lib/types';
  */
 export type Scope =
   | 'slotsImage' | 'slotsVideo' | 'slotsExtend' | 'settings' | 'extendSettings' | 'shared' | 'model' | 'text' | 'promptFile'
-  | 'enhanceImage' | 'enhanceVideo' | 'extendSource' | 'audioText' | 'audioSettings' | 'voice'
+  | 'enhanceImage' | 'enhanceVideo' | 'enhanceAudio' | 'extendSource' | 'audioText' | 'audioSettings' | 'audioDelivery' | 'voice'
   | 'memory' | 'ui' | 'preset' | 'derived';
 
 /** The scope of every draft field. A field added to `DraftState` without a scope here fails the type check. */
@@ -110,18 +111,31 @@ export const FIELD_SCOPE: Record<keyof DraftState, Scope> = {
   lyrics: 'audioText',
   speechText: 'audioText',
   soundPrompt: 'audioText',
+  audioRewrites: 'audioText',
+  lyricsVersions: 'audioText',
+  lyricsCurrent: 'audioText',
+  audioDescribe: 'audioText',
+  enhanceSettingsAudio: 'enhanceAudio',
   audioSeconds: 'audioSettings',
+  audioTempo: 'audioSettings',
+  audioKey: 'audioSettings',
+  musicSeconds: 'audioSettings',
+  soundType: 'audioSettings',
+  speechDelivery: 'audioDelivery',
   voiceMode: 'voice',
+  speechSpeaker: 'voice',
   voicePath: 'voice',
   voiceUpload: 'voice',
   voiceText: 'voice',
 
   enhancedHistory: 'memory',
+  enhancedScratched: 'memory',
   lorasByFamily: 'memory',
   savedText: 'memory',
   savedSettings: 'memory',
   enhanceAuto: 'memory',
   enhanceModel: 'memory',
+  describeTier: 'memory',
   enhanceFormat: 'memory',
   videoKind: 'memory',
   audioKind: 'memory',
@@ -140,20 +154,20 @@ export const RESET_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
   image: ['slotsImage', 'settings', 'shared', 'enhanceImage', 'preset'],
   video: ['slotsVideo', 'settings', 'shared', 'enhanceVideo', 'preset'],
   extend: ['slotsExtend', 'extendSettings', 'settings', 'shared', 'enhanceVideo', 'preset'],
-  audio: ['audioSettings', 'voice', 'shared', 'preset'],
+  audio: ['audioSettings', 'audioDelivery', 'voice', 'enhanceAudio', 'shared', 'preset'],
 };
 
 /**
  * What applying a take's settings exactly (a Reuse, a Load settings) puts back before it sets the take's own: the tab's Reset scope,
  * its text, the model with its LoRAs and quantization and, on Extend, its source. The prompt file, the rewrites remembered for
- * the text and the choices of enhancer stay. The Audio tab's kinds each keep their own text, length and voice, so a take puts
- * back only Batch and Seed there and sets the fields of its kind.
+ * the text and the choices of enhancer stay. The Audio tab's kinds each keep their own text and voice, so a take puts back
+ * only Batch, Seed and the settings there (a take without a Tempo is on Auto) and sets the fields of its kind.
  */
 export const REUSE_SCOPE: Record<WorkspaceTab, readonly Scope[]> = {
   image: [...RESET_SCOPE.image, 'text', 'model'],
   video: [...RESET_SCOPE.video, 'text', 'model'],
   extend: [...RESET_SCOPE.extend, 'text', 'model', 'extendSource'],
-  audio: ['shared'],
+  audio: ['shared', 'audioSettings', 'audioDelivery'],
 };
 
 /** The draft keys that belong to any of the scopes. */

@@ -23,7 +23,7 @@ export const workspaceApiMocks = {
 export const EMPTY_JOB_PLAN: JobDownloadPlan = { parts: [], total_bytes: 0, space: null, unchecked: false, licences: [] };
 
 /** Lets a test pick the phone layout, or a touch screen at a wide width (`coarse`); the page reads them when it mounts. */
-export const layoutProbe = { compact: false, coarse: false };
+export const layoutProbe = { compact: false, coarse: false, tall: false };
 
 export const configApiMocks = {
   updateConfig: vi.fn(async () => ({})),

@@ -522,6 +522,8 @@
   .ui-help-error { color: var(--color-error); }
   .ui-help-success { color: var(--color-success); }
   .ui-help-warning { color: var(--color-warning); }
+  /* The ⚠ that replaces a tool's icon when what it fixes is out of date. */
+  .ui-icon-warn { color: var(--color-warning); }
 
   /* The one small-caps style, for names of areas: panels, sections, table headers, menu groups. */
   .ui-area-label { font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }

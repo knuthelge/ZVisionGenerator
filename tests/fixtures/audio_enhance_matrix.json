@@ -1,0 +1,739 @@
+{
+  "axes": [
+    {
+      "key": "genre",
+      "label": "Genre",
+      "multi": false,
+      "kind": "music",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "pop",
+          "label": "Pop",
+          "description": "Write it as Pop",
+          "group": "Pop & rock"
+        },
+        {
+          "slug": "synth-pop",
+          "label": "Synth-pop",
+          "description": "Write it as Synth-pop",
+          "group": "Pop & rock"
+        },
+        {
+          "slug": "indie-rock",
+          "label": "Indie rock",
+          "description": "Write it as Indie rock",
+          "group": "Pop & rock"
+        },
+        {
+          "slug": "rock",
+          "label": "Rock",
+          "description": "Write it as Rock",
+          "group": "Pop & rock"
+        },
+        {
+          "slug": "house",
+          "label": "House",
+          "description": "Write it as House",
+          "group": "Electronic"
+        },
+        {
+          "slug": "techno",
+          "label": "Techno",
+          "description": "Write it as Techno",
+          "group": "Electronic"
+        },
+        {
+          "slug": "drum-and-bass",
+          "label": "Drum and bass",
+          "description": "Write it as Drum and bass",
+          "group": "Electronic"
+        },
+        {
+          "slug": "synthwave",
+          "label": "Synthwave",
+          "description": "Write it as Synthwave",
+          "group": "Electronic"
+        },
+        {
+          "slug": "hip-hop",
+          "label": "Hip-hop",
+          "description": "Write it as Hip-hop",
+          "group": "Hip-hop & R&B"
+        },
+        {
+          "slug": "trap",
+          "label": "Trap",
+          "description": "Write it as Trap",
+          "group": "Hip-hop & R&B"
+        },
+        {
+          "slug": "r-and-b",
+          "label": "R&B",
+          "description": "Write it as R&B",
+          "group": "Hip-hop & R&B"
+        },
+        {
+          "slug": "soul",
+          "label": "Soul",
+          "description": "Write it as Soul",
+          "group": "Hip-hop & R&B"
+        },
+        {
+          "slug": "jazz",
+          "label": "Jazz",
+          "description": "Write it as Jazz",
+          "group": "Jazz & blues"
+        },
+        {
+          "slug": "smooth-jazz",
+          "label": "Smooth jazz",
+          "description": "Write it as Smooth jazz",
+          "group": "Jazz & blues"
+        },
+        {
+          "slug": "swing",
+          "label": "Swing",
+          "description": "Write it as Swing",
+          "group": "Jazz & blues"
+        },
+        {
+          "slug": "blues",
+          "label": "Blues",
+          "description": "Write it as Blues",
+          "group": "Jazz & blues"
+        },
+        {
+          "slug": "folk",
+          "label": "Folk",
+          "description": "Write it as Folk",
+          "group": "Folk & country"
+        },
+        {
+          "slug": "country",
+          "label": "Country",
+          "description": "Write it as Country",
+          "group": "Folk & country"
+        },
+        {
+          "slug": "bluegrass",
+          "label": "Bluegrass",
+          "description": "Write it as Bluegrass",
+          "group": "Folk & country"
+        },
+        {
+          "slug": "singer-songwriter",
+          "label": "Singer-songwriter",
+          "description": "Write it as Singer-songwriter",
+          "group": "Folk & country"
+        },
+        {
+          "slug": "classical",
+          "label": "Classical",
+          "description": "Write it as Classical",
+          "group": "Classical & cinematic"
+        },
+        {
+          "slug": "orchestral",
+          "label": "Orchestral",
+          "description": "Write it as Orchestral",
+          "group": "Classical & cinematic"
+        },
+        {
+          "slug": "film-score",
+          "label": "Film score",
+          "description": "Write it as Film score",
+          "group": "Classical & cinematic"
+        },
+        {
+          "slug": "neoclassical",
+          "label": "Neoclassical",
+          "description": "Write it as Neoclassical",
+          "group": "Classical & cinematic"
+        },
+        {
+          "slug": "latin",
+          "label": "Latin",
+          "description": "Write it as Latin",
+          "group": "World"
+        },
+        {
+          "slug": "reggae",
+          "label": "Reggae",
+          "description": "Write it as Reggae",
+          "group": "World"
+        },
+        {
+          "slug": "afrobeat",
+          "label": "Afrobeat",
+          "description": "Write it as Afrobeat",
+          "group": "World"
+        },
+        {
+          "slug": "flamenco",
+          "label": "Flamenco",
+          "description": "Write it as Flamenco",
+          "group": "World"
+        },
+        {
+          "slug": "lo-fi",
+          "label": "Lo-fi",
+          "description": "Write it as Lo-fi",
+          "group": "Lo-fi & ambient"
+        },
+        {
+          "slug": "ambient",
+          "label": "Ambient",
+          "description": "Write it as Ambient",
+          "group": "Lo-fi & ambient"
+        },
+        {
+          "slug": "chillout",
+          "label": "Chillout",
+          "description": "Write it as Chillout",
+          "group": "Lo-fi & ambient"
+        },
+        {
+          "slug": "downtempo",
+          "label": "Downtempo",
+          "description": "Write it as Downtempo",
+          "group": "Lo-fi & ambient"
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    },
+    {
+      "key": "music_mood",
+      "label": "Mood",
+      "multi": false,
+      "kind": "music",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "serene",
+          "label": "Serene",
+          "description": "Calm and serene, unhurried",
+          "group": null
+        },
+        {
+          "slug": "joyful",
+          "label": "Joyful",
+          "description": "Joyful and upbeat",
+          "group": null
+        },
+        {
+          "slug": "romantic",
+          "label": "Romantic",
+          "description": "Romantic and tender",
+          "group": null
+        },
+        {
+          "slug": "nostalgic",
+          "label": "Nostalgic",
+          "description": "Nostalgic, a fond memory",
+          "group": null
+        },
+        {
+          "slug": "melancholic",
+          "label": "Melancholic",
+          "description": "Melancholic and wistful",
+          "group": null
+        },
+        {
+          "slug": "mysterious",
+          "label": "Mysterious",
+          "description": "Mysterious, with an air of suspense",
+          "group": null
+        },
+        {
+          "slug": "dark",
+          "label": "Dark",
+          "description": "Dark and brooding",
+          "group": null
+        },
+        {
+          "slug": "dramatic",
+          "label": "Dramatic",
+          "description": "Dramatic and tense",
+          "group": null
+        },
+        {
+          "slug": "epic",
+          "label": "Epic",
+          "description": "Epic and awe-inspiring",
+          "group": null
+        },
+        {
+          "slug": "hopeful",
+          "label": "Hopeful",
+          "description": "Hopeful and uplifting",
+          "group": null
+        },
+        {
+          "slug": "energetic",
+          "label": "Energetic",
+          "description": "Energetic and driving",
+          "group": null
+        },
+        {
+          "slug": "dreamy",
+          "label": "Dreamy",
+          "description": "Dreamy and floating",
+          "group": null
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    },
+    {
+      "key": "instruments",
+      "label": "Instruments",
+      "multi": true,
+      "kind": "music",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "guitar",
+          "label": "Guitar",
+          "description": "Feature guitar",
+          "group": null
+        },
+        {
+          "slug": "piano",
+          "label": "Piano",
+          "description": "Feature piano",
+          "group": null
+        },
+        {
+          "slug": "drums",
+          "label": "Drums",
+          "description": "Feature drums",
+          "group": null
+        },
+        {
+          "slug": "bass",
+          "label": "Bass",
+          "description": "Feature bass",
+          "group": null
+        },
+        {
+          "slug": "strings",
+          "label": "Strings",
+          "description": "Feature strings",
+          "group": null
+        },
+        {
+          "slug": "synth",
+          "label": "Synth",
+          "description": "Feature synth",
+          "group": null
+        },
+        {
+          "slug": "brass",
+          "label": "Brass",
+          "description": "Feature brass",
+          "group": null
+        },
+        {
+          "slug": "saxophone",
+          "label": "Saxophone",
+          "description": "Feature saxophone",
+          "group": null
+        },
+        {
+          "slug": "violin",
+          "label": "Violin",
+          "description": "Feature violin",
+          "group": null
+        },
+        {
+          "slug": "flute",
+          "label": "Flute",
+          "description": "Feature flute",
+          "group": null
+        },
+        {
+          "slug": "organ",
+          "label": "Organ",
+          "description": "Feature organ",
+          "group": null
+        },
+        {
+          "slug": "percussion",
+          "label": "Percussion",
+          "description": "Feature percussion",
+          "group": null
+        }
+      ],
+      "default": []
+    },
+    {
+      "key": "without",
+      "label": "Without",
+      "multi": true,
+      "kind": "music",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "guitar",
+          "label": "Guitar",
+          "description": "Leave out guitar",
+          "group": null
+        },
+        {
+          "slug": "piano",
+          "label": "Piano",
+          "description": "Leave out piano",
+          "group": null
+        },
+        {
+          "slug": "drums",
+          "label": "Drums",
+          "description": "Leave out drums",
+          "group": null
+        },
+        {
+          "slug": "bass",
+          "label": "Bass",
+          "description": "Leave out bass",
+          "group": null
+        },
+        {
+          "slug": "strings",
+          "label": "Strings",
+          "description": "Leave out strings",
+          "group": null
+        },
+        {
+          "slug": "synth",
+          "label": "Synth",
+          "description": "Leave out synth",
+          "group": null
+        },
+        {
+          "slug": "brass",
+          "label": "Brass",
+          "description": "Leave out brass",
+          "group": null
+        },
+        {
+          "slug": "saxophone",
+          "label": "Saxophone",
+          "description": "Leave out saxophone",
+          "group": null
+        },
+        {
+          "slug": "violin",
+          "label": "Violin",
+          "description": "Leave out violin",
+          "group": null
+        },
+        {
+          "slug": "flute",
+          "label": "Flute",
+          "description": "Leave out flute",
+          "group": null
+        },
+        {
+          "slug": "organ",
+          "label": "Organ",
+          "description": "Leave out organ",
+          "group": null
+        },
+        {
+          "slug": "percussion",
+          "label": "Percussion",
+          "description": "Leave out percussion",
+          "group": null
+        }
+      ],
+      "default": []
+    },
+    {
+      "key": "singer",
+      "label": "Singer",
+      "multi": false,
+      "kind": "music",
+      "vocal": true,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "female",
+          "label": "Female",
+          "description": "A female lead vocal",
+          "group": null
+        },
+        {
+          "slug": "male",
+          "label": "Male",
+          "description": "A male lead vocal",
+          "group": null
+        },
+        {
+          "slug": "duet",
+          "label": "Duet",
+          "description": "A female and a male voice",
+          "group": null
+        },
+        {
+          "slug": "choir",
+          "label": "Choir",
+          "description": "Many voices together",
+          "group": null
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    },
+    {
+      "key": "production",
+      "label": "Production",
+      "multi": false,
+      "kind": "music",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "polished",
+          "label": "Polished",
+          "description": "Clean, modern, radio-ready",
+          "group": null
+        },
+        {
+          "slug": "lo-fi",
+          "label": "Lo-fi",
+          "description": "Tape warmth, soft noise, muffled",
+          "group": null
+        },
+        {
+          "slug": "live",
+          "label": "Live",
+          "description": "Played together in a room",
+          "group": null
+        },
+        {
+          "slug": "vintage",
+          "label": "Vintage",
+          "description": "The sound of an old record",
+          "group": null
+        },
+        {
+          "slug": "cinematic",
+          "label": "Cinematic",
+          "description": "Wide, large, deep",
+          "group": null
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    },
+    {
+      "key": "space",
+      "label": "Space",
+      "multi": false,
+      "kind": "sound",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "small-room",
+          "label": "Small room",
+          "description": "Dry, close walls",
+          "group": null
+        },
+        {
+          "slug": "large-hall",
+          "label": "Large hall",
+          "description": "Long, open reverb",
+          "group": null
+        },
+        {
+          "slug": "street",
+          "label": "Street",
+          "description": "Outdoors between buildings",
+          "group": null
+        },
+        {
+          "slug": "open-country",
+          "label": "Open country",
+          "description": "Outdoors, wide and dry",
+          "group": null
+        },
+        {
+          "slug": "forest",
+          "label": "Forest",
+          "description": "Soft, scattered reflections",
+          "group": null
+        },
+        {
+          "slug": "underwater",
+          "label": "Underwater",
+          "description": "Muffled and dense",
+          "group": null
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    },
+    {
+      "key": "distance",
+      "label": "Distance",
+      "multi": false,
+      "kind": "sound",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "close",
+          "label": "Close",
+          "description": "Right next to you",
+          "group": null
+        },
+        {
+          "slug": "medium",
+          "label": "Medium",
+          "description": "A few steps away",
+          "group": null
+        },
+        {
+          "slug": "far",
+          "label": "Far",
+          "description": "Far off, faint",
+          "group": null
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    },
+    {
+      "key": "over_time",
+      "label": "Over time",
+      "multi": false,
+      "kind": "sound",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "steady",
+          "label": "Steady",
+          "description": "Stays the same",
+          "group": null
+        },
+        {
+          "slug": "builds",
+          "label": "Builds",
+          "description": "Grows louder or denser",
+          "group": null
+        },
+        {
+          "slug": "hit-then-tail",
+          "label": "Hit then tail",
+          "description": "A sharp start, then it fades",
+          "group": null
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    },
+    {
+      "key": "movement",
+      "label": "Movement",
+      "multi": false,
+      "kind": "sound",
+      "vocal": false,
+      "options": [
+        {
+          "slug": "keep",
+          "label": "Keep",
+          "description": "Don't impose one; keep what your text says",
+          "group": null
+        },
+        {
+          "slug": "still",
+          "label": "Still",
+          "description": "Stays in place",
+          "group": null
+        },
+        {
+          "slug": "passing",
+          "label": "Passing",
+          "description": "Goes past you",
+          "group": null
+        },
+        {
+          "slug": "approaching",
+          "label": "Approaching",
+          "description": "Comes toward you",
+          "group": null
+        },
+        {
+          "slug": "receding",
+          "label": "Receding",
+          "description": "Moves away",
+          "group": null
+        }
+      ],
+      "default": [
+        "keep"
+      ]
+    }
+  ],
+  "defaults": {
+    "genre": "keep",
+    "music_mood": "keep",
+    "instruments": [],
+    "without": [],
+    "singer": "keep",
+    "production": "keep",
+    "space": "keep",
+    "distance": "keep",
+    "over_time": "keep",
+    "movement": "keep",
+    "note": ""
+  }
+}

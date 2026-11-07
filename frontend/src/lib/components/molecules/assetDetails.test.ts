@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { GalleryAsset } from '$lib/types';
 
+import { AUDIO_SETTINGS, makeAudioAsset, makeSpeechAsset } from '../../../test-utils/audio';
 import { assetDetailSections, describeUpscale } from './assetDetails';
 
 describe('describeUpscale', () => {
@@ -68,5 +69,38 @@ describe('assetDetailSections', () => {
     const generation = assetDetailSections(clip({ audio_track_path: '/music/song.mp3', audio_track_start: 12, audio_track_end: null })).generation;
     expect(generation.find((fact) => fact.label === 'Audio track')?.value).toBe('song.mp3 · from 0:12');
     expect(labels(clip())).not.toContain('Audio track');
+  });
+});
+
+describe('assetDetailSections for an audio take', () => {
+  const facts = (asset: GalleryAsset, vocabulary = AUDIO_SETTINGS): Record<string, string> =>
+    Object.fromEntries(assetDetailSections(asset, undefined, vocabulary).generation.map((fact) => [fact.label, fact.value]));
+  const excited = AUDIO_SETTINGS.vibes.find((vibe) => vibe.id === 'excited-host')!;
+
+  it('joins the tempo and the key of a song in one fact, with the key named as the client names it', () => {
+    expect(facts(makeAudioAsset({ tempo: 92, key: 'Am' }))['Tempo · Key']).toBe('92 BPM · A minor');
+    expect(facts(makeAudioAsset({ tempo: 120, key: 'F#m' }))['Tempo · Key']).toBe('120 BPM · F♯ minor');
+  });
+
+  it('shows only the part of Tempo · Key the song set, and nothing for a song that set neither', () => {
+    expect(facts(makeAudioAsset({ tempo: 92, key: null }))).toMatchObject({ Tempo: '92 BPM' });
+    expect(facts(makeAudioAsset({ tempo: null, key: 'C' }))).toMatchObject({ Key: 'C major' });
+    expect(Object.keys(facts(makeAudioAsset({ tempo: null, key: null })))).not.toEqual(expect.arrayContaining(['Tempo', 'Key', 'Tempo · Key']));
+  });
+
+  it('names the Vibe the delivery of a speech take matches, and Custom when it matches none', () => {
+    expect(facts(makeSpeechAsset({ ...excited.delivery }))['Delivery']).toBe(excited.label);
+    expect(facts(makeSpeechAsset({ ...excited.delivery, pitch: 'low' }))['Delivery']).toBe('Custom');
+  });
+
+  it('shows no Delivery for a speech take that recorded none, or without the vocabulary to name it', () => {
+    expect(facts(makeSpeechAsset())).not.toHaveProperty('Delivery');
+    expect(assetDetailSections(makeSpeechAsset({ ...excited.delivery })).generation.map((fact) => fact.label)).not.toContain('Delivery');
+  });
+
+  it('names the sound type of a sound by its label, and shows none for a take without one', () => {
+    const label = AUDIO_SETTINGS.sound_types.find((type) => type.id === 'ambience')!.label;
+    expect(facts(makeAudioAsset({ kind: 'sound', sound_type: 'ambience' }))['Sound type']).toBe(label);
+    expect(facts(makeAudioAsset({ kind: 'sound', sound_type: null }))).not.toHaveProperty('Sound type');
   });
 });

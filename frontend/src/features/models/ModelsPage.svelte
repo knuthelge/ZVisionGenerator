@@ -52,7 +52,7 @@
   /** The row name the Models-page download API knows the background removal models by. */
   const MATTE_NAME = 'background-removal';
   /** How the Audio models table names a model's kind. */
-  const AUDIO_KIND_LABELS: Record<AudioModelEntry['kind'], string> = { music: 'Music', speech: 'Speech', sound: 'Sound' };
+  const AUDIO_KIND_LABELS: Record<AudioModelEntry['kinds'][number], string> = { music: 'Music', speech: 'Speech', sound: 'Sound' };
   const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
 
   type DownloadKind = DownloadItem['kind'];
@@ -680,7 +680,7 @@
                     {#each inventory.audio_models as m (m.name)}
                       <tr data-testid="audio-row" data-model={m.name} class:dl-main={downloadStore.active('audio', m.name) !== null}>
                         <td>{@render modelName({ ...m, source: 'audio' })}</td>
-                        <td data-testid="audio-kind">{AUDIO_KIND_LABELS[m.kind]}</td>
+                        <td data-testid="audio-kind">{m.kinds.map((kind) => AUDIO_KIND_LABELS[kind]).join(' · ')}</td>
                         <td>{@render diskSizeCell(m.disk_size_label)}</td>
                         <td>{@render memoryFitCell(m)}</td>
                         {#snippet remove()}

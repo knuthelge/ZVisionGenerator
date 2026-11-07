@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from tests._audio_presets import audio_config
+from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_two_kind_preset, yue2_preset
 from tests._factories import load_packaged_config
 from tests._fake_audio import fake_read_config, install_fake_audio, write_fake_audio
 from tests._paths import FIXTURES
@@ -20,12 +20,13 @@ from tests.audio._helpers import case_request, clip, fake_backend, patch_runner,
 from tests.web._helpers import make_web_config, wait_for_status
 
 from zvisiongenerator.core.audio_backend import AudioCancelled
-from zvisiongenerator.core.audio_types import AudioGenerationRequest, VoiceRef
+from zvisiongenerator.core.audio_types import AudioGenerationRequest, SpeechDelivery, VoiceRef
 from zvisiongenerator.downloads.ensure import DownloadReport
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadProgress, TargetCheck
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
+from zvisiongenerator.web.audio_job import AudioFields, audio_request_from_fields
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.web import audio_models as audio_models_module
 from zvisiongenerator.web import model_download_plan as plan_module
@@ -34,6 +35,7 @@ from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web.job_contract import generation_supported_controls
 
 CASES = json.loads((FIXTURES / "audio_cli_cases.json").read_text(encoding="utf-8"))
+SETTINGS_CASES = json.loads((FIXTURES / "audio_settings_cases.json").read_text(encoding="utf-8"))["cases"]
 _GIB = 1024**3
 
 
@@ -86,7 +88,7 @@ class TestSubmit:
 
     def test_the_summary_of_a_queued_job_does_not_repeat_the_model(self, env):
         sound = env.post(model="sa3", prompt="rain", seconds="3").json()
-        speech = env.post(model="higgs3", prompt="Welcome back.").json()
+        speech = env.post(model="qwen3_tts", prompt="Welcome back.").json()
 
         assert sound["meta"] == "3 s"
         assert speech["meta"] == "13 characters"
@@ -122,10 +124,61 @@ class TestSubmit:
         assert env.post(model="sa3", prompt="rain").status_code == 409
 
 
+class TestKinds:
+    """The form's ``workflow`` is the kind of the take; the model decides what that kind takes."""
+
+    @pytest.fixture
+    def two_kinds(self, env):
+        env.web_config.app_config.update(audio_config(yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset()))
+        return env
+
+    def test_a_model_of_two_kinds_makes_the_kind_the_form_names(self, two_kinds):
+        sound = two_kinds.post(workflow="sound", model="sa3", prompt="rain").json()
+        music = two_kinds.post(workflow="music", model="sa3", prompt="calm piano").json()
+
+        assert (sound["workflow"], music["workflow"]) == ("sound", "music")
+        assert [job["request"].kind for job in two_kinds.submitted] == ["sound", "music"]
+
+    def test_a_form_without_a_workflow_makes_the_first_kind_of_the_model(self, two_kinds):
+        assert two_kinds.post(model="sa3", prompt="rain").json()["workflow"] == "sound"
+        assert two_kinds.post(model="yue2", prompt="piano").json()["workflow"] == "music"
+
+    def test_music_of_a_model_without_lyrics_takes_a_length_and_no_lyrics(self, two_kinds):
+        two_kinds.post(workflow="music", model="sa3", prompt="calm piano", lyrics="[verse]\nLa", seconds="45")
+        two_kinds.post(workflow="music", model="sa3", prompt="calm piano")
+
+        assert [(job["request"].lyrics, job["request"].seconds) for job in two_kinds.submitted] == [("", 45.0), ("", 30.0)]
+
+    def test_the_length_of_music_is_checked_against_the_models_limit(self, two_kinds):
+        _refused(two_kinds.post(workflow="music", model="sa3", prompt="x", seconds="381"), "seconds must be between 1 and 380; Stable Audio 3 Medium makes songs of that length.")
+
+    def test_music_of_a_model_with_lyrics_ignores_the_length(self, two_kinds):
+        two_kinds.post(workflow="music", model="yue2", prompt="piano", lyrics="[verse]\nLa", seconds="45")
+
+        assert (two_kinds.submitted[0]["request"].lyrics, two_kinds.submitted[0]["request"].seconds) == ("[verse]\nLa", None)
+
+    @pytest.mark.parametrize(
+        ("model", "workflow", "message"),
+        [
+            ("sa3", "speech", "Stable Audio 3 Medium makes sound and music, not speech."),
+            ("yue2", "sound", "YuE2 3B makes music, not sound."),
+            ("qwen3_tts", "music", "Qwen3-TTS 1.7B makes speech, not music."),
+        ],
+    )
+    def test_a_kind_the_model_lacks_is_refused_naming_what_it_makes(self, two_kinds, model, workflow, message):
+        assert _refused(two_kinds.post(workflow=workflow, model=model, prompt="x")) == message
+        assert two_kinds.submitted == []
+
+    def test_a_recording_is_not_read_for_a_model_that_cannot_speak(self, two_kinds, tmp_path):
+        response = two_kinds.post(workflow="speech", model="sa3", prompt="x", voice_path=str(tmp_path / "missing.wav"), voice_text="x")
+
+        _refused(response, "makes sound and music, not speech")
+
+
 class TestRecentPrompts:
     def test_each_kind_is_remembered_under_its_own_list_and_a_song_keeps_its_lyrics(self, env):
         env.post(model="yue2", prompt="  synth-pop ", lyrics="[verse]\r\nLa la")
-        env.post(model="higgs3", prompt="Welcome back.")
+        env.post(model="qwen3_tts", prompt="Welcome back.")
         env.post(model="sa3", prompt="rain on a roof")
 
         def remembered(kind: str) -> list[tuple[str, str]]:
@@ -140,7 +193,7 @@ class TestNormalisation:
     def test_the_style_and_the_sound_prompt_are_trimmed_and_speech_is_kept_as_typed(self, env):
         env.post(model="yue2", prompt="  calm piano \n")
         env.post(model="sa3", prompt=" rain on a roof ", seconds="12")
-        env.post(model="higgs3", prompt="  Welcome back.\n\nSecond line.  ")
+        env.post(model="qwen3_tts", prompt="  Welcome back.\n\nSecond line.  ")
 
         music, sound, speech = (job["request"] for job in env.submitted)
         assert music.prompt == "calm piano" and sound.prompt == "rain on a roof"
@@ -148,7 +201,7 @@ class TestNormalisation:
 
     def test_the_browsers_line_breaks_become_the_ones_the_shell_hands_the_cli(self, env):
         env.post(model="yue2", prompt="style", lyrics="[verse]\r\nHello\r\n[chorus]\r\nLa")
-        env.post(model="higgs3", prompt="One.\r\nTwo.")
+        env.post(model="qwen3_tts", prompt="One.\r\nTwo.")
 
         assert env.submitted[0]["request"].lyrics == "[verse]\nHello\n[chorus]\nLa"
         assert env.submitted[1]["request"].prompt == "One.\nTwo."
@@ -160,15 +213,15 @@ class TestNormalisation:
 
     def test_a_field_of_another_kind_is_ignored_as_the_form_hides_it(self, env):
         env.post(model="sa3", prompt="rain", lyrics="[verse]\nx", voice_path="/nowhere.wav", voice_text="x", seconds="5")
-        env.post(model="higgs3", prompt="Hello.", lyrics="[verse]\nx", seconds="5")
+        env.post(model="qwen3_tts", prompt="Hello.", lyrics="[verse]\nx", seconds="5")
         env.post(model="yue2", prompt="piano", seconds="5", voice_text="x", voice_consent="on")
 
         assert [(job["request"].lyrics, job["request"].seconds, job["request"].voice) for job in env.submitted] == [("", 5.0, None), ("", None, None), ("", None, None)]
 
-    def test_a_sound_without_a_length_is_ten_seconds(self, env):
+    def test_a_sound_without_a_length_is_twelve_seconds(self, env):
         env.post(model="sa3", prompt="rain")
 
-        assert env.submitted[0]["request"].seconds == 10.0
+        assert env.submitted[0]["request"].seconds == 12.0
 
 
 class TestFormMatchesCopyCli:
@@ -194,23 +247,153 @@ class TestFormMatchesCopyCli:
         assert [call.args[0] for call in backend.generate.call_args_list] == [case_request(item, voices) for item in case["requests"]]
 
 
+def _settings_request(item: dict, voices) -> AudioGenerationRequest:
+    """Return the request a ``audio_settings_cases.json`` case expects (its seed is set per take by the runner), with its ``/voices/`` paths moved into *voices*."""
+    voice = item["voice"]
+    return AudioGenerationRequest(
+        **{key: value for key, value in item.items() if key not in ("voice", "delivery")},
+        voice=None if voice is None else VoiceRef(voice["path"].replace("/voices/", f"{voices}/"), voice["text"]),
+        delivery=SpeechDelivery(**item["delivery"]) if item["delivery"] else None,
+    )
+
+
+def _settings_fields(form: dict) -> AudioFields:
+    """Return the fields of a case's form that ``audio_request_from_fields`` reads, the enhance record parsed."""
+    return AudioFields(
+        prompt=form["prompt"],
+        seconds=float(form["seconds"]) if form.get("seconds") else None,
+        **{name: form.get(name) for name in ("tempo", "key", "emotion", "manner", "pace", "pitch", "expressiveness", "sound_type", "prompt_input")},
+        enhance_record=json.loads(form["enhance_record"]) if form.get("enhance_record") else None,
+    )
+
+
+class TestSettingsRoundTrip:
+    """The Retry and Reuse form of a take that sets every new value makes the take's own request (the Python half of the round trip; the same cases run in Vitest)."""
+
+    @pytest.fixture
+    def voices(self, tmp_path):
+        return voice_folder(tmp_path)
+
+    @pytest.fixture(autouse=True)
+    def _models(self, env):
+        env.web_config.app_config.update(audio_config(yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset()))
+
+    def _post(self, env, monkeypatch, voices, form: dict):
+        fields = {key: ([item for item in value] if isinstance(value, list) else str(value).replace("/voices/", f"{voices}/")) for key, value in form.items()}
+        patch_runner(monkeypatch, fake_backend(clip(0.2)))
+        response = env.client.post("/api/generate", data=fields)
+        assert response.status_code == 200, response.text
+        return env.submitted[-1]
+
+    @pytest.mark.parametrize("which", ["form", "reuse_form"])
+    @pytest.mark.parametrize("case", SETTINGS_CASES, ids=[case["name"] for case in SETTINGS_CASES])
+    def test_the_form_makes_the_request_of_the_take(self, env, monkeypatch, voices, case, which):
+        form = case.get(which, case["form"])
+        expected = _settings_request(case["request"], voices)
+
+        job = self._post(env, monkeypatch, voices, form)
+
+        assert job["request"] == expected
+
+    @pytest.mark.parametrize("case", SETTINGS_CASES, ids=[case["name"] for case in SETTINGS_CASES])
+    def test_the_job_records_the_form_as_sent_for_retry_and_load_settings(self, env, monkeypatch, voices, case):
+        job = self._post(env, monkeypatch, voices, case["form"])
+
+        recorded = {key: value for key, value in job["context"]["settings"].items()}
+        sent = {key: (value if isinstance(value, list) else str(value).replace("/voices/", f"{voices}/")) for key, value in case["form"].items() if key != "voice_consent"}
+        assert recorded == sent
+
+    @pytest.mark.parametrize("case", [case for case in SETTINGS_CASES if "enhance_record" in case["form"]], ids=lambda case: case["name"])
+    def test_an_enhanced_text_keeps_its_own_text_and_record_in_the_request(self, case):
+        item = case["request"]
+        preset = next(model for model in parse_audio_presets(audio_config(yue2=yue2_preset(), qwen3_tts=qwen3_tts_preset(), sa3=sa3_two_kind_preset())) if model.id == item["preset"])
+
+        request = audio_request_from_fields(preset, item["kind"], _settings_fields(case["form"]))
+
+        assert request == _settings_request(item, None)
+
+
+class TestEnhancedText:
+    """The Enhanced text of a take: the form's ``prompt_input`` and ``enhance_record`` reach the request, and a record that cannot be read never fails the job."""
+
+    _RECORD = {"settings": {"genre": "folk"}, "model": "example/enhancer-model", "tier": "turbo", "format": "text", "task": "style"}
+
+    def _submit(self, env, **fields):
+        response = env.post(workflow="music", model="yue2", prompt="Folk, piano", **fields)
+        assert response.status_code == 200, response.text
+        return env.submitted[-1]["request"]
+
+    def test_an_enhanced_style_keeps_the_users_own_text_and_the_normalized_record(self, env):
+        request = self._submit(env, prompt_input="sad folk", enhance_record=json.dumps(self._RECORD))
+
+        assert request.prompt == "Folk, piano" and request.prompt_input == "sad folk"
+        assert request.enhance_record == {**self._RECORD, "tier": "custom"}  # the tier is worked out from the model, not trusted
+
+    def test_the_users_own_text_may_be_empty(self, env):
+        request = self._submit(env, prompt_input="", enhance_record=json.dumps(self._RECORD))
+
+        assert request.prompt_input == "" and request.enhance_record is not None
+
+    def test_the_users_own_text_without_a_record_is_not_kept(self, env):
+        request = self._submit(env, prompt_input="sad folk")
+
+        assert (request.prompt_input, request.enhance_record) == (None, None)
+
+    @pytest.mark.parametrize(
+        "record", ["not json", "[]", json.dumps({**_RECORD, "task": "poem"}), json.dumps({**_RECORD, "settings": {"genre": "nope"}}), json.dumps({"settings": {}, "task": "style"})]
+    )
+    def test_a_record_that_cannot_be_read_is_dropped_with_a_warning_and_the_job_still_runs(self, env, record):
+        with pytest.warns(UserWarning, match="Ignoring the enhance record"):
+            request = self._submit(env, prompt_input="sad folk", enhance_record=record)
+
+        assert (request.prompt, request.prompt_input, request.enhance_record) == ("Folk, piano", None, None)
+
+
+class TestSettingsRefusals:
+    @pytest.mark.parametrize(
+        ("fields", "message"),
+        [
+            ({"model": "yue2", "tempo": "300"}, "Tempo must be 40 to 220 BPM."),
+            ({"model": "yue2", "tempo": "quick"}, "Tempo must be 40 to 220 BPM."),
+            ({"model": "yue2", "key": "H"}, "Key must be one of:"),
+            ({"model": "qwen3_tts", "emotion": "grumpy"}, "Emotion must be one of:"),
+            ({"model": "qwen3_tts", "manner": "sing"}, "Manner must be one of:"),
+            ({"model": "sa3", "sound_type": "song"}, "Sound type must be one of:"),
+        ],
+    )
+    def test_a_bad_value_is_refused_in_the_users_words(self, env, fields, message):
+        _refused(env.post(prompt="x", **fields), message)
+        assert env.submitted == []
+
+    def test_a_bad_value_of_another_kinds_setting_is_ignored_as_the_form_hides_it(self, env):
+        assert env.post(model="sa3", prompt="rain", tempo="300", key="H", emotion="grumpy").status_code == 200
+        assert env.post(model="yue2", prompt="pop", sound_type="song", pace="warp").status_code == 200
+
+    def test_delivery_with_a_recording_is_ignored_even_when_wrong(self, env, monkeypatch, tmp_path):
+        voices = voice_folder(tmp_path)
+
+        response = env.post(model="qwen3_tts", prompt="Hi", voice_path=str(voices / "me.wav"), voice_text="Hello", voice_consent="on", emotion="grumpy")
+
+        assert response.status_code == 200 and env.submitted[0]["request"].delivery is None
+
+
 class TestRefusals:
     def test_speech_over_ten_thousand_characters_is_refused_with_the_models_message(self, env):
-        response = env.post(model="higgs3", prompt="a" * 10_001)
+        response = env.post(model="qwen3_tts", prompt="a" * 10_001)
 
         _refused(response, "Shorten the text", "10,000 characters")
         assert env.submitted == []
 
-    @pytest.mark.parametrize(("model", "message"), [("yue2", "Write a style first."), ("higgs3", "Write the text to read first."), ("sa3", "Describe the sound first.")])
+    @pytest.mark.parametrize(("model", "message"), [("yue2", "Write a style first."), ("qwen3_tts", "Write the text to read first."), ("sa3", "Describe the sound first.")])
     def test_a_missing_prompt_names_what_to_write(self, env, model, message):
         assert _refused(env.post(model=model, prompt="  \n")) == message
         assert _refused(env.post(model=model)) == message
 
     def test_a_missing_model_lists_the_ones_that_run(self, env):
-        _refused(env.post(prompt="x"), "Field 'model' is required", "yue2, higgs3, sa3")
+        _refused(env.post(prompt="x"), "Field 'model' is required", "yue2, qwen3_tts, sa3")
 
     def test_an_unknown_model_lists_the_ones_that_run(self, env):
-        _refused(env.post(model="nope", prompt="x"), "Unknown audio model 'nope'. Choose one of: yue2, higgs3, sa3.")
+        _refused(env.post(model="nope", prompt="x"), "Unknown audio model 'nope'. Choose one of: yue2, qwen3_tts, sa3.")
 
     def test_a_machine_without_audio_models_names_the_config_section(self, env):
         env.web_config.app_config.update({**load_packaged_config(), "audio_model_presets": {}})
@@ -233,13 +416,55 @@ class TestRefusals:
         _refused(env.post(model="sa3", prompt="x", seconds="long"), "'seconds' must be a number")
 
 
+class TestSpeaker:
+    def test_speech_without_a_speaker_is_read_in_the_models_default_voice(self, env):
+        env.post(model="qwen3_tts", prompt="Hello.")
+
+        assert env.submitted[0]["request"].speaker == "ryan"
+
+    def test_the_voice_the_form_chose_is_the_speaker_of_the_take(self, env):
+        env.post(model="qwen3_tts", prompt="Hello.", speaker="serena")
+
+        assert env.submitted[0]["request"].speaker == "serena"
+
+    def test_a_blank_speaker_is_the_default_voice(self, env):
+        env.post(model="qwen3_tts", prompt="Hello.", speaker="")
+
+        assert env.submitted[0]["request"].speaker == "ryan"
+
+    def test_a_voice_the_model_lacks_is_refused_with_the_models_label(self, env):
+        _refused(env.post(model="qwen3_tts", prompt="Hello.", speaker="nobody"), "Pick one of Qwen3-TTS 1.7B's voices.")
+        assert env.submitted == []
+
+    def test_the_plan_refuses_a_voice_the_model_lacks_as_the_submit_does(self, env):
+        _refused(env.post("/api/generate/plan", model="qwen3_tts", prompt="Hello.", speaker="nobody"), "Pick one of Qwen3-TTS 1.7B's voices.")
+
+    def test_a_speaker_is_ignored_by_the_kinds_that_have_no_voices(self, env):
+        env.post(model="yue2", prompt="piano", speaker="ryan")
+        env.post(model="sa3", prompt="rain", speaker="ryan")
+
+        assert [job["request"].speaker for job in env.submitted] == [None, None]
+
+    def test_the_job_settings_keep_the_speaker_for_retry_and_load_settings(self, env):
+        env.post(model="qwen3_tts", prompt="Hello.", speaker="eric")
+
+        assert env.submitted[0]["context"]["settings"]["speaker"] == "eric"
+
+    def test_a_recording_has_no_speaker_whatever_the_form_says(self, env, tmp_path):
+        voices = voice_folder(tmp_path)
+
+        env.post(model="qwen3_tts", prompt="More.", speaker="eric", voice_path=str(voices / "any.flac"), voice_text="Hello", voice_consent="false")
+
+        assert env.submitted[0]["request"].speaker is None
+
+
 class TestVoice:
     @pytest.fixture
     def voices(self, tmp_path):
         return voice_folder(tmp_path)
 
     def speak(self, env, voices, name, **fields):
-        return env.post(model="higgs3", prompt="More words.", voice_path=str(voices / name), voice_text="Hello, this is me.", **fields)
+        return env.post(model="qwen3_tts", prompt="More words.", voice_path=str(voices / name), voice_text="Hello, this is me.", **fields)
 
     def test_a_recording_needs_the_speakers_consent(self, env, voices):
         _refused(self.speak(env, voices, "me.wav"), "permission")
@@ -260,7 +485,7 @@ class TestVoice:
         assert self.speak(env, voices, "cloned.flac", voice_consent="on").status_code == 200
 
     def test_a_voice_needs_its_transcript(self, env, voices):
-        response = env.post(model="higgs3", prompt="x", voice_path=str(voices / "me.wav"), voice_consent="on")
+        response = env.post(model="qwen3_tts", prompt="x", voice_path=str(voices / "me.wav"), voice_consent="on")
 
         _refused(response, "Write what the recording says first.")
 
@@ -268,23 +493,23 @@ class TestVoice:
         short = tmp_path / "short.flac"
         write_fake_audio(clip(1.5).samples, 24000, short, {"kind": "speech", "prompt": "x"})
 
-        _refused(env.post(model="higgs3", prompt="x", voice_path=str(short), voice_text="Hi"), "The voice recording is 1.5 seconds long; use one between 3 and 30 seconds.")
+        _refused(env.post(model="qwen3_tts", prompt="x", voice_path=str(short), voice_text="Hi"), "The voice recording is 1.5 seconds long; use one between 3 and 30 seconds.")
 
     def test_a_voice_that_cannot_be_read_is_refused(self, env, tmp_path):
         broken = tmp_path / "broken.flac"
         broken.write_bytes(b"not audio")
 
-        _refused(env.post(model="higgs3", prompt="x", voice_path=str(broken), voice_text="Hi", voice_consent="on"), "Can't read")
+        _refused(env.post(model="qwen3_tts", prompt="x", voice_path=str(broken), voice_text="Hi", voice_consent="on"), "Can't read")
 
     def test_a_voice_that_is_not_a_file_on_the_host_is_refused(self, env, tmp_path):
-        _refused(env.post(model="higgs3", prompt="x", voice_path=str(tmp_path / "gone.wav"), voice_text="Hi", voice_consent="on"), "voice_path", "existing host-local file")
-        _refused(env.post(model="higgs3", prompt="x", voice_path="https://example.com/a.wav", voice_text="Hi", voice_consent="on"), "host-local file path")
+        _refused(env.post(model="qwen3_tts", prompt="x", voice_path=str(tmp_path / "gone.wav"), voice_text="Hi", voice_consent="on"), "voice_path", "existing host-local file")
+        _refused(env.post(model="qwen3_tts", prompt="x", voice_path="https://example.com/a.wav", voice_text="Hi", voice_consent="on"), "host-local file path")
 
     def test_a_voice_path_is_used_as_typed_with_the_home_folder_expanded(self, env, voices, monkeypatch):
         monkeypatch.setenv("HOME", str(voices))
         monkeypatch.setenv("USERPROFILE", str(voices))
 
-        response = env.post(model="higgs3", prompt="x", voice_path="~/any.flac", voice_text="Hi")
+        response = env.post(model="qwen3_tts", prompt="x", voice_path="~/any.flac", voice_text="Hi")
 
         assert response.status_code == 200
         assert env.submitted[0]["request"].voice.path == str(voices / "any.flac")
@@ -294,7 +519,7 @@ class TestVoice:
 
         response = env.client.post(
             "/api/generate",
-            data={"mode": "audio", "model": "higgs3", "prompt": "x", "voice_path": str(voices / "me.wav"), "voice_text": "Welcome back."},
+            data={"mode": "audio", "model": "qwen3_tts", "prompt": "x", "voice_path": str(voices / "me.wav"), "voice_text": "Welcome back."},
             files={"voice_file": upload},
         )
 
@@ -304,7 +529,9 @@ class TestVoice:
         assert env.submitted[0]["context"]["settings"]["voice_path"] == saved
 
     def test_an_upload_that_is_not_audio_is_refused_by_name(self, env):
-        response = env.client.post("/api/generate", data={"mode": "audio", "model": "higgs3", "prompt": "x", "voice_text": "Hi"}, files={"voice_file": ("notes.txt", io.BytesIO(b"hi"), "text/plain")})
+        response = env.client.post(
+            "/api/generate", data={"mode": "audio", "model": "qwen3_tts", "prompt": "x", "voice_text": "Hi"}, files={"voice_file": ("notes.txt", io.BytesIO(b"hi"), "text/plain")}
+        )
 
         _refused(response, "Voice recording must be a WAV, MP3, M4A, FLAC, or OGG file.")
 
@@ -365,7 +592,7 @@ class TestMissingFfmpeg:
 
     @pytest.mark.parametrize("path", ["/api/generate", "/api/generate/plan"])
     def test_a_recording_form_gets_the_ffmpeg_message_not_a_consent_refusal(self, no_ffmpeg, path):
-        response = no_ffmpeg.post(path, model="higgs3", prompt="More words.", voice_path=str(no_ffmpeg.voices / "me.wav"), voice_text="Hello, this is me.")
+        response = no_ffmpeg.post(path, model="qwen3_tts", prompt="More words.", voice_path=str(no_ffmpeg.voices / "me.wav"), voice_text="Hello, this is me.")
 
         detail = _refused(response, "ffmpeg")
         assert "permission" not in detail
@@ -409,7 +636,7 @@ class TestPlan:
 
     @pytest.mark.parametrize(
         ("model", "suppliers"),
-        [("yue2", ["M-A-P"]), ("higgs3", ["Boson AI", "Boson AI"]), ("sa3", ["Stability AI", "Google"])],
+        [("yue2", ["M-A-P"]), ("qwen3_tts", ["Qwen"]), ("sa3", ["Stability AI", "Google"])],
     )
     def test_the_plan_carries_the_packaged_records_of_each_audio_model(self, plan_env, model, suppliers):
         licences = plan_env.post("/api/generate/plan", model=model, prompt="calm piano").json()["licences"]
@@ -425,7 +652,7 @@ class TestPlan:
         assert plan["parts"] == [] and plan["licences"] == []
 
     def test_an_audio_form_is_refused_by_the_plan_as_the_submit_refuses_it(self, plan_env):
-        fields = {"model": "higgs3", "prompt": "a" * 10_001}
+        fields = {"model": "qwen3_tts", "prompt": "a" * 10_001}
 
         planned = plan_env.post("/api/generate/plan", **fields)
         submitted = plan_env.post("/api/generate", **fields)
@@ -433,11 +660,11 @@ class TestPlan:
         assert planned.status_code == submitted.status_code == 422
         assert planned.json() == submitted.json()
 
-    @pytest.mark.parametrize(("model", "fields"), [("yue2", {"prompt": "calm piano"}), ("sa3", {"prompt": "rain", "seconds": "10"}), ("higgs3", {"prompt": "Hello there."})])
+    @pytest.mark.parametrize(("model", "fields"), [("yue2", {"prompt": "calm piano"}), ("sa3", {"prompt": "rain", "seconds": "10"}), ("qwen3_tts", {"prompt": "Hello there."})])
     def test_the_plan_of_each_kind_is_the_same_with_or_without_the_voice_file(self, plan_env, model, fields):
-        voice = {"voice_text": "Welcome back."} if model == "higgs3" else {}
+        voice = {"voice_text": "Welcome back."} if model == "qwen3_tts" else {}
         data = {"mode": "audio", "model": model, **fields, **voice}
-        files = {"voice_file": ("me.wav", b"RIFF....", "audio/wav")} if model == "higgs3" else None
+        files = {"voice_file": ("me.wav", b"RIFF....", "audio/wav")} if model == "qwen3_tts" else None
 
         full = plan_env.client.post("/api/generate/plan", data=data, files=files)
         bare = plan_env.client.post("/api/generate/plan", data=data, files={"voice_file": ("me.wav", b"", "audio/wav")} if files else None)
@@ -448,7 +675,7 @@ class TestPlan:
         assert not (plan_env.root / "out" / ".web_uploads").exists()
 
     def test_the_plan_refuses_the_voice_file_type_the_submit_refuses(self, plan_env):
-        data = {"mode": "audio", "model": "higgs3", "prompt": "Hello there.", "voice_text": "Welcome back."}
+        data = {"mode": "audio", "model": "qwen3_tts", "prompt": "Hello there.", "voice_text": "Welcome back."}
 
         planned = plan_env.client.post("/api/generate/plan", data=data, files={"voice_file": ("notes.txt", b"", "text/plain")})
         submitted = plan_env.client.post("/api/generate", data=data, files={"voice_file": ("notes.txt", b"hi", "text/plain")})
@@ -457,7 +684,7 @@ class TestPlan:
         assert planned.json() == submitted.json()
 
     def test_the_plan_leaves_the_content_of_the_voice_file_to_the_submit(self, plan_env):
-        data = {"mode": "audio", "model": "higgs3", "prompt": "Hello there.", "voice_text": "Welcome back."}
+        data = {"mode": "audio", "model": "qwen3_tts", "prompt": "Hello there.", "voice_text": "Welcome back."}
         voice = {"voice_file": ("me.wav", b"", "audio/wav")}
 
         planned = plan_env.client.post("/api/generate/plan", data=data, files=voice)
@@ -469,8 +696,8 @@ class TestPlan:
     def test_the_voice_fields_are_still_checked_by_the_plan(self, plan_env):
         files = {"voice_file": ("me.wav", b"", "audio/wav")}
 
-        missing_text = plan_env.client.post("/api/generate/plan", data={"mode": "audio", "model": "higgs3", "prompt": "Hello there."}, files=files)
-        no_prompt = plan_env.client.post("/api/generate/plan", data={"mode": "audio", "model": "higgs3", "prompt": "", "voice_text": "Hi"}, files=files)
+        missing_text = plan_env.client.post("/api/generate/plan", data={"mode": "audio", "model": "qwen3_tts", "prompt": "Hello there."}, files=files)
+        no_prompt = plan_env.client.post("/api/generate/plan", data={"mode": "audio", "model": "qwen3_tts", "prompt": "", "voice_text": "Hi"}, files=files)
 
         _refused(missing_text, "Write what the recording says first.")
         _refused(no_prompt, "Write the text to read first.")
@@ -674,3 +901,69 @@ class TestRunner:
         assert (request.prompt, preset.id) == ("rain on a roof", "sa3") and config == audio_config()
         assert (kwargs["runs"], kwargs["seed"], kwargs["output_dir"]) == (2, 5, str(tmp_path))
         assert kwargs["skip_signal"] is runner._get_job(job_id).control_signal
+
+    def _run_qwen(self, runner, monkeypatch, tmp_path, **request_fields):
+        patch_runner(monkeypatch, fake_backend(clip(0.3)))
+        config = audio_config(qwen3_tts=qwen3_tts_preset())
+        preset = next(item for item in parse_audio_presets(config) if item.id == "qwen3_tts")
+        request = AudioGenerationRequest(preset="qwen3_tts", kind="speech", prompt="Hello there.", **request_fields)
+
+        job_id = self.submit(runner, tmp_path, request=request, preset=preset, config=config, runs=1, context={"workflow": "speech", "model": "qwen3_tts", "prompt": "Hello there."})
+        wait_for_status(runner, job_id, "completed", timeout=10)
+        return [target.repo_id for target in runner.ensure.call_args.args[0]]
+
+    def test_a_built_in_voice_job_downloads_customvoice_alone(self, runner, monkeypatch, tmp_path):
+        assert self._run_qwen(runner, monkeypatch, tmp_path, speaker="aiden") == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]
+
+    def test_a_job_with_a_recording_downloads_the_cloning_checkpoint_too(self, runner, monkeypatch, tmp_path):
+        repos = self._run_qwen(runner, monkeypatch, tmp_path, voice=VoiceRef("/voices/me.wav", "Hello, this is me."))
+
+        assert repos == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"]
+
+
+class TestQwenCloningFiles:
+    """Qwen3-TTS downloads its cloning checkpoint only for a take that follows a recording: the plan and the queued job say so alike."""
+
+    _BASE = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+    _CUSTOM = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+
+    @pytest.fixture
+    def qwen_env(self, env, monkeypatch, tmp_path):
+        """Serve the plan with a fake Hub and disk, and Qwen3-TTS among the models."""
+        env.web_config.app_config.update(audio_config(qwen3_tts=qwen3_tts_preset()))
+        monkeypatch.setattr(web_server.download_flights, "active", DownloadFlights().active)
+        real_summary = plan_module.parts_summary
+        monkeypatch.setattr(
+            web_server,
+            "parts_summary",
+            lambda parts, **kwargs: real_summary(
+                parts,
+                **kwargs,
+                check=lambda target: TargetCheck(missing_files=2, missing_bytes=3 * _GIB),
+                present=lambda target: False,
+                space=lambda items, *, cache_dir: SpaceNeed(path=cache_dir, needed_bytes=sum(c.missing_bytes for _, c in items), free_bytes=100 * _GIB),
+                cache_dir=lambda: tmp_path,
+            ),
+        )
+        return env
+
+    def test_a_built_in_voice_take_plans_and_queues_customvoice_alone(self, qwen_env):
+        plan = qwen_env.post("/api/generate/plan", model="qwen3_tts", prompt="Hello there.").json()
+        qwen_env.post(model="qwen3_tts", prompt="Hello there.")
+
+        assert plan["parts"][0]["bytes"] == 3 * _GIB
+        assert [target.repo_id for target in qwen_env.submitted[0]["planned_targets"]] == [self._CUSTOM]
+
+    def test_a_take_with_a_recording_also_plans_the_cloning_checkpoint(self, qwen_env):
+        data = {"mode": "audio", "model": "qwen3_tts", "prompt": "Hello there.", "voice_text": "Welcome back."}
+
+        plan = qwen_env.client.post("/api/generate/plan", data=data, files={"voice_file": ("me.wav", b"", "audio/wav")}).json()
+
+        assert plan["parts"][0]["bytes"] == 6 * _GIB
+
+    def test_a_queued_take_with_a_recording_holds_both_checkpoints(self, qwen_env, tmp_path):
+        voices = voice_folder(tmp_path)
+
+        qwen_env.post(model="qwen3_tts", prompt="Hello there.", voice_path=str(voices / "me.wav"), voice_text="Hello, this is me.", voice_consent="on")
+
+        assert [target.repo_id for target in qwen_env.submitted[0]["planned_targets"]] == [self._CUSTOM, self._BASE]

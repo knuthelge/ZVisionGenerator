@@ -1,0 +1,42 @@
+[
+  {
+    "text": "",
+    "characters": 0
+  },
+  {
+    "text": "Plain words.",
+    "characters": 12
+  },
+  {
+    "text": "[sad] Goodbye.",
+    "characters": 9
+  },
+  {
+    "text": "Hello [whisper]there[as set] again",
+    "characters": 17
+  },
+  {
+    "text": "[Whisper]Be quiet. [AS  SET] Done.",
+    "characters": 16
+  },
+  {
+    "text": "[ sad ]Hi",
+    "characters": 2
+  },
+  {
+    "text": "A [sadd] note, [1] and [x].",
+    "characters": 27
+  },
+  {
+    "text": "[sad][shout][as set]",
+    "characters": 0
+  },
+  {
+    "text": "Mixed [Angry] case and\nline breaks [whisper]\nhere",
+    "characters": 33
+  },
+  {
+    "text": "Emoji \ud83d\ude00 count once [sad]",
+    "characters": 19
+  }
+]

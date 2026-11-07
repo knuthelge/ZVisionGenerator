@@ -339,30 +339,71 @@ describe('cliCommand for audio', () => {
     expect(cliCommand(settings as unknown as JobSettings)).toEqual({ command, caveats: [] });
   });
 
+  it('names the Enhanced text as the prompt of an enhanced take, as image and video do: the command makes that text without enhancing again', () => {
+    const record = JSON.stringify({ settings: { space: 'large-hall' }, model: 'org/fast', format: 'text', task: 'sound' });
+    const enhanced = { mode: 'audio', workflow: 'sound', model: 'sa3', prompt: 'Heavy rain on a tin roof', prompt_input: 'rain on a roof', enhance_record: record, seed: '3' };
+
+    expect(cliCommand(enhanced)).toEqual({ command: "ziv audio --model sa3 --kind sound --prompt 'Heavy rain on a tin roof' --seed 3", caveats: [] });
+  });
+
   it('adds --voice-consent only when the form carries the tick', () => {
-    const cloned = { mode: 'audio', workflow: 'speech', model: 'higgs3', prompt: 'Hi', voice_path: '/v/me.wav', voice_text: 'Hello' };
+    const cloned = { mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hi', voice_path: '/v/me.wav', voice_text: 'Hello' };
 
     expect(cliCommand({ ...cloned, voice_consent: ['false', 'on'] }).command).toContain('--voice-consent');
     expect(cliCommand({ ...cloned, voice_consent: 'false' }).command).not.toContain('--voice-consent');
     expect(cliCommand(cloned).command).not.toContain('--voice-consent');
   });
 
-  it('sends lyrics with music, the length with sound and a voice with speech only', () => {
+  it('sends lyrics with music, the length with music and sound and a voice with speech only', () => {
     const extras = { lyrics: '[verse]', seconds: '12', voice_path: '/v/me.wav', voice_text: 'Hello', voice_consent: 'on' };
 
-    expect(cliCommand({ mode: 'audio', workflow: 'music', model: 'm', prompt: 'p', ...extras }).command).toBe("ziv audio --model m --prompt p --lyrics '[verse]'");
-    expect(cliCommand({ mode: 'audio', workflow: 'sound', model: 's', prompt: 'p', ...extras }).command).toBe('ziv audio --model s --prompt p --seconds 12');
-    expect(cliCommand({ mode: 'audio', workflow: 'speech', model: 'h', prompt: 'p', ...extras }).command).toBe('ziv audio --model h --prompt p --voice /v/me.wav --voice-text Hello --voice-consent');
+    expect(cliCommand({ mode: 'audio', workflow: 'music', model: 'm', prompt: 'p', ...extras }).command).toBe("ziv audio --model m --kind music --prompt p --lyrics '[verse]' --seconds 12");
+    expect(cliCommand({ mode: 'audio', workflow: 'sound', model: 's', prompt: 'p', ...extras }).command).toBe('ziv audio --model s --kind sound --prompt p --seconds 12');
+    expect(cliCommand({ mode: 'audio', workflow: 'speech', model: 'h', prompt: 'p', ...extras }).command).toBe('ziv audio --model h --kind speech --prompt p --voice /v/me.wav --voice-text Hello --voice-consent');
+  });
+
+  it('names the tempo and key of a song, and leaves them out on Auto or for another kind', () => {
+    const song = { mode: 'audio', workflow: 'music', model: 'yue2', prompt: 'p', tempo: '92', key: 'F#m' };
+
+    expect(cliCommand(song).command).toBe("ziv audio --model yue2 --kind music --prompt p --tempo 92 --key 'F#m'");
+    expect(cliCommand({ ...song, tempo: '', key: '' }).command).toBe('ziv audio --model yue2 --kind music --prompt p');
+    expect(cliCommand({ ...song, workflow: 'sound', model: 'sa3' }).command).toBe('ziv audio --model sa3 --kind sound --prompt p');
+    expect(cliCommand({ ...song, workflow: 'speech', model: 'qwen3_tts' }).command).toBe('ziv audio --model qwen3_tts --kind speech --prompt p');
+  });
+
+  it('names the delivery values that differ from neutral, for a built-in voice only', () => {
+    const delivered = { mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hi', speaker: 'ryan', emotion: 'afraid', manner: 'natural', pace: 'very-slow', pitch: 'high', expressiveness: 'normal' };
+
+    expect(cliCommand(delivered).command).toBe('ziv audio --model qwen3_tts --kind speech --prompt Hi --speaker ryan --emotion afraid --pace very-slow --pitch high');
+    expect(cliCommand({ ...delivered, voice_path: '/v/me.wav', voice_text: 'Hello' }).command).not.toContain('--emotion');
+    expect(cliCommand({ ...delivered, workflow: 'music', model: 'yue2' }).command).not.toContain('--pace');
+  });
+
+  it('names the sound type unless it is Auto, and the length only when one is chosen', () => {
+    const sound = { mode: 'audio', workflow: 'sound', model: 'sa3', prompt: 'p', seconds: '', sound_type: 'one-shot' };
+
+    expect(cliCommand(sound).command).toBe('ziv audio --model sa3 --kind sound --prompt p --sound-type one-shot');
+    expect(cliCommand({ ...sound, seconds: '3', sound_type: 'auto' }).command).toBe('ziv audio --model sa3 --kind sound --prompt p --seconds 3');
+    expect(cliCommand({ ...sound, workflow: 'music', model: 'yue2' }).command).not.toContain('--sound-type');
+  });
+
+  it('adds --speaker for a built-in voice and leaves it out when a recording is followed or for another kind', () => {
+    const voiced = { mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hi', speaker: 'vivian' };
+
+    expect(cliCommand(voiced).command).toBe('ziv audio --model qwen3_tts --kind speech --prompt Hi --speaker vivian');
+    expect(cliCommand({ ...voiced, voice_path: '/v/me.wav', voice_text: 'Hello' }).command).toBe('ziv audio --model qwen3_tts --kind speech --prompt Hi --voice /v/me.wav --voice-text Hello');
+    expect(cliCommand({ ...voiced, workflow: 'music', model: 'yue2' }).command).toBe('ziv audio --model yue2 --kind music --prompt Hi');
+    expect(cliCommand({ ...voiced, speaker: '' }).command).toBe('ziv audio --model qwen3_tts --kind speech --prompt Hi');
   });
 
   it('names an uploaded recording by file name and says so', () => {
     const form = new FormData();
-    for (const [key, value] of Object.entries({ mode: 'audio', workflow: 'speech', model: 'higgs3', prompt: 'Hi', voice_text: 'Hello', voice_consent: 'on' })) form.append(key, value);
+    for (const [key, value] of Object.entries({ mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hi', voice_text: 'Hello', voice_consent: 'on' })) form.append(key, value);
     form.append('voice_file', new File(['x'], 'my voice.wav', { type: 'audio/wav' }));
     form.append('voice_path', '/old/me.wav');
 
     expect(cliCommand(formSettings(form))).toEqual({
-      command: "ziv audio --model higgs3 --prompt Hi --voice 'my voice.wav' --voice-text Hello --voice-consent",
+      command: "ziv audio --model qwen3_tts --kind speech --prompt Hi --voice 'my voice.wav' --voice-text Hello --voice-consent",
       caveats: ['uploaded_voice'],
     });
   });
@@ -370,7 +411,7 @@ describe('cliCommand for audio', () => {
   it('adds the batch, the seed and the output folder', () => {
     const { command } = cliCommand({ mode: 'audio', workflow: 'sound', model: 'sa3', prompt: 'rain', seconds: '5', runs: '3', seed: '8' }, { outputDir: '/out' });
 
-    expect(command).toBe('ziv audio --model sa3 --prompt rain --seconds 5 --runs 3 --seed 8 --output /out');
+    expect(command).toBe('ziv audio --model sa3 --kind sound --prompt rain --seconds 5 --runs 3 --seed 8 --output /out');
   });
 
   it.each([

@@ -94,7 +94,7 @@ describe('an exact prefill', () => {
     editedImageForm();
     draft.patch({
       audioStyle: 'calm', speechText: 'say it', voiceMode: 'recording', voicePath: '/voices/me.wav', extendSourcePath: '/clips/a.mp4', firstFramePath: '/in/first.png',
-      savedText: { video: { prompt: 'an action', scene: 'a scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [] } },
+      savedText: { video: { prompt: 'an action', scene: 'a scene', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [], enhancedScratched: null } },
     });
     const before = { ...draft.state };
 
@@ -146,5 +146,45 @@ describe('an exact prefill on the Audio tab', () => {
 
     expect(draft.state).toMatchObject({ workflow: 'music', audioStyle: 'calm piano', runs: 1, seed: null, voicePath: '/voices/me.wav' });
     expect(voiceConsent.ticked).toBe(true);
+  });
+
+  it('sets the settings of the take, and puts Auto and the defaults back for any it does not name', () => {
+    draft.hydrateFromContext(ctx, null);
+    draft.setTab('audio');
+    draft.onTabChange(ctx);
+    draft.patch({ audioTempo: 150, audioKey: 'Bb', soundType: 'ambience', speechDelivery: { emotion: 'angry', manner: 'shout', pace: 'fast', pitch: 'high', expressiveness: 'low' } });
+
+    reuse({ workflow: 'music', model: 'yue2', prompt: 'calm piano', tempo: '92', key: 'F#m' });
+    expect(draft.state).toMatchObject({ audioTempo: 92, audioKey: 'F#m' });
+
+    reuse({ workflow: 'music', model: 'yue2', prompt: 'calm piano' });
+    expect(draft.state).toMatchObject({ audioTempo: null, audioKey: null });
+  });
+
+  it('leaves the settings of the other kinds as the form has them', () => {
+    draft.hydrateFromContext(ctx, null);
+    draft.setTab('audio');
+    draft.onTabChange(ctx);
+    const delivery = { emotion: 'angry', manner: 'shout', pace: 'fast', pitch: 'high', expressiveness: 'low' } as const;
+    draft.patch({ audioTempo: 150, audioKey: 'Bb', audioSeconds: 7, soundType: 'effect', speechDelivery: delivery });
+
+    reuse({ workflow: 'speech', model: 'qwen3-tts', prompt: 'hello there' });
+    expect(draft.state).toMatchObject({ audioTempo: 150, audioKey: 'Bb', audioSeconds: 7, soundType: 'effect', speechDelivery: { emotion: 'neutral', manner: 'natural' } });
+
+    reuse({ workflow: 'music', model: 'yue2', prompt: 'calm piano' });
+    expect(draft.state).toMatchObject({ audioTempo: null, audioKey: null, audioSeconds: 7, soundType: 'effect' });
+  });
+});
+
+describe('the scopes of the Audio tab', () => {
+  it('reset and reuse put back the settings and the delivery', () => {
+    for (const scopes of [RESET_SCOPE.audio, REUSE_SCOPE.audio]) {
+      expect(keysOf(scopes)).toEqual(expect.arrayContaining(['audioSeconds', 'audioTempo', 'audioKey', 'musicSeconds', 'soundType', 'speechDelivery']));
+    }
+  });
+
+  it('keep the text and the model of a Reuse out of the reset, as the kinds keep their own', () => {
+    expect(keysOf(REUSE_SCOPE.audio)).not.toEqual(expect.arrayContaining(['audioStyle']));
+    expect(keysOf(REUSE_SCOPE.audio)).not.toContain('voicePath');
   });
 });

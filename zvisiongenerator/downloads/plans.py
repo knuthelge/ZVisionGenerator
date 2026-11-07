@@ -133,12 +133,14 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
     )
 
 
-def audio_plan(preset: AudioPreset) -> tuple[DownloadTarget, ...]:
+def audio_plan(preset: AudioPreset, *, voice: bool = False) -> tuple[DownloadTarget, ...]:
     """Return one target per repository the audio *preset* loads, at the pinned commit, in the order the preset lists them.
 
-    The plan comes from the config alone, so it needs no connection and is never ``None``.
+    A take that follows a voice recording (*voice*) also needs the preset's ``voice_files``, which come last; a built-in voice
+    does not. The plan comes from the config alone, so it needs no connection and is never ``None``.
     """
-    return tuple(DownloadTarget(files.repo_id, files.revision, files.patterns) for files in preset.files)
+    files = (*preset.files, *preset.voice_files) if voice else preset.files
+    return tuple(DownloadTarget(item.repo_id, item.revision, item.patterns) for item in files)
 
 
 def video_model_downloaded(

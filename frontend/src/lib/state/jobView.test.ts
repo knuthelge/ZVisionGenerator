@@ -596,15 +596,17 @@ describe('an audio job', () => {
   });
 
   it('shows speech as one row that names the part and spans all parts', () => {
-    const [first] = audioRows(speech(progress('Speech tokens', 250, 500, 2, 4)));
-    const [decoding] = audioRows(speech(progress('Decode', 0, 1, 2, 4)));
+    const [reading] = audioRows(speech(progress('Speech', 0, 1, 2, 4)));
+    const [read] = audioRows(speech(progress('Speech', 1, 1, 2, 4)));
 
-    expect(first.text).toContain('part 2 of 4');
-    expect(decoding.text).toContain('part 2 of 4');
-    expect(first.percent).toBe(Math.round(audioFraction(speech(progress('Speech tokens', 250, 500, 2, 4))) * 100));
-    expect(first.percent).toBeGreaterThan(25);
-    expect(decoding.percent).toBeGreaterThan(first.percent!);
-    expect(decoding.text).not.toBe(first.text);
+    expect(reading.text).toBe('Reading part 2 of 4');
+    expect(read.text).toBe('Reading part 2 of 4');
+    expect(reading.percent).toBe(25);
+    expect(read.percent).toBe(50);
+  });
+
+  it('shows speech with no clock, as Reading for one part', () => {
+    expect(audioRows(speech(progress('Speech', 0, 1, 1, 1)))[0].text).toBe('Reading');
   });
 
   it('finishes every row of a song with the take', () => {
@@ -616,7 +618,7 @@ describe('an audio job', () => {
     const fraction = (state: ActiveJobState) => itemFraction(state);
 
     it('is the Aurora estimate, so the bar, the segments and the strip agree', () => {
-      for (const state of [take({ audio: progress('Song tokens', 500, null) }), speech(progress('Speech tokens', 90, 500, 2, 4)), sound(progress('Sampling', 4, 8))]) {
+      for (const state of [take({ audio: progress('Song tokens', 500, null) }), speech(progress('Speech', 1, 1, 2, 4)), sound(progress('Sampling', 4, 8))]) {
         expect(audioFraction(state)).toBe(auroraProgress(state.workflow as AudioWorkflow, state.audio ?? null));
         expect(fraction(state)).toBe(audioFraction(state));
       }
@@ -625,11 +627,9 @@ describe('an audio job', () => {
 
     it('never runs backwards across the parts of a speech take', () => {
       const parts = 4;
-      const events = Array.from({ length: parts }, (_, index) => [
-        ...[0, 125, 250, 375, 500].map((step) => progress('Speech tokens', step, 500, index + 1, parts)),
-        progress('Decode', 0, 1, index + 1, parts),
-        progress('Decode', 1, 1, index + 1, parts),
-      ]).flat();
+      const events = [
+        ...Array.from({ length: parts }, (_, index) => [progress('Speech', 0, 1, index + 1, parts), progress('Speech', 1, 1, index + 1, parts)]).flat(),
+      ];
       const bars = events.map((audio) => audioFraction(speech(audio)));
 
       for (let i = 1; i < bars.length; i += 1) expect(bars[i]).toBeGreaterThanOrEqual(bars[i - 1]);

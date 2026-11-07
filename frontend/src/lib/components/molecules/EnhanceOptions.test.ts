@@ -2,7 +2,9 @@
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { EnhanceAxis, EnhanceSettings } from '$lib/types';
+import { AUDIO_MATRIX } from '../../../test-utils/audio';
+import { axesOf } from '$lib/state/audioEnhance';
+import type { AudioEnhanceSettings, EnhanceAxis, EnhanceSettings } from '$lib/types';
 
 import EnhanceOptions from './EnhanceOptions.svelte';
 import Host from './EnhanceOptionsHost.test.svelte';
@@ -168,6 +170,117 @@ describe('EnhanceOptions', () => {
       const after = target.querySelector('[data-color-dot="0"] input') as HTMLInputElement;
       expect(after).toBe(before);
       expect(after.value).toBe('#' + '778899');
+    });
+  });
+  describe('audio mode', () => {
+    const soundAxes = axesOf(AUDIO_MATRIX, 'sound');
+    const SOUND: AudioEnhanceSettings = { ...AUDIO_MATRIX.defaults };
+    const headings = (): string[] => Array.from(target.querySelectorAll('h3')).map((h) => h.textContent?.trim() ?? '');
+
+    function mountSound(settings = SOUND, onchange = vi.fn()): typeof onchange {
+      document.body.appendChild(target);
+      app = flushSync(() => mount(EnhanceOptions, { target, props: { axes: soundAxes, settings, mode: 'audio', onchange, idPrefix: 't' } }));
+      return onchange;
+    }
+
+    it("lists Sound's two sections with the axes passed in, and no image or video section", () => {
+      mountSound();
+
+      expect(headings()).toEqual(['Place', 'Motion']);
+      expect(Array.from(target.querySelectorAll('.picker')).map((picker) => picker.id)).toEqual(['t-space', 't-distance', 't-over_time', 't-movement']);
+      expect(target.querySelector('section[aria-label="Look"], section[aria-label="Output"]')).toBeNull();
+    });
+
+    it('shows only the sections whose axes it was given', () => {
+      document.body.appendChild(target);
+      app = flushSync(() => mount(EnhanceOptions, { target, props: { axes: soundAxes.filter((axis) => axis.key === 'space'), settings: SOUND, mode: 'audio', onchange: vi.fn(), idPrefix: 't' } }));
+
+      expect(headings()).toEqual(['Place']);
+      expect(target.querySelector('#t-distance')).toBeNull();
+    });
+
+    it('reports a choice with the other audio options as they were', () => {
+      const onchange = mountSound({ ...SOUND, space: 'forest' });
+
+      flushSync(() => (target.querySelector('#t-distance') as HTMLButtonElement).click());
+      flushSync(() => (document.querySelector('[role="option"][data-slug="far"]') as HTMLButtonElement).click());
+
+      expect(onchange).toHaveBeenLastCalledWith({ ...SOUND, space: 'forest', distance: 'far' });
+    });
+
+    it('reports a typed direction, asking for a sound\'s own kind of direction', () => {
+      const onchange = mountSound();
+      const input = target.querySelector('#t-note') as HTMLInputElement;
+      expect(input.placeholder).toContain('thunder');
+
+      input.value = 'far off';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+
+      expect(onchange).toHaveBeenLastCalledWith({ ...SOUND, note: 'far off' });
+    });
+
+    describe('a Music style', () => {
+      const musicAxes = axesOf(AUDIO_MATRIX, 'style');
+      const MUSIC: AudioEnhanceSettings = { ...AUDIO_MATRIX.defaults };
+      const sections = (): string[] => Array.from(target.querySelectorAll('h3, legend .ui-area-label')).map((node) => node.textContent?.trim() ?? '');
+      const chip = (axis: string, name: string) => Array.from(target.querySelectorAll(`#t-${axis}-label ~ .chip-list button`)).find((button) => button.textContent?.trim() === name) as HTMLButtonElement;
+
+      function mountMusic(settings = MUSIC, onchange = vi.fn(), axesIn = musicAxes): typeof onchange {
+        document.body.appendChild(target);
+        app = flushSync(() => mount(EnhanceOptions, { target, props: { axes: axesIn, settings, mode: 'audio', onchange, idPrefix: 't' } }));
+        return onchange;
+      }
+
+      it('lists the pickers, the two instrument lists and the singer, with a music direction', () => {
+        mountMusic();
+
+        expect(sections()).toEqual(['Sound', 'Instruments · pick any', 'Without · pick any', 'Voice']);
+        expect(Array.from(target.querySelectorAll('.picker')).map((picker) => picker.id)).toEqual(['t-genre', 't-music_mood', 't-production', 't-singer']);
+        expect((target.querySelector('#t-note') as HTMLInputElement).placeholder).toContain('guitar');
+      });
+
+      it('leaves out the Voice section when the singer is not offered', () => {
+        mountMusic(MUSIC, vi.fn(), axesOf(AUDIO_MATRIX, 'style', false));
+
+        expect(sections()).toEqual(['Sound', 'Instruments · pick any', 'Without · pick any']);
+      });
+
+      it('offers All on Instruments only, in the matrix order', () => {
+        const onchange = mountMusic({ ...MUSIC, instruments: ['piano', 'guitar'] });
+
+        expect(target.querySelector('[data-toggle-all="without"]')).toBeNull();
+        flushSync(() => chip('instruments', 'Drums').click());
+
+        expect(onchange).toHaveBeenLastCalledWith({ ...MUSIC, instruments: ['guitar', 'piano', 'drums'], without: [] });
+      });
+
+      it('drops an instrument from Without when it is asked for, and does not let Without take it back', () => {
+        const onchange = mountMusic({ ...MUSIC, instruments: ['piano'], without: ['guitar', 'drums'] });
+
+        expect(chip('without', 'Piano').disabled).toBe(true);
+        expect(chip('without', 'Guitar').disabled).toBe(false);
+        flushSync(() => chip('instruments', 'Guitar').click());
+
+        expect(onchange).toHaveBeenLastCalledWith({ ...MUSIC, instruments: ['guitar', 'piano'], without: ['drums'] });
+      });
+
+      it('marks what is left out with a minus and a name that says so', () => {
+        mountMusic({ ...MUSIC, without: ['drums'] });
+
+        expect(chip('without', 'Drums').getAttribute('aria-pressed')).toBe('true');
+        expect(chip('without', 'Drums').getAttribute('aria-label')).toBe('Without drums');
+        expect(chip('without', 'Drums').querySelector('svg')).not.toBeNull();
+        expect(chip('instruments', 'Drums').querySelector('svg')).toBeNull();
+      });
+
+      it('groups the genres', () => {
+        mountMusic();
+        flushSync(() => (target.querySelector('#t-genre') as HTMLButtonElement).click());
+
+        const names = Array.from(document.querySelectorAll('[role="listbox"] .picker-group')).map((node) => node.textContent?.trim());
+        expect(names).toContain('Pop & rock');
+        expect(names).toContain('World');
+      });
     });
   });
 });

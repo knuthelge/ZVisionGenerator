@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { CHORD_TIMEOUT_MS, hasOpenModal, isPlainKey, isTyping, stepChord, stepGoChord } from './keyboard';
+import { APP_SHORTCUTS, CHORD_TIMEOUT_MS, hasOpenModal, isPlainKey, isTyping, stepChord, stepGoChord } from './keyboard';
 
 function el(html: string): HTMLElement {
   const host = document.createElement('div');
@@ -35,6 +35,15 @@ describe('keyboard', () => {
     expect(hasOpenModal()).toBe(false);
     document.body.innerHTML = '<div role="dialog" aria-modal="true"></div>';
     expect(hasOpenModal()).toBe(true);
+  });
+
+  describe('APP_SHORTCUTS', () => {
+    const entriesOf = (title: string) => APP_SHORTCUTS.find((group) => group.title === title)?.entries ?? [];
+
+    it('lists Alt+Enter for the Speech text under Workspace, beside its use for random choices under Prompts', () => {
+      expect(entriesOf('Workspace').some((entry) => entry.keys.includes('⌥/Alt+↵') && entry.label.includes('Speech text'))).toBe(true);
+      expect(entriesOf('Prompts').some((entry) => entry.keys.includes('⌥/Alt+↵'))).toBe(true);
+    });
   });
 
   describe('stepGoChord', () => {

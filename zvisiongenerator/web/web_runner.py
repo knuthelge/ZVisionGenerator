@@ -1020,7 +1020,9 @@ class WebRunner:
             progress_callback({"type": "batch_cancelled", "mode": "audio", "completed_iterations": 0, "total_iterations": runs})
             return
         require_ffmpeg()
-        if not self._ensure_downloads(audio_model_part(preset), mode="audio", total_iterations=runs, progress_callback=progress_callback, control_signal=control_signal, files_required=True):
+        if not self._ensure_downloads(
+            audio_model_part(preset, voice=request.voice is not None), mode="audio", total_iterations=runs, progress_callback=progress_callback, control_signal=control_signal, files_required=True
+        ):
             return
         run_audio_batch(
             request,

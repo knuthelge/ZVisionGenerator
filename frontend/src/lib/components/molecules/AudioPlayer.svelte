@@ -61,13 +61,10 @@
     if (wave?.hasPointerCapture?.(event.pointerId)) wave.releasePointerCapture(event.pointerId);
   }
 
-  // The file itself, not the prop: a parent that hands over a fresh copy of the same take keeps it playing.
-  const file = $derived(src);
-
   // A take never keeps playing when its player goes: the panel leaves (paging, closing, another take) or another file loads.
+  // Each file has its own audio element (the `{#key}` below), so another take never inherits the last one's playing state.
   $effect(() => {
     const element = audio;
-    void file;
     played = 0;
     return () => {
       if (!element) return;
@@ -94,19 +91,23 @@
     <Waveform {peaks} {played} />
     <span class="playhead" data-testid="audio-playhead" style:left="{played * 100}%"></span>
   </div>
-  <!-- svelte-ignore a11y_media_has_caption because a take has no captions to show -->
-  <audio
-    bind:this={audio}
-    {src}
-    controls
-    preload="metadata"
-    aria-label="Play {filename}"
-    onplay={() => audio && claimPlayback(audio)}
-    ontimeupdate={sync}
-    onseeked={sync}
-    onloadedmetadata={sync}
-    onended={sync}
-  ></audio>
+  <!-- A new element for each file: a source change on a playing element goes back to paused without a `pause` event, which can
+       leave the browser's own button on Pause. A fresh element starts on Play. A fresh copy of the same file keeps its element. -->
+  {#key src}
+    <!-- svelte-ignore a11y_media_has_caption because a take has no captions to show -->
+    <audio
+      bind:this={audio}
+      {src}
+      controls
+      preload="metadata"
+      aria-label="Play {filename}"
+      onplay={() => audio && claimPlayback(audio)}
+      ontimeupdate={sync}
+      onseeked={sync}
+      onloadedmetadata={sync}
+      onended={sync}
+    ></audio>
+  {/key}
 </div>
 
 <style>

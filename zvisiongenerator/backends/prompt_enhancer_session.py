@@ -215,6 +215,16 @@ def plan_job_enhancer(
     """
     if not enhancement_requested(disabled=disabled, override=override, enhance_by_set=enhance_by_set):
         return None
+    return plan_enhancer(config, platform_key=platform_key, cli_model=cli_model, budget_bytes=budget_bytes)
+
+
+def plan_enhancer(config: dict[str, Any], *, platform_key: str, cli_model: str | None = None, budget_bytes: int | None = None) -> tuple[str, str | None]:
+    """Return the enhancer ``(repo, revision)`` a job that enhances will load, after checking that it is available.
+
+    Raises:
+        ValueError: When no enhancer model is configured or *cli_model* is malformed.
+        RuntimeError: When the model is missing and Hugging Face is offline.
+    """
     repo, revision = resolve_enhancer_model(config, platform_key=platform_key, cli_model=cli_model, budget_bytes=budget_bytes)
     ensure_available(repo, revision)
     return repo, revision

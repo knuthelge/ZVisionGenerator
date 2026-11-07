@@ -107,7 +107,7 @@ Future work is written up in `proposals/` before it is built: the problem, the e
 | `make run` / `make model` | Run `ziv-image` / `ziv-model` with `ARGS="..."` |
 | `make enhance-bench` | Run the [prompt-enhancer bench](enhancer-bench.md) with `ARGS="..."`; loads a real model |
 | `make check-curated` | Compare the [curated LoRA list](curated-loras.md)'s pinned files with the Hugging Face Hub (network; run before a release) |
-| `make update-ltx` / `make update-seedvr2` / `make update-h3-mlx` / `make update-moss` / `make update-birefnet` / `make update-yue2` / `make update-sa3` | Re-vendor LTX, SeedVR2, the MiniMax H3 MLX port, MOSS-Image, BiRefNet, YuE2 or Stable Audio 3. See [Vendored packages](vendored.md) |
+| `make update-ltx` / `make update-seedvr2` / `make update-h3-mlx` / `make update-moss` / `make update-birefnet` / `make update-yue2` / `make update-sa3` / `make update-qwen3-tts` | Re-vendor LTX, SeedVR2, the MiniMax H3 MLX port, MOSS-Image, BiRefNet, YuE2, Stable Audio 3 or Qwen3-TTS (`qwen_tts` and `faster_qwen3_tts`). See [Vendored packages](vendored.md) |
 | `make e2e` / `make e2e-image` / `make e2e-video` | Smoke tests that load real models and write tiny outputs to `output/`; not part of `make check` |
 
 ## License

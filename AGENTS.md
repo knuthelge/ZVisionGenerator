@@ -26,7 +26,7 @@ Every module, function, and class should be **atomic**: a single, self-contained
 
 ## Repository Rules
 
-- `packages/ltx_*`, `packages/seedvr2_torch`, `packages/minimax_h3_mlx`, `packages/moss_image`, `packages/yue2` and `packages/stable_audio_3` are vendored. Never edit them by hand; update them with `make update-ltx`, `make update-seedvr2`, `make update-h3-mlx`, `make update-moss`, `make update-yue2` and `make update-sa3`.
+- `packages/ltx_*`, `packages/seedvr2_torch`, `packages/minimax_h3_mlx`, `packages/moss_image`, `packages/yue2`, `packages/stable_audio_3`, `packages/qwen_tts` and `packages/faster_qwen3_tts` are vendored. Never edit them by hand; update them with `make update-ltx`, `make update-seedvr2`, `make update-h3-mlx`, `make update-moss`, `make update-yue2`, `make update-sa3` and `make update-qwen3-tts`.
 - The Web UI is built from `frontend/` (Svelte 5, TypeScript, pnpm) into `zvisiongenerator/web/static/app/`, which is committed. After any frontend change, run `make frontend-build` and commit the rebuilt files.
 - Future work is written up as proposals in `proposals/` (see its README). Check there before larger work. When a proposal ships or is rejected, update its status and move it to `proposals/archive/`. Files in `docs/` never link to proposals.
 - User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`. Explain a feature once in Concepts; the Web UI and CLI pages show how to use it and link there. New settings go in `docs/concepts/configuration.md` and new flags in `docs/cli/reference.md`. See [Writing docs](docs/developer/docs.md).

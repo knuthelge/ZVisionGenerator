@@ -70,6 +70,18 @@ describe('InspectorNumber', () => {
     expect(onchange).toHaveBeenLastCalledWith(0.1);
   });
 
+  it('steps from the number Auto stands for when the value is empty and one is given', () => {
+    const onchange = vi.fn();
+    app = flushSync(() => mount(InspectorNumber, { target, props: { value: null, step: 1, min: 1, max: 380, nullable: true, nudgeFrom: 12, stepper: true, onchange } }));
+    const up = target.querySelector<HTMLButtonElement>('[data-step="up"]')!;
+    press(up);
+    release(up);
+    expect(onchange).toHaveBeenLastCalledWith(13);
+
+    target.querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(onchange).toHaveBeenLastCalledWith(11);
+  });
+
   it('repeats while held and stops on release', () => {
     vi.useFakeTimers();
     const onchange = vi.fn();

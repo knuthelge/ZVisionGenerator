@@ -1,0 +1,389 @@
+# Messy, realistic Text-box contents for the script helper (Add delivery, Fit to time). Original text written for the bench. Run with:
+#   python -m bench.enhance run --cases-file bench/enhance/cases/audio-script-messy.yaml --label NAME --model fast|smart
+# Cause tags: apology (the script opens with a phrase the refusal check reads as a refusal), marks, quotes, language, short, long, odd.
+
+cases:
+  # ---- Add delivery ---------------------------------------------------------------------------------------------------------------
+  - id: ms-d-voicemail-plain
+    tags: [audio, script, messy, delivery, voicemail]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Hi Mum, it's me. Just calling to say the train was delayed so I'll be about an hour late. Don't hold dinner. I'll grab something on the way. Love you, bye.
+    settings: {actions: [delivery]}
+  - id: ms-d-voicemail-sorry
+    tags: [audio, script, messy, delivery, voicemail, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I'm sorry I missed your call. I was in a meeting that ran long and my phone was on silent. Please leave a message, or text me, and I'll get back to you this afternoon. Thanks.
+    settings: {actions: [delivery]}
+  - id: ms-d-opens-cant
+    tags: [audio, script, messy, delivery, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I can't believe it's been a whole year since we opened the doors. Thank you to everyone who came through, who told a friend, who left a kind review. We are only getting started.
+    settings: {actions: [delivery]}
+  - id: ms-d-opens-wont
+    tags: [audio, script, messy, delivery, voicemail, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I won't be in the office today, so please send anything urgent to Priya. I'll check my email tonight and reply to everything tomorrow morning.
+    settings: {actions: [delivery]}
+  - id: ms-d-opens-cannot
+    tags: [audio, script, messy, delivery, ad, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I cannot stress enough how much our customers love the new Harbour Roast. Rich, dark, and ready in three minutes. Pick up a bag at your local store this week.
+    settings: {actions: [delivery]}
+  - id: ms-d-airline-apology
+    tags: [audio, script, messy, delivery, announcement, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I'm sorry to inform you that flight 412 to Oslo has been delayed by two hours due to fog. We apologise for the inconvenience. Refreshments are available at gate 7, and we will update you at 15:30.
+    settings: {actions: [delivery]}
+  - id: ms-d-as-an-ai
+    tags: [audio, script, messy, delivery, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      As an AI voice assistant, I'm here to help you reset your password. First, say your account number. Then wait for the tone.
+    settings: {actions: [delivery]}
+  - id: ms-d-radio-ad-numbers
+    tags: [audio, script, messy, delivery, ad, numbers]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Spring sale at Fjord Furniture! Sofas from $499, dining sets from $299, and 50% off all lamps until March 31st. Visit fjordfurniture.example or call 555-0142 today. Hurry, stock is limited!
+    settings: {actions: [delivery]}
+  - id: ms-d-narration-six
+    tags: [audio, script, messy, delivery, narration]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      The lighthouse had been dark for eleven years. Nobody in the village talked about it. On the night of the storm, a single light appeared in the tower window. The fishermen stopped their work and stared. Then the light went out. By morning, the sea was calm, and the old door stood open.
+    settings: {actions: [delivery]}
+  - id: ms-d-dialogue-names
+    tags: [audio, script, messy, delivery, dialogue]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      ANNA: Did you lock the door?
+      BOB: Of course I did.
+      ANNA: Then why is it open?
+      BOB: I don't know. Maybe the wind.
+      ANNA: There is no wind, Bob.
+    settings: {actions: [delivery]}
+  - id: ms-d-dialogue-straight-quotes
+    tags: [audio, script, messy, delivery, dialogue, quotes]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Marta looked at the letter for a long time. "Are you sure?" she asked. "I've never been surer," said Jonas. She folded it and said, "Then we leave at dawn."
+    settings: {actions: [delivery]}
+  - id: ms-d-dialogue-curly-quotes
+    tags: [audio, script, messy, delivery, dialogue, quotes]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      “Where were you?” she whispered. “Out,” he said. “I couldn’t sleep.” She nodded. “Neither could I.”
+    settings: {actions: [delivery]}
+  - id: ms-d-existing-marks
+    tags: [audio, script, messy, delivery, marks]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      [sad] The house was quiet after the funeral. Nobody knew where to sit. [as set] Then Lena put the kettle on, and slowly the kitchen filled with voices again.
+    settings: {actions: [delivery]}
+  - id: ms-d-existing-marks-trailing
+    tags: [audio, script, messy, delivery, marks]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Welcome back. [whisper] I have something to tell you. [shout] Run! [as set]
+    settings: {actions: [delivery]}
+  - id: ms-d-unknown-brackets
+    tags: [audio, script, messy, delivery, marks, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      [Host] Welcome to the show. [laughs] Today we have a special guest. [Music fades] Please give a warm round of applause.
+    settings: {actions: [delivery]}
+  - id: ms-d-ascii-ellipsis
+    tags: [audio, script, messy, delivery, ellipsis]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Well... I don't know... maybe we should wait. It's late, and... oh, never mind. Let's just go.
+    settings: {actions: [delivery]}
+  - id: ms-d-unicode-ellipsis
+    tags: [audio, script, messy, delivery, ellipsis]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I opened the box… and there it was. Just sitting there… waiting. Nobody spoke.
+    settings: {actions: [delivery]}
+  - id: ms-d-dashes
+    tags: [audio, script, messy, delivery, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      It was — how shall I put it — a surprise. A good one, mostly. Though the cat — poor thing — hid for a week.
+    settings: {actions: [delivery]}
+  - id: ms-d-one-word
+    tags: [audio, script, messy, delivery, short]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: Hello.
+    settings: {actions: [delivery]}
+  - id: ms-d-one-sentence
+    tags: [audio, script, messy, delivery, short]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: Please remain seated until the aircraft has come to a complete stop.
+    settings: {actions: [delivery]}
+  - id: ms-d-very-long
+    tags: [audio, script, messy, delivery, long]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Chapter one. The valley had no name until the surveyors came. Before that, it was simply home to the people who lived there, and to the sheep, and to the river that cut through the middle like a silver blade. The surveyors arrived in the spring of that year with their tripods and their long chains, and they stayed for three months. They measured everything. They measured the width of the river and the height of the hills. They counted the houses and the barns and the stones in the walls. When they left, they took with them a map that gave the valley a name, and the villagers, who had never needed one, found that they could not stop saying it. Greenholm, they said. Greenholm this and Greenholm that. By autumn, the children were drawing it on their slates. By winter, the old people were arguing about whether it had always been called that. By the following spring, nobody could remember that it had ever been otherwise. And that, as far as anyone could tell, was how the valley lost its first name and gained its second, without a single shot being fired or a single word of protest being spoken. Chapter two. The first thing the mapmakers noticed was the silence. It was not the silence of an empty place, because the valley was full of small sounds: the bleating of lambs, the clatter of a cart on the stones, the slow tick of the church clock. It was the silence of a place that had decided, a long time ago, to listen rather than to speak. Mara, the youngest of the surveyors, spent her evenings sitting on a wall at the edge of the village, writing in a small notebook. She wrote about the light, which turned the hills gold at six and violet at seven. She wrote about the smell of woodsmoke and wet grass. She wrote about the old woman who sold eggs from a basket and never once asked her name. Years later, when Mara had grown old herself, she took out that notebook and read it aloud to her grandchildren, and they asked her whether the valley was real. She smiled and said that it was as real as anything she had ever measured, and a good deal more beautiful. Chapter three. The winter of that year was the hardest anyone could remember. Snow fell for nine days without stopping, and when it finally ceased, the whole valley lay under a white blanket that muffled every sound. The river froze from bank to bank. The sheep huddled in the lee of the walls. The villagers kept their fires burning day and night, and shared what they had, which was not much. On the tenth morning, a boy named Tomas climbed the hill behind the church and looked out over the valley. He saw the smoke rising from every chimney, thin and straight in the still air, and he understood for the first time that the village was not a place but a promise that people made to one another.
+    settings: {actions: [delivery]}
+  - id: ms-d-norwegian-narration
+    tags: [audio, script, messy, delivery, narration, language]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Det var en gang en liten gutt som bodde ved fjorden. Hver morgen gikk han ned til brygga og ventet på båten. Men båten kom aldri. Til slutt bestemte han seg for å bygge sin egen.
+    settings: {actions: [delivery]}
+  - id: ms-d-spanish-ad
+    tags: [audio, script, messy, delivery, ad, language]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      ¡Gran apertura en la Calle Mayor! ¿Quieres probar el mejor café de la ciudad? Ven este sábado y te regalamos una galleta. ¡No te lo pierdas!
+    settings: {actions: [delivery]}
+  - id: ms-d-mixed-language
+    tags: [audio, script, messy, delivery, language]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Hei alle sammen, and welcome to the tour. Vi starter ved den gamle kirken, then we walk down to the harbour. Ta med paraply, it might rain.
+    settings: {actions: [delivery]}
+  - id: ms-d-all-caps-sale
+    tags: [audio, script, messy, delivery, ad, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      SALE! SALE! SALE! EVERYTHING MUST GO! TODAY ONLY, ALL SHOES HALF PRICE!!! DON'T MISS OUT!
+    settings: {actions: [delivery]}
+  - id: ms-d-date-times
+    tags: [audio, script, messy, delivery, numbers]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Your appointment is on 14 March 2026 at 09:30, room 2B, with Dr. Hansen. Please arrive 15 minutes early and bring your ID. To cancel, call 555-0100 before 5 p.m. on the 12th.
+    settings: {actions: [delivery]}
+  - id: ms-d-numbered-steps
+    tags: [audio, script, messy, delivery, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Here is how to make tea:
+      1. Boil the water.
+      2. Put a teabag in the cup.
+      3. Pour in the water and wait four minutes.
+      4. Remove the bag and add milk if you like.
+    settings: {actions: [delivery]}
+  - id: ms-d-paragraphs
+    tags: [audio, script, messy, delivery, narration]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      The market opens at dawn.
+
+      Stalls are set up in the dark, lanterns swinging from poles. The first customers are the cooks from the restaurants, who know exactly what they want.
+
+
+      By nine the square is full. Children dart between the crates. A man sells fish from a cart, shouting prices in three languages.
+    settings: {actions: [delivery]}
+  - id: ms-d-sentence-per-line
+    tags: [audio, script, messy, delivery, narration]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      The door creaked open.
+      Nobody was there.
+      The candle flickered.
+      Then the whole room went dark.
+    settings: {actions: [delivery]}
+  - id: ms-d-emoji-hashtags
+    tags: [audio, script, messy, delivery, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Big news, friends! 🎉 Our new podcast drops on Friday. Subscribe now and tell your friends. #newpodcast #fridayvibes
+    settings: {actions: [delivery]}
+  - id: ms-d-parenthetical-directions
+    tags: [audio, script, messy, delivery, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      (whispering) Come closer. (pause) I have a secret. (laughs softly) You will never guess it.
+    settings: {actions: [delivery]}
+  - id: ms-d-run-on-sentence
+    tags: [audio, script, messy, delivery, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      So I went to the shop and they didn't have the thing I wanted so I went to the other shop and they had it but it was blue and I wanted red so I went home and then my sister told me red was sold out everywhere so I just bought the blue one and honestly it looks fine
+    settings: {actions: [delivery]}
+  - id: ms-d-repeated-words
+    tags: [audio, script, messy, delivery, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      No, no, no, no. Not again. Please, please, please. Just one more chance.
+    settings: {actions: [delivery]}
+  - id: ms-d-email-url
+    tags: [audio, script, messy, delivery, odd]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      For questions, write to help@fjord.example or visit www.fjord.example/support. Our team replies within 24 hours, Monday to Friday.
+    settings: {actions: [delivery]}
+  - id: ms-d-motivational
+    tags: [audio, script, messy, delivery, narration]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      You didn't come this far to only come this far. Every morning you get up is a victory. Every step, even a small one, is a step forward. So breathe, stand tall, and go and take what is yours.
+    settings: {actions: [delivery]}
+  - id: ms-d-ghost-story
+    tags: [audio, script, messy, delivery, narration]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Every night at midnight the old clock in the hall struck thirteen. Nobody dared to count again. The thirteenth stroke was always softer, almost a sigh, and after it the temperature in the house dropped by ten degrees.
+    settings: {actions: [delivery]}
+  # ---- Fit to time ------------------------------------------------------------------------------------------------------------------
+  - id: ms-f-voicemail-shorten
+    tags: [audio, script, messy, fit, voicemail]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Hi, this is Karen from Northside Dental calling to confirm your appointment on Thursday at ten o'clock. If you can't make it, please call us back on 555-0177 as soon as possible so we can offer the slot to someone else. Also, please remember to bring your insurance card, and if you've had any changes in your medication since your last visit, let the hygienist know when you arrive. We look forward to seeing you. Thank you, and have a lovely day.
+    settings: {actions: [fit], seconds: 12}
+  - id: ms-f-sorry-shorten
+    tags: [audio, script, messy, fit, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I'm sorry for the trouble you've had with your order. We know that waiting two weeks for a parcel is not what you expect from us, and we take full responsibility. Your replacement has been sent by express post, and you'll receive a refund on the delivery fee within three working days.
+    settings: {actions: [fit], seconds: 10}
+  - id: ms-f-cant-lengthen
+    tags: [audio, script, messy, fit, apology]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I can't wait to see you all at the reunion. It's going to be great.
+    settings: {actions: [fit], seconds: 15}
+  - id: ms-f-lengthen-ad
+    tags: [audio, script, messy, fit, ad]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Try our fresh sourdough, baked every morning at Miller's Bakery on Elm Street.
+    settings: {actions: [fit], seconds: 20}
+  - id: ms-f-narration-marks-shorten
+    tags: [audio, script, messy, fit, marks]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      [sad] The house was quiet after the funeral. Nobody wanted to be the first to speak. The clock in the hall ticked on, and the rain kept falling against the windows. [as set] Then Lena put the kettle on, and slowly the kitchen filled with voices again. We told stories until the sun went down, and for the first time that week, we laughed.
+    settings: {actions: [fit], seconds: 12}
+  - id: ms-f-slow-pace
+    tags: [audio, script, messy, fit, pace]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Welcome to tonight's guided relaxation. Settle into a comfortable position and let your shoulders drop. Breathe in slowly through your nose, hold for a moment, and breathe out through your mouth. Let each breath carry the tension out of your body.
+    settings: {actions: [fit], seconds: 30, pace: slow}
+  - id: ms-f-fast-pace
+    tags: [audio, script, messy, fit, pace]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Welcome to Radio Fjord, your home for traffic, weather and the best new music. The road to the airport is clear, there is light rain over the northern hills, and in a moment we'll play a brand new single from a local band.
+    settings: {actions: [fit], seconds: 8, pace: fast}
+  - id: ms-f-same-length
+    tags: [audio, script, messy, fit]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      The museum opens at nine and closes at five. Tickets are available at the front desk, and children under twelve enter free. Please keep bags in the lockers on the ground floor.
+    settings: {actions: [fit], seconds: 12}
+  - id: ms-f-quotes-shorten
+    tags: [audio, script, messy, fit, quotes]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      The mayor stood up and said "We will rebuild the bridge before winter." The crowd cheered. Then the engineer explained that the work would cost four million and take three months, and that the river would have to be diverted first.
+    settings: {actions: [fit], seconds: 9}
+  - id: ms-f-dialogue
+    tags: [audio, script, messy, fit, dialogue]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      ANNA: Did you lock the door?
+      BOB: Of course I did.
+      ANNA: Then why is it open?
+      BOB: I don't know. Maybe the wind.
+      ANNA: There is no wind, Bob. Someone has been here.
+      BOB: Don't be silly. Let's go to bed.
+    settings: {actions: [fit], seconds: 10}
+  - id: ms-f-norwegian
+    tags: [audio, script, messy, fit, language]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Velkommen til Bergen! Byen ligger mellom syv fjell og er kjent for fiskemarkedet, Bryggen og regnet. Ta gjerne med paraply, og ikke glem å prøve fiskesuppen på havnen. Vi håper du får et fint opphold.
+    settings: {actions: [fit], seconds: 8}
+  - id: ms-f-very-long-30s
+    tags: [audio, script, messy, fit, long]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Our story begins in a small workshop at the edge of town, where a retired clockmaker named Henrik spent his days repairing watches that nobody wanted. People thought him strange, because he refused to throw anything away, and his shelves were crowded with broken springs, tarnished cases and cracked glass. But Henrik believed that everything had a second life waiting in it. One winter, a young woman named Ida brought him a pocket watch that had belonged to her grandfather. It had not run for forty years. Henrik turned it over in his hands, opened the back, and smiled. For three weeks he worked on it every evening, cleaning, oiling, adjusting. When it finally began to tick, Ida cried. Word spread through the town, and soon the workshop was full of visitors with old clocks and older stories. Henrik never charged more than a cup of tea. He used to say that time was the only thing worth fixing, because it was the only thing we all shared.
+    settings: {actions: [fit], seconds: 30}
+  - id: ms-f-very-short-lengthen
+    tags: [audio, script, messy, fit, short]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: Thank you for calling.
+    settings: {actions: [fit], seconds: 20}
+  - id: ms-f-min-target
+    tags: [audio, script, messy, fit, short]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Good morning, and welcome aboard this flight to Lisbon. Please fasten your seat belts and stow your bags.
+    settings: {actions: [fit], seconds: 3}
+  - id: ms-f-numbers-shorten
+    tags: [audio, script, messy, fit, numbers]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      The train to Trondheim departs at 08:15 from platform 4 and arrives at 15:42. Tickets cost 499 kroner for adults and 249 kroner for children. Seats can be reserved for an extra 40 kroner, and bicycles travel free of charge.
+    settings: {actions: [fit], seconds: 8}
+  - id: ms-f-ellipsis
+    tags: [audio, script, messy, fit, ellipsis]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      I thought… I really thought it would be different this time. But no. The same old story… the same old ending. Maybe that's all there is.
+    settings: {actions: [fit], seconds: 6}

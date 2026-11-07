@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.video_family import VideoFamily
     from zvisiongenerator.utils.interactive import SkipSignal
 
-__all__ = ["plan_iterations", "run_preflight"]
+__all__ = ["plan_iterations", "print_enhancer_licence", "print_enhancer_phase", "release_enhancer_memory", "run_preflight"]
 
 _MODES = ("image", "video")
 
@@ -199,7 +199,7 @@ def run_preflight(
     if reference is None:
         raise RuntimeError("Prompt enhancement was requested but no enhancer model could be planned.")
     if ensure_downloads is None:
-        _print_enhancer_licence(config, reference)
+        print_enhancer_licence(config, reference)
     elif not ensure_downloads(*reference):
         return JobPlan(iterations, cancelled=True)
     pause = _make_pause(control, mode=mode, total_iterations=total_iterations, progress_callback=progress_callback)
@@ -208,7 +208,7 @@ def run_preflight(
     rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode, family=family), caption=caption)
 
     def _on_phase(phase: str) -> None:
-        _print_enhancer_phase(phase)
+        print_enhancer_phase(phase)
         emit_progress(progress_callback, "enhancer_loading", mode=mode, phase=phase)
 
     with prompt_enhancer_session.job_enhancer(*reference, on_phase=_on_phase, session=session) as enhancer:
@@ -219,7 +219,7 @@ def run_preflight(
         planned, cancelled = _rewrite_all(enhancer, iterations, positions, rewrite=rewrite, control=control, pause=pause, mode=mode, progress_callback=progress_callback)
     used = EnhancerUsed(*reference, tier=enhancer_tier(config, platform_key=sys.platform, model=model_reference(*reference)), format="json" if caption else "text")
     # Reached only on the normal paths (success or quit); on an exception close() already freed the enhancer.
-    (release_memory or _release_accelerator_memory)()
+    (release_memory or release_enhancer_memory)()
     if not cancelled:
         cancelled = _boundary(control, pause) == "quit"
     if cancelled:
@@ -229,7 +229,7 @@ def run_preflight(
     return _finish(JobPlan(planned, enhancer=used), mode=mode, progress_callback=progress_callback)
 
 
-def _print_enhancer_licence(config: dict[str, Any], reference: tuple[str, str | None]) -> None:
+def print_enhancer_licence(config: dict[str, Any], reference: tuple[str, str | None]) -> None:
     """Print the terms of the enhancer tier *reference* names, before its first download; nothing for a custom model or one on disk."""
     tier = enhancer_tier(config, platform_key=sys.platform, model=model_reference(*reference))
     if tier in ENHANCER_LICENCE_TIERS:
@@ -409,12 +409,12 @@ def _finish(plan: JobPlan, *, mode: str, progress_callback: ProgressCallback | N
     return plan
 
 
-def _print_enhancer_phase(phase: str) -> None:
+def print_enhancer_phase(phase: str) -> None:
     """Print a status line while the enhancer downloads or loads."""
     print(_PHASE_MESSAGES.get(phase, phase))
 
 
-def _release_accelerator_memory() -> None:
+def release_enhancer_memory() -> None:
     """Free the closed enhancer's accelerator memory; a cleanup failure only warns."""
     try:
         release_accelerator_memory()

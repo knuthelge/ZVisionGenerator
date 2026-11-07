@@ -1,6 +1,6 @@
 """AudioBackend Protocol: the contract of a platform's audio inference engine.
 
-One backend serves one model family (``yue2``, ``higgs3``, ``stable_audio_3``) on a torch device (``cuda`` or ``mps``).
+One backend serves one model family (``yue2``, ``qwen3_tts``, ``stable_audio_3``) on a torch device (``cuda`` or ``mps``).
 ``backends.get_audio_backend(family)`` returns it.
 """
 
@@ -13,16 +13,19 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest
     from zvisiongenerator.utils.audio_preset import AudioPreset
 
-__all__ = ["DECODE_PHASE", "AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback", "raise_if_cancelled"]
+__all__ = ["DECODE_PHASE", "SPEECH_PHASE", "AudioBackend", "AudioCancelled", "CancelCheck", "ProgressCallback", "raise_if_cancelled"]
 
 DECODE_PHASE = "Decode"
 """The progress phase after the last step, when the decoder turns what was made into the waveform; it has no count of its own worth showing."""
+
+SPEECH_PHASE = "Speech"
+"""The progress phase of a speech take: one step per part, reported before the part and after it."""
 
 type ProgressCallback = Callable[[str, int, int | None, int, int], None]
 """Reports progress of a take, called as ``on_progress(phase, step, total, part, n_parts)``.
 
 ``phase`` is a short label of what the model is doing (``Plan``, ``Song tokens``, ``Synthesis``, ``Decode``,
-``Speech tokens`` or ``Sampling``). ``step`` counts the units done in that phase and ``total`` is how many there will be,
+``Speech`` or ``Sampling``). ``step`` counts the units done in that phase and ``total`` is how many there will be,
 or ``None`` when the phase ends on its own and the total is unknown. ``part`` and ``n_parts`` are 1 and 1 for every take
 except multi-part speech, where they name the part being made.
 """

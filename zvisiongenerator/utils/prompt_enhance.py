@@ -643,7 +643,12 @@ def _check_mode(mode: str) -> None:
         raise ValueError(f"Unknown enhancement mode '{mode}'. Valid values: {', '.join(ENHANCE_MODES)}.")
 
 
-def _parse_axis_value(axis: EnhanceAxis, raw: Any) -> str | tuple[str, ...]:
+def parse_axis_value(axis: EnhanceAxis, raw: Any) -> str | tuple[str, ...]:
+    """Return *raw* as the slug (single-choice axis) or the tuple of slugs (multi axis) of *axis*; a ``+``-separated string is a list.
+
+    Raises:
+        ValueError: On an unknown slug, a wrong type, or an empty value for a single-choice axis.
+    """
     if axis.multi:
         if raw is None:
             items: list[str] = []
@@ -670,8 +675,12 @@ def _parse_parts(raw: Any) -> str | None:
     return raw.strip()
 
 
-def _parse_note(raw: Any) -> str:
-    """Return the direction note as one trimmed line."""
+def parse_note(raw: Any) -> str:
+    """Return the direction note as one trimmed line.
+
+    Raises:
+        ValueError: When *raw* is not text or is longer than ``NOTE_MAX_CHARS``.
+    """
     if raw is None:
         return ""
     if not isinstance(raw, str):
@@ -722,7 +731,7 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
     values: dict[str, Any] = {}
     for key, raw in data.items():
         if key == NOTE_KEY:
-            values[key] = _parse_note(raw)
+            values[key] = parse_note(raw)
             continue
         if key == COLORS_KEY:
             values[key] = _parse_colors(raw)
@@ -732,7 +741,7 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
                 warnings.warn(f"'{key}' only applies to video prompts and is ignored for images.", stacklevel=2)
                 continue
             raise ValueError(f"'{key}' only applies to video prompts.")
-        values[key] = _parse_parts(raw) if key == PARTS_KEY else _parse_axis_value(_AXES_BY_KEY[key], raw)
+        values[key] = _parse_parts(raw) if key == PARTS_KEY else parse_axis_value(_AXES_BY_KEY[key], raw)
     if values.get(COLORS_KEY):
         palette = values.get(PALETTE_AXIS.key, KEEP)
         if palette != CUSTOM_PALETTE:
@@ -740,15 +749,14 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
     return EnhanceSettings(**values)
 
 
-def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
-    """Parse a CLI spec such as ``style=cinematic,details=lighting+camera,length=longer``.
+def parse_spec_pairs(spec: str | None) -> dict[str, str]:
+    """Split a CLI spec such as ``style=cinematic,details=lighting+camera`` into its ``key=value`` pairs; an empty or ``None`` spec has none.
 
-    An empty or ``None`` spec returns the defaults. The free-text ``note`` is not part of the
-    grammar (it may contain commas); the CLIs take it from ``--enhance-note``.
+    Raises:
+        ValueError: When a part is not ``key=value``, or the spec sets ``note`` (that is ``--enhance-note``'s: it may contain commas).
     """
-    _check_mode(mode)
     if spec is None or not spec.strip():
-        return EnhanceSettings()
+        return {}
     data: dict[str, str] = {}
     for part in spec.split(","):
         part = part.strip()
@@ -760,7 +768,17 @@ def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
         if key.strip() == NOTE_KEY:
             raise ValueError("Set the direction with --enhance-note, not in the --enhance spec.")
         data[key.strip()] = value.strip()
-    return settings_from_mapping(data, mode=mode)
+    return data
+
+
+def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
+    """Parse a CLI spec such as ``style=cinematic,details=lighting+camera,length=longer``.
+
+    An empty or ``None`` spec returns the defaults. The free-text ``note`` is not part of the
+    grammar (it may contain commas); the CLIs take it from ``--enhance-note``.
+    """
+    _check_mode(mode)
+    return settings_from_mapping(parse_spec_pairs(spec), mode=mode)
 
 
 def format_enhance_spec(settings: EnhanceSettings, *, mode: str = "video") -> str:
@@ -971,7 +989,11 @@ def clean_output(text: str) -> str:
     text = strip_reasoning(text)
     text = _SPECIAL_TOKEN_RE.sub("", text)
     text = _LABEL_RE.sub("", text.strip())
-    text = text.strip()
+    return strip_wrapping_quotes(text.strip())
+
+
+def strip_wrapping_quotes(text: str) -> str:
+    """Return *text* without double quotes that wrap all of it as one pair; quotes that also appear inside stay."""
     while len(text) >= 2 and _QUOTE_PAIRS.get(text[0]) == text[-1] and not _has_inner_quote(text):
         text = text[1:-1].strip()
     return text
@@ -992,11 +1014,16 @@ def _echo_key(text: str) -> str:
     return " ".join(_WORD_RE.findall(text.casefold()))
 
 
+def is_echo(output: str, original: str) -> bool:
+    """Return whether *output* says *original* again: the same words, case, punctuation and spacing aside (so an output with no words at all is an echo of ``""``)."""
+    return _echo_key(output) == _echo_key(original)
+
+
 def is_unusable(output: str, original: str) -> bool:
     """Return whether *output* is empty, an echo of *original* (case and punctuation aside), or starts with a refusal."""
     if not output.strip():
         return True
-    if _echo_key(output) == _echo_key(original):
+    if is_echo(output, original):
         return True
     return bool(_REFUSAL_RE.match(output))
 
@@ -1174,9 +1201,14 @@ def palette_rules(settings: EnhanceSettings, *, lead: str = "") -> list[str]:
 
 def direction_rules(settings: EnhanceSettings, *, both_parts: bool = False) -> list[str]:
     """Return the rule that carries the user's free-text direction, or none when there is no direction."""
-    if not settings.note:
+    return note_rules(settings.note, both_parts=both_parts)
+
+
+def note_rules(note: str, *, both_parts: bool = False) -> list[str]:
+    """Return the rule that carries the free-text direction *note*, or none when it is empty."""
+    if not note:
         return []
-    return [f"Direction from the user (follow it{' in both parts' if both_parts else ''}): {settings.note}"]
+    return [f"Direction from the user (follow it{' in both parts' if both_parts else ''}): {note}"]
 
 
 def system_message(intro: str, rules: list[str], closing: str) -> str:
@@ -1296,8 +1328,9 @@ def generate_raw(
     temperature: float,
     on_text: Callable[[str], None] | None,
     cancelled: Callable[[], bool] | None,
+    clean: Callable[[str], str] = clean_output,
 ) -> str:
-    """Stream one generation, reporting throttled cleaned text to *on_text*, and return the raw text.
+    """Stream one generation, reporting throttled text cleaned by *clean* to *on_text*, and return the raw text.
 
     Raises:
         RuntimeError: When *cancelled* returns True.
@@ -1311,7 +1344,7 @@ def generate_raw(
         now = time.monotonic()
         if on_text is not None and now - last_update >= TEXT_UPDATE_INTERVAL_SECONDS:
             last_update = now
-            on_text(clean_output(raw))
+            on_text(clean(raw))
     if cancelled is not None and cancelled():
         raise RuntimeError("Prompt enhancement was cancelled.")
     return raw

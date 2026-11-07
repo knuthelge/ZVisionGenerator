@@ -1,4 +1,4 @@
-import type { GalleryAsset, GalleryPage, ImageModelDefaults, JobSnapshot, ModelLicence, VideoModelDefaults, WorkspaceContext } from '$lib/types';
+import type { AudioEnhanceMatrix, GalleryAsset, GalleryPage, ImageModelDefaults, JobSnapshot, ModelLicence, VideoModelDefaults, WorkspaceContext } from '$lib/types';
 
 // Fixtures of the Workspace page tests: a server context with one image and one video model, and the job and asset records a page shows.
 
@@ -313,6 +313,12 @@ export function jobSnap(jobId: string, status: JobSnapshot['status'], extra: Par
 }
 
 
+/** The audio option matrix of a server that serves none of the axes: the defaults only. */
+export const EMPTY_AUDIO_MATRIX: AudioEnhanceMatrix = {
+  axes: [],
+  defaults: { genre: 'keep', music_mood: 'keep', instruments: [], without: [], singer: 'keep', production: 'keep', space: 'keep', distance: 'keep', over_time: 'keep', movement: 'keep', note: '' },
+};
+
 /** Add the prompt enhancer to the image workflows of *context*. */
 export function withEnhancer(context: WorkspaceContext): WorkspaceContext {
   context.workflow_contract.definitions.txt2img.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
@@ -326,6 +332,7 @@ export function withEnhancer(context: WorkspaceContext): WorkspaceContext {
       ],
       defaults: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' },
     },
+    audio_matrix: EMPTY_AUDIO_MATRIX,
     model: 'owner/llm',
     revision: null,
     downloaded: true,

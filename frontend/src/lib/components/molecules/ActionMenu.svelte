@@ -16,6 +16,8 @@
     checked?: boolean;
     /** Muted text after the label. */
     hint?: string;
+    /** A muted sentence under the label, for a choice that needs saying what it does. */
+    description?: string;
     /** An icon before the label. */
     icon?: IconName;
     onselect?: () => void;
@@ -28,7 +30,7 @@
     | { kind: 'separator' }
     | ActionMenuItem
     /** A row that shows or hides its items in place; the menu stays open. The state resets each time the menu opens. */
-    | { kind: 'group'; id: string; label: string; items: ActionMenuItem[]; defaultOpen?: boolean };
+    | { kind: 'group'; id: string; label: string; items: (ActionMenuItem | { kind: 'heading'; label: string })[]; defaultOpen?: boolean };
 </script>
 
 <script lang="ts">
@@ -104,7 +106,11 @@
       <span class="action-menu-check" aria-hidden="true">{#if entry.checked}<Icon name="check" size={14} />{/if}</span>
     {/if}
     {#if entry.icon}<Icon name={entry.icon} size={14} />{/if}
-    <span class="action-menu-label">{entry.label}</span>
+    {#if entry.description}
+      <span class="action-menu-label"><span class="action-menu-name">{entry.label}</span><span class="action-menu-description">{entry.description}</span></span>
+    {:else}
+      <span class="action-menu-label">{entry.label}</span>
+    {/if}
     {#if entry.hint}<span class="action-menu-hint">{entry.hint}</span>{/if}
   {/snippet}
   {#if entry.href}
@@ -156,8 +162,12 @@
         </button>
         {#if isExpanded(entry)}
           <div class="action-menu-group-items" role="group" aria-label={entry.label}>
-            {#each entry.items as child (child.id)}
-              {@render row(child)}
+            {#each entry.items as child, childIndex (childIndex)}
+              {#if child.kind === 'heading'}
+                <p class="action-menu-heading ui-area-label" role="presentation">{child.label}</p>
+              {:else}
+                {@render row(child)}
+              {/if}
             {/each}
           </div>
         {/if}
@@ -202,6 +212,10 @@
   @media (hover: hover) { .action-menu-item:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); outline: none; } }
   .action-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
   .action-menu-label { flex: 1; min-width: 0; }
+  .action-menu-name { display: block; font-weight: 600; color: var(--color-text-primary); }
+  .action-menu-description { display: block; max-width: 17rem; margin-top: 2px; font-size: var(--text-meta); line-height: 1.4; color: var(--color-text-muted); }
+  .action-sheet-body .action-menu-item:has(.action-menu-description) { min-height: 48px; padding: 8px 12px; }
+  .action-sheet-body .action-menu-description { font-size: 12px; }
   .action-menu-hint { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
   /* An enabled item's hint is short ("Video tab, from 0 s"): the menu grows to hold it whole instead of cutting it. */
   .action-menu-item:not([aria-disabled='true']) .action-menu-hint { max-width: none; }

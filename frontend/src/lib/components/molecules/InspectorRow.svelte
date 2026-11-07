@@ -18,16 +18,19 @@
     onreset?: () => void;
     /** Indents the row under the one above. */
     sub?: boolean;
+    /** A mark after the label (the ✦ of a value Describe it wrote). */
+    mark?: Snippet;
     children: Snippet;
   }
 
-  let { label, forId, labelId, scrubber, changed = false, onreset, sub = false, children }: Props = $props();
+  let { label, forId, labelId, scrubber, changed = false, onreset, sub = false, mark, children }: Props = $props();
 </script>
 
 <div class="inspector-row" class:sub data-changed={changed}>
   {#snippet labelText()}
     <span class="inspector-label-text">{label}</span>
     {#if changed}<span class="inspector-changed" aria-label="changed from default"></span>{/if}
+    {@render mark?.()}
   {/snippet}
   {#if scrubber && !layout.coarse}
     <!-- A finger scrolls when it drags, so touch screens get steppers in the field instead of a scrubbable label. -->
@@ -56,7 +59,7 @@
 </div>
 
 <style>
-  .inspector-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; min-height: var(--spacing-row); padding: 0 8px 0 12px; }
+  .inspector-row { display: grid; grid-template-columns: var(--inspector-label-width, 96px) minmax(0, 1fr); align-items: center; gap: 8px; min-height: var(--spacing-row); padding: 0 8px 0 12px; }
   @media (pointer: coarse) {
     .inspector-reset { width: 32px; height: 32px; }
   }

@@ -14,7 +14,7 @@ import type { SettingsPreset, JobContext, WorkspaceContext, GalleryAsset } from 
 import WorkspacePage from './WorkspacePage.svelte';
 import { placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
-import { FLUX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer } from '../../test-utils/workspace';
+import { FLUX_LICENCE, MATTE_LICENCE, makeAsset, makeContext, makeGalleryPage, makeIdeogramDefaults, makeImageDefaults, makeVideoDefaults, withEnhancer, EMPTY_AUDIO_MATRIX } from '../../test-utils/workspace';
 import { addFiles, answerConfirm, createHost, dragFiles, fakeDebounceTimers, mountWorkspacePage, pressKey, resetWorkspaceTest, settle, waitDebounce } from '../../test-utils/workspaceHarness';
 import { browseApiMocks, configApiMocks, enhanceApiMocks, galleryApiMocks, layoutProbe, modelApiMocks, presetApiMocks, videoMemoryApiMocks, workspaceApiMocks } from '../../test-utils/workspaceMocks';
 
@@ -722,6 +722,7 @@ describe('WorkspacePage last frame', () => {
           axes: [{ key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] }],
           defaults: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' },
         },
+        audio_matrix: EMPTY_AUDIO_MATRIX,
         model: 'owner/llm', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, error: null,
       };
     }

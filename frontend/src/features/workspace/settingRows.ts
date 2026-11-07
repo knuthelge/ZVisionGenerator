@@ -1,5 +1,6 @@
 import type { WorkspaceCapabilities } from './capabilities';
 import type { ChipKey } from './settingsChips';
+import { sameDelivery } from '$lib/state/speechDelivery';
 import type { DraftState } from '$lib/types';
 
 /** A setting the Settings pane shows as one row: the draft keys it edits, when it shows, and the phone chip it belongs to. */
@@ -20,8 +21,13 @@ export const SETTING_ROWS = [
   { id: 'size', keys: ['ratio', 'size', 'dimensionMode'], chip: 'size', visible: (caps) => caps.showDimensions },
   { id: 'runs', keys: ['runs'], chip: 'runs', visible: (caps) => caps.showRuns },
   { id: 'duration', keys: ['frameCount'], chip: 'seconds', visible: (caps) => caps.showFrameCount },
-  { id: 'length', keys: ['audioSeconds'], chip: 'length', visible: (caps) => caps.showLength },
-  { id: 'voice', keys: ['voiceMode', 'voicePath', 'voiceUpload', 'voiceText'], chip: 'voice', visible: (caps) => caps.showVoice },
+  { id: 'soundType', keys: ['soundType'], chip: 'soundType', visible: (caps) => caps.showSoundType },
+  { id: 'length', keys: ['audioSeconds'], chip: 'length', visible: (caps) => caps.showLength && caps.audioKind !== 'music' },
+  { id: 'tempo', keys: ['audioTempo'], chip: 'tempo', visible: (caps) => caps.showTempo },
+  { id: 'key', keys: ['audioKey'], chip: 'key', visible: (caps) => caps.showKey },
+  { id: 'musicLength', keys: ['musicSeconds'], chip: 'length', visible: (caps) => caps.showLength && caps.audioKind === 'music' },
+  { id: 'delivery', keys: ['speechDelivery'], chip: 'delivery', visible: (caps) => caps.showDelivery },
+  { id: 'voice', keys: ['voiceMode', 'speechSpeaker', 'voicePath', 'voiceUpload', 'voiceText'], chip: 'voice', visible: (caps) => caps.showVoice },
   { id: 'extendLength', keys: ['extendFrames'], chip: 'extendSeconds', visible: (caps) => caps.showExtendLength },
   { id: 'steps', keys: ['steps'], chip: 'steps', visible: (caps) => caps.showSteps },
   { id: 'guidance', keys: ['guidance'], chip: 'guidance', visible: (caps) => caps.showGuidance },
@@ -53,8 +59,13 @@ function _row(id: RowId): SettingRow {
   return _ROWS.find((row) => row.id === id) as SettingRow;
 }
 
+/** Whether a draft setting equals its default: a value by identity, the Delivery's five values by what they say. */
+export function settingChanged(key: keyof DraftState, state: DraftState, defaults: DraftState): boolean {
+  return key === 'speechDelivery' ? !sameDelivery(state.speechDelivery, defaults.speechDelivery) : !Object.is(state[key], defaults[key]);
+}
+
 function _differs(row: SettingRow, state: DraftState, defaults: DraftState): boolean {
-  return row.keys.some((key) => !Object.is(state[key], defaults[key]));
+  return row.keys.some((key) => settingChanged(key, state, defaults));
 }
 
 /** Whether a row's settings differ from their defaults. */

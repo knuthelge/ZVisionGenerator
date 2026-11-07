@@ -77,14 +77,14 @@
   bind:this={buttonEl}
   type="button"
   id="ws-save-prompt"
-  class="ui-btn ui-btn-sm"
+  class="ui-btn ui-btn-sm ui-btn-icon"
   aria-label="Save to prompt file…"
   aria-haspopup="menu"
   aria-expanded={menuOpen}
   disabled={blocked || saving}
   {title}
   onclick={open}
-><Icon name="file" size={14} />Save…</button>
+><Icon name="file" size={14} /></button>
 <ActionMenu open={menuOpen} anchor={buttonEl} {items} label="Save to prompt file" onclose={() => { menuOpen = false; }} />
 <PathBrowser bind:open={browsing} purpose="prompt_file" initialPath={targets[0] ?? null} onchoose={(path) => void saveTo(path)} />
 <NewPromptFileDialog bind:open={newFileOpen} initialDirectory={folderOf(targets[0] ?? null)} oncreated={(path) => void saveTo(path)} />

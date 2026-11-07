@@ -541,3 +541,35 @@ describe('SettingPopover audio track', () => {
   });
 
 });
+
+describe('SettingPopover kind list', () => {
+  function mountKind(onclose = vi.fn()): ReturnType<typeof vi.fn> {
+    const ctx = makeContext();
+    ctx.workflow_contract.values = [...ctx.workflow_contract.values, 'extend'];
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: { key: 'kind', context: ctx, get images() { return currentImagesView(ctx); }, get audioTrack() { return currentAudioTrackView(ctx); }, busy: false, models: [], quantizeOptions: null, lastSeed: null, onModelChange: vi.fn(), onclose },
+    }));
+    return onclose;
+  }
+
+  it('switches the kind and closes on a pick', () => {
+    draft.patch({ workflow: 'txt2vid', model: 'ltx-8' });
+    const onclose = mountKind();
+
+    (target.querySelector('[role="radio"][aria-checked="false"]') as HTMLButtonElement).click();
+
+    expect(draft.state.workflow).toBe('extend');
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it('closes without changing anything when the current kind is picked again', () => {
+    draft.patch({ workflow: 'txt2vid', model: 'ltx-8' });
+    const onclose = mountKind();
+
+    (target.querySelector('[role="radio"][aria-checked="true"]') as HTMLButtonElement).click();
+
+    expect(draft.state.workflow).toBe('txt2vid');
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+});

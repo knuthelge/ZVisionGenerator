@@ -650,6 +650,7 @@
   onuseaudio={useAudio}
   {useAs}
   audioModels={workspaceMemory.get()?.audio_models}
+  audioVocabulary={workspaceMemory.get()?.audio_settings}
   onextend={extendAsset}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}

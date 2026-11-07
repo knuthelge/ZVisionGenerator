@@ -63,25 +63,27 @@ With a prompt file, *Compose* summarizes the prompts you chose. Click **Prompts�
 
 ### The prompt box
 
-The box has three bars, each with one job.
+The box has a header, the text and a tools row. Messages from the last run appear in one line under the box.
 
-**The tabs** say which text you are looking at:
+**The header** says which text you are looking at, and what Generate sends:
 
-- **Prompt** (**Your text** for video) is what you wrote.
+- **Prompt** is what you wrote.
 - **Enhanced** is the [prompt enhancer](../concepts/prompt-enhancer.md)'s rewrite. When it has text, Generate uses it.
 
-In the **Enhanced** tab, `‹ 2 of 3 ›` at the right steps through the last five rewrites of the same text; Generate sends the one shown. See [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
+A mark on the **Enhanced** tab tells you when Generate sends it: a dot while you look at your own text, ⚠ when it is out of date, and a small spinner while Enhance runs. With the **Enhanced** tab open, **✕** after the tab scratches the Enhanced text, so Generate sends your text again, and while Enhance runs a stop ring takes its place. At the right end, `‹ 2 of 3 ›` steps through the last five versions of the Enhanced text. No mark anywhere means Generate sends your own text. What the marks mean, and how versions work, is in [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
 
-**The tools row** under the box holds what you can do with the text. With the JSON box on, **Enhance** and **Save…** are hidden:
+With the JSON box on, or with **Enhance each image when generating** on, the header is a single **Prompt** heading with no tabs and no marks: the text Generate sends is the one in the box (or, for each image, your prompt, rewritten as the job runs).
 
-- ✨ **Enhance**: rewrite the prompt now, or with **Enhance each image when generating**, rewrite every image's prompt as the job runs. See [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
-- **{ } JSON** (Ideogram 4): swap the prompt for a structured caption.
+**The tools row** under the box holds what you can do with the text. With the JSON box on, **Enhance** and **Save** are hidden:
+
+- ✨ **Enhance**: rewrite the prompt now, or with **Enhance each image when generating**, rewrite every image's prompt as the job runs. When the Enhanced text is out of date the icon is ⚠ and the panel opens on **Enhance again**, with the reason beside it; with **Enhance each image when generating** on there is no ⚠. See [Prompt enhancer](../concepts/prompt-enhancer.md#in-the-web-ui).
+- **{ }** (*JSON caption*, Ideogram 4): swap the prompt for a structured caption. It is teal while on.
+- 🗑 **Clear**: empty the box. It clears your text, the Enhanced text and its versions (with JSON on, the JSON prompt), and a video's Scene and Action together. It shows only while the box holds something, and the line under the box then reads **Cleared. Undo** until your next edit or run there. There is no confirmation.
+- 🏷 **Triggers**: put a trigger word of a LoRA in use into the prompt. The number beside the tag counts the words the prompt does not hold yet. See [LoRAs](../concepts/loras.md).
 - 🕘 **Recent prompts**: bring back a prompt you generated before. See below.
-- **Save…**: append the prompt to a prompt file. See [Save a Workspace prompt](prompts.md#save-a-workspace-prompt).
+- **Save**: append the prompt to a prompt file. See [Save a Workspace prompt](prompts.md#save-a-workspace-prompt). It is a button with the file icon and the name *Save to prompt file…*.
 
 ![The Enhance popover with Shot, Angle and Palette set under Framing and Color](../assets/screenshots/enhance-popover.webp){ width="420" }
-
-**The status line** under the box says what Generate sends and counts the words. It shows **Generate uses the Enhanced text** with **Use mine** to go back to your text; **Out of date** with **Re-enhance** and **Use mine**; or **Enhanced when the job runs** with auto-enhance on. Nothing shows while your own text is sent.
 
 For video, *Compose* has a **Scene** box above the **Action** box. See [Scene and action](../concepts/video.md#scene-and-action).
 
@@ -89,7 +91,7 @@ For video, *Compose* has a **Scene** box above the **Action** box. See [Scene an
 
 The 🕘 button in the tools row lists the prompts you generated in the current mode, newest first: image prompts in **Image**, video prompts (a scene and an action together) in **Video**, whichever kind. Each row shows up to two lines of the prompt (or of the scene), how long ago, and a **{ } JSON** badge for a JSON caption. Hover a row to read the whole prompt. A line below shows a video's scene, or an image prompt's **Negative:** prompt when it has one. Type in the filter to search all of that mode's prompts, not only the ones shown. The list shows up to 50 matches.
 
-- **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text is dropped. A JSON caption turns on **{ } JSON** and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and tab don't change.
+- **Pick a row** to bring the prompt back: the prompt, a video's scene and the negative prompt go into their boxes, and any Enhanced text and its versions are dropped. A JSON caption turns on the **{ }** JSON caption and fills its box. JSON rows are greyed out, with the reason, on a model that takes no JSON captions. Settings, model and tab don't change.
 - **From the keyboard:** press ++alt+up++ in an empty prompt to open the list with the filter ready. ++up++ and ++down++ move, ++enter++ picks and ++esc++ closes and puts the cursor back in the prompt box (or on the button, if you opened the list with it).
 - **Clear recents** at the bottom of the list removes the prompts of the list you are in, after asking. Every other list stays.
 
@@ -192,7 +194,7 @@ When you choose another model, the settings you changed are kept and the rest ta
 
 ### Reset
 
-**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the length, the voice, **Batch size** and **Seed**. It keeps the model, LoRAs and quant, the prompts and the Extend source, and it never touches another tab. **Batch size** and **Seed** are shared by every tab, so each Reset puts them back.
+**Reset** in the *Settings* header puts the open tab back to its defaults: its settings, images, audio track and *Enhance* options, and the applied preset is deselected. On Audio it puts back the tempo, key, delivery, sound type, length, the voice, the *Enhance* options, **Batch size** and **Seed**. It keeps the model, LoRAs and quant, the prompts and the Extend source, and it never touches another tab. **Batch size** and **Seed** are shared by every tab, so each Reset puts them back.
 
 ### Copy as a command
 
@@ -219,35 +221,146 @@ Typing in a path field suggests matching folders and files: ++tab++ takes the fi
 
 ![The Audio tab on Music, with Style and Lyrics under Compose and the status line saying Song](../assets/screenshots/placeholder.svg "audio-music")
 
-The toolbar reads **Kind** (**Music**, **Speech** or **Sound**), **Model**, the model's **ⓘ** licence mark and its memory badge. The kind decides what *Compose* and *Settings* show; presets, **Quant** and LoRAs aren't used. A model that isn't downloaded yet is asked for when you press **Generate**, as for [images](#model-and-loras).
+To make a take, pick the **Kind** (**Music**, **Speech** or **Sound**) and the **Model** in the toolbar, write the **Style**, the **Text** or the **Prompt** in Compose, and press **Generate**. The helpers below are optional. A model that isn't downloaded yet is asked for when you press **Generate**, as for [images](#model-and-loras). The kind decides what *Compose* and *Settings* show; presets, **Quant** and LoRAs aren't used.
 
 | Kind | Compose | Settings |
 |---|---|---|
-| **Music** | **Style** (required) above **Lyrics** (optional) | **Batch size**, **Seed** |
-| **Speech** | **Text**, with a count against the 10,000 characters it can hold | **Voice**, then **Batch size** and **Seed** |
-| **Sound** | **Prompt**, what you hear | **Length (s)**, from 1 to 380 and 10 to begin with, then **Batch size** and **Seed** |
+| **Music** | [**Describe it**](#describe-it), then **Style** (required), with an **Enhanced** tab, above **Lyrics**; a model without lyrics has only the Style | The [Music](#music) section, then **Batch size** and **Seed** |
+| **Speech** | [**Describe it**](#describe-it), then **Text**, with a **Written** tab, an [Insert](#insert-into-the-text) menu, a [Script helper](#script-helper) and a count of the characters and the time it takes to read | **Voice** and [Delivery](#delivery), then **Batch size** and **Seed** |
+| **Sound** | **Prompt**, what you hear, with an **Enhanced** tab | The [Sound](#sound) section, then **Batch size** and **Seed** |
 
-- **Music:** a line under the boxes says whether you will get a song or an instrumental. See [Music](../concepts/audio.md#music).
-- **Speech:** type expressive tags such as `<|sfx:laughter|>` into the text; see [Expressive tags](../concepts/audio.md#expressive-tags).
-- **No enhancer, JSON mode or negative prompt.** The tools row has only **Recent prompts**, one list per kind.
+Every box has a 🗑 **Clear** first in the right of its tools row, as in [the prompt box](#the-prompt-box): it empties your text, the Enhanced (Written) text and its versions, or for Lyrics the whole song and its versions, and **Undo** in the line under the box brings it all back until your next edit or run there.
+
+See [Music](../concepts/audio.md#music), [Speech](../concepts/audio.md#speech) and [Sound](../concepts/audio.md#sound) for what each kind does. The Style and Prompt boxes enhance as in [Music Enhance](#music-enhance) and [Sound Enhance](#sound-enhance); the Lyrics and the Speech text have the [Lyrics helper](#lyrics-helper) and the [Script helper](#script-helper). There is no JSON mode or negative prompt.
+
+### Describe it
+
+**Describe it** is a box at the top of Compose for Music and Speech, shown wherever the prompt enhancer is set up. Write the idea in it (*a sad folk song about leaving the coast*) and press **Fill in**, or <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>⌘</kbd>+<kbd>Enter</kbd>) in the box. What it writes and keeps is in [Describe it and Fill in](../concepts/prompt-enhancer.md#describe-it-and-fill-in).
+
+- **Fill in** writes only the fields that are empty. A line under the box says which, and the button is off with the reason in that line when there is nothing to write.
+- **Fast** or **Smart** beside **Fill in** is the enhancer it uses. It is remembered apart from the one in Enhance and the helpers, and a helper's **Fill in from Describe it** uses it. The line under the box adds the first-use download when the enhancer is not on this machine yet.
+- 🗑 **Clear** empties the idea, in the open box and on the folded line. What Fill in wrote stays, with its **Undo fill**.
+- **✦** marks the Tempo, Key and Vibe it wrote until you edit them. **Fill in again** rewrites only the empty and still marked fields.
+- **Undo fill** puts back what the fill replaced, for the fields still marked. The Style it wrote lands in your own **Style** tab, like Speech's Text.
+- The box folds to one line after a fill, and starts folded when you begin with your own lyrics or text.
+- The lyrics helper on a song with no words and the Script helper on an empty script offer **Fill in from Describe it**.
+
+![Describe it above the Style and Lyrics of a song, folded to one line after Fill in, with the filled fields marked](../assets/screenshots/placeholder.svg "audio-describe-it")
+
+### Song blocks
+
+The Lyrics box shows a song as one block per section (**Verse**, **Chorus**, **Pre-Chorus**…), each with its words in a box. A section with no words is an instrumental section, so a list of empty blocks makes an [instrumental](../concepts/audio.md#music) of those sections.
+
+- **Add** at the foot adds a section: **Verse**, **Chorus**, **Bridge** and **Outro** directly, and **More** for the whole list.
+- The **⋯** button of a block opens **Improve this section…** (or **Write**, on a section with no words) when the prompt enhancer is set up, then **Move up**, **Move down**, **Duplicate**, **Add a section below** and **Remove**. **Remove** on a block with words offers **Undo** until the next change.
+- The block's name opens the list of section names, and **Other name…** types one of your own.
+- **Edit as text** shows the whole lyrics as one text with its `[section]` tags, and back. Pasted or reused lyrics show exactly as written.
+
+![The Lyrics box as blocks: an Intro with no words, a Verse and a Chorus with theirs, and the Add row under them](../assets/screenshots/placeholder.svg "audio-song-blocks")
+
+### Lyrics helper
+
+**Improve lyrics** in the Lyrics tools row opens a popover beside the button (a sheet on a tablet or phone) for the whole song. Each block's **Improve** button, or **Write** on a section with no words, opens it for that section. What it writes and keeps is in [Lyrics helper](../concepts/prompt-enhancer.md#lyrics-helper).
+
+- **Improve lyrics** offers **Tighten**, **Fit the sections**, **Smooth rhymes** and **Simpler words**, pick any, and a **Direction** such as *make it more hopeful*, with the **Fast** or **Smart** enhancer. **Tighten** is picked when the panel opens; clear every pick for a general polish.
+- **Improve a section** has the same choices without **Fit the sections**.
+- **Write** has only the **Direction**. It fills the section to fit the rest of the song.
+
+Each result is a version of the lyrics: ‹ **2 of 3** › in the Lyrics head steps through up to five, yours first, and a ✦ after **Lyrics** marks a version a helper wrote. Typing in a version makes it yours. Generate uses the lyrics shown.
+
+![The Lyrics box with the Improve lyrics popover open: Tighten and Smooth rhymes picked, a Direction typed and the Fast enhancer chosen](../assets/screenshots/placeholder.svg "audio-lyrics-helper")
+
+### Music
+
+The **Music** section comes first in Music's *Settings*. Its header shows what is set: *Auto*, or *92 BPM · A minor*.
+
+- **Tempo** is a number from 40 to 220 beats per minute. Empty reads **Auto**, where the model picks.
+- **Key** opens a list: **Auto**, then the twelve major keys and the twelve minor keys.
+- **Length (s)** is only there for a model that sets its own length, Stable Audio: 1 to 380 seconds, 30 to begin with.
+
+A changed row has a dot, and its reset puts it back to Auto (or to 30 seconds). What each setting does is in [Tempo and Key](../concepts/audio.md#tempo-and-key).
+
+**Stable Audio 3 Medium** is offered under **Music** next to YuE2 and under **Sound**. On it, Music has no **Lyrics** box and the section adds **Length (s)**. See [Stable Audio under Music](../concepts/audio.md#stable-audio-under-music).
+
+### Sound
+
+The **Sound** section comes first in Sound's *Settings*. Its header shows the type and the length the take will have: *Ambience · ≈ 12 s*.
+
+- **Type** is **Auto**, **Ambience**, **Effect** or **One-shot**.
+- **Length (s)** is empty on Auto, and the field shows the number Auto will use. Typing a number from 1 to 380 locks it, whatever the type, and emptying the field goes back to Auto.
+
+A changed row has a dot, and its reset puts it back to Auto. What each type does is in [Sound](../concepts/audio.md#sound).
+
+### Sound Enhance
+
+**Enhance** under the Sound prompt rewrites it into the shape Stable Audio follows; what it writes is in [Audio](../concepts/prompt-enhancer.md#audio). The header, marks and versions work as in [the prompt box](#the-prompt-box). The panel opens as a popover on a computer and as a sheet on a tablet or phone.
+
+- **Space**, **Distance**, **Over time** and **Movement** each start on **Keep**. **Direction** takes your own words, such as *keep the thunder far off*. **Reset** puts every choice back to Keep and clears the direction.
+- **Enhancer** (Fast or Smart) sits beside **Enhance prompt**, which starts the rewrite. The **Type** and **Length** go along.
+
+**Reuse settings**, **Retry** and **Load settings** of an enhanced sound put your text in **Prompt** and the rewrite in **Enhanced**.
+
+### Music Enhance
+
+**Enhance** under the Style rewrites it for the open model, as a line of descriptors for YuE2 or a sentence for Stable Audio 3; what it writes is in [Audio](../concepts/prompt-enhancer.md#audio). It never touches Lyrics. It works as [Sound Enhance](#sound-enhance) does, with these options:
+
+- **Genre** (grouped), **Mood** and **Production** each start on **Keep**; **Instruments** and **Without** are pick-any chips. **Direction** takes your own words, such as *keep the guitar fingerpicked*.
+- **Singer** is there only when the song has words to sing.
+- Your lyrics' first lines, whether the song is instrumental, and any Tempo and Key go along; Length never does.
+
+**Reuse settings**, **Retry** and **Load settings** of an enhanced song put your style in **Style** and the rewrite in **Enhanced**.
+
+### Insert into the text
+
+**Insert** in the Speech tools row (or <kbd>Alt</kbd>+<kbd>Enter</kbd> in the text) opens a menu that puts something readable into the text at the caret. A selection is replaced. While the **Written** tab is shown, it edits the Written text. Under the box, the count reads *1,180 / 10,000 characters · about 1:24*.
+
+- **Pause** puts `…` and **Laugh** puts `haha`.
+- **Delivery from here** offers the emotions in four groups, **Whisper**, **Shout** and **As set**. Your pick goes in as a `[mark]` at the start of the sentence the caret is in; a mark that already opens the sentence is replaced. It is hidden while the voice follows a recording.
+
+What a mark does, and the pause and the laugh, are in [Marks](../concepts/audio.md#marks) and [Pauses and laughs](../concepts/audio.md#pauses-and-laughs).
+
+### Script helper
+
+**Script helper** in the Speech tools row opens a popover beside the button (a sheet on a tablet or a phone). It always starts from your **Text**. What it writes and keeps is in [Script helper](../concepts/prompt-enhancer.md#script-helper).
+
+- **Fit to time** and **Add delivery** are checkboxes, any of them. The run button names the picks. With both, one run fits the Text and then adds delivery, as one Written version with one **Stop**. **Add delivery** is left out while the voice follows a recording.
+- **Fit to** takes a number of seconds (3 to 600) and shows while **Fit to time** is picked.
+- The **Fast** or **Smart** enhancer is chosen beside the run button.
+
+A result lands in the **Written** tab beside your **Text**; ‹ **2 of 3** › steps through up to five. Generate sends the Written text. You can edit it by hand.
+
+![The Speech text with the Script helper popover open on Fit to time, 0:30 typed](../assets/screenshots/placeholder.svg "audio-script-helper")
 
 ### Voice
 
-**Voice** is the first group in Speech's *Settings*. Leave it on **Any**, or choose **From a recording**: add a file of 3 to 30 seconds (Browse, upload or drop), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.* The tick is asked again whenever the voice changes. See [Voices](../concepts/audio.md#voices).
+**Voice** is the first group in Speech's *Settings*. Its select lists the model's nine built-in voices, each with its language (*Ryan · English*), and **From a recording**. Ryan is the default.
+
+To follow a recording, choose **From a recording**: add a file of 3 to 30 seconds (Browse, upload or drop), type **What it says**, and tick *This is my voice, or I have the speaker's permission to clone it.* The tick is asked again whenever the voice changes. The cloning files download the first time you generate with a recording. See [Voices](../concepts/audio.md#voices).
 
 ![The Voice section on From a recording, with the file, What it says and the consent tick](../assets/screenshots/placeholder.svg "audio-voice")
 
-While something is missing, **Generate** is disabled and the first reason shows above it.
+### Delivery
+
+**Delivery** comes after Voice in Speech's *Settings* and sets how a built-in voice says the text. Pick one of the six **Vibe** tiles to fill the five rows below it, and edit any row:
+
+- **Emotion**: **Neutral**, or one of the emotions in four groups.
+- **Manner**: **Natural**, **Whisper** or **Shout**.
+- **Pace**: a slider from *Very slow* to *Very fast*.
+- **Pitch** and **Expressiveness**: **Low**, **Normal** or **High**.
+
+A changed row has a dot and its own reset; the reset beside **Vibe** puts all five back. With **From a recording** chosen in Voice, the section only says that a cloned voice reads as recorded. What each setting does and the Vibes' values are in [Delivery](../concepts/audio.md#delivery).
+
+![The Delivery section with the Calm narrator Vibe picked and its five values under it](../assets/screenshots/placeholder.svg "audio-delivery")
 
 ### While a take is made
 
-The job card counts takes (*Take 1 of 2*) and shows the stage the model is in: for music *Planning*, *Writing the song*, *Rendering* and *Finishing*, for speech the part being read (*Reading part 2 of 4*), for sound its steps. The preview strip shows the take forming and settles into its waveform when it is ready. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs).
+The job card counts takes (*Take 1 of 2*) and shows the stage the model is in. The preview strip shows the take forming and settles into its waveform when it is ready. **Pause**, **Skip**, **Repeat** and **Cancel** work as for [images](#while-a-job-runs).
 
 ### The result
 
 ![A finished take in the player, with its waveform and the browser's audio controls](../assets/screenshots/placeholder.svg "audio-take")
 
-The preview shows the finished take as a player: its waveform over the browser's own audio controls. Click or drag the waveform to seek. Nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and a take that reached YuE2's limit carries **Cut at 6:00**. Takes appear in the Gallery strip as audio tiles; see [Audio in the Gallery](gallery.md#audio). On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
+The preview shows the finished take as a player. Click or drag the waveform to seek; nothing plays by itself. **Reuse settings** and the **⋯** menu sit in the corner of the panel, and a take that reached YuE2's limit carries **Cut at 6:00**. Takes appear in the Gallery strip as audio tiles; see [Audio in the Gallery](gallery.md#audio). On a phone, see [Audio on a phone](devices.md#audio-on-a-phone).
 
 ## Generate
 

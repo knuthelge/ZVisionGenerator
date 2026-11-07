@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import settingsCases from '../../../../tests/fixtures/audio_settings_cases.json';
 import { hasJobSettings, jobSettingsPrefill, outputSettingsPatch } from './jobSettings';
+import type { JobSettings } from '$lib/types';
 
 describe('jobSettingsPrefill', () => {
   it('loads an audio job into the Audio tab instead of reading it as an image job', () => {
@@ -9,6 +11,33 @@ describe('jobSettingsPrefill', () => {
       patch: {},
     });
     expect(jobSettingsPrefill({ mode: 'image', prompt: 'a calm piano' }).patch).toMatchObject({ prompt: 'a calm piano' });
+  });
+
+  it.each(settingsCases.cases.map((item) => [item.name, item] as const))('loads the settings of an audio job as a Reuse of the same take does: %s', (_name, item) => {
+    const { voice_consent: _consent, ...form } = item.form as unknown as JobSettings;
+
+    expect(jobSettingsPrefill(form).params).toEqual(item.retry);
+  });
+
+  it('reads a job as Enhanced when it sent an enhance record, not when its own text is non-empty', () => {
+    const base = { mode: 'audio', workflow: 'sound', model: 'sa3', prompt: 'Heavy rain on a tin roof.' };
+    const record = '{"settings":{},"model":"fast","tier":"fast","format":"text","task":"sound"}';
+
+    expect(jobSettingsPrefill({ ...base, prompt_input: 'rain', enhance_record: record }).params).toMatchObject({ prompt: 'rain', enhanced_prompt: 'Heavy rain on a tin roof.', enhance: record });
+    expect(jobSettingsPrefill({ ...base, prompt_input: '', enhance_record: record }).params).toMatchObject({ prompt: '', enhanced_prompt: 'Heavy rain on a tin roof.' });
+    for (const enhance_record of [undefined, '', '{}', 'null', 'not json']) {
+      const { params } = jobSettingsPrefill({ ...base, prompt_input: 'rain', ...(enhance_record === undefined ? {} : { enhance_record }) });
+      expect(params.prompt).toBe('Heavy rain on a tin roof.');
+      expect(params).not.toHaveProperty('enhanced_prompt');
+      expect(params).not.toHaveProperty('enhance');
+    }
+  });
+
+  it('loads the built-in voice of a speech job, and a recording when it followed one', () => {
+    expect(jobSettingsPrefill({ mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hello', speaker: 'vivian', runs: '1' }).params).toEqual({ workflow: 'speech', model: 'qwen3_tts', prompt: 'Hello', speaker: 'vivian', runs: '1' });
+    expect(jobSettingsPrefill({ mode: 'audio', workflow: 'speech', model: 'qwen3_tts', prompt: 'Hello', voice_path: '/v/me.wav', voice_text: 'Hi', voice_consent: 'on' }).params).toEqual({
+      workflow: 'speech', model: 'qwen3_tts', prompt: 'Hello', voice_path: '/v/me.wav', voice_text: 'Hi',
+    });
   });
 
   it('splits an inline image job into prefill params and the remaining settings', () => {

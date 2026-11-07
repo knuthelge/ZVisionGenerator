@@ -1,0 +1,511 @@
+{
+  "tempo": {
+    "min": 40,
+    "max": 220
+  },
+  "keys": [
+    {
+      "id": "C",
+      "words": "C major",
+      "mode": "major"
+    },
+    {
+      "id": "Db",
+      "words": "Db major",
+      "mode": "major"
+    },
+    {
+      "id": "D",
+      "words": "D major",
+      "mode": "major"
+    },
+    {
+      "id": "Eb",
+      "words": "Eb major",
+      "mode": "major"
+    },
+    {
+      "id": "E",
+      "words": "E major",
+      "mode": "major"
+    },
+    {
+      "id": "F",
+      "words": "F major",
+      "mode": "major"
+    },
+    {
+      "id": "F#",
+      "words": "F# major",
+      "mode": "major"
+    },
+    {
+      "id": "G",
+      "words": "G major",
+      "mode": "major"
+    },
+    {
+      "id": "Ab",
+      "words": "Ab major",
+      "mode": "major"
+    },
+    {
+      "id": "A",
+      "words": "A major",
+      "mode": "major"
+    },
+    {
+      "id": "Bb",
+      "words": "Bb major",
+      "mode": "major"
+    },
+    {
+      "id": "B",
+      "words": "B major",
+      "mode": "major"
+    },
+    {
+      "id": "Cm",
+      "words": "C minor",
+      "mode": "minor"
+    },
+    {
+      "id": "C#m",
+      "words": "C# minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Dm",
+      "words": "D minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Ebm",
+      "words": "Eb minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Em",
+      "words": "E minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Fm",
+      "words": "F minor",
+      "mode": "minor"
+    },
+    {
+      "id": "F#m",
+      "words": "F# minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Gm",
+      "words": "G minor",
+      "mode": "minor"
+    },
+    {
+      "id": "G#m",
+      "words": "G# minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Am",
+      "words": "A minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Bbm",
+      "words": "Bb minor",
+      "mode": "minor"
+    },
+    {
+      "id": "Bm",
+      "words": "B minor",
+      "mode": "minor"
+    }
+  ],
+  "emotions": [
+    {
+      "id": "neutral",
+      "label": "Neutral",
+      "group": null
+    },
+    {
+      "id": "elated",
+      "label": "Elated",
+      "group": "Bright"
+    },
+    {
+      "id": "amused",
+      "label": "Amused",
+      "group": "Bright"
+    },
+    {
+      "id": "enthusiastic",
+      "label": "Enthusiastic",
+      "group": "Bright"
+    },
+    {
+      "id": "proud",
+      "label": "Proud",
+      "group": "Bright"
+    },
+    {
+      "id": "content",
+      "label": "Content",
+      "group": "Warm"
+    },
+    {
+      "id": "affectionate",
+      "label": "Affectionate",
+      "group": "Warm"
+    },
+    {
+      "id": "relieved",
+      "label": "Relieved",
+      "group": "Warm"
+    },
+    {
+      "id": "longing",
+      "label": "Longing",
+      "group": "Warm"
+    },
+    {
+      "id": "thoughtful",
+      "label": "Thoughtful",
+      "group": "Thoughtful"
+    },
+    {
+      "id": "determined",
+      "label": "Determined",
+      "group": "Thoughtful"
+    },
+    {
+      "id": "awed",
+      "label": "Awed",
+      "group": "Thoughtful"
+    },
+    {
+      "id": "surprised",
+      "label": "Surprised",
+      "group": "Thoughtful"
+    },
+    {
+      "id": "confused",
+      "label": "Confused",
+      "group": "Thoughtful"
+    },
+    {
+      "id": "sad",
+      "label": "Sad",
+      "group": "Heavy"
+    },
+    {
+      "id": "bitter",
+      "label": "Bitter",
+      "group": "Heavy"
+    },
+    {
+      "id": "ashamed",
+      "label": "Ashamed",
+      "group": "Heavy"
+    },
+    {
+      "id": "helpless",
+      "label": "Helpless",
+      "group": "Heavy"
+    },
+    {
+      "id": "afraid",
+      "label": "Afraid",
+      "group": "Heavy"
+    },
+    {
+      "id": "angry",
+      "label": "Angry",
+      "group": "Heavy"
+    },
+    {
+      "id": "disgusted",
+      "label": "Disgusted",
+      "group": "Heavy"
+    }
+  ],
+  "manners": [
+    {
+      "id": "natural",
+      "label": "Natural"
+    },
+    {
+      "id": "whisper",
+      "label": "Whisper"
+    },
+    {
+      "id": "shout",
+      "label": "Shout"
+    }
+  ],
+  "paces": [
+    {
+      "id": "very-slow",
+      "label": "Very slow"
+    },
+    {
+      "id": "slow",
+      "label": "Slow"
+    },
+    {
+      "id": "normal",
+      "label": "Normal"
+    },
+    {
+      "id": "fast",
+      "label": "Fast"
+    },
+    {
+      "id": "very-fast",
+      "label": "Very fast"
+    }
+  ],
+  "levels": [
+    {
+      "id": "low",
+      "label": "Low"
+    },
+    {
+      "id": "normal",
+      "label": "Normal"
+    },
+    {
+      "id": "high",
+      "label": "High"
+    }
+  ],
+  "delivery_defaults": {
+    "emotion": "neutral",
+    "manner": "natural",
+    "pace": "normal",
+    "pitch": "normal",
+    "expressiveness": "normal"
+  },
+  "vibes": [
+    {
+      "id": "calm-narrator",
+      "label": "Calm narrator",
+      "delivery": {
+        "emotion": "thoughtful",
+        "manner": "natural",
+        "pace": "slow",
+        "pitch": "normal",
+        "expressiveness": "normal"
+      }
+    },
+    {
+      "id": "storyteller",
+      "label": "Storyteller",
+      "delivery": {
+        "emotion": "content",
+        "manner": "natural",
+        "pace": "normal",
+        "pitch": "normal",
+        "expressiveness": "high"
+      }
+    },
+    {
+      "id": "excited-host",
+      "label": "Excited host",
+      "delivery": {
+        "emotion": "enthusiastic",
+        "manner": "natural",
+        "pace": "fast",
+        "pitch": "high",
+        "expressiveness": "high"
+      }
+    },
+    {
+      "id": "announcer",
+      "label": "Announcer",
+      "delivery": {
+        "emotion": "determined",
+        "manner": "natural",
+        "pace": "normal",
+        "pitch": "normal",
+        "expressiveness": "low"
+      }
+    },
+    {
+      "id": "sad-confession",
+      "label": "Sad confession",
+      "delivery": {
+        "emotion": "sad",
+        "manner": "natural",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "normal"
+      }
+    },
+    {
+      "id": "whispered-secret",
+      "label": "Whispered secret",
+      "delivery": {
+        "emotion": "neutral",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "low"
+      }
+    }
+  ],
+  "marks": [
+    {
+      "id": "elated",
+      "field": "emotion",
+      "value": "elated"
+    },
+    {
+      "id": "amused",
+      "field": "emotion",
+      "value": "amused"
+    },
+    {
+      "id": "enthusiastic",
+      "field": "emotion",
+      "value": "enthusiastic"
+    },
+    {
+      "id": "proud",
+      "field": "emotion",
+      "value": "proud"
+    },
+    {
+      "id": "content",
+      "field": "emotion",
+      "value": "content"
+    },
+    {
+      "id": "affectionate",
+      "field": "emotion",
+      "value": "affectionate"
+    },
+    {
+      "id": "relieved",
+      "field": "emotion",
+      "value": "relieved"
+    },
+    {
+      "id": "longing",
+      "field": "emotion",
+      "value": "longing"
+    },
+    {
+      "id": "thoughtful",
+      "field": "emotion",
+      "value": "thoughtful"
+    },
+    {
+      "id": "determined",
+      "field": "emotion",
+      "value": "determined"
+    },
+    {
+      "id": "awed",
+      "field": "emotion",
+      "value": "awed"
+    },
+    {
+      "id": "surprised",
+      "field": "emotion",
+      "value": "surprised"
+    },
+    {
+      "id": "confused",
+      "field": "emotion",
+      "value": "confused"
+    },
+    {
+      "id": "sad",
+      "field": "emotion",
+      "value": "sad"
+    },
+    {
+      "id": "bitter",
+      "field": "emotion",
+      "value": "bitter"
+    },
+    {
+      "id": "ashamed",
+      "field": "emotion",
+      "value": "ashamed"
+    },
+    {
+      "id": "helpless",
+      "field": "emotion",
+      "value": "helpless"
+    },
+    {
+      "id": "afraid",
+      "field": "emotion",
+      "value": "afraid"
+    },
+    {
+      "id": "angry",
+      "field": "emotion",
+      "value": "angry"
+    },
+    {
+      "id": "disgusted",
+      "field": "emotion",
+      "value": "disgusted"
+    },
+    {
+      "id": "whisper",
+      "field": "manner",
+      "value": "whisper"
+    },
+    {
+      "id": "shout",
+      "field": "manner",
+      "value": "shout"
+    },
+    {
+      "id": "as set",
+      "field": null,
+      "value": null
+    }
+  ],
+  "sound_types": [
+    {
+      "id": "auto",
+      "label": "Auto"
+    },
+    {
+      "id": "ambience",
+      "label": "Ambience"
+    },
+    {
+      "id": "effect",
+      "label": "Effect"
+    },
+    {
+      "id": "one-shot",
+      "label": "One-shot"
+    }
+  ],
+  "auto_seconds": {
+    "auto": 12.0,
+    "ambience": 12.0,
+    "effect": 5.0,
+    "one-shot": 2.0
+  },
+  "reading": {
+    "chars_per_second": 14.0,
+    "pace_factor": {
+      "very-slow": 0.72,
+      "slow": 0.81,
+      "normal": 1.0,
+      "fast": 1.17,
+      "very-fast": 1.22
+    }
+  }
+}

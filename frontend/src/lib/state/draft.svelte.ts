@@ -1,4 +1,4 @@
-import { AUDIO_FIELD_DEFAULTS, audioModelById, audioPrefill, availableKinds, hydrateAudio } from './audioDraft';
+import { AUDIO_FIELD_DEFAULTS, AUDIO_KIND_SETTINGS, audioPrefill, availableKinds, hydrateAudio, isAudioModelId } from './audioDraft';
 import { extendPrefillFor } from './extend';
 import { downloadStore } from './downloads.svelte';
 import { heldUploads } from './heldUploads.svelte';
@@ -13,6 +13,7 @@ import { isAudioWorkflow, navTab, videoKindOf, workflowFor, workspaceTab, type M
 import { voiceConsent } from './voiceConsent.svelte';
 import { pickScopes, RESET_SCOPE, REUSE_SCOPE, type Scope } from './resetScope';
 import { firstValues, listOf } from '$lib/prefillParams';
+import { AUDIO_KINDS } from '$lib/types';
 import type { NavTab, VideoKind, TabText, LoraInfo, DraftState, ExtendSourceInfo, FrameRule, PrefillParams, SettingsPreset, WorkspacePrefill, WorkspaceContext, AudioWorkflow, Workflow, WorkspaceWorkflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
@@ -95,12 +96,14 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedScene: '',
   enhancedFrom: null,
   enhancedHistory: [],
+  enhancedScratched: null,
   savedText: {},
   savedSettings: {},
   enhanceSettings: null,
   enhanceSettingsVideo: null,
   enhanceAuto: false,
   enhanceModel: 'fast',
+  describeTier: 'fast',
   enhanceFormat: 'text',
   extendSourcePath: null,
   extendFrames: null,
@@ -206,11 +209,11 @@ function _withDerivedWorkflow(ctx: WorkspaceContext | null, state: DraftState): 
 
 /** The draft fields that hold a tab's own text: what is typed and the Enhanced text made from it. */
 const TEXT_KEYS = [
-  'prompt', 'scene', 'negativePrompt', 'jsonPromptEnabled', 'jsonPrompt', 'enhancedPrompt', 'enhancedScene', 'enhancedFrom', 'enhancedHistory',
+  'prompt', 'scene', 'negativePrompt', 'jsonPromptEnabled', 'jsonPrompt', 'enhancedPrompt', 'enhancedScene', 'enhancedFrom', 'enhancedHistory', 'enhancedScratched',
 ] as const satisfies readonly (keyof TabText)[];
 
 const EMPTY_TEXT: TabText = {
-  prompt: '', scene: '', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [],
+  prompt: '', scene: '', negativePrompt: '', jsonPromptEnabled: false, jsonPrompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [], enhancedScratched: null,
 };
 
 function _textOf(state: DraftState): TabText {
@@ -246,6 +249,12 @@ function _withSettingsOfMode(state: DraftState, workflow: WorkspaceWorkflow): Dr
   const savedSettings = from === 'audio' ? state.savedSettings : { ...state.savedSettings, [from]: pickScopes(state, MODE_MEMORY_SCOPES) };
   if (to === 'audio') return { ...state, savedSettings };
   return { ...state, savedSettings, ...savedSettings[to] };
+}
+
+/** The defaults an exact Reuse of an audio kind puts back: the Audio scope without the settings that belong to the other kinds. */
+function _audioReuseDefaults(kind: AudioWorkflow): Partial<DraftState> {
+  const others = new Set<keyof DraftState>(AUDIO_KINDS.filter((other) => other !== kind).flatMap((other) => AUDIO_KIND_SETTINGS[other]));
+  return Object.fromEntries(Object.entries(pickScopes(DEFAULT_DRAFT, REUSE_SCOPE.audio)).filter(([key]) => !others.has(key as keyof DraftState)));
 }
 
 /** Return the state with the text and the settings of the mode a workflow belongs to, as that mode left them. */
@@ -384,8 +393,8 @@ function _loraFamilyKey(ctx: WorkspaceContext, model: string): string {
  */
 function _swapFamilyLoras(ctx: WorkspaceContext, state: DraftState, fromModel: string, toModel: string): Partial<DraftState> {
   if (!fromModel || !toModel) return {};
-  const fromAudio = audioModelById(ctx, fromModel) !== null;
-  const toAudio = audioModelById(ctx, toModel) !== null;
+  const fromAudio = isAudioModelId(ctx, fromModel);
+  const toAudio = isAudioModelId(ctx, toModel);
   if (fromAudio && toAudio) return {};
   const fromKey = _loraFamilyKey(ctx, fromModel);
   const toKey = _loraFamilyKey(ctx, toModel);
@@ -578,7 +587,7 @@ function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState, sourceF
   const imageTakesJson = !isVideoMode && (modelDefaults as ImageModelDefaults | null)?.supports_json_prompt === true;
   if (!imageTakesJson && isJsonCaption(nextState.enhancedPrompt)) nextState = { ...nextState, enhancedPrompt: '', enhancedFrom: null };
   if (!imageTakesJson && nextState.enhancedHistory.some((entry) => isJsonCaption(entry.prompt))) {
-    nextState = { ...nextState, enhancedHistory: nextState.enhancedHistory.filter((entry) => !isJsonCaption(entry.prompt)) };
+    nextState = { ...nextState, enhancedHistory: nextState.enhancedHistory.filter((entry) => !isJsonCaption(entry.prompt)), enhancedScratched: null };
   }
   if (isVideoMode) {
     nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
@@ -715,11 +724,11 @@ export const draft = {
 
     // The Audio tab has its own fields: its kind opens, and a Use as → Voice or a Reuse sets only what it names.
     if (isAudioWorkflow(workflow)) {
-      const { patch, voice } = audioPrefill(params, ctx, workflow, options.ungated === true);
+      const { patch, voice } = audioPrefill(params, ctx, workflow, options.ungated === true, _draft);
       // The tick follows the voice: a prefill that replaces the voice leaves it for the person to give, and one that does not
       // (a song or a sound) leaves the voice and its tick alone.
       if (voice) voiceConsent.reset(voice.exempt);
-      const opened: DraftState = { ..._withModeOf(_draft, workflow), ...(exact ? pickScopes(DEFAULT_DRAFT, REUSE_SCOPE.audio) : {}), ...prefill, ...patch, workflow, audioKind: workflow };
+      const opened: DraftState = { ..._withModeOf(_draft, workflow), ...(exact ? _audioReuseDefaults(workflow) : {}), ...prefill, ...patch, workflow, audioKind: workflow };
       const hydrated = ctx ? hydrateAudio(ctx, opened) : opened;
       _draft = ctx ? { ...hydrated, ..._swapFamilyLoras(ctx, _draft, _draft.model, hydrated.model) } : hydrated;
       return;

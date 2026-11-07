@@ -17,6 +17,7 @@
     sliders: 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4',
     chevright: 'M9 5l7 7-7 7',
     chevdown: 'M19 9l-7 7-7-7',
+    chevup: 'M5 15l7-7 7 7',
     collapse: 'M11 17l-5-5 5-5M18 17l-5-5 5-5',
     uncollapse: 'M13 17l5-5-5-5M6 17l5-5-5-5',
     reset: 'M4 4v5h5M4.6 9A8 8 0 1 1 4 13',
@@ -50,6 +51,7 @@
     search: 'M11 5a6 6 0 110 12 6 6 0 010-12zM20 20l-4.5-4.5',
     edit: 'M4 20h4L19 9l-4-4L4 16z',
     up: 'M12 19V5M6 11l6-6 6 6',
+    down: 'M12 5v14M6 13l6 6 6-6',
     file: 'M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5',
     upload: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12',
     drive: 'M4 14h16v5H4zM6 14l2-9h8l2 9M16 16.5h.01',
@@ -57,6 +59,8 @@
     clock: 'M12 4a8 8 0 110 16 8 8 0 010-16zM12 8v4l2.5 2.5',
     // A clock with a counter-clockwise arrow: going back to earlier prompts (the Job log keeps the plain clock).
     history: 'M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4v4.5h4.5M12 8v4l2.5 2.5',
+    braces: 'M8 4H7a2 2 0 00-2 2v4a2 2 0 01-2 2 2 2 0 012 2v4a2 2 0 002 2h1M16 4h1a2 2 0 012 2v4a2 2 0 002 2 2 2 0 00-2 2v4a2 2 0 01-2 2h-1',
+    tag: 'M3 7V4a1 1 0 011-1h3l11 11-5 5L3 7zM7 7h.01',
   } as const;
 
   export type IconName = keyof typeof PATHS;

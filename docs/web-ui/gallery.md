@@ -19,7 +19,7 @@ An audio take is a tile with an icon for its kind, the words of the take, a thin
 
 ![The Gallery filtered to Audio only, with music, speech and sound tiles](../assets/screenshots/placeholder.svg "gallery-audio")
 
-The viewer shows a player: the take's waveform over the browser's own audio controls. Click or drag the waveform to seek. **Details** lists the kind, model, voice, length, seed and format. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
+The viewer shows a player: the take's waveform over the browser's own audio controls. Click or drag the waveform to seek. **Details** lists the kind, model, voice, length, seed and format; the **Tempo · Key** of a song (*92 BPM · A minor*), the **Delivery** of a speech take in a built-in voice and the **Sound type** of a sound, each only when the take set it; how its text was written when it was [enhanced or filled in](../concepts/audio.md); and a **Note** when the model could not follow a setting of the take. **Reuse settings** opens the **Audio** tab on the take's kind with its settings; see [Takes and files](../concepts/audio.md#takes-and-files). **Download** and **Delete** work as for other files.
 
 An audio file without this app's settings, such as one you copied into the output folder, plays but has no **Reuse settings**.
 
@@ -63,7 +63,7 @@ Zoom into an image to see its real pixels: click it on a computer, or pinch or d
 
 **Details** lists what the file records: prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, audio track with the span of it the clip used (*song.mp3 · 1:30–1:34*), references, quant, upscale and post-processing. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
 
-When the prompt was enhanced, Details shows how, as one line such as *Fast · Cinematic, Melancholic, Longer*, with **Your prompt** under it.
+When the prompt was enhanced, Details shows how, as one line such as *Fast · Cinematic, Melancholic, Longer*, with **Your prompt** under it. An audio take shows the same for its Style, Text or Prompt, for example *Fast · Style · Folk*.
 
 ### Reuse settings
 
@@ -71,8 +71,9 @@ When the prompt was enhanced, Details shows how, as one line such as *Fast · Ci
 
 - Post-processing (**Sharpen**, **Contrast**, **Saturation**, **Transparent**), the upscale settings and **Strength** come back too. For an image upscaled in the viewer, only **Transparent** does.
 
-- For an enhanced prompt, **Your text** gets what you typed, **Enhanced** gets the rewrite, and the enhance options come back too.
+- For an enhanced prompt, **Prompt** gets what you typed, **Enhanced** gets the rewrite, and the enhance options come back too.
 - For a video, Scene and Action are filled. A video that was itself an extension comes back with its source.
+- For audio, the settings the take was made with come back: the **Tempo** and **Key** of a song, the length, the **Delivery** of a speech take in a built-in voice and the **Type** of a sound. A setting the take did not set, such as a song made without a Tempo, comes back on **Auto**.
 
 ### Use as
 

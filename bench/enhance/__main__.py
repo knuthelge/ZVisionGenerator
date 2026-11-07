@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from bench.enhance.cases import load_cases, select_cases
+from bench.enhance.cases import CASES_PATH, load_cases, select_cases
 from bench.enhance.report import compare_runs, load_run
 
 RUNS_DIR = Path(__file__).with_name("runs")
@@ -23,9 +23,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--tags", default=None, help="Comma-separated tags; run only cases with any of them.")
     run.add_argument("--cases", default=None, help="Comma-separated case ids; run only these.")
     run.add_argument("--seeds", type=int, default=3, help="Seeds per case (default 3).")
+    run.add_argument("--cases-file", type=Path, default=CASES_PATH, help="YAML file of cases (default: cases.yaml).")
     run.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help=argparse.SUPPRESS)
     rescore = commands.add_parser("rescore", help="Recompute the checks of stored runs from their outputs (after changing checks or expectations).")
     rescore.add_argument("labels", nargs="+", help="Labels (or folders) of the runs to rescore.")
+    rescore.add_argument("--cases-file", type=Path, default=CASES_PATH, help="YAML file of cases (default: cases.yaml).")
     rescore.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help=argparse.SUPPRESS)
     sheet = commands.add_parser("sheet", help="Render the rewrites of image cases as images, side by side per run (loads an image model).")
     sheet.add_argument("runs", nargs="+", help="Labels (or folders) of the runs, one column each after the user's prompt.")
@@ -67,7 +69,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(f"Invalid --label '{args.label}'.")
     if args.seeds < 1:
         raise SystemExit("--seeds must be at least 1.")
-    cases = select_cases(load_cases(), tags=_split(args.tags), ids=_split(args.cases))
+    cases = select_cases(load_cases(args.cases_file), tags=_split(args.tags), ids=_split(args.cases))
     if not cases:
         raise SystemExit("No cases match --tags/--cases.")
     config = load_config()
@@ -95,7 +97,7 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
     from bench.enhance.runner import rescore_run
 
     config = load_config()
-    cases = load_cases()
+    cases = load_cases(args.cases_file)
     for label in args.labels:
         count = rescore_run(_run_dir(args.runs_dir, label), cases, config=config, options=enhance_options(config))
         print(f"Rescored {count} results in {label}")

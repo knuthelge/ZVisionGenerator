@@ -99,9 +99,9 @@ def ltx_video_upscale_part(request: LtxVideoUpscaleRequest, config: dict[str, An
     return video_model_part(request.model_name, request.model_ref, family="ltx", config=config, upscale=True)
 
 
-def audio_model_part(preset: AudioPreset) -> JobDownloadPart:
-    """Return the part for the audio model *preset* an audio job generates with."""
-    return JobDownloadPart(preset.label, preset.id, ROLE_MODEL, audio_plan(preset))
+def audio_model_part(preset: AudioPreset, *, voice: bool = False) -> JobDownloadPart:
+    """Return the part for the audio model *preset* an audio job generates with; *voice* when the take follows a recording, which also needs the cloning files."""
+    return JobDownloadPart(preset.label, preset.id, ROLE_MODEL, audio_plan(preset, voice=voice))
 
 
 def matte_part() -> JobDownloadPart:

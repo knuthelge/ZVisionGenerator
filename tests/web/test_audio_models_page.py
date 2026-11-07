@@ -9,17 +9,12 @@ import huggingface_hub.constants
 import pytest
 from fastapi.testclient import TestClient
 
-from tests._audio_presets import HIGGS_CODEC_REPO, HIGGS_REPO, YUE2_REPO, audio_config
+from tests._audio_presets import QWEN_BASE_REPO, QWEN_CUSTOM_REPO, YUE2_REPO, audio_config, qwen3_tts_preset, sa3_preset, sa3_two_kind_preset, yue2_preset
 from tests._factories import load_packaged_config
 from tests._licences import use_licences
 
-from zvisiongenerator.backends.audio import snapshot_dir
-from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 from zvisiongenerator.utils.audio_preset import parse_audio_presets
-from zvisiongenerator.utils.hf_snapshot import cached_snapshot
-from zvisiongenerator.utils.h3_preset import HubFiles
-from zvisiongenerator.utils.hf_cache import repo_disk_bytes
 from zvisiongenerator.utils.licences import load_licences
 from zvisiongenerator.utils.model_files import disk_size_label
 from zvisiongenerator.utils.model_memory import GIB, MemoryBudget
@@ -88,11 +83,11 @@ class TestInventoryRows:
     def test_each_runnable_preset_is_a_row_with_the_fields_the_page_reads(self, env):
         rows = _rows(env, target_present=lambda target: target.repo_id.startswith("m-a-p/"))
 
-        assert list(rows) == ["yue2", "higgs3", "sa3"]
+        assert list(rows) == ["yue2", "qwen3_tts", "sa3"]
         assert rows["yue2"] == {
             "name": "yue2",
             "label": "YuE2 3B",
-            "kind": "music",
+            "kinds": ["music"],
             "licences": [
                 {
                     "name": "CC BY-NC 4.0 with individual creator permission",
@@ -109,9 +104,16 @@ class TestInventoryRows:
             "delete": None,
             "disk_size_label": None,
         }
-        assert [rows[name]["kind"] for name in rows] == ["music", "speech", "sound"]
+        assert [rows[name]["kinds"] for name in rows] == [["music"], ["speech"], ["sound"]]
+        assert not any("kind" in row for row in rows.values())
         assert rows["sa3"]["downloaded"] is False and rows["sa3"]["download_needed"] is True
         assert rows["sa3"]["licences"] == []
+
+    def test_a_model_of_two_kinds_is_one_row_that_lists_both(self, env):
+        rows = _rows(env, audio_config(sa3=sa3_two_kind_preset()))
+
+        assert list(rows) == ["sa3"]
+        assert rows["sa3"]["kinds"] == ["sound", "music"]
 
     def test_a_model_with_files_on_disk_reports_their_size_and_what_deleting_removes(self, env):
         _cache(env.hub, YUE2_REPO.split("@")[0])
@@ -141,7 +143,7 @@ class TestInventoryRows:
     def test_the_packaged_config_has_a_row_per_model(self, env):
         rows = audio_inventory_rows(load_packaged_config(), _BUDGET)
 
-        assert [row["name"] for row in rows] == ["yue2", "higgs3", "sa3"]
+        assert [row["name"] for row in rows] == ["yue2", "qwen3_tts", "sa3"]
 
     def test_the_models_payload_lists_the_rows_after_the_video_models(self, env, monkeypatch):
         monkeypatch.setattr(audio_models_module, "target_present_offline", lambda _target: True)
@@ -149,103 +151,8 @@ class TestInventoryRows:
 
         models = workspace_api_module.build_models_response(_web_config(env), token_source=None, image_defaults_for=lambda *_a: {})
 
-        assert [row["name"] for row in models["audio_models"]] == ["yue2", "higgs3", "sa3"]
+        assert [row["name"] for row in models["audio_models"]] == ["yue2", "qwen3_tts", "sa3"]
         assert list(models).index("audio_models") == list(models).index("video_models") + 1
-
-
-class TestHiggs:
-    """Higgs TTS 3 has two repositories and nothing to prepare after them."""
-
-    def _cache_blobs(self, env, repo: str, size: int) -> Path:
-        """Cache *repo* as the Hub lays it out (a blob and a snapshot symlink) with a weights file of *size* bytes."""
-        repo_dir = env.hub / f"models--{repo.split('@')[0].replace('/', '--')}"
-        (repo_dir / "blobs").mkdir(parents=True)
-        (repo_dir / "snapshots" / "abc").mkdir(parents=True)
-        weights = repo_dir / "blobs" / "sha-weights"
-        weights.write_bytes(b"w" * size)
-        (repo_dir / "snapshots" / "abc" / "model.safetensors").symlink_to(weights)
-        return repo_dir
-
-    def test_it_is_downloaded_as_soon_as_both_repositories_are_present(self, env):
-        row = _rows(env, target_present=lambda _target: True)["higgs3"]
-
-        assert (row["downloaded"], row["download_needed"]) == (True, False)
-
-    def test_a_missing_repository_needs_a_download(self, env):
-        row = _rows(env, target_present=lambda target: target.repo_id != HIGGS_CODEC_REPO.split("@")[0])["higgs3"]
-
-        assert (row["downloaded"], row["download_needed"]) == (False, True)
-
-    def test_deleting_it_targets_exactly_its_two_repositories(self, env):
-        for repo in (HIGGS_REPO, HIGGS_CODEC_REPO):
-            _cache(env.hub, repo.split("@")[0])
-        preset = {item.id: item for item in parse_audio_presets(audio_config())}["higgs3"]
-
-        target = audio_delete_target(preset)
-
-        assert target.kind == "huggingface"
-        assert target.repo_ids == ("bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer")
-        delete_model(target)
-        assert not any(env.hub.iterdir())
-
-    def test_the_row_reports_what_deleting_removes(self, env):
-        for repo in (HIGGS_REPO, HIGGS_CODEC_REPO):
-            _cache(env.hub, repo.split("@")[0])
-
-        row = _rows(env, target_present=lambda _target: True)["higgs3"]
-
-        assert row["delete"] == {"kind": "huggingface", "repo_id": "bosonai/higgs-tts-3-4b", "linked_by": [], "stored_quants": [], "source_repos": []}
-
-    def _snapshot_every_listed_file(self, env, files) -> Path:
-        """Lay *files* out in the fake Hub cache at their pinned revision, as a finished download does."""
-        for repo in files:
-            for name in repo.patterns:
-                _touch(env.hub / f"models--{repo.repo_id.replace('/', '--')}" / "snapshots" / repo.revision / name)
-        return env.hub
-
-    def test_the_plan_the_presence_check_and_the_loader_agree_on_the_packaged_files(self, env):
-        """The row, the offline presence check and the backend's cache lookup all read the same file list."""
-        config = load_packaged_config()
-        preset = {item.id: item for item in parse_audio_presets(config)}["higgs3"]
-        files = preset.files
-        targets = row_plan("audio", "higgs3", _web_config(env, config)).targets
-
-        assert [item.repo_id for item in files] == [target.repo_id for target in targets] == ["bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer"]
-        assert [set(item.patterns) for item in files] == [set(target.allow_patterns) for target in targets]
-        assert not any(target_present_offline(target) for target in targets)
-        assert _rows(env, config)["higgs3"]["downloaded"] is False
-
-        self._snapshot_every_listed_file(env, files)
-
-        assert all(target_present_offline(target) for target in targets)
-        assert all(cached_snapshot(HubFiles(item.repo_id, item.revision, item.patterns)) is not None for item in files)
-        assert [snapshot_dir(item).name for item in files] == [item.revision for item in files]
-        assert _rows(env, config)["higgs3"]["downloaded"] is True
-
-    @pytest.mark.parametrize("index", [0, 1])
-    def test_a_listed_file_missing_from_either_repository_fails_all_three_alike(self, env, index):
-        config = load_packaged_config()
-        preset = {item.id: item for item in parse_audio_presets(config)}["higgs3"]
-        files = preset.files
-        self._snapshot_every_listed_file(env, files)
-        broken = files[index]
-        (env.hub / f"models--{broken.repo_id.replace('/', '--')}" / "snapshots" / broken.revision / broken.patterns[-1]).unlink()
-        target = row_plan("audio", "higgs3", _web_config(env, config)).targets[index]
-
-        assert target_present_offline(target) is False
-        assert cached_snapshot(HubFiles(broken.repo_id, broken.revision, broken.patterns)) is None
-        with pytest.raises(FileNotFoundError, match=broken.repo_id):
-            snapshot_dir(broken)
-        assert _rows(env, config)["higgs3"]["downloaded"] is False
-
-    def test_the_size_is_the_sum_of_both_repositories(self, env):
-        official = self._cache_blobs(env, HIGGS_REPO, 6_000_000)
-        codec = self._cache_blobs(env, HIGGS_CODEC_REPO, 1_000)
-
-        row = _rows(env, target_present=lambda _target: True)["higgs3"]
-
-        assert row["disk_size_label"] == disk_size_label(repo_disk_bytes(official) + repo_disk_bytes(codec))
-        assert row["disk_size_label"] == disk_size_label(6_001_000)
 
 
 class TestDownloadPlan:
@@ -331,7 +238,7 @@ class TestCacheListing:
     def test_the_repositories_of_every_preset_are_used(self, env):
         used = audio_repo_ids(audio_config())
 
-        assert {"m-a-p/YuE2-3B", "m-a-p/YuE2-Vae", "bosonai/higgs-tts-3-4b", "bosonai/higgs-audio-v2-tokenizer", "Comfy-Org/stable-audio-3"} <= used
+        assert {"m-a-p/YuE2-3B", "m-a-p/YuE2-Vae", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Comfy-Org/stable-audio-3"} <= used
 
     def test_a_cached_audio_repository_is_not_offered_as_an_unused_download(self, env):
         _cache(env.hub, "m-a-p/YuE2-3B")
@@ -345,38 +252,60 @@ class TestCacheListing:
         assert [repo.repo_id for repo in unused] == ["org/unused"]
 
 
-class TestOnAMac:
-    """On a Mac, Higgs runs on its ``mps`` entry: its own family and the model repository only."""
+class TestQwenCloningFiles:
+    """Qwen3-TTS keeps the cloning checkpoint apart: the row's download covers CustomVoice, ``voice_download`` covers Base, and delete and the cache cover both."""
 
-    @pytest.fixture
-    def mac(self, env, monkeypatch):
-        monkeypatch.setattr(audio_models_module, "audio_platform_key", lambda: "mps")
-        return env
+    def _config(self):
+        return audio_config(qwen3_tts=qwen3_tts_preset())
 
-    def test_the_download_plan_is_the_model_repository_only(self, mac):
-        targets = row_plan("audio", "higgs3", _web_config(mac)).targets
-
-        assert [target.repo_id for target in targets] == ["bosonai/higgs-tts-3-4b"]
-
-    def test_the_row_is_downloaded_with_the_model_repository_alone(self, mac):
-        row = _rows(mac, target_present=lambda target: target.repo_id == "bosonai/higgs-tts-3-4b")["higgs3"]
+    def test_the_row_is_downloaded_with_customvoice_alone_and_reports_the_cloning_files_apart(self, env):
+        row = _rows(env, self._config(), target_present=lambda target: target.repo_id == QWEN_CUSTOM_REPO.split("@")[0])["qwen3_tts"]
 
         assert (row["downloaded"], row["download_needed"]) == (True, False)
+        assert row["voice_download"] == {"downloaded": False}
 
-    def test_deleting_it_removes_the_model_repository_only(self, mac, monkeypatch):
-        for repo in (HIGGS_REPO, HIGGS_CODEC_REPO):
-            _cache(mac.hub, repo.split("@")[0])
-        web_config = _web_config(mac)
-        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+    def test_the_cloning_files_count_as_downloaded_when_present(self, env):
+        row = _rows(env, self._config(), target_present=lambda _target: True)["qwen3_tts"]
 
-        with TestClient(web_server.app) as client:
-            assert client.delete("/api/audio-models/higgs3").status_code == 200
+        assert row["voice_download"] == {"downloaded": True}
 
-        assert not (mac.hub / "models--bosonai--higgs-tts-3-4b").exists()
-        assert (mac.hub / "models--bosonai--higgs-audio-v2-tokenizer").is_dir()
+    def test_a_speech_model_without_cloning_files_has_a_null_voice_download_and_other_kinds_have_no_key(self, env):
+        preset = qwen3_tts_preset()
+        del preset["voice_files"]
+        rows = _rows(env, audio_config(qwen3_tts=preset, yue2=yue2_preset(), sa3=sa3_preset()), target_present=lambda _target: True)
 
-    def test_a_codec_repository_the_mac_does_not_load_is_offered_as_unused(self, mac):
-        used = audio_repo_ids(audio_config())
+        assert rows["qwen3_tts"]["voice_download"] is None
+        assert "voice_download" not in rows["yue2"] and "voice_download" not in rows["sa3"]
 
-        assert "bosonai/higgs-tts-3-4b" in used and "bosonai/higgs-audio-v2-tokenizer" not in used
+    def test_deleting_removes_both_checkpoints(self, env):
+        for repo in (QWEN_CUSTOM_REPO, QWEN_BASE_REPO):
+            _cache(env.hub, repo.split("@")[0])
+        preset = next(item for item in parse_audio_presets(self._config()) if item.id == "qwen3_tts")
+
+        target = audio_delete_target(preset)
+
+        assert target.repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+        delete_model(target)
+        assert not any(env.hub.iterdir())
+
+    def test_deleting_with_only_the_cloning_files_on_disk_still_finds_them(self, env):
+        _cache(env.hub, QWEN_BASE_REPO.split("@")[0])
+        preset = next(item for item in parse_audio_presets(self._config()) if item.id == "qwen3_tts")
+
+        assert audio_delete_target(preset).repo_ids == ("Qwen/Qwen3-TTS-12Hz-1.7B-Base",)
+
+    def test_the_disk_size_adds_both_checkpoints(self, env):
+        for repo in (QWEN_CUSTOM_REPO, QWEN_BASE_REPO):
+            _cache(env.hub, repo.split("@")[0])
+
+        row = _rows(env, self._config(), target_present=lambda _target: True)["qwen3_tts"]
+
+        assert row["disk_size_label"] == disk_size_label(2)
+
+    def test_the_cache_listing_uses_both_repositories(self, env):
+        assert {"Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"} <= audio_repo_ids(self._config())
+
+    def test_the_models_page_download_plan_stays_on_the_main_files(self, env):
+        part = row_plan("audio", "qwen3_tts", _web_config(env, self._config()))
+
+        assert [target.repo_id for target in part.targets] == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]

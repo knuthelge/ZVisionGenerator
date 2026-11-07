@@ -167,4 +167,54 @@ describe('Select', () => {
     pickOption(box, 'date');
     expect(onchange).toHaveBeenCalledExactlyOnceWith('date');
   });
+
+  describe('grouped columns', () => {
+    const KEYS = [
+      { value: '', label: 'Auto', hint: 'The model picks' },
+      { value: 'C', label: 'C major', group: 'Major' },
+      { value: 'D', label: 'D major', group: 'Major' },
+      { value: 'Cm', label: 'C minor', group: 'Minor' },
+      { value: 'Dm', label: 'D minor', group: 'Minor' },
+    ];
+
+    it('lists the options that have no group first, then one titled column per group, with the hint under the label', () => {
+      const { box } = mountSelect({ options: KEYS, value: '', groupColumns: true });
+      const options = openOptions(box);
+
+      expect(options.map((option) => option.dataset.value)).toEqual(['', 'C', 'D', 'Cm', 'Dm']);
+      const columns = Array.from(document.querySelectorAll('.ui-select-column'));
+      expect(columns.map((column) => column.getAttribute('aria-label'))).toEqual(['Major', 'Minor']);
+      expect(columns[1].querySelectorAll('[role="option"]')).toHaveLength(2);
+      expect(options[0].textContent).toContain('The model picks');
+      expect(options[0].closest('.ui-select-column')).toBeNull();
+    });
+
+    it('moves Left and Right to the same row of the next column, and Down along the order', () => {
+      const { box } = mountSelect({ options: KEYS, value: 'D', groupColumns: true });
+      const list = document.getElementById(openOptions(box)[0].closest('[role="listbox"]')!.id)!;
+      const active = () => list.querySelector('[data-active="true"]')?.getAttribute('data-value');
+
+      expect(active()).toBe('D');
+      key(list, 'ArrowRight');
+      expect(active()).toBe('Dm');
+      key(list, 'ArrowRight');
+      expect(active()).toBe('Dm');
+      key(list, 'ArrowLeft');
+      expect(active()).toBe('D');
+      key(list, 'ArrowDown');
+      expect(active()).toBe('Cm');
+    });
+
+    it('lists the options in one column without the prop, and picks from the columns', () => {
+      const flat = mountSelect({ options: KEYS, value: '' });
+      openOptions(flat.box);
+      expect(document.querySelector('.ui-select-column')).toBeNull();
+      flushSync(() => flat.box.click());
+
+      const onchange = vi.fn();
+      const { box } = mountSelect({ options: KEYS, value: '', groupColumns: true, onchange });
+      pickOption(box, 'Dm');
+      expect(onchange).toHaveBeenCalledExactlyOnceWith('Dm');
+    });
+  });
 });

@@ -22,8 +22,11 @@
   import { Icon } from '$lib/components/atoms';
   import type { EnhanceAxis } from '$lib/types';
 
+  /** What the picker reads of an axis: image, video and audio axes all have these. */
+  type PickerAxis = Pick<EnhanceAxis, 'label' | 'options' | 'default'>;
+
   interface Props {
-    axis: EnhanceAxis;
+    axis: PickerAxis;
     /** The chosen option's slug. */
     value: string;
     /** Id of the trigger button, which a row label points at. */

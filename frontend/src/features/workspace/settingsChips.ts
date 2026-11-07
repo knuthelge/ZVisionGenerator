@@ -7,12 +7,14 @@ import type { AudioWorkflow, DraftState, VideoKind, Workflow, WorkspaceWorkflow 
 import { AUDIO_KIND_INFO, VIDEO_KIND_INFO } from './kindInfo';
 import type { VoiceView } from './audioView';
 import { isAudioWorkflow } from '$lib/state/workspaceTab';
+import { keyShortName } from '$lib/state/musicSettings';
+import { hasDescribe, markedFields } from '$lib/state/audioFill';
 
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
   | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'seed' | 'runs'
   | 'source' | 'images' | 'track' | 'size' | 'audio' | 'loras' | 'upscale' | 'transparent' | 'model'
-  | 'kind' | 'voice' | 'length';
+  | 'kind' | 'voice' | 'delivery' | 'length' | 'tempo' | 'key' | 'soundType';
 
 export interface SettingChip {
   key: ChipKey;
@@ -25,6 +27,8 @@ export interface SettingChip {
   on?: boolean;
   /** Something to look at: a clip that may not fit, a model not downloaded. */
   warn?: boolean;
+  /** Describe it wrote the value and it is still as written: the chip carries a ✦. */
+  filled?: boolean;
   /** A glyph before the label and value (the Audio tab's Kind chip). */
   icon?: IconName;
   /** The preset chip's applied preset slug, empty when none is applied. */
@@ -121,23 +125,39 @@ export interface AudioChipFacts {
   voiceBlocks: boolean;
   /** Whether a chip's settings differ from their defaults (`SETTING_ROWS` decides which settings are the chip's). */
   changed: (chip: ChipKey) => boolean;
-  /** The model takes a length (Sound). */
+  /** The model takes a length (Sound, or Music on a model that sets its length). */
   showLength: boolean;
+  /** The length in seconds the Length chip shows (what Auto will use, while `lengthAuto`); null where there is none. */
+  seconds: number | null;
+  /** A sound's length is on Auto: the chip reads `auto ≈ 12 s`. */
+  lengthAuto: boolean;
+  /** Sound: the Type chip, with the type's label as its value and whether the type is not Auto. */
+  soundType: { shown: boolean; label: string };
+  /** Speech in a built-in voice: the Delivery chip, with the Vibe, `Natural` or `Custom` as its value. */
+  delivery: { shown: boolean; summary: string };
+  /** Music: the Tempo and Key chips. `key` is the chosen key's name (`A minor`), or null for Auto. */
+  tempo: { shown: boolean };
+  key: { shown: boolean; name: string | null };
   showSeed: boolean;
   showRuns: boolean;
 }
 
 /**
- * The chips of the Audio tab, in the order its settings change in the loop: the Kind and the Model first, then the Voice (Speech)
- * or the Length (Sound), the Seed and the Batch. Presets, LoRAs and size have none here.
+ * The chips of the Audio tab, in the order its settings change in the loop: the Kind and the Model first, then the Voice and the Delivery (Speech),
+ * the Tempo and Key (Music), the Type (Sound) or the Length (Sound, or Music on a model that sets it), the Seed and the Batch. Presets, LoRAs and size have none here.
  */
 export function audioChips(f: AudioChipFacts): SettingChip[] {
   const { state: s } = f;
+  const marked = hasDescribe(f.kind) ? markedFields(s, f.kind) : [];
   const chips: (SettingChip | null)[] = [
     { key: 'kind', label: '', value: AUDIO_KIND_INFO[f.kind].label, changed: false, icon: AUDIO_KIND_INFO[f.kind].icon },
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
     f.voice ? { key: 'voice', label: 'Voice', value: f.voice.chip, changed: f.changed('voice'), on: f.voice.recording && f.voice.summary.tone === 'active', warn: f.voice.summary.tone === 'error' || f.voiceBlocks } : null,
-    f.showLength ? { key: 'length', label: 'Length', value: `${fmt(s.audioSeconds)} s`, changed: f.changed('length') } : null,
+    f.delivery.shown ? { key: 'delivery', label: 'Delivery', value: f.delivery.summary, changed: f.changed('delivery'), on: f.changed('delivery'), filled: marked.includes('vibe') } : null,
+    f.tempo.shown ? { key: 'tempo', label: 'Tempo', value: s.audioTempo === null ? 'Auto' : String(s.audioTempo), changed: f.changed('tempo'), filled: marked.includes('tempo') } : null,
+    f.key.shown ? { key: 'key', label: 'Key', value: f.key.name === null ? 'Auto' : keyShortName(f.key.name), changed: f.changed('key'), filled: marked.includes('key') } : null,
+    f.soundType.shown ? { key: 'soundType', label: 'Type', value: f.soundType.label, changed: f.changed('soundType'), on: f.changed('soundType') } : null,
+    f.showLength && f.seconds !== null ? { key: 'length', label: 'Length', value: f.lengthAuto ? `auto ≈ ${fmt(f.seconds)} s` : `${fmt(f.seconds)} s`, changed: f.changed('length'), on: f.changed('length') } : null,
     f.showSeed ? { key: 'seed', label: 'Seed', value: s.seed === null ? 'random' : String(s.seed), changed: f.changed('seed'), on: s.seed !== null } : null,
     f.showRuns ? { key: 'runs', label: 'Batch', value: `×${s.runs}`, changed: f.changed('runs') } : null,
   ];
@@ -148,9 +168,9 @@ export function audioChips(f: AudioChipFacts): SettingChip[] {
 const PENDING_IMAGE_CHIPS: [ChipKey, string][] = [['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['runs', 'Batch'], ['images', 'Images'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']];
 const PENDING_VIDEO_CHIPS: [ChipKey, string][] = [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['images', 'Images'], ['track', 'Track'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']];
 const PENDING_AUDIO_CHIPS: Record<AudioWorkflow, [ChipKey, string][]> = {
-  music: [['kind', ''], ['model', ''], ['seed', 'Seed'], ['runs', 'Batch']],
-  speech: [['kind', ''], ['model', ''], ['voice', 'Voice'], ['seed', 'Seed'], ['runs', 'Batch']],
-  sound: [['kind', ''], ['model', ''], ['length', 'Length'], ['seed', 'Seed'], ['runs', 'Batch']],
+  music: [['kind', ''], ['model', ''], ['tempo', 'Tempo'], ['key', 'Key'], ['seed', 'Seed'], ['runs', 'Batch']],
+  speech: [['kind', ''], ['model', ''], ['voice', 'Voice'], ['delivery', 'Delivery'], ['seed', 'Seed'], ['runs', 'Batch']],
+  sound: [['kind', ''], ['model', ''], ['soundType', 'Type'], ['length', 'Length'], ['seed', 'Seed'], ['runs', 'Batch']],
 };
 const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
   txt2img: PENDING_IMAGE_CHIPS,

@@ -1,0 +1,826 @@
+{
+  "description": "Round trip of a take that sets every new value, per case. form: the fields the Audio tab posts, none for a control the model hides such as Stable Audio's Lyrics under Music (also the job's recorded settings, which Retry and Load settings read). reuse_form: the fields after a Reuse, when they differ (a recording has no delivery; a length left on Auto stays Auto, because the take records the length asked for apart from the one it was made at). request: the request the form makes (seed aside). payload: the settings the FLAC records. reuse: the Gallery Reuse params (an enhanced take adds its record as sorted JSON under enhance, as the FLAC stores it). retry: what jobSettingsPrefill makes of form. A voice path under /voices/ is moved into a scratch folder by the tests.",
+  "cases": [
+    {
+      "name": "a song with a tempo and a key",
+      "seed": 7,
+      "form": {
+        "mode": "audio",
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "upbeat synth-pop, female vocal",
+        "lyrics": "[verse]\nHello there\n[chorus]\nLa la la",
+        "tempo": "92",
+        "key": "F#m",
+        "runs": "1",
+        "seed": "7"
+      },
+      "request": {
+        "preset": "yue2",
+        "kind": "music",
+        "prompt": "upbeat synth-pop, female vocal",
+        "lyrics": "[verse]\nHello there\n[chorus]\nLa la la",
+        "seconds": null,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": null,
+        "tempo": 92,
+        "key": "F#m",
+        "delivery": null,
+        "sound_type": null,
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "music",
+        "kind": "music",
+        "model": "yue2",
+        "prompt": "upbeat synth-pop, female vocal",
+        "lyrics": "[verse]\nHello there\n[chorus]\nLa la la",
+        "tempo": 92,
+        "key": "F#m",
+        "seed": 7
+      },
+      "reuse": {
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "upbeat synth-pop, female vocal",
+        "lyrics": "[verse]\nHello there\n[chorus]\nLa la la",
+        "tempo": "92",
+        "key": "F#m",
+        "seed": "7"
+      },
+      "retry": {
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "upbeat synth-pop, female vocal",
+        "lyrics": "[verse]\nHello there\n[chorus]\nLa la la",
+        "tempo": "92",
+        "key": "F#m",
+        "seed": "7",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "a song with tempo and key on Auto",
+      "seed": 3,
+      "form": {
+        "mode": "audio",
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "calm piano, slow",
+        "lyrics": "",
+        "tempo": "",
+        "key": "",
+        "runs": "1",
+        "seed": "3"
+      },
+      "request": {
+        "preset": "yue2",
+        "kind": "music",
+        "prompt": "calm piano, slow",
+        "lyrics": "",
+        "seconds": null,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": null,
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "music",
+        "kind": "music",
+        "model": "yue2",
+        "prompt": "calm piano, slow",
+        "seed": 3
+      },
+      "reuse": {
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "calm piano, slow",
+        "seed": "3"
+      },
+      "retry": {
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "calm piano, slow",
+        "lyrics": "",
+        "tempo": "",
+        "key": "",
+        "seed": "3",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "Stable Audio under Music with a chosen length",
+      "seed": 5,
+      "form": {
+        "mode": "audio",
+        "workflow": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seconds": "45",
+        "tempo": "120",
+        "key": "C",
+        "runs": "1",
+        "seed": "5"
+      },
+      "request": {
+        "preset": "sa3",
+        "kind": "music",
+        "prompt": "ambient pad, warm",
+        "lyrics": "",
+        "seconds": 45.0,
+        "requested_seconds": 45.0,
+        "voice": null,
+        "speaker": null,
+        "tempo": 120,
+        "key": "C",
+        "delivery": null,
+        "sound_type": null,
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "music",
+        "kind": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seconds": 45.0,
+        "requested_seconds": 45.0,
+        "tempo": 120,
+        "key": "C",
+        "seed": 5
+      },
+      "reuse": {
+        "workflow": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seconds": "45",
+        "tempo": "120",
+        "key": "C",
+        "seed": "5"
+      },
+      "retry": {
+        "workflow": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seconds": "45",
+        "tempo": "120",
+        "key": "C",
+        "seed": "5",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "Stable Audio under Music with the length on Auto",
+      "seed": 5,
+      "form": {
+        "mode": "audio",
+        "workflow": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seconds": "",
+        "tempo": "",
+        "key": "",
+        "runs": "1",
+        "seed": "5"
+      },
+      "request": {
+        "preset": "sa3",
+        "kind": "music",
+        "prompt": "ambient pad, warm",
+        "lyrics": "",
+        "seconds": 30.0,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": null,
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "music",
+        "kind": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seconds": 30.0,
+        "seed": 5
+      },
+      "reuse": {
+        "workflow": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seed": "5"
+      },
+      "retry": {
+        "workflow": "music",
+        "model": "sa3",
+        "prompt": "ambient pad, warm",
+        "seconds": "",
+        "tempo": "",
+        "key": "",
+        "seed": "5",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "speech in a built-in voice with a chosen delivery",
+      "seed": 4,
+      "form": {
+        "mode": "audio",
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "speaker": "vivian",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "runs": "1",
+        "seed": "4"
+      },
+      "request": {
+        "preset": "qwen3_tts",
+        "kind": "speech",
+        "prompt": "Welcome back.",
+        "lyrics": "",
+        "seconds": null,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": "vivian",
+        "tempo": null,
+        "key": null,
+        "delivery": {
+          "emotion": "sad",
+          "manner": "whisper",
+          "pace": "slow",
+          "pitch": "low",
+          "expressiveness": "high"
+        },
+        "sound_type": null,
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "speech",
+        "kind": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "speaker": "vivian",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "seed": 4
+      },
+      "reuse": {
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "speaker": "vivian",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "seed": "4"
+      },
+      "retry": {
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "speaker": "vivian",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "seed": "4",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "speech following a recording ignores the delivery",
+      "seed": 4,
+      "form": {
+        "mode": "audio",
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "voice_path": "/voices/me.wav",
+        "voice_text": "Hello, this is me.",
+        "voice_consent": [
+          "false",
+          "on"
+        ],
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "runs": "1",
+        "seed": "4"
+      },
+      "request": {
+        "preset": "qwen3_tts",
+        "kind": "speech",
+        "prompt": "Welcome back.",
+        "lyrics": "",
+        "seconds": null,
+        "requested_seconds": null,
+        "voice": {
+          "path": "/voices/me.wav",
+          "text": "Hello, this is me."
+        },
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": null,
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "speech",
+        "kind": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "voice_path": "/voices/me.wav",
+        "voice_text": "Hello, this is me.",
+        "seed": 4
+      },
+      "reuse": {
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "voice_path": "/voices/me.wav",
+        "voice_text": "Hello, this is me.",
+        "seed": "4"
+      },
+      "retry": {
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "voice_path": "/voices/me.wav",
+        "voice_text": "Hello, this is me.",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "seed": "4",
+        "runs": "1"
+      },
+      "reuse_form": {
+        "mode": "audio",
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back.",
+        "voice_path": "/voices/me.wav",
+        "voice_text": "Hello, this is me.",
+        "voice_consent": [
+          "false",
+          "on"
+        ],
+        "runs": "1",
+        "seed": "4"
+      }
+    },
+    {
+      "name": "a sound on Auto",
+      "seed": 3,
+      "form": {
+        "mode": "audio",
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "rain on a tin roof",
+        "seconds": "",
+        "sound_type": "auto",
+        "runs": "1",
+        "seed": "3"
+      },
+      "request": {
+        "preset": "sa3",
+        "kind": "sound",
+        "prompt": "rain on a tin roof",
+        "lyrics": "",
+        "seconds": 12.0,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": "auto",
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "sound",
+        "kind": "sound",
+        "model": "sa3",
+        "prompt": "rain on a tin roof",
+        "seconds": 12.0,
+        "sound_type": "auto",
+        "seed": 3
+      },
+      "reuse": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "rain on a tin roof",
+        "sound_type": "auto",
+        "seed": "3"
+      },
+      "retry": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "rain on a tin roof",
+        "seconds": "",
+        "sound_type": "auto",
+        "seed": "3",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "an effect on Auto is five seconds",
+      "seed": 3,
+      "form": {
+        "mode": "audio",
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "a door slams",
+        "seconds": "",
+        "sound_type": "effect",
+        "runs": "1",
+        "seed": "3"
+      },
+      "request": {
+        "preset": "sa3",
+        "kind": "sound",
+        "prompt": "a door slams",
+        "lyrics": "",
+        "seconds": 5.0,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": "effect",
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "sound",
+        "kind": "sound",
+        "model": "sa3",
+        "prompt": "a door slams",
+        "seconds": 5.0,
+        "sound_type": "effect",
+        "seed": 3
+      },
+      "reuse": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "a door slams",
+        "sound_type": "effect",
+        "seed": "3"
+      },
+      "retry": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "a door slams",
+        "seconds": "",
+        "sound_type": "effect",
+        "seed": "3",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "an ambience with a chosen length",
+      "seed": 3,
+      "form": {
+        "mode": "audio",
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "a forest at night",
+        "seconds": "20",
+        "sound_type": "ambience",
+        "runs": "1",
+        "seed": "3"
+      },
+      "request": {
+        "preset": "sa3",
+        "kind": "sound",
+        "prompt": "a forest at night",
+        "lyrics": "",
+        "seconds": 20.0,
+        "requested_seconds": 20.0,
+        "voice": null,
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": "ambience",
+        "prompt_input": null,
+        "enhance_record": null
+      },
+      "payload": {
+        "workflow": "sound",
+        "kind": "sound",
+        "model": "sa3",
+        "prompt": "a forest at night",
+        "seconds": 20.0,
+        "requested_seconds": 20.0,
+        "sound_type": "ambience",
+        "seed": 3
+      },
+      "reuse": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "a forest at night",
+        "seconds": "20",
+        "sound_type": "ambience",
+        "seed": "3"
+      },
+      "retry": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "a forest at night",
+        "seconds": "20",
+        "sound_type": "ambience",
+        "seed": "3",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "an enhanced style whose own text is empty",
+      "seed": 7,
+      "form": {
+        "mode": "audio",
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "dreamy lo-fi, soft piano",
+        "prompt_input": "",
+        "enhance_record": "{\"settings\":{\"genre\":\"lo-fi\"},\"model\":\"example/enhancer-model\",\"tier\":\"custom\",\"format\":\"text\",\"task\":\"style\"}",
+        "lyrics": "",
+        "tempo": "",
+        "key": "",
+        "runs": "1",
+        "seed": "7"
+      },
+      "request": {
+        "preset": "yue2",
+        "kind": "music",
+        "prompt": "dreamy lo-fi, soft piano",
+        "lyrics": "",
+        "seconds": null,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": null,
+        "prompt_input": "",
+        "enhance_record": {
+          "settings": {
+            "genre": "lo-fi"
+          },
+          "model": "example/enhancer-model",
+          "tier": "custom",
+          "format": "text",
+          "task": "style"
+        }
+      },
+      "payload": {
+        "workflow": "music",
+        "kind": "music",
+        "model": "yue2",
+        "prompt": "dreamy lo-fi, soft piano",
+        "enhance": {
+          "settings": {
+            "genre": "lo-fi"
+          },
+          "model": "example/enhancer-model",
+          "tier": "custom",
+          "format": "text",
+          "task": "style"
+        },
+        "prompt_input": "",
+        "seed": 7
+      },
+      "reuse": {
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "",
+        "enhanced_prompt": "dreamy lo-fi, soft piano",
+        "seed": "7",
+        "enhance": "{\"format\":\"text\",\"model\":\"example/enhancer-model\",\"settings\":{\"genre\":\"lo-fi\"},\"task\":\"style\",\"tier\":\"custom\"}"
+      },
+      "retry": {
+        "workflow": "music",
+        "model": "yue2",
+        "prompt": "",
+        "enhanced_prompt": "dreamy lo-fi, soft piano",
+        "enhance": "{\"settings\":{\"genre\":\"lo-fi\"},\"model\":\"example/enhancer-model\",\"tier\":\"custom\",\"format\":\"text\",\"task\":\"style\"}",
+        "lyrics": "",
+        "tempo": "",
+        "key": "",
+        "seed": "7",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "an enhanced sound with its own text",
+      "seed": 3,
+      "form": {
+        "mode": "audio",
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "Heavy rain on a tin roof, steady, close.",
+        "prompt_input": "rain",
+        "enhance_record": "{\"settings\":{},\"model\":\"example/enhancer-model\",\"tier\":\"custom\",\"format\":\"text\",\"task\":\"sound\"}",
+        "seconds": "",
+        "sound_type": "ambience",
+        "runs": "1",
+        "seed": "3"
+      },
+      "request": {
+        "preset": "sa3",
+        "kind": "sound",
+        "prompt": "Heavy rain on a tin roof, steady, close.",
+        "lyrics": "",
+        "seconds": 12.0,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": null,
+        "tempo": null,
+        "key": null,
+        "delivery": null,
+        "sound_type": "ambience",
+        "prompt_input": "rain",
+        "enhance_record": {
+          "settings": {},
+          "model": "example/enhancer-model",
+          "tier": "custom",
+          "format": "text",
+          "task": "sound"
+        }
+      },
+      "payload": {
+        "workflow": "sound",
+        "kind": "sound",
+        "model": "sa3",
+        "prompt": "Heavy rain on a tin roof, steady, close.",
+        "seconds": 12.0,
+        "sound_type": "ambience",
+        "enhance": {
+          "settings": {},
+          "model": "example/enhancer-model",
+          "tier": "custom",
+          "format": "text",
+          "task": "sound"
+        },
+        "prompt_input": "rain",
+        "seed": 3
+      },
+      "reuse": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "rain",
+        "enhanced_prompt": "Heavy rain on a tin roof, steady, close.",
+        "sound_type": "ambience",
+        "seed": "3",
+        "enhance": "{\"format\":\"text\",\"model\":\"example/enhancer-model\",\"settings\":{},\"task\":\"sound\",\"tier\":\"custom\"}"
+      },
+      "retry": {
+        "workflow": "sound",
+        "model": "sa3",
+        "prompt": "rain",
+        "enhanced_prompt": "Heavy rain on a tin roof, steady, close.",
+        "enhance": "{\"settings\":{},\"model\":\"example/enhancer-model\",\"tier\":\"custom\",\"format\":\"text\",\"task\":\"sound\"}",
+        "seconds": "",
+        "sound_type": "ambience",
+        "seed": "3",
+        "runs": "1"
+      }
+    },
+    {
+      "name": "speech written by the script helper",
+      "seed": 8,
+      "form": {
+        "mode": "audio",
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "[whisper] Welcome back. …\nCome in.",
+        "speaker": "ryan",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "runs": "1",
+        "seed": "8",
+        "prompt_input": "Welcome back. Come in.",
+        "enhance_record": "{\"settings\":{\"actions\":[\"fit\",\"delivery\"],\"seconds\":20,\"pace\":\"slow\"},\"model\":\"example/enhancer-model\",\"tier\":\"custom\",\"format\":\"text\",\"task\":\"script\"}"
+      },
+      "request": {
+        "preset": "qwen3_tts",
+        "kind": "speech",
+        "prompt": "[whisper] Welcome back. …\nCome in.",
+        "lyrics": "",
+        "seconds": null,
+        "requested_seconds": null,
+        "voice": null,
+        "speaker": "ryan",
+        "tempo": null,
+        "key": null,
+        "delivery": {
+          "emotion": "sad",
+          "manner": "whisper",
+          "pace": "slow",
+          "pitch": "low",
+          "expressiveness": "high"
+        },
+        "sound_type": null,
+        "prompt_input": "Welcome back. Come in.",
+        "enhance_record": {
+          "settings": {
+            "actions": ["fit", "delivery"],
+            "seconds": 20,
+            "pace": "slow"
+          },
+          "model": "example/enhancer-model",
+          "tier": "custom",
+          "format": "text",
+          "task": "script"
+        }
+      },
+      "payload": {
+        "workflow": "speech",
+        "kind": "speech",
+        "model": "qwen3_tts",
+        "prompt": "[whisper] Welcome back. …\nCome in.",
+        "speaker": "ryan",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "seed": 8,
+        "enhance": {
+          "settings": {
+            "actions": ["fit", "delivery"],
+            "seconds": 20,
+            "pace": "slow"
+          },
+          "model": "example/enhancer-model",
+          "tier": "custom",
+          "format": "text",
+          "task": "script"
+        },
+        "prompt_input": "Welcome back. Come in."
+      },
+      "reuse": {
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back. Come in.",
+        "speaker": "ryan",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "seed": "8",
+        "enhanced_prompt": "[whisper] Welcome back. …\nCome in.",
+        "enhance": "{\"format\":\"text\",\"model\":\"example/enhancer-model\",\"settings\":{\"actions\":[\"fit\",\"delivery\"],\"pace\":\"slow\",\"seconds\":20},\"task\":\"script\",\"tier\":\"custom\"}"
+      },
+      "retry": {
+        "workflow": "speech",
+        "model": "qwen3_tts",
+        "prompt": "Welcome back. Come in.",
+        "speaker": "ryan",
+        "emotion": "sad",
+        "manner": "whisper",
+        "pace": "slow",
+        "pitch": "low",
+        "expressiveness": "high",
+        "seed": "8",
+        "runs": "1",
+        "enhanced_prompt": "[whisper] Welcome back. …\nCome in.",
+        "enhance": "{\"settings\":{\"actions\":[\"fit\",\"delivery\"],\"seconds\":20,\"pace\":\"slow\"},\"model\":\"example/enhancer-model\",\"tier\":\"custom\",\"format\":\"text\",\"task\":\"script\"}"
+      }
+    }
+  ]
+}

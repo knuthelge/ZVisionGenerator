@@ -12,13 +12,13 @@ import numpy as np
 from tests._audio_presets import audio_config
 from tests._fake_audio import decode_fake, fake_save_flac, install_fake_audio
 
-from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest, VoiceRef
+from zvisiongenerator.core.audio_types import AudioClip, AudioGenerationRequest, SpeechDelivery, VoiceRef
 from zvisiongenerator.utils.audio_preset import AudioPreset, parse_audio_presets
 from zvisiongenerator.utils.video_splice import write_pcm16_wav
 
 
 def preset(model_id: str) -> AudioPreset:
-    """Return the parsed fixture preset *model_id* (``yue2``, ``higgs3`` or ``sa3``)."""
+    """Return the parsed fixture preset *model_id* (``yue2``, ``qwen3_tts`` or ``sa3``)."""
     return next(item for item in parse_audio_presets(audio_config()) if item.id == model_id)
 
 
@@ -80,7 +80,7 @@ def patch_runner(monkeypatch, backend: Any, *, present: bool = True, platform: s
 
 
 def voice_folder(root: Path) -> Path:
-    """Return a folder under *root* of fake takes (see ``tests/_fake_audio.py``) with a recording (``me.wav``), an *Any* take (``any.flac``) and a cloned take (``cloned.flac``), each 4 s."""
+    """Return a folder under *root* of fake takes (see ``tests/_fake_audio.py``) with a recording (``me.wav``), a take in a built-in voice (``any.flac``) and a cloned take (``cloned.flac``), each 4 s."""
     folder = root / "voices"
     folder.mkdir()
     tone = sine(4.0, rate=24000)
@@ -99,6 +99,12 @@ def case_request(item: dict, voices: Path) -> AudioGenerationRequest:
         prompt=item["prompt"],
         lyrics=item["lyrics"],
         seconds=item["seconds"],
+        requested_seconds=item.get("requested_seconds"),
         voice=None if voice is None else VoiceRef(voice["path"].replace("/voices/", f"{voices}/"), voice["text"]),
         seed=item["seed"],
+        speaker=item["speaker"],
+        tempo=item.get("tempo"),
+        key=item.get("key"),
+        delivery=SpeechDelivery(**item["delivery"]) if item.get("delivery") else None,
+        sound_type=item.get("sound_type"),
     )

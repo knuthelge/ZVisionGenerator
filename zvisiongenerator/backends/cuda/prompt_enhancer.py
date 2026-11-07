@@ -10,6 +10,9 @@ from typing import Any
 from zvisiongenerator.utils.config import model_reference
 
 _END_TOKEN = "<|im_end|>"
+# Subtracted once from the logit of every token already generated in this request; stops songs from repeating a verse.
+# transformers runs custom processors before its temperature and top-k warpers.
+_PRESENCE_PENALTY = 1.5
 
 
 def _make_stopping_criteria(cancelled: Callable[[], bool] | None) -> Any:
@@ -20,6 +23,22 @@ def _make_stopping_criteria(cancelled: Callable[[], bool] | None) -> Any:
             return bool(cancelled is not None and cancelled())
 
     return StoppingCriteriaList([_CancelCriteria()])
+
+
+def _make_presence_penalty(prompt_len: int) -> Any:
+    """Return a logits processor list that penalises each token generated after the first *prompt_len* ids."""
+    from transformers import LogitsProcessor, LogitsProcessorList
+
+    class _PresencePenalty(LogitsProcessor):
+        def __call__(self, input_ids: Any, scores: Any) -> Any:
+            generated = input_ids[:, prompt_len:]
+            if generated.shape[1] == 0:
+                return scores
+            seen = scores.new_zeros(scores.shape)
+            seen.scatter_(1, generated, 1.0)
+            return scores - _PRESENCE_PENALTY * seen
+
+    return LogitsProcessorList([_PresencePenalty()])
 
 
 class TransformersPromptEnhancer:
@@ -91,6 +110,7 @@ class TransformersPromptEnhancer:
                         pad_token_id=self._tokenizer.pad_token_id if self._tokenizer.pad_token_id is not None else (self._eos_ids[0] if self._eos_ids else None),
                         streamer=streamer,
                         stopping_criteria=_make_stopping_criteria(cancelled),
+                        logits_processor=_make_presence_penalty(inputs["input_ids"].shape[1]),
                     )
             except BaseException as exc:  # noqa: BLE001 - re-raised on the consumer thread
                 errors.append(exc)

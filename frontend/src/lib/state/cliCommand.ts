@@ -1,5 +1,6 @@
 import type { ExtendSourceInfo, JobSettings } from '$lib/types';
 import { CUSTOM_PALETTE } from './promptEnhance';
+import { DEFAULT_SPEECH_DELIVERY, DELIVERY_FIELDS } from './audioDraft';
 import { checked, first, numberOrNull, values } from './jobSettings';
 
 /** A submitted setting the CLI cannot express exactly; the copied command differs from the Web job there. */
@@ -271,9 +272,11 @@ const AUDIO_PROMPT_ERRORS: Record<string, string> = {
 /**
  * Build the `ziv audio` command for a music, speech or sound job.
  *
- * Lyrics go with music only, the length with sound only, and a voice with speech only, as the form shows them. A
- * recording from a file or a gallery take is named by its path; `--voice-consent` follows the form's tick, which a
- * take made in the model's own voice never shows.
+ * The kind is always named with `--kind`. Lyrics, Tempo and Key go with music only, the Sound Type with sound only, the length
+ * with sound and with music of a model that sets it (the form sends none otherwise), and a voice with speech only, as the form
+ * shows them. A setting on Auto (blank) or at its default (a sound type of `auto`, a delivery value of neutral) is left out. A
+ * recording from a file or a gallery take is named by its path; `--voice-consent` follows the form's tick, which a take made
+ * in a built-in voice never shows. A built-in voice is `--speaker` with its delivery, and a recording replaces both.
  *
  * @throws {Error} When the text is blank, or a voice recording has no transcript.
  */
@@ -286,11 +289,17 @@ function audioCliCommand(settings: JobSettings, options: CliCommandOptions): Cli
   };
 
   flag('--model', text(settings, 'model'));
+  args.push('--kind', kind);
   const prompt = untrimmed(settings, 'prompt');
   if (prompt === undefined) throw new Error(AUDIO_PROMPT_ERRORS[kind] ?? AUDIO_PROMPT_ERRORS.music);
   args.push('--prompt', prompt);
-  if (kind === 'music') flag('--lyrics', untrimmed(settings, 'lyrics'));
-  if (kind === 'sound') flag('--seconds', text(settings, 'seconds'));
+  if (kind === 'music') {
+    flag('--lyrics', untrimmed(settings, 'lyrics'));
+    flag('--tempo', text(settings, 'tempo'));
+    flag('--key', text(settings, 'key'));
+  }
+  if (kind !== 'speech') flag('--seconds', text(settings, 'seconds'));
+  if (kind === 'sound' && text(settings, 'sound_type') !== 'auto') flag('--sound-type', text(settings, 'sound_type'));
 
   if (kind === 'speech') {
     const upload = text(settings, 'voice_file');
@@ -301,6 +310,12 @@ function audioCliCommand(settings: JobSettings, options: CliCommandOptions): Cli
       if (upload !== undefined) caveats.push('uploaded_voice');
       args.push('--voice', voice, '--voice-text', transcript);
       if (checked(settings, 'voice_consent')) args.push('--voice-consent');
+    } else {
+      flag('--speaker', text(settings, 'speaker'));
+      for (const field of DELIVERY_FIELDS) {
+        const value = text(settings, field);
+        if (value !== DEFAULT_SPEECH_DELIVERY[field]) flag(`--${field}`, value);
+      }
     }
   }
 

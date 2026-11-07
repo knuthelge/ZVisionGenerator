@@ -4,7 +4,9 @@ import { audioView } from '../../features/workspace/audioView';
 import { AUDIO_MODELS } from '../../test-utils/audio';
 import type { DraftState } from '$lib/types';
 
-const HIGGS = AUDIO_MODELS[1];
+const NO_SETTINGS = { showLyrics: false, showLength: false, showTempo: false, showKey: false, showDelivery: false, showSoundType: false };
+
+const SPEECH_MODEL = AUDIO_MODELS[1];
 
 /** What a reload does to the page's state: every module starts again, and only localStorage is left. */
 async function reload(): Promise<{ draft: typeof import('./draft.svelte').draft; voiceConsent: typeof import('./voiceConsent.svelte').voiceConsent }> {
@@ -33,8 +35,8 @@ describe('the speaker\'s consent across a reload', () => {
     expect(second.voiceConsent.exempt).toBe(false);
     const view = audioView({
       state: second.draft.state as DraftState,
-      caps: { isAudio: true, audioKind: 'speech', showVoice: true },
-      model: HIGGS,
+      caps: { isAudio: true, audioKind: 'speech', showVoice: true, ...NO_SETTINGS },
+      model: SPEECH_MODEL,
       file: null,
       restored: true,
       lengthOf: () => null,

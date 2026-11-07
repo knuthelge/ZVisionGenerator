@@ -326,9 +326,9 @@ def _audio_definition(*controls: str) -> dict[str, Any]:
 
 
 AUDIO_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
-    "music": _audio_definition("music_style", "lyrics"),
-    "speech": _audio_definition("speech_text", *VOICE_CONTROLS),
-    "sound": _audio_definition("sound_prompt", "length"),
+    "music": _audio_definition("music_style", "lyrics", "tempo", "key", "length"),
+    "speech": _audio_definition("speech_text", *VOICE_CONTROLS, "delivery"),
+    "sound": _audio_definition("sound_prompt", "sound_type", "length"),
 }
 WORKFLOW_DEFINITIONS.update(AUDIO_WORKFLOW_DEFINITIONS)
 

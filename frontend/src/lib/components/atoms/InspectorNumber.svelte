@@ -11,6 +11,8 @@
     placeholder?: string;
     /** Empty input means `null` (e.g. "auto" or "random"); otherwise empty input is ignored. */
     nullable?: boolean;
+    /** Where an arrow key or a stepper starts while the value is `null`: the number Auto stands for. Without it, from the minimum. */
+    nudgeFrom?: number;
     disabled?: boolean;
     /** Report typed values only on commit, for a value the parent reshapes (e.g. converts and snaps). */
     commitOnly?: boolean;
@@ -36,6 +38,7 @@
     max,
     placeholder,
     nullable = false,
+    nudgeFrom,
     disabled = false,
     commitOnly = false,
     ariaLabel,
@@ -96,7 +99,7 @@
     // A commit-only field may hold typed text it has not reported yet; nudge from that.
     const input = event.currentTarget as HTMLInputElement;
     const typed = Number(input.value);
-    const start = commitOnly && input.value !== '' && Number.isFinite(typed) ? typed : value;
+    const start = commitOnly && input.value !== '' && Number.isFinite(typed) ? typed : (value ?? nudgeFrom ?? null);
     report(nudgeValue(start, event.key === 'ArrowUp' ? 1 : -1, { step, min, max }, event.shiftKey));
     showKept(input);
   }
@@ -104,7 +107,7 @@
   /** A stepper press: one step from the kept value, within bounds. */
   function nudge(direction: 1 | -1): void {
     if (disabled) return;
-    report(nudgeValue(value, direction, { step, min, max }));
+    report(nudgeValue(value ?? nudgeFrom ?? null, direction, { step, min, max }));
   }
 </script>
 

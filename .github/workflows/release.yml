@@ -9,7 +9,28 @@ permissions:
   contents: write
 
 jobs:
+  # Resolve the built wheel from an empty directory, as `uv tool install` does for a user, before anything is published.
+  wheel-resolves:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Check the wheel resolves on Linux, Windows and macOS
+        run: scripts/check_wheel_resolves.sh
+
   publish:
+    needs: wheel-resolves
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

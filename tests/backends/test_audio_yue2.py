@@ -15,11 +15,14 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+from yue2.protocol import GenerationConfig, SongRequest, resolve_sampling, token_prefixes
 
 import zvisiongenerator.backends.audio.yue2 as yue2_module
 from tests._audio_presets import audio_config
 from tests._factories import load_packaged_config
+from tests._paths import FIXTURES
 from zvisiongenerator.backends.audio.yue2 import SAMPLE_RATE, YuE2Backend
+from zvisiongenerator.backends.audio.yue2_score import score_header, silence_vocal
 from zvisiongenerator.backends.audio.yue2_swap import WeightSwap
 from zvisiongenerator.core.audio_backend import AudioCancelled
 from zvisiongenerator.core.audio_types import AudioGenerationRequest
@@ -205,19 +208,44 @@ class TestWeightSwap:
 # ---- A fake kit pipeline ------------------------------------------------------------------------------------------
 
 
+def _score(name: str) -> str:
+    return (FIXTURES / "yue2_scores" / f"{name}.abc").read_text(encoding="utf-8")
+
+
+class _FakeTokenizer:
+    """Turn text into one id per character and back, so a score survives the round trip."""
+
+    def encode(self, text: str) -> list[int]:
+        return [ord(char) for char in text]
+
+    def decode(self, ids: list[int]) -> str:
+        return "".join(chr(token) for token in ids)
+
+
 class _FakePipe:
     """Record the stages a take runs, and what was on the GPU at each."""
 
     def __init__(self, *, truncated: bool = False, semantic_tokens: int = 30) -> None:
         self.model_dir = "/models/yue2"
-        self.generation_config = SimpleNamespace(ode_steps=32, context=24576)
+        self.generation_config = GenerationConfig(ode_steps=32)
+        self.tokenizer = _FakeTokenizer()
         self._model = None
         self.events: list[tuple[str, frozenset[str], bool]] = []
         self.calls: dict[str, dict] = {}
+        self.replans: list[SongRequest] = []
+        self.generates: list[dict] = []
         self.truncated = truncated
         self.semantic_tokens = semantic_tokens
         self.closed = False
         self.cancelled_seen: list[bool] = []
+        self.abc: str | None = None
+        """The score an ordinary plan writes; the song fixture for a song and the instrumental fixture for an instrumental."""
+        self.plan_truncated = False
+        self.continuation = ""
+        """What the model writes after a header given to ``_generate``."""
+        self.continuation_truncated = False
+        self.probe = ""
+        """What the model writes in the short tempo probe, the start of an ordinary plan."""
 
     def _record(self, stage: str) -> None:
         model = self._model
@@ -226,12 +254,28 @@ class _FakePipe:
         else:
             self.events.append((stage, frozenset(), False))
 
-    def plan(self, style, lyrics, *, cot, seed, cfg_scale, abc_sampling, cancelled, on_token):
+    def plan(self, style=None, lyrics=None, *, cot=None, seed=None, cfg_scale=None, abc_sampling=None, cancelled=None, on_token=None, request=None):
         self._record("plan")
+        if request is not None:
+            self.replans.append(request)
+            return SimpleNamespace(abc=request.abc, abc_ids=list(range(25)), prefix=[1, 2, 3], request=request, truncated=False)
         self.calls["plan"] = {"style": style, "lyrics": lyrics, "cot": cot, "seed": seed, "cfg_scale": cfg_scale, "abc_sampling": abc_sampling, "cancelled": cancelled}
         for token in range(25):
             on_token("abc", token)
-        return SimpleNamespace(abc_ids=list(range(25)), prefix=[1, 2, 3], request=SimpleNamespace(seed=seed), truncated=False)
+        abc = self.abc if self.abc is not None else _score("instrumental_planned" if cot == "melody" else "song_planned")
+        return SimpleNamespace(abc=abc, abc_ids=list(range(25)), prefix=[1, 2, 3], request=SimpleNamespace(seed=seed), truncated=self.plan_truncated)
+
+    def _generate(self, prefix, sampling, seed, phase, **kwargs):
+        self._load_model()  # the kit's own _generate asks for the model here, which is where the CUDA swap's loader is
+        self._record("header-plan")
+        self.generates.append({"prefix": prefix, "sampling": sampling, "seed": seed, "phase": phase, **kwargs})
+        if kwargs["cancelled"]():
+            raise InterruptedError("Cancelled during the plan")
+        if sampling.max_tokens == 64:  # the tempo probe: the start of an ordinary plan, not a header's continuation
+            return self.tokenizer.encode(self.probe), {}, True
+        for token in range(10):
+            kwargs["on_token"]("abc", token)
+        return self.tokenizer.encode(self.continuation), {}, self.continuation_truncated
 
     def generate_semantic(self, plan, *, sampling, cancelled, on_token):
         self._record("semantic")
@@ -635,6 +679,284 @@ class TestGenerate:
         assert calls[-1] == ("Decode", 1, 1, 1, 1)
 
 
+# ---- tempo, key and instrumentals ---------------------------------------------------------------------------------
+
+
+def _written_after(header: str, name: str) -> str:
+    """Return what the model wrote after *header* in the real score *name*."""
+    score = _score(name)
+    assert score.startswith(header)
+    return score[len(header) :]
+
+
+def _song_request(**changes) -> SongRequest:
+    values = {"style": "Indie folk, warm female vocal", "lyrics": "[Verse]\nThe lamp is lit\n\n[Chorus]\nShine on", "cot": "full", "seed": 7, "cfg_scale": 1.0}
+    return SongRequest(**{**values, **changes})
+
+
+class TestScoreSteering:
+    def test_a_take_without_tempo_key_or_instrumental_plans_as_before(self, kit):
+        clip = _loaded().generate(_request(), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.generates == [] and kit.pipe.replans == []
+        assert clip.notes == ()
+
+    def test_a_tempo_is_written_into_the_header_the_model_continues(self, kit):
+        header = score_header(90)
+        kit.pipe.continuation = "K:Am\n" + _written_after(score_header(90, "Am"), "song_header_am")  # the model writes the key itself
+
+        clip = _loaded().generate(_request(tempo=90), MagicMock(), _never_cancelled)
+
+        _, generate = kit.pipe.generates
+        tokenizer = kit.pipe.tokenizer
+        assert generate["prefix"] == token_prefixes(_song_request(), tokenizer) + tokenizer.encode(header)
+        assert "plan" not in kit.pipe.calls, "the header replaces the ordinary plan"
+        (replan,) = kit.pipe.replans
+        assert replan.abc == _score("song_header_am")
+        assert clip.notes == ()
+
+    def test_a_tempo_and_key_are_both_in_the_header(self, kit):
+        header = score_header(90, "G")
+        kit.pipe.continuation = _written_after(header, "song_header_g")
+
+        _loaded().generate(_request(tempo=90, key="G"), MagicMock(), _never_cancelled)
+
+        _, generate = kit.pipe.generates
+        assert generate["prefix"][-len(header) :] == kit.pipe.tokenizer.encode(header)
+        assert kit.pipe.replans[0].abc == _score("song_header_g")
+
+    def test_the_header_plan_uses_the_plans_sampling_seed_phase_and_stop(self, kit):
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+
+        _loaded().generate(_request(tempo=90, key="G", seed=11), MagicMock(), _never_cancelled)
+
+        _, generate = kit.pipe.generates
+        assert generate["sampling"] == resolve_sampling({"max_tokens": 4096}, kit.pipe.generation_config.abc)
+        assert (generate["seed"], generate["phase"]) == (11, "abc")
+        assert callable(generate["cancelled"]) and generate["cancelled"]() is False
+
+    def test_a_tempo_or_key_is_planned_in_the_meter_and_note_length_the_model_opens_with(self, kit):
+        kit.pipe.probe = "X:1\nT:\nM:3/4\nL:1/16\nQ:1/4=74\n"
+        header = score_header(76, "D", "3/4", "1/16")
+        kit.pipe.continuation = "% verse\nV: Vocal\nz32|\nV: Ins\nA32|\n"
+
+        clip = _loaded().generate(_request(tempo=76, key="D", seed=11), MagicMock(), _never_cancelled)
+
+        probe, generate = kit.pipe.generates
+        assert probe["sampling"].max_tokens == 64
+        assert generate["prefix"][-len(header) :] == kit.pipe.tokenizer.encode(header)
+        assert kit.pipe.replans[0].abc == header + kit.pipe.continuation
+        assert "M:3/4\nL:1/16\nQ:1/4=76\n" in kit.pipe.replans[0].abc and clip.notes == ()
+
+    def test_a_probe_with_no_meter_line_plans_in_4_4_and_1_32(self, kit):
+        kit.pipe.probe = "X:1\nT:\n"
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+
+        _loaded().generate(_request(tempo=90, key="G"), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.replans[0].abc.startswith("X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=90\n")
+
+    def test_the_users_tempo_wins_over_the_probes_and_the_probe_tempo_fills_in_for_auto(self, kit):
+        kit.pipe.probe = "X:1\nT:\nM:6/8\nL:1/32\nQ:1/4=74\n"
+        kit.pipe.continuation = "% verse\nV: Vocal\nz32|\nV: Ins\nA32|\n"
+
+        _loaded().generate(_request(tempo=76, key="G"), MagicMock(), _never_cancelled)
+        _loaded().generate(_request(key="G"), MagicMock(), _never_cancelled)
+
+        user, auto = kit.pipe.replans
+        assert user.abc.startswith("X:1\nT:\nM:6/8\nL:1/32\nQ:1/4=76\n")
+        assert auto.abc.startswith("X:1\nT:\nM:6/8\nL:1/32\nQ:1/4=74\n")
+
+    def test_the_header_plan_reports_plan_progress(self, kit):
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+        on_progress = MagicMock()
+
+        _loaded().generate(_request(tempo=90, key="G"), on_progress, _never_cancelled)
+
+        assert ("Plan", 10, None, 1, 1) in [call.args for call in on_progress.call_args_list]
+
+    def test_the_header_song_always_goes_back_to_the_kit_as_the_score_to_use(self, kit):
+        """Even a song that needs no edit: the kit then plans from the written score, not from the model's token ids."""
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+
+        _loaded().generate(_request(tempo=90, key="G", seed=11), MagicMock(), _never_cancelled)
+
+        (replan,) = kit.pipe.replans
+        assert (replan.style, replan.lyrics, replan.cot, replan.seed, replan.cfg_scale) == ("Indie folk, warm female vocal", "[Verse]\nThe lamp is lit\n\n[Chorus]\nShine on", "full", 11, 1.0)
+        assert replan.abc == _score("song_header_g")
+
+    def test_the_header_plan_runs_with_the_ar_weights_on_the_gpu(self, kit):
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+
+        _loaded().generate(_request(tempo=90, key="G"), MagicMock(), _never_cancelled)
+
+        (_, groups, resident) = next(event for event in kit.pipe.events if event[0] == "header-plan")
+        assert groups == {"embed", "head", "ar"} and resident
+
+    def test_a_key_with_the_tempo_on_auto_takes_the_tempo_from_a_short_probe_then_plans_from_the_header(self, kit):
+        kit.pipe.probe = _score("song_planned")[:300]  # 142 BPM
+        header = score_header(142, "Am")
+        kit.pipe.continuation = "% verse\nV: Vocal\nz32|\nV: Ins\nA32|\n"
+
+        clip = _loaded().generate(_request(key="Am", seed=11), MagicMock(), _never_cancelled)
+
+        probe, generate = kit.pipe.generates
+        tokenizer = kit.pipe.tokenizer
+        assert probe["prefix"] == token_prefixes(_song_request(), tokenizer)
+        assert probe["sampling"] == resolve_sampling({"max_tokens": 64}, kit.pipe.generation_config.abc)
+        assert (probe["seed"], probe["phase"]) == (11, "abc") and callable(probe["cancelled"])
+        assert "on_token" not in probe, "the probe's tokens are not the Plan phase's progress"
+        assert "plan" not in kit.pipe.calls, "no full plan before the header plan"
+        assert generate["prefix"][-len(header) :] == tokenizer.encode(header)
+        assert generate["sampling"].max_tokens == 4096
+        assert kit.pipe.replans[0].abc == header + kit.pipe.continuation
+        assert clip.notes == ()
+
+    def test_the_probe_does_not_count_into_the_plan_progress(self, kit):
+        kit.pipe.probe = "X:1\nL:1/32\nQ:1/4=90\n"
+        kit.pipe.continuation = _written_after(score_header(90, "Am"), "song_header_am")
+        on_progress = MagicMock()
+
+        _loaded().generate(_request(key="Am"), on_progress, _never_cancelled)
+
+        plan_counts = [call.args[1] for call in on_progress.call_args_list if call.args[0] == "Plan"]
+        assert max(plan_counts) == 25 and 10 in plan_counts, "the header plan counts its own 10 tokens from zero"
+
+    def test_a_key_with_no_complete_tempo_line_in_the_probe_falls_back_to_an_ordinary_plan_with_a_note(self, kit):
+        kit.pipe.probe = "X:1\nL:1/8\nM:4/4\nK:Bb"
+
+        clip = _loaded().generate(_request(key="Am"), MagicMock(), _never_cancelled)
+
+        assert len(kit.pipe.generates) == 1 and kit.pipe.replans == []
+        assert kit.pipe.calls["plan"]["cot"] == "full"
+        assert clip.notes == ("YuE2 couldn't plan with this tempo and key; the take uses its own.",)
+
+    def test_a_probe_cut_off_in_the_middle_of_the_tempo_is_not_misread(self, kit):
+        kit.pipe.probe = "X:1\nL:1/8\nQ:1/4=9"  # the model went on to write 90
+
+        clip = _loaded().generate(_request(key="Am"), MagicMock(), _never_cancelled)
+
+        assert len(kit.pipe.generates) == 1 and kit.pipe.replans == []
+        assert "plan" in kit.pipe.calls and len(clip.notes) == 1
+
+    def test_a_tempo_line_that_ends_the_probe_with_its_newline_is_read(self, kit):
+        kit.pipe.probe = "X:1\nL:1/8\nQ:1/4=90\nK:Am"
+        kit.pipe.continuation = _written_after(score_header(90, "Am"), "song_header_am")
+
+        clip = _loaded().generate(_request(key="Am"), MagicMock(), _never_cancelled)
+
+        assert len(kit.pipe.generates) == 2 and clip.notes == ()
+
+    @pytest.mark.parametrize("continuation", ["", "% only a comment\n"], ids=["empty", "no music"])
+    def test_a_header_the_model_cannot_continue_falls_back_to_an_ordinary_plan_with_a_note(self, kit, continuation):
+        kit.pipe.continuation = continuation
+
+        clip = _loaded().generate(_request(tempo=90, key="Am"), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.calls["plan"]["cot"] == "full" and kit.pipe.replans == []
+        assert clip.notes == ("YuE2 couldn't plan with this tempo and key; the take uses its own.",)
+
+    def test_a_header_plan_that_hit_the_token_cap_is_used_as_written_like_the_kits_own_cut_off_plan(self, kit):
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+        kit.pipe.continuation_truncated = True
+
+        clip = _loaded().generate(_request(tempo=90, key="G"), MagicMock(), _never_cancelled)
+
+        (replan,) = kit.pipe.replans
+        assert replan.abc == _score("song_header_g")
+        assert "plan" not in kit.pipe.calls and clip.notes == ()
+
+    def test_an_instrumental_gets_its_vocal_voice_silenced_and_the_kit_plans_from_that_score(self, kit):
+        clip = _loaded().generate(_request(lyrics=""), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.calls["plan"]["cot"] == "melody"
+        (replan,) = kit.pipe.replans
+        assert replan.abc == silence_vocal(_score("instrumental_planned")) == _score("instrumental_silenced")
+        assert replan.cot == "melody" and replan.seed == 7
+        assert clip.notes == ()
+
+    def test_a_song_keeps_its_voice(self, kit):
+        _loaded().generate(_request(), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.replans == []
+
+    def test_an_instrumental_that_is_already_silent_is_not_planned_again(self, kit):
+        kit.pipe.abc = _score("instrumental_silenced")
+
+        _loaded().generate(_request(lyrics=""), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.replans == []
+
+    def test_an_instrumental_with_a_header_has_the_header_score_silenced_and_planned_once(self, kit):
+        header = score_header(90, "G")
+        kit.pipe.continuation = _written_after(header, "song_header_g")
+
+        clip = _loaded().generate(_request(lyrics="", tempo=90, key="G"), MagicMock(), _never_cancelled)
+
+        _, generate = kit.pipe.generates
+        assert generate["prefix"][-len(header) :] == kit.pipe.tokenizer.encode(header)
+        (replan,) = kit.pipe.replans
+        assert replan.abc == silence_vocal(_score("song_header_g")) and replan.cot == "melody"
+        assert clip.notes == ()
+
+    def test_an_instrumental_score_that_cannot_be_silenced_is_used_as_planned_with_a_note(self, kit):
+        kit.pipe.abc = "not a score"
+
+        clip = _loaded().generate(_request(lyrics=""), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.replans == []
+        assert clip.notes == ("YuE2 couldn't silence the voice in this instrumental; the take may have a voice in it.",)
+
+    def test_an_instrumental_plan_that_was_cut_off_still_has_its_vocal_silenced(self, kit):
+        kit.pipe.plan_truncated = True
+
+        clip = _loaded().generate(_request(lyrics=""), MagicMock(), _never_cancelled)
+
+        (replan,) = kit.pipe.replans
+        assert replan.abc == _score("instrumental_silenced")
+        assert clip.notes == ()
+
+    def test_an_instrumental_plan_that_was_cut_off_before_it_has_a_vocal_line_is_used_as_planned_with_a_note(self, kit):
+        kit.pipe.plan_truncated = True
+        kit.pipe.abc = "X:1\nK:Bb\n"
+
+        clip = _loaded().generate(_request(lyrics=""), MagicMock(), _never_cancelled)
+
+        assert kit.pipe.replans == []
+        assert len(clip.notes) == 1 and "may have a voice in it" in clip.notes[0]
+
+    def test_both_notes_come_back_when_neither_step_could_be_done(self, kit):
+        kit.pipe.abc = "X:1\nK:Bb\n"
+
+        clip = _loaded().generate(_request(lyrics="", key="Am"), MagicMock(), _never_cancelled)
+
+        assert [("tempo and key" in note, "may have a voice" in note) for note in clip.notes] == [(True, False), (False, True)]
+
+    def test_the_notes_reach_a_cut_take_too(self, kit):
+        kit.pipe.truncated = True
+        kit.pipe.abc = "not a score"
+
+        clip = _loaded().generate(_request(lyrics=""), MagicMock(), _never_cancelled)
+
+        assert clip.cut and len(clip.notes) == 1
+
+    def test_a_header_take_runs_the_same_stages_after_the_plan(self, kit):
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+
+        clip = _loaded().generate(_request(tempo=90, key="G"), MagicMock(), _never_cancelled)
+
+        assert [stage for stage, _, _ in kit.pipe.events if stage not in {"nar-close", "header-plan"}] == ["plan", "semantic", "prefill", "ode", "decode"]
+        assert clip.samples.shape == (2, 960)
+
+    def test_a_stop_during_the_header_plan_raises_audio_cancelled(self, kit):
+        kit.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+
+        with pytest.raises(AudioCancelled, match="during the plan"):
+            _loaded().generate(_request(tempo=90, key="G"), MagicMock(), lambda: True)
+
+        assert "semantic" not in kit.pipe.calls
+
+
 # ---- stop ---------------------------------------------------------------------------------------------------------
 
 
@@ -663,6 +985,15 @@ class TestMpsSpeedups:
         assert stages[:9] == ["fold+", "plan", "fold-", "fold+", "head+", "semantic", "head-", "fold-", "prefill"]
         head_on_the_pipeline_model = next(on_model for stage, _, on_model in speedups.pipe.events if stage == "head+")
         assert head_on_the_pipeline_model
+
+    def test_on_mps_the_header_plan_runs_inside_the_folded_attention(self, speedups):
+        speedups.pipe.continuation = _written_after(score_header(90, "G"), "song_header_g")
+
+        _loaded("mps").generate(_request(tempo=90, key="G"), MagicMock(), _never_cancelled)
+
+        stages = [stage for stage, _, _ in speedups.pipe.events if stage in {"fold+", "fold-", "header-plan", "plan", "semantic"}]
+        assert stages[:6] == ["fold+", "header-plan", "header-plan", "plan", "fold-", "fold+"]
+        assert "semantic" in stages
 
     def test_on_mps_the_acoustic_stage_attends_1024_queries_at_a_time(self, speedups):
         _loaded("mps").generate(_request(), MagicMock(), _never_cancelled)

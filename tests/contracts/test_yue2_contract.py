@@ -225,7 +225,7 @@ def test_the_pipeline_and_stage_results_expose_what_the_backend_reads() -> None:
     def fields(name: str) -> list[str]:
         return [node.target.id for node in _class(tree, name).body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)]
 
-    assert {"request", "abc_ids", "prefix", "truncated"} <= set(fields("SymbolicPlan"))
+    assert {"request", "abc", "abc_ids", "prefix", "truncated"} <= set(fields("SymbolicPlan"))
     assert {"plan", "tokens", "truncated"} <= set(fields("SemanticResult"))
 
 
@@ -373,6 +373,72 @@ def test_the_offload_helper_moves_the_ar_modules_the_swap_also_names() -> None:
     offload = _function(_tree("nar.py"), "_offload_ar")
     sources = {ast.unparse(node) for node in ast.walk(offload) if isinstance(node, ast.Attribute)}
     assert {"model.model.embed_tokens", "model.lm_head", "model.model.layers", "layer.self_attn", "layer.mlp"} <= sources
+
+
+# ---- The score the backend writes before planning and hands back to the kit -----------------------------------------------
+
+
+def test_generate_takes_a_prefix_a_sampling_a_seed_and_a_phase_and_forwards_the_stop_check_and_token_callback() -> None:
+    """The backend continues a score header by calling the private ``_generate`` as ``plan`` does, through the ordinary model loader."""
+    generate = _function(_class(_tree("pipeline.py"), "YuE2Pipeline"), "_generate")
+    assert list(_parameters(generate)) == ["prefix", "sampling", "seed", "phase"]
+    assert generate.args.kwarg is not None and generate.args.kwarg.arg == "kwargs"
+    assert "self._load_model" in _call_sources(generate), "the CUDA weight swap hooks the model loader"
+    popped = [ast.literal_eval(call.args[0]) for call in _calls_to(generate, "kwargs.pop")]
+    assert popped == ["on_token"], "cancelled must travel on through **kwargs to the token loop"
+    forwarded = _calls_to(generate, "generate_tokens")[0]
+    assert [ast.unparse(arg) for arg in forwarded.args] == ["model", "prefix", "sampling", "seed", "phase"]
+    assert None in [keyword.arg for keyword in forwarded.keywords], "**kwargs reaches generate_tokens"
+
+
+def test_plan_runs_the_abc_phase_the_way_the_backend_continues_a_header() -> None:
+    """The backend repeats ``plan``'s call with the header's ids added to the prefix, so the sampling, seed and phase must be the same."""
+    plan = _function(_class(_tree("pipeline.py"), "YuE2Pipeline"), "plan")
+    assert [ast.unparse(call) for call in _calls_to(plan, "resolve_sampling")] == ["resolve_sampling(abc_sampling, self.generation_config.abc)"]
+    (call,) = _calls_to(plan, "self._generate")
+    assert [ast.unparse(arg) for arg in call.args] == ["token_prefixes(request, self.tokenizer)", "sampling", "request.seed", "'abc'"]
+    assert {keyword.arg for keyword in call.keywords} == {"cancelled", "on_token"}
+    returned = [ast.unparse(node.value) for node in ast.walk(plan) if isinstance(node, ast.Return)]
+    assert "SymbolicPlan(request, self.tokenizer.decode(ids), ids, token_prefixes(request, self.tokenizer, ids), timing, truncated)" in returned
+
+
+def test_plan_uses_a_given_score_as_written() -> None:
+    """The backend hands an edited or header score back through ``request.abc``; ``plan`` must encode it as it is, with no model call."""
+    plan = _function(_class(_tree("pipeline.py"), "YuE2Pipeline"), "plan")
+    given = next(node for node in plan.body if isinstance(node, ast.If) and ast.unparse(node.test) == "request.abc is not None")
+    assert not [call for call in ast.walk(given) if isinstance(call, ast.Call) and ast.unparse(call.func) == "self._generate"]
+    assert "self.tokenizer.encode(request.abc)" in {ast.unparse(call) for call in ast.walk(given) if isinstance(call, ast.Call)}
+    returns = [ast.unparse(node.value) for node in ast.walk(given) if isinstance(node, ast.Return)]
+    assert returns and returns[0].startswith("SymbolicPlan(request, request.abc, ids, token_prefixes(request, self.tokenizer, ids)")
+
+
+def test_the_song_request_has_the_fields_the_backend_builds_it_with() -> None:
+    request = _class(_tree("protocol.py"), "SongRequest")
+    fields = {node.target.id: node for node in request.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
+    assert list(fields)[:3] == ["style", "lyrics", "cot"]
+    assert {"style", "lyrics", "cot", "seed", "abc", "cfg_scale"} <= set(fields)
+    assert ast.literal_eval(fields["abc"].value) is None
+    assert ast.literal_eval(fields["cfg_scale"].value) is None
+    assert any(ast.unparse(d) == "dataclass(frozen=True)" for d in request.decorator_list), "the backend replaces the score with dataclasses.replace"
+
+
+def test_token_prefixes_takes_the_request_a_tokenizer_and_optional_score_ids() -> None:
+    token_prefixes = _function(_tree("protocol.py"), "token_prefixes")
+    assert list(_parameters(token_prefixes)) == ["request", "tokenizer", "abc_ids"]
+    assert _default(token_prefixes, "abc_ids") is None
+
+
+def test_the_generation_config_holds_the_score_sampling_the_backend_resolves() -> None:
+    config = _class(_tree("protocol.py"), "GenerationConfig")
+    fields = [node.target.id for node in config.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)]
+    assert "abc" in fields and "semantic" in fields
+
+
+def test_the_tokenizer_encodes_and_decodes_text() -> None:
+    tokenizer = _class(_tree("tokenization_yue2.py"), "YuE2TextTokenizer")
+    assert list(_parameters(_function(tokenizer, "encode"))) == ["text"]
+    assert list(_parameters(_function(tokenizer, "decode"))) == ["ids"]
+    assert "tokenizer" in _self_stores(_class(_tree("pipeline.py"), "YuE2Pipeline"))
 
 
 # ---- Import check ----------------------------------------------------------------------------------------------------

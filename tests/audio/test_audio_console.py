@@ -30,6 +30,10 @@ class TestText:
         assert progress_text("Decode", 0, 1, 1, 1, None).strip() == "Finishing..."
         assert progress_text("Decode", 1, 1, 2, 3, None).strip() == "Finishing (part 2 of 3)..."
 
+    def test_a_part_of_speech_reads_by_name_without_a_count(self):
+        assert progress_text("Speech", 0, 1, 1, 1, None).strip() == "Reading..."
+        assert progress_text("Speech", 1, 1, 2, 3, None).strip() == "Reading (part 2 of 3)..."
+
 
 class TestTerminal:
     def test_one_line_is_rewritten_in_place_while_a_phase_runs(self):
@@ -48,28 +52,6 @@ class TestTerminal:
         console("Song tokens", 1, None, 1, 1, None)
 
         assert out.getvalue().count("\n") == 1
-
-    def test_a_total_that_moves_while_the_count_runs_is_shown_as_the_first_one(self):
-        console, out = _console(terminal=True)
-
-        console("Speech tokens", 1, 220, 1, 2, None)
-        console("Speech tokens", 200, 230, 1, 2, None)
-        console("Speech tokens", 220, 230, 1, 2, None)
-
-        assert [text.strip() for text in out.getvalue().split("\r") if text.strip()] == [
-            "Speech tokens (part 1 of 2) 1/220",
-            "Speech tokens (part 1 of 2) 200/220",
-            "Speech tokens (part 1 of 2) 220/220",
-        ]
-
-    def test_past_the_first_total_only_the_count_is_shown(self):
-        console, out = _console(terminal=True)
-
-        console("Speech tokens", 220, 220, 1, 1, None)
-        console("Speech tokens", 230, 240, 1, 1, None)
-        console("Speech tokens", 238, 238, 1, 1, None)  # the part ended: it reports the count as its total
-
-        assert out.getvalue().rstrip().endswith("Speech tokens 238")
 
     def test_a_new_part_takes_its_own_total(self):
         console, out = _console(terminal=True)
@@ -98,6 +80,15 @@ class TestTerminal:
 
 
 class TestPipe:
+    def test_each_part_of_speech_prints_one_line(self):
+        console, out = _console(terminal=False)
+
+        for part in (1, 2):
+            console("Speech", 0, 1, part, 2, None)
+            console("Speech", 1, 1, part, 2, None)
+
+        assert out.getvalue() == "  Reading (part 1 of 2)...\n  Reading (part 2 of 2)...\n"
+
     def test_one_line_is_printed_when_the_phase_or_part_changes_and_none_between(self):
         console, out = _console(terminal=False)
 

@@ -18,8 +18,8 @@ __all__ = ["audio_inventory_rows", "audio_repo_ids"]
 
 
 def audio_repo_ids(config: Mapping[str, Any]) -> frozenset[str]:
-    """Return every repository an audio preset of *config* loads on this machine, so the cache listing never offers them as unused."""
-    return frozenset(files.repo_id for preset in runnable_audio_models(config) for files in preset.files)
+    """Return every repository an audio preset of *config* loads on this machine, cloning files included, so the cache listing never offers them as unused."""
+    return frozenset(files.repo_id for preset in runnable_audio_models(config) for files in (*preset.files, *preset.voice_files))
 
 
 def audio_inventory_rows(

@@ -885,12 +885,13 @@ describe('WorkspacePage', () => {
     expect(draft.state.enhancedHistory.map((entry) => entry.from.record?.model)).toEqual(['org/fast@r1', 'org/fast@r1']);
     expect(draft.state.enhancedPrompt).toBe('A fox at dusk.');
 
+    // Enhance again from changed text keeps the earlier versions.
     draft.update('prompt', 'a cat');
     rewrites.push('A cat on a sill.');
     const third = document.querySelector<HTMLButtonElement>('#ws-enhance-run') ?? (await openEnhanceRun());
     third.click();
     await settle();
-    expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['A cat on a sill.']);
+    expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['A fox in snow.', 'A fox at dusk.', 'A cat on a sill.']);
   });
 
   describe('recent prompts', () => {
@@ -936,9 +937,10 @@ describe('WorkspacePage', () => {
       expect(rows()[1].title).toBe('She turns to the window.\nScene: A night tram.');
     });
 
-    it('shows the negative prompt of a row, fills the prompt and the negative prompt on a pick, closes, and drops the Enhanced pair', async () => {
+    it('shows the negative prompt of a row, fills the prompt and the negative prompt on a pick, closes, and drops the Enhanced pair and its versions', async () => {
       recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [recent({ prompt: 'A red fox', negative_prompt: 'blurry' })] });
-      draft.patch({ prompt: 'a cat', negativePrompt: '', enhancedPrompt: 'A cat, enhanced.', enhancedFrom: { prompt: 'a cat', scene: '', mode: 'image' } });
+      const catFrom = { prompt: 'a cat', scene: '', mode: 'image' as const };
+      draft.patch({ prompt: 'a cat', negativePrompt: '', enhancedPrompt: 'A cat, enhanced.', enhancedFrom: catFrom, enhancedHistory: [{ prompt: 'A cat, enhanced.', scene: '', from: catFrom }, { prompt: 'A cat, again.', scene: '', from: catFrom }] });
       await mountWorkspace(withEnhancer(makeContext()));
       (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
       await settle();
@@ -948,7 +950,7 @@ describe('WorkspacePage', () => {
       rows()[0].click();
       await settle();
 
-      expect(draft.state).toMatchObject({ prompt: 'A red fox', negativePrompt: 'blurry', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, jsonPromptEnabled: false });
+      expect(draft.state).toMatchObject({ prompt: 'A red fox', negativePrompt: 'blurry', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [], enhancedScratched: null, jsonPromptEnabled: false });
       expect(document.querySelector('[role="dialog"][aria-label="Recent prompts"]')).toBeNull();
       expect(target.querySelector('#ws-tab-prompt')?.getAttribute('aria-selected')).toBe('true');
       expect(field('ws-prompt').value).toBe('A red fox');
@@ -1221,11 +1223,13 @@ describe('WorkspacePage', () => {
     });
   });
 
-  describe('status line and rewrite stepper', () => {
-    const statusLineEl = () => target.querySelector('[data-testid="prompt-statusline"]') as HTMLElement;
-    const lineState = () => statusLineEl().dataset.state;
-    const link = (label: string) => Array.from(statusLineEl().querySelectorAll('button')).find((el) => el.textContent?.trim() === label);
-    const stepper = () => target.querySelector('[role="group"][aria-label="Rewrites"]');
+  describe('header marks and rewrite stepper', () => {
+    const tabEl = (name: 'prompt' | 'enhanced') => target.querySelector(`#ws-tab-${name}`) as HTMLButtonElement;
+    const markOf = () => tabEl('enhanced').querySelector('[data-mark]')?.getAttribute('data-mark') ?? null;
+    const sentNote = () => (tabEl('enhanced').getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
+    const scratchButton = () => target.querySelector('[aria-label="Scratch the enhanced text"]') as HTMLButtonElement | null;
+    const stepper = () => target.querySelector('[role="group"][aria-label="Enhanced versions"]');
+    const counter = () => stepper()?.querySelector('.rewrite-count')?.textContent ?? null;
     const step = (label: string) => stepper()!.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
     const RECORD = { settings: {}, model: 'org/fast@r1', format: 'text' as const };
     const FROM = { prompt: 'a fox', scene: '', mode: 'image' as const };
@@ -1237,56 +1241,68 @@ describe('WorkspacePage', () => {
       draft.patch({ prompt: 'a fox', enhancedPrompt: second.prompt, enhancedFrom: second.from, enhancedHistory: [first, second] });
     }
     async function showEnhanced(): Promise<void> {
-      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      tabEl('enhanced').click();
       await settle();
     }
 
-    it('says nothing while your own text is sent, and offers Use mine once the Enhanced text is', async () => {
+    it('has no mark and no status line while your own text is sent, and a dot on the closed Enhanced tab once the Enhanced text is', async () => {
       draft.update('prompt', 'a fox');
       await mountWorkspace(withEnhancer(makeContext()));
-      expect(lineState()).toBe('none');
-      expect(link('Use mine')).toBeUndefined();
+      expect(markOf()).toBeNull();
+      expect(target.querySelector('[data-testid="prompt-statusline"]')).toBeNull();
+      expect(sentNote()).toBe('');
 
       draft.patch({ enhancedPrompt: 'A red fox in deep snow.', enhancedFrom: FROM });
       await settle();
-      expect(lineState()).toBe('used');
-      expect(link('Use mine')).toBeDefined();
-      expect(target.querySelector('#ws-tab-prompt')?.textContent?.trim()).toBe('Prompt');
-      expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
+
+      expect(markOf()).toBe('dot');
+      expect(sentNote()).toBe('sent by Generate');
+      expect(tabEl('prompt').querySelector('[data-mark]')).toBeNull();
+      expect(tabEl('prompt').textContent?.trim()).toBe('Prompt');
+      expect(tabEl('enhanced').textContent?.trim()).toBe('Enhanced');
+      expect((target.querySelector('#ws-prompt') as HTMLElement).hasAttribute('data-unsent')).toBe(true);
     });
 
-    it('drops the Enhanced text with Use mine, so Generate sends the prompt', async () => {
+    it('shows ✕ Scratch after the tablist on the open Enhanced tab, and Scratch sends your prompt again with the focus on your tab', async () => {
       draft.update('prompt', 'a fox');
       draft.patch({ enhancedPrompt: 'A red fox.', enhancedFrom: FROM });
       await mountWorkspace(withEnhancer(makeContext()));
       await showEnhanced();
+      expect(markOf()).toBeNull();
+      expect(scratchButton()!.closest('[role="tablist"]')).toBeNull();
 
-      (link('Use mine') as HTMLButtonElement).click();
+      scratchButton()!.click();
       await settle();
 
       expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedFrom: null });
-      expect(target.querySelector('#ws-tab-prompt')?.getAttribute('aria-selected')).toBe('true');
+      expect(tabEl('prompt').getAttribute('aria-selected')).toBe('true');
+      expect(document.activeElement).toBe(tabEl('prompt'));
+      expect(scratchButton()).toBeNull();
       expect((await submitForm(target)).get('prompt')).toBe('a fox');
     });
 
-    it('offers Re-enhance and Use mine beside Out of date, in the Prompt view too', async () => {
+    it('marks the Enhanced text out of date from the first keystroke, in either view, and puts the warning on the Enhance button', async () => {
       enhanceApiMocks.enhancePrompt.mockResolvedValue();
       draft.patch({ prompt: 'a cat', enhancedPrompt: 'A red fox.', enhancedFrom: FROM });
       await mountWorkspace(withEnhancer(makeContext()));
 
-      expect(target.querySelector('#ws-tab-prompt')?.getAttribute('aria-selected')).toBe('true');
-      expect(lineState()).toBe('stale');
-      expect(link('Use mine')).toBeDefined();
-      (link('Re-enhance') as HTMLButtonElement).click();
+      expect(tabEl('prompt').getAttribute('aria-selected')).toBe('true');
+      expect(markOf()).toBe('warn');
+      expect(sentNote()).toBe('sent by Generate, out of date');
+      const enhance = target.querySelector('#ws-enhance-toggle') as HTMLButtonElement;
+      expect(enhance.getAttribute('aria-label')).toBe('Enhance (out of date)');
+      await showEnhanced();
+      expect(markOf()).toBeNull();
+      expect(scratchButton()).not.toBeNull();
+
+      enhance.click();
+      await settle();
+      const run = document.querySelector('#ws-enhance-run') as HTMLButtonElement;
+      expect(document.activeElement).toBe(run);
+      expect(run.textContent?.trim()).toBe('Enhance again');
+      run.click();
       await settle();
       expect((enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { prompt: string }).prompt).toBe('a cat');
-    });
-
-    it('marks the JSON box in the status line', async () => {
-      const defaults = makeIdeogramDefaults();
-      draft.patch({ jsonPromptEnabled: true, jsonPrompt: '{"a": 1}' });
-      await mountWorkspace(makeContext({ image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }], defaults, current_image_model: 'ideo', image_model_defaults: { ideo: defaults } }));
-      expect(lineState()).toBe('json');
     });
 
     it('steps through the rewrites, and Generate sends the one shown with how it was written', async () => {
@@ -1295,19 +1311,503 @@ describe('WorkspacePage', () => {
       expect(stepper()).toBeNull();
       await showEnhanced();
 
-      expect(step('Next rewrite').disabled).toBe(true);
-      step('Previous rewrite').click();
+      expect(counter()).toBe('2 of 2');
+      expect(step('Next version').disabled).toBe(true);
+      step('Previous version').click();
       await settle();
 
-      expect(step('Previous rewrite').disabled).toBe(true);
+      expect(counter()).toBe('1 of 2');
+      expect(step('Previous version').disabled).toBe(true);
       expect(field('ws-enhanced-prompt').value).toBe('A fox in snow.');
       const submitted = await submitForm(target);
       expect(submitted.get('prompt')).toBe('A fox in snow.');
       expect(JSON.parse(String(submitted.get('enhance_record'))).model).toBe('org/smart@r2');
 
-      step('Next rewrite').click();
+      step('Next version').click();
       await settle();
       expect(JSON.parse(String((await submitForm(target)).get('enhance_record'))).model).toBe('org/fast@r1');
+    });
+
+    it('keeps the stepper while out of date and hides it in your own view', async () => {
+      twoRewrites();
+      draft.update('prompt', 'a fox, changed');
+      await mountWorkspace(withEnhancer(makeContext()));
+      expect(stepper()).toBeNull();
+      await showEnhanced();
+
+      expect(markOf()).toBeNull();
+      expect(counter()).toBe('2 of 2');
+    });
+
+    it('says "– of N" after Scratch, and ‹ brings back the version that was scratched, not the newest', async () => {
+      twoRewrites();
+      await mountWorkspace(withEnhancer(makeContext()));
+      await showEnhanced();
+      step('Previous version').click();
+      await settle();
+      scratchButton()!.click();
+      await settle();
+      await showEnhanced();
+
+      expect(counter()).toBe('– of 2');
+      expect(field('ws-enhanced-prompt').value).toBe('');
+      expect(field('ws-enhanced-prompt').placeholder).toBe('No enhanced text. Generate sends your Prompt.');
+      expect((await submitForm(target)).get('prompt')).toBe('a fox');
+
+      step('Bring back version 1').click();
+      await settle();
+
+      expect(field('ws-enhanced-prompt').value).toBe('A fox in snow.');
+      expect(counter()).toBe('1 of 2');
+    });
+
+    it('replaces the shown version when it is typed in, and drops its record, so Generate records nothing for it', async () => {
+      twoRewrites();
+      await mountWorkspace(withEnhancer(makeContext()));
+      await showEnhanced();
+      step('Previous version').click();
+      await settle();
+
+      const box = field('ws-enhanced-prompt') as HTMLTextAreaElement;
+      box.value = 'A fox in snow, mine.';
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      await settle();
+
+      expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['A fox in snow, mine.', 'A fox at dusk.']);
+      expect(draft.state.enhancedHistory[0].from.record).toBeUndefined();
+      expect(draft.state.enhancedHistory[1].from.record).toEqual(RECORD);
+      expect(counter()).toBe('1 of 2');
+      const submitted = await submitForm(target);
+      expect(submitted.get('prompt')).toBe('A fox in snow, mine.');
+      expect(submitted.has('enhance_record')).toBe(false);
+    });
+
+    it('hides the stepper for hand-typed Enhanced text that is not a version', async () => {
+      twoRewrites();
+      draft.patch({ enhancedPrompt: 'Typed in by hand.', enhancedFrom: null });
+      await mountWorkspace(withEnhancer(makeContext()));
+      await showEnhanced();
+
+      expect(stepper()).toBeNull();
+    });
+
+    it('keeps the earlier versions when Enhance again runs on changed text', async () => {
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', prompt: 'A cat on a sill.', clamped: false, model: 'org/fast@r1' });
+      });
+      twoRewrites();
+      draft.update('prompt', 'a cat');
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      (await openEnhanceRun()).click();
+      await settle();
+
+      expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['A fox in snow.', 'A fox at dusk.', 'A cat on a sill.']);
+      expect(counter()).toBe('3 of 3');
+    });
+
+    it('shows the stop ring on the open Enhanced tab while Enhance runs, and stops it', async () => {
+      let aborted = false;
+      let release: () => void = () => {};
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'text', text: 'A fo', prompt: 'A fo' });
+        (rest[1] as AbortSignal).addEventListener('abort', () => { aborted = true; release(); });
+        await new Promise<void>((resolve) => { release = resolve; });
+      });
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      (await openEnhanceRun()).click();
+      await settle();
+
+      const ring = target.querySelector('[aria-label="Stop enhancing"]') as HTMLButtonElement;
+      expect(ring).not.toBeNull();
+      expect(ring.closest('[role="tablist"]')).toBeNull();
+      expect(scratchButton()).toBeNull();
+      expect(sentNote()).toBe('enhancing');
+      expect(stepper()).toBeNull();
+      ring.focus();
+
+      ring.click();
+      await settle();
+
+      expect(aborted).toBe(true);
+      expect(target.querySelector('[aria-label="Stop enhancing"]')).toBeNull();
+      expect(document.activeElement).toBe(tabEl('enhanced'));
+    });
+
+    it('shows one Prompt heading and no tabs or marks for the JSON box', async () => {
+      const defaults = makeIdeogramDefaults();
+      draft.patch({ jsonPromptEnabled: true, jsonPrompt: '{"a": 1}' });
+      await mountWorkspace(withEnhancer(makeContext({ image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }], defaults, current_image_model: 'ideo', image_model_defaults: { ideo: defaults } })));
+
+      expect(target.querySelectorAll('[role="tab"]')).toHaveLength(0);
+      expect(target.querySelector('.head')?.textContent?.trim()).toBe('Prompt');
+      expect(target.querySelector('[data-testid="prompt-statusline"]')).toBeNull();
+    });
+
+    it('shows one Prompt heading and no tabs or marks when Enhance each image is on, with the button saying why', async () => {
+      draft.patch({ prompt: 'a fox', enhancedPrompt: 'A red fox.', enhancedFrom: FROM, enhanceAuto: true });
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      expect(target.querySelectorAll('[role="tab"]')).toHaveLength(0);
+      expect(target.querySelector('.head')?.textContent?.trim()).toBe('Prompt');
+      expect(target.querySelector('#ws-enhanced-prompt')).toBeNull();
+      expect(target.querySelector('#ws-enhance-toggle')?.textContent).toContain('Enhance · each image');
+      expect(target.querySelector('[data-mark]')).toBeNull();
+    });
+
+    it('has an icon-only Save button that keeps its name', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      const save = target.querySelector('#ws-save-prompt') as HTMLButtonElement;
+      expect(save.getAttribute('aria-label')).toBe('Save to prompt file…');
+      expect(save.textContent?.trim()).toBe('');
+    });
+  });
+
+  describe('Clear and Undo in the prompt box', () => {
+    const clearButton = () => target.querySelector('[data-testid="clear-box"]') as HTMLButtonElement | null;
+    const undoButton = () => target.querySelector('[data-testid="clear-undo"] button') as HTMLButtonElement | null;
+    const undoLine = () => target.querySelector('[data-testid="clear-undo"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+    const enhancedTab = () => target.querySelector('#ws-tab-enhanced') as HTMLButtonElement;
+    const FROM = { prompt: 'a fox', scene: '', mode: 'image' as const };
+    const REWRITE = { prompt: 'A red fox in snow.', scene: '', from: FROM };
+    const click = async (node: Element | null) => { (node as HTMLElement).click(); await settle(); };
+
+    it('is the first button of the right group, and there only while the box holds something', async () => {
+      await mountWorkspace(withEnhancer(makeContext()));
+      expect(clearButton()).toBeNull();
+
+      type('ws-prompt', 'a fox');
+      await settle();
+
+      expect(clearButton()!.getAttribute('aria-label')).toBe('Clear the prompt');
+      const group = clearButton()!.parentElement!;
+      expect(group.firstElementChild).toBe(clearButton());
+      expect(group.contains(target.querySelector('#ws-recent-prompts'))).toBe(true);
+
+      type('ws-prompt', '');
+      await settle();
+      expect(clearButton()).toBeNull();
+      // An Enhanced text or kept versions count as something, whatever your own text holds.
+      draft.patch({ enhancedPrompt: REWRITE.prompt, enhancedFrom: FROM, enhancedHistory: [REWRITE] });
+      await settle();
+      expect(clearButton()).not.toBeNull();
+    });
+
+    it('empties your text, the Enhanced text and every version, and Undo puts back both texts, the versions and the open Enhanced view', async () => {
+      draft.patch({ prompt: 'a fox', enhancedPrompt: REWRITE.prompt, enhancedFrom: FROM, enhancedHistory: [REWRITE] });
+      await mountWorkspace(withEnhancer(makeContext()));
+      await click(enhancedTab());
+
+      await click(clearButton());
+
+      expect(draft.state).toMatchObject({ prompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null, enhancedHistory: [], enhancedScratched: null });
+      expect(undoLine()).toBe('Cleared. Undo');
+      expect(clearButton()).toBeNull();
+      expect(target.querySelector('#ws-tab-prompt')!.getAttribute('aria-selected')).toBe('true');
+      expect(document.activeElement).toBe(field('ws-prompt'));
+      expect((await submitForm(target)).get('prompt')).toBe('');
+
+      await click(undoButton());
+
+      expect(draft.state).toMatchObject({ prompt: 'a fox', enhancedPrompt: REWRITE.prompt, enhancedHistory: [REWRITE], enhancedFrom: FROM });
+      expect(enhancedTab().getAttribute('aria-selected')).toBe('true');
+      expect(undoLine()).toBeNull();
+      expect(clearButton()).not.toBeNull();
+    });
+
+    it('offers Undo until the next edit in the box', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      await click(clearButton());
+      expect(undoButton()).not.toBeNull();
+
+      type('ws-prompt', 'a cat');
+      await settle();
+
+      expect(undoButton()).toBeNull();
+      expect(draft.state.prompt).toBe('a cat');
+    });
+
+    it('gives a finger the Undo to focus instead of raising the keyboard', async () => {
+      layoutProbe.coarse = true;
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      await click(clearButton());
+
+      expect(document.activeElement).toBe(undoButton());
+    });
+
+    it('is hidden while Enhance runs in the box', async () => {
+      enhanceApiMocks.enhancePrompt.mockImplementation(() => new Promise<void>(() => undefined));
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      expect(clearButton()).not.toBeNull();
+
+      pressKey('e', { ctrlKey: true }, field('ws-prompt'));
+      await settle();
+
+      expect(clearButton()).toBeNull();
+    });
+
+    it('is one Clear for a video’s Scene and Action, in the Action box, and Undo brings both back', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      expect(target.querySelectorAll('[data-testid="clear-box"]')).toHaveLength(1);
+      expect(clearButton()!.getAttribute('aria-label')).toBe('Clear the scene and action');
+      expect(field('ws-prompt').closest('.ui-prompt-box')!.contains(clearButton())).toBe(true);
+
+      await click(clearButton());
+
+      expect(draft.state).toMatchObject({ scene: '', prompt: '', enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+      expect(undoLine()).toBe('Cleared. Undo');
+
+      await click(undoButton());
+
+      expect(draft.state).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' });
+    });
+
+    it('clears the JSON prompt the box shows, and Undo puts it back', async () => {
+      const defaults = makeIdeogramDefaults();
+      draft.patch({ jsonPromptEnabled: true, jsonPrompt: '{"high_level_description": "a fox"}', prompt: 'kept' });
+      await mountWorkspace(withEnhancer(makeContext({ image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }], defaults, current_image_model: 'ideo', image_model_defaults: { ideo: defaults } })));
+      expect(clearButton()!.getAttribute('aria-label')).toBe('Clear the JSON prompt');
+
+      await click(clearButton());
+
+      expect(draft.state).toMatchObject({ jsonPrompt: '', prompt: 'kept' });
+      await click(undoButton());
+      expect(draft.state.jsonPrompt).toBe('{"high_level_description": "a fox"}');
+    });
+  });
+
+  describe('the JSON caption toggle', () => {
+    it('is the braces icon alone, named JSON caption, and pressed while the JSON prompt replaces the normal one', async () => {
+      const defaults = makeIdeogramDefaults();
+      await mountWorkspace(withEnhancer(makeContext({ image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }], defaults, current_image_model: 'ideo', image_model_defaults: { ideo: defaults } })));
+      const toggle = target.querySelector('#ws-json-prompt-toggle') as HTMLButtonElement;
+
+      expect(toggle.getAttribute('aria-label')).toBe('JSON caption');
+      expect(toggle.textContent?.trim()).toBe('');
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(toggle.getAttribute('title')).toBe('JSON caption: replaces the normal prompt');
+
+      toggle.click();
+      await settle();
+
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      expect(draft.state.jsonPromptEnabled).toBe(true);
+    });
+  });
+
+  describe('the Enhance box after a walk', () => {
+    const NO_REWRITE = 'The enhancer returned no usable rewrite. Try again.';
+    const FROM = { prompt: 'a fox', scene: '', mode: 'image' as const };
+    const toggle = () => target.querySelector('#ws-enhance-toggle') as HTMLButtonElement;
+    const runButton = () => document.querySelector('#ws-enhance-run') as HTMLButtonElement | null;
+    const tabEl = (name: 'prompt' | 'enhanced') => target.querySelector(`#ws-tab-${name}`) as HTMLButtonElement;
+    const generate = () => target.querySelector('#ws-submit') as HTMLButtonElement;
+    const click = async (node: Element | null) => {
+      (node as HTMLElement).click();
+      await settle();
+    };
+
+    /** Make each run wait until released (or aborted), as a slow enhancer does. */
+    function holdRun(): { release: () => void; readonly aborted: boolean } {
+      const held = { aborted: false, release: () => {} };
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        (rest[1] as AbortSignal).addEventListener('abort', () => { held.aborted = true; held.release(); });
+        await new Promise<void>((resolve) => { held.release = resolve; });
+      });
+      return held;
+    }
+
+    it('shows no warning on the button or anywhere with Enhance each image on, however old the Enhanced text is', async () => {
+      draft.patch({ prompt: 'a cat', enhancedPrompt: 'A red fox.', enhancedFrom: FROM });
+      await mountWorkspace(withEnhancer(makeContext()));
+      expect(toggle().getAttribute('aria-label')).toBe('Enhance (out of date)');
+
+      draft.update('enhanceAuto', true);
+      await settle();
+
+      expect(toggle().getAttribute('aria-label')).toBeNull();
+      expect(toggle().textContent).toContain('Enhance · each image');
+      expect(toggle().querySelector('.ui-icon-warn')).toBeNull();
+      expect(target.querySelector('[data-mark="warn"]')).toBeNull();
+      expect(target.querySelector('[data-testid="enhance-stale"]')).toBeNull();
+    });
+
+    it('returns to your own text after a failed run, with the error under the box and the versions as they were', async () => {
+      draft.patch({ prompt: 'a fox', enhancedPrompt: 'A red fox.', enhancedFrom: FROM, enhancedHistory: [{ prompt: 'A red fox.', scene: '', from: FROM }] });
+      await mountWorkspace(withEnhancer(makeContext()));
+      await click(tabEl('enhanced'));
+      const before = { prompt: draft.state.enhancedPrompt, history: draft.state.enhancedHistory };
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'error', detail: NO_REWRITE });
+      });
+
+      await click(toggle());
+      await click(runButton());
+
+      expect(tabEl('prompt').getAttribute('aria-selected')).toBe('true');
+      const help = target.querySelector('[data-testid="help-line"]')!;
+      expect(help.textContent).toBe(NO_REWRITE);
+      expect(help.getAttribute('role')).toBe('alert');
+      expect({ prompt: draft.state.enhancedPrompt, history: draft.state.enhancedHistory }).toEqual(before);
+    });
+
+    it('returns to your own text, with the error, when the request fails and there was no Enhanced text', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      enhanceApiMocks.enhancePrompt.mockRejectedValue(new Error('The enhancer is not reachable.'));
+
+      await click(toggle());
+      await click(runButton());
+
+      expect(tabEl('prompt').getAttribute('aria-selected')).toBe('true');
+      expect(target.querySelector('[data-testid="help-line"]')?.textContent).toBe('The enhancer is not reachable.');
+    });
+
+    it('returns to your own Prompt and Scene after a failed video run', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: 'a knight' });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'error', detail: NO_REWRITE });
+      });
+
+      await click(toggle());
+      await click(runButton());
+
+      expect(tabEl('prompt').getAttribute('aria-selected')).toBe('true');
+      expect(target.querySelector('[data-testid="help-line"]')?.textContent).toBe(NO_REWRITE);
+    });
+
+    it('closes the panel as the run starts and puts the focus on the Enhance button', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      holdRun();
+      await click(toggle());
+      runButton()!.focus();
+
+      await click(runButton());
+
+      expect(document.querySelector('#ws-enhance-panel')).toBeNull();
+      expect(document.activeElement).toBe(toggle());
+    });
+
+    it('puts the focus on the Enhance button after the panel\'s own Stop', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      const held = holdRun();
+      await click(toggle());
+      await click(runButton());
+      await click(toggle());
+      const stop = document.querySelector('#ws-enhance-panel .ui-btn-danger') as HTMLButtonElement;
+      expect(stop.textContent?.trim()).toBe('Stop');
+      stop.focus();
+
+      await click(stop);
+
+      expect(held.aborted).toBe(true);
+      expect(document.querySelector('#ws-enhance-panel .ui-btn-danger')).toBeNull();
+      expect(document.activeElement).toBe(toggle());
+    });
+
+    it('says in the panel, beside "Enhance again", why the Enhanced text is out of date, and nothing while it is current', async () => {
+      draft.patch({ prompt: 'a fox', enhancedPrompt: 'A red fox.', enhancedFrom: FROM });
+      await mountWorkspace(withEnhancer(makeContext()));
+      await click(toggle());
+      expect(document.querySelector('[data-testid="enhance-stale"]')).toBeNull();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await settle();
+
+      type('ws-prompt', 'a cat');
+      await settle();
+      await click(toggle());
+
+      const stale = document.querySelector('#ws-enhance-panel [data-testid="enhance-stale"]');
+      expect(stale?.textContent).toBe('Your Prompt changed since this was written.');
+      expect(runButton()!.textContent?.trim()).toBe('Enhance again');
+      expect(runButton()!.parentElement?.contains(stale)).toBe(true);
+    });
+
+    it('names the Action or the Scene of a video that changed', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: { prompt: 'a knight', scene: 'A castle.', mode: 'video' } });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      type('ws-prompt', 'a queen');
+      await settle();
+      await click(toggle());
+      expect(document.querySelector('[data-testid="enhance-stale"]')?.textContent).toBe('Your Action changed since this was written.');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await settle();
+
+      type('ws-scene', 'A harbour.');
+      await settle();
+      await click(toggle());
+      expect(document.querySelector('[data-testid="enhance-stale"]')?.textContent).toBe('Your Scene and Action changed since this was written.');
+    });
+
+    it('keeps Generate off, with the reason in view, while Enhance runs, and on again once it ends', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      const held = holdRun();
+      expect(generate().disabled).toBe(false);
+      await click(toggle());
+      await click(runButton());
+
+      expect(generate().disabled).toBe(true);
+      expect(target.querySelector('#ws-generate-reason')?.textContent).toBe("Enhancing… Generate when it's done.");
+      expect(generate().getAttribute('aria-describedby')).toBe('ws-generate-reason');
+      await submitForm(target);
+      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+
+      held.release();
+      await settle();
+
+      expect(generate().disabled).toBe(false);
+      expect(target.querySelector('#ws-generate-reason')).toBeNull();
+    });
+
+    it('keeps Generate off, with the reason in view, while a video Enhance runs', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: 'a knight' });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      const held = holdRun();
+      await click(toggle());
+      await click(runButton());
+
+      expect(generate().disabled).toBe(true);
+      expect(target.querySelector('#ws-generate-reason')?.textContent).toBe("Enhancing… Generate when it's done.");
+
+      held.release();
+      await settle();
+      expect(generate().disabled).toBe(false);
+    });
+
+    it('keeps Generate off on the phone, with the reason above the row, while Enhance runs', async () => {
+      layoutProbe.compact = true;
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      const held = holdRun();
+      await click(target.querySelector('[aria-label="Edit the prompt"]'));
+      await click(toggle());
+      await click(runButton());
+
+      expect((target.querySelector('#ws-submit-compact') as HTMLButtonElement).disabled).toBe(true);
+      expect(target.querySelector('[data-testid="generate-reason"]')?.textContent?.trim()).toBe("Enhancing… Generate when it's done.");
+
+      held.release();
+      await settle();
+      expect((target.querySelector('#ws-submit-compact') as HTMLButtonElement).disabled).toBe(false);
+      expect(target.querySelector('[data-testid="generate-reason"]')).toBeNull();
     });
   });
 
@@ -1455,13 +1955,13 @@ describe('WorkspacePage', () => {
     draft.update('enhancedPrompt', 'A red fox.');
     draft.update('enhancedFrom', { prompt: 'a fox', scene: '', mode: 'image' });
     await mountWorkspace(withEnhancer(makeContext()));
-    expect(target.textContent).not.toContain('Out of date');
+    expect(target.querySelector('[data-mark="warn"]')).toBeNull();
 
     const prompt = target.querySelector('#ws-prompt') as HTMLTextAreaElement;
     prompt.value = 'a cat';
     prompt.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    expect(target.textContent).toContain('Out of date');
+    expect(target.querySelector('[data-mark="warn"]')).not.toBeNull();
   });
 
   it('submits the original prompt plus auto-enhance fields when enhancing each image', async () => {
@@ -1471,7 +1971,7 @@ describe('WorkspacePage', () => {
     draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: ['action'], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
 
-    expect((target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(target.querySelector('#ws-enhanced-prompt')).toBeNull();
     const submitted = await submitForm(target);
     expect(submitted.get('prompt')).toBe('a fox');
     expect(submitted.get('enhance_auto')).toBe('true');
@@ -1594,6 +2094,31 @@ describe('WorkspacePage', () => {
       expect(isShown('ws-scene') && isShown('ws-prompt')).toBe(true);
     });
 
+    it('opens on your own text when the mode changes between Image and Video, and keeps the tab within a mode', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      const selected = (id: string) => target.querySelector(`#${id}`)?.getAttribute('aria-selected');
+
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+      expect(selected('ws-tab-enhanced')).toBe('true');
+
+      draft.update('workflow', 'txt2vid');
+      await settle();
+      expect(selected('ws-tab-prompt')).toBe('true');
+      expect(isShown('ws-scene') && isShown('ws-prompt')).toBe(true);
+
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+      draft.update('workflow', 'img2vid');
+      await settle();
+      expect(selected('ws-tab-enhanced')).toBe('true');
+
+      draft.update('workflow', 'txt2img');
+      await settle();
+      expect(selected('ws-tab-prompt')).toBe('true');
+    });
+
     it('lets a scene alone generate, and refuses with a message on the Action box when both boxes are empty', async () => {
       draft.update('workflow', 'txt2vid');
       await mountWorkspace(makeContext());
@@ -1669,7 +2194,6 @@ describe('WorkspacePage', () => {
       expect(field('ws-enhanced-scene').value).toBe('A castle at dusk.');
       expect(field('ws-enhanced-prompt').value).toBe('A knight rides in.');
       expect(target.textContent).toContain('The enhancer did not follow the format.');
-      expect(target.textContent).not.toContain('Out of date');
     });
 
     it('sends no scene when an image prompt is enhanced', async () => {
@@ -1788,10 +2312,11 @@ describe('WorkspacePage', () => {
         (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
         await settle();
         expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ settings: { parts: 'both' } });
-        // The remembered choice survives and applies again once there is a scene.
+        // The remembered choice survives and applies again once there is a scene. The run closed the panel, so it is opened again.
         expect(draft.state.enhanceSettingsVideo?.partsByWorkflow).toEqual({ txt2vid: 'action' });
         type('ws-scene', 'A castle.');
         await settle();
+        await openEnhanceRun();
         expect(chip('Action only').disabled).toBe(false);
         expect(chip('Action only').getAttribute('aria-checked')).toBe('true');
       });
@@ -1808,149 +2333,118 @@ describe('WorkspacePage', () => {
       });
     });
 
-    describe('markers', () => {
-      const labelRow = (id: string) => target.querySelector(`label[for="${id}"]`)!.closest('.label-row') as HTMLElement;
-      /** The text beside the label: clip links and the enhanced marker. */
-      const rowText = (id: string) => (labelRow(id).querySelector('.label-extras')?.textContent ?? '').replace(/\s+/g, ' ').trim();
-      const useMine = (id: string) => Array.from(labelRow(id).querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Use mine') as HTMLButtonElement | undefined;
-      const status = () => target.querySelector('[role="status"]')?.textContent?.trim();
-      const lineState = () => (target.querySelector('[data-testid="prompt-statusline"]') as HTMLElement).dataset.state;
-      const lineButtons = () => Array.from(target.querySelectorAll('[data-testid="prompt-statusline"] button')).map((el) => el.textContent?.trim());
+    describe('marks', () => {
+      const tabEl = (name: 'prompt' | 'enhanced') => target.querySelector(`#ws-tab-${name}`) as HTMLButtonElement;
+      const markOf = () => tabEl('enhanced').querySelector('[data-mark]')?.getAttribute('data-mark') ?? null;
+      const sentNote = () => (tabEl('enhanced').getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
+      const scratchButton = () => target.querySelector('[aria-label="Scratch the enhanced text"]') as HTMLButtonElement | null;
+      const counter = () => target.querySelector('.rewrite-count')?.textContent ?? null;
+      const isGrey = (id: string) => (target.querySelector(`#${id}`) as HTMLElement).hasAttribute('data-unsent');
+      const FROM = { scene: 'A castle.', prompt: 'a knight', mode: 'video' as const };
 
-      it('shows no marker, no Use mine and no pill on Your text when nothing is enhanced', async () => {
+      it('names the tabs Prompt and Enhanced, with no marker on either and no part badge when nothing is enhanced', async () => {
         draft.update('workflow', 'txt2vid');
         draft.patch({ scene: 'A castle.', prompt: 'a knight' });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(rowText('ws-scene')).toBe('');
-        expect(rowText('ws-prompt')).toBe('');
-        expect(target.querySelector('#ws-tab-prompt')?.textContent?.trim()).toBe('Your text');
-        expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
+
+        expect(tabEl('prompt').textContent?.trim()).toBe('Prompt');
+        expect(tabEl('enhanced').textContent?.trim()).toBe('Enhanced');
+        expect(target.querySelector('[data-mark]')).toBeNull();
+        expect(isGrey('ws-scene') || isGrey('ws-prompt')).toBe(false);
       });
 
-      it('marks only the part with Enhanced text, in both tabs, and describes the field by it', async () => {
+      it('greys only the part whose Enhanced text is sent, in your view, and puts a dot on the closed Enhanced tab', async () => {
         draft.update('workflow', 'txt2vid');
         draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: null });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(rowText('ws-prompt')).toBe('Uses enhanced Use mine');
-        expect(rowText('ws-scene')).not.toContain('Uses enhanced');
-        const marker = document.getElementById('ws-action-marker')!;
-        expect(marker.textContent?.trim()).toBe('Uses enhanced');
-        expect(field('ws-prompt').getAttribute('aria-describedby')).toContain('ws-action-marker');
-        expect(field('ws-enhanced-prompt').getAttribute('aria-describedby')).toContain('ws-action-marker');
-        expect(field('ws-scene').getAttribute('aria-describedby')).toBeNull();
-        // The tabs carry no pills; the label rows say which part is used.
-        expect(target.querySelector('#ws-tab-prompt')?.textContent?.trim()).toBe('Your text');
-        expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
 
-        (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
-        await settle();
-        expect(rowText('ws-enhanced-prompt')).toContain('Uses enhanced');
+        expect(isGrey('ws-prompt')).toBe(true);
+        expect(isGrey('ws-scene')).toBe(false);
+        expect(markOf()).toBe('dot');
+        expect(sentNote()).toBe('sent by Generate');
+        expect(target.querySelector('.label-extras')).toBeNull();
       });
 
-      it('clears one part with Use mine, announces it and sends the user text for that part', async () => {
+      it('covers the pair with one header: ✕ Scratch empties both Enhanced boxes and Generate sends your text for both', async () => {
         draft.update('workflow', 'txt2vid');
-        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: FROM });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(rowText('ws-scene')).toContain('Uses enhanced');
-        expect(rowText('ws-prompt')).toContain('Uses enhanced');
-
-        useMine('ws-prompt')!.click();
+        tabEl('enhanced').click();
         await settle();
-        expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedScene: 'A castle at dusk.' });
-        expect(rowText('ws-prompt')).not.toContain('Uses enhanced');
-        expect(rowText('ws-scene')).toContain('Uses enhanced');
-        expect(status()).toBe('Action now uses your text.');
+        expect(scratchButton()).not.toBeNull();
+
+        scratchButton()!.click();
+        await settle();
+
+        expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+        expect(tabEl('prompt').getAttribute('aria-selected')).toBe('true');
+        expect(document.activeElement).toBe(tabEl('prompt'));
         const submitted = await submitForm(target);
-        expect(submitted.get('scene')).toBe('A castle at dusk.');
+        expect(submitted.get('scene')).toBe('A castle.');
         expect(submitted.get('prompt')).toBe('a knight');
-
-        useMine('ws-scene')!.click();
-        await settle();
-        expect(status()).toBe('Scene now uses your text.');
-        expect(draft.state.enhancedFrom).toBeNull();
-        expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
       });
 
-      it('shows no marker while auto-enhancing, whatever the boxes hold', async () => {
+      it('shows no marker while auto-enhancing, whatever the boxes hold, under one Prompt heading', async () => {
         draft.update('workflow', 'txt2vid');
         draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'Ignored.', enhanceAuto: true });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(rowText('ws-prompt')).not.toContain('Uses enhanced');
-        expect(lineState()).toBe('auto');
+
+        expect(target.querySelector('[data-mark]')).toBeNull();
+        expect(target.querySelectorAll('[role="tab"]')).toHaveLength(0);
+        expect(target.querySelector('.head')?.textContent?.trim()).toBe('Prompt');
+        expect(isGrey('ws-prompt')).toBe(false);
       });
 
-      it('says Out of date in the status line, not on the part, only while its pair is stale', async () => {
+      it('marks the pair out of date on the first keystroke in either part, only while the part that changed has a rewrite made from it', async () => {
         draft.update('workflow', 'txt2vid');
-        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: FROM });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(lineState()).not.toBe('stale');
+        expect(markOf()).toBe('dot');
 
         type('ws-scene', 'A harbour.');
         await settle();
-        expect(rowText('ws-prompt')).toBe('Uses enhanced Use mine');
-        // The scene is not enhanced, so what it sends is current.
-        expect(rowText('ws-scene')).toBe('');
-        expect(lineState()).toBe('stale');
-        // The pair has its own Use mine links, so the status line offers Re-enhance only.
-        expect(lineButtons()).toEqual(['Re-enhance']);
+
+        expect(markOf()).toBe('warn');
+        expect(sentNote()).toBe('sent by Generate, out of date');
+        // The scene is not enhanced, so it stays bright; the action is the part that is sent from the rewrite.
+        expect(isGrey('ws-scene')).toBe(false);
+        expect(isGrey('ws-prompt')).toBe(true);
+        expect((target.querySelector('#ws-enhance-toggle') as HTMLElement).getAttribute('aria-label')).toBe('Enhance (out of date)');
 
         type('ws-scene', 'A castle.');
         await settle();
-        expect(lineState()).not.toBe('stale');
+        expect(markOf()).toBe('dot');
       });
 
-      it('keeps Out of date and Re-enhance in the status line ahead of a notice', async () => {
+      it('keeps the stepper while out of date, and Enhance again starts from your text and keeps the versions', async () => {
+        const first = { prompt: 'A knight rides in.', scene: 'A castle at dusk.', from: FROM };
+        enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+          (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: 'A harbour at dawn.', prompt: 'A knight rides out.', clamped: false });
+        });
         draft.update('workflow', 'txt2vid');
-        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+        draft.patch({ scene: 'A harbour.', prompt: 'a knight', enhancedScene: first.scene, enhancedPrompt: first.prompt, enhancedFrom: first.from, enhancedHistory: [first] });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        type('ws-scene', 'A harbour.');
-        await settle();
-        expect(lineState()).toBe('stale');
+        expect(markOf()).toBe('warn');
 
-        useMine('ws-scene')!.click();
-        await settle();
-
-        expect(draft.state.enhancedScene).toBe('');
-        expect(lineState()).toBe('stale');
-        expect(lineButtons()).toContain('Re-enhance');
-      });
-
-      it('empties both Enhanced boxes with the two Use mine links, and Enhance again starts from the user text', async () => {
-        enhanceApiMocks.enhancePrompt.mockResolvedValue();
-        draft.update('workflow', 'txt2vid');
-        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
-        await mountWorkspace(withVideoEnhancer(makeContext()));
-        (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
-        await settle();
-        useMine('ws-enhanced-scene')!.click();
-        await settle();
-        useMine('ws-enhanced-prompt')!.click();
-        await settle();
-        expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
-
-        draft.patch({ enhancedScene: 'Old.', enhancedPrompt: 'Old.' });
         await openEnhanceRun();
         (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
         await settle();
-        expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ scene: 'A castle.', prompt: 'a knight' });
+
+        expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ scene: 'A harbour.', prompt: 'a knight' });
+        expect(draft.state.enhancedHistory.map((entry) => entry.prompt)).toEqual(['A knight rides in.', 'A knight rides out.']);
+        expect(counter()).toBe('2 of 2');
       });
     });
 
     describe('Enhanced placeholders', () => {
-      it('say what the job will do with auto-enhance, by Rewrite choice', async () => {
+      it('say what Generate sends for a part nothing was written for, in both tabs', async () => {
         draft.update('workflow', 'txt2vid');
-        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhanceAuto: true });
+        draft.patch({ scene: 'A castle.', prompt: 'a knight' });
         await mountWorkspace(withVideoEnhancer(makeContext()));
-        expect(field('ws-enhanced-scene').placeholder).toBe('Enhanced when the job runs');
-        expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
-        expect(field('ws-enhanced-scene').disabled).toBe(true);
 
-        draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', shot: 'keep', angle: 'keep', palette: 'keep', colors: [], camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
-        await settle();
-        expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
-        expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
+        expect(field('ws-enhanced-scene').placeholder).toBe('Not rewritten. Generate sends your scene.');
+        expect(field('ws-enhanced-prompt').placeholder).toBe('Not rewritten. Generate sends your action.');
       });
-
     });
 
     it('fills both tabs from the Reuse params without marking them out of date', async () => {
@@ -1963,7 +2457,6 @@ describe('WorkspacePage', () => {
       expect(field('ws-prompt').value).toBe('a knight');
       expect(field('ws-enhanced-scene').value).toBe('A castle at dusk.');
       expect(field('ws-enhanced-prompt').value).toBe('A knight rides in.');
-      expect(target.textContent).not.toContain('Out of date');
     });
 
     it('focuses the Prompt box, not the Scene box, with Alt+1', async () => {

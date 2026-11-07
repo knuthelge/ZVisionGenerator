@@ -1,0 +1,235 @@
+# Messy, realistic Describe it ideas for Fill in (music: style, tempo, key, lyrics; speech: vibe, text). Original text written for the bench. Run with:
+#   python -m bench.enhance run --cases-file bench/enhance/cases/audio-fill-messy.yaml --label NAME --model fast|smart
+# Cause tags: vague, specific, instrumental, speech, language, quotes, odd, partial (the take already holds some fields), apology.
+
+cases:
+  # ---- music: vague ideas -----------------------------------------------------------------------------------------------------------
+  - {id: mf-vague-sad, tags: [audio, fill, messy, music, vague], mode: audio-fill, family: yue2, prompt: something sad, settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-vague-song, tags: [audio, fill, messy, music, vague], mode: audio-fill, family: yue2, prompt: a song, settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-vague-vibes, tags: [audio, fill, messy, music, vague], mode: audio-fill, family: yue2, prompt: "good vibes only lol", settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-vague-surprise, tags: [audio, fill, messy, music, vague], mode: audio-fill, family: yue2, prompt: "idk, surprise me", settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-vague-one-word, tags: [audio, fill, messy, music, vague], mode: audio-fill, family: yue2, prompt: rain, settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-vague-chill, tags: [audio, fill, messy, music, vague], mode: audio-fill, family: yue2, prompt: "chill but also kind of epic??", settings: {fields: [style, tempo, key, lyrics]}}
+  # ---- music: specific ideas --------------------------------------------------------------------------------------------------------
+  - id: mf-specific-trip-hop
+    tags: [audio, fill, messy, music, specific, language]
+    mode: audio-fill
+    family: yue2
+    prompt: a 92 bpm trip-hop song in D minor with whispered female vocals and a dusty vinyl crackle, about my cat Pelle who sleeps on the radiator, sung in Norwegian
+    settings: {fields: [style, tempo, key, lyrics]}
+    keep: [Pelle]
+  - id: mf-specific-long-ramble
+    tags: [audio, fill, messy, music, specific]
+    mode: audio-fill
+    family: yue2
+    prompt: >-
+      ok so my brother is getting married next June in a barn outside Stavanger and I want to surprise him with a song. It should be warm and a bit funny,
+      like a country-folk thing with banjo and a stomping beat, mention that he once drove a tractor into a lake, that his fiancee Ingrid hates cilantro,
+      and that they met at a bus stop in the rain. Maybe a singalong chorus that the whole barn can shout back. He is 34, she is 31, not that it matters.
+      Keep it clean because grandma will be there. Tempo somewhere around 110. And please no autotune.
+    settings: {fields: [style, tempo, key, lyrics]}
+    keep: [Ingrid, Stavanger]
+  - id: mf-specific-structure
+    tags: [audio, fill, messy, music, specific]
+    mode: audio-fill
+    family: yue2
+    prompt: "pop-punk, 170 bpm, E major, structure: verse chorus verse chorus bridge chorus, about quitting a job I hated"
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-contradictory
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: a very slow fast song that is quiet and loud at the same time
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-all-caps
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: HEAVY METAL ABOUT VIKINGS AND BEER!!!
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-labels-typed
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: "Style: dreamy synthwave. Key: A minor. Tempo: 100. Lyrics: about driving at night along an empty coast."
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-emoji
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: "🔥🔥 summer party anthem 🍹🌴 with a big drop 💃"
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-bullets
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: |-
+      - mood: nostalgic
+      - theme: last day of school
+      - instruments: acoustic guitar, hand claps
+      - no swearing
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-copyright-artist
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: a song just like Taylor Swift would write about a breakup in a small town
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-non-musical-question
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: what is the capital of Australia and how many people live there?
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-recipe
+    tags: [audio, fill, messy, music, odd]
+    mode: audio-fill
+    family: yue2
+    prompt: a recipe for pancakes with flour, eggs and milk
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-cant-forgive
+    tags: [audio, fill, messy, music, apology]
+    mode: audio-fill
+    family: yue2
+    prompt: a bitter song about how I can't forgive him and I won't take him back, even if he says he's sorry
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-apology-song
+    tags: [audio, fill, messy, music, apology]
+    mode: audio-fill
+    family: yue2
+    prompt: a heartfelt apology song, "I'm sorry" should be the first line of the verse
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-quotes-chorus
+    tags: [audio, fill, messy, music, quotes]
+    mode: audio-fill
+    family: yue2
+    prompt: 'a road-trip song where the chorus goes "Take the long way home, take the long way home" and the verses mention Route 66'
+    settings: {fields: [style, tempo, key, lyrics]}
+    keep: [Route 66]
+  - id: mf-curly-quotes
+    tags: [audio, fill, messy, music, quotes]
+    mode: audio-fill
+    family: yue2
+    prompt: a gospel number with the hook “Don’t you worry ’bout a thing” and a big choir
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-norwegian-idea
+    tags: [audio, fill, messy, music, language]
+    mode: audio-fill
+    family: yue2
+    prompt: en rolig vise om en gammel fisker som aldri kom hjem fra havet
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-spanish-idea
+    tags: [audio, fill, messy, music, language]
+    mode: audio-fill
+    family: yue2
+    prompt: una canción alegre de verano en la playa, con guitarra y palmas
+    settings: {fields: [style, tempo, key, lyrics]}
+  - id: mf-tempo-conflict
+    tags: [audio, fill, messy, music, partial]
+    mode: audio-fill
+    family: yue2
+    prompt: fast dance track, around 128 bpm
+    settings: {fields: [style, key, lyrics]}
+    context: {tempo: 70}
+  - id: mf-style-set-lyrics-empty
+    tags: [audio, fill, messy, music, partial]
+    mode: audio-fill
+    family: yue2
+    prompt: a song about the first snow of winter
+    settings: {fields: [tempo, key, lyrics]}
+    context: {style: "dark synth-pop, female vocal, pulsing bass"}
+  - id: mf-tags-only-lyrics-set
+    tags: [audio, fill, messy, music, partial, tags-only]
+    mode: audio-fill
+    family: yue2
+    prompt: a hopeful song about moving to a new city
+    settings: {fields: [style, tempo, key]}
+    context:
+      lyrics: |-
+        [Verse]
+
+        [Chorus]
+
+        [Verse]
+
+        [Chorus]
+  - id: mf-tags-only-lyrics-would-fill
+    tags: [audio, fill, messy, music, partial, tags-only, would-be]
+    mode: audio-fill
+    family: yue2
+    prompt: a hopeful song about moving to a new city
+    settings: {fields: [style, tempo, key, lyrics]}
+    context:
+      lyrics: |-
+        [Verse]
+
+        [Chorus]
+
+        [Verse]
+
+        [Chorus]
+  - id: mf-untagged-lyrics-set
+    tags: [audio, fill, messy, music, partial]
+    mode: audio-fill
+    family: yue2
+    prompt: make it feel like a lullaby
+    settings: {fields: [style, tempo, key]}
+    context:
+      lyrics: |-
+        Close your eyes, the day is done
+        The stars come out one by one
+        Sleep now, sleep now, little one
+  - id: mf-lyrics-sorry-set
+    tags: [audio, fill, messy, music, partial, apology]
+    mode: audio-fill
+    family: yue2
+    prompt: sparse and raw, just a voice and a guitar
+    settings: {fields: [style, tempo, key]}
+    context:
+      lyrics: |-
+        [Verse]
+        I'm sorry that I left you in the rain
+        I'm sorry that I never called again
+  # ---- music: instrumental requests ---------------------------------------------------------------------------------------------------
+  - {id: mf-inst-piano, tags: [audio, fill, messy, music, instrumental], mode: audio-fill, family: yue2, prompt: "instrumental only, no vocals, solo piano for studying", settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-inst-podcast, tags: [audio, fill, messy, music, instrumental], mode: audio-fill, family: yue2, prompt: "background music for my podcast intro, no singing please", settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-inst-metal, tags: [audio, fill, messy, music, instrumental, specific], mode: audio-fill, family: yue2, prompt: "an instrumental progressive metal piece with odd time signatures, no lyrics at all, 150 bpm, F# minor, long melodic guitar solo, just guitars and drums, no screaming, no choir, no humming", settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-inst-lofi-sa3, tags: [audio, fill, messy, music, instrumental, sa3], mode: audio-fill, family: stable_audio_3, prompt: "lofi beat to relax to, rainy window, no vocals", settings: {fields: [style, tempo, key]}}
+  - {id: mf-inst-karaoke, tags: [audio, fill, messy, music, instrumental, specific], mode: audio-fill, family: yue2, prompt: "a karaoke backing track for a 90s power ballad, 68 bpm, G major, big drums and strings, without the singer and no backing vocals either", settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-inst-with-lyrics-request, tags: [audio, fill, messy, music, odd], mode: audio-fill, family: yue2, prompt: "instrumental intro, then vocals come in halfway, about a lighthouse", settings: {fields: [style, tempo, key, lyrics]}}
+  - {id: mf-sa3-vague, tags: [audio, fill, messy, music, vague, sa3], mode: audio-fill, family: stable_audio_3, prompt: something for a long drive at night, settings: {fields: [style, tempo, key]}}
+  - {id: mf-sa3-specific, tags: [audio, fill, messy, music, specific, sa3], mode: audio-fill, family: stable_audio_3, prompt: "tense orchestral cue for a chase through a market, 140 bpm, C minor, low brass stabs, ticking percussion", settings: {fields: [style, tempo, key]}}
+
+  # ---- speech ideas ---------------------------------------------------------------------------------------------------------------------
+  - {id: sf-voicemail-late, tags: [audio, fill, messy, speech], mode: audio-fill, family: qwen3_tts, prompt: a voicemail apologizing for being late to dinner, settings: {fields: [vibe, text]}}
+  - {id: sf-voicemail-sorry-first, tags: [audio, fill, messy, speech, apology], mode: audio-fill, family: qwen3_tts, prompt: 'a voicemail that starts with "I''m sorry I missed your call" and asks them to call back about the invoice', settings: {fields: [vibe, text]}}
+  - {id: sf-ad-bakery, tags: [audio, fill, messy, speech, ad], mode: audio-fill, family: qwen3_tts, prompt: a 15 second ad for a bakery called Miller's on Elm Street, settings: {fields: [vibe, text]}, keep: [Miller, Elm Street]}
+  - {id: sf-bedtime, tags: [audio, fill, messy, speech], mode: audio-fill, family: qwen3_tts, prompt: a bedtime story about a sleepy bear, settings: {fields: [vibe, text]}}
+  - {id: sf-news-dog, tags: [audio, fill, messy, speech], mode: audio-fill, family: qwen3_tts, prompt: a news bulletin about a lost golden retriever called Biscuit in Oslo, settings: {fields: [vibe, text]}, keep: [Biscuit, Oslo]}
+  - {id: sf-motivational, tags: [audio, fill, messy, speech], mode: audio-fill, family: qwen3_tts, prompt: motivational speech for a marathon runner at kilometre 35, settings: {fields: [vibe, text]}}
+  - {id: sf-ghost-whisper, tags: [audio, fill, messy, speech], mode: audio-fill, family: qwen3_tts, prompt: a whispered ghost story opening, settings: {fields: [vibe, text]}}
+  - {id: sf-airline-delay, tags: [audio, fill, messy, speech, apology], mode: audio-fill, family: qwen3_tts, prompt: an airport announcement apologising for a two hour delay to Oslo caused by fog, settings: {fields: [vibe, text]}, keep: [Oslo]}
+  - {id: sf-grocery-list, tags: [audio, fill, messy, speech, odd], mode: audio-fill, family: qwen3_tts, prompt: "read my grocery list: milk, eggs, bread, 2 lemons, coffee", settings: {fields: [vibe, text]}}
+  - {id: sf-vague, tags: [audio, fill, messy, speech, vague], mode: audio-fill, family: qwen3_tts, prompt: something nice, settings: {fields: [vibe, text]}}
+  - {id: sf-one-word, tags: [audio, fill, messy, speech, vague], mode: audio-fill, family: qwen3_tts, prompt: hello, settings: {fields: [vibe, text]}}
+  - {id: sf-question, tags: [audio, fill, messy, speech, odd], mode: audio-fill, family: qwen3_tts, prompt: "how do I change a tyre?", settings: {fields: [vibe, text]}}
+  - {id: sf-norwegian, tags: [audio, fill, messy, speech, language], mode: audio-fill, family: qwen3_tts, prompt: en kort velkomsthilsen til gjestene på en bryllupsfest i Bergen, settings: {fields: [vibe, text]}, keep: [Bergen]}
+  - {id: sf-spanish, tags: [audio, fill, messy, speech, language], mode: audio-fill, family: qwen3_tts, prompt: un anuncio de radio de 20 segundos para una heladería llamada Polo Norte, settings: {fields: [vibe, text]}, keep: [Polo Norte]}
+  - {id: sf-quotes, tags: [audio, fill, messy, speech, quotes], mode: audio-fill, family: qwen3_tts, prompt: 'a narrator telling how the captain shouted "All hands on deck!" as the storm hit', settings: {fields: [vibe, text]}}
+  - {id: sf-curly-quotes, tags: [audio, fill, messy, speech, quotes], mode: audio-fill, family: qwen3_tts, prompt: 'a podcast intro that ends with the tagline “Stay curious, stay kind”', settings: {fields: [vibe, text]}}
+  - id: sf-long-ramble
+    tags: [audio, fill, messy, speech, specific]
+    mode: audio-fill
+    family: qwen3_tts
+    prompt: >-
+      So I need something for my grandfather's 80th birthday party. A short speech, maybe a minute, that I can have the app read out so he hears it
+      in a friendly warm voice. It should mention that he worked on the ferries for forty years, that he taught all of us to swim at the lake behind
+      the cabin, that he still cheats at cards, and that his wife Solveig is the real captain of the family. Not too soppy. A bit of humour.
+    settings: {fields: [vibe, text]}
+    keep: [Solveig]
+  - {id: sf-text-set-vibe-only, tags: [audio, fill, messy, speech, partial], mode: audio-fill, family: qwen3_tts, prompt: read it like a tired old pirate, settings: {fields: [vibe]}, context: {text: "The treasure was never buried. It was spent, a long time ago, on rum and regret."}}
+  - {id: sf-text-sorry-set-vibe-only, tags: [audio, fill, messy, speech, partial, apology], mode: audio-fill, family: qwen3_tts, prompt: gentle and sincere, settings: {fields: [vibe]}, context: {text: "I'm sorry for what I said. I didn't mean it, and I wish I could take it back."}}
+  - {id: sf-vibe-set-text-empty, tags: [audio, fill, messy, speech, partial], mode: audio-fill, family: qwen3_tts, prompt: a short thank-you to the volunteers after the charity run, settings: {fields: [text]}}
+  - {id: sf-all-caps, tags: [audio, fill, messy, speech, odd], mode: audio-fill, family: qwen3_tts, prompt: WELCOME TO THE BIGGEST SALE OF THE YEAR!!!, settings: {fields: [vibe, text]}}
+  - {id: sf-emoji, tags: [audio, fill, messy, speech, odd], mode: audio-fill, family: qwen3_tts, prompt: "🎃 spooky halloween intro for my youtube channel 👻", settings: {fields: [vibe, text]}}
+  - {id: sf-bullets, tags: [audio, fill, messy, speech, odd], mode: audio-fill, family: qwen3_tts, prompt: "- tone: friendly\n- topic: our new app update\n- length: 20 seconds\n- mention dark mode", settings: {fields: [vibe, text]}}

@@ -1,4 +1,4 @@
-"""Stable Audio 3 Medium backend: ambience and sound effects of 1 to 380 seconds, 44.1 kHz stereo.
+"""Stable Audio 3 Medium backend: ambience, sound effects and instrumental music of 1 to 380 seconds, 44.1 kHz stereo.
 
 The model is the vendored ``packages/stable_audio_3``. It is built through the same factory the package's own loader
 uses, but under an fp16 default dtype, and then filled tensor by tensor from the checkpoint. The fp32 model (9.2 GB) and
@@ -23,6 +23,7 @@ from zvisiongenerator.core.audio_backend import DECODE_PHASE, AudioCancelled, ra
 from zvisiongenerator.core.audio_types import AudioClip
 from zvisiongenerator.backends.audio import snapshot_dir
 from zvisiongenerator.backends.audio.build_cancel import stop_while_building
+from zvisiongenerator.backends.audio.sa3_caption import sa3_caption
 from zvisiongenerator.utils.library_noise import quiet_flash_attn_probe, silence_autotune_report
 from zvisiongenerator.utils.safetensors_stream import iter_tensors
 from zvisiongenerator.utils.torch_flags import default_dtype
@@ -184,7 +185,8 @@ class StableAudio3Backend:
         honoured between steps, not only before the take.
 
         Args:
-            request: The sound to make; ``seconds`` is required.
+            request: The sound or music to make; ``seconds`` is required. The prompt goes to the model inside the caption shell of
+                :func:`sa3_caption`, with the tempo and key of music.
             on_progress: Called as ``on_progress("Sampling", step, steps, 1, 1)``, then ``on_progress("Decode", 0, 1, 1, 1)`` and
                 ``on_progress("Decode", 1, 1, 1, 1)`` around the decoder that follows the last step.
             cancelled: Called between steps; ``True`` stops the take.
@@ -209,10 +211,11 @@ class StableAudio3Backend:
         def on_decode(done: int) -> None:
             on_progress(DECODE_PHASE, done, 1, 1, 1)
 
+        caption = sa3_caption(request.prompt, kind=request.kind, seconds=seconds, tempo=request.tempo, key=request.key)
         sound = self._model
         with _keep_decoded(sound.model.pretransform, on_decode) as decoded:
             sound.generate(
-                prompt=request.prompt,
+                prompt=caption,
                 duration=seconds,
                 steps=steps,
                 cfg_scale=float(self._settings["cfg_scale"]),

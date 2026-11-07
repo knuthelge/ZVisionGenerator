@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests._audio_presets import audio_config, higgs3_preset, sa3_preset
+from tests._audio_presets import audio_config, qwen3_tts_preset, sa3_preset
 from tests._factories import _make_args, _make_video_args, make_extend_source
 from tests.web._helpers import stub_request_job, wait_for_status
 
@@ -233,13 +233,19 @@ class TestAudioParts:
         return next(preset for preset in parse_audio_presets(config) if preset.id == model_id)
 
     def test_an_audio_job_has_one_model_part_named_by_its_preset(self, monkeypatch):
-        audio = MagicMock(side_effect=lambda preset: (DownloadTarget(f"audio/{preset.id}", allow_patterns=("files",)),))
+        audio = MagicMock(side_effect=lambda preset, voice=False: (DownloadTarget(f"audio/{preset.id}", allow_patterns=("files",)),))
         monkeypatch.setattr(job_downloads_module, "audio_plan", audio)
-        config = audio_config(higgs3=higgs3_preset(), sa3=sa3_preset())
+        config = audio_config(qwen3_tts=qwen3_tts_preset(), sa3=sa3_preset())
 
-        part = audio_model_part(self._preset("higgs3", config))
+        part = audio_model_part(self._preset("qwen3_tts", config))
 
-        assert part == JobDownloadPart("Higgs TTS 3 4B", "higgs3", "model", (DownloadTarget("audio/higgs3", allow_patterns=("files",)),))
+        assert part == JobDownloadPart("Qwen3-TTS 1.7B", "qwen3_tts", "model", (DownloadTarget("audio/qwen3_tts", allow_patterns=("files",)),))
+
+    def test_the_part_of_a_take_with_a_recording_holds_the_cloning_files_too(self):
+        preset = self._preset("qwen3_tts", audio_config(qwen3_tts=qwen3_tts_preset()))
+
+        assert [target.repo_id for target in audio_model_part(preset).targets] == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"]
+        assert [target.repo_id for target in audio_model_part(preset, voice=True).targets] == ["Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"]
 
     def test_the_real_planner_downloads_the_preset_s_files(self):
         part = audio_model_part(self._preset("sa3", audio_config(sa3=sa3_preset())))

@@ -2,46 +2,88 @@
   {
     "name": "a song from a style and lyrics",
     "settings": {"mode": "audio", "workflow": "music", "model": "yue2", "prompt": "upbeat synth-pop, female vocal", "lyrics": "[verse]\nHello there\n[chorus]\nLa la la", "runs": "1", "seed": "7"},
-    "command": "ziv audio --model yue2 --prompt 'upbeat synth-pop, female vocal' --lyrics '[verse]\nHello there\n[chorus]\nLa la la' --seed 7",
-    "requests": [{"preset": "yue2", "kind": "music", "prompt": "upbeat synth-pop, female vocal", "lyrics": "[verse]\nHello there\n[chorus]\nLa la la", "seconds": null, "voice": null, "seed": 7}]
+    "command": "ziv audio --model yue2 --kind music --prompt 'upbeat synth-pop, female vocal' --lyrics '[verse]\nHello there\n[chorus]\nLa la la' --seed 7",
+    "requests": [{"preset": "yue2", "kind": "music", "prompt": "upbeat synth-pop, female vocal", "lyrics": "[verse]\nHello there\n[chorus]\nLa la la", "seconds": null, "voice": null, "seed": 7, "speaker": null}]
   },
   {
     "name": "an instrumental from a style alone",
     "settings": {"mode": "audio", "workflow": "music", "model": "yue2", "prompt": "calm piano, slow", "lyrics": "", "runs": "1", "seed": "3"},
-    "command": "ziv audio --model yue2 --prompt 'calm piano, slow' --seed 3",
-    "requests": [{"preset": "yue2", "kind": "music", "prompt": "calm piano, slow", "lyrics": "", "seconds": null, "voice": null, "seed": 3}]
+    "command": "ziv audio --model yue2 --kind music --prompt 'calm piano, slow' --seed 3",
+    "requests": [{"preset": "yue2", "kind": "music", "prompt": "calm piano, slow", "lyrics": "", "seconds": null, "voice": null, "seed": 3, "speaker": null}]
   },
   {
-    "name": "speech in the model's own voice (Any)",
-    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "Welcome back.", "runs": "1", "seed": "4"},
-    "command": "ziv audio --model higgs3 --prompt 'Welcome back.' --seed 4",
-    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": null, "seed": 4}]
+    "name": "speech in the default built-in voice",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "Welcome back.", "runs": "1", "seed": "4", "speaker": "ryan"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'Welcome back.' --speaker ryan --seed 4",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": null, "seed": 4, "speaker": "ryan", "delivery": {"emotion": "neutral", "manner": "natural", "pace": "normal", "pitch": "normal", "expressiveness": "normal"}}]
+  },
+  {
+    "name": "speech in another built-in voice",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "Welcome back.", "runs": "1", "seed": "9", "speaker": "uncle_fu"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'Welcome back.' --speaker uncle_fu --seed 9",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": null, "seed": 9, "speaker": "uncle_fu", "delivery": {"emotion": "neutral", "manner": "natural", "pace": "normal", "pitch": "normal", "expressiveness": "normal"}}]
   },
   {
     "name": "speech following a recording, with the speaker's consent",
-    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "Welcome back.", "voice_path": "/voices/me.wav", "voice_text": "Hello, this is me.", "voice_consent": ["false", "on"], "runs": "1", "seed": "4"},
-    "command": "ziv audio --model higgs3 --prompt 'Welcome back.' --voice /voices/me.wav --voice-text 'Hello, this is me.' --voice-consent --seed 4",
-    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/me.wav", "text": "Hello, this is me."}, "seed": 4}]
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "Welcome back.", "voice_path": "/voices/me.wav", "voice_text": "Hello, this is me.", "voice_consent": ["false", "on"], "runs": "1", "seed": "4"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'Welcome back.' --voice /voices/me.wav --voice-text 'Hello, this is me.' --voice-consent --seed 4",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/me.wav", "text": "Hello, this is me."}, "seed": 4, "speaker": null}]
   },
   {
-    "name": "speech following an Any take, which needs no consent",
-    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "More words.", "voice_path": "/voices/any.flac", "voice_text": "Welcome back.", "voice_consent": "false", "runs": "1", "seed": "5"},
-    "command": "ziv audio --model higgs3 --prompt 'More words.' --voice /voices/any.flac --voice-text 'Welcome back.' --seed 5",
-    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "More words.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/any.flac", "text": "Welcome back."}, "seed": 5}]
+    "name": "speech following a take in a built-in voice, which needs no consent",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "More words.", "voice_path": "/voices/any.flac", "voice_text": "Welcome back.", "voice_consent": "false", "runs": "1", "seed": "5"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'More words.' --voice /voices/any.flac --voice-text 'Welcome back.' --seed 5",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "More words.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/any.flac", "text": "Welcome back."}, "seed": 5, "speaker": null}]
   },
   {
     "name": "speech following a cloned take, with consent",
-    "settings": {"mode": "audio", "workflow": "speech", "model": "higgs3", "prompt": "More words.", "voice_path": "/voices/cloned.flac", "voice_text": "Hello, this is me.", "voice_consent": "on", "runs": "1", "seed": "5"},
-    "command": "ziv audio --model higgs3 --prompt 'More words.' --voice /voices/cloned.flac --voice-text 'Hello, this is me.' --voice-consent --seed 5",
-    "requests": [{"preset": "higgs3", "kind": "speech", "prompt": "More words.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/cloned.flac", "text": "Hello, this is me."}, "seed": 5}]
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "More words.", "voice_path": "/voices/cloned.flac", "voice_text": "Hello, this is me.", "voice_consent": "on", "runs": "1", "seed": "5"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'More words.' --voice /voices/cloned.flac --voice-text 'Hello, this is me.' --voice-consent --seed 5",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "More words.", "lyrics": "", "seconds": null, "voice": {"path": "/voices/cloned.flac", "text": "Hello, this is me."}, "seed": 5, "speaker": null}]
   },
   {
     "name": "a sound of a chosen length, two takes",
     "settings": {"mode": "audio", "workflow": "sound", "model": "sa3", "prompt": "rain on a tin roof, distant thunder", "seconds": "30", "runs": "2", "seed": "3"},
-    "command": "ziv audio --model sa3 --prompt 'rain on a tin roof, distant thunder' --seconds 30 --runs 2 --seed 3",
+    "command": "ziv audio --model sa3 --kind sound --prompt 'rain on a tin roof, distant thunder' --seconds 30 --runs 2 --seed 3",
     "requests": [
-      {"preset": "sa3", "kind": "sound", "prompt": "rain on a tin roof, distant thunder", "lyrics": "", "seconds": 30, "voice": null, "seed": 3},
-      {"preset": "sa3", "kind": "sound", "prompt": "rain on a tin roof, distant thunder", "lyrics": "", "seconds": 30, "voice": null, "seed": 3}
+      {"preset": "sa3", "kind": "sound", "prompt": "rain on a tin roof, distant thunder", "lyrics": "", "seconds": 30, "requested_seconds": 30, "voice": null, "seed": 3, "speaker": null, "sound_type": "auto"},
+      {"preset": "sa3", "kind": "sound", "prompt": "rain on a tin roof, distant thunder", "lyrics": "", "seconds": 30, "requested_seconds": 30, "voice": null, "seed": 3, "speaker": null, "sound_type": "auto"}
     ]
+  },
+  {
+    "name": "a song with a tempo and a key",
+    "settings": {"mode": "audio", "workflow": "music", "model": "yue2", "prompt": "upbeat synth-pop, female vocal", "lyrics": "[verse]\nHello there\n[chorus]\nLa la la", "tempo": "92", "key": "F#m", "runs": "1", "seed": "7"},
+    "command": "ziv audio --model yue2 --kind music --prompt 'upbeat synth-pop, female vocal' --lyrics '[verse]\nHello there\n[chorus]\nLa la la' --tempo 92 --key 'F#m' --seed 7",
+    "requests": [{"preset": "yue2", "kind": "music", "prompt": "upbeat synth-pop, female vocal", "lyrics": "[verse]\nHello there\n[chorus]\nLa la la", "seconds": null, "voice": null, "seed": 7, "speaker": null, "tempo": 92, "key": "F#m"}]
+  },
+  {
+    "name": "an instrumental with the tempo and key on Auto",
+    "settings": {"mode": "audio", "workflow": "music", "model": "yue2", "prompt": "calm piano, slow", "lyrics": "", "tempo": "", "key": "", "runs": "1", "seed": "3"},
+    "command": "ziv audio --model yue2 --kind music --prompt 'calm piano, slow' --seed 3",
+    "requests": [{"preset": "yue2", "kind": "music", "prompt": "calm piano, slow", "lyrics": "", "seconds": null, "voice": null, "seed": 3, "speaker": null, "tempo": null, "key": null}]
+  },
+  {
+    "name": "speech with every delivery value chosen",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "Welcome back.", "speaker": "vivian", "emotion": "sad", "manner": "whisper", "pace": "slow", "pitch": "low", "expressiveness": "high", "runs": "1", "seed": "4"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'Welcome back.' --speaker vivian --emotion sad --manner whisper --pace slow --pitch low --expressiveness high --seed 4",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": null, "seed": 4, "speaker": "vivian", "delivery": {"emotion": "sad", "manner": "whisper", "pace": "slow", "pitch": "low", "expressiveness": "high"}}]
+  },
+  {
+    "name": "speech with one delivery value, the rest at their defaults",
+    "settings": {"mode": "audio", "workflow": "speech", "model": "qwen3_tts", "prompt": "Welcome back.", "speaker": "ryan", "emotion": "neutral", "manner": "natural", "pace": "fast", "pitch": "normal", "expressiveness": "normal", "runs": "1", "seed": "4"},
+    "command": "ziv audio --model qwen3_tts --kind speech --prompt 'Welcome back.' --speaker ryan --pace fast --seed 4",
+    "requests": [{"preset": "qwen3_tts", "kind": "speech", "prompt": "Welcome back.", "lyrics": "", "seconds": null, "voice": null, "seed": 4, "speaker": "ryan", "delivery": {"emotion": "neutral", "manner": "natural", "pace": "fast", "pitch": "normal", "expressiveness": "normal"}}]
+  },
+  {
+    "name": "an effect on Auto length",
+    "settings": {"mode": "audio", "workflow": "sound", "model": "sa3", "prompt": "a door slams", "seconds": "", "sound_type": "effect", "runs": "1", "seed": "3"},
+    "command": "ziv audio --model sa3 --kind sound --prompt 'a door slams' --sound-type effect --seed 3",
+    "requests": [{"preset": "sa3", "kind": "sound", "prompt": "a door slams", "lyrics": "", "seconds": 5, "voice": null, "seed": 3, "speaker": null, "sound_type": "effect"}]
+  },
+  {
+    "name": "an ambience of a chosen length",
+    "settings": {"mode": "audio", "workflow": "sound", "model": "sa3", "prompt": "a forest at night", "seconds": "20", "sound_type": "ambience", "runs": "1", "seed": "3"},
+    "command": "ziv audio --model sa3 --kind sound --prompt 'a forest at night' --seconds 20 --sound-type ambience --seed 3",
+    "requests": [{"preset": "sa3", "kind": "sound", "prompt": "a forest at night", "lyrics": "", "seconds": 20, "requested_seconds": 20, "voice": null, "seed": 3, "speaker": null, "sound_type": "ambience"}]
   }
 ]

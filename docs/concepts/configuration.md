@@ -172,13 +172,14 @@ You rarely need to change these. They are documented in the packaged `config.yam
 
 ## `audio_model_presets`
 
-The audio models: one entry per model, keyed by the model id you pass with `-m`. The packaged config ships `yue2`, `higgs3` and `sa3` with their pinned sources, and the Audio tab and `ziv audio` offer them on every machine with a CUDA card or Apple silicon. You rarely need to change them. The shipped entries:
+The audio models: one entry per model, keyed by the model id you pass with `-m`. The packaged config ships `yue2`, `qwen3_tts` and `sa3` with their pinned sources, and the Audio tab and `ziv audio` offer them on every machine with a CUDA card or Apple silicon. You rarely need to change them. The shipped entries:
 
 ```yaml
 audio_model_presets:
   yue2:
     label: "YuE2 3B"
-    kind: music
+    kinds: [music]
+    lyrics: true
     family: yue2
     files:
       - repo: "m-a-p/YuE2-3B@8f24312f187763b9854adeec87e437e2b03bbff1"
@@ -197,28 +198,37 @@ audio_model_presets:
     platforms:
       cuda: { memory_gb: 6.7 }
       mps: { memory_gb: 10.5 }
-  higgs3:
-    label: "Higgs TTS 3 4B"
-    kind: speech
-    family: higgs3
+  qwen3_tts:
+    label: "Qwen3-TTS 1.7B"
+    kinds: [speech]
+    family: qwen3_tts
+    # CustomVoice: the built-in voices. It downloads with the model.
     files:
-      - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
-        files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
-      - repo: "bosonai/higgs-audio-v2-tokenizer@815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
-        files: [config.json, model.safetensors, preprocessor_config.json]
-    limits: { max_new_tokens: 1500, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
-    settings: { temperature: 0.7, top_p: 0.95, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
+      - repo: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@0c0e3051f131929182e2c023b9537f8b1c68adfe"
+        files: [config.json, generation_config.json, merges.txt, model.safetensors, preprocessor_config.json, tokenizer_config.json, vocab.json, speech_tokenizer/config.json, speech_tokenizer/configuration.json, speech_tokenizer/model.safetensors, speech_tokenizer/preprocessor_config.json]
+    # Base: cloning a voice recording. It downloads the first time a take follows a recording.
+    voice_files:
+      - repo: "Qwen/Qwen3-TTS-12Hz-1.7B-Base@fd4b254389122332181a7c3db7f27e918eec64e3"
+        files: [config.json, generation_config.json, merges.txt, model.safetensors, preprocessor_config.json, tokenizer_config.json, vocab.json, speech_tokenizer/config.json, speech_tokenizer/configuration.json, speech_tokenizer/model.safetensors, speech_tokenizer/preprocessor_config.json]
+    # The built-in voices, the first one the default; the label and the native language are the model card's.
+    voices:
+      - { id: ryan, label: Ryan, language: English }
+      - { id: aiden, label: Aiden, language: English }
+      - { id: vivian, label: Vivian, language: Chinese }
+      - { id: serena, label: Serena, language: Chinese }
+      - { id: uncle_fu, label: Uncle Fu, language: Chinese }
+      - { id: dylan, label: Dylan, language: Beijing Chinese }
+      - { id: eric, label: Eric, language: Sichuan Chinese }
+      - { id: ono_anna, label: Ono Anna, language: Japanese }
+      - { id: sohee, label: Sohee, language: Korean }
+    limits: { max_new_tokens: 1200, part_chars: 500, max_text_chars: 10000, min_voice_seconds: 3, max_voice_seconds: 30 }
+    settings: { language: auto, join_pause_ms: 300, join_fade_ms: 10, part_level_match_db: 3, edge_silence_max_ms: 150 }
     platforms:
-      cuda: { memory_gb: 8.2 }
-      mps:
-        family: higgs3_mlx
-        files:
-          - repo: "bosonai/higgs-tts-3-4b@239f63fb7b02b1aa085f98d9efae5e35cc5523e8"
-            files: [config.json, model.safetensors, tokenizer.json, tokenizer_config.json]
-        memory_gb: 11.1
+      cuda: { memory_gb: 6.0 }
+      mps: { family: qwen3_tts_mlx }
   sa3:
     label: "Stable Audio 3 Medium"
-    kind: sound
+    kinds: [sound, music]
     family: stable_audio_3
     files:
       - repo: "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9"
@@ -226,7 +236,7 @@ audio_model_presets:
       - repo: "cocktailpeanut/stable-audio-3-medium@a30034d70bd58f6e6f967ef28ecaa6c52c185d6c"
         files: [model_config.json]
       - repo: "mlx-community/stable-audio-3-small-sfx@ca6c38718d27cd2b446a4661c8851f1f3d0a3870"
-        files: ["t5gemma-b-b-ul2/*"]
+        files: [t5gemma-b-b-ul2/config.json, t5gemma-b-b-ul2/generation_config.json, t5gemma-b-b-ul2/model.safetensors, t5gemma-b-b-ul2/special_tokens_map.json, t5gemma-b-b-ul2/tokenizer.json, t5gemma-b-b-ul2/tokenizer_config.json]
     limits: { max_seconds: 380 }
     settings: { steps: 8, cfg_scale: 1.0, sample_size: 16777216 }
     platforms:
@@ -237,14 +247,17 @@ audio_model_presets:
 | Key | Required | Description |
 |---|---|---|
 | `label` | yes | The name the Web UI shows |
-| `kind` | yes | `music`, `speech` or `sound`. The kind decides what the model takes: music takes lyrics, sound takes a length, speech follows a voice recording |
-| `family` | yes | Which engine runs the model: `yue2`, `higgs3` (torch), `higgs3_mlx` (MLX, macOS only) or `stable_audio_3` |
+| `kinds` | yes | The kinds of audio the model makes: a list of `music`, `speech` and `sound`, none repeated. The first one is the kind the model makes when a take names none. What a model takes is decided per kind: speech reads in a built-in voice or follows a voice recording, sound takes a length, and music takes a length unless the model has `lyrics` |
+| `lyrics` | no | `true` for a music model that sings lyrics: its music takes lyrics and their sections set the length. Needs `music` in `kinds` and the `instrumental_sections` setting. Default `false`: the model's music takes a style and a length, with no lyrics |
+| `family` | yes | Which engine runs the model: `yue2`, `qwen3_tts`, `qwen3_tts_mlx` or `stable_audio_3` |
 | `files` | yes | The downloads. Each entry has `repo`, as `owner/name@commit` with the full 40-character commit, and `files`, the file names or patterns to fetch |
-| `limits` | yes | The model's own ceilings: `max_seconds` for music and sound; for speech `max_new_tokens`, `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
-| `settings` | no | The model's own settings, such as `temperature` or `ode_steps` |
-| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator: `settings` that win over the entry's; `family` and `files`, which replace the entry's there (`higgs3` runs on MLX on a Mac and downloads only the model repository); and `memory_gb`, the GPU memory the model peaked at in GiB. Leave `memory_gb` out while it is unmeasured; the Web UI then shows no memory badge |
+| `voices` | no | Needs `speech` in `kinds`: the built-in voices, each with an `id` (what `--speaker` takes), a `label` and the `language` it speaks natively. The first one is the default. A model without `voices` has no built-in voices and reads only in a recording's voice |
+| `voice_files` | no | Needs `speech` in `kinds`: the files that following a voice recording needs on top of `files`, in the same form. They download the first time a take follows a recording, not with the model. Without `voice_files`, a recording needs nothing extra |
+| `limits` | yes | The model's own ceilings, those of each of its kinds together: `max_seconds` for music and sound; for speech `max_new_tokens`, `part_chars`, `max_text_chars`, `min_voice_seconds` and `max_voice_seconds` |
+| `settings` | no | The model's own settings, such as `ode_steps`. A model with `lyrics` sets `instrumental_sections` here: the section list an empty Lyrics box stands for, which makes an instrumental. A speech model reads `language` here: `auto` lets the model detect the language of the text, or name one it supports to fix it. `join_pause_ms`, `join_fade_ms`, `part_level_match_db` and `edge_silence_max_ms` shape how the parts of a long text are joined |
+| `platforms.cuda`, `platforms.mps` | no | What differs on that accelerator: `settings` that win over the entry's; `family`, which replaces the entry's there; and `memory_gb`, the GPU memory the model peaked at in GiB. Leave `memory_gb` out while it is unmeasured; the Web UI then shows no memory badge. The shipped `qwen3_tts` entry uses this on macOS: its `mps` entry names the `qwen3_tts_mlx` family and uses the entry's `files` and `voice_files` |
 
-The app refuses to start when a required key or limit is missing, when `kind` is unknown, or when a `repo` is not pinned to a commit.
+The app refuses to start when a required key or limit is missing, when a kind in `kinds` is unknown or repeated, when `lyrics` lacks `music` or `instrumental_sections`, or when a `repo` is not pinned to a commit.
 
 ## `ideogram4_instant`
 

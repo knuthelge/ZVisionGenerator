@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import stat
@@ -19,7 +18,7 @@ from PIL import Image, UnidentifiedImageError
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, supports_video_extend, video_file_upscale_method
 from zvisiongenerator.core.ideogram4 import is_json_caption
 from zvisiongenerator.utils import app_db
-from zvisiongenerator.utils.enhance_record import enhance_record_summary
+from zvisiongenerator.utils.enhance_record import enhance_record_summary, enhance_reuse_param
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
 from zvisiongenerator.utils.paths import is_existing_file, resolve_model_path
 from zvisiongenerator.utils.provenance import (
@@ -510,7 +509,7 @@ def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
 
 def _reuse_enhance_params(asset: GalleryAsset) -> dict[str, str]:
     """Return the ``enhance`` Reuse param: the recorded options, model, tier and format as JSON, when the asset has them."""
-    return {"enhance": json.dumps(asset.enhance, separators=(",", ":"))} if asset.enhance else {}
+    return enhance_reuse_param(asset.enhance)
 
 
 def delete_gallery_assets(output_dir: str, selected_paths: list[str]) -> None:

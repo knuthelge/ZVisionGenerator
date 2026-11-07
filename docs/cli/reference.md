@@ -115,19 +115,35 @@ MiniMax H3 extends only 24 fps sources whose width and height are multiples of 3
 
 | Option | Default | Description |
 |---|---|---|
-| `-m`, `--model` | *(required)* | The audio model: `yue2` (music), `higgs3` (speech) or `sa3` (sound), as set in [`audio_model_presets`](../concepts/configuration.md#audio_model_presets). The model decides which of the options below it takes |
-| `--prompt` | *(required)* | The style of a song, the text to read (up to 10,000 characters, read in parts), or the description of a sound |
+| `-m`, `--model` | *(required)* | The audio model: `yue2` (music), `qwen3_tts` (speech) or `sa3` (sound), as set in [`audio_model_presets`](../concepts/configuration.md#audio_model_presets). The model decides which of the options below it takes |
+| `--kind` | the model's first kind | What to make: `music`, `speech` or `sound`. A model that makes one kind needs none. A kind the model doesn't make is refused, naming the kinds it does. The kind decides which of the options below apply |
+| `--prompt` | *(required)* | The style of a song, the text to read (up to 10,000 characters, read in parts, with [Delivery marks](../concepts/audio.md#marks) in square brackets), or the description of a sound |
 | `--lyrics` | none | The lyrics of a song, with `[verse]` and `[chorus]` tags. Without lyrics, or with only `[section]` tags, the take is an instrumental, and the tags set its length. Music models only |
 | `--lyrics-file PATH` | none | Read the lyrics from a text file. Can't be combined with `--lyrics` |
-| `--seconds` | `10` | Length of a sound, from 1 second up to the model's limit. Models that set their own length refuse it |
-| `--voice PATH` | none | A recording of the voice to follow, 3 to 30 seconds long. Speech models that clone a voice only. Needs `--voice-text`. Without it the model reads in its own voice |
+| `--seconds` | Auto | Length in seconds, from 1 up to the model's limit. Left out, a sound is 12 s long (ambience 12, effect 5, one-shot 2, by `--sound-type`) and music from a model without lyrics is 30 s. Models that set their own length (YuE2 from the lyrics, speech from the text) refuse it |
+| `--tempo BPM` | Auto | The tempo of a song, a whole number from 40 to 220. Music only |
+| `--key ID` | Auto | The key of a song: `C`, `Db`, `D`, `Eb`, `E`, `F`, `F#`, `G`, `Ab`, `A`, `Bb`, `B` for the major keys, and `Cm`, `C#m`, `Dm`, `Ebm`, `Em`, `Fm`, `F#m`, `Gm`, `G#m`, `Am`, `Bbm`, `Bm` for the minor ones. Music only |
+| `--sound-type TYPE` | `auto` | The type of a sound: `auto`, `ambience`, `effect` or `one-shot`. It sets the Auto length of `--seconds`. Sound only |
+| `--emotion EMOTION` | `neutral` | How speech in a built-in voice feels: `neutral`, `elated`, `amused`, `enthusiastic`, `proud`, `content`, `affectionate`, `relieved`, `longing`, `thoughtful`, `determined`, `awed`, `surprised`, `confused`, `sad`, `bitter`, `ashamed`, `helpless`, `afraid`, `angry` or `disgusted`. Speech in a built-in voice only; refused together with `--voice` |
+| `--manner MANNER` | `natural` | `natural`, `whisper` or `shout`. Same rule as `--emotion` |
+| `--pace PACE` | `normal` | `very-slow`, `slow`, `normal`, `fast` or `very-fast`. Same rule as `--emotion` |
+| `--pitch PITCH` | `normal` | `low`, `normal` or `high`. Same rule as `--emotion` |
+| `--expressiveness LEVEL` | `normal` | `low`, `normal` or `high`. Same rule as `--emotion` |
+| `--vibe ID` | none | Start the delivery of speech in a built-in voice from a named style: `calm-narrator`, `storyteller`, `excited-host`, `announcer`, `sad-confession` or `whispered-secret`. `--emotion`, `--manner`, `--pace`, `--pitch` and `--expressiveness` then change one. Same rule as `--emotion` |
+| `--speaker ID` | the model's first voice | The built-in voice a speech model reads in, such as `ryan` or `vivian`. Refused together with `--voice` |
+| `--voice PATH` | none | A recording of the voice to follow, 3 to 30 seconds long. Speech models that clone a voice only. Needs `--voice-text`. Without it the model reads in a built-in voice (`--speaker`) |
 | `--voice-text` | none | What the `--voice` recording says |
-| `--voice-consent` | off | Confirms the speaker of the `--voice` recording allows cloning their voice. Needed with `--voice`, except for a speech take made in the model's own voice, which anyone may follow |
+| `--voice-consent` | off | Confirms the speaker of the `--voice` recording allows cloning their voice. Needed with `--voice`, except for a speech take made in a built-in voice, which anyone may follow |
+| `--enhance [SPEC]` | off | Rewrite a sound's description or a song's style before the model loads. A sound takes `space`, `distance`, `over_time` and `movement`; music takes `genre`, `music_mood`, `instruments`, `without`, `singer` and `production`. Put `+` between several values, as in `instruments=guitar+violin`. See [Enhance the prompt](audio.md#enhance-the-prompt). Refused for speech |
+| `--enhance-note TEXT` | none | A direction for the enhancer, up to 300 characters. Implies `--enhance` |
+| `--no-enhance` | | Turn enhancement off |
+| `--enhance-model` | `fast` | `fast`, `smart`, `REPO[@REVISION]` or a local folder. Needs `--enhance` |
+| `--enhance-format` | `text` | Only `text` |
 | `-r`, `--runs` | `1` | How many takes to make. They share one model load |
 | `--seed` | random | Seed, for repeatable takes. Every take of a run uses it; omit it for a new random seed per take |
 | `-o`, `--output` | `.` | Output folder. Takes are saved as FLAC files named `<kind>_<date>_<time>.flac`, with their settings inside |
 
-An option the chosen model doesn't take is refused with the reason. `ziv-audio` needs [ffmpeg](https://ffmpeg.org/), which it offers to install like `ziv-video` does.
+An option the chosen model doesn't take as the chosen kind is refused with the reason, such as `Qwen3-TTS 1.7B has no tempo; drop --tempo`. `ziv-audio` needs [ffmpeg](https://ffmpeg.org/), which it offers to install like `ziv-video` does.
 
 ## `ziv-model model`
 

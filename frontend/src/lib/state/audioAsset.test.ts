@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { AUDIO_MODELS, LYRICS, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../test-utils/audio';
-import { audioModelLabel, cutNote, hasNoWords, lyricLines, seekFraction, takeWords, tileWords, wordBlocks } from './audioAsset';
+import { AUDIO_MODELS, LYRICS, SA3_MUSIC, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../test-utils/audio';
+import { audioModelLabel, audioRowOf, cutNote, hasNoWords, lyricLines, seekFraction, takeWords, tileWords, wordBlocks } from './audioAsset';
+import type { AudioModelOption } from '$lib/types';
 
 describe('the words of a take', () => {
   it('leaves the [section] lines out of a song\'s lyrics', () => {
@@ -42,6 +43,22 @@ describe('the cut note', () => {
     expect(cutNote(makeAudioAsset({ cut: true, duration: 120 }), undefined)?.text).toBe('⚠ Cut at 2:00');
     expect(cutNote(makeAudioAsset({ cut: false }), AUDIO_MODELS)).toBeNull();
     expect(cutNote(makeAudioAsset({ cut: true, duration: null }), undefined)).toBeNull();
+  });
+});
+
+describe('a model of several kinds', () => {
+  const soundRow = AUDIO_MODELS[2];
+  const musicRow: AudioModelOption = { ...SA3_MUSIC, kind: 'music', limits: { min_seconds: 1, max_seconds: 120, default_seconds: 30 } };
+  const rows = [soundRow, musicRow];
+
+  it('is cut at the cap of the kind the take was made as', () => {
+    expect(cutNote(makeAudioAsset({ model: 'sa3', kind: 'music', cut: true, duration: 119 }), rows)?.text).toBe('⚠ Cut at 2:00');
+    expect(cutNote(makeAudioAsset({ model: 'sa3', kind: 'sound', cut: true, duration: 119 }), rows)?.text).toBe('⚠ Cut at 6:20');
+  });
+
+  it('is found by id alone for a take without a kind', () => {
+    expect(audioRowOf({ model: 'sa3', kind: null }, rows)).toBe(soundRow);
+    expect(audioRowOf({ model: 'sa3', kind: 'speech' }, rows)).toBeUndefined();
   });
 });
 

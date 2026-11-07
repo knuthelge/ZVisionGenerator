@@ -137,12 +137,11 @@ class TestPackagedRecords:
 
         assert [r.id for r in load_licences() if any(mirror in r.url for mirror in mirrors)] == []
 
-    def test_only_the_stability_and_higgs_records_carry_an_attribution(self) -> None:
+    def test_only_the_stability_record_carries_an_attribution(self) -> None:
         carrying = {r.id: r.attribution for r in load_licences() if r.attribution}
 
-        assert set(carrying) == {"stability-community", "higgs3-nc", "higgs-audio2-community"}
+        assert set(carrying) == {"stability-community"}
         assert carrying["stability-community"] == "Powered by Stability AI"
-        assert carrying["higgs3-nc"] == "Built with Higgs TTS 3 licensed from Boson AI USA, Inc."
 
     @staticmethod
     def _model_ids(config: dict[str, Any]) -> set[str]:
@@ -172,7 +171,7 @@ class TestPackagedRecords:
             ("ltx25-4", ["ltx-2x-community"]),
             ("h3", ["minimax-h3-community"]),
             ("yue2", ["yue2-creator-nc"]),
-            ("higgs3", ["higgs3-nc", "higgs-audio2-community"]),
+            ("qwen3_tts", ["qwen3-tts-apache"]),
             ("sa3", ["stability-community", "gemma"]),
             ("matte", ["matte"]),
             ("zit", ["zimage-apache"]),

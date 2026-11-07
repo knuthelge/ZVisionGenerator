@@ -1,6 +1,6 @@
 # Prompt-enhancer bench cases. See proposals/archive/prompt-enhancer-v3.md (phase 1) and docs/developer/enhancer-bench.md.
 #
-# Each case: id, tags, mode (image | video | caption), prompt, scene (video only), settings (as a prompt file's
+# Each case: id, tags, mode (image | video | caption | audio-sound | audio-style | audio-lyrics | audio-script | audio-fill), prompt, scene (video only), settings (as a prompt file's
 # enhance: mapping; {} = the defaults), context (ratio, width, height, frames, fps, audio, reference_image, extends,
 # previous, extract_from, new_frames, prompt_is_original), family (for the word ceiling), and optional expectations:
 # keep (phrases that must survive; words match as stems, "a|b" lists alternatives), count ("three cats"),
@@ -583,3 +583,495 @@ cases:
   - {id: t2v-framing-palette, tags: [video, t2v, framing, palette], mode: video, prompt: a dancer spins in an empty warehouse, settings: {shot: wide, angle: high, palette: sunset}, context: {ratio: "16:9", frames: 97, fps: 24}, keep: [dancer, warehouse]}
   - {id: t2v-angle-low, tags: [video, t2v, framing, angle], mode: video, prompt: a skateboarder rolls down an empty city street, settings: {angle: low, shot: full}, context: {ratio: "16:9", frames: 97, fps: 24}, keep: [skateboarder, street]}
   - {id: t2v-angle-overhead, tags: [video, t2v, framing, angle], mode: video, prompt: a chef plates a dessert on a kitchen counter, settings: {angle: overhead}, context: {ratio: "16:9", frames: 97, fps: 24}, keep: [chef, dessert, counter]}
+
+  # --- Audio: a music style or a sound, written for the model that reads it (family picks the caption rules) ------
+  # Audio cases need a family (yue2 writes comma descriptors, stable_audio_3 one sentence) and take settings from the audio
+  # axes (genre, music_mood, instruments, without, singer, production | space, distance, over_time, movement) and these
+  # context keys: lyrics, instrumental, tempo, key, seconds, sound_type. Shape, length and banned words are
+  # scored from the family's caption rules, so they need no expectations here.
+  - {id: yue2-style-song, tags: [audio, style, yue2, song], mode: audio-style, family: yue2, prompt: an upbeat summer pop song about a road trip with friends, settings: {}, keep: [pop]}
+  - {id: yue2-style-ballad, tags: [audio, style, yue2, song], mode: audio-style, family: yue2, prompt: a slow sad song, settings: {genre: singer-songwriter, music_mood: melancholic, singer: female}, context: {lyrics: "[verse]\nThe porch light flickers, the street is wet\nI still keep your coat by the door"}, keep: [female]}
+  - {id: yue2-style-instrumental, tags: [audio, style, yue2, instrumental], mode: audio-style, family: yue2, prompt: calm music for studying with soft guitar, settings: {genre: lo-fi}, context: {instrumental: true}, keep: [lo-fi, guitar]}
+  - {id: yue2-style-without, tags: [audio, style, yue2, instrumental], mode: audio-style, family: yue2, prompt: a gentle evening piece, settings: {instruments: [piano, strings], without: [drums, bass]}, context: {instrumental: true}, keep: [piano, strings, no drums, no bass]}
+  - {id: yue2-style-names, tags: [audio, style, yue2, names], mode: audio-style, family: yue2, prompt: 'late-night fado guitars in the alleys of Alfama, Lisbon, in the spirit of "Barco Negro"', settings: {}, keep: [fado, Alfama, Lisbon]}
+  - {id: yue2-style-tempo-set, tags: [audio, style, yue2, metadata], mode: audio-style, family: yue2, prompt: driving electronic dance music, settings: {genre: house}, context: {tempo: 124, key: Am}, keep: [house]}
+  - {id: sa3-style-music, tags: [audio, style, sa3, music], mode: audio-style, family: stable_audio_3, prompt: a cozy lo-fi beat for studying, settings: {}, keep: [lo-fi]}
+  - {id: sa3-style-moody, tags: [audio, style, sa3, music], mode: audio-style, family: stable_audio_3, prompt: slow cinematic strings, settings: {genre: film-score, music_mood: dark, production: cinematic}, keep: [strings]}
+  - {id: sa3-style-singer-ignored, tags: [audio, style, sa3, music, vocals], mode: audio-style, family: stable_audio_3, prompt: a warm acoustic folk song, settings: {genre: folk, singer: female}, keep: [folk, acoustic]}
+  - {id: sa3-style-without, tags: [audio, style, sa3, music], mode: audio-style, family: stable_audio_3, prompt: an energetic funk groove, settings: {instruments: [bass, brass], without: [guitar]}, keep: [bass, brass, no guitar]}
+  - {id: sa3-style-tempo-set, tags: [audio, style, sa3, music, metadata], mode: audio-style, family: stable_audio_3, prompt: bright disco with a four-on-the-floor beat, settings: {}, context: {tempo: 118, key: C, seconds: 30}, keep: [disco]}
+  - {id: sa3-style-names, tags: [audio, style, sa3, music, names], mode: audio-style, family: stable_audio_3, prompt: 'an Irish session in a pub in Galway, tin whistle and fiddle, like "The Wild Rover"', settings: {}, keep: [Galway, tin whistle, fiddle]}
+  - {id: sa3-sound-ambience, tags: [audio, sound, sa3, sound-type], mode: audio-sound, family: stable_audio_3, prompt: rain on a tin roof, settings: {space: small-room}, context: {sound_type: ambience, seconds: 12}, keep: [rain, tin roof]}
+  - {id: sa3-sound-effect, tags: [audio, sound, sa3, sound-type], mode: audio-sound, family: stable_audio_3, prompt: a heavy wooden door slamming shut, settings: {over_time: hit-then-tail}, context: {sound_type: effect, seconds: 5}, keep: [wooden door, slam]}
+  - {id: sa3-sound-one-shot, tags: [audio, sound, sa3, sound-type], mode: audio-sound, family: stable_audio_3, prompt: a spoon tapping a glass bottle, settings: {}, context: {sound_type: one-shot, seconds: 2}, keep: [spoon, glass bottle]}
+  - {id: sa3-sound-auto, tags: [audio, sound, sa3, sound-type], mode: audio-sound, family: stable_audio_3, prompt: footsteps on gravel, settings: {movement: passing, distance: far}, context: {sound_type: auto}, keep: [footsteps, gravel]}
+  - {id: sa3-sound-no-music, tags: [audio, sound, sa3, sound-type], mode: audio-sound, family: stable_audio_3, prompt: a busy cafe at lunchtime, settings: {space: large-hall}, context: {sound_type: ambience, seconds: 12}, keep: [cafe], forbid: [music, song, melody]}
+  - {id: sa3-sound-names, tags: [audio, sound, sa3, names, quotes], mode: audio-sound, family: stable_audio_3, prompt: 'the ship bell of the "Santa Maria" ringing in Lisbon harbour', settings: {}, context: {sound_type: effect, seconds: 5}, keep: [bell, Lisbon]}
+  - {id: sa3-sound-direction, tags: [audio, sound, sa3, direction], mode: audio-sound, family: stable_audio_3, prompt: a thunderstorm rolling in, settings: {distance: far, over_time: builds, note: keep it menacing and low}, context: {sound_type: ambience, seconds: 12}, keep: [thunder]}
+
+  # --- Audio lyrics: a song's lyrics improved as a whole or one section at a time, or one empty section written -----
+  # A lyrics case's prompt is the song as the Lyrics box holds it (`[Section]` tags on their own lines), its settings are the
+  # lyrics task's (improve: tighten | fit | rhymes | simpler, note, section: the section's index from 0, action: write) and its
+  # context takes `style`. The checks are `tags_kept` (the same tags, in order, each on its own line), `scope_kept` (empty sections stay
+  # empty, a repeated chorus stays a repeat, a section task changes only its section; a Write fills only its section) and `marks_kept`.
+  - id: yue2-lyrics-tighten
+    tags: [audio, lyrics, yue2, improve]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      I was walking down the road that leads me back to where I used to be
+      And the streetlights they were flickering, flickering, flickering on me
+      I was thinking about all of the things that we said to each other that day
+
+      [Chorus]
+      Oh, take me home, take me home, take me home to the place where I belong
+      Take me home, take me home, take me home where the river sings its song
+
+      [Verse]
+      Now the years have gone and passed me by like leaves upon the autumn wind
+      And I wonder if you ever think of me, of where we were and where we've been
+    settings: {improve: [tighten]}
+    context: {style: "warm acoustic folk, fingerpicked guitar, wistful"}
+    keep: [road, streetlights, home, river]
+  - id: yue2-lyrics-rhymes
+    tags: [audio, lyrics, yue2, improve, rhymes]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Marie stands at the window in the rain
+      The coffee in her hand has gone cold
+      A letter lies unopened on the floor
+      She thinks of the harbour long ago
+
+      [Chorus]
+      Marie, Marie, wait for the morning
+      The light will find you again
+    settings: {improve: [rhymes]}
+    context: {style: "melancholic indie pop"}
+    keep: [Marie, window, rain, harbour]
+  - id: yue2-lyrics-simpler
+    tags: [audio, lyrics, yue2, improve, simpler]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Lugubrious shadows elongate across the ephemeral dusk
+      My melancholy reverberates through the desolate corridors
+
+      [Chorus]
+      Oh, ineffable sorrow, abide with me
+      Oh, interminable night, release me
+    settings: {improve: [simpler]}
+    forbid: [lugubrious, ephemeral, ineffable, interminable]
+    keep: [shadows, dusk, sorrow, night]
+  - id: yue2-lyrics-fit
+    tags: [audio, lyrics, yue2, improve, fit]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Up the hill we climbed together
+      Counting every star above
+      Laughing at the wind and weather
+      Holding on to what we love
+      Down the path we walked in silence
+      Past the old and broken gate
+      Every step a quiet promise
+      Every road a little late
+
+      [Chorus]
+      We are the sun, we are the rain, we are the fire, we are the flame, we are the river running free, we are the ones who make it be
+
+      [Bridge]
+      Stay
+    settings: {improve: [fit]}
+    keep: [star, wind, sun]
+  - id: yue2-lyrics-polish
+    tags: [audio, lyrics, yue2, improve, empty]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Intro]
+
+      [Verse]
+      City lights are blurring in the window
+      I hold your hand as the train rolls on
+
+      [Chorus]
+      We'll be fine, we'll be fine
+      Wherever the night takes us
+
+      [Solo]
+
+      [Chorus]
+      We'll be fine, we'll be fine
+      Wherever the night takes us
+
+      [Outro]
+    settings: {}
+    keep: [city, train, fine]
+  - id: yue2-lyrics-direction
+    tags: [audio, lyrics, yue2, improve, direction]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      The factory closed down on a Monday
+      Tom came home with nothing in his hands
+      The kitchen light was dim and grey
+      And the bills were stacked up on the stand
+
+      [Chorus]
+      Tom, hold on, hold on
+      The morning is coming
+    settings: {note: make it more hopeful, improve: []}
+    keep: [Tom, factory, morning]
+  - id: yue2-lyrics-names-quotes
+    tags: [audio, lyrics, yue2, improve, names, quotes]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      We danced in Lisbon to "Barco Negro" till the dawn
+      Joao sang along and the whole bar sang on
+      Down the steps of Alfama, laughing, we were gone
+
+      [Chorus]
+      Oh Lisbon, Lisbon, keep me in your song
+      "Barco Negro" playing, we belong
+    settings: {improve: [tighten, rhymes]}
+    keep: [Lisbon, Joao, Alfama]
+  - id: yue2-lyrics-norwegian
+    tags: [audio, lyrics, yue2, improve, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Jeg gikk langs fjorden i den tidlige morgen
+      Båtene lå stille og tåken lå tung
+      Jeg tenkte på deg og på alt som er borte
+      Og savnet var stort som en uendelig sang
+
+      [Chorus]
+      Kom hjem, kom hjem til kysten
+      Der lyset er blått og havet er stille
+    settings: {improve: [tighten]}
+    forbid: [the, and, home, coast, light]
+    keep: [fjorden, kysten, havet]
+  - id: yue2-lyrics-repeat
+    tags: [audio, lyrics, yue2, improve, repeat]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Wake up slowly in the morning sun
+      Coffee on the stove and nothing to be done
+
+      [Chorus]
+      Sing it loud, sing it clear
+      Everybody knows that we are here
+
+      [Verse]
+      Walking to the corner with a song in my head
+      Waving at the neighbours as the day begins to spread
+
+      [Chorus]
+      Sing it loud, sing it clear
+      Everybody knows that we are here
+    settings: {improve: [tighten, rhymes]}
+    context: {style: "upbeat summer pop, handclaps"}
+    keep: [sun, corner]
+  - id: yue2-lyrics-style
+    tags: [audio, lyrics, yue2, improve, style]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      I walk through the empty streets at night
+      Nobody around and the city is cold
+
+      [Chorus]
+      Burn it down, burn it down
+      Nothing left to hold
+    settings: {note: keep the lines short and hard}
+    context: {style: "dark industrial rock, distorted guitars, shouted male vocal"}
+    keep: [streets, city]
+  - id: yue2-lyrics-section-tighten
+    tags: [audio, lyrics, yue2, section, improve]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      I was walking down the road that leads me back to where I used to be
+      And the streetlights they were flickering, flickering, flickering on me
+
+      [Chorus]
+      Oh, take me home, take me home, take me home to the place where I belong
+      Take me home, take me home, take me home where the river sings its song
+    settings: {improve: [tighten], section: 1}
+    context: {style: "warm acoustic folk"}
+    keep: [home, river]
+  - id: yue2-lyrics-section-rhymes
+    tags: [audio, lyrics, yue2, section, improve, rhymes]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      The harbour lights are low tonight
+      The boats are tied and still
+      She stands there waiting by the quay
+      For a ship that never will
+
+      [Chorus]
+      Marie, Marie, wait for the morning
+      The light will find you again
+    settings: {improve: [rhymes], section: 0}
+    keep: [harbour, boats, quay]
+  - id: yue2-lyrics-section-simpler
+    tags: [audio, lyrics, yue2, section, improve, simpler]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Walking home in the rain
+
+      [Bridge]
+      Perambulating through the inclement precipitation
+      I contemplate my tribulations
+    settings: {improve: [simpler], section: 1}
+    forbid: [perambulating, inclement, precipitation, tribulations]
+  - id: yue2-lyrics-write-bridge
+    tags: [audio, lyrics, yue2, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      The porch light flickers, the street is wet
+      I still keep your coat by the door
+
+      [Chorus]
+      Come back home, come back home
+      The light is on for you
+
+      [Bridge]
+
+      [Chorus]
+      Come back home, come back home
+      The light is on for you
+    settings: {action: write, section: 2}
+    context: {style: "warm acoustic folk, fingerpicked guitar, wistful"}
+  - id: yue2-lyrics-write-chorus
+    tags: [audio, lyrics, yue2, write, repeat]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Wake up slowly in the morning sun
+      Coffee on the stove and nothing to be done
+
+      [Chorus]
+      Sing it loud, sing it clear
+      Everybody knows that we are here
+
+      [Verse]
+      Walking to the corner with a song in my head
+      Waving at the neighbours as the day begins to spread
+
+      [Chorus]
+    settings: {action: write, section: 3}
+    context: {style: "upbeat summer pop, handclaps"}
+    keep: [sing it loud, everybody knows]
+  - id: yue2-lyrics-write-verse
+    tags: [audio, lyrics, yue2, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Marie stands at the window in the rain
+      The coffee in her hand has gone cold
+      A letter lies unopened on the floor
+
+      [Chorus]
+      Marie, Marie, wait for the morning
+      The light will find you again
+
+      [Verse]
+
+      [Chorus]
+      Marie, Marie, wait for the morning
+      The light will find you again
+    settings: {action: write, section: 2, note: she finally opens the letter}
+    keep: [Marie]
+  - id: yue2-lyrics-write-norwegian
+    tags: [audio, lyrics, yue2, write, language]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Jeg gikk langs fjorden i den tidlige morgen
+      Båtene lå stille og tåken lå tung
+
+      [Chorus]
+      Kom hjem, kom hjem til kysten
+      Der lyset er blått og havet er stille
+
+      [Verse]
+    settings: {action: write, section: 2}
+    forbid: [the, and, home, coast, light, you]
+  - id: yue2-lyrics-write-outro
+    tags: [audio, lyrics, yue2, write]
+    mode: audio-lyrics
+    family: yue2
+    prompt: |-
+      [Verse]
+      Late trains and quiet platforms
+      A coat that smells of rain
+
+      [Chorus]
+      We'll be fine, we'll be fine
+      Wherever the night takes us
+
+      [Outro]
+    settings: {action: write, section: 2}
+    context: {style: "slow synth-pop"}
+
+  # --- Audio script: a speech text marked up with delivery, or fitted to a reading time -----------------------------
+  # A script case's prompt is the Text box (with its `[marks]`), its settings are the script task's (`actions: [delivery]`, `actions: [fit]`
+  # with `seconds` and an optional `pace`, or both), and it takes no context. The checks are `words_kept` (Add delivery changed no word),
+  # `marks_known` (only marks the app knows), `fit_in_range` (a Fit reads within 15% of its time by the app's reading rate; `length_ratio`
+  # is the share of the target) and `quotes_kept`. `keep` and `forbid` work as for the other cases.
+  - id: qwen3-script-delivery-sad-story
+    tags: [audio, script, qwen3, delivery]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      My grandfather kept a small boat in the harbour for forty years. Every Sunday he rowed out alone and never said where he went. When he died, we found the boat empty except for a single letter. It was addressed to my grandmother, who had left us long before. We read it together, and for the first time in years, we laughed.
+    settings: {actions: [delivery]}
+    keep: [grandfather, boat, harbour, letter, grandmother]
+  - id: qwen3-script-delivery-announcement
+    tags: [audio, script, qwen3, delivery]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Ladies and gentlemen, welcome to the final night of the Summer Lights Festival! Tonight we have fireworks over the lake, a live band on the main stage, and free ice cream for every child under twelve. The gates close at midnight, so make the most of it. Thank you for being here, and enjoy the show!
+    settings: {actions: [delivery]}
+    keep: [Summer Lights Festival, fireworks, ice cream, midnight]
+  - id: qwen3-script-delivery-secret
+    tags: [audio, script, qwen3, delivery]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Come closer. I have to tell you something, and nobody else can hear it. The key is not under the mat. It never was. It is inside the old clock in the hall, behind the little door at the back. Do not tell Marta.
+    settings: {actions: [delivery]}
+    keep: [key, clock, Marta]
+  - id: qwen3-script-delivery-existing-marks
+    tags: [audio, script, qwen3, delivery, marks]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      [sad] The house was quiet after the funeral. … Nobody wanted to be the first to speak. [as set] Then Lena put the kettle on, and slowly the kitchen filled with voices again. We told stories until the sun went down.
+    settings: {actions: [delivery]}
+    keep: [Lena, kettle, kitchen]
+  - id: qwen3-script-delivery-names-quotes
+    tags: [audio, script, qwen3, delivery, names, quotes]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Dr. Okafor looked at the results for a long time. Then she turned to Piotr and said "The scan is clear." He could not believe it. They had waited eleven weeks for those words, in a hospital in Gdansk where every corridor smelled of coffee and fear.
+    settings: {actions: [delivery]}
+    keep: [Okafor, Piotr, Gdansk, eleven weeks]
+  - id: qwen3-script-delivery-plain
+    tags: [audio, script, qwen3, delivery, neutral]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      To reset the router, unplug it from the wall and wait thirty seconds. Plug it back in and wait until the green light stays on. This usually takes about two minutes. If the light stays red, contact your provider.
+    settings: {actions: [delivery]}
+    keep: [router, thirty seconds, green light, provider]
+  - id: qwen3-script-fit-shorten
+    tags: [audio, script, qwen3, fit]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Our company was founded in 1998 in a small garage in Portland by two friends who loved bicycles. At first we only repaired old frames and sold used parts to neighbours. Slowly, word spread, and customers began to ask for new bikes built to their own measurements. By 2005 we had moved into a real workshop with six employees. Today we ship custom bicycles to more than forty countries, and every frame is still welded by hand. We believe that a bicycle should fit its rider like a good pair of shoes, and that belief has guided every decision we have made, from the first frame to the ten thousandth.
+    settings: {actions: [fit], seconds: 25}
+    keep: [1998, Portland, bicycle, forty countries]
+  - id: qwen3-script-fit-shorten-slow
+    tags: [audio, script, qwen3, fit, pace]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Good evening, and welcome to tonight's guided meditation. Find a comfortable position, either sitting or lying down, and let your hands rest loosely at your sides. Close your eyes if that feels right for you. Take a slow breath in through your nose, hold it gently for a moment, and release it through your mouth. Notice how your body feels against the surface beneath you. With every breath out, allow your shoulders to drop a little further, and let any tension in your jaw melt away.
+    settings: {actions: [fit], seconds: 30, pace: slow}
+    keep: [breath, shoulders]
+  - id: qwen3-script-fit-lengthen
+    tags: [audio, script, qwen3, fit, lengthen]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Welcome to the Riverside Library. We have books, computers and a quiet reading room. The library is open every day.
+    settings: {actions: [fit], seconds: 14}
+    keep: [Riverside Library, books, computers, reading room]
+  - id: qwen3-script-fit-marks
+    tags: [audio, script, qwen3, fit, marks]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      [thoughtful] I have been thinking about the old orchard behind our house. It had forty apple trees when my father planted it, and a low stone wall that he built himself, one stone at a time. [sad] Last winter a storm took half of the trees. … [determined] This spring we are planting them again. Each tree will carry a small brass tag with the name of someone we love, so that the orchard will remember them long after we are gone.
+    settings: {actions: [fit], seconds: 20}
+    keep: [orchard, apple, father, brass]
+  - id: qwen3-script-fit-names-quotes
+    tags: [audio, script, qwen3, fit, names, quotes]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      The mayor of Linz, Katharina Brandt, opened the new bridge on Saturday morning. In front of a crowd of nearly two thousand people she said "This bridge belongs to everyone who walks, cycles or rides across it." The bridge cost forty million euros, took three years to build, and connects the old town with the new harbour district for the first time since the war.
+    settings: {actions: [fit], seconds: 18}
+    keep: [Linz, Katharina Brandt, bridge]
+  - id: qwen3-script-fit-fast
+    tags: [audio, script, qwen3, fit, pace]
+    mode: audio-script
+    family: qwen3_tts
+    prompt: |-
+      Thanks for calling Northside Dental. Our office is open Monday through Friday from eight in the morning until five in the afternoon, and on Saturdays from nine until noon. If this is a dental emergency, please press one now to reach our on-call dentist. To book an appointment, press two. To speak with our billing team about an invoice or insurance claim, press three. For directions to our clinic, press four. To hear these options again, stay on the line.
+    settings: {actions: [fit], seconds: 20, pace: fast}
+    keep: [Northside Dental, emergency, appointment]
+
+  # --- Audio fill: the fields still empty written from a Describe it idea, in one answer -----------------------------
+  # A fill case's prompt is the Describe it text and its settings are `fields` (what is still empty: style, tempo, key, lyrics for music;
+  # vibe, text for speech); the kind follows the fields. Its context takes what the user already set (style, lyrics, text, tempo, key), which
+  # the answer must not write again. The checks are `fields_filled` (the share of the asked fields written; an instrumental, tagged `instrumental`,
+  # is filled by `LYRICS: none`), `only_empty` (the first answer wrote only the asked fields), `values_valid` (the first answer's Tempo, Key
+  # and Vibe were in range, one of the 24 and one the app serves), `fill_tags` (the first answer's lyrics put every section tag alone on its
+  # line) and `banned` on the Style; `keep` checks that names from the idea survive and `quotes_kept` quoted words.
+  - {id: yue2-fill-folk-song, tags: [audio, fill, yue2, music], mode: audio-fill, family: yue2, prompt: a sad folk song about leaving the coast, settings: {fields: [style, tempo, key, lyrics]}, keep: [coast]}
+  - {id: yue2-fill-names, tags: [audio, fill, yue2, music, names], mode: audio-fill, family: yue2, prompt: an upbeat birthday song for my grandmother Ingrid in Bergen, settings: {fields: [style, tempo, key, lyrics]}, keep: [Ingrid, Bergen]}
+  - {id: yue2-fill-quote, tags: [audio, fill, yue2, music, quotes], mode: audio-fill, family: yue2, prompt: 'a stadium rock anthem whose chorus is "We Never Sleep"', settings: {fields: [style, tempo, key, lyrics]}, keep: [We Never Sleep]}
+  - {id: yue2-fill-instrumental, tags: [audio, fill, yue2, music, instrumental], mode: audio-fill, family: yue2, prompt: an instrumental piano piece for a rainy afternoon, settings: {fields: [style, tempo, key, lyrics]}, keep: [piano, rain]}
+  - {id: yue2-fill-keeps-style, tags: [audio, fill, yue2, music, partial], mode: audio-fill, family: yue2, prompt: a song about driving through the desert at night, settings: {fields: [tempo, key, lyrics]}, context: {style: "dark synth-pop, female vocal, pulsing bass"}, keep: [desert]}
+  - id: yue2-fill-keeps-lyrics
+    tags: [audio, fill, yue2, music, partial]
+    mode: audio-fill
+    family: yue2
+    prompt: warm and slow, like a lullaby
+    settings: {fields: [style, tempo, key]}
+    context:
+      lyrics: |-
+        [Verse]
+        Close your eyes, the day is done
+        The stars come out one by one
+
+        [Chorus]
+        Sleep now, sleep now, little one
+  - {id: yue2-fill-tempo-only, tags: [audio, fill, yue2, music, partial], mode: audio-fill, family: yue2, prompt: a frantic chase theme for a heist film, settings: {fields: [tempo, key]}, context: {style: "orchestral, brass, tense strings"}}
+  - {id: sa3-fill-study, tags: [audio, fill, sa3, music], mode: audio-fill, family: stable_audio_3, prompt: calm piano music for studying, settings: {fields: [style, tempo, key]}, keep: [piano]}
+  - {id: sa3-fill-workout, tags: [audio, fill, sa3, music], mode: audio-fill, family: stable_audio_3, prompt: an upbeat nineties dance track for a workout, settings: {fields: [style, tempo, key]}, keep: [dance]}
+  - {id: sa3-fill-place, tags: [audio, fill, sa3, music], mode: audio-fill, family: stable_audio_3, prompt: "music for a sunrise over the Faroe Islands, slow and wide", settings: {fields: [style, tempo, key]}}
+  - {id: qwen3-fill-secret, tags: [audio, fill, qwen3, speech, names], mode: audio-fill, family: qwen3_tts, prompt: a whispered secret for Marta about a key hidden in the old clock, settings: {fields: [vibe, text]}, keep: [Marta, key, clock]}
+  - {id: qwen3-fill-announcement, tags: [audio, fill, qwen3, speech, names], mode: audio-fill, family: qwen3_tts, prompt: an excited 20 second radio announcement for the Summer Lights Festival, settings: {fields: [vibe, text]}, keep: [Summer Lights Festival]}
+  - {id: qwen3-fill-quote, tags: [audio, fill, qwen3, speech, quotes, names], mode: audio-fill, family: qwen3_tts, prompt: 'a narrator telling how Dr. Okafor said "The scan is clear." to Piotr in Gdansk', settings: {fields: [vibe, text]}, keep: [Okafor, Piotr, Gdansk]}
+  - {id: qwen3-fill-meditation, tags: [audio, fill, qwen3, speech], mode: audio-fill, family: qwen3_tts, prompt: a calm 30 second meditation intro, settings: {fields: [vibe, text]}, keep: [breath|breathe]}
+  - {id: qwen3-fill-keeps-text, tags: [audio, fill, qwen3, speech, partial], mode: audio-fill, family: qwen3_tts, prompt: read it like a sad confession, settings: {fields: [vibe]}, context: {text: "I never told anyone. Not even you. The door was open."}}
+  - {id: qwen3-fill-keeps-vibe-text-empty, tags: [audio, fill, qwen3, speech, partial], mode: audio-fill, family: qwen3_tts, prompt: a short bedtime story about a fox who cannot sleep, settings: {fields: [text]}, keep: [fox]}

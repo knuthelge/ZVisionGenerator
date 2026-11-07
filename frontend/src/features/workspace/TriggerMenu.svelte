@@ -23,21 +23,25 @@
   );
 </script>
 
+<!-- A tag icon, and the count of words the prompt lacks when there are any (the one thing to act on); no word, no chevron. -->
 <button
   bind:this={buttonEl}
   type="button"
   id="ws-triggers"
   class="ui-btn ui-btn-sm triggers-button"
+  class:ui-btn-icon={menu.missing === 0}
   aria-haspopup="menu"
   aria-expanded={open}
+  aria-label={menu.missing > 0 ? `Trigger words, ${menu.missing} not in the prompt` : 'Trigger words'}
   title="Trigger words of the LoRAs in use"
   onclick={() => { open = !open; }}
 >
-  Triggers{#if menu.missing > 0}<span class="triggers-count" data-testid="triggers-count">{menu.missing}</span>{/if}<Icon name="chevdown" size={12} />
+  <Icon name="tag" size={14} />{#if menu.missing > 0}<span class="triggers-count" data-testid="triggers-count">{menu.missing}</span>{/if}
 </button>
 <ActionMenu {open} anchor={buttonEl} {items} label="Triggers" align="end" onclose={() => { open = false; }} />
 
 <style>
-  .triggers-button { gap: 6px; color: var(--color-primary-main); }
-  .triggers-count { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 600; }
+  .triggers-button { gap: 4px; color: var(--color-primary-main); }
+  /* The count sits inline and centred on the icon, as the Reset count in the Settings footer does. */
+  .triggers-count { display: block; line-height: 1; font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 600; font-variant-numeric: tabular-nums; text-box: trim-both cap alphabetic; }
 </style>

@@ -6,6 +6,72 @@ export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid' | 'extend';
 export const AUDIO_KINDS = ['music', 'speech', 'sound'] as const;
 export type AudioWorkflow = (typeof AUDIO_KINDS)[number];
 
+/** The types of a sound, as the Sound Type control lists them; `auto` leaves the choice (and the Auto length) to the model. */
+export const SOUND_TYPES = ['auto', 'ambience', 'effect', 'one-shot'] as const;
+export type SoundType = (typeof SOUND_TYPES)[number];
+
+/** The five settings that steer how a built-in voice says the text, by their ids (the vocabulary is the workspace payload's `audio_settings`). */
+export interface SpeechDeliveryValues {
+  emotion: string;
+  manner: string;
+  pace: string;
+  pitch: string;
+  expressiveness: string;
+}
+
+/** One of the 24 keys a song can be asked to be in: its ABC id (`F#m`), its words (`F# minor`) and its mode. */
+export interface MusicKeyOption {
+  id: string;
+  words: string;
+  mode: 'major' | 'minor';
+}
+
+/** One choice of a delivery setting: its id as the form sends it and its label. */
+export interface DeliveryChoice {
+  id: string;
+  label: string;
+}
+
+/** An emotion and the group a picker lists it under; `neutral` is in none. */
+export interface EmotionChoice extends DeliveryChoice {
+  group: string | null;
+}
+
+/** A Vibe: a named starting point that sets all five delivery values. */
+export interface VibeOption extends DeliveryChoice {
+  delivery: SpeechDeliveryValues;
+}
+
+/** A `[mark]` a speech text may hold; `as set` has no field or value. */
+export interface SpeechMarkOption {
+  id: string;
+  field: keyof SpeechDeliveryValues | null;
+  value: string | null;
+}
+
+/** The vocabulary of the audio settings the Workspace payload serves as `audio_settings` (the part the form reads). */
+export interface AudioSettingsVocabulary {
+  /** The slowest and fastest tempo of a take, in beats per minute. */
+  tempo: { min: number; max: number };
+  keys: MusicKeyOption[];
+  /** Speech delivery: the emotions (neutral first, then by group), the manners, the paces slowest first, and the Low/Normal/High levels. */
+  emotions: EmotionChoice[];
+  manners: DeliveryChoice[];
+  paces: DeliveryChoice[];
+  levels: DeliveryChoice[];
+  /** The five values of a voice nobody steered, and the Vibes that fill them. */
+  delivery_defaults: SpeechDeliveryValues;
+  vibes: VibeOption[];
+  /** The marks a speech text holds; they steer the delivery and are not read, so they are not counted. */
+  marks: SpeechMarkOption[];
+  /** How long speech takes to read: characters a second at a Normal pace, and the factor of every other pace. */
+  reading: { chars_per_second: number; pace_factor: Record<string, number> };
+  /** The Sound Types as the control lists them (Auto first), each with its label. */
+  sound_types: { id: SoundType; label: string }[];
+  /** The length in seconds a sound has when its Length is left on Auto, by Sound Type. */
+  auto_seconds: Record<SoundType, number>;
+}
+
 /** What the Workspace form can run: an image or video workflow, or the kind of the Audio tab. */
 export type WorkspaceWorkflow = Workflow | AudioWorkflow;
 
@@ -87,6 +153,18 @@ export interface GalleryAsset {
   lyrics?: string | null;
   /** A song that reached the model's cap and was faded out there. */
   cut?: boolean;
+  /** An audio take: what the model noted about it (a setting it could not follow); absent or empty for none. */
+  notes?: string[];
+  /** A song's tempo in beats per minute and its key id (`Am`); null when the take left them on Auto. */
+  tempo?: number | null;
+  key?: string | null;
+  /** A speech take's delivery as recorded (each null when not recorded), and a sound's type. */
+  emotion?: string | null;
+  manner?: string | null;
+  pace?: string | null;
+  pitch?: string | null;
+  expressiveness?: string | null;
+  sound_type?: SoundType | null;
   reuse_workspace_url: string; // hash URL: '#/workspace?workflow=...&prompt=...'
   has_reusable_config?: boolean;
   reuse_state?: ReuseState;
@@ -299,26 +377,44 @@ export interface ModelStatusFields {
   memory_fit?: MemoryFit | null;
 }
 
-/** The keys every audio model row has. The kind decides what a model takes: music has lyrics, sound a length, speech a voice. */
+/**
+ * The keys every audio model row has. The Workspace lists a model once per kind it makes (a row is a (model, kind) pair, so the
+ * same `id` can repeat with another `kind`), and what that pair takes follows from the row: music with lyrics has the Lyrics box,
+ * music without lyrics and sound have a length, speech has a voice.
+ */
 interface AudioModelBase extends ModelStatusFields {
   id: string;
   label: string;
   type: 'audio';
-  /** A music model: the `[section]` list an empty Lyrics box stands for; null for the others. */
+  /** The workflow controls this model does not have as this kind, such as `lyrics` or `length`; the workflow's controls minus these are the ones shown. */
+  hidden_controls: string[];
+  /** A music row of a model that sings lyrics: the `[section]` list an empty Lyrics box stands for; null for the others. */
   instrumental_sections?: string | null;
   licences: ModelLicence[];
 }
 
-/** A music model; `max_seconds` is where it cuts a song. */
+/** A music model; `max_seconds` is where it cuts a song. A model that sets the length of its music (no lyrics) also gives the shortest and the default length. */
 export interface MusicAudioModel extends AudioModelBase {
   kind: 'music';
-  limits: { max_seconds: number };
+  limits: { max_seconds: number; min_seconds?: number; default_seconds?: number };
 }
 
-/** A speech model: the text it reads in one take and the recordings it takes as a voice. */
+/** One built-in voice of a speech model: its id, its name and the language it speaks natively. */
+export interface AudioVoice {
+  id: string;
+  label: string;
+  language: string;
+}
+
+/** A speech model: the text it reads in one take, its built-in voices (the first is the default) and the recordings it takes as a voice. */
 export interface SpeechAudioModel extends AudioModelBase {
   kind: 'speech';
   limits: { max_text_chars: number; min_voice_seconds: number; max_voice_seconds: number };
+  voices: AudioVoice[];
+  /** The id of the voice a take reads in when none is chosen; null for a model without built-in voices. */
+  default_voice: string | null;
+  /** Whether the files that cloning a recording needs are downloaded; null when the model has none to fetch or the state is unknown. */
+  voice_download?: { downloaded: boolean } | null;
 }
 
 /** A sound model: the lengths it makes, and the one a new draft starts with. */
@@ -398,6 +494,8 @@ export interface WorkspaceContext {
   video_models: ModelOption[];
   /** The audio models that run on this machine, in config order; empty (and the Audio tab hidden) without one. */
   audio_models?: AudioModelOption[];
+  /** The vocabulary of the audio settings (tempo range, keys); served with the audio models. */
+  audio_settings?: AudioSettingsVocabulary;
   loras: LoraInfo[];
   history_assets: GalleryAsset[];
   active_job: JobSnapshot | null;
@@ -508,8 +606,176 @@ export interface EnhanceOptionInfo {
   swatches?: string[];
 }
 
+/** The keys of the audio option axes: Music's six, then Sound's four. */
+export type AudioEnhanceAxisKey = 'genre' | 'music_mood' | 'instruments' | 'without' | 'singer' | 'production' | 'space' | 'distance' | 'over_time' | 'movement';
+
+/** What the audio enhancer writes: a Sound prompt (`sound`) or a Music style (`style`). */
+export type AudioEnhanceTask = 'sound' | 'style';
+
+/** The tasks that write a longer text: the lyrics helper (Music), the script helper (Speech) and Describe it's Fill in (both). */
+export type AudioWriterTask = 'lyrics' | 'script' | 'fill';
+
+/** The ways the script helper edits a speech text: mark it up with delivery, or fit it to a reading time. */
+export type ScriptAction = 'delivery' | 'fit';
+
+/**
+ * What a script request asks for, and what the record of a text it wrote keeps: the actions, fit first when both are asked (the server runs them in
+ * that order in one request). `seconds` and `pace` belong to `fit` (a record leaves out a Normal pace).
+ */
+export interface ScriptSettings {
+  actions: ScriptAction[];
+  seconds?: number;
+  pace?: string;
+}
+
+/** What can write the text of an audio box: a caption task, or the script helper for Speech's text. */
+export type AudioRewriteTask = AudioEnhanceTask | 'script';
+
+/** The fields Fill in can write: Music's Style, Tempo, Key and Lyrics; Speech's Vibe and Text. */
+export type FillField = 'style' | 'tempo' | 'key' | 'lyrics' | 'vibe' | 'text';
+
+/** The kinds that have a Describe it box. */
+export type DescribeKind = 'music' | 'speech';
+
+/**
+ * What the fields Fill in wrote looked like before it wrote them: the draft keys it changed, with their values, so Undo fill puts back exactly
+ * what was there. `marked` is the marks the fields had before this fill.
+ */
+export interface FillSnapshot {
+  values: Partial<DraftState>;
+  marked: FillField[];
+  /** The values those earlier marks were given. */
+  filled: Partial<Record<FillField, string>>;
+}
+
+/** The Describe it box of one kind: the idea, the fields Fill in wrote (each marked ✦ while it is still as written), what Undo fill puts back, and whether the box is folded to one line (null: folded while the Lyrics or Text have words). */
+export interface AudioDescribe {
+  text: string;
+  marked: FillField[];
+  /** The value each marked field was given, so an edit (which makes the field the user's) is told from the fill's own text. */
+  filled: Partial<Record<FillField, string>>;
+  undo: FillSnapshot | null;
+  folded: boolean | null;
+}
+
+/** The ways the lyrics helper improves lyrics; `fit` works on the whole song only. */
+export type LyricsImprovement = 'tighten' | 'fit' | 'rhymes' | 'simpler';
+
+/** What a lyrics request asks for: improve the words that are there, or write one empty section. */
+export interface LyricsSettings {
+  action?: 'improve' | 'write';
+  improve?: LyricsImprovement[];
+  /** Free-text direction; omitted for none. */
+  note?: string;
+  /** The section to work on, counted over the `[section]` tags from 0; null or omitted is the whole song. */
+  section?: number | null;
+}
+
+/** One version of the song's lyrics: the whole text, and whether it is the user's own (the first version, kept when a result arrives). */
+export interface LyricsVersion {
+  text: string;
+  mine: boolean;
+}
+
+/** A choice on every audio axis, plus the free-text direction. A `sound` task reads Sound's four axes, a `style` task Music's six. */
+export interface AudioEnhanceSettings {
+  genre: string;
+  music_mood: string;
+  instruments: string[];
+  /** Instruments to leave out; the enhancer writes them as "no guitar". */
+  without: string[];
+  singer: string;
+  production: string;
+  space: string;
+  distance: string;
+  over_time: string;
+  movement: string;
+  /** Free-text direction for the enhancer; empty for none. */
+  note: string;
+}
+
+/** One audio option axis, as the server serves it in `prompt_enhancer.audio_matrix`. */
+export interface AudioEnhanceAxis {
+  key: AudioEnhanceAxisKey;
+  label: string;
+  multi: boolean;
+  /** The kind whose Enhance offers it. */
+  kind: 'music' | 'sound';
+  /** Applies only when the take has a singing voice (Singer). */
+  vocal: boolean;
+  options: EnhanceOptionInfo[];
+  default: string[];
+}
+
+export interface AudioEnhanceMatrix {
+  axes: AudioEnhanceAxis[];
+  defaults: AudioEnhanceSettings;
+}
+
+/** The take's facts that shape an audio rewrite; every key is optional. */
+export interface AudioEnhanceContext {
+  /** The start of the lyrics (the first 600 characters are used). */
+  lyrics?: string;
+  /** The start of the speech text (the first 600 characters are used), so Fill in picks a Vibe that suits it. */
+  text?: string;
+  /** The song's style text, so the lyrics helper writes words that suit it. */
+  style?: string;
+  /** The song has no singing, so no singer is described. */
+  instrumental?: boolean;
+  /** Tempo in BPM and key as an ABC id; only a model that writes metadata states them. */
+  tempo?: number | string | null;
+  key?: string | null;
+  /** The length of the take in seconds; a sound's rewrite describes only what fits in it. */
+  seconds?: number;
+  sound_type?: SoundType;
+}
+
+/** How an audio text was written: stored with the take as its `enhance` record. */
+export interface AudioEnhanceRecord {
+  /** Only the options that are not defaults; a script record holds what the helper did. */
+  settings: Partial<AudioEnhanceSettings> | ScriptSettings;
+  /** The enhancer that wrote it, ``REPO[@REVISION]``; the server works out Fast, Smart or custom from it. */
+  model: string;
+  /** Which enhancer it was (Fast, Smart or a custom model); the server works it out, and a saved take carries it. */
+  tier?: 'fast' | 'smart' | 'custom';
+  format: 'text';
+  task: AudioRewriteTask;
+}
+
+/** The text boxes of the Audio tab that can hold a rewrite: Music's Style, a Sound's Prompt and Speech's Text. */
+export type AudioBox = 'style' | 'sound' | 'text';
+
+/** What an audio rewrite was made from: the own text and the audio model, so a change to either makes it out of date. */
+export interface AudioRewriteSource {
+  /** The text the rewrite was made from; empty for a take whose own text was empty. */
+  input: string;
+  /** The audio model the rewrite was written for (its family sets the caption shape). */
+  model: string;
+  task: AudioRewriteTask;
+  /** How the rewrite was written; Generate sends it so the take records it. Missing for typed-in text. */
+  record?: AudioEnhanceRecord;
+}
+
+/** One rewrite kept in the history of a box. */
+export interface AudioRewrite {
+  text: string;
+  /** Null for text typed in the Enhanced tab (never out of date). */
+  from: AudioRewriteSource | null;
+}
+
+/**
+ * The Enhanced text of one audio box (empty text is none: Generate sends the own text) and its last five versions. `scratched` is the position
+ * (from 0) of the version Scratch emptied the box from, which the stepper's ‹ brings back; absent unless the box was scratched.
+ */
+export interface AudioRewrites extends AudioRewrite {
+  history: AudioRewrite[];
+  scratched?: number | null;
+}
+
 export interface PromptEnhancerContract {
   matrix: { axes: EnhanceAxis[]; defaults: EnhanceSettings };
+  /** The audio option axes and their defaults. */
+  audio_matrix: AudioEnhanceMatrix;
   /** Effective model repo/path; null when none is configured (see `error`). */
   model: string | null;
   revision: string | null;
@@ -578,6 +844,17 @@ export type EnhanceFrame =
   | { type: 'text'; text: string; scene?: string; prompt?: string }
   | { type: 'done'; prompt: string; scene?: string; clamped: boolean; warning?: string; model?: string }
   | { type: 'error'; detail: string };
+
+/**
+ * One line of an audio enhance stream. The written texts are in `fields`, a mapping of field name to text
+ * (`prompt` for the `sound` task, `style` for the `style` task), so a task that writes several fields uses the same frame.
+ * Only the caption tasks stream `text` frames; a writer task sends `status`, then `done`.
+ */
+export type AudioEnhanceFrame =
+  | { type: 'status'; phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' }
+  | { type: 'text'; task: AudioEnhanceTask; text: string; fields: Record<string, string> }
+  | { type: 'done'; task: AudioEnhanceTask | AudioWriterTask; fields: Record<string, string>; clamped: boolean; warning?: string; model?: string }
+  | { type: 'error'; detail: string; /** A writer left the text as it was: a note, not a failure. */ no_change?: boolean };
 
 export interface PromptFileContract {
   accepted_extensions: string[];
@@ -947,6 +1224,7 @@ export interface TabText {
   enhancedScene: string;
   enhancedFrom: EnhancedSource | null;
   enhancedHistory: EnhancedRewrite[];
+  enhancedScratched: number | null;
 }
 
 export interface DraftState {
@@ -1043,8 +1321,10 @@ export interface DraftState {
   /** The Enhanced scene of a video; used together with the Enhanced prompt. */
   enhancedScene: string;
   enhancedFrom: EnhancedSource | null;
-  /** The last rewrites of one source text, oldest first; browser-local. Written only by Enhance, Reset and the JSON capability gate. */
+  /** The last five versions of the Enhanced text, oldest first; browser-local. Written by Enhance, Scratch, a recent-prompt pick, Reset and the JSON capability gate. */
   enhancedHistory: EnhancedRewrite[];
+  /** The position (from 0) of the version Scratch emptied the Enhanced text from, which the stepper's ‹ brings back; null otherwise. */
+  enhancedScratched: number | null;
   /**
    * The text of the mode (image or video) that is not open; the fields from `prompt` to `enhancedHistory` (the same as
    * `TabText`) hold the open one's. Opening the other mode swaps the two. Empty until the first switch.
@@ -1064,6 +1344,8 @@ export interface DraftState {
   enhanceAuto: boolean;
   /** The enhancer chosen in the popover; Smart falls back to Fast where it is unavailable. */
   enhanceModel: EnhancerTier;
+  /** The enhancer Describe it's Fill in uses, chosen apart from `enhanceModel` (Enhance and the helpers); the same fallback to Fast. */
+  describeTier: EnhancerTier;
   /** What image enhancement writes; JSON applies only to models that take JSON captions. */
   enhanceFormat: EnhanceFormat;
   /** Extend: the video to continue; null until one is chosen. Its facts are fetched again on load. */
@@ -1090,14 +1372,36 @@ export interface DraftState {
   soundPrompt: string;
   /** Audio tab, Sound: the length in seconds; 0 until the model's default fills it. */
   audioSeconds: number;
-  /** Audio tab, Speech: whether the model picks the voice (`any`) or follows a recording (`recording`). */
-  voiceMode: 'any' | 'recording';
+  /** Audio tab, Music: the tempo in beats per minute; null is Auto (the model chooses). */
+  audioTempo: number | null;
+  /** Audio tab, Music: the key as an ABC id such as `F#m`; null is Auto. */
+  audioKey: string | null;
+  /** Audio tab, Music of a model that sets its length: the length in seconds; 0 is the model's default. */
+  musicSeconds: number;
+  /** Audio tab, Sound: the type of the sound. */
+  soundType: SoundType;
+  /** Audio tab, Speech: how a built-in voice says the text; a recording ignores it. */
+  speechDelivery: SpeechDeliveryValues;
+  /** Audio tab, Speech: whether the take reads in a built-in voice (`builtin`) or follows a recording (`recording`). */
+  voiceMode: 'builtin' | 'recording';
+  /** Audio tab, Speech: the id of the built-in voice; null is the model's default voice. */
+  speechSpeaker: string | null;
   /** Audio tab, Speech: the recording's path on the host; null when none is set or it was uploaded (`voiceUpload`). */
   voicePath: string | null;
   /** Audio tab, Speech: the file name of a recording uploaded from this device (its file is in `heldUploads`); null when none. */
   voiceUpload: string | null;
   /** Audio tab, Speech: what the recording says. */
   voiceText: string;
+  /** Audio tab: the Enhanced text of each box and its earlier versions. */
+  audioRewrites: Record<AudioBox, AudioRewrites>;
+  /** Audio tab, Music: the versions of the lyrics the helper made, the user's own first (`mine`); empty before the helper ran. */
+  lyricsVersions: LyricsVersion[];
+  /** Audio tab, Music: the index in `lyricsVersions` of the version `lyrics` shows (it is out of step when `lyrics` was set by anything else). */
+  lyricsCurrent: number;
+  /** Audio tab: the Enhance options of each task, as last chosen; null is every default. */
+  enhanceSettingsAudio: Record<AudioEnhanceTask, Partial<AudioEnhanceSettings> | null>;
+  /** Audio tab, Music and Speech: the Describe it box of each kind. */
+  audioDescribe: Record<DescribeKind, AudioDescribe>;
   /** The slug of the settings preset the form started from; null when none. Cleared on a mode switch, Reset, a loaded source's settings and when the preset is deleted. */
   appliedPreset: string | null;
 }
@@ -1263,10 +1567,10 @@ export interface ActiveJobState extends JobContext {
 
 /** Where an audio take is, from its `audio_progress` events. */
 export interface AudioProgress {
-  /** The phase the model is in, as it names it: `Plan`, `Song tokens`, `Synthesis`, `Decode`, `Speech tokens` or `Sampling`. */
+  /** The phase the model is in, as it names it: `Plan`, `Song tokens`, `Synthesis`, `Decode`, `Speech` or `Sampling`. */
   phase: string;
   step: number;
-  /** The phase's step count; null while the model cannot say (a song's tokens run until it ends). Speech tokens count against the frames the part's text should need, and a finished part reports the frames it took. */
+  /** The phase's step count; null while the model cannot say (a song's tokens run until it ends). A speech part is one step: 0 before it is read and 1 after. */
   total: number | null;
   /** The part of a long speech text being read (1-based), and how many there are. */
   part: number;
@@ -1681,11 +1985,11 @@ export interface VideoModelEntry extends ModelStatusFields {
   licences?: ModelLicence[];
 }
 
-/** An audio model on the Models page. `name` is the model's id. */
+/** An audio model on the Models page: one row per model, listing every kind it makes. `name` is the model's id. */
 export interface AudioModelEntry extends ModelStatusFields {
   name: string;
   label: string;
-  kind: AudioWorkflow;
+  kinds: AudioWorkflow[];
   delete?: ModelDeleteInfo | null;
   disk_size_label?: string | null;
   /** Files are missing, so the Models page offers Download. */
