@@ -44,7 +44,8 @@ class TestQwenPerPlatform:
         from tests._speech_fakes import qwen_preset
         from zvisiongenerator.backends.audio import qwen3_tts_mlx
 
-        monkeypatch.setitem(sys.modules, "mlx_audio", None)  # not installed, as on Windows and Linux
+        for name in ("mlx_audio", "mlx_audio.tts", "mlx_audio.tts.utils"):  # not installed, as on Windows and Linux
+            monkeypatch.setitem(sys.modules, name, None)
         monkeypatch.setattr(qwen3_tts_mlx, "snapshot_dir", lambda files: tmp_path)
         backend = get_audio_backend("qwen3_tts_mlx")  # nothing is imported yet
 
