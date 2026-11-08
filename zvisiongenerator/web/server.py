@@ -141,6 +141,8 @@ from zvisiongenerator.web.gallery import (
     filter_and_sort_assets,
     gallery_asset_to_json,
     list_gallery_assets,
+    move_gallery_assets,
+    output_source_folder,
     resolve_output_asset_path,
 )
 from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, JobLogError
@@ -171,6 +173,7 @@ from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_facto
 from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
+from zvisiongenerator.web.projects import PROJECT_FIELD, create_project, folder_project, list_projects, project_dir
 from zvisiongenerator.web.presets import create_preset, delete_preset, list_presets, rename_preset, update_preset
 from zvisiongenerator.web.model_delete import (
     DeleteTarget,
@@ -1018,6 +1021,7 @@ def _job_response(job_id: str, context: dict[str, Any], supported_controls: tupl
             "height": context.get("height"),
             "notices": list(context.get("notices", ())),
             "queue_position": queue_position,
+            "save_project": context.get("save_project"),
             **({"media_type": context["media_type"]} if "media_type" in context else {}),
             **({"upscale_method": context["upscale_method"]} if "upscale_method" in context else {}),
         }
@@ -1037,12 +1041,15 @@ def _public_job_context(
     width: int | None,
     height: int | None,
     output_dir: str,
+    save_dir: str,
     uploads: dict[str, str | list[str] | None],
 ) -> dict[str, Any]:
     """Build the public context a job carries from submission on (shown in snapshots and the queue).
 
     ``workflow`` is the one the job runs, decided from the inputs it received rather than from what the form posted.
     ``width`` and ``height`` are the size the job renders at, which gives its preview the output's shape.
+    ``output_dir`` is the output root and ``save_dir`` the folder the job really saves into; the project it names (or
+    ``None``) is carried as ``save_project``, apart from the recorded settings, because an Extend saves beside its source.
     ``uploads`` maps each path setting (``image_path``, ``end_image_path``) to the file the job uses for it, and
     ``reference_path`` to the list of every reference file in order.
     """
@@ -1058,6 +1065,7 @@ def _public_job_context(
         "height": height,
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": output_dir,
+        "save_project": folder_project(Path(output_dir), save_dir),
         "settings": _submitted_settings(form, uploads=uploads),
     }
 
@@ -1078,7 +1086,7 @@ def _submitted_settings(form: Any, *, uploads: dict[str, str | list[str] | None]
     # Starlette's FormData repeats a key per value; plain mappings (tests, internal callers) have one item per key.
     items = form.multi_items() if hasattr(form, "multi_items") else form.items()
     for key, value in items:
-        if key == REFERENCE_FIELD:
+        if key in (REFERENCE_FIELD, PROJECT_FIELD):
             continue
         if isinstance(value, list):
             settings[key] = [str(item) for item in value]
@@ -1219,6 +1227,8 @@ def _parse_upscale_body(body: Any) -> ParsedUpscale:
         "notices": list(plan.notices),
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": web_config.output_dir,
+        # The upscale saves beside its source, so it lands in the source's project.
+        "save_project": folder_project(Path(web_config.output_dir), Path(source.path).parent),
         "settings": {},
     }
     workflow = build_seedvr2_upscale_workflow(transparent=plan.request.transparent) if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen, transparent=plan.request.transparent)
@@ -1265,6 +1275,8 @@ def _parse_video_upscale(source_path: Path, factor: int, method: str) -> ParsedU
         "notices": list(plan.notices),
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": web_config.output_dir,
+        # The upscale saves beside its source, so it lands in the source's project.
+        "save_project": folder_project(Path(web_config.output_dir), Path(source.path).parent),
         "settings": {},
     }
     return ParsedUpscale(request=plan.request, model_ref=None, config=web_config.app_config, context=context, workflow=None)
@@ -1292,6 +1304,8 @@ def _parse_ltx_video_upscale(source: ExtendSource, recorded_config: dict[str, An
         "notices": list(plan.notices),
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
         "output_dir": web_config.output_dir,
+        # The upscale saves beside its source, so it lands in the source's project.
+        "save_project": folder_project(Path(web_config.output_dir), Path(source.path).parent),
         "settings": {},
     }
     return ParsedUpscale(request=request, model_ref=None, config=web_config.app_config, context=context, workflow=None)
@@ -1469,6 +1483,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     # Workspace form lets a stale browser tab write to one root while Gallery and
     # /media serve another, which breaks previews and makes new assets disappear.
     output_dir = _resolve_output_dir(web_config.output_dir)
+    save_dir = _project_save_dir(form, output_dir)
     upscale = _optional_int(form, "upscale")
     args = argparse.Namespace(
         ratio=_choice_or_default(form, "ratio", web_config.image_ratios, app_config["generation"].get("default_ratio", "2:3")),
@@ -1491,7 +1506,7 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         image_path=_resolve_reference_image(form, output_dir),
         reference_paths=_resolve_reference_images(form, output_dir),
         image_strength=_optional_float(form, "image_strength"),
-        output=output_dir,
+        output=save_dir,
         model=model_name,
         quantize=_optional_int(form, "quantize"),
         sharpen=_resolve_numeric_toggle(form, "sharpen_enabled", "sharpen_amount", default_enabled=True),
@@ -1633,7 +1648,8 @@ def _parse_image_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         meta=f"{eff_width}x{eff_height} · {args.steps} steps" if args.width else f"{args.ratio} · {args.size} · {args.steps} steps",
         width=eff_width,
         height=eff_height,
-        output_dir=args.output,
+        output_dir=output_dir,
+        save_dir=save_dir,
         uploads={"image_path": args.image_path, "reference_path": args.reference_paths},
     )
     return ParsedJob(
@@ -1689,10 +1705,14 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
     # An extension takes its size, frame rate and length from the source clip, so the size and reference-image fields are ignored.
     ratio, size = (None, None) if extend else _video_ratio_and_size(form, web_config)
     output_dir = _resolve_output_dir(web_config.output_dir)
+    save_dir = _project_save_dir(form, output_dir)
     image_path = None if extend else _resolve_reference_image(form, output_dir)
     end_image_path = None if extend else _resolve_reference_image(form, output_dir, path_key="end_image_path")
     # The source is checked again here: the file may have changed since the Workspace inspected it.
     source = load_source_video(_optional_text(form, "source_video"), key="source_video") if extend else None
+    if source is not None:
+        # An extension lands beside its source when that is an asset in the output folder; a staged or outside source uses the picked project.
+        save_dir = output_source_folder(output_dir, str(source.path)) or save_dir
     audio_track_path = _resolve_audio_track_file(form, output_dir)
     audio_track = _audio_track_from_form(form, audio_track_path)
     # A track is the clip's sound, so it overrides the Audio switch.
@@ -1721,7 +1741,7 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         seed=_optional_int(form, "seed"),
         runs=_optional_int(form, "runs") or 1,
         low_memory=_checkbox(form, "low_memory", default=True),
-        output=output_dir,
+        output=save_dir,
         format="mp4",
         lora=None,
         lora_paths=[],
@@ -1818,7 +1838,8 @@ def _parse_video_job(form: Any, web_config: WebUiConfig) -> ParsedJob:
         meta=meta,
         width=args.width,
         height=args.height,
-        output_dir=args.output,
+        output_dir=output_dir,
+        save_dir=save_dir,
         uploads={"image_path": image_path, "end_image_path": end_image_path, "audio_track_path": audio_track.path if audio_track is not None else None},
     )
     return ParsedJob(
@@ -1882,6 +1903,7 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
     seed = _optional_int(form, "seed")
     check_seed(seed)
     output_dir = _resolve_output_dir(web_config.output_dir)
+    save_dir = _project_save_dir(form, output_dir)
     fields = AudioFields(
         prompt=_untrimmed_text(form, "prompt"),
         lyrics=_untrimmed_text(form, "lyrics"),
@@ -1915,6 +1937,7 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
         width=None,
         height=None,
         output_dir=output_dir,
+        save_dir=save_dir,
         uploads={"voice_path": request.voice.path if request.voice is not None else None},
     )
     context["media_type"] = "audio"
@@ -1926,7 +1949,7 @@ def _parse_audio_job(form: Any, web_config: WebUiConfig, *, planning: bool = Fal
         config=app_config,
         runs=runs,
         seed=seed,
-        output_dir=output_dir,
+        output_dir=save_dir,
         context=context,
         supported_controls=generation_supported_controls(review=False),
     )
@@ -2367,6 +2390,15 @@ def _upload_name(filename: Any, suffix: str) -> str:
     return f"{stem or 'audio'}{suffix}"
 
 
+def _project_save_dir(form: Any, root: str) -> str:
+    """Return the folder a job saves into: the form's ``project`` under *root*, or *root* itself when the field is blank or absent.
+
+    Raises:
+        ValueError: If the project is not one plain folder name.
+    """
+    return str(project_dir(Path(root), _optional_text(form, PROJECT_FIELD)))
+
+
 def _resolve_output_dir(value: str | None) -> str:
     if value is None:
         raise ValueError("An output directory is required.")
@@ -2668,18 +2700,41 @@ def api_workspace(include_history: bool = Query(True)) -> dict[str, Any]:
     return _build_workspace_response(web_config, history_assets)
 
 
+@app.get("/api/projects")
+async def api_list_projects() -> dict[str, Any]:
+    """Return the project folders under the output folder."""
+    projects = await run_in_threadpool(list_projects, _media_output_root())
+    return {"projects": [{"name": project.name, "path": project.path} for project in projects]}
+
+
+@app.post("/api/projects")
+async def api_create_project(request: Request) -> dict[str, str]:
+    """Create a project folder under the output folder."""
+    payload = await request.json()
+    name = _required_json_string(payload, "name")
+    try:
+        project = await run_in_threadpool(create_project, _media_output_root(), name)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"name": project.name, "path": project.path}
+
+
 @app.get("/api/gallery")
 def api_gallery_json(
     page: int = Query(1, ge=1),
     filter: str = Query("all"),
     sort_order: str = Query("newest"),
+    project: str = Query(""),
 ) -> dict[str, Any]:
-    """Return paginated gallery assets as JSON for the Svelte SPA gallery view."""
+    """Return paginated gallery assets as JSON for the Svelte SPA gallery view, limited to one project when *project* is set."""
     web_config = load_web_config()
     all_assets = filter_and_sort_assets(
         list_gallery_assets(web_config.output_dir),
         media_filter=filter,
         sort_order=sort_order,
+        project=project or None,
     )
     return build_gallery_page_json(all_assets, web_config, page=page, page_size=web_config.gallery_page_size)
 
@@ -3336,6 +3391,40 @@ def api_gallery_audio_peaks(asset_id: str = Query(..., alias="id", min_length=1)
     if peaks is None:
         raise HTTPException(status_code=404, detail=f"Audio asset not found: {asset_id}")
     return {"id": asset_id, "peaks": peaks}
+
+
+@app.post("/api/gallery/move")
+async def api_move_gallery_assets(request: Request) -> dict[str, Any]:
+    """Move gallery assets into a project (``null`` for the top of the output folder), reporting each file on its own."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Expected a JSON object.")
+    asset_ids = payload.get("asset_ids")
+    project = payload.get("project")
+    if not isinstance(asset_ids, list) or not all(isinstance(asset_id, str) for asset_id in asset_ids):
+        raise HTTPException(status_code=422, detail="Field 'asset_ids' must be a list of strings.")
+    if project is not None and not isinstance(project, str):
+        raise HTTPException(status_code=422, detail="Field 'project' must be a string or null.")
+    try:
+        return await run_in_threadpool(_move_assets_response, asset_ids, project)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _move_assets_response(asset_ids: list[str], project: str | None) -> dict[str, Any]:
+    """Move the assets and describe the outcome; runs off the event loop because building the assets reads the model inventory."""
+    result = move_gallery_assets(str(_media_output_root()), asset_ids, project)
+    moved: list[dict[str, Any]] = []
+    if result.moved:
+        web_config = load_web_config()
+        moved = [{"from": item.from_id, "asset": gallery_asset_to_json(item.asset, web_config)} for item in result.moved]
+    return {
+        "moved": moved,
+        "failed": [{"id": failure.id, "detail": failure.detail} for failure in result.failed],
+    }
 
 
 @app.delete("/api/gallery/{asset_path:path}")

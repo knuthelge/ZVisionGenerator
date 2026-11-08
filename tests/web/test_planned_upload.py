@@ -43,3 +43,28 @@ def test_the_stand_in_path_is_under_the_output_folder_and_keeps_only_the_file_na
 
     assert path == str(tmp_path / ".web_uploads" / "planned" / "voice.wav")
     assert not (tmp_path / ".web_uploads").exists()
+
+
+def test_a_plan_with_a_project_puts_the_stand_in_under_the_root(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from tests.web._helpers import make_resolved_image_defaults, make_web_config, patch_image_submit_dependencies
+    from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+    from zvisiongenerator.web import server as web_server
+
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=True, size=None), defaults=make_resolved_image_defaults(supports_img2img=True))
+    planned = []
+    monkeypatch.setattr(web_server, "job_download_parts", lambda request, config, **kwargs: planned.append(kwargs["args"]) or ())
+    monkeypatch.setattr(web_server, "_summarize_job_parts", lambda parts: {})
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/generate/plan", data={"model": "zimage", "prompt": "x", "project": "A"}, files={"image_file": ("ref.png", b"data", "image/png")})
+
+    assert response.status_code == 200, response.text
+    (args,) = planned
+    assert args.image_path == str(tmp_path / ".web_uploads" / "planned" / "ref.png")
+    assert args.output == str(tmp_path / "A")
+    assert not (tmp_path / ".web_uploads").exists()

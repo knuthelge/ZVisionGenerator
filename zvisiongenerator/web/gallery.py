@@ -20,6 +20,7 @@ from zvisiongenerator.core.ideogram4 import is_json_caption
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.enhance_record import enhance_record_summary, enhance_reuse_param
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
+from zvisiongenerator.utils.filename import unique_output_path
 from zvisiongenerator.utils.paths import is_existing_file, resolve_model_path
 from zvisiongenerator.utils.provenance import (
     UPSCALE_METHOD_CREATIVE,
@@ -47,6 +48,7 @@ from zvisiongenerator.utils.video_upscale import ltx_upscale_problem, ltx_video_
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery_audio import audio_asset_facts, audio_asset_json, is_reusable_audio_config
 from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
+from zvisiongenerator.web.projects import NO_PROJECT_FILTER, asset_project, project_dir
 from zvisiongenerator.web.upscale_api import ltx_upscale_model
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
@@ -231,16 +233,25 @@ def _scan_output_root(root: Path) -> tuple[list[ScannedFile], bool]:
     return files, not errors
 
 
-def filter_and_sort_assets(assets: list[GalleryAsset], *, media_filter: str, sort_order: str) -> list[GalleryAsset]:
-    """Apply gallery filter and sort controls to a list of assets."""
+def filter_and_sort_assets(assets: list[GalleryAsset], *, media_filter: str, sort_order: str, project: str | None = None) -> list[GalleryAsset]:
+    """Apply gallery filter and sort controls to a list of assets.
+
+    A *project* keeps only the assets whose first ID segment is exactly that name. The ``no_project`` filter keeps the
+    assets that sit in no project; it is a value of the media filter because a project folder can be named anything.
+    """
     normalized_filter = media_filter.strip().lower()
-    if normalized_filter not in {"all", "image", "video", "audio"}:
+    if normalized_filter not in {"all", "image", "video", "audio", NO_PROJECT_FILTER}:
         normalized_filter = "all"
     normalized_sort = sort_order.strip().lower()
     if normalized_sort not in {"newest", "oldest"}:
         normalized_sort = "newest"
 
-    filtered = [asset for asset in assets if normalized_filter == "all" or asset.kind == normalized_filter]
+    if normalized_filter == NO_PROJECT_FILTER:
+        filtered = [asset for asset in assets if asset_project(asset.id) is None]
+    else:
+        filtered = [asset for asset in assets if normalized_filter == "all" or asset.kind == normalized_filter]
+    if project:
+        filtered = [asset for asset in filtered if asset_project(asset.id) == project]
     return sorted(filtered, key=lambda asset: asset.modified_at, reverse=normalized_sort == "newest")
 
 
@@ -260,7 +271,7 @@ def build_gallery_page_json(assets: list[GalleryAsset], web_config: WebUiConfig,
 def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]:
     """Convert one gallery asset to the current SPA JSON shape."""
     if asset.kind == "audio":
-        return audio_asset_json(asset, web_config)
+        return {**audio_asset_json(asset, web_config), "project": asset_project(asset.id)}
     created_at = datetime.fromtimestamp(asset.modified_at, tz=timezone.utc).isoformat()
     default_workflow = default_workflow_for_mode(asset.kind)
     # An upscale is regenerated with the workflow that made its source.
@@ -365,6 +376,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
                 reuse_params["height"] = str(asset.source["height"])
     return {
         "id": asset.id,
+        "project": asset_project(asset.id),
         "url": asset.media_url,
         "thumbnail_url": f"/thumbs/{quote(asset.id, safe='/')}",
         "filename": asset.name,
@@ -526,6 +538,93 @@ def delete_gallery_assets(output_dir: str, selected_paths: list[str]) -> None:
     _GALLERY_INDEX.forget(_index_root_key(root), removed)
 
 
+@dataclass(frozen=True)
+class MovedAsset:
+    """Record one moved file: the asset ID it had and the asset it is now."""
+
+    from_id: str
+    asset: GalleryAsset
+
+
+@dataclass(frozen=True)
+class MoveFailure:
+    """Record one file that could not be moved: the ID as requested and why."""
+
+    id: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class MoveResult:
+    """Hold the outcome of a move: the files moved and the files that failed, each in request order."""
+
+    moved: tuple[MovedAsset, ...]
+    failed: tuple[MoveFailure, ...]
+
+
+def move_gallery_assets(output_dir: str, asset_ids: list[str], project: str | None) -> MoveResult:
+    """Move gallery assets to the top of a project folder (or of the output root for ``None``), handling each file on its own.
+
+    A move is a rename inside the output root, so modified times are kept. A taken name gets the next free ``_N`` name.
+    A file already in the target project is left alone and is in neither list. The target folder is created
+    when missing. The index rows of the moved files are re-keyed, so their facts are not read again.
+
+    Raises:
+        ValueError: If *project* isn't one plain folder name.
+        OSError: If the target folder cannot be created.
+    """
+    root = Path(output_dir).resolve()
+    target = project_dir(root, project)
+    target.mkdir(exist_ok=True)
+    target_project = None if target == root else project
+    moves: list[tuple[str, Path]] = []
+    failed: list[MoveFailure] = []
+    for asset_id in dict.fromkeys(asset_ids):
+        rel_path = normalize_asset_id(asset_id)
+        source = resolve_output_asset_path(root, asset_id)
+        if rel_path is None or source is None or _asset_kind(source) is None:
+            failed.append(MoveFailure(asset_id, "Not a valid asset ID."))
+        elif not source.is_file():
+            failed.append(MoveFailure(asset_id, "The file is missing."))
+        elif asset_project(rel_path) != target_project:
+            destination = unique_output_path(target, source.stem, source.suffix)
+            try:
+                os.replace(source, destination)
+            except OSError as exc:
+                failed.append(MoveFailure(asset_id, f"Could not move the file: {exc.strerror or exc}"))
+            else:
+                moves.append((rel_path, destination))
+    return MoveResult(_rekey_moved(root, moves), tuple(failed))
+
+
+def _rekey_moved(root: Path, moves: list[tuple[str, Path]]) -> tuple[MovedAsset, ...]:
+    """Re-key the index rows of files just moved and build their assets from the stored facts."""
+    root_key = _index_root_key(root)
+    renamed = [(old_id, _moved_file(root, path)) for old_id, path in moves]
+    _GALLERY_INDEX.rename(root_key, renamed)
+    files = [file for _old_id, file in renamed]
+    facts = _GALLERY_INDEX.facts_for(root_key, files, _read_scanned_facts, prune=False)
+    moved: list[MovedAsset] = []
+    for old_id, file in renamed:
+        asset = _build_gallery_asset(root, file, facts[file.rel_path])
+        if asset is None:
+            raise RuntimeError(f"{file.rel_path} is not a media file after it was moved.")
+        moved.append(MovedAsset(old_id, asset))
+    return tuple(moved)
+
+
+def _moved_file(root: Path, path: Path) -> ScannedFile:
+    """Describe a file just moved to *path*; it was renamed a moment ago, so a file that is not there is a fault.
+
+    Raises:
+        RuntimeError: If *path* is not a regular file.
+    """
+    file = _scanned_file(root, path)
+    if file is None:
+        raise RuntimeError(f"{path} is not a file after it was moved.")
+    return file
+
+
 def resolve_output_asset_path(root: Path, asset_id: str) -> Path | None:
     """Resolve an output-root-relative POSIX asset ID safely under the configured root."""
     normalized = normalize_asset_id(asset_id)
@@ -549,6 +648,21 @@ def normalize_asset_id(asset_id: str) -> str | None:
     if not parts or any(part in {"", ".", ".."} or _is_staging_part(part) for part in parts):
         return None
     return path.as_posix()
+
+
+def output_source_folder(output_dir: str, source_path: str) -> str | None:
+    """Return the folder holding *source_path* when it is an asset under *output_dir*, else ``None``.
+
+    A source outside the output folder, or inside a staging folder such as ``.web_uploads``, is not an asset.
+    """
+    try:
+        root = Path(output_dir).expanduser().resolve()
+        source = Path(source_path).expanduser().resolve()
+        if not source.is_relative_to(root) or normalize_asset_id(source.relative_to(root).as_posix()) is None:
+            return None
+    except OSError, ValueError:
+        return None
+    return str(source.parent)
 
 
 def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -> GalleryAsset | None:

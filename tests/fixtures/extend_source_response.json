@@ -1,6 +1,7 @@
 {
   "path": "/clips/clip.mp4",
   "filename": "clip.mp4",
+  "output_folder": null,
   "width": 512,
   "height": 256,
   "rotation": 0,

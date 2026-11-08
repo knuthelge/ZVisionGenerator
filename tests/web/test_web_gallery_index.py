@@ -389,6 +389,91 @@ def test_forget_with_unusable_database_only_warns(tmp_path: Path) -> None:
     assert db_dir.is_dir()
 
 
+def _facts_rows(tmp_path: Path) -> dict[tuple[str, str], str]:
+    with closing(sqlite3.connect(tmp_path / "ziv.sqlite3")) as conn:
+        return {(row[0], row[1]): row[2] for row in conn.execute(f"SELECT root, rel_path, facts FROM gallery_assets_v{GALLERY_INDEX_VERSION}")}
+
+
+def _move(root: Path, old: str, new: str) -> ScannedFile:
+    """Rename a file under *root* and return its scan at the new path."""
+    (root / new).parent.mkdir(parents=True, exist_ok=True)
+    os.replace(root / old, root / new)
+    return next(f for f in _scan(root) if f.rel_path == new)
+
+
+def test_rename_moves_the_row_with_its_facts_and_the_post_move_stat(tmp_path: Path, root: Path) -> None:
+    _make_files(root, ["a.png", "b.png"])
+    index = _index(tmp_path)
+    index.facts_for("root", _scan(root), _Reader(), prune=True)
+    before = _facts_rows(tmp_path)[("root", "a.png")]
+    moved = _move(root, "a.png", "P/a.png")
+
+    index.rename("root", [("a.png", moved)])
+
+    assert set(_rows(tmp_path)) == {"b.png", "P/a.png"}
+    assert _rows(tmp_path)["P/a.png"] == (moved.mtime_ns, moved.ctime_ns, moved.size)
+    assert _facts_rows(tmp_path)[("root", "P/a.png")] == before
+
+
+def test_a_listing_after_rename_reads_nothing(tmp_path: Path, root: Path) -> None:
+    _make_files(root, ["a.png", "b.png"])
+    index = _index(tmp_path)
+    index.facts_for("root", _scan(root), _Reader(), prune=True)
+    moved = _move(root, "a.png", "P/a.png")
+    index.rename("root", [("a.png", moved)])
+    reader = _Reader()
+
+    facts = index.facts_for("root", _scan(root), reader, prune=True)
+
+    assert reader.total == 0
+    assert facts["P/a.png"]["config"] == {"name": "a.png"}
+
+
+def test_rename_replaces_a_stale_row_at_the_new_path_and_leaves_other_roots(tmp_path: Path, root: Path) -> None:
+    (root / "P").mkdir(parents=True)
+    _make_files(root, ["a.png", "P/a.png"])
+    index = _index(tmp_path)
+    index.facts_for("root", _scan(root), _Reader(), prune=True)
+    index.facts_for("other", _scan(root), _Reader(), prune=True)
+    (root / "P" / "a.png").unlink()
+    moved = _move(root, "a.png", "P/a.png")
+
+    index.rename("root", [("a.png", moved)])
+
+    with closing(sqlite3.connect(tmp_path / "ziv.sqlite3")) as conn:
+        stored = set(conn.execute(f"SELECT root, rel_path FROM gallery_assets_v{GALLERY_INDEX_VERSION}"))
+    assert stored == {("root", "P/a.png"), ("other", "a.png"), ("other", "P/a.png")}
+    assert _rows(tmp_path)["P/a.png"] == (moved.mtime_ns, moved.ctime_ns, moved.size)
+
+
+def test_rename_of_a_file_without_a_row_stores_nothing(tmp_path: Path, root: Path) -> None:
+    _make_files(root, ["a.png", "b.png"])
+    index = _index(tmp_path)
+    index.facts_for("root", [f for f in _scan(root) if f.rel_path == "b.png"], _Reader(), prune=False)
+    moved = _move(root, "a.png", "P/a.png")
+
+    index.rename("root", [("a.png", moved)])
+
+    assert set(_rows(tmp_path)) == {"b.png"}
+
+
+def test_rename_without_a_database_creates_none(tmp_path: Path) -> None:
+    path = tmp_path / "data" / "ziv.sqlite3"
+    file = ScannedFile("P/a.png", tmp_path / "a.png", 1, 1, 1.0, 1)
+    GalleryIndex(lambda: path).rename("root", [("a.png", file)])
+    assert not path.exists()
+    assert not path.parent.exists()
+
+
+def test_rename_with_unusable_database_only_warns(tmp_path: Path) -> None:
+    db_dir = tmp_path / "ziv.sqlite3"
+    db_dir.mkdir()
+    file = ScannedFile("P/a.png", tmp_path / "a.png", 1, 1, 1.0, 1)
+    with pytest.warns(UserWarning):
+        GalleryIndex(lambda: db_dir).rename("root", [("a.png", file)])
+    assert db_dir.is_dir()
+
+
 def _surrogate_scan(root: Path, bad_name: str) -> list[ScannedFile]:
     """Scan *root* and rename one file's asset ID to *bad_name*, as a non-UTF-8 file name appears after the walk."""
     return [dataclasses.replace(f, rel_path=bad_name) if f.rel_path == "b.png" else f for f in _scan(root)]

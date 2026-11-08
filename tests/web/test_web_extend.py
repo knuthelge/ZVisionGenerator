@@ -741,3 +741,92 @@ def test_memory_fit_route_refuses_a_size_that_is_too_small(clip_fit, monkeypatch
     monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 16, "height": 448, "num_frames": 49})
 
     assert _memory_fit({}).status_code == 422
+
+
+@pytest.fixture
+def root_clips(monkeypatch, tmp_path, clip):
+    """Serve a root at ``tmp_path/out`` and return a function that submits an extension of a clip at a root-relative or absolute path."""
+    root = tmp_path / "out"
+    web_config = make_web_config()
+    web_config.output_dir = str(root)
+    submitted = _stub_extend_submission(monkeypatch, tmp_path, clip)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+
+    def extend(source, **fields) -> str:
+        path = source if os.path.isabs(source) else root / source
+        if not os.path.isabs(source):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(clip.path.read_bytes())
+        response = _post_extend({"source_video": str(path), **fields})
+        assert response.status_code == 200, response.text
+        job = submitted[-1]
+        assert job["context"]["output_dir"] == str(root)
+        extend.save_project = job["context"]["save_project"]
+        return job["args"].output
+
+    extend.root = root
+    extend.save_project = None
+    return extend
+
+
+def test_an_extension_of_an_asset_in_a_project_saves_beside_it_whatever_the_pick(root_clips):
+    assert root_clips("B/c.mp4", project="A") == str(root_clips.root / "B")
+
+
+def test_an_extension_of_an_asset_in_the_root_saves_in_the_root(root_clips):
+    assert root_clips("c.mp4", project="A") == str(root_clips.root)
+
+
+def test_the_job_names_the_folder_an_extension_really_saves_into(root_clips, clip):
+    root_clips("B/c.mp4", project="A")
+    beside_source = root_clips.save_project
+    root_clips("c.mp4", project="A")
+    at_root = root_clips.save_project
+    root_clips(str(clip.path), project="A")
+    picked = root_clips.save_project
+
+    assert (beside_source, at_root, picked) == ("B", None, "A")
+
+
+def test_an_extension_of_a_clip_outside_the_root_saves_in_the_picked_project(root_clips, clip):
+    assert root_clips(str(clip.path), project="A") == str(root_clips.root / "A")
+
+
+def test_an_extension_of_a_clip_outside_the_root_without_a_project_saves_in_the_root(root_clips, clip):
+    assert root_clips(str(clip.path)) == str(root_clips.root)
+
+
+def test_an_extension_of_a_staged_upload_saves_in_the_picked_project(root_clips):
+    assert root_clips(".web_uploads/c.mp4", project="A") == str(root_clips.root / "A")
+
+
+def test_an_extension_with_a_bad_project_is_refused_even_beside_its_source(root_clips, clip):
+    (root_clips.root / "B").mkdir(parents=True)
+    (root_clips.root / "B" / "c.mp4").write_bytes(clip.path.read_bytes())
+
+    response = _post_extend({"source_video": str(root_clips.root / "B" / "c.mp4"), "project": "../x"})
+
+    assert response.status_code == 422
+
+
+def test_inspect_route_names_the_folder_of_a_source_in_the_output_folder(clip, tmp_path, monkeypatch):
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    nested = tmp_path / "B"
+    nested.mkdir()
+    (nested / "c.mp4").write_bytes(b"\x00" * 16)
+
+    inside = _inspect({"path": str(nested / "c.mp4")}).json()
+    at_root = _inspect({"path": str(clip.path)}).json()
+
+    assert inside["output_folder"] == str(nested)
+    assert at_root["output_folder"] == str(tmp_path)
+
+
+def test_inspect_route_has_no_output_folder_for_a_source_outside_the_output_folder(clip, tmp_path, monkeypatch):
+    web_config = make_web_config()
+    web_config.output_dir = str(tmp_path / "elsewhere")
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+
+    assert _inspect({"path": str(clip.path)}).json()["output_folder"] is None

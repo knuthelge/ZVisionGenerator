@@ -18,7 +18,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from tests._paths import FIXTURES
-from tests.web._helpers import ffprobe_cannot_read_files
+from tests.web._helpers import ffprobe_cannot_read_files, make_web_config
 
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.upscale import WORK_DIR_PREFIX
@@ -28,12 +28,16 @@ from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import (
     EXTEND_UPSCALED_REASON,
     GalleryAsset,
+    build_gallery_page_json,
+    filter_and_sort_assets,
     _scan_output_root,
     delete_gallery_assets,
     gallery_asset_for_output_path,
     gallery_asset_to_json,
     list_gallery_assets,
+    move_gallery_assets,
     normalize_asset_id,
+    output_source_folder,
     resolve_output_asset_path,
 )
 from zvisiongenerator.web.gallery_index import GALLERY_INDEX_VERSION, GalleryIndex
@@ -1201,3 +1205,289 @@ def test_a_video_reuse_has_none_of_the_image_finishing_keys(tmp_path):
     _payload, params = _video_reuse(tmp_path, {"generation": {"transparent": True, "sharpen": 0.6}})
 
     assert _finishing(params) == {}
+
+
+def _project_tree(root: Path) -> None:
+    for relative in ("A/1.png", "A/deep/2.png", "B/3.png", "4.png", ".archive/5.png"):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _make_plain_png(path)
+
+
+def test_an_asset_names_its_project_and_a_top_level_or_dot_folder_file_has_none(tmp_path):
+    _project_tree(tmp_path)
+    assets = list_gallery_assets(str(tmp_path))
+
+    projects = {asset.id: gallery_asset_to_json(asset, make_web_config())["project"] for asset in assets}
+
+    assert projects == {"A/1.png": "A", "A/deep/2.png": "A", "B/3.png": "B", "4.png": None, ".archive/5.png": None}
+
+
+def test_the_project_filter_keeps_exactly_that_projects_assets(tmp_path):
+    _project_tree(tmp_path)
+    assets = list_gallery_assets(str(tmp_path))
+
+    def ids(project: str | None) -> set[str]:
+        return {asset.id for asset in filter_and_sort_assets(assets, media_filter="all", sort_order="newest", project=project)}
+
+    assert ids("A") == {"A/1.png", "A/deep/2.png"}
+    assert ids("a") == set()
+    assert ids("Nope") == set()
+    assert len(ids(None)) == len(ids("")) == 5
+
+
+def test_the_no_project_filter_keeps_the_files_that_sit_in_no_project(tmp_path):
+    _project_tree(tmp_path)
+    assets = list_gallery_assets(str(tmp_path))
+
+    unsorted = filter_and_sort_assets(assets, media_filter="no_project", sort_order="newest")
+
+    assert {asset.id for asset in unsorted} == {"4.png", ".archive/5.png"}
+
+
+def test_the_no_project_filter_is_empty_inside_a_project(tmp_path):
+    _project_tree(tmp_path)
+    assets = list_gallery_assets(str(tmp_path))
+
+    assert filter_and_sort_assets(assets, media_filter="no_project", sort_order="newest", project="A") == []
+
+
+def test_the_project_filter_combines_with_the_media_filter_and_sort(tmp_path):
+    _project_tree(tmp_path)
+    (tmp_path / "A" / "clip.mp4").write_bytes(b"\x00" * 8)
+    os.utime(tmp_path / "A" / "1.png", (1_000, 1_000))
+    os.utime(tmp_path / "A" / "deep" / "2.png", (2_000, 2_000))
+    assets = list_gallery_assets(str(tmp_path))
+
+    images = filter_and_sort_assets(assets, media_filter="image", sort_order="oldest", project="A")
+
+    assert [asset.id for asset in images] == ["A/1.png", "A/deep/2.png"]
+
+
+def test_paging_counts_a_project_that_spans_several_pages(tmp_path):
+    (tmp_path / "Big").mkdir()
+    for index in range(5):
+        _make_plain_png(tmp_path / "Big" / f"{index}.png")
+    _make_plain_png(tmp_path / "other.png")
+    assets = filter_and_sort_assets(list_gallery_assets(str(tmp_path)), media_filter="all", sort_order="newest", project="Big")
+
+    second = build_gallery_page_json(assets, make_web_config(), page=2, page_size=2)
+
+    assert (second["total_count"], second["total_pages"], len(second["assets"])) == (5, 3, 2)
+    assert all(asset["project"] == "Big" for asset in second["assets"])
+
+
+class TestOutputSourceFolder:
+    @pytest.mark.parametrize(
+        ("relative", "expected"),
+        [("c.mp4", ""), ("B/c.mp4", "B"), ("B/deep/c.mp4", "B/deep"), (".hidden/c.mp4", ".hidden")],
+    )
+    def test_the_folder_of_an_asset_under_the_root(self, tmp_path, relative, expected):
+        assert output_source_folder(str(tmp_path), str(tmp_path / relative)) == str(tmp_path / expected).rstrip("/")
+
+    @pytest.mark.parametrize("relative", [".web_uploads/c.mp4", ".web_uploads/abc/c.mp4", "B/.web_uploads/c.mp4"])
+    def test_a_staged_upload_is_not_an_asset(self, tmp_path, relative):
+        assert output_source_folder(str(tmp_path), str(tmp_path / relative)) is None
+
+    def test_a_source_outside_the_root_has_no_folder(self, tmp_path):
+        assert output_source_folder(str(tmp_path / "out"), str(tmp_path / "elsewhere" / "c.mp4")) is None
+
+    def test_a_link_out_of_the_root_has_no_folder(self, tmp_path):
+        (tmp_path / "out").mkdir()
+        (tmp_path / "elsewhere").mkdir()
+        (tmp_path / "elsewhere" / "c.mp4").write_bytes(b"x")
+        (tmp_path / "out" / "link.mp4").symlink_to(tmp_path / "elsewhere" / "c.mp4")
+
+        assert output_source_folder(str(tmp_path / "out"), str(tmp_path / "out" / "link.mp4")) is None
+
+
+def _png_bytes(path: Path, color: str) -> bytes:
+    Image.new("RGB", (16, 16), color=color).save(path)
+    return path.read_bytes()
+
+
+def _move_ids(result) -> tuple[list[tuple[str, str]], list[str]]:
+    return [(item.from_id, item.asset.id) for item in result.moved], [item.id for item in result.failed]
+
+
+def test_a_move_renames_into_the_project_keeping_the_modified_time(tmp_path):
+    _aged_png(tmp_path / "x.png", _CONFIG)
+    before = (tmp_path / "x.png").stat().st_mtime_ns
+
+    result = move_gallery_assets(str(tmp_path), ["x.png"], "B")
+
+    assert _move_ids(result) == ([("x.png", "B/x.png")], [])
+    assert not (tmp_path / "x.png").exists()
+    assert (tmp_path / "B" / "x.png").stat().st_mtime_ns == before
+    assert result.moved[0].asset.prompt == "A castle."
+    assert result.moved[0].asset.modified_at == before / 1e9
+
+
+def test_a_move_to_a_taken_name_takes_the_next_free_one_and_keeps_both_files(tmp_path):
+    (tmp_path / "B").mkdir()
+    theirs = _png_bytes(tmp_path / "B" / "x.png", "blue")
+    ours = _png_bytes(tmp_path / "x.png", "green")
+
+    result = move_gallery_assets(str(tmp_path), ["x.png"], "B")
+
+    assert _move_ids(result) == ([("x.png", "B/x_2.png")], [])
+    assert (tmp_path / "B" / "x.png").read_bytes() == theirs
+    assert (tmp_path / "B" / "x_2.png").read_bytes() == ours
+
+
+def test_a_broken_link_with_the_same_name_in_the_target_does_not_stall_the_move(tmp_path):
+    (tmp_path / "B").mkdir()
+    (tmp_path / "B" / "x.png").symlink_to(tmp_path / "gone.png")
+    ours = _png_bytes(tmp_path / "x.png", "green")
+
+    result = move_gallery_assets(str(tmp_path), ["x.png"], "B")
+
+    assert _move_ids(result)[1] == []
+    assert len(result.moved) == 1
+    assert (tmp_path / result.moved[0].asset.id).read_bytes() == ours
+
+
+def test_two_files_with_the_same_name_from_different_projects_both_land_in_the_target(tmp_path):
+    for folder, color in (("A", "red"), ("C", "blue")):
+        (tmp_path / folder).mkdir()
+        _png_bytes(tmp_path / folder / "x.png", color)
+
+    result = move_gallery_assets(str(tmp_path), ["A/x.png", "C/x.png"], "B")
+
+    assert _move_ids(result) == ([("A/x.png", "B/x.png"), ("C/x.png", "B/x_2.png")], [])
+
+
+def test_no_project_moves_to_the_root_and_a_sub_folder_is_flattened(tmp_path):
+    (tmp_path / "A" / "sub").mkdir(parents=True)
+    _make_plain_png(tmp_path / "A" / "sub" / "x.png")
+    _make_plain_png(tmp_path / "A" / "y.png")
+
+    to_b = move_gallery_assets(str(tmp_path), ["A/sub/x.png"], "B")
+    to_root = move_gallery_assets(str(tmp_path), ["A/y.png"], None)
+
+    assert _move_ids(to_b) == ([("A/sub/x.png", "B/x.png")], [])
+    assert _move_ids(to_root) == ([("A/y.png", "y.png")], [])
+    assert (tmp_path / "y.png").is_file() and (tmp_path / "B" / "x.png").is_file()
+
+
+@pytest.mark.parametrize("project", [None, "", "  "])
+def test_a_file_already_in_the_target_is_in_neither_list(tmp_path, project):
+    _make_plain_png(tmp_path / "x.png")
+
+    result = move_gallery_assets(str(tmp_path), ["x.png"], project)
+
+    assert (result.moved, result.failed) == ((), ())
+    assert [path.name for path in tmp_path.iterdir()] == ["x.png"]
+
+
+def test_a_file_already_in_the_target_project_stays_even_in_a_sub_folder(tmp_path):
+    (tmp_path / "A" / "sub").mkdir(parents=True)
+    _make_plain_png(tmp_path / "A" / "sub" / "x.png")
+    _make_plain_png(tmp_path / "A" / "x.png")
+
+    result = move_gallery_assets(str(tmp_path), ["A/sub/x.png", "A/x.png"], "A")
+
+    assert (result.moved, result.failed) == ((), ())
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*.png")) == ["A/sub/x.png", "A/x.png"]
+
+
+def test_the_target_folder_is_created_when_missing(tmp_path):
+    _make_plain_png(tmp_path / "x.png")
+
+    move_gallery_assets(str(tmp_path), ["x.png"], "New")
+
+    assert (tmp_path / "New" / "x.png").is_file()
+
+
+def test_each_file_is_reported_on_its_own_and_the_rest_still_move(tmp_path):
+    _make_plain_png(tmp_path / "a.png")
+    _make_plain_png(tmp_path / "b.png")
+    (tmp_path / "notes.txt").write_text("x")
+
+    result = move_gallery_assets(str(tmp_path), ["a.png", "missing.png", "../escape.png", "notes.txt", "b.png", "a.png"], "B")
+
+    assert _move_ids(result) == ([("a.png", "B/a.png"), ("b.png", "B/b.png")], ["missing.png", "../escape.png", "notes.txt"])
+    assert all(failure.detail for failure in result.failed)
+
+
+def test_a_rename_that_fails_is_reported_and_the_rest_still_move(tmp_path, monkeypatch):
+    _make_plain_png(tmp_path / "a.png")
+    _make_plain_png(tmp_path / "b.png")
+    real_replace = os.replace
+
+    def replace(source, destination):
+        if Path(source).name == "a.png":
+            raise PermissionError(13, "Permission denied")
+        real_replace(source, destination)
+
+    monkeypatch.setattr("zvisiongenerator.web.gallery.os.replace", replace)
+
+    result = move_gallery_assets(str(tmp_path), ["a.png", "b.png"], "B")
+
+    assert _move_ids(result) == ([("b.png", "B/b.png")], ["a.png"])
+    assert "Permission denied" in result.failed[0].detail
+    assert sorted(path.name for path in (tmp_path / "B").iterdir()) == ["b.png"]
+    assert (tmp_path / "a.png").is_file()
+
+
+@pytest.mark.parametrize("project", ["../out", "a/b", ".hidden", "a\\b"])
+def test_a_project_that_is_not_one_plain_folder_name_is_refused_before_anything_moves(tmp_path, project):
+    _make_plain_png(tmp_path / "x.png")
+
+    with pytest.raises(ValueError):
+        move_gallery_assets(str(tmp_path), ["x.png"], project)
+
+    assert [path.name for path in tmp_path.iterdir()] == ["x.png"]
+
+
+def test_a_move_re_keys_the_index_row_and_a_listing_after_it_reads_no_facts(tmp_path, reads):
+    _aged_png(tmp_path / "a.png", _CONFIG)
+    _aged_png(tmp_path / "b.png", _CONFIG)
+    list_gallery_assets(str(tmp_path))
+    reads.clear()
+
+    result = move_gallery_assets(str(tmp_path), ["a.png"], "B")
+    listed = list_gallery_assets(str(tmp_path))
+
+    assert _stored_rel_paths() == ["B/a.png", "b.png"]
+    assert reads == []
+    moved = result.moved[0].asset
+    assert next(asset for asset in listed if asset.id == "B/a.png") == moved
+
+
+def test_a_move_stores_the_stat_the_file_has_after_the_move(tmp_path):
+    _aged_png(tmp_path / "a.png", _CONFIG)
+    list_gallery_assets(str(tmp_path))
+
+    move_gallery_assets(str(tmp_path), ["a.png"], "B")
+
+    st = (tmp_path / "B" / "a.png").stat()
+    with closing(sqlite3.connect(app_db.app_db_path())) as conn:
+        row = conn.execute(f"SELECT mtime_ns, ctime_ns, size FROM gallery_assets_v{GALLERY_INDEX_VERSION} WHERE rel_path = 'B/a.png'").fetchone()
+    assert row == (st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+
+
+def test_a_move_succeeds_when_the_database_is_unusable(tmp_path, monkeypatch):
+    _aged_png(tmp_path / "a.png", _CONFIG)
+    _use_unusable_index(monkeypatch, tmp_path)
+
+    with pytest.warns(UserWarning):
+        result = move_gallery_assets(str(tmp_path), ["a.png"], "B")
+
+    assert _move_ids(result) == ([("a.png", "B/a.png")], [])
+    assert result.moved[0].asset.prompt == "A castle."
+
+
+def test_a_recorded_source_link_stays_as_written(tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"\x00" * 8)
+    _backdate(source, clip)
+    config = {"schema": "zvisiongenerator.config.v1", **_extend_config(source), "model": "ltx-8"}
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={}), patch("zvisiongenerator.web.gallery.config_from_probe", return_value=config):
+        before = _find_asset(list_gallery_assets(str(tmp_path)), "clip.mp4")
+        moved = move_gallery_assets(str(tmp_path), ["clip.mp4"], "B").moved[0].asset
+
+    assert moved.id == "B/clip.mp4"
+    assert moved.source_video == before.source_video == str(source)

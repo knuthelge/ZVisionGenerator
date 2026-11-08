@@ -2298,3 +2298,306 @@ class TestLoraFamilies:
         row = workspace_client.get("/api/workspace", params={"include_history": "false"}).json()["loras"][0]
 
         assert (row["family"], row["size_variant"]) == (None, None)
+
+
+class TestProjectRoutes:
+    @pytest.fixture
+    def client(self, monkeypatch, tmp_path):
+        web_config = make_web_config()
+        web_config.output_dir = str(tmp_path)
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def test_lists_the_project_folders(self, client, tmp_path):
+        (tmp_path / "Alpha").mkdir()
+        (tmp_path / ".web_uploads").mkdir()
+        (tmp_path / "file.txt").write_text("x")
+        (tmp_path / "link").symlink_to(tmp_path / "Alpha", target_is_directory=True)
+
+        response = client.get("/api/projects")
+
+        assert response.status_code == 200
+        assert response.json() == {"projects": [{"name": "Alpha", "path": str(tmp_path / "Alpha")}]}
+
+    def test_the_project_routes_never_build_the_model_inventory(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr(web_server, "load_web_config", MagicMock(side_effect=AssertionError("the inventory scan ran")))
+
+        assert client.get("/api/projects").status_code == 200
+        assert client.post("/api/projects", json={"name": "Reel"}).status_code == 200
+
+    def test_creates_a_project(self, client, tmp_path):
+        response = client.post("/api/projects", json={"name": " Reel "})
+
+        assert response.status_code == 200
+        assert response.json() == {"name": "Reel", "path": str(tmp_path / "Reel")}
+        assert (tmp_path / "Reel").is_dir()
+
+    @pytest.mark.parametrize("name", ["", "a/b", "a\\b", "..", ".hidden", "a:b", "name.", "CON", "nul.txt"])
+    def test_refuses_a_bad_name_with_422(self, client, tmp_path, name):
+        response = client.post("/api/projects", json={"name": name})
+
+        assert response.status_code == 422
+        assert response.json()["detail"]
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_duplicate_ignoring_case_is_409(self, client, tmp_path):
+        (tmp_path / "reel").mkdir()
+
+        response = client.post("/api/projects", json={"name": "Reel"})
+
+        assert response.status_code == 409
+        assert response.json()["detail"]
+        assert [path.name for path in tmp_path.iterdir()] == ["reel"]
+
+
+class TestGalleryProjectFilter:
+    @pytest.fixture
+    def client(self, monkeypatch, tmp_path):
+        web_config = make_web_config()
+        web_config.output_dir = str(tmp_path)
+        web_config.gallery_page_size = 2
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
+        monkeypatch.setattr("zvisiongenerator.web.gallery.ffprobe_json", MagicMock(side_effect=RuntimeError("no ffprobe")))
+        for relative in ("A/1.png", "A/deep/2.png", "A/3.png", "B/4.png", "5.png"):
+            (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+            write_png(tmp_path / relative)
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def test_limits_the_listing_to_one_project_and_pages_it(self, client):
+        first = client.get("/api/gallery", params={"project": "A"}).json()
+        second = client.get("/api/gallery", params={"project": "A", "page": 2}).json()
+
+        assert (first["total_count"], first["total_pages"]) == (3, 2)
+        assert len(first["assets"]) == 2 and len(second["assets"]) == 1
+        assert {asset["project"] for asset in first["assets"] + second["assets"]} == {"A"}
+
+    @pytest.mark.parametrize("params", [{}, {"project": ""}])
+    def test_an_omitted_or_blank_project_lists_everything(self, client, params):
+        body = client.get("/api/gallery", params=params).json()
+
+        assert body["total_count"] == 5
+
+    def test_the_no_project_filter_lists_only_files_in_no_project(self, client):
+        body = client.get("/api/gallery", params={"filter": "no_project"}).json()
+
+        assert body["total_count"] == 1
+        assert [asset["project"] for asset in body["assets"]] == [None]
+
+    def test_an_unknown_project_is_an_empty_page(self, client):
+        body = client.get("/api/gallery", params={"project": "Nope"}).json()
+
+        assert (body["total_count"], body["assets"]) == (0, [])
+
+
+class TestGalleryMove:
+    @pytest.fixture
+    def env(self, monkeypatch, tmp_path):
+        web_config = make_web_config()
+        web_config.output_dir = str(tmp_path)
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
+        monkeypatch.setattr("zvisiongenerator.web.gallery.ffprobe_json", MagicMock(side_effect=RuntimeError("no ffprobe")))
+        for relative in ("A/1.png", "A/sub/2.png", "3.png"):
+            (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+            write_png(tmp_path / relative)
+        with TestClient(web_server.app) as client:
+            yield SimpleNamespace(client=client, root=tmp_path)
+
+    def test_moves_files_and_reports_the_old_id_with_the_new_asset(self, env):
+        response = env.client.post("/api/gallery/move", json={"asset_ids": ["A/1.png", "A/sub/2.png"], "project": "B"})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["failed"] == []
+        assert [(item["from"], item["asset"]["id"], item["asset"]["project"]) for item in body["moved"]] == [("A/1.png", "B/1.png", "B"), ("A/sub/2.png", "B/2.png", "B")]
+        assert body["moved"][0]["asset"]["url"] == "/media/B/1.png"
+        assert (env.root / "B" / "1.png").is_file() and not (env.root / "A" / "1.png").exists()
+
+    def test_the_inventory_scan_behind_the_moved_assets_runs_off_the_event_loop(self, env, monkeypatch):
+        import asyncio
+
+        on_loop: list[bool] = []
+
+        def watched():
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(True)
+            except RuntimeError:
+                on_loop.append(False)
+            config = make_web_config()
+            config.output_dir = str(env.root)
+            return config
+
+        monkeypatch.setattr(web_server, "load_web_config", watched)
+
+        assert env.client.post("/api/gallery/move", json={"asset_ids": ["3.png"], "project": "A"}).status_code == 200
+        assert on_loop == [False]
+
+    def test_a_null_project_moves_to_the_top_of_the_output_folder(self, env):
+        body = env.client.post("/api/gallery/move", json={"asset_ids": ["A/1.png"], "project": None}).json()
+
+        assert [(item["from"], item["asset"]["id"], item["asset"]["project"]) for item in body["moved"]] == [("A/1.png", "1.png", None)]
+
+    def test_one_missing_file_is_in_failed_and_the_rest_move(self, env):
+        body = env.client.post("/api/gallery/move", json={"asset_ids": ["nope.png", "3.png"], "project": "A"}).json()
+
+        assert [item["from"] for item in body["moved"]] == ["3.png"]
+        assert [item["id"] for item in body["failed"]] == ["nope.png"] and body["failed"][0]["detail"]
+
+    def test_a_file_already_in_the_target_is_in_neither_list(self, env):
+        body = env.client.post("/api/gallery/move", json={"asset_ids": ["A/1.png"], "project": "A"}).json()
+
+        assert body == {"moved": [], "failed": []}
+
+    @pytest.mark.parametrize("project", ["a/b", "..", ".hidden", "a\\b"])
+    def test_an_invalid_project_is_422_and_moves_nothing(self, env, project):
+        response = env.client.post("/api/gallery/move", json={"asset_ids": ["3.png"], "project": project})
+
+        assert response.status_code == 422
+        assert (env.root / "3.png").is_file()
+
+    @pytest.mark.parametrize(
+        "body",
+        [{}, {"asset_ids": "3.png", "project": "A"}, {"asset_ids": [1], "project": "A"}, {"asset_ids": ["3.png"], "project": 5}, ["3.png"]],
+    )
+    def test_a_malformed_body_is_422(self, env, body):
+        assert env.client.post("/api/gallery/move", json=body).status_code == 422
+
+    def test_a_body_that_is_not_json_is_422(self, env):
+        assert env.client.post("/api/gallery/move", content=b"nope", headers={"content-type": "application/json"}).status_code == 422
+
+
+class TestJobProject:
+    @pytest.fixture
+    def env(self, monkeypatch, tmp_path):
+        web_config = make_web_config()
+        web_config.output_dir = str(tmp_path)
+        submitted: list[dict[str, object]] = []
+        patch_image_submit_dependencies(
+            monkeypatch,
+            model_info=ImageModelInfo(family="zimage", is_distilled=True, size=None),
+            defaults=make_resolved_image_defaults(supports_img2img=True),
+            submitted=submitted,
+        )
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        with TestClient(web_server.app) as client:
+            yield SimpleNamespace(client=client, root=tmp_path, submitted=submitted)
+
+    def test_an_image_job_saves_into_the_project_and_keeps_the_root_in_its_context(self, env):
+        response = env.client.post("/api/generate", data={"model": "zimage", "prompt": "a fox", "project": "A"})
+
+        assert response.status_code == 200
+        (job,) = env.submitted
+        assert (job["args"].output, job["request"].output_dir) == (str(env.root / "A"), str(env.root / "A"))
+        assert job["context"]["output_dir"] == str(env.root)
+
+    @pytest.mark.parametrize("fields", [{}, {"project": ""}, {"project": "  "}])
+    def test_an_absent_or_blank_project_saves_in_the_root(self, env, fields):
+        env.client.post("/api/generate", data={"model": "zimage", "prompt": "a fox", **fields})
+
+        (job,) = env.submitted
+        assert (job["args"].output, job["request"].output_dir, job["context"]["output_dir"]) == (str(env.root),) * 3
+
+    def test_the_job_names_the_project_it_saves_into_apart_from_its_settings(self, env):
+        env.client.post("/api/generate", data={"model": "zimage", "prompt": "a fox", "project": "A"})
+        env.client.post("/api/generate", data={"model": "zimage", "prompt": "a fox"})
+
+        named, unnamed = env.submitted
+        assert (named["context"]["save_project"], unnamed["context"]["save_project"]) == ("A", None)
+        assert "save_project" not in named["context"]["settings"]
+
+    def test_the_submit_response_and_the_snapshot_carry_the_project(self, env):
+        response = env.client.post("/api/generate", data={"model": "zimage", "prompt": "a fox", "project": "A"})
+
+        assert response.json()["save_project"] == "A"
+        snapshot = public_job_snapshot(
+            job_id="j",
+            status="queued",
+            workflow="txt2img",
+            supported_controls=(),
+            context=env.submitted[0]["context"],
+            created_at=0.0,
+            completed_at=None,
+            event_count=0,
+            last_event=None,
+            paused=False,
+            result_path=None,
+        )
+        assert snapshot["save_project"] == "A"
+
+    def test_the_project_is_not_kept_in_the_recorded_settings(self, env):
+        env.client.post("/api/generate", data={"model": "zimage", "prompt": "a fox", "project": "A"})
+
+        (job,) = env.submitted
+        assert "project" not in job["context"]["settings"]
+        assert job["context"]["settings"]["prompt"] == "a fox"
+
+    def test_an_upload_stays_under_the_root_whatever_the_project(self, env):
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8), "teal").save(buffer, format="PNG")
+
+        response = env.client.post("/api/generate", data={"model": "zimage", "prompt": "a fox", "project": "A"}, files={"image_file": ("ref.png", buffer.getvalue(), "image/png")})
+
+        assert response.status_code == 200, response.text
+        (job,) = env.submitted
+        saved = Path(job["args"].image_path)
+        assert saved.parent == env.root / ".web_uploads"
+        assert job["args"].output == str(env.root / "A")
+
+    @pytest.mark.parametrize("path", ["/api/generate", "/api/generate/plan"])
+    @pytest.mark.parametrize("project", ["../x", ".hidden", "a/b", "a\\b", ".."])
+    def test_a_project_that_is_not_one_plain_folder_name_is_refused_with_422(self, env, path, project):
+        response = env.client.post(path, data={"model": "zimage", "prompt": "a fox", "project": project})
+
+        assert response.status_code == 422
+        assert env.submitted == []
+
+    def test_a_video_job_saves_into_the_project(self, monkeypatch, tmp_path):
+        submitted = stub_video_submission(monkeypatch, tmp_path)
+
+        response = post_video({"prompt": "waves", "project": "A"})
+
+        assert response.status_code == 200, response.text
+        (job,) = submitted
+        assert (job["args"].output, job["request"].output_dir) == (str(tmp_path / "A"), str(tmp_path / "A"))
+        assert job["context"]["output_dir"] == str(tmp_path)
+        assert "project" not in job["context"]["settings"]
+
+    def test_a_video_job_without_a_project_saves_in_the_root(self, monkeypatch, tmp_path):
+        submitted = stub_video_submission(monkeypatch, tmp_path)
+
+        post_video({"prompt": "waves"})
+
+        (job,) = submitted
+        assert (job["args"].output, job["context"]["output_dir"]) == (str(tmp_path), str(tmp_path))
+
+    @pytest.mark.parametrize("project", ["../x", ".hidden"])
+    def test_a_video_job_with_a_bad_project_is_refused_with_422(self, monkeypatch, tmp_path, project):
+        submitted = stub_video_submission(monkeypatch, tmp_path)
+
+        response = post_video({"prompt": "waves", "project": project})
+
+        assert response.status_code == 422
+        assert submitted == []
+
+    def test_a_video_plan_with_a_bad_project_is_refused_with_422(self, monkeypatch, tmp_path):
+        stub_video_submission(monkeypatch, tmp_path)
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/generate/plan", data={"mode": "video", "model": "ltx-8", "prompt": "waves", "project": "../x"})
+
+        assert response.status_code == 422
+
+    def test_the_finished_file_of_a_project_job_gets_an_id_with_the_project(self, tmp_path, monkeypatch):
+        from zvisiongenerator.web import web_runner
+
+        monkeypatch.setattr(web_runner, "load_web_config", make_web_config)
+        write_png(tmp_path / "A" / "x.png")
+
+        payload = web_runner._output_asset_payload({"output_dir": str(tmp_path)}, str(tmp_path / "A" / "x.png"))
+
+        assert payload is not None and (payload["id"], payload["project"]) == ("A/x.png", "A")

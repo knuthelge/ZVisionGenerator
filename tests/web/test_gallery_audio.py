@@ -34,6 +34,7 @@ from zvisiongenerator.web.gallery import (
     gallery_asset_for_output_path,
     gallery_asset_to_json,
     list_gallery_assets,
+    move_gallery_assets,
 )
 from zvisiongenerator.web.gallery_index import GALLERY_INDEX_VERSION
 
@@ -436,6 +437,14 @@ class TestFilter:
 
         assert {asset["filename"] for asset in body["assets"]} == {"c.flac", "d.wav"} and body["total_count"] == 2
 
+    def test_a_take_in_a_project_names_it(self, tmp_path):
+        (tmp_path / "Reel").mkdir()
+        _take(tmp_path, "Reel/song.flac", _SONG)
+        _take(tmp_path, "top.flac", _SONG)
+
+        assert _json(tmp_path, "song.flac", _web_config())["project"] == "Reel"
+        assert _json(tmp_path, "top.flac", _web_config())["project"] is None
+
 
 class TestIndex:
     def test_an_audio_files_facts_are_stored_and_not_read_again(self, tmp_path, monkeypatch):
@@ -541,6 +550,19 @@ class TestPeaks:
         gallery.audio_peaks(str(tmp_path), "fresh.flac")
 
         assert decodes == ["fresh.flac", "fresh.flac"]
+
+    def test_a_moved_take_keeps_its_stored_peaks_without_decoding_again(self, tmp_path, decodes):
+        self._settled(tmp_path, seconds=2.0, rate=48000)
+        list_gallery_assets(str(tmp_path))
+        peaks = gallery.audio_peaks(str(tmp_path), "song.flac")
+        move_gallery_assets(str(tmp_path), ["song.flac"], "Songs")
+        moved = _json(tmp_path, "song.flac")
+
+        assert moved["id"] == "Songs/song.flac"
+        assert gallery.audio_peaks(str(tmp_path), "Songs/song.flac") == peaks
+        assert moved["peaks"] == peaks
+        assert moved["duration"] == pytest.approx(2.0, abs=0.05) and (moved["channels"], moved["sample_rate"]) == (1, 48000)
+        assert decodes == ["song.flac"]
 
     def test_a_file_that_cannot_be_decoded_gives_no_peaks_and_stores_nothing(self, tmp_path, monkeypatch):
         self._settled(tmp_path)

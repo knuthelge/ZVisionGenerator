@@ -124,6 +124,46 @@ class TestSubmit:
         assert env.post(model="sa3", prompt="rain").status_code == 409
 
 
+class TestProject:
+    def test_a_take_saves_into_the_project_and_the_context_keeps_the_root(self, env):
+        response = env.post(model="sa3", prompt="rain", seconds="3", project="A")
+
+        assert response.status_code == 200, response.text
+        (job,) = env.submitted
+        assert job["output_dir"] == str(env.root / "out" / "A")
+        assert job["context"]["output_dir"] == str(env.root / "out")
+        assert "project" not in job["context"]["settings"]
+
+    @pytest.mark.parametrize("fields", [{}, {"project": ""}])
+    def test_an_absent_or_blank_project_saves_in_the_root(self, env, fields):
+        env.post(model="sa3", prompt="rain", seconds="3", **fields)
+
+        assert env.submitted[0]["output_dir"] == str(env.root / "out")
+
+    @pytest.mark.parametrize("path", ["/api/generate", "/api/generate/plan"])
+    @pytest.mark.parametrize("project", ["../x", ".hidden"])
+    def test_a_bad_project_is_refused_with_422(self, env, path, project):
+        response = env.post(path, model="sa3", prompt="rain", seconds="3", project=project)
+
+        assert response.status_code == 422
+        assert env.submitted == []
+
+    def test_a_voice_upload_stays_under_the_root(self, env, tmp_path):
+        voices = voice_folder(tmp_path)
+        upload = ("me.flac", io.BytesIO((voices / "any.flac").read_bytes()), "audio/flac")
+
+        response = env.client.post(
+            "/api/generate",
+            data={"mode": "audio", "model": "qwen3_tts", "prompt": "x", "voice_text": "Hi", "voice_consent": "on", "project": "A"},
+            files={"voice_file": upload},
+        )
+
+        assert response.status_code == 200, response.text
+        (job,) = env.submitted
+        assert job["request"].voice.path.startswith(str(env.root / "out" / ".web_uploads"))
+        assert job["output_dir"] == str(env.root / "out" / "A")
+
+
 class TestKinds:
     """The form's ``workflow`` is the kind of the take; the model decides what that kind takes."""
 

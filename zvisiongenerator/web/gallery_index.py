@@ -335,6 +335,31 @@ class GalleryIndex:
             if conn is not None:
                 conn.close()
 
+    def rename(self, root_key: str, moves: Iterable[tuple[str, ScannedFile]]) -> None:
+        """Re-key the rows of moved files: each ``(old_rel_path, file)`` keeps its stored facts under ``file.rel_path``.
+
+        The row takes the stat key of *file*, which the caller read after the move because a rename can change
+        ``ctime``. A row already at the new path is replaced; an old path with no row is skipped.
+        Takes no scan lock and creates no database file; errors only warn.
+        """
+        pairs = [(root_key, old_rel_path, file) for old_rel_path, file in moves]
+        path = self._path_provider()
+        if not pairs or not path.exists():
+            return
+        conn: app_db.AppConnection | None = None
+        try:
+            conn = app_db.connect(path, components=(self._component,))
+            with app_db.transaction(conn):
+                conn.executemany(
+                    f"UPDATE OR REPLACE {self._table} SET rel_path = ?, mtime_ns = ?, ctime_ns = ?, size = ? WHERE root = ? AND rel_path = ?",
+                    [(file.rel_path, file.mtime_ns, file.ctime_ns, file.size, root, old) for root, old, file in pairs],
+                )
+        except _DB_ERRORS as exc:
+            self._handle_failure(conn, exc, "could not re-key moved files")
+        finally:
+            if conn is not None:
+                conn.close()
+
     def _open_and_load(self, root_key: str) -> tuple[app_db.AppConnection | None, dict[str, tuple[app_db.StatKey, str]]]:
         """Open a connection and load the root's rows; return ``(None, {})`` when the database is unusable."""
         conn: app_db.AppConnection | None = None

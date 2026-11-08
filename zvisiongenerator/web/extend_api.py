@@ -30,6 +30,7 @@ from zvisiongenerator.utils.video_extend import (
 )
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
+from zvisiongenerator.web.gallery import output_source_folder
 from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.path_browser import SOURCE_VIDEO_EXTENSIONS
@@ -173,6 +174,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, *, downloading
     return {
         "path": str(path),
         "filename": path.name,
+        "output_folder": output_source_folder(web_config.output_dir, str(path)),
         "width": probe.width if probe is not None else None,
         "height": probe.height if probe is not None else None,
         "rotation": probe.rotation if probe is not None else None,

@@ -452,7 +452,18 @@ def test_upscale_route_queues_job(upscale_client):
     assert submitted["context"]["workflow"] == "upscale"
     assert submitted["context"]["settings"] == {}
     assert submitted["context"]["meta"].startswith("2× creative → 1664×2432")
+    assert submitted["context"]["save_project"] == "set"
     assert payload["queue_position"] is None
+
+
+def test_upscale_route_names_no_project_for_a_source_outside_every_project(upscale_client):
+    _write_png(upscale_client.root / "portrait.png", config={"prompt": "a barn", "model": "zit", "seed": 3})
+
+    response = upscale_client.client.post("/api/upscale", json={"asset_id": "portrait.png", "factor": 2})
+
+    assert response.status_code == 200
+    assert upscale_client.submitted[0]["context"]["save_project"] is None
+    assert response.json()["save_project"] is None
 
 
 def _busy_runner(client):
@@ -525,6 +536,7 @@ def test_upscale_route_queues_a_seedvr2_job(upscale_client):
     assert submitted["context"]["model"] == "SeedVR2 7B q8"
     assert submitted["context"]["meta"] == "2× → 1664×2432"
     assert submitted["context"]["settings"] == {}
+    assert submitted["context"]["save_project"] == "set"
 
 
 @pytest.mark.parametrize("method", ["creative", "seedvr2"])
@@ -865,7 +877,22 @@ def test_video_upscale_route_queues_the_job(video_upscale_client):
     assert Path(request.output_dir) == video_upscale_client.root
     assert (submitted["context"]["media_type"], payload["upscale_method"]) == ("video", "seedvr2")
     assert submitted["context"]["settings"] == {}
+    assert submitted["context"]["save_project"] is None
     assert video_upscale_client.image_submitted == []
+
+
+def test_video_upscale_route_names_the_project_the_clip_is_in(video_upscale_client):
+    clip = video_upscale_client.root / "Reel" / "clip.mp4"
+    clip.parent.mkdir()
+    clip.write_bytes(b"\x00")
+    source = make_extend_source(path=clip, width=768, height=448, frame_count=121, scene=None, prompt=None)
+    video_upscale_client.monkeypatch.setattr(web_server, "read_video_upscale_source", lambda path: (source, None))
+
+    response = _post_video(video_upscale_client, asset_id="Reel/clip.mp4")
+
+    assert response.status_code == 200
+    assert video_upscale_client.submitted[0]["context"]["save_project"] == "Reel"
+    assert response.json()["save_project"] == "Reel"
 
 
 def _video_unsupported(client):
@@ -973,6 +1000,14 @@ def _ltx_web_config(tmp_path, *, video_model_options=("ltx-8", "ltx-4", "ltx25-4
 def _ltx_source(tmp_path, **overrides):
     values = dict(path=tmp_path / "clip.mp4", width=768, height=448, frame_count=121, model="ltx-4", scene="A harbour at dawn.", prompt="A man walks his bicycle.")
     return make_extend_source(**{**values, **overrides})
+
+
+def test_the_ltx_upscale_job_names_the_project_the_clip_is_in(tmp_path):
+    source = _ltx_source(tmp_path, path=tmp_path / "Reel" / "clip.mp4")
+
+    parsed = web_server._parse_ltx_video_upscale(source, {"workflow": "txt2vid"}, _ltx_web_config(tmp_path))
+
+    assert parsed.context["save_project"] == "Reel"
 
 
 class TestLtxVideoUpscalePlan:

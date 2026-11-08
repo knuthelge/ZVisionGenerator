@@ -95,6 +95,8 @@ def public_job_snapshot(
         "height": context.get("height"),
         "settings": context.get("settings", {}),
         "notices": list(context.get("notices", ())),
+        # The project the job saves into, or None.
+        "save_project": context.get("save_project"),
     }
     if "media_type" in context:
         snapshot["media_type"] = context["media_type"]
