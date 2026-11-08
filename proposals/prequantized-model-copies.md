@@ -121,8 +121,6 @@ No new format, and no torchao: torchao would add a dependency and a second load 
 - **Format tags.** Today's stored-quant format tags embed the exact library versions (`mflux-0.22.0`, `diffusers-…+transformers-…+bitsandbytes-…`), so any bump would mark a published copy stale. Published copies get a format version we own instead, with a contract test that loads a small fixture of each format under the locked libraries. When a bump breaks loading, the copy is rebuilt and the pin moves.
 - **Existing local copies.** A locally built copy whose manifest uses the old tags is rebuilt or downloaded again once. That is a breaking change for disk users already have, so ask before shipping; per project rules there's no migration code.
 
-[free-source-weights.md](free-source-weights.md) becomes unnecessary for every model with a published copy, because the original is never downloaded. It stays relevant for `h3` and for unquantized image runs.
-
 ### Reproducibility
 
 `scripts/build_prequantized.py <alias> --platform cuda|mac --bits 4|8 --out <folder>` builds a copy from the pinned sources by calling the app's own writers (`weights.ensure_prepared`, the stored-quant writers, `save_pretrained` for the enhancer). It writes the model card, the licence files and the source pins.
