@@ -1,6 +1,6 @@
 # Steer audio before it's generated: settings and an enhancer
 
-**Status:** In progress (2026-11-08): built and on `main`; the Mac checks pass (see below). Open: the owner's listening to the Mac takes and the Fit to time follow-up, then the proposal is archived
+**Status:** Done (2026-11-08, unreleased): on `main`; the Mac checks pass (see below) and the owner heard the Mac takes as fine. Four small findings from the Mac checks went to the [backlog](../backlog.md)
 
 ## Mac checks (2026-11-08)
 
@@ -24,9 +24,8 @@ On a 32 GB M5 Mac, through the app's own backends, CLI and Web UI; tempo and key
 - The Sound shell (`TrackType: SFX`) made no difference in 6 of 6 pairs and is dropped.
 - English against Auto language was split 1-1, with no change.
 
-The Safari audio player fix has been verified on a Mac. The MiniMax Music 3 follow-up is its own proposal, [minimax-music3.md](minimax-music3.md).
+The Safari audio player fix has been verified on a Mac. The MiniMax Music 3 follow-up is its own proposal, [minimax-music3.md](../minimax-music3.md).
 
-**After the owner's listening and the Fit to time follow-up:** archive this proposal.
 
 ## Scope
 

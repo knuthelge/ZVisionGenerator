@@ -16,7 +16,7 @@ YuE2 stays the default. This proposal asks whether Music 3 can run on both platf
 
 ## What it is
 
-Checked 2026-11-07 (sources at the end). The input contract (tags on their own lines, the three-heading caption, empty lyrics refused, length a ceiling, tempo and key as hints) is already written up in `audio-controls.md`, "Two more models to support".
+Checked 2026-11-07 (sources at the end). The input contract (tags on their own lines, the three-heading caption, empty lyrics refused, length a ceiling, tempo and key as hints) is already written up in `archive/audio-controls.md`, "Two more models to support".
 
 - **Open weights**, released 2026-08-13; no newer MiniMax release since (no official Turbo; the repository changed once on 2026-10-26, a docs rename).
 - **Licence: MiniMax-Music3 Community License** (free grant, commercial use allowed). A commercial product's interface must prominently display "MiniMax-Music3" (the app shows a model's credit through the `attribution` key of `licences.yaml`, as for Stable Audio 3). Above USD 20M yearly revenue needs MiniMax's written approval. A product that lets third parties generate outputs must keep reasonable safeguards, and an acceptable-use list applies. Output ownership and termination are not addressed. This is not legal advice.
