@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 - The prompt enhancer repeats itself less, for images, video and audio.
+- **The prompt enhancer writes about 3× faster on Windows and Linux** with an NVIDIA GPU, with the same models and nothing new to install.
 - **One header for every prompt box** (Image, Video and the Audio boxes). Marks on the **Enhanced** tab replace the status line, **✕** scratches the Enhanced text, and **Enhance again** keeps up to five versions to step through. **Use mine** and the word counts are gone
 - **The image tools row is shorter.** JSON is the **{ }** icon, and Triggers is a tag with the number of trigger words not yet in the prompt, so the whole row fits on a phone
 - **The Gallery and the Workspace strip load small thumbnails** instead of the full images and videos, so they open faster

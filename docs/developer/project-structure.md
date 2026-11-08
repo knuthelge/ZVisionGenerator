@@ -50,6 +50,7 @@ zvisiongenerator/
 │   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
 │   │   ├── download_plan.py       Hugging Face downloads the diffusers image, LTX video and transformers enhancer backends need (no torch import)
 │   │   ├── driver.py              NVIDIA driver hint when a CUDA build of PyTorch cannot start
+│   │   ├── enhancer_decode.py     Prompt-enhancer decode loop: one token per CUDA-graph replay
 │   │   ├── lora_peft.py           Detect and report LoRA files that match no module (peft)
 │   │   ├── memory.py              CUDA memory release after a job, free GPU memory, and GPU and system memory sizes
 │   │   ├── prompt_enhancer.py     Prompt-enhancer LLM (transformers)
