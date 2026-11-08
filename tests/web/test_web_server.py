@@ -45,6 +45,7 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.h3_converted import write_converted_h3
 from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 from zvisiongenerator.utils import app_db
+from zvisiongenerator.utils.yaml_round_trip import load_round_trip
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
@@ -1490,7 +1491,7 @@ def test_media_output_root_is_cached_until_user_config_changes(monkeypatch, tmp_
     assert web_server._media_output_root() == (tmp_path / "first").resolve()
     assert len(loads) == 1
 
-    config_contract_module.write_user_config_override({"ui": {"output_dir": str(tmp_path / "second")}})
+    config_contract_module.write_user_config_override(load_round_trip(yaml.safe_dump({"ui": {"output_dir": str(tmp_path / "second")}})))
     assert web_server._media_output_root() == (tmp_path / "second").resolve()
     assert len(loads) == 2
 

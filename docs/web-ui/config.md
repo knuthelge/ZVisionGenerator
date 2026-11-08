@@ -16,7 +16,7 @@ The **Config** page (++g++ ++c++) holds the defaults the whole app uses. Saved s
 
 A setting you changed shows a reset mark; reset it to go back to the default. **Discard changes** undoes edits you haven't saved.
 
-The settings are saved to `config.yaml` in the data folder, which also holds settings this page doesn't show. See [Configuration](../concepts/configuration.md).
+The settings are saved to `config.yaml` in the data folder, which also holds settings this page doesn't show. Comments in the file are kept. See [Configuration](../concepts/configuration.md).
 
 ## Folders and access
 

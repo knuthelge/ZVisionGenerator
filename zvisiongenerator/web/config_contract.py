@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import io
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.error import CommentMark, YAMLError
+from ruamel.yaml.tokens import CommentToken
 
 from zvisiongenerator.utils.atomic_write import write_text_atomic
 from zvisiongenerator.utils.config import model_reference
 from zvisiongenerator.utils.paths import get_ziv_data_dir, is_huggingface_repo_id
+from zvisiongenerator.utils.yaml_round_trip import attach_following, delete_key, round_trip_yaml, set_key, yaml11_safe
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults
 
 
@@ -171,7 +176,7 @@ def persist_writable_config_patch(patch: dict[str, Any], current: Any) -> None:
     """Apply a writable config patch using omitted/null/empty-string semantics."""
     # Web handlers run in worker threads; serialise read-modify-write so concurrent saves cannot drop each other's changes.
     with _USER_CONFIG_WRITE_LOCK:
-        override_config = read_user_config_override()
+        override_config = _load_user_config_document()
         fields_by_key = {field.key: field for field in WRITABLE_CONFIG_FIELDS}
         for key, raw_value in patch.items():
             field = fields_by_key.get(key)
@@ -189,7 +194,7 @@ def persist_writable_config_patch(patch: dict[str, Any], current: Any) -> None:
 def persist_first_run_skipped() -> None:
     """Record in the user config override that the first-run dialog was skipped, keeping every other key."""
     with _USER_CONFIG_WRITE_LOCK:
-        override_config = read_user_config_override()
+        override_config = _load_user_config_document()
         _set_nested_mapping_value(override_config, ("ui", "first_run_skipped"), True)
         write_user_config_override(override_config)
 
@@ -209,7 +214,7 @@ def discover_content_filter_setting() -> object:
 def persist_discover_huggingface(enabled: bool) -> None:
     """Record in the user config override whether Discover LoRAs shows Hugging Face LoRAs, keeping every other key."""
     with _USER_CONFIG_WRITE_LOCK:
-        override_config = read_user_config_override()
+        override_config = _load_user_config_document()
         _set_nested_mapping_value(override_config, ("ui", "discover_huggingface"), enabled)
         write_user_config_override(override_config)
 
@@ -230,16 +235,58 @@ def read_user_config_override() -> dict[str, Any]:
     return payload
 
 
-def write_user_config_override(payload: dict[str, Any]) -> None:
-    """Atomically replace the mutable user config override file.
+def _load_user_config_document() -> CommentedMap:
+    """Load the user config override as a round-trip document that keeps its comments, for editing and saving.
+
+    Reads still go through :func:`read_user_config_override` (PyYAML); this copy is only what a save edits.
+
+    Returns:
+        The document; an empty one when the file is missing or empty. A file with only comments keeps them.
+
+    Raises:
+        ValueError: When the file cannot be read, is not valid YAML (a repeated key counts), or is not a mapping.
+            The file is not changed.
+    """
+    config_path = get_ziv_data_dir() / "config.yaml"
+    if not config_path.is_file():
+        return CommentedMap()
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        payload = round_trip_yaml().load(text)
+    except (OSError, YAMLError) as exc:
+        raise ValueError(f"Failed to read user config override: {exc}") from exc
+    if payload is None:
+        return _comment_only_document(text)
+    if not isinstance(payload, CommentedMap):
+        raise ValueError("User config override must be a YAML mapping.")
+    return payload
+
+
+def _comment_only_document(text: str) -> CommentedMap:
+    """Return an empty document that writes *text* (a file of comments and blank lines) above its first key."""
+    document = CommentedMap()
+    if text.strip():
+        document.ca.comment = [None, [CommentToken(text if text.endswith("\n") else text + "\n", CommentMark(0))]]
+    return document
+
+
+def write_user_config_override(document: CommentedMap) -> None:
+    """Atomically replace the mutable user config override file with *document*, keeping its comments.
 
     Readers (config loads on other request threads) see either the old or the new file, never a truncated one;
     a symlinked config.yaml and its permissions are preserved.
+
+    Raises:
+        TypeError: When *document* is not a :class:`CommentedMap` from :func:`_load_user_config_document`.
     """
+    if not isinstance(document, CommentedMap):
+        raise TypeError("The user config override must be written from a round-trip document (CommentedMap).")
     config_path = get_ziv_data_dir() / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    buffer = io.StringIO()
+    round_trip_yaml().dump(document, buffer)
     with _USER_CONFIG_WRITE_LOCK:
-        write_text_atomic(config_path, yaml.safe_dump(payload, sort_keys=False))
+        write_text_atomic(config_path, buffer.getvalue())
 
 
 def _normalize_patch_value(field: WritableConfigField, raw_value: Any) -> ConfigValue:
@@ -315,28 +362,66 @@ def _get_nested_value(payload: dict[str, Any], path: tuple[str, ...]) -> ConfigV
     return None
 
 
-def _set_nested_mapping_value(payload: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
-    cursor = payload
-    for key in path[:-1]:
-        next_value = cursor.get(key)
-        if not isinstance(next_value, dict):
-            next_value = {}
-            cursor[key] = next_value
-        cursor = next_value
-    cursor[path[-1]] = value
-
-
-def _delete_nested_mapping_value(payload: dict[str, Any], path: tuple[str, ...]) -> None:
-    parents: list[tuple[dict[str, Any], str]] = []
-    cursor = payload
-    for key in path[:-1]:
-        next_value = cursor.get(key)
-        if not isinstance(next_value, dict):
+def _set_nested_mapping_value(document: CommentedMap, path: tuple[str, ...], value: Any) -> None:
+    """Set the value at *path*, creating the mappings it needs; strings PyYAML would read as another type are quoted."""
+    cursor = document
+    for depth, key in enumerate(path[:-1]):
+        child = cursor.get(key)
+        if not isinstance(child, CommentedMap):
+            set_key(cursor, key, _nested_chain(path[depth + 1 :], value))
             return
-        parents.append((cursor, key))
-        cursor = next_value
-    cursor.pop(path[-1], None)
-    for parent, key in reversed(parents):
-        child = parent.get(key)
-        if isinstance(child, dict) and not child:
-            parent.pop(key, None)
+        cursor = child
+    set_key(cursor, path[-1], yaml11_safe(value) if isinstance(value, str) else value)
+
+
+def _nested_chain(path: tuple[str, ...], value: Any) -> CommentedMap:
+    """Return new mappings that hold *value* at *path*."""
+    node: Any = yaml11_safe(value) if isinstance(value, str) else value
+    for key in reversed(path):
+        wrapper = CommentedMap()
+        wrapper[key] = node
+        node = wrapper
+    return node
+
+
+def _delete_nested_mapping_value(document: CommentedMap, path: tuple[str, ...]) -> None:
+    """Remove the value at *path* and the mappings it leaves empty; comments that followed it stay in the file."""
+    chain = [document]
+    for key in path[:-1]:
+        child = chain[-1].get(key)
+        if not isinstance(child, CommentedMap):
+            return
+        chain.append(child)
+    depth = len(chain) - 1
+    following, previous = _remove_key(chain[depth], path[depth])
+    while depth > 0 and not chain[depth]:
+        depth -= 1
+        removed, previous = _remove_key(chain[depth], path[depth])
+        following = (removed or "") + (following or "") or None
+    if following:
+        _reattach(chain, path, depth, previous, following)
+
+
+def _remove_key(node: CommentedMap, key: str) -> tuple[str | None, str | None]:
+    """Delete *key* from *node* if present; return the lines that followed it and the key before it."""
+    keys = list(node)
+    if key not in keys:
+        return None, None
+    position = keys.index(key)
+    return delete_key(node, key), keys[position - 1] if position else None
+
+
+def _reattach(chain: list[CommentedMap], path: tuple[str, ...], depth: int, previous: str | None, following: str) -> None:
+    """Put *following* back below the key before the removed one, else at the start of its mapping.
+
+    A removed first key leaves the lines at the top of its parent key (after ``ui:``); a removed first top-level
+    key leaves them in the file header. An emptied document drops them.
+    """
+    node = chain[depth]
+    if previous is not None:
+        attach_following(node, previous, following)
+    elif depth > 0:
+        attach_following(chain[depth - 1], path[depth - 1], following, at_key=True)
+    elif node:
+        node.ca.comment = node.ca.comment or [None, []]
+        node.ca.comment[1] = [*(node.ca.comment[1] or []), CommentToken(following, CommentMark(0))]

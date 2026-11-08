@@ -14,22 +14,17 @@ import re
 from typing import Any, Literal
 
 from ruamel.yaml import YAML
-import yaml as pyyaml
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
-from ruamel.yaml.error import YAMLError
-from ruamel.yaml.representer import RoundTripRepresenter
-from ruamel.yaml.scalarstring import DoubleQuotedScalarString, LiteralScalarString, ScalarString
+from ruamel.yaml.scalarstring import LiteralScalarString, ScalarString
 
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, settings_to_mapping
+from zvisiongenerator.utils.yaml_round_trip import load_round_trip, move_trailing_comment, round_trip_yaml, split_comment_lines, yaml11_safe
 
 SNIPPETS_KEY = "snippets"
 ENTRY_KEY_ORDER = ("active", "scene", "prompt", "negative", "enhance")
 
 # YAML 1.1 booleans that PyYAML (and so the CLI) reads as false; ruamel reads YAML 1.2 and keeps them as strings.
 _YAML11_FALSE = frozenset({"no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"})
-# The CLI reads prompt files with PyYAML (YAML 1.1); its resolver says what a plain scalar would become.
-_PYYAML_RESOLVER = pyyaml.resolver.Resolver()
-_PYYAML_STR_TAG = "tag:yaml.org,2002:str"
 _CAPITAL_BOOL_RE = re.compile(r":[ \t]+(True|False)[ \t]*(?:#|$)", re.MULTILINE)
 _LOWER_BOOL_RE = re.compile(r":[ \t]+(true|false)[ \t]*(?:#|$)", re.MULTILINE)
 
@@ -103,7 +98,7 @@ def load_prompt_document(text: str) -> PromptDocument:
         ValueError: When the text is not valid YAML, or its structure is not a mapping of sets that are lists
             of entry mappings (with an optional ``snippets`` mapping).
     """
-    return _document_from_root(_load_round_trip(text))
+    return _document_from_root(load_round_trip(text))
 
 
 def _document_from_root(root: Any) -> PromptDocument:
@@ -152,8 +147,8 @@ def render_prompt_document(original_text: str, document: PromptDocument) -> str:
     Raises:
         ValueError: When *original_text* cannot be loaded (see :func:`load_prompt_document`).
     """
-    yaml = _round_trip_yaml(capital_bools=_prefers_capital_bools(original_text))
-    root = _load_round_trip(original_text)
+    yaml = round_trip_yaml(capital_bools=_prefers_capital_bools(original_text))
+    root = load_round_trip(original_text)
     _document_from_root(root)  # same structural checks as a load
     if not isinstance(root, CommentedMap):
         root = CommentedMap()
@@ -168,7 +163,7 @@ def render_prompt_document(original_text: str, document: PromptDocument) -> str:
     old_entries = _index_entries(root)
     for doc_set in document.sets:
         old_key = old_sets.get(doc_set.id)
-        key = old_key if old_key is not None and str(old_key) == doc_set.name else _yaml11_safe(doc_set.name)
+        key = old_key if old_key is not None and str(old_key) == doc_set.name else yaml11_safe(doc_set.name)
         items.append((old_key, key, _render_entries(doc_set, old_entries)))
 
     blocks = [_dump_item(yaml, root, old_key, key, value, _leading_comments(root, old_key, lines)) for old_key, key, value in items]
@@ -278,34 +273,6 @@ def _as_comparable(value: Any) -> Any:
     return sorted(value) if isinstance(value, (list, tuple)) else value
 
 
-def _load_round_trip(text: str) -> Any:
-    try:
-        return _round_trip_yaml().load(text)
-    except YAMLError as exc:
-        raise ValueError(f"The file is not valid YAML: {exc}") from exc
-
-
-def _round_trip_yaml(*, capital_bools: bool = False) -> YAML:
-    yaml = YAML(typ="rt")
-    yaml.preserve_quotes = True
-    yaml.width = 4096
-    yaml.indent(mapping=2, sequence=4, offset=2)
-    if capital_bools:
-        yaml.Representer = _CapitalBoolRepresenter
-    return yaml
-
-
-class _CapitalBoolRepresenter(RoundTripRepresenter):
-    """Write booleans as ``True`` / ``False``, for files written that way."""
-
-
-def _represent_capital_bool(representer: RoundTripRepresenter, data: bool) -> Any:
-    return representer.represent_scalar("tag:yaml.org,2002:bool", "True" if data else "False")
-
-
-_CapitalBoolRepresenter.add_representer(bool, _represent_capital_bool)
-
-
 def _prefers_capital_bools(text: str) -> bool:
     return len(_CAPITAL_BOOL_RE.findall(text)) > len(_LOWER_BOOL_RE.findall(text))
 
@@ -350,32 +317,12 @@ def _drop_trailing_comments(node: Any) -> None:
         slot = slot_owner.get(slot_key)
         token = slot[index] if slot and len(slot) > index else None
         if token is not None:
-            kept = _item_comment_lines(token.value, token.column)
+            kept = split_comment_lines(token.value, token.column)[0]
             if kept is None:
                 slot[index] = None
             else:
                 token.value = kept
         node = child
-
-
-def _item_comment_lines(value: str, first_column: int) -> str | None:
-    """Return a trailing comment token's value without blank lines and column-0 comments, or None when nothing is left.
-
-    The value's first line starts where the token starts (``first_column``) unless the value begins with a newline;
-    every later line carries its own indentation.
-    """
-    starts_on_new_line = value.startswith("\n")
-    lines = (value[1:] if starts_on_new_line else value).split("\n")
-    kept = []
-    for index, line in enumerate(lines):
-        if not line.strip():
-            continue
-        column = first_column if index == 0 and not starts_on_new_line else len(line) - len(line.lstrip())
-        if column > 0:
-            kept.append(line)
-    if not kept:
-        return None
-    return ("\n" if starts_on_new_line else "") + "\n".join(kept) + "\n"
 
 
 def _render_entries(doc_set: DocumentSet, old_entries: dict[str, tuple[CommentedMap, CommentedSeq, int]]) -> CommentedSeq:
@@ -451,7 +398,7 @@ def _render_snippets(root: CommentedMap, snippets: tuple[DocumentSnippet, ...]) 
     out.ca.comment = old_map.ca.comment
     for snippet in snippets:
         old_key = old_keys.get(snippet.id)
-        key = old_key if old_key is not None and str(old_key) == snippet.name else _yaml11_safe(snippet.name)
+        key = old_key if old_key is not None and str(old_key) == snippet.name else yaml11_safe(snippet.name)
         out[key] = _value_node(snippet.value, old_map[old_key] if old_key is not None else None)
         if old_key is not None:
             _carry_item_comment(old_map, old_key, out, key)
@@ -483,7 +430,7 @@ def _value_node(value: PromptValue, old: Any) -> Any:
     if value.kind == "fields":
         mapping = CommentedMap()
         for key, text in value.fields:
-            mapping[_yaml11_safe(key)] = _text_node(text)
+            mapping[yaml11_safe(key)] = _text_node(text)
         if isinstance(old, CommentedMap):
             for key in mapping:
                 _carry_item_comment(old, key, mapping, key)
@@ -494,17 +441,7 @@ def _value_node(value: PromptValue, old: Any) -> Any:
 def _text_node(text: str) -> Any:
     if "\n" in text.rstrip("\n"):
         return LiteralScalarString(text)
-    return _yaml11_safe(text.rstrip("\n"))
-
-
-def _yaml11_safe(text: str) -> str:
-    """Quote *text* when PyYAML would read it unquoted as something else (``off`` as a bool, ``1.10`` as a float).
-
-    ruamel writes YAML 1.2, where ``yes``/``no``/``on``/``off`` are plain strings; the CLI reads YAML 1.1.
-    """
-    if _PYYAML_RESOLVER.resolve(pyyaml.ScalarNode, text, (True, False)) != _PYYAML_STR_TAG:
-        return DoubleQuotedScalarString(text)
-    return text
+    return yaml11_safe(text.rstrip("\n"))
 
 
 def _apply_entry(node: CommentedMap, entry: DocumentEntry) -> None:
@@ -552,20 +489,7 @@ def _put(node: CommentedMap, key: str, value: Any) -> None:
     position = _insert_position(node, key)
     node.insert(position, key, value)
     if last is not None and position == len(node) - 1:
-        _move_trailing_comment(node, last, key)
-
-
-def _move_trailing_comment(node: CommentedMap, from_key: Any, to_key: Any) -> None:
-    """Move the comment after *from_key*'s value to after the last line of *to_key*'s value."""
-    slot = node.ca.items.get(from_key)
-    if not slot or len(slot) < 3 or slot[2] is None:
-        return
-    token, slot[2] = slot[2], None
-    # A block mapping value ends with its own last key; descend until the last value is a scalar or flow list.
-    owner, key = node, to_key
-    while isinstance(owner[key], CommentedMap) and owner[key]:
-        owner, key = owner[key], next(reversed(owner[key]))
-    owner.ca.items[key] = [None, None, token, None]
+        move_trailing_comment(node, last, key)
 
 
 def _insert_position(node: CommentedMap, key: str) -> int:

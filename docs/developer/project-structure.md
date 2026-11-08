@@ -240,7 +240,8 @@ zvisiongenerator/
 │   ├── video_splice.py            Join a generated segment onto the source clip (stream copy or one re-encode) with the audio
 │   ├── video_support.py           Refuse a video request the model's family cannot do on this platform
 │   ├── video_tail.py              Read a clip's last frames, or all its frames, at their displayed size
-│   └── video_upscale.py           LTX video file upscale (macOS): the clips it takes, its steps, menu option, progress units and time left
+│   ├── video_upscale.py           LTX video file upscale (macOS): the clips it takes, its steps, menu option, progress units and time left
+│   └── yaml_round_trip.py         Comment-keeping YAML edits with ruamel.yaml (load, set and delete a key, quote what PyYAML reads differently), shared by the prompt builder and the config writer
 ├── web/
 │   ├── audio_enhance.py           The audio side of the prompt-enhance endpoint: request validation, the run and the stream frames
 │   ├── audio_job.py               Turn an audio generate form's fields into the request of one take, with the refusals `ziv audio` makes

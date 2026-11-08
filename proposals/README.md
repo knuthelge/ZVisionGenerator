@@ -38,7 +38,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Split config.yaml into a file per area](split-config-file.md) | Proposed (2026-11-02) | Ship the packaged config as a `config/` folder (image, video, audio, enhancer, ui), read into the same dict by the one loader; the user config stays one file. Best done after the model metadata moves out |
 | [Hear what was said: speech recognition with Whisper](speech-recognition.md) | Proposed (2026-11-04) | Whisper turns speech into text with timestamps: fill in what a voice recording says, warn when a speech take doesn't match its text, and write captions |
 | [Studio: generate on a timeline](studio.md) | Proposed (2026-11-05) | A timeline with video and audio lanes where you generate in place: click a point for an image, drag a range for a clip whose first and last frame come from the timeline and whose soundtrack is the audio under it, drag on an audio lane for sound that fits; takes per slot, the existing queue, render to MP4 |
-| [Backlog from the v1 review](backlog.md) | Backlog | Verified findings left out of v1, each small enough to pick up alone: stalled-stream detection, toasts that drop the reason, config comments lost on save, image-batch exceptions, Ctrl+C tracebacks, converter error handling, dead code and `__all__`, doc nits, proposals to archive |
+| [Backlog from the v1 review](backlog.md) | Backlog | Verified findings left out of v1, each small enough to pick up alone: stalled-stream detection, toasts that drop the reason, image-batch exceptions, Ctrl+C tracebacks, converter error handling, dead code and `__all__`, doc nits, proposals to archive |
 
 ## Archive
 

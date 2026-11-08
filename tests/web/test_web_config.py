@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
+from zvisiongenerator.utils.yaml_round_trip import load_round_trip
 from zvisiongenerator.web import config_contract as config_contract_module
 from zvisiongenerator.web import config as web_config_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
@@ -336,23 +339,8 @@ def test_build_writable_config_schema_reports_effective_default_size_without_ove
     assert fields["generation.default_size"]["effective_value"] == "m"
 
 
-def test_persist_writable_config_patch_clears_and_normalizes_values(monkeypatch, tmp_path):
-    """Writable config patches should normalize paths and treat null as clear."""
-    captured: dict[str, object] = {}
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        config_contract_module,
-        "read_user_config_override",
-        lambda: {
-            "ui": {
-                "default_models": {"image": "zit", "video": "ltx-8"},
-                "output_dir": str(tmp_path / "old-output"),
-            },
-            "generation": {"default_size": "m"},
-        },
-    )
-    monkeypatch.setattr(config_contract_module, "write_user_config_override", lambda payload: captured.setdefault("payload", payload))
-    current = SimpleNamespace(
+def _persist_current() -> SimpleNamespace:
+    return SimpleNamespace(
         image_model_options=("zit", "local-image"),
         video_model_options=("ltx-8",),
         app_config={"generation": {"default_ratio": "2:3"}},
@@ -360,64 +348,286 @@ def test_persist_writable_config_patch_clears_and_normalizes_values(monkeypatch,
         image_size_options={"2:3": ("m", "l")},
     )
 
-    config_contract_module.persist_writable_config_patch(
-        {
-            "ui.default_models.image": None,
-            "ui.output_dir": " exports ",
-            "generation.default_size": "l",
-        },
-        current,
+
+def _write_user_config(monkeypatch, tmp_path: Path, text: str) -> Path:
+    """Point ZIV_DATA_DIR at *tmp_path* and write *text* as its config.yaml."""
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _load_yaml(path: Path) -> object:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def test_persist_writable_config_patch_clears_and_normalizes_values(monkeypatch, tmp_path):
+    """Writable config patches should normalize paths and treat null as clear."""
+    monkeypatch.chdir(tmp_path)
+    path = _write_user_config(
+        monkeypatch,
+        tmp_path,
+        yaml.safe_dump({"ui": {"default_models": {"image": "zit", "video": "ltx-8"}, "output_dir": str(tmp_path / "old-output")}, "generation": {"default_size": "m"}}),
     )
 
-    assert captured["payload"] == {
-        "ui": {
-            "default_models": {"video": "ltx-8"},
-            "output_dir": str(tmp_path / "exports"),
-        },
+    config_contract_module.persist_writable_config_patch(
+        {"ui.default_models.image": None, "ui.output_dir": " exports ", "generation.default_size": "l"},
+        _persist_current(),
+    )
+
+    assert _load_yaml(path) == {
+        "ui": {"default_models": {"video": "ltx-8"}, "output_dir": str(tmp_path / "exports")},
         "generation": {"default_size": "l"},
     }
 
 
 def test_persist_writable_config_patch_clears_output_dir_override(monkeypatch, tmp_path):
     """Clearing the output-dir patch should remove the persisted override entirely."""
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        config_contract_module,
-        "read_user_config_override",
-        lambda: {
-            "ui": {
-                "default_models": {"image": "zit", "video": "ltx-8"},
-                "output_dir": str(tmp_path / "old-output"),
-            },
-        },
-    )
-    monkeypatch.setattr(config_contract_module, "write_user_config_override", lambda payload: captured.setdefault("payload", payload))
-
-    current = SimpleNamespace(
-        image_model_options=("zit",),
-        video_model_options=("ltx-8",),
-        app_config={"generation": {"default_ratio": "2:3"}},
-        image_ratios=("2:3",),
-        image_size_options={"2:3": ("m",)},
+    path = _write_user_config(
+        monkeypatch,
+        tmp_path,
+        yaml.safe_dump({"ui": {"default_models": {"image": "zit", "video": "ltx-8"}, "output_dir": str(tmp_path / "old-output")}}),
     )
 
-    config_contract_module.persist_writable_config_patch({"ui.output_dir": None}, current)
+    config_contract_module.persist_writable_config_patch({"ui.output_dir": None}, _persist_current())
 
-    assert captured["payload"] == {
-        "ui": {
-            "default_models": {"image": "zit", "video": "ltx-8"},
-        },
-    }
+    assert _load_yaml(path) == {"ui": {"default_models": {"image": "zit", "video": "ltx-8"}}}
 
 
-def _persist_current() -> SimpleNamespace:
-    return SimpleNamespace(
-        image_model_options=("zit",),
-        video_model_options=("ltx-8",),
-        app_config={"generation": {"default_ratio": "2:3"}},
-        image_ratios=("2:3",),
-        image_size_options={"2:3": ("m", "l")},
+# A user file with a header, end-of-line comments, a heading and commented-out keys at the end.
+CONFIG_WITH_COMMENTS = """\
+# My Ziv config
+
+aliases:  # my own shortcuts
+  mine: some/repo  # keep me
+  # old: other/repo
+
+discover_content_filter: off
+
+ui:
+  output_dir: /old/outputs  # where files go
+  gallery_page_size: 12
+  default_models:
+    image: zit  # my favourite
+
+# Generation
+generation:
+  default_size: m  # medium
+
+# Tried once:
+#   aliases:
+#     x: y/z
+"""
+
+# The packaged ui block: comment lines between keys and a multi-line comment before the last one.
+PACKAGED_UI_BLOCK = """\
+ui:
+  startup_view: workspace
+  gallery_page_size: 12
+  output_dir: null  # unset: the data dir's outputs folder
+  default_models:
+    image: klein9b
+    video: ltx-8
+  # Set once the first-run dialog is skipped; a user setting.
+  first_run_skipped: false
+  # Set when Show Hugging Face LoRAs is chosen in Discover LoRAs.
+  discover_huggingface: false
+  # Discover's content filter on Hugging Face results.
+  # Set to off if it hides a LoRA you want to use.
+  discover_content_filter: on
+"""
+
+
+def _comments(text: str) -> list[str]:
+    """Return the comment text of every line, in file order (a whole-line comment or an end-of-line one)."""
+    return [line[line.index("#") :].strip() for line in text.splitlines() if "#" in line]
+
+
+def _edited(old: dict, path: str, value: object) -> dict:
+    """Return a copy of *old* with the dotted *path* set to *value*, or removed (with emptied parents) when it is None."""
+    result = copy.deepcopy(old)
+    keys = path.split(".")
+    parents = [result]
+    for key in keys[:-1]:
+        if value is None and not isinstance(parents[-1].get(key), dict):
+            return result
+        parents.append(parents[-1].setdefault(key, {}))
+    if value is None:
+        parents[-1].pop(keys[-1], None)
+        for parent, key in zip(reversed(parents[:-1]), reversed(keys[:-1]), strict=True):
+            if not parent[key]:
+                del parent[key]
+    else:
+        parents[-1][keys[-1]] = value
+    return result
+
+
+def _save_patch(monkeypatch, tmp_path: Path, text: str, patch: dict[str, object]) -> tuple[str, str]:
+    """Write *text* as config.yaml, apply *patch* through the Web UI save, and return the old and new text."""
+    path = _write_user_config(monkeypatch, tmp_path, text)
+    config_contract_module.persist_writable_config_patch(patch, _persist_current())
+    return text, path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "dropped"),
+    [
+        pytest.param("generation.default_size", "l", [], id="set an existing key"),
+        pytest.param("ui.default_models.image", "local-image", [], id="set an existing nested key"),
+        pytest.param("prompt_enhancer.user_model", "owner/name", [], id="set a key under a missing parent"),
+        pytest.param("ui.default_models.video", "ltx-8", [], id="set a new key last in its mapping"),
+        pytest.param("ui.output_dir", None, ["# where files go"], id="clear the first key of a mapping"),
+        pytest.param("ui.default_models.image", None, ["# my favourite"], id="clear the last key before a heading"),
+        pytest.param("generation.default_size", None, ["# medium"], id="clear a section's only key"),
+    ],
+)
+def test_config_save_keeps_comments_and_changes_only_the_edited_path(monkeypatch, tmp_path, path, value, dropped):
+    """A Config page save keeps every comment except the cleared key's own, and changes only the edited path."""
+    old, new = _save_patch(monkeypatch, tmp_path, CONFIG_WITH_COMMENTS, {path: value})
+
+    assert _comments(new) == [comment for comment in _comments(old) if comment not in dropped]
+    assert yaml.safe_load(new) == _edited(yaml.safe_load(old), path, value)
+    assert new.startswith("# My Ziv config\n")
+    assert new.rstrip().endswith("#     x: y/z")  # the commented-out keys stay at the end
+
+
+def test_config_save_keeps_the_heading_above_its_section(monkeypatch, tmp_path):
+    """Adding a key at the end of the ui block does not pull the next section's heading above it."""
+    _old, new = _save_patch(monkeypatch, tmp_path, CONFIG_WITH_COMMENTS, {"ui.default_models.video": "ltx-8"})
+
+    assert "# Generation\ngeneration:\n" in new
+    assert new.index("video: ltx-8") < new.index("# Generation")
+
+
+def test_config_save_keeps_the_heading_when_a_nested_section_is_cleared(monkeypatch, tmp_path):
+    """Clearing the last key of a section leaves the lines that followed it where they were."""
+    _old, new = _save_patch(monkeypatch, tmp_path, CONFIG_WITH_COMMENTS, {"ui.default_models.image": None})
+
+    assert "  gallery_page_size: 12\n\n# Generation\ngeneration:\n" in new
+
+
+def test_config_save_with_several_new_keys_keeps_trailing_comments_last(monkeypatch, tmp_path):
+    """Two keys added in one save both land before the file's trailing comments."""
+    _old, new = _save_patch(
+        monkeypatch,
+        tmp_path,
+        CONFIG_WITH_COMMENTS,
+        {"prompt_enhancer.user_model": "owner/name", "ui.default_models.video": "ltx-8"},
     )
+
+    assert yaml.safe_load(new)["prompt_enhancer"] == {"user_model": "owner/name"}
+    assert new.rstrip().endswith("#     x: y/z")
+    assert new.index("user_model") < new.index("# Tried once")
+
+
+def test_config_save_quotes_strings_that_yaml_one_one_reads_as_another_type(monkeypatch, tmp_path):
+    """A value PyYAML would read as a float is written quoted, so it comes back as the string that was saved."""
+    monkeypatch.setattr(config_contract_module, "normalize_user_directory", lambda value: value)
+    _old, new = _save_patch(monkeypatch, tmp_path, CONFIG_WITH_COMMENTS, {"ui.output_dir": "1.10"})
+
+    assert yaml.safe_load(new)["ui"]["output_dir"] == "1.10"
+    assert '"1.10"' in new
+
+
+def test_config_save_keeps_the_values_yaml_one_one_reads_in_untouched_keys(monkeypatch, tmp_path):
+    """Plain ``off`` and ``on`` stay what PyYAML read them as (booleans) after a save elsewhere."""
+    _old, new = _save_patch(monkeypatch, tmp_path, CONFIG_WITH_COMMENTS, {"generation.default_size": "l"})
+
+    assert yaml.safe_load(new)["discover_content_filter"] is False
+
+
+@pytest.mark.parametrize(
+    ("patch", "dropped", "expected"),
+    [
+        pytest.param({"ui.output_dir": None}, ["# unset: the data dir's outputs folder"], ("ui.output_dir", None), id="clear output_dir"),
+        pytest.param({"ui.default_models.video": None}, [], ("ui.default_models.video", None), id="clear the last default model"),
+    ],
+)
+def test_config_save_keeps_the_packaged_ui_block_comments(monkeypatch, tmp_path, patch, dropped, expected):
+    """The comment lines between the ui keys survive clearing a key, and the lines after it stay below its section."""
+    old, new = _save_patch(monkeypatch, tmp_path, PACKAGED_UI_BLOCK, patch)
+
+    assert _comments(new) == [comment for comment in _comments(old) if comment not in dropped]
+    assert yaml.safe_load(new) == _edited(yaml.safe_load(old), *expected)
+    assert "  # Set once the first-run dialog is skipped; a user setting.\n  first_run_skipped: false\n" in new
+
+
+def test_config_save_adds_a_default_model_below_the_ui_comments(monkeypatch, tmp_path):
+    """A default video model added to a ui block that lacks it goes with the other default models."""
+    text = PACKAGED_UI_BLOCK.replace("    video: ltx-8\n", "")
+    old, new = _save_patch(monkeypatch, tmp_path, text, {"ui.default_models.video": "ltx-8"})
+
+    assert _comments(new) == _comments(old)
+    assert yaml.safe_load(new) == _edited(yaml.safe_load(old), "ui.default_models.video", "ltx-8")
+    assert "    video: ltx-8\n  # Set once the first-run dialog is skipped; a user setting.\n" in new
+
+
+def test_first_run_skip_and_discover_switch_keep_comments(monkeypatch, tmp_path):
+    """The first-run skip and the Discover switch edit their own key and leave the file's comments alone."""
+    path = _write_user_config(monkeypatch, tmp_path, PACKAGED_UI_BLOCK)
+
+    config_contract_module.persist_first_run_skipped()
+    config_contract_module.persist_discover_huggingface(True)
+
+    new = path.read_text(encoding="utf-8")
+    assert _comments(new) == _comments(PACKAGED_UI_BLOCK)
+    assert yaml.safe_load(new)["ui"]["first_run_skipped"] is True
+    assert config_contract_module.discover_huggingface_enabled() is True
+    expected = yaml.safe_load(PACKAGED_UI_BLOCK)
+    expected["ui"].update(first_run_skipped=True, discover_huggingface=True)
+    assert yaml.safe_load(new) == expected
+
+
+def test_first_run_skip_and_discover_switch_create_the_file(monkeypatch, tmp_path):
+    """A missing or empty config.yaml is created with the one key."""
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+    config_contract_module.persist_first_run_skipped()
+    assert _load_yaml(tmp_path / "config.yaml") == {"ui": {"first_run_skipped": True}}
+
+    (tmp_path / "config.yaml").write_text("", encoding="utf-8")
+    config_contract_module.persist_discover_huggingface(True)
+    assert _load_yaml(tmp_path / "config.yaml") == {"ui": {"discover_huggingface": True}}
+
+
+def test_config_save_keeps_a_file_that_holds_only_comments(monkeypatch, tmp_path):
+    """A config.yaml of commented-out settings keeps them when the first key is saved."""
+    path = _write_user_config(monkeypatch, tmp_path, "# ui:\n#   output_dir: /somewhere\n")
+
+    config_contract_module.persist_first_run_skipped()
+
+    new = path.read_text(encoding="utf-8")
+    assert new.startswith("# ui:\n#   output_dir: /somewhere\n")
+    assert yaml.safe_load(new) == {"ui": {"first_run_skipped": True}}
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        pytest.param("ui: [unclosed\n", "Failed to read user config override", id="invalid yaml"),
+        pytest.param("- just\n- a list\n", "must be a YAML mapping", id="not a mapping"),
+        pytest.param("ui:\n  output_dir: /a\nui:\n  output_dir: /b\n", "Failed to read user config override", id="duplicate key"),
+    ],
+)
+def test_config_save_refuses_a_file_it_cannot_round_trip_and_leaves_it_alone(monkeypatch, tmp_path, text, message):
+    """An invalid, non-mapping or duplicate-key config.yaml raises ValueError and is not rewritten."""
+    path = _write_user_config(monkeypatch, tmp_path, text)
+
+    with pytest.raises(ValueError, match=message):
+        config_contract_module.persist_first_run_skipped()
+    with pytest.raises(ValueError, match=message):
+        config_contract_module.persist_writable_config_patch({"generation.default_size": "l"}, _persist_current())
+
+    assert path.read_text(encoding="utf-8") == text
+
+
+def test_write_user_config_override_accepts_only_a_round_trip_document(monkeypatch, tmp_path):
+    """A plain dict would lose the file's comments, so the writer refuses it."""
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+
+    with pytest.raises(TypeError):
+        config_contract_module.write_user_config_override({"ui": {}})  # type: ignore[arg-type]
+
+    assert not (tmp_path / "config.yaml").exists()
 
 
 def test_concurrent_config_saves_do_not_drop_each_others_changes(monkeypatch, tmp_path):
@@ -425,17 +635,15 @@ def test_concurrent_config_saves_do_not_drop_each_others_changes(monkeypatch, tm
     import threading
     import time
 
-    import yaml
-
     monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-    real_read = config_contract_module.read_user_config_override
+    real_load = config_contract_module._load_user_config_document
 
-    def _slow_read():
-        payload = real_read()
+    def _slow_load():
+        document = real_load()
         time.sleep(0.05)  # widen the window between read and write
-        return payload
+        return document
 
-    monkeypatch.setattr(config_contract_module, "read_user_config_override", _slow_read)
+    monkeypatch.setattr(config_contract_module, "_load_user_config_document", _slow_load)
     patches = [{"ui.default_models.image": "zit"}, {"ui.default_models.video": "ltx-8"}, {"generation.default_size": "l"}]
     threads = [threading.Thread(target=config_contract_module.persist_writable_config_patch, args=(patch, _persist_current())) for patch in patches]
     for thread in threads:
@@ -443,14 +651,14 @@ def test_concurrent_config_saves_do_not_drop_each_others_changes(monkeypatch, tm
     for thread in threads:
         thread.join()
 
-    saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    saved = _load_yaml(tmp_path / "config.yaml")
     assert saved == {"ui": {"default_models": {"image": "zit", "video": "ltx-8"}}, "generation": {"default_size": "l"}}
 
 
 def test_user_config_write_is_atomic(monkeypatch, tmp_path):
     """A failed write must leave the previous file intact and no temp files behind (never a truncated file)."""
     monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-    config_contract_module.write_user_config_override({"ui": {"output_dir": "/keep"}})
+    config_contract_module.write_user_config_override(load_round_trip("ui:\n  output_dir: /keep\n"))
     original = (tmp_path / "config.yaml").read_text(encoding="utf-8")
 
     def _boom(*_args, **_kwargs):
@@ -458,7 +666,7 @@ def test_user_config_write_is_atomic(monkeypatch, tmp_path):
 
     monkeypatch.setattr(type(tmp_path), "replace", _boom)
     with pytest.raises(OSError, match="disk full"):
-        config_contract_module.write_user_config_override({"ui": {"output_dir": "/new"}})
+        config_contract_module.write_user_config_override(load_round_trip("ui:\n  output_dir: /new\n"))
 
     assert (tmp_path / "config.yaml").read_text(encoding="utf-8") == original
     assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
@@ -477,7 +685,7 @@ def test_user_config_write_preserves_symlink_and_permissions(monkeypatch, tmp_pa
     (data_dir / "config.yaml").symlink_to(target)
     monkeypatch.setenv("ZIV_DATA_DIR", str(data_dir))
 
-    config_contract_module.write_user_config_override({"ui": {"output_dir": "/new"}})
+    config_contract_module.write_user_config_override(load_round_trip("ui:\n  output_dir: /new\n"))
 
     assert (data_dir / "config.yaml").is_symlink()
     assert "/new" in target.read_text(encoding="utf-8")

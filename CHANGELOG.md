@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **The viewer stays on the result you opened** when a new one lands or an earlier one is deleted
 - **The job card's notice has room**, so *Pausing after this image* is no longer cut off
 - **Steps stops at the video model's limit** as you type, so the count shown is the count that runs
+- **Saving on the Config page, skipping the first-run dialog and the Discover Hugging Face switch keep the comments in your `config.yaml`**, instead of rewriting the file without them
 - **The two Ideogram 4 LoRAs in Discover are marked Non-commercial**, as the model they build on is
 - `ziv-image -m <owner/repo>` with a built-in model's repo records the model under its short name, as `ziv-video` does
 
