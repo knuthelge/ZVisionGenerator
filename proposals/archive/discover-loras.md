@@ -1,6 +1,6 @@
 # Discover LoRAs: a curated list, and Hugging Face behind it
 
-**Status:** Done (2026-10-28, unreleased; branch feat/discover-loras). Not yet verified on a Mac; see [Mac verification](#mac-verification).
+**Status:** Done (2026-10-28, unreleased; branch feat/discover-loras). Partly checked on a 32 GB M5 on 2026-11-08; see [Mac verification](#mac-verification).
 
 ## Problem
 
@@ -192,7 +192,12 @@ To do before the merge. Skip a step whose model isn't downloaded.
 6. **The Hugging Face box.** Show, Not now and Turn off do what they say; on a phone the buttons stay pinned at the bottom.
 7. **Optional: a crash leftover.** Quit `ziv ui` while step 2's model loads. The next job that loads a LoRA removes the leftover copy.
 
-**Results:** none yet.
+**Results (2026-11-08, 32 GB M5):** run on the models that were downloaded, and the owner closed the testing there.
+
+- **Step 3:** passed. The renamed copy exists during the job and is removed when it ends.
+- **Step 4:** Klein 4B *NASA Concept Art* and LTX-2.3 *HelloWorld Interactor* load without an error and change a same-seed result. *NASA Concept Art* smears at its weight of 1.0; set aside as a matter of that LoRA.
+- **Step 6:** passed. Show, Not now and Turn off do what they say, and the buttons stay pinned on a phone.
+- **Not run:** steps 1, 2 and 5 and the other families in step 4 (their models were not downloaded), and optional step 7.
 
 ## Alternatives considered
 

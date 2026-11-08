@@ -11,7 +11,7 @@ Four parts, in this order:
 
 Part 1 comes first, and its work (per-model naming and conversion) may run alongside Parts 2 and 3, since it touches different modules. Parts 3 and 4 started after the Mac test of the shipped LTX-2.5 and H3 support ([ltx-2.5-mac-test-plan.md](ltx-2.5-mac-test-plan.md)) passed. Each part opens with a spike and a gate table, and is built only once its gates pass.
 
-This follows [Convert LTX-2.3 checkpoints](ltx-checkpoint-conversion.md), and it picks up an item that [LTX-2.5 and MiniMax H3](../ltx-2.5.md) left out of scope: "Converting single-file fine-tunes for either family."
+This follows [Convert LTX-2.3 checkpoints](ltx-checkpoint-conversion.md), and it picks up an item that [LTX-2.5 and MiniMax H3](ltx-2.5.md) left out of scope: "Converting single-file fine-tunes for either family."
 
 ## Problem
 
@@ -204,7 +204,7 @@ LTX-2.5, from headers:
 ### Sources and licences
 
 - **Licences.** LTX-2.5 is under the [LTX-2.x Community License](https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2_x), and every Lightricks 2.5 repo is gated (auto-approved). H3 is under the MiniMax H3 community licence, and the MiniMaxAI repo is ungated. Converted models are derivatives and keep those terms.
-- **The standing rule** (2026-10-22, [ltx-2.5.md](../ltx-2.5.md)): the app downloads from ungated sources and links to the original. The download dialog shows a short licence line, which is built by the download-licence work on another branch (see [Licence notice](../ltx-2.5.md#licence-notice)). A download this proposal adds gets a licence entry there, and nothing more.
+- **The standing rule** (2026-10-22, [ltx-2.5.md](ltx-2.5.md)): the app downloads from ungated sources and links to the original. The download dialog shows a short licence line, which is built by the download-licence work on another branch (see [Licence notice](ltx-2.5.md#licence-notice)). A download this proposal adds gets a licence entry there, and nothing more.
 
 ## Proposed change
 
@@ -450,7 +450,7 @@ Part 3 started after the Mac test passed (2026-10-25).
 2. **The 2.5 base** is the shipped `ltx25-4` repo (ungated and pinned), which anyone who uses `ltx25-4` has already downloaded. It only has q4, so for q8 the converter writes its own `quantize_config.json`.
 3. **`embedded_config.json`** comes from the checkpoint's metadata, in stock's spelling. When the checkpoint has none, it comes from the 2.5 base, never from 2.3's.
 4. **Connectors** are linked when the pins say they are stock. Otherwise they are written from the checkpoint, which costs about 4 GB more disk.
-5. **The level.** The form preselects q4 until the Mac test has measured q8's headroom ([ltx-2.5.md](../ltx-2.5.md), open question 4).
+5. **The level.** The form preselects q4 until the Mac test has measured q8's headroom ([ltx-2.5.md](ltx-2.5.md), open question 4).
 
 **Spike**, on the 32 GB Mac:
 
@@ -466,7 +466,7 @@ Decision: build once G0–G3 pass. q8 is offered only if G4 passes.
 
 **Risks:**
 
-- **The mirror.** The base is a mirror of a gated repo. Its file hashes are recorded in [ltx-2.5.md](../ltx-2.5.md).
+- **The mirror.** The base is a mirror of a gated repo. Its file hashes are recorded in [ltx-2.5.md](ltx-2.5.md).
 - **Determinism.** `mx.quantize` must round the same way across MLX versions. It reproduced 2.3 bit for bit on Metal.
 
 ### Part 4: MiniMax H3 on macOS (size L)
@@ -522,7 +522,7 @@ Decision: build once G0–G3 and G5 pass. If G4 fails (RTN visibly worse than ca
 - **Changed LTX connectors on Windows/Linux:** refused, as for 2.3.
 - **Converting H3 LoRAs** from ComfyUI's format.
 - **Calibrated INT8** on the Mac.
-- **H3 Ref2VA fine-tunes:** Ref2VA isn't supported ([ltx-2.5.md](../ltx-2.5.md)).
+- **H3 Ref2VA fine-tunes:** Ref2VA isn't supported ([ltx-2.5.md](ltx-2.5.md)).
 - **The licence notice:** the download-licence work on another branch.
 
 ### Docs and tests
@@ -548,7 +548,7 @@ Decision: build once G0–G3 and G5 pass. If G4 fails (RTN visibly worse than ca
 - **Diffusers-layout H3 only.** Rejected by the user: most fine-tunes are single files.
 - **Reading the gated files for the LTX-2.5 pins.** Not needed: the gated listing gives the official oids, and the ungated copies with equal oids are the same bytes. The gated content is never read, and users never need an account.
 - **No LTX-2.5 pins.** Rejected: verified sources exist for every item.
-- **Applying the turbo LoRA at run time for converted H3 models.** Rejected: the 2b decision in [ltx-2.5.md](../ltx-2.5.md) kept the turbo LoRA merged into the stored copy, and a converted model follows stock.
+- **Applying the turbo LoRA at run time for converted H3 models.** Rejected: the 2b decision in [ltx-2.5.md](ltx-2.5.md) kept the turbo LoRA merged into the stored copy, and a converted model follows stock.
 - **Vendoring upstream's `build_quant.py` for the Mac.** Rejected: it loads the whole bf16 transformer, which doesn't fit 32 GB, and it needs `save_sharded`, which isn't vendored.
 - **Calibrated INT8 on the Mac.** Deferred: it needs activations recorded on the same source revision, plus a CUDA device.
 - **Keeping the bf16 AdaLN projection in converted H3 folders**, so a schedule change could rebuild the tables without the source. Rejected for now: it would add the 13.0B AdaLN parameters (about 26 GB in bf16) to every converted model. Converting again is the remedy, as it is for LTX.

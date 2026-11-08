@@ -1,8 +1,8 @@
 # LTX-2.5 and MiniMax H3
 
-**Status:** In progress. Phase 1a is done and 1b is decided (2026-10-22): go with `ltx25-4` only. 1c is implemented and GPU-verified: a smoke test on the RTX 3080 10 GB / 30 GB RAM ran t2v and i2v at 1280×704 in 172 and 176 s, with peak RSS about 22.5 GB and no kills. An Extend of 2 s joined cleanly, with a frame-to-frame PSNR across the seam of 35.8 dB, which is inside the clip's normal motion range. Phase 2a is done and 2b is decided (2026-10-22): go at 864×480. 2c is done. 2d is built with full parity (text to video, image to video, first and last frame, Extend, 2× upscale with review through SeedVR2, user LoRAs, 4 or 8 steps) and is implemented on Windows and Linux and GPU-verified on the RTX 3080 (M1, 2026-10-23, see [Phase 2 M1 results](#phase-2-m1-results-measured)); the final GPU verification (M2, 2026-10-23) is done and H3 passed on CUDA (see [Phase 2 M2 results](#phase-2-m2-results-measured)); after M2, H3's 2× upscale was fixed to fit the card at every size and to stop redrawing the frame, but it still looks clearly worse than LTX's own upscale, and a latent upscale for H3 is being researched (see [H3 upscale after M2](#h3-upscale-after-m2)); 2e, the LTX backend split, remains. Phase 3 is implemented on macOS and verified on a 32 GiB M5 (2026-10-25, [test plan](archive/ltx-2.5-mac-test-plan.md)): LTX-2.5 (the `ltx25-4` alias, 2.5 sigmas and the ancestral loop, Gemma 4 handling) and H3 on a vendored MLX port (everything except upscale). Everything built so far ships in v0.13.0.
+**Status:** Done (2026-11-08). LTX-2.5 and MiniMax H3 ship on Windows, Linux and macOS, verified on the RTX 3080 and on a 32 GiB M5. H3's 2× upscale on Windows and Linux went the latent route (`a83113f4`), see [H3 upscale after M2](#h3-upscale-after-m2); macOS has no H3 upscale. The LTX backend split (2e) moved to the [backlog](../backlog.md).
 
-**Mac test plan:** [ltx-2.5-mac-test-plan.md](archive/ltx-2.5-mac-test-plan.md) is the test plan for LTX-2.5 and MiniMax H3 on a 32 GB Mac. It ran on 2026-10-25, and its results and follow-ups are recorded in it.
+**Mac test plan:** [ltx-2.5-mac-test-plan.md](ltx-2.5-mac-test-plan.md) is the test plan for LTX-2.5 and MiniMax H3 on a 32 GB Mac. It ran on 2026-10-25, and its results and follow-ups are recorded in it.
 
 Three phases, each opened by a benchmark and a decision point before any implementation:
 
@@ -10,7 +10,7 @@ Three phases, each opened by a benchmark and a decision point before any impleme
 2. **MiniMax H3** on Windows/Linux: spike, decision, a consolidation refactor of the shared weight code, build, then a split of the LTX backend. This phase adds the video-family seam.
 3. **macOS:** both families, tested afterwards on a Mac.
 
-This proposal supersedes the "LTX-2.5 not planned" decision of 2026-10-10 in [deps-cuda](archive/deps-cuda.md), [deps-macos](archive/deps-macos.md) and [platform-parity](archive/platform-parity.md). That decision rested on the bf16 DiT being no smaller than 2.3's, so there was "no memory gain". The premise here is different: the app already runs a 19B LTX DiT on a 10 GB card as a streamed NF4 copy. A 2.5 DiT of the same shape fits the same path. Since then, community work has also brought H3 within reach of 10-16 GB cards.
+This proposal supersedes the "LTX-2.5 not planned" decision of 2026-10-10 in [deps-cuda](deps-cuda.md), [deps-macos](deps-macos.md) and [platform-parity](platform-parity.md). That decision rested on the bf16 DiT being no smaller than 2.3's, so there was "no memory gain". The premise here is different: the app already runs a 19B LTX DiT on a 10 GB card as a streamed NF4 copy. A 2.5 DiT of the same shape fits the same path. Since then, community work has also brought H3 within reach of 10-16 GB cards.
 
 ## Problem
 
@@ -258,7 +258,7 @@ Reported Mac speeds: about 1.2 h projected for 8 steps at 1344×768 for 5 s on a
 
 ### Licence notice
 
-Shipped for every model with terms, LTX-2.5 and H3 included, by [Licences at download](archive/model-licences.md):
+Shipped for every model with terms, LTX-2.5 and H3 included, by [Licences at download](model-licences.md):
 
 - **Records:** one record per licence in `zvisiongenerator/utils/licences.yaml` (not a `licence` entry per preset in config), with the supplier, a summary and licence and NOTICE links pinned to a revision. LTX-2.5 is under the LTX-2.x Community License; H3 under the MiniMax H3 Community License.
 - **Download dialog:** every download shows the models' licence lines in the dialog, as a notice with no checkbox.
@@ -480,7 +480,7 @@ LTX-2.3 and 2.5 behaviour, outputs, stored-copy layouts and manifests stay byte-
 3. **A download plan** with allow and ignore patterns for the transformer, VAEs, tokenizer and processor, the first four shards of the NF4 text encoder and the turbo LoRA; the macOS plan lists the INT8 transformer, the `FL2VA` components and the turbo LoRA file by file.
 4. **Config, docs, CHANGELOG, frontend build and mocked tests.**
 
-**2e. Split the LTX backend (refactor, no behaviour change).** Its own series of commits after 2d and before the model-naming cleanup, kept apart from any user-facing rename. `backends/cuda/video/backend.py` becomes LTX modules under `backends/cuda/video/ltx/` (state, load, place, sample, extend, decode) beside `h3/`, with `DiffusersVideoBackend` as a thin class. Conditions:
+**2e. Split the LTX backend (refactor, no behaviour change; moved to the [backlog](../backlog.md)).** Its own series of commits after 2d and before the model-naming cleanup, kept apart from any user-facing rename. `backends/cuda/video/backend.py` becomes LTX modules under `backends/cuda/video/ltx/` (state, load, place, sample, extend, decode) beside `h3/`, with `DiffusersVideoBackend` as a thin class. Conditions:
 
 - `_check_system_memory` keeps `stacklevel=4`, so its warning still names the caller of the public load.
 - The `importlib.reload` test of the backend module stays: importing the backend sets no allocator environment.
@@ -529,7 +529,7 @@ Hand testing after M2 found two problems with H3's `--upscale 2` on Windows and 
 
 **Built on this branch now:** a Last frame control in the Web UI for H3, for first and last frame parity with the CLI.
 
-**Kept gap:** H3 has no upscale on macOS. The Mac video upscale plan is [video-upscale-existing.md](archive/video-upscale-existing.md).
+**Kept gap:** H3 has no upscale on macOS. The Mac video upscale plan is [video-upscale-existing.md](video-upscale-existing.md).
 
 ### Phase 3: macOS (tested afterwards on a Mac)
 

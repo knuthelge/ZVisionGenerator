@@ -1,6 +1,6 @@
 # Backlog from the v1 review
 
-**Status:** Backlog (2026-10-27)
+**Status:** Backlog (2026-11-08)
 
 Findings from the pre-v1 codebase review that were verified but deliberately left out of v1. Each is small enough to pick up on its own; none has a proposal of its own. Items are grouped by area, and each says what a user sees, where it sits, and what the fix would be. Decisions taken at the review are noted.
 
@@ -24,7 +24,6 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 - **ffprobe is not checked.** `ensure_ffmpeg` checks ffmpeg only; ffmpeg without ffprobe gives `[Errno 2] ... 'ffprobe'`.
 - **`ziv image -p <directory>`, or an unreadable prompts file, still tracebacks.** The early check in `image_cli.py` turns only `FileNotFoundError` into "Prompts file not found … Provide --prompt or a valid --prompts-file"; `Path.read_text` raises `IsADirectoryError` or `PermissionError` for those inputs. `ziv video` checks `Path(...).is_file()` first. Catch `OSError` or add the same pre-check. Decision: skipped for v1.
 - **The prompts-file message lives in both CLIs.** The same sentence and check sit in `image_cli.py` and `video_cli.py`. One `require_prompts_file()` helper in `utils/prompts.py` would keep them from drifting. Decision: skipped for v1.
-- **macOS: `ziv video --extend` on an H3 clip picks the LTX default model.** `video_cli.py` (`_model_available_locally`) judges H3 "not available locally" because the Mac plan downloads only some text-encoder shards; it then extends with `ui.default_models.video` and may start an LTX download. The Web UI judges by download plan. Needs a Mac to confirm.
 
 ## Generation and backends
 
@@ -56,6 +55,7 @@ Findings from the pre-v1 codebase review that were verified but deliberately lef
 
 ## Code hygiene (no user impact)
 
+- **Split the LTX backend.** `backends/cuda/video/backend.py` (about 1,600 lines) becomes LTX modules under `backends/cuda/video/ltx/` beside `h3/`, with no behaviour change. The plan and its conditions are step 2e of [LTX-2.5 and MiniMax H3](archive/ltx-2.5.md).
 - Dead code: `utils/h3_memory.h3_extend_window_frames` (duplicates `video_extend.window_frames`), `web_runner.WebRunner.get_job_result_path`, `job_contract.ACTIVE_STATUSES`, the job snapshot field `supports_controls` (duplicates `supported_controls`), `backends/cuda/image/backend._make_skip_callback`, the `GET /docs/assets/{asset_name}` route (always 404 once installed), the frontend `progress_text` SSE handler, `draft.reset()`.
 - Duplicated helpers: `backends/mac/video.py` `_snapshot_download` repeats `utils/hf_snapshot.snapshot_download`; `workflows/video_stages.py` handles a `CalledProcessError` that `splice_clips` can never raise while `strip_audio` and `embed_mp4_config` still raise it.
 - `backends/cuda/video/h3/lora.py` docstring mentions a planning label ("C11's `load_copy`"); `h3/conditioning.py` imports the private `_weight_files` from `decode.py`.

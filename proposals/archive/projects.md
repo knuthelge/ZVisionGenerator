@@ -1,6 +1,6 @@
 # Projects: work on one chunk at a time
 
-**Status:** Done (2026-11-08, unreleased; built on `feat/projects`). Checked with real image jobs through the live queue on Linux; macOS and Windows were reviewed in code only.
+**Status:** Done (2026-11-08, unreleased; built on `feat/projects`). Checked with real image jobs through the live queue on Linux, and on a 32 GB M5 on 2026-11-08 with real image, video and audio jobs in Chromium and WebKit, including the phone layout; Windows was reviewed in code only.
 
 ## Problem
 

@@ -33,7 +33,7 @@ Sizes are from the Hugging Face API at the pinned revisions (2026-10-27). Prepar
 | Enhancer Fast | 9.1 GB bf16 (`coder3101/Qwen3.5-4B-heretic`, personal) | NF4 at every load, never stored | ~3 GB NF4 | ~6 GB per install, the quantize step on every load |
 | Enhancer Smart | 18.8 GB bf16 (`coder3101/Qwen3.5-9B-heretic`, personal) | Same | ~6.5 GB NF4 | ~12 GB |
 | `ltx-4`, `ltx-8` (LTX-2.3) | ~103 GB: transformer 46.2 (`Lightricks/LTX-2.3`, official), Gemma 3 text encoder 48.7 (fp32), connectors 6.3, VAEs and vocoder 1.9 (`diffusers/LTX-2.3-Distilled-Diffusers`, official) | `ltx-4@q4` (NF4 transformer + FP8 text encoder, ~23 GB est.), `ltx-8@q8` (FP8 transformer, same encoder, ~34 GB est.). Time and peak not measured for 2.3; LTX-2.5's identical build took 327 s at 9.2 GiB | ~31 GB (`ltx-4`), ~42 GB (`ltx-8`), ~53 GB for both | ~60–70 GB, ~5 min, the 9 GiB peak |
-| `ltx25-4` (LTX-2.5) | 71 GB (`unsloth/LTX-2.5-FP8`, a byte-identical copy of the gated official repo) | `ltx25-4@q4`, 22 GB; 327 s, 9.2 GiB ([ltx-2.5.md](ltx-2.5.md)) | ~31 GB | ~40 GB, ~5.5 min |
+| `ltx25-4` (LTX-2.5) | 71 GB (`unsloth/LTX-2.5-FP8`, a byte-identical copy of the gated official repo) | `ltx25-4@q4`, 22 GB; 327 s, 9.2 GiB ([ltx-2.5.md](archive/ltx-2.5.md)) | ~31 GB | ~40 GB, ~5.5 min |
 | `h3` | 98 GB: transformer 66.3 bf16, VAEs 11 (`MiniMaxAI/MiniMax-H3`, official), NF4 Qwen3-VL shards 1–4 ~19 (`unsloth/…-bnb-4bit`), turbo LoRA 1.4 (`lightx2v`) | `h3@q4`, 12 GB (folded AdaLN tables, turbo LoRA merged); 4–11.6 min, 8.3 GiB | ~42 GB | ~56 GB, up to 12 min. Not publishable (Licences) |
 | SeedVR2 | FP8 files as published, 8.5 / 3.4 GB (`numz`, `AInVFX`) | nothing | — | nothing |
 

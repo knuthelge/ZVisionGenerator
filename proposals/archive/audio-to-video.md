@@ -44,7 +44,7 @@ The **Video** and **Extend Video** tabs get an optional **Audio track**, with or
 
 ### Cost
 
-- Every LTX run already generates audio tokens (about 25 per second), so a track adds no tokens, only one audio encode. Reference points from this repo: `ltx25-4` image to video at 1280×704 on the 10 GB card took 176 s at about 22.5 GB peak RAM ([ltx-2.5](../ltx-2.5.md)); `ltx-4 --upscale 2` at 768×448 on a 32 GB Mac took 135–147 s at 17.7 GB ([macos-speed](macos-speed.md)).
+- Every LTX run already generates audio tokens (about 25 per second), so a track adds no tokens, only one audio encode. Reference points from this repo: `ltx25-4` image to video at 1280×704 on the 10 GB card took 176 s at about 22.5 GB peak RAM ([ltx-2.5](ltx-2.5.md)); `ltx-4 --upscale 2` at 768×448 on a 32 GB Mac took 135–147 s at 17.7 GB ([macos-speed](macos-speed.md)).
 
 ## Proposed change
 
