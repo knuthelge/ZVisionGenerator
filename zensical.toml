@@ -55,6 +55,7 @@ nav = [
       { "Video" = "concepts/video.md" },
       { "Audio" = "concepts/audio.md" },
       { "Upscaling" = "concepts/upscaling.md" },
+      { "Projects" = "concepts/projects.md" },
       { "LoRAs" = "concepts/loras.md" },
     ] },
     { "Your machine" = [

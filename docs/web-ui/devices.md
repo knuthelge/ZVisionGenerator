@@ -53,7 +53,7 @@ The prompt sits at the bottom beside **Generate**. Tap it to edit, with the same
 
 While a job runs, a bar over the preview shows its progress with **Pause**. **⋯** on the bar opens the job's details, with **Skip**, **Repeat** and **Cancel**.
 
-The menu at the top left opens the other pages. Menus, dialogs and sheets close when you pull them down, tap outside them or tap ✕.
+The menu at the top left opens the other pages, and has the **Project** row for picking a [project](../concepts/projects.md); with one picked, **Generate** shows its name. Menus, dialogs and sheets close when you pull them down, tap outside them or tap ✕.
 
 ### Images on a phone
 

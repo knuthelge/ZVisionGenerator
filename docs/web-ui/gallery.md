@@ -1,17 +1,25 @@
 # Gallery and viewer
 
-The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the CLI made there. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
+The **Gallery** (++g++ ++g++) shows every image, video and audio file in your output folder, including ones the CLI made there, or just those of the [project](#projects) you have picked. The Workspace's Gallery strip shows the same list, so a new output or a delete shows in both.
 
 ![The Gallery page with a grid of images](../assets/screenshots/gallery-page.webp)
 
 ## Browse
 
-- **Filter** with **All media**, **Images only**, **Videos only** or **Audio only**, and sort **Newest first** or **Oldest first**.
+- **Filter** with **All media**, **Images only**, **Videos only** or **Audio only**, and sort **Newest first** or **Oldest first**. With **All files** picked, the filter also offers **Not in a project**.
 - Scroll down and more load in.
 - Click a tile, or press ++enter++ on it, to open the viewer.
 - Each tile's **⋯** menu has the same actions as the viewer, led by **Reuse settings**. Right-click a tile with a mouse, or press and hold it on a touch screen, for the same menu.
 - When you come back to the Gallery, it shows what it had, scrolled to the same place, and fetches anything new.
 - Transparent images show over a checkerboard. It is only a display aid; the file holds real transparency.
+
+## Projects
+
+Pick a project with the picker in the top bar, as on every page. What a project is and what it shares with the rest of the app is in [Projects](../concepts/projects.md).
+
+- With a project picked, the Gallery shows only its files, and the line under the title starts with its name. A project with nothing in it says *Nothing in Night Bus yet*.
+- Changing the picked project clears the selection, closes the viewer and scrolls back to the top. The filter and sort stay as they are.
+- With **All files**, each tile's line leads with its project, such as *Night Bus · 11/8/2026*.
 
 ## Audio
 
@@ -30,13 +38,27 @@ An audio file without this app's settings, such as one you copied into the outpu
 - **Audio track** opens **Video** with the file as the clip's [audio track](workspace.md#audio-track). It is greyed, with the reason, when the video model can't follow a track.
 - **Voice** (speech takes) opens **Audio** on Speech with the take as the recording and its text as **What it says**. It is greyed for a take longer than 30 seconds. This is how to keep one voice across separate takes; see [Voices](../concepts/audio.md#voices).
 
-## Select and delete
+## Select, move and delete
 
 - ++space++ or ++x++ selects the focused tile; ++ctrl+a++ selects everything loaded.
+- **Move selected** moves the selection to a project; see [Move to project](#move-to-project). The button reads **Move** in a narrower window and in a phone's select bar.
 - ++delete++ deletes the selection, or the focused tile, after asking.
 - ++esc++ clears the selection.
 
 Deleting removes the file from the output folder.
+
+## Move to project
+
+Move puts existing files into a project, or takes them out of one. The rules are in [Move a file to another project](../concepts/projects.md#move-a-file-to-another-project).
+
+- **One file:** **Move to project…** in its **⋯** menu, which a Gallery tile, the Workspace strip, the preview and the viewer all have. On a computer or tablet the viewer's toolbar also has a **Move** button.
+- **Several files:** select them, then **Move selected**.
+
+Choose the target in the list. The place the file is in now is checked and greyed out; for several files from different places nothing is checked. **New project…** asks for a name, then **Create and move** makes the project and moves the files into it.
+
+After the move a notice says where the files went. If some files couldn't be moved it says how many and why, and those stay selected. If none could be moved, the notice gives the reason.
+
+In **All files** a moved tile stays in the list, under its new project. In a project, or in **Not in a project**, a file that no longer belongs leaves the list, and the viewer steps to a neighbouring file.
 
 ## The viewer
 
@@ -53,6 +75,7 @@ Step through the set with ++left++ and ++right++, or ++home++ and ++end++ for th
 | **Use as** | Opens an image as the start image or a reference in Image, or the first or last frame in Video; opens audio as a video's audio track or a speech voice | ++e++ |
 | **Extend** | Opens a video in Video, on its Extend kind | ++e++ |
 | **Upscale** | Upscales an image 2× or 4×, or a video 2× | ++x++ then ++2++ or ++4++ |
+| **Move** | Moves the file to a project. On a phone it is **Move to project…** in the **⋯** menu | |
 | **Download** | Saves the file to this device | ++d++ |
 | Copy prompt | Copies the prompt to the clipboard | ++c++ |
 | Delete | Deletes the file, after asking (++shift+delete++ skips asking) | ++delete++ |
@@ -61,7 +84,7 @@ Zoom into an image to see its real pixels: click it on a computer, or pinch or d
 
 ### Details
 
-**Details** lists what the file records: prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, audio track with the span of it the clip used (*song.mp3 · 1:30–1:34*), references, quant, upscale and post-processing. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
+**Details** lists what the file records, starting with its **Project** (*No project* for a file at the top of the output folder): prompt, negative prompt, model, seed, steps, guidance, scheduler, size, LoRAs, start image, audio track with the span of it the clip used (*song.mp3 · 1:30–1:34*), references, quant, upscale and post-processing. An image with a [transparent background](../concepts/images.md#transparent-background) shows *Transparent background: On*. See [Output files](../concepts/data-folder.md#output-files).
 
 When the prompt was enhanced, Details shows how, as one line such as *Fast · Cinematic, Melancholic, Longer*, with **Your prompt** under it. An audio take shows the same for its Style, Text or Prompt, for example *Fast · Style · Folk*.
 

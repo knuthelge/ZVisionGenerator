@@ -50,7 +50,7 @@ The finished image fills the preview and appears first in the Gallery strip. Cli
 - **Reuse settings** (++r++) to load them back into the Workspace,
 - **Upscale** it, **Download** it, or delete it.
 
-Images are saved to the output folder, `~/.ziv/outputs` unless you [changed it](config.md). Every image remembers the settings it was made with.
+Images are saved to the output folder, `~/.ziv/outputs` unless you [changed it](config.md). Every image remembers the settings it was made with. To keep a piece of work together, pick or make a [project](../concepts/projects.md) first.
 
 ## Make it better
 

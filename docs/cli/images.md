@@ -109,4 +109,6 @@ Images are saved in the current folder, or in `-o`:
 ziv-image -m klein9b -o ~/Pictures/ziv --prompt "a sunset"
 ```
 
+Name a folder under the Web UI's output folder, such as `-o ~/.ziv/outputs/"Night Bus"`, to put the images in a [project](../concepts/projects.md#on-disk-and-in-the-cli).
+
 The file name is the prompt set's name and the time, for example `prompt_2026-10-04_14-03-22.png`. The settings are embedded in the file. See [Output files](../concepts/data-folder.md#output-files).

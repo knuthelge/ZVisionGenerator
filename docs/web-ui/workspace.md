@@ -6,6 +6,12 @@ The Workspace is where you make things. Pick **Image**, **Video** or [**Audio**]
 
 ![The Workspace: Compose and Settings on the left, the preview in the middle and the Gallery strip below](../assets/screenshots/workspace.webp)
 
+## Project
+
+The project picker is the button after the logo in the top bar, showing the project's name or **All files**; [on a phone](devices.md#on-a-phone) it is in the menu. With a project picked, the preview, the Gallery strip and the latest image and video that **Images** offers show only its files, new work is saved into its folder, and a project with nothing in it says *Nothing in Night Bus yet* in the preview. See [Projects](../concepts/projects.md) for how projects work.
+
+The job card, and each job under **Up next**, names the project it saves into. A result saved in another project doesn't appear in the preview or the strip; a notice says where it went.
+
 ## Model and LoRAs
 
 The top of the sidebar picks the **Model** for the current tab, its quantization (**Quant**) and its **LoRAs**.
@@ -198,7 +204,7 @@ When you choose another model, the settings you changed are kept and the rest ta
 
 ### Copy as a command
 
-The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
+The terminal button in the *Settings* header copies a `ziv image`, `ziv video` or `ziv audio` command with the current model, prompt, LoRAs and settings, writing to the folder the job would save to: the Web UI's output folder, or the picked [project's](../concepts/projects.md) folder. Paste it in a terminal to run the same job from the [CLI](../cli/index.md).
 
 !!! note "When the command differs"
     The CLI has no inline negative prompt, and runs every prompt in a prompt file rather than only the ones you selected. A notice says when the copied command would do something different. An uploaded start image or reference is named by its file name: replace it with the file's path.
@@ -207,7 +213,7 @@ The terminal button in the *Settings* header copies a `ziv image`, `ziv video` o
 
 Fields that take a path on the server's machine (prompt files, the output folder, checkpoints, LoRAs, images, audio tracks, source videos) have a folder button. It opens a file browser inside the Web UI, so it works the same on every system and from a phone.
 
-- It opens at the field's current path or the matching folder, and lists only the files the field accepts. **Show all** lists the rest; **Hidden files** shows names that start with a dot.
+- It opens at the field's current path or the matching folder, and lists only the files the field accepts. With a [project](#project) picked, an empty image, audio track or source video field opens in the project's folder. **Show all** lists the rest; **Hidden files** shows names that start with a dot.
 - Your last five choices are under **Recent**.
 - Click the path bar or press ++slash++ to type a path.
 - Click **Name**, **Size** or **Modified** to sort, and again to reverse. The order is remembered, starting with newest first.
@@ -407,9 +413,10 @@ A job keeps running when you close or reload the tab. Reopen the Workspace and i
 
 ## The preview and the Gallery strip
 
-Finished images and videos appear in the Gallery strip, newest first. It is the same list as the [Gallery](gallery.md) page, so a new output or a delete shows in both. Scroll to the end and older ones load in. Click one to open the [viewer](gallery.md#the-viewer); **Show all** opens the Gallery page.
+Finished images, videos and audio appear in the Gallery strip, newest first. It is the same list as the [Gallery](gallery.md) page, so a new output, a delete or a move shows in both. Scroll to the end and older ones load in. Click one to open the [viewer](gallery.md#the-viewer); **Show all** opens the Gallery page.
 
 - Press ++left++ and ++right++ (or use the arrows over the preview, or swipe sideways with two fingers on a trackpad) to step through earlier outputs in the preview. **Latest** goes back to the newest.
+- A strip tile's **⋯** menu has **Move to project…**; see [Move to project](gallery.md#move-to-project).
 - The **«** button next to *Compose* folds the sidebar into a narrow strip, giving the preview more room. The choice is remembered.
 
 ## Model-specific controls

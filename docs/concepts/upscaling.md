@@ -47,7 +47,7 @@ From the viewer or a tile's **⋯** menu in the [Gallery](../web-ui/gallery.md#u
 | **2×**, **4×** | A **plain upscale** with SeedVR2: no prompt, no image model. It enlarges faithfully and adds fine detail without redrawing. |
 | **2× creative**, **4× creative** | A **creative upscale**: the image model redraws the enlarged image with the image's own settings. |
 
-The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`.
+The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`, in the same [project](projects.md#made-from-outputs) as the original, whichever project is picked.
 
 An image with a [transparent background](images.md#transparent-background) stays transparent in either kind.
 

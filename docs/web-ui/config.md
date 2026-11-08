@@ -11,7 +11,7 @@ The **Config** page (++g++ ++c++) holds the defaults the whole app uses. Saved s
 | **Default image model** | The model the Workspace starts with for images | The first available image model |
 | **Default video model** | The model the Workspace starts with for video | The first available video model |
 | **Base resolution** | The image size preset, such as `m (832x1216)` | The app's base resolution, `m` |
-| **Output folder** | Where images and videos are saved | `outputs` in the [data folder](../concepts/data-folder.md), which moves with `ZIV_DATA_DIR` |
+| **Output folder** | Where images, videos and audio are saved. The folders directly under it are your [projects](../concepts/projects.md) | `outputs` in the [data folder](../concepts/data-folder.md), which moves with `ZIV_DATA_DIR` |
 | **Prompt enhancer model** | A Hugging Face repo (`owner/name`, optionally `@revision`) or a local folder with a chat model, used instead of Fast and Smart | Fast or Smart, chosen in the Enhance popover |
 
 A setting you changed shows a reset mark; reset it to go back to the default. **Discard changes** undoes edits you haven't saved.

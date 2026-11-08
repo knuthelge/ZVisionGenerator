@@ -130,6 +130,28 @@ The workspace payload (`GET /api/workspace`) lists `audio_models`, one row per p
 
 `AUDIO_EXTENSIONS` (`.flac`, `.wav`, `.mp3`, `.m4a`, `.ogg`) are gallery media: `/media` serves them with ranges so a player can seek, and `GET /api/gallery?filter=audio` lists only them. `_read_audio_facts` makes one ffprobe call per file for the embedded settings, duration, channels and sample rate, and never decodes it. The 100 waveform peaks are computed lazily: `GET /api/gallery-peaks?id=<asset id>` decodes the file on the first request and stores the result in the file's index row, so later requests and listings decode nothing; the asset JSON carries `peaks: null` until then. A take a job just made carries its peaks in its `generation_finished` asset. The asset JSON (`web/gallery_audio.py`) adds `kind`, `model_label`, `duration`, `peaks`, `channels`, `sample_rate`, `has_reference_voice`, `lyrics`, `cut` and `parts`, with `null` `upscale` and `extend` blocks. A file with this app's settings is reusable; its Reuse URL never carries the consent. A file without them lists and plays but has no Reuse (`has_reusable_config: false`).
 
+## Projects
+
+A project is a folder directly under the output root; there is no registry. `web/projects.py` owns the rules: `list_projects(root)` returns the real folders (no files, symlinks or dot-prefixed names) sorted by `casefold`, `create_project(root, name)` applies the creation rules, and `asset_project(asset_id)` is the first segment of a multi-segment ID that doesn't start with a dot, else `None`.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/projects` | `{"projects": [{"name", "path"}]}`; clients never join paths |
+| `POST /api/projects` | Body `{"name"}`. 422 for a name the creation rules refuse; 409 for a duplicate ignoring case |
+| `GET /api/gallery?project=<name>` | The usual page, limited to assets whose `project` is the name; blank or absent means everything |
+| `GET /api/gallery?filter=no_project` | The files in no project. `NO_PROJECT_FILTER` is a value of `filter` beside `image`, `video` and `audio`, not a project name, because a folder can be named anything. Empty with a `project` |
+| `POST /api/gallery/move` | Body `{"asset_ids": [...], "project": str \| null}` (`null` is the top of the output folder). Answers `{"moved": [{"from", "asset"}], "failed": [{"id", "detail"}]}`; 422 for an invalid `project` |
+
+Gallery asset JSON carries `project` (`str` or `null`), derived from the ID.
+
+**Two checks on a name.** `create_project` applies the full creation rules, the same on every platform. `project_dir(root, name)` (saves and moves) only requires one plain segment, with no leading dot, backslash or NUL, so an existing folder the creation rules would refuse (such as `what?`) still works.
+
+**Root and save folder are separate.** Generate and plan requests take an optional `project` form field. In `_parse_image_job`, `_parse_video_job` and `_parse_audio_job`, `args.output` (and an audio job's `output_dir`) is the save folder, `_project_save_dir(form, root)`: the project's folder, or the root when the field is blank. Uploads, staging, reference resolution and the job context's `output_dir` always use the root, because asset IDs and `/media` URLs are relative to it. `project` is not recorded in a file's settings (`_submitted_settings` skips it). The folder a job really saves into is the context's `save_project`, in the submit response and every job snapshot.
+
+**Made-from outputs.** An upscale saves beside its source and carries that folder's project. `output_source_folder(root, source_path)` (`web/gallery.py`) returns an Extend source's parent when the source is an asset under the root, else `None`; `_parse_video_job` saves an extension there and otherwise in the picked project.
+
+**Move.** `move_gallery_assets(output_dir, asset_ids, project)` handles each file on its own and returns `MoveResult(moved, failed)`; a file already in the target is in neither list. Each file is `os.replace`d to the next free name from `unique_output_path` (`utils/filename.py`); the check and the rename are not atomic, which the single-user, local design accepts. A move keeps mtime, flattens sub-folders and leaves `_preupscale` companions behind. `GalleryIndex.rename` then re-keys the index rows (see [Gallery index](app-database.md#gallery-index)). Source links in upscales and extensions are not rewritten.
+
 ## File browser previews
 
 Purposes with a `preview` kind (`BrowsePurpose.preview` in `web/path_browser.py`: images, audio tracks, source videos) get three routes, with the logic in `web/browse_media.py`:

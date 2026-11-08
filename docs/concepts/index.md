@@ -18,6 +18,7 @@ How the app works, whichever way you use it. The [Web UI](../web-ui/index.md) an
 | [Audio](audio.md) | Songs, instrumentals, speech and sound effects, voices and the files they make |
 | [Upscaling](upscaling.md) | Upscaling new images, existing images and video |
 | [LoRAs](loras.md) | Adding styles and subjects to a model |
+| [Projects](projects.md) | Keeping a piece of work together: the picker, All files and moving files between projects |
 
 ## Your machine
 

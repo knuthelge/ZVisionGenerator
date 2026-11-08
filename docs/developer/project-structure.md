@@ -278,6 +278,7 @@ zvisiongenerator/
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── path_browser.py            Host folder listings and the browse purposes (with their preview kind) for the in-app path browser
 │   ├── presets.py                 Settings presets for the Web UI: file format, slugs, validation, and the store (list, write, rename, delete under one lock)
+│   ├── projects.py                Projects: the folders under the output folder, the name rules, a project's folder and an asset's project
 │   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked), create prompt files, and append a Workspace prompt
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── recent_prompts.py          Recent prompts component of the app database: the entry builder and the `recent_prompts_entries` store

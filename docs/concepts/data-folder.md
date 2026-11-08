@@ -32,6 +32,8 @@ ziv ui
 
 The Web UI saves to the **Output folder** on the [Config page](../web-ui/config.md), `outputs` in the data folder by default. The CLI saves to the current folder, or to `-o`.
 
+Files can sit in a [project](projects.md): a folder directly under the output folder. The Web UI saves into the project you have picked, and files at the top of the output folder are in no project.
+
 Files are named after the prompt set and the time: `portrait_2026-10-04_14-03-22.png`. When a name is taken, `_2`, `_3`… is added, so nothing is overwritten. An inline prompt's set is `prompt`. Videos follow the same pattern, and audio takes are named after their kind, such as `music_2026-10-04_14-03-22.flac`.
 
 Every file records the settings it was made with: prompt and negative prompt, scene, model, seed, steps, guidance, scheduler, size, LoRAs, start image and strength, references, quant, generation time, upscale method and its settings, the sharpen, contrast and saturation amounts, and whether the background was removed. An enhanced prompt also keeps your own prompt and the enhance options. The Web UI viewer shows them under **Details**, and **Reuse settings** loads them.
