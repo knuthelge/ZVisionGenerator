@@ -51,6 +51,9 @@ def describe_model_status(
 ) -> dict[str, Any]:
     """Return the ``downloaded`` flag and ``memory_fit`` summary for one inventory model.
 
+    MiniMax H3 is downloaded when every target of its plan on this platform is on disk. An LTX model is downloaded when
+    its folder resolves and every target of its plan is on disk. Any other model is downloaded when its folder resolves.
+
     Args:
         resolved_path: The model's local directory or HuggingFace repo id.
         kind: ``"image"`` or ``"video"``.
@@ -60,7 +63,7 @@ def describe_model_status(
         model_name: The name the model is picked by (``ltx-4``); on CUDA it sets a video model's quantize level.
         app_config: The loaded config: it names the Gemma 3 text encoder and the downloads of a video model, and sets a CUDA video model's quantize level.
         family: A video model's family (``"ltx"`` or ``"h3"``); ``None`` is LTX. LTX and H3 have a memory estimate.
-        target_present: Tells whether one download target is fully on disk; MiniMax H3 is downloaded when every target of its plan is.
+        target_present: Tells whether one download target is fully on disk; a video model is downloaded when every target of its plan is.
 
     Returns:
         ``{"downloaded": bool, "memory_fit": dict | None}``. ``memory_fit`` holds ``kind`` (``"unified"`` on
@@ -76,12 +79,13 @@ def describe_model_status(
     h3_video = kind == "video" and family == "h3"
     if h3_video:
         downloaded = _video_downloaded(resolved_path, "h3", model_name, app_config, target_present)
-    elif ltx_video and model_dir is not None and is_ltx_mlx_layout(model_dir):
-        downloaded = _video_downloaded(resolved_path, "ltx", model_name, app_config, target_present)
-        if downloaded and ltx_mlx_bundled_text_encoder(model_dir) is None:  # An LTX-2.5 pack carries its own Gemma 4; the others need the Gemma 3 repo.
-            text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo_id(app_config))
+    elif ltx_video:  # The folder check covers a local folder (its plan is empty); the plan covers the files a Hub reference still needs.
+        downloaded = model_dir is not None and _video_downloaded(resolved_path, "ltx", model_name, app_config, target_present)
     else:
         downloaded = model_dir is not None
+    # An LTX-2.5 MLX pack carries its own Gemma 4; the other MLX packs need the Gemma 3 repo.
+    if ltx_video and downloaded and model_dir is not None and is_ltx_mlx_layout(model_dir) and ltx_mlx_bundled_text_encoder(model_dir) is None:
+        text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo_id(app_config))
 
     memory_fit = None
     if h3_video and downloaded and budget is not None:

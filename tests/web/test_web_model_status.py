@@ -146,7 +146,27 @@ class TestDescribeMlxVideoStatus:
         ref = config["model_aliases"]["ltx-8"]["darwin"]
 
         status = describe_model_status(
-            ref, kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({}), model_name="ltx-8", app_config=config, target_present=lambda target: True
+            ref, kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({}), model_name="ltx-8", app_config=config, target_present=lambda target: False
+        )
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+    def test_a_local_mlx_folder_with_only_the_marker_file_is_not_downloaded(self, tmp_path):
+        folder = tmp_path / "ltx-mlx"
+        _write_sized(folder / "connector.safetensors", 0.1)
+
+        status = describe_model_status(
+            str(folder), kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), model_name="ltx-4", app_config=load_packaged_config(), target_present=lambda target: True
+        )
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+    def test_a_local_folder_without_weights_is_not_downloaded(self, tmp_path):
+        folder = tmp_path / "ltx-local"
+        folder.mkdir()
+
+        status = describe_model_status(
+            str(folder), kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), model_name="ltx-4", app_config=load_packaged_config(), target_present=lambda target: True
         )
 
         assert status == {"downloaded": False, "memory_fit": None}
@@ -384,11 +404,69 @@ class TestDescribeCudaModelStatus:
             },
         }
 
+    @pytest.fixture
+    def linux(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+
+    @staticmethod
+    def _video_status(tmp_path, *, present=lambda target: True, name="ltx-4", budget=MemoryBudget(10 * _GIB, 30 * _GIB)):
+        """Describe the Windows/Linux LTX alias *name*, whose repo folder is on disk, with the plan targets *present* says are there."""
+        config = load_packaged_config()
+        ref = config["model_aliases"][name]["linux"]
+        return describe_model_status(ref, kind="video", budget=budget, find_local_dir=_finder({ref: tmp_path}), model_name=name, app_config=config, target_present=present)
+
+    @pytest.mark.usefixtures("linux")
+    def test_cuda_video_with_every_plan_target_present_is_downloaded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda *args: None)
+        seen = []
+
+        def present(target):
+            seen.append(target.repo_id)
+            return True
+
+        status = self._video_status(tmp_path, present=present)
+
+        assert status["downloaded"] is True
+        assert seen == ["diffusers/LTX-2.3-Distilled-Diffusers", "Lightricks/LTX-2.3"]
+
+    @pytest.mark.usefixtures("linux")
+    def test_cuda_video_with_the_repo_but_not_the_transformer_file_is_not_downloaded(self, tmp_path, monkeypatch):
+        system = LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
+        monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda *args: system)
+
+        status = self._video_status(tmp_path, present=lambda target: target.repo_id == "diffusers/LTX-2.3-Distilled-Diffusers")
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+    @pytest.mark.usefixtures("linux")
+    def test_a_local_diffusers_folder_without_weights_is_not_downloaded(self, tmp_path):
+        folder = tmp_path / "ltx-local"
+        folder.mkdir()
+        (folder / "model_index.json").write_text("{}", encoding="utf-8")
+
+        status = describe_model_status(str(folder), kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), model_name="ltx-4", app_config=load_packaged_config(), target_present=lambda target: True)
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+    @pytest.mark.usefixtures("linux")
+    def test_cuda_video_with_no_local_folder_is_not_downloaded_even_when_its_plan_is_present(self):
+        config = load_packaged_config()
+        ref = config["model_aliases"]["ltx-4"]["linux"]
+
+        status = describe_model_status(
+            ref, kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({}), model_name="ltx-4", app_config=config, target_present=lambda target: True
+        )
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+    @pytest.mark.usefixtures("linux")
     def test_cuda_video_is_estimated_at_the_models_level(self, tmp_path, monkeypatch):
         system = LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
         monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda resolved, name, config, finder: system if name == "ltx-4" else None)
 
-        status = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({"owner/ltx": tmp_path}), model_name="ltx-4", app_config={})
+        status = self._video_status(tmp_path)
 
         fit = status["memory_fit"]
         assert status["downloaded"] is True
@@ -397,17 +475,19 @@ class TestDescribeCudaModelStatus:
         assert fit["by_quantize"]["none"]["required_gb"] < fit["without_low_memory"]["required_gb"]  # the transformer stays on the GPU
         assert fit["by_quantize"]["none"]["system_gb"] == fit["without_low_memory"]["system_gb"]
 
+    @pytest.mark.usefixtures("linux")
     def test_cuda_video_weights_beyond_system_memory_are_too_large(self, tmp_path, monkeypatch):
         system = LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
         monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda *args: system)
 
-        status = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(24 * _GIB, 16 * _GIB), find_local_dir=_finder({"owner/ltx": tmp_path}), model_name="ltx-4", app_config={})
+        status = self._video_status(tmp_path, budget=MemoryBudget(24 * _GIB, 16 * _GIB))
 
         assert status["memory_fit"]["by_quantize"]["none"]["status"] == "too_large"  # the backend refuses the load
 
+    @pytest.mark.usefixtures("linux")
     def test_cuda_video_without_its_files_or_level_is_not_estimated(self, tmp_path, monkeypatch):
         monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda *args: None)
 
-        status = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({"owner/ltx": tmp_path}), model_name="ltx-4", app_config={})
+        status = self._video_status(tmp_path)
 
         assert status == {"downloaded": True, "memory_fit": None}
