@@ -10,6 +10,7 @@
   import ActionMenu from './ActionMenu.svelte';
   import AudioPlayer from './AudioPlayer.svelte';
   import { assetMenuEntries } from './assetMenu';
+  import MoveMenu from './MoveMenu.svelte';
 
   interface Props extends AssetActionHandlers {
     asset: GalleryAsset;
@@ -22,6 +23,8 @@
     /** What the Use as items show: which targets are disabled, and their hints. */
     useAs?: UseAsState;
     eager?: boolean;
+    /** Card density: lead the meta line with the asset's project, when it has one, in place of the workflow word. */
+    showProject?: boolean;
     onmediaload?: () => void;
     class?: string;
   }
@@ -34,6 +37,7 @@
     deleting = false,
     useAs = {},
     eager = false,
+    showProject = false,
     onmediaload,
     onpreview,
     onreuse,
@@ -42,10 +46,13 @@
     onupscale,
     onuseaudio,
     ondelete,
+    onmove,
     class: extraClass = '',
   }: Props = $props();
 
   let menuOpen = $state(false);
+  // The Move list opens after the ⋯ menu has closed, anchored at the ⋯ button, which is there on every tile.
+  let moveOpen = $state(false);
   let moreButton = $state<HTMLButtonElement | null>(null);
 
   const isVideo = $derived(asset.media_type === 'video');
@@ -64,7 +71,7 @@
   const length = $derived(asset.duration != null ? formatClock(asset.duration) : null);
   const transparent = $derived(asset.transparent === true && !isVideo);
   const canReuse = $derived(asset.has_reusable_config === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs));
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   const thumbnail = $derived(asset.thumbnail_url || asset.url);
@@ -117,7 +124,7 @@
   data-audio={isAudio}
   data-transparent={transparent}
   data-selected={selected}
-  data-menu-open={menuOpen}
+  data-menu-open={menuOpen || moveOpen}
   aria-busy={deleting}
   aria-label={asset.filename}
 >
@@ -219,7 +226,7 @@
   {#if density === 'card'}
     <div class="asset-tile-foot ui-media-foot">
       <p class="truncate text-ui font-medium text-text-secondary">{asset.filename}</p>
-      <p class="mt-0.5 truncate text-meta text-text-muted">{#if isAudio}{audioFoot(asset, new Date(asset.created_at).toLocaleDateString())}{:else}{asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}{/if}</p>
+      <p class="mt-0.5 truncate text-meta text-text-muted">{#if isAudio}{audioFoot(asset, new Date(asset.created_at).toLocaleDateString(), showProject)}{:else}{showProject && asset.project !== null ? asset.project : asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}{/if}</p>
     </div>
   {/if}
 
@@ -231,6 +238,16 @@
     label="Actions for {asset.filename}"
     onclose={() => { menuOpen = false; contextAt = null; }}
   />
+  {#if onmove && moveOpen}
+    <MoveMenu
+      open={moveOpen}
+      anchor={moreButton}
+      align="end"
+      current={asset.project}
+      onmove={(project) => onmove(asset, project)}
+      onclose={() => { moveOpen = false; }}
+    />
+  {/if}
 </article>
 
 <style>

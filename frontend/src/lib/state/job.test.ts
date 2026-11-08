@@ -27,6 +27,68 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.outputs.map((output) => output.id)).toEqual([keep.id]);
   });
 
+  describe('a moved output', () => {
+    const output = (id: string, project: string | null) => ({ id, url: `/media/${id}`, thumbnail_url: '', filename: id.split('/').pop() as string, created_at: '', project, workflow: 'txt2img', prompt: 'P', model: 'zit', media_type: 'image', reuse_workspace_url: '' });
+    const outputIds = () => jobStore.current?.outputs.map((item) => item.id);
+
+    it('is shown under its new ID, and stays so when the server lists it again under the old one', () => {
+      jobStore.startJob({ job_id: 'job-moved', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 2, created_at: '' });
+      const source = lastEventSource();
+      const old = output('a.png', null);
+      const moved = output('Night Bus/a.png', 'Night Bus');
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: old, run_index: 1 });
+
+      jobStore.replaceOutputs([{ from: 'a.png', asset: moved as never }]);
+      expect(jobStore.current?.outputs[0]).toMatchObject({ id: 'Night Bus/a.png', project: 'Night Bus' });
+
+      // The server's record still holds the old ID: neither the finished event nor a repeat brings it back.
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: old, run_index: 1 });
+      source.emit('job_completed', { type: 'job_completed', job_id: 'job-moved', total_runs: 2, outputs: [old, output('b.png', null)] });
+      expect(outputIds()).toEqual(['Night Bus/a.png', 'b.png']);
+    });
+
+    it('shows a file moved on again, and back, under the ID it has now', () => {
+      jobStore.startJob({ job_id: 'job-back', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      const source = lastEventSource();
+      const first = output('a.png', null);
+      const inBus = output('Night Bus/a.png', 'Night Bus');
+      const inZoo = output('Zoo/a.png', 'Zoo');
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: first, run_index: 1 });
+
+      jobStore.replaceOutputs([{ from: 'a.png', asset: inBus as never }]);
+      jobStore.replaceOutputs([{ from: 'Night Bus/a.png', asset: inZoo as never }]);
+      expect(outputIds()).toEqual(['Zoo/a.png']);
+
+      jobStore.replaceOutputs([{ from: 'Zoo/a.png', asset: first as never }]);
+      expect(outputIds()).toEqual(['a.png']);
+      source.emit('job_completed', { type: 'job_completed', job_id: 'job-back', total_runs: 1, outputs: [first] });
+      expect(outputIds()).toEqual(['a.png']);
+    });
+
+    it('is still removed by a delete of its new ID', () => {
+      jobStore.startJob({ job_id: 'job-del', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      const source = lastEventSource();
+      const old = output('a.png', null);
+      source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: old, run_index: 1 });
+
+      jobStore.replaceOutputs([{ from: 'a.png', asset: output('Night Bus/a.png', 'Night Bus') as never }]);
+      jobStore.removeOutputs(['Night Bus/a.png']);
+      source.emit('job_completed', { type: 'job_completed', job_id: 'job-del', total_runs: 1, outputs: [old] });
+
+      expect(outputIds()).toEqual([]);
+    });
+
+    it('is forgotten with the job: a new job starts with the IDs the server gives', () => {
+      jobStore.startJob({ job_id: 'job-one', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      jobStore.replaceOutputs([{ from: 'a.png', asset: output('Night Bus/a.png', 'Night Bus') as never }]);
+
+      jobStore.startJob({ job_id: 'job-two', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+      lastEventSource().emit('generation_finished', { type: 'generation_finished', status: 'success', asset: output('a.png', null), run_index: 1 });
+
+      expect(outputIds()).toEqual(['a.png']);
+    });
+  });
+
   it('updates paused state from pause and resume SSE events', () => {
     jobStore.startJob({
       job_id: 'job-1',
@@ -220,6 +282,15 @@ describe('jobStore reconnect contract', () => {
       last_event: { type: 'step_progress', event_id: 9, current_step: 2, total_steps: 8, enhance_status: 'skipped' },
     } });
     expect(jobStore.current?.enhanceStatus).toBe('skipped');
+  });
+
+  it('carries the project a reconnected job saves into', async () => {
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'restore-project', job_id: 'restore-project', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+      prompt: 'P', model: 'zit', runs: 1, created_at: '', event_count: 1, paused: false, save_project: 'Night Bus',
+    } });
+
+    expect(jobStore.current?.save_project).toBe('Night Bus');
   });
 
   describe('model downloads', () => {
@@ -436,6 +507,7 @@ describe('jobStore reconnect contract', () => {
       thumbnail_url: '/media/outputs/result.png',
       filename: 'result.png',
       created_at: '2026-04-22T00:00:04Z',
+      project: null,
       workflow: 'txt2vid' as const,
       prompt: 'Recovered video prompt',
       model: 'ltx-8',

@@ -211,7 +211,9 @@
   .action-menu-item:focus { background: var(--color-bg-surface-hover); color: var(--color-text-primary); outline: none; }
   @media (hover: hover) { .action-menu-item:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); outline: none; } }
   .action-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
-  .action-menu-label { flex: 1; min-width: 0; }
+  /* A long unbroken name (a project's) wraps at the viewport edge instead of overflowing. */
+  .action-menu-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  @media (pointer: coarse) { .action-menu .action-menu-item { min-height: 40px; } }
   .action-menu-name { display: block; font-weight: 600; color: var(--color-text-primary); }
   .action-menu-description { display: block; max-width: 17rem; margin-top: 2px; font-size: var(--text-meta); line-height: 1.4; color: var(--color-text-muted); }
   .action-sheet-body .action-menu-item:has(.action-menu-description) { min-height: 48px; padding: 8px 12px; }

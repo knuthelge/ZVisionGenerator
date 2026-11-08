@@ -68,6 +68,23 @@ describe('JobCard', () => {
     expect(control('quit')).not.toBeNull();
   });
 
+  it('names the project the job saves into', () => {
+    render({ save_project: 'Night Bus' });
+    expect(header().querySelector('[data-testid="job-project"]')?.textContent?.trim()).toBe('Night Bus');
+  });
+
+  it('keeps the project out of the status row, so it never takes room from the status label', () => {
+    render({ save_project: 'Night Bus' });
+    const project = header().querySelector('[data-testid="job-project"]')!;
+    expect(project.closest('.job-row')).toBeNull();
+    expect(header().querySelector('.job-status')?.textContent).not.toContain('Night Bus');
+  });
+
+  it('shows no project for a job that saves at the top of the output folder', () => {
+    render({ save_project: null });
+    expect(header().querySelector('[data-testid="job-project"]')).toBeNull();
+  });
+
   it('shows the job notices', () => {
     render({ workflow: 'upscale', notices: ['original settings unknown'] });
     expect(log().textContent).toContain('original settings unknown');

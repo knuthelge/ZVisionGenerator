@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
+  import { SaveProject } from '$lib/components/molecules';
   import { hasJobSettings } from '$lib/state/jobSettings';
   import type { JobSnapshot } from '$lib/types';
 
@@ -32,6 +33,9 @@
           <div class="queue-text">
             <span class="queue-prompt" title={job.prompt}>{job.prompt || (job.workflow === 'upscale' ? 'No prompt recorded' : 'Prompt file')}</span>
             <span class="queue-meta">{details(job)}</span>
+            {#if job.save_project}
+              <SaveProject name={job.save_project} testid="queue-project" />
+            {/if}
           </div>
           {#if index === 0}<span class="ui-badge ui-badge-info queue-tag">Starts next</span>{/if}
           {#if hasJobSettings(job.settings)}

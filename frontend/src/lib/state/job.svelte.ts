@@ -1,4 +1,4 @@
-import type { ActiveJobState, AudioProgressEvent, EnhanceStatus, JobContext, JobReview, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
+import type { ActiveJobState, AudioProgressEvent, EnhanceStatus, JobContext, JobReview, JobSnapshot, GalleryAsset, MovedAsset, StepEvent, SSEEvent } from '$lib/types';
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
@@ -188,13 +188,18 @@ function isReplayedBeforeSnapshot(event: Record<string, unknown>): boolean {
 // Outputs the user deleted during this job; later events (e.g. the terminal output list) must not bring them back.
 const _removedOutputIds = new Set<string>();
 
-/** Drop duplicate outputs and outputs the user deleted. */
+// Outputs the user moved to another project during this job, by the ID they had. The server's record of the job keeps
+// that old ID, so every later list it sends (the terminal output list, a snapshot after a reload) is read through this.
+const _movedOutputs = new Map<string, GalleryAsset>();
+
+/** Drop duplicate outputs and outputs the user deleted, and show a moved output as the asset it now is. */
 function dedupeOutputs(outputs: GalleryAsset[]): GalleryAsset[] {
   const seen = new Set<string>();
-  return outputs.filter((output) => {
-    if (seen.has(output.id) || _removedOutputIds.has(output.id)) return false;
-    seen.add(output.id);
-    return true;
+  return outputs.flatMap((output) => {
+    const current = _movedOutputs.get(output.id) ?? output;
+    if (seen.has(current.id) || _removedOutputIds.has(current.id)) return [];
+    seen.add(current.id);
+    return [current];
   });
 }
 
@@ -264,6 +269,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     supported_controls: snapshot.supported_controls ?? [],
     notices: snapshot.notices ?? [],
     settings: snapshot.settings,
+    save_project: snapshot.save_project,
     status: snapshot.status,
     currentStep: eventFieldNumber(lastEvent, 'current_step'),
     totalSteps: eventFieldNumber(lastEvent, 'total_steps'),
@@ -533,6 +539,7 @@ function followActive(active: JobSnapshot | null): void {
   if (!active || (_job && !isTerminalStatus(_job.status))) return;
   cancelRecovery();
   _removedOutputIds.clear();
+  _movedOutputs.clear();
   connectSnapshot(active);
 }
 
@@ -639,6 +646,18 @@ export const jobStore = {
     if (_job) _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
   },
 
+  /**
+   * Replace the current job's outputs that were moved to another project with the assets they now are, and keep doing so
+   * for the outputs the server sends later. A file moved back regains its old ID and shows under it again.
+   */
+  replaceOutputs(moves: readonly MovedAsset[]): void {
+    for (const { from, asset } of moves) {
+      for (const [oldId, current] of _movedOutputs) if (current.id === from) _movedOutputs.set(oldId, asset);
+      _movedOutputs.set(from, asset);
+    }
+    if (_job) _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
+  },
+
   /** Take the response of a submit: follow the job when it is the active one, otherwise add it to the queue. */
   jobSubmitted(ctx: JobContext): void {
     if (ctx.queue_position) {
@@ -715,6 +734,7 @@ export const jobStore = {
   startJob(ctx: JobContext): void {
     cancelRecovery();
     _removedOutputIds.clear();
+    _movedOutputs.clear();
     _job = makeInitialJobState(ctx);
     _previewEventFloor = 0;
     _lastEventId = 0;

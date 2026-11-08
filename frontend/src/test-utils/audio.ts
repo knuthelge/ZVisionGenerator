@@ -16,6 +16,7 @@ export function makeAudioAsset(overrides: Partial<GalleryAsset> = {}): GalleryAs
     thumbnail_url: '/media/out/song.flac',
     filename: 'song.flac',
     created_at: '2026-11-01T12:00:00Z',
+    project: null,
     workflow: 'music',
     prompt: 'Dreamy synth-pop, warm analog pads',
     model: 'yue2',

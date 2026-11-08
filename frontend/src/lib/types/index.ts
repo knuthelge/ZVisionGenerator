@@ -110,6 +110,8 @@ export interface GalleryAsset {
   thumbnail_url: string;
   filename: string;
   created_at: string;
+  /** The project folder the file sits in; null for a file at the top of the output folder. */
+  project: string | null;
   workflow: Workflow | AudioWorkflow;
   prompt: string;
   /** A video's recorded scene (who and where, look, camera); null for images and videos made without one. */
@@ -264,6 +266,8 @@ export interface ExtendSourceInfo {
   extend_frames: number | null;
   window_frames: number | null;
   memory_fit: ClipMemoryFit | null;
+  /** The project folder the source sits in; null when it sits at the top of the output folder or outside it. */
+  output_folder: string | null;
 }
 
 /** How a saved asset was made, as recorded in its embedded settings. */
@@ -1463,6 +1467,8 @@ export interface JobContext {
   height?: number | null;
   /** Form fields the job was submitted with; the submit response omits them, so the Workspace adds them. */
   settings?: JobSettings;
+  /** The project the job saves into (for an Extend, the folder beside its source); null for the top of the output folder, absent on an upscale. */
+  save_project?: string | null;
   /** 1-based place in the queue; null once the job is the active one. */
   queue_position?: number | null;
   /** Short notes about how the job deviates from what was asked, e.g. "original settings unknown". */
@@ -1755,6 +1761,27 @@ export interface GalleryPage {
   page: number;
   total_pages: number;
   total_count: number;
+}
+
+// ── Projects ───────────────────────────────────────────────────────────────────
+
+/** A project: a folder directly under the output folder. */
+export interface Project {
+  name: string;
+  /** Absolute path of the folder on the host. */
+  path: string;
+}
+
+/** One file a move renamed: its old ID and the asset as it now stands. */
+export interface MovedAsset {
+  from: string;
+  asset: GalleryAsset;
+}
+
+/** What a move did: the files it moved, and the ones it could not with the reason. */
+export interface MoveResult {
+  moved: MovedAsset[];
+  failed: { id: string; detail: string }[];
 }
 
 // ── Job log types ──────────────────────────────────────────────────────────────

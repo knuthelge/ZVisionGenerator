@@ -5,17 +5,24 @@ import type { GalleryAsset } from '$lib/types';
 
 import AssetViewer from './AssetViewer.svelte';
 import { escapeLayerOpen } from '$lib/actions/escapeStack';
-import { mountComponent } from '../../../test-utils/mount';
+import { mountComponent, settle } from '../../../test-utils/mount';
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { requestConfirm } from './confirm.svelte';
 
 // The touch layer (neighbour panes) follows the pointer; a test switches it on without a real media query.
-const touch = vi.hoisted(() => ({ coarse: false }));
+const touch = vi.hoisted(() => ({ coarse: false, compact: false }));
 vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
-  return { ...actual, layout: new Proxy(actual.layout, { get: (target, key) => (key === 'coarse' && touch.coarse ? true : Reflect.get(target, key)) }) };
+  return {
+    ...actual,
+    layout: new Proxy(actual.layout, {
+      get: (target, key) => (key === 'coarse' && touch.coarse) || (key === 'compact' && touch.compact) ? true : Reflect.get(target, key),
+    }),
+  };
 });
+const projectApi = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
+vi.mock('$lib/api/projects', () => projectApi);
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -24,6 +31,7 @@ function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
     thumbnail_url: '/media/out/asset-a.png',
     filename: 'asset-a.png',
     created_at: '2026-04-30T12:00:00Z',
+    project: null,
     workflow: 'txt2img',
     prompt: 'Test asset',
     model: 'zit',
@@ -724,5 +732,95 @@ describe('AssetViewer', () => {
         origin.remove();
       }
     });
+  });
+});
+
+describe('AssetViewer Move', () => {
+  const ZOO = { name: 'Zoo', path: '/out/Zoo' };
+  const rows = () => Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitemradio"]'));
+  const moveButton = () => document.querySelector<HTMLButtonElement>('button[data-action="move"]');
+
+  function mountViewer(props: Record<string, unknown> = {}): void {
+    const assets = [makeAsset({ project: 'Night Bus' }), assetB];
+    mountComponent(AssetViewer, { assets, currentId: assets[0].id, open: true, onclose: vi.fn(), onnavigate: vi.fn(), onmove: vi.fn(), ...props });
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    touch.compact = false;
+    projectApi.listProjects.mockReset().mockResolvedValue([{ name: 'Night Bus', path: '/out/Night Bus' }, ZOO]);
+  });
+
+  it('shows a labelled Move button between Use as and Download, and none without a handler', () => {
+    mountViewer({ onreference: vi.fn() });
+    const actions = Array.from(document.querySelectorAll('.viewer-bar [data-action]')).map((el) => el.getAttribute('data-action'));
+    expect(actions.indexOf('move')).toBe(actions.indexOf('download') - 1);
+    expect(moveButton()?.title).toBe('Move to project');
+    expect(moveButton()?.textContent).toContain('Move');
+    expect(moveButton()?.getAttribute('aria-haspopup')).toBe('menu');
+  });
+
+  it('has no Move button when nothing handles a move', async () => {
+    mountViewer({ onmove: undefined });
+    expect(moveButton()).toBeNull();
+  });
+
+  it('opens the project list at the button, with the current project checked and disabled', async () => {
+    mountViewer();
+    moveButton()!.click();
+    await settle();
+
+    expect(moveButton()?.getAttribute('aria-expanded')).toBe('true');
+    const checked = rows().find((row) => row.getAttribute('aria-checked') === 'true')!;
+    expect(checked.textContent?.trim()).toBe('Night Bus');
+    expect(checked.getAttribute('aria-disabled')).toBe('true');
+    expect(document.querySelector('.action-menu-heading')?.textContent).toBe('Move to');
+  });
+
+  it('moves the open asset to the chosen project', async () => {
+    const onmove = vi.fn();
+    mountViewer({ onmove });
+    moveButton()!.click();
+    await settle();
+    rows().find((row) => row.textContent?.trim() === 'Zoo')!.click();
+    await settle();
+
+    expect(onmove).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 'Zoo');
+  });
+
+  it('opens the list at the toolbar button when Move is chosen from the right-click menu', async () => {
+    mountViewer();
+    const anchorRect = vi.spyOn(moveButton()!, 'getBoundingClientRect');
+    document.querySelector('.viewer-stage')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 200 }));
+    await settle();
+    document.querySelector<HTMLElement>('[role="menu"] [data-action="move"]')!.click();
+    await settle();
+
+    expect(rows().map((row) => row.textContent?.trim())).toEqual(['No project', 'Night Bus', 'Zoo']);
+    expect(document.querySelectorAll('[role="menu"]')).toHaveLength(1);
+    expect(anchorRect).toHaveBeenCalled();
+  });
+
+  it('leaves the viewer keys alone while the Move list is open', async () => {
+    const onnavigate = vi.fn();
+    mountViewer({ onnavigate });
+    moveButton()!.click();
+    await settle();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+
+    expect(onnavigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps Move in the actions sheet on a phone, with no toolbar button and no heading', async () => {
+    touch.compact = true;
+    mountViewer();
+    expect(moveButton()).toBeNull();
+    document.querySelector<HTMLButtonElement>('button[data-action="more"]')!.click();
+    await settle();
+    document.querySelector<HTMLElement>('[role="menu"] [data-action="move"]')!.click();
+    await settle();
+
+    expect(rows().map((row) => row.textContent?.trim())).toEqual(['No project', 'Night Bus', 'Zoo']);
+    expect(document.querySelector('.action-menu-heading')).toBeNull();
   });
 });

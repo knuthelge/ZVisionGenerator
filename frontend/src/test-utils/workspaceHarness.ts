@@ -60,7 +60,7 @@ export function resetWorkspaceTest(): void {
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.planGenerate, workspaceApiMocks.getJobSnapshot,
     galleryApiMocks.getGallery, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.checkReferencePaths, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
-    videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
+    videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset, galleryApiMocks.moveAssets,
   ]) mock.mockReset();
   recentPromptsApiMocks.getRecentPrompts.mockReset();
   recentPromptsApiMocks.getRecentPrompts.mockResolvedValue({ entries: [] });

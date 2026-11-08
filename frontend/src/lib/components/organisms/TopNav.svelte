@@ -5,6 +5,7 @@
   import { isReviewing } from '$lib/state/jobView';
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import { Badge, Icon, MascotHome, Wordmark } from '$lib/components/atoms';
+  import ProjectPicker from '$lib/components/molecules/ProjectPicker.svelte';
   import { navTab, visibleTabs } from '$lib/state/workspaceTab';
   import type { PageId, WorkspaceWorkflow } from '$lib/types';
 
@@ -38,6 +39,8 @@
       <Wordmark height={13.4} />
       <span class="sr-only">Z-Vision</span>
     </h1>
+
+    <ProjectPicker variant="nav" tight={currentPage === 'workspace'} />
 
     {#if currentPage === 'workspace'}
       <nav class="workflow-tabs" aria-label="Workflow">
@@ -77,7 +80,7 @@
 
 <style>
   .app-nav { display: flex; align-items: stretch; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 16px; flex-shrink: 0; background: color-mix(in srgb, var(--color-bg-overlay) 70%, black); }
-  .nav-workflows { display: flex; align-items: stretch; gap: 24px; min-width: 0; }
+  .nav-workflows { display: flex; align-items: stretch; gap: 16px; min-width: 0; }
   .brand { align-self: center; }
   /* Underline tabs that run the full bar height, so the active line sits on the bar's bottom edge. */
   .workflow-tabs, .main-tabs { display: flex; align-items: stretch; gap: 2px; }
@@ -94,7 +97,7 @@
      Review badge): the wordmark goes (the mascot and the screen-reader name stay) and the tabs sit closer. */
   @media (max-width: 1000px) {
     .app-nav { gap: 8px; padding: 0 12px; }
-    .nav-workflows { gap: 16px; }
+    .nav-workflows { gap: 8px; }
     .brand :global(.wordmark) { display: none; }
     .nav-tab { padding: 0 6px; }
     .nav-icon { padding: 0 10px; }

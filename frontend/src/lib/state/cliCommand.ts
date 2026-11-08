@@ -36,6 +36,11 @@ export interface CliCommandOptions {
   upscaleSharpenDefault?: boolean;
 }
 
+/** Where a copied command saves: the Extend source's folder, else the picked project's folder, else the output root. */
+export function cliOutputDir(folders: { root?: string | null; projectPath?: string | null; extendFolder?: string | null }): string | null {
+  return folders.extendFolder || folders.projectPath || folders.root || null;
+}
+
 const SAFE_ARG = /^[A-Za-z0-9_\-+=.,:/@%]+$/;
 
 /** Quote an argument for a POSIX shell; plain words stay bare. */

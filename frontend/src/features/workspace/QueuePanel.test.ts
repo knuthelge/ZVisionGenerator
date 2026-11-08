@@ -60,6 +60,15 @@ describe('QueuePanel', () => {
     expect(rows[1]).toContain('zit');
   });
 
+  it('names the project a queued job saves into, only when it has one', () => {
+    mountPanel([makeJob({ save_project: 'Night Bus' }), makeJob({ id: 'job-2', job_id: 'job-2', save_project: null }), makeJob({ id: 'job-3', job_id: 'job-3' })]);
+
+    const rows = Array.from(target.querySelectorAll('.queue-item'));
+    expect(rows[0].querySelector('[data-testid="queue-project"]')?.textContent?.trim()).toBe('Night Bus');
+    expect(rows[1].querySelector('[data-testid="queue-project"]')).toBeNull();
+    expect(rows[2].querySelector('[data-testid="queue-project"]')).toBeNull();
+  });
+
   it('labels a queued upscale and offers no settings to load', () => {
     mountPanel([makeJob({ workflow: 'upscale', job_type: 'Upscale', prompt: '', settings: {}, meta: '2× → 1664×2432' })]);
 

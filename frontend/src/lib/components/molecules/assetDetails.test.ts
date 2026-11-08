@@ -27,10 +27,17 @@ describe('describeUpscale', () => {
 
 describe('assetDetailSections', () => {
   const clip = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => ({
-    id: 'out/c.mp4', url: '/media/out/c.mp4', thumbnail_url: '/media/out/c.mp4', filename: 'c.mp4', created_at: '2026-10-03T12:00:00Z',
+    id: 'out/c.mp4', url: '/media/out/c.mp4', thumbnail_url: '/media/out/c.mp4', filename: 'c.mp4', created_at: '2026-10-03T12:00:00Z', project: null,
     workflow: 'img2vid', prompt: 'a fox', model: 'h3', media_type: 'video', reuse_workspace_url: '', ...overrides,
   });
   const labels = (asset: GalleryAsset) => assetDetailSections(asset).generation.map((fact) => fact.label);
+
+  it('leads the file facts with the project, or No project, for an image and a video', () => {
+    const fileFacts = (asset: GalleryAsset) => assetDetailSections(asset).file;
+    expect(fileFacts(clip({ project: 'Night Bus' }))[0]).toEqual({ label: 'Project', value: 'Night Bus', wide: true, wrap: true });
+    expect(fileFacts(clip())[0]).toEqual({ label: 'Project', value: 'No project', wide: true, wrap: true });
+    expect(fileFacts(clip({ media_type: 'image', project: 'Night Bus' }))[0].value).toBe('Night Bus');
+  });
 
   it('lists the last frame after the first frame, by file name', () => {
     const asset = clip({ image_path: '/in/start.png', end_image_path: '/in/end.png' });
@@ -76,6 +83,12 @@ describe('assetDetailSections for an audio take', () => {
   const facts = (asset: GalleryAsset, vocabulary = AUDIO_SETTINGS): Record<string, string> =>
     Object.fromEntries(assetDetailSections(asset, undefined, vocabulary).generation.map((fact) => [fact.label, fact.value]));
   const excited = AUDIO_SETTINGS.vibes.find((vibe) => vibe.id === 'excited-host')!;
+
+  it('leads the file facts of a take with its project, or No project', () => {
+    const fileFacts = (asset: GalleryAsset) => assetDetailSections(asset, undefined, AUDIO_SETTINGS).file;
+    expect(fileFacts(makeAudioAsset({ project: 'Night Bus' }))[0]).toMatchObject({ label: 'Project', value: 'Night Bus', wrap: true });
+    expect(fileFacts(makeAudioAsset({ project: null }))[0]).toMatchObject({ label: 'Project', value: 'No project' });
+  });
 
   it('joins the tempo and the key of a song in one fact, with the key named as the client names it', () => {
     expect(facts(makeAudioAsset({ tempo: 92, key: 'Am' }))['Tempo · Key']).toBe('92 BPM · A minor');

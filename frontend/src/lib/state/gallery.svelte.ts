@@ -1,8 +1,11 @@
-import type { GalleryAsset } from '$lib/types';
+import type { GalleryAsset, MovedAsset } from '$lib/types';
 import { getGallery } from '$lib/api/gallery';
 import { keepLoadedTail } from '$lib/state/pageMerge';
+import { inProject, projectPick } from '$lib/state/projectPick.svelte';
+import { filterAdmits, type MediaFilter } from '$lib/state/galleryFilter';
+import { applyMovesToView } from '$lib/state/viewMoves';
 
-export type MediaFilter = 'all' | 'image' | 'video' | 'audio';
+export type { MediaFilter };
 export type SortOrder = 'newest' | 'oldest';
 
 /** What a Gallery view shows: the media it keeps and the order it runs in. */
@@ -31,9 +34,13 @@ export function queryKey(query: GalleryQuery): string {
 const DEFAULT_KEY = queryKey(DEFAULT_QUERY);
 const EMPTY_VIEW: GalleryView = Object.freeze({ assets: [], page: 1, totalPages: 1, totalCount: null });
 
-// One list per query. The default one is the strip's and the stage's, and the store loads it; the Gallery page
-// loads the others and commits them here, so every page shows the same list and a visit comes back where it was.
+// One list per query, all scoped to the picked project (the picker resets them when the pick changes). The default one
+// is the strip's and the stage's, and the store loads it; the Gallery page loads the others and commits them here, so
+// every page shows the same list and a visit comes back where it was.
 let _views = $state<Record<string, GalleryView>>({});
+// Page one of the whole Gallery, newest first, for what ignores the pick (recent LoRAs, the last seed). Only
+// kept apart while a project is picked; with All files the default view is that list.
+let _recent = $state<GalleryAsset[]>([]);
 let _loading = $state(false);
 let _loadingMore = $state(false);
 let _pageSize = $state<number | null>(null);
@@ -56,6 +63,16 @@ function appendNew(assets: GalleryAsset[]): number {
   return fresh.length;
 }
 
+/** Fetch the unscoped recent list; a stale or failed response changes nothing. */
+async function loadRecent(generation: number): Promise<void> {
+  try {
+    const page = await getGallery(1, DEFAULT_QUERY.filter, DEFAULT_QUERY.sort);
+    if (generation === _generation) _recent = page.assets;
+  } catch {
+    // ignore: the recent list stays as it was
+  }
+}
+
 export const galleryStore = {
   /** The list a query shows; empty until it has been loaded. */
   view(query: GalleryQuery = DEFAULT_QUERY): GalleryView {
@@ -67,7 +84,10 @@ export const galleryStore = {
     _views[queryKey(query)] = view;
   },
 
-  /** Drop every list (tests). */
+  /**
+   * Drop every list and the paging state, and drop responses still on their way. The picker calls it when the pick
+   * changes. The unscoped recent list stays, as it does not follow the pick.
+   */
   reset(): void {
     _views = {};
     _loading = false;
@@ -81,6 +101,11 @@ export const galleryStore = {
   get loading(): boolean { return _loading; },
   get loadingMore(): boolean { return _loadingMore; },
   get totalCount(): number | null { return defaultView().totalCount; },
+  /**
+   * The newest assets of the whole Gallery whatever project is picked: where the recent LoRAs and the last seed come
+   * from. With All files that is the default view; with a project it is its own unfiltered request, made by `refresh`.
+   */
+  get allRecent(): GalleryAsset[] { return projectPick.current === null ? defaultView().assets : _recent; },
   get hasMore(): boolean {
     const { assets, totalCount } = defaultView();
     return totalCount !== null && _pageSize !== null && assets.length < totalCount;
@@ -92,18 +117,21 @@ export const galleryStore = {
   },
 
   /**
-   * Put a finished job's outputs at the front of every newest-first list whose filter admits them. An oldest-first
-   * list would need its last page for them, so it is dropped and its next visit reloads it.
+   * Put a finished job's outputs at the front of every newest-first list whose filter admits them. Outputs from
+   * another project than the pick are left out. An oldest-first list would need its last page for them, so it is
+   * dropped and its next visit reloads it.
    */
   mergeOutputs(assets: GalleryAsset[]): void {
-    if (assets.length === 0) return;
-    const newestFirst = [...assets].reverse();
+    const pick = projectPick.current;
+    const scoped = assets.filter((asset) => inProject(asset, pick));
+    if (scoped.length === 0) return;
+    const newestFirst = [...scoped].reverse();
     const next: Record<string, GalleryView> = {};
     for (const key of new Set([DEFAULT_KEY, ...Object.keys(_views)])) {
       const [filter, sort] = key.split('|') as [MediaFilter, SortOrder];
       if (sort !== 'newest') continue;
       const view = _views[key] ?? EMPTY_VIEW;
-      const incoming = newestFirst.filter((asset) => filter === 'all' || asset.media_type === filter);
+      const incoming = newestFirst.filter((asset) => filterAdmits(filter, asset));
       const incomingIds = new Set(incoming.map((asset) => asset.id));
       const added = incoming.filter((asset) => !view.assets.some((item) => item.id === asset.id)).length;
       next[key] = {
@@ -119,23 +147,45 @@ export const galleryStore = {
   removeAssets(removed: readonly GalleryAsset[]): void {
     if (removed.length === 0) return;
     const removedIds = new Set(removed.map((asset) => asset.id));
+    _recent = _recent.filter((asset) => !removedIds.has(asset.id));
     for (const key of Object.keys(_views)) {
       const view = _views[key];
       const filter = key.split('|')[0] as MediaFilter;
       const assets = view.assets.filter((asset) => !removedIds.has(asset.id));
       // A list is shorter by every removed asset its filter admits, whether or not it had loaded it yet.
-      const gone = removed.filter((asset) => filter === 'all' || asset.media_type === filter).length;
+      const gone = removed.filter((asset) => filterAdmits(filter, asset)).length;
       if (gone === 0 && assets.length === view.assets.length) continue;
       _views[key] = { ...view, assets, totalCount: view.totalCount === null ? null : Math.max(0, view.totalCount - gone) };
     }
   },
 
-  /** Reload page one of the default view, keeping the pages loaded after it. */
+  /** Update every loaded list after files moved between projects: see `applyMovesToView`. */
+  applyMoves(moves: readonly MovedAsset[]): void {
+    if (moves.length === 0) return;
+    const pick = projectPick.current;
+    // A file moved out of every project now belongs to the Not in a project list, at a place only its next load knows.
+    const joinsUnsorted = moves.some((move) => move.asset.project === null);
+    for (const key of Object.keys(_views)) {
+      const filter = key.split('|')[0] as MediaFilter;
+      if (filter === 'no_project' && joinsUnsorted) delete _views[key];
+      else _views[key] = applyMovesToView(_views[key], filter, moves, pick);
+    }
+    // The recent list ignores the pick, so a moved file stays in it under its new ID.
+    const byOldId = new Map(moves.map((move) => [move.from, move.asset]));
+    if (_recent.some((asset) => byOldId.has(asset.id))) _recent = _recent.map((asset) => byOldId.get(asset.id) ?? asset);
+  },
+
+  /**
+   * Reload page one of the default view for the picked project, keeping the pages loaded after it. With a project
+   * picked it also loads the unscoped recent list, in the same round.
+   */
   async refresh(): Promise<void> {
     _loading = true;
     const generation = ++_generation;
+    const pick = projectPick.current;
+    const recentLoad = pick === null ? null : loadRecent(generation);
     try {
-      const page = await getGallery(1, DEFAULT_QUERY.filter, DEFAULT_QUERY.sort);
+      const page = await getGallery(1, DEFAULT_QUERY.filter, DEFAULT_QUERY.sort, pick);
       if (generation !== _generation) return;
       // Keep tiles loaded past page one so a refresh does not snap a scrolled strip back to the start.
       const current = defaultView();
@@ -144,11 +194,15 @@ export const galleryStore = {
       setDefault({ assets, page: assets.length > page.assets.length ? current.page : page.page, totalPages: page.total_pages, totalCount: page.total_count });
       // Page one is full whenever more pages follow, so its length is the server's page size.
       if (page.total_pages > 1) _pageSize = page.assets.length;
+      // Without a pick the default view is the whole Gallery. Keeping its page one lets a later pick start with
+      // recent LoRAs and a last seed already in hand.
+      if (pick === null) _recent = page.assets;
     } catch {
       // ignore refresh errors
     } finally {
       if (generation === _generation) _loading = false;
     }
+    await recentLoad;
   },
 
   /** Append the next page of older assets to the default view, skipping pages that hold only assets already shown. */
@@ -160,7 +214,7 @@ export const galleryStore = {
     let pageNumber = Math.floor(defaultView().assets.length / _pageSize) + 1;
     try {
       for (;;) {
-        const page = await getGallery(pageNumber, DEFAULT_QUERY.filter, DEFAULT_QUERY.sort);
+        const page = await getGallery(pageNumber, DEFAULT_QUERY.filter, DEFAULT_QUERY.sort, projectPick.current);
         if (generation !== _generation) return;
         setDefault({ totalCount: page.total_count, page: page.page, totalPages: page.total_pages });
         if (appendNew(page.assets) > 0 || pageNumber >= page.total_pages) return;

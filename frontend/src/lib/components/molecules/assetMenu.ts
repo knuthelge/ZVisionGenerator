@@ -6,7 +6,9 @@ import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
 /**
- * Build the actions for an asset's menu: reuse, use as, extend, upscale, download, delete.
+ * Build the actions for an asset's menu: reuse, use as, extend, upscale, move, download, delete.
+ *
+ * `openMove` opens the Move to project list; the Move item is offered when it is given.
  *
  * Reuse leads when offered: on a touch screen a grid tile shows only the menu button, so the menu is where the
  * tile's quick action lives.
@@ -15,7 +17,8 @@ export function assetMenuEntries(
   asset: GalleryAsset,
   handlers: AssetActionHandlers,
   deleting = false,
-  useAs: UseAsState = {}
+  useAs: UseAsState = {},
+  openMove?: () => void
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
   const { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete } = handlers;
@@ -48,6 +51,8 @@ export function assetMenuEntries(
   if (upscaleItems.length > 0) {
     entries.push({ kind: 'heading', label: 'Upscale' }, ...upscaleItems, { kind: 'separator' });
   }
+  // Move opens the project list, which the menu's owner holds: this menu closes first, so it cannot host the list.
+  if (openMove) entries.push({ kind: 'item', id: 'move', label: 'Move to project…', disabled: deleting, onselect: openMove });
   entries.push({ kind: 'item', id: 'download', label: 'Download', href: asset.url, download: asset.filename });
   if (ondelete) {
     entries.push(

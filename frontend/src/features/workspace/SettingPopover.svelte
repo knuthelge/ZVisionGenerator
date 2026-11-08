@@ -170,7 +170,7 @@
   }
 
   // --- Seed ---
-  const latestSeed = $derived(galleryStore.assets[0]?.seed ?? null);
+  const latestSeed = $derived(galleryStore.allRecent[0]?.seed ?? null);
 
   // --- LoRAs ---
   const loraOptions = $derived(context.loras);
@@ -178,7 +178,7 @@
   const addable = $derived(loraOptions.filter((lora) => !loraChips.some((chip) => chip.name === lora.name)));
   // The LoRAs that fit the model lead; the rest fold under "Other models", open from the start only when nothing else is offered.
   const loraModel = $derived(modelLoraFamily(context, s.model));
-  const loraGroups = $derived(groupLorasForModel(addable, loraModel, recentLoraNames(galleryStore.assets, loraModel?.family ?? null, loraOptions)));
+  const loraGroups = $derived(groupLorasForModel(addable, loraModel, recentLoraNames(galleryStore.allRecent, loraModel?.family ?? null, loraOptions)));
   let otherToggled = $state<boolean | null>(null);
   const otherOpen = $derived(otherToggled ?? loraGroups.main.length === 0);
   $effect(() => {

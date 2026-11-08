@@ -184,7 +184,7 @@ describe('WorkspacePage', () => {
 
     expect(workspaceApiMocks.getWorkspaceCoreContext).toHaveBeenCalledTimes(1);
     expect(workspaceApiMocks.getWorkspaceContext).not.toHaveBeenCalled();
-    expect(galleryApiMocks.getGallery).toHaveBeenCalledWith(1, 'all', 'newest');
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledWith(1, 'all', 'newest', null);
     expect(target.querySelector(`button[aria-label="View ${asset.filename}"]`)).not.toBeNull();
   });
 

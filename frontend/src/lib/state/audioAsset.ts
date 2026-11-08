@@ -22,9 +22,13 @@ export function takeWords(asset: GalleryAsset): string {
   return asset.kind == null ? '' : (asset.prompt ?? '').trim();
 }
 
-/** The foot's second line: `music · 01/11/2026`, or `audio · no settings` for a file this app did not make. */
-export function audioFoot(asset: GalleryAsset, date: string): string {
-  return asset.kind == null ? 'audio · no settings' : `${asset.kind} · ${date}`;
+/**
+ * The foot's second line: `music · 01/11/2026`, or `audio · no settings` for a file this app did not make. With
+ * `showProject`, a file in a project leads with the project's name in place of the kind word.
+ */
+export function audioFoot(asset: GalleryAsset, date: string, showProject = false): string {
+  const lead = showProject && asset.project !== null ? asset.project : (asset.kind ?? 'audio');
+  return asset.kind == null ? `${lead} · no settings` : `${lead} · ${date}`;
 }
 
 /** Whether a tile has nothing to read: a file without settings, or one whose words are empty. It shows only its icon and waveform. */

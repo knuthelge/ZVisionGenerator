@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryAsset, GalleryPage } from '$lib/types';
 
-const getGallery = vi.fn<(page?: number, filter?: string, sort?: string) => Promise<GalleryPage>>();
-vi.mock('$lib/api/gallery', () => ({ getGallery: (page?: number, filter?: string, sort?: string) => getGallery(page, filter, sort) }));
+const getGallery = vi.fn<(page?: number, filter?: string, sort?: string, project?: string | null) => Promise<GalleryPage>>();
+vi.mock('$lib/api/gallery', () => ({
+  getGallery: (page?: number, filter?: string, sort?: string, project?: string | null) => getGallery(page, filter, sort, project),
+}));
 
 type Store = typeof import('./gallery.svelte').galleryStore;
 
 const PAGE_SIZE = 3;
 
-function asset(id: number, media_type: 'image' | 'video' | 'audio' = 'image'): GalleryAsset {
-  return { id: `a${id}`, media_type } as GalleryAsset;
+function asset(id: number, media_type: 'image' | 'video' | 'audio' = 'image', project: string | null = null): GalleryAsset {
+  return { id: `a${id}`, media_type, project } as GalleryAsset;
 }
 
 /** Serve newest-first pages over `count` assets numbered from the newest. */
@@ -26,11 +28,15 @@ function serve(count: number): void {
 const ids = (store: Store): string[] => store.assets.map((item) => item.id);
 
 let store: Store;
+let pickProject: (name: string | null) => void;
 
 beforeEach(async () => {
   vi.resetModules();
+  localStorage.clear();
   getGallery.mockReset();
   store = (await import('./gallery.svelte')).galleryStore;
+  const { projectPick } = await import('./projectPick.svelte');
+  pickProject = (name) => projectPick.set(name);
 });
 
 describe('galleryStore paging', () => {
@@ -43,13 +49,13 @@ describe('galleryStore paging', () => {
   it('appends the next page after page one, from the whole gallery newest first', async () => {
     serve(7);
     await store.refresh();
-    expect(getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest');
+    expect(getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest', null);
     expect(store.hasMore).toBe(true);
     expect(store.totalCount).toBe(7);
 
     await store.loadMore();
     expect(ids(store)).toEqual(['a0', 'a1', 'a2', 'a3', 'a4', 'a5']);
-    expect(getGallery).toHaveBeenLastCalledWith(2, 'all', 'newest');
+    expect(getGallery).toHaveBeenLastCalledWith(2, 'all', 'newest', null);
 
     await store.loadMore();
     expect(ids(store)).toEqual(['a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6']);
@@ -176,5 +182,189 @@ describe('galleryStore audio filter', () => {
     expect(ids(store)).toEqual(['a0', 'a1']);
     expect(store.view(audio).assets.map((item) => item.id)).toEqual(['a1', 'a3']);
     expect(store.view(images).assets.map((item) => item.id)).toEqual(['a0', 'a4']);
+  });
+});
+
+describe('galleryStore project scope', () => {
+  const view = (assets: GalleryAsset[], totalCount: number | null = assets.length) => ({ assets, page: 1, totalPages: 1, totalCount });
+
+  it('asks for the picked project on refresh and on load more', async () => {
+    pickProject('A');
+    getGallery.mockImplementation(async (page = 1, _filter, _sort, project) => ({
+      assets: project === 'A' ? [asset(page * 10, 'image', 'A'), asset(page * 10 + 1, 'image', 'A')] : [asset(99)],
+      page,
+      total_pages: 3,
+      total_count: 6,
+    }));
+    await store.refresh();
+    expect(getGallery).toHaveBeenCalledWith(1, 'all', 'newest', 'A');
+    await store.loadMore();
+    expect(getGallery).toHaveBeenLastCalledWith(2, 'all', 'newest', 'A');
+    expect(ids(store)).toEqual(['a10', 'a11', 'a20', 'a21']);
+  });
+
+  it('makes one request with All files, and the default view is the recent list', async () => {
+    serve(4);
+    await store.refresh();
+    expect(getGallery).toHaveBeenCalledTimes(1);
+    expect(store.allRecent).toBe(store.assets);
+    expect(store.allRecent.map((item) => item.id)).toEqual(['a0', 'a1', 'a2']);
+  });
+
+  it('makes a second, unfiltered request with a project and keeps its assets as the recent list', async () => {
+    pickProject('A');
+    getGallery.mockImplementation(async (_page, _filter, _sort, project) => ({
+      assets: project === 'A' ? [asset(1, 'image', 'A')] : [asset(7, 'image', 'B'), asset(1, 'image', 'A')],
+      page: 1,
+      total_pages: 1,
+      total_count: project === 'A' ? 1 : 2,
+    }));
+    await store.refresh();
+    expect(getGallery).toHaveBeenCalledTimes(2);
+    expect(getGallery).toHaveBeenCalledWith(1, 'all', 'newest', undefined);
+    expect(ids(store)).toEqual(['a1']);
+    expect(store.allRecent.map((item) => item.id)).toEqual(['a7', 'a1']);
+  });
+
+  it('ignores a failed recent request and keeps the scoped list', async () => {
+    pickProject('A');
+    getGallery.mockImplementation(async (_page, _filter, _sort, project) => {
+      if (project === 'A') return { assets: [asset(1, 'image', 'A')], page: 1, total_pages: 1, total_count: 1 };
+      throw new Error('offline');
+    });
+    await store.refresh();
+    expect(ids(store)).toEqual(['a1']);
+    expect(store.allRecent).toEqual([]);
+  });
+
+  it('drops a recent response that a newer refresh overtook', async () => {
+    pickProject('A');
+    let release: (page: GalleryPage) => void = () => {};
+    getGallery.mockImplementationOnce(async () => ({ assets: [asset(1, 'image', 'A')], page: 1, total_pages: 1, total_count: 1 }));
+    getGallery.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const first = store.refresh();
+    getGallery.mockImplementation(async (_page, _filter, _sort, project) => ({
+      assets: project === 'A' ? [asset(2, 'image', 'A')] : [asset(8)],
+      page: 1,
+      total_pages: 1,
+      total_count: 1,
+    }));
+    await store.refresh();
+    release({ assets: [asset(42)], page: 1, total_pages: 1, total_count: 1 });
+    await first;
+    expect(store.allRecent.map((item) => item.id)).toEqual(['a8']);
+  });
+
+  it('keeps the recent list through a reset, as it does not follow the pick', async () => {
+    serve(3);
+    await store.refresh();
+    pickProject('A');
+    store.reset();
+    expect(store.assets).toEqual([]);
+    expect(store.allRecent.map((item) => item.id)).toEqual(['a0', 'a1', 'a2']);
+  });
+
+  it('leaves out outputs from another project, and admits all with All files', () => {
+    pickProject('A');
+    store.setView({ filter: 'all', sort: 'newest' }, view([asset(5, 'image', 'A')]));
+    store.mergeOutputs([asset(1, 'image', 'B'), asset(2, 'image', 'A'), asset(3, 'image', null)]);
+    expect(ids(store)).toEqual(['a2', 'a5']);
+    expect(store.totalCount).toBe(2);
+
+    pickProject(null);
+    store.mergeOutputs([asset(1, 'image', 'B'), asset(3, 'image', null)]);
+    expect(ids(store)).toEqual(['a3', 'a1', 'a2', 'a5']);
+  });
+
+  it('replaces a moved asset in place with All files, keeping the count', () => {
+    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1), asset(2), asset(3)], 9));
+    store.applyMoves([{ from: 'a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } }]);
+    expect(ids(store)).toEqual(['a1', 'B/a2', 'a3']);
+    expect(store.totalCount).toBe(9);
+  });
+
+  it('removes a file moved out of the picked project and lowers every count that admits it', () => {
+    pickProject('A');
+    const videos = { filter: 'video' as const, sort: 'newest' as const };
+    const images = { filter: 'image' as const, sort: 'newest' as const };
+    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1, 'image', 'A'), asset(2, 'video', 'A'), asset(3, 'image', 'A')], 8));
+    store.setView(videos, view([asset(2, 'video', 'A')], 3));
+    store.setView(images, view([asset(1, 'image', 'A'), asset(3, 'image', 'A')], 5));
+
+    store.applyMoves([{ from: 'a2', asset: { ...asset(2, 'video'), id: 'B/a2', project: 'B' } }]);
+    expect(ids(store)).toEqual(['a1', 'a3']);
+    expect(store.totalCount).toBe(7);
+    expect(store.view(videos).assets).toEqual([]);
+    expect(store.view(videos).totalCount).toBe(2);
+    // The image list does not admit a video: untouched.
+    expect(store.view(images).totalCount).toBe(5);
+  });
+
+  it('keeps a file moved into the picked project under its new ID, and counts one it never loaded', () => {
+    pickProject('A');
+    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1, 'image', 'A'), asset(2, 'image', 'A')], 6));
+    store.applyMoves([
+      { from: 'a2', asset: { ...asset(2), id: 'A/a2', project: 'A' } },
+      { from: 'a9', asset: { ...asset(9), id: 'B/a9', project: 'B' } },
+    ]);
+    expect(ids(store)).toEqual(['a1', 'A/a2']);
+    expect(store.totalCount).toBe(5);
+  });
+
+  it('keeps a moved file in the unscoped recent list under its new ID', async () => {
+    pickProject('A');
+    getGallery.mockImplementation(async (_page, _filter, _sort, project) => ({
+      assets: project === 'A' ? [asset(1, 'image', 'A')] : [asset(1, 'image', 'A'), asset(2, 'image', 'B')],
+      page: 1,
+      total_pages: 1,
+      total_count: 1,
+    }));
+    await store.refresh();
+    store.applyMoves([{ from: 'a1', asset: { ...asset(1), id: 'B/a1', project: 'B' } }]);
+    expect(store.allRecent.map((item) => item.id)).toEqual(['B/a1', 'a2']);
+  });
+});
+
+describe('galleryStore Not in a project list', () => {
+  const unsorted = { filter: 'no_project' as const, sort: 'newest' as const };
+  const view = (assets: GalleryAsset[], totalCount: number | null = assets.length) => ({ assets, page: 1, totalPages: 1, totalCount });
+
+  it('takes new outputs only when they sit in no project', () => {
+    store.setView(unsorted, view([asset(1)], 1));
+    store.mergeOutputs([asset(2, 'image', null), asset(3, 'image', 'A')]);
+    expect(store.view(unsorted).assets.map((item) => item.id)).toEqual(['a2', 'a1']);
+    expect(store.view(unsorted).totalCount).toBe(2);
+  });
+
+  it('lowers its count when a file in no project is deleted, whatever the media', () => {
+    store.setView(unsorted, view([asset(1), asset(2, 'video')], 5));
+    store.removeAssets([asset(2, 'video'), asset(3, 'image', 'A')]);
+    expect(store.view(unsorted).assets.map((item) => item.id)).toEqual(['a1']);
+    expect(store.view(unsorted).totalCount).toBe(4);
+  });
+
+  it('drops a file moved into a project, and lowers the count', () => {
+    store.setView(unsorted, view([asset(1), asset(2), asset(3)], 7));
+    store.applyMoves([{ from: 'a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } }]);
+    expect(store.view(unsorted).assets.map((item) => item.id)).toEqual(['a1', 'a3']);
+    expect(store.view(unsorted).totalCount).toBe(6);
+  });
+
+  it('lowers its count only for the files it had loaded', () => {
+    store.setView(unsorted, view([asset(1), asset(2)], 7));
+    store.applyMoves([
+      { from: 'a2', asset: { ...asset(2), id: 'B/a2', project: 'B' } },
+      { from: 'a9', asset: { ...asset(9), id: 'B/a9', project: 'B' } },
+    ]);
+    expect(store.view(unsorted).assets.map((item) => item.id)).toEqual(['a1']);
+    expect(store.view(unsorted).totalCount).toBe(6);
+  });
+
+  it('is dropped, to load again, when a file moves out of every project', () => {
+    store.setView(unsorted, view([asset(1)], 1));
+    store.setView({ filter: 'all', sort: 'newest' }, view([asset(1), { ...asset(2), id: 'B/a2', project: 'B' }], 2));
+    store.applyMoves([{ from: 'B/a2', asset: asset(2) }]);
+    expect(store.view(unsorted).totalCount).toBeNull();
+    expect(ids(store)).toEqual(['a1', 'a2']);
   });
 });

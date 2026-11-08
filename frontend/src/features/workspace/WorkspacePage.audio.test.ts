@@ -6,6 +6,7 @@ import { trackLengths } from '$lib/state/audioTrackLength.svelte';
 import { draft } from '$lib/state/draft.svelte';
 import { downloadedTiers } from '$lib/state/enhancerDownload.svelte';
 import { heldUploads } from '$lib/state/heldUploads.svelte';
+import { projectPick } from '$lib/state/projectPick.svelte';
 import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { voiceConsent } from '$lib/state/voiceConsent.svelte';
 import type { AudioEnhanceFrame, AudioRewrites, DraftState, GalleryAsset, JobContext, WorkspaceContext } from '$lib/types';
@@ -263,6 +264,22 @@ describe('the Audio tab', () => {
       expect(Object.fromEntries(sent.entries())).toEqual({ mode: 'audio', workflow: 'music', model: 'yue2', prompt: 'Dreamy synth-pop', lyrics: '[verse]\nla la', tempo: '', key: '', runs: '2', seed: '7' });
       // The plan that asks about downloads reads the same form.
       expect(workspaceApiMocks.planGenerate.mock.calls.at(-1)?.[0].get('mode')).toBe('audio');
+    });
+  });
+
+  describe('the picked project', () => {
+    afterEach(() => projectPick.set(null));
+
+    it('is sent with an audio job, and left out with All files', async () => {
+      await mountAudio('music');
+      await typeInto('ws-audio-style', 'Dreamy synth-pop');
+      await settle();
+
+      expect((await submitForm(target)).has('project')).toBe(false);
+
+      projectPick.set('Night Bus');
+      await settle();
+      expect((await submitForm(target)).get('project')).toBe('Night Bus');
     });
   });
 

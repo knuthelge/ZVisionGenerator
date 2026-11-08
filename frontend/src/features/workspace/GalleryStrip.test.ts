@@ -31,6 +31,7 @@ function makeAsset(id: string): GalleryAsset {
     thumbnail_url: `/media/${id}`,
     filename: id,
     created_at: '2026-04-24T12:00:00Z',
+    project: null,
     workflow: 'txt2img',
     prompt: 'A calm shoreline at dusk',
     model: 'zit',

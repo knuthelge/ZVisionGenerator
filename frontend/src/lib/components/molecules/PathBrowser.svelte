@@ -4,6 +4,7 @@
   import { Button, Icon, Toggle } from '$lib/components/atoms';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { projectsStore } from '$lib/state/projects.svelte';
   import {
     breadcrumbs,
     DEFAULT_BROWSE_VIEW,
@@ -15,6 +16,7 @@
     jumpToLetter,
     middleTruncate,
     orderAfterClick,
+    pickerStart,
     readBrowseView,
     readRecentPaths,
     readShowHidden,
@@ -131,8 +133,10 @@
   $effect(() => {
     if (!open) return;
     const name = purpose;
-    const start = initialPath ?? '';
+    const given = initialPath;
     untrack(() => {
+      // An empty field opens in the picked project's folder; reading the pick here keeps an open browser from resetting when it changes.
+      const start = given || pickerStart(name, projectsStore.currentPath) || '';
       history = [];
       filter = '';
       showAll = false;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import audioCases from '../../../../tests/fixtures/audio_cli_cases.json';
-import { cliCommand, formSettings, shellQuote } from './cliCommand';
+import { cliCommand, cliOutputDir, formSettings, shellQuote } from './cliCommand';
 import type { JobSettings } from '$lib/types';
 
 describe('shellQuote', () => {
@@ -12,6 +12,20 @@ describe('shellQuote', () => {
     expect(shellQuote("the fox's den")).toBe("'the fox'\\''s den'");
     expect(shellQuote('$HOME')).toBe("'$HOME'");
     expect(shellQuote('')).toBe("''");
+  });
+});
+
+describe('cliOutputDir', () => {
+  const folders = { root: '/out', projectPath: '/out/A', extendFolder: '/out/B' };
+
+  it('names the Extend source folder first, then the project, then the root', () => {
+    expect(cliOutputDir(folders)).toBe('/out/B');
+    expect(cliOutputDir({ ...folders, extendFolder: null })).toBe('/out/A');
+    expect(cliOutputDir({ root: '/out', projectPath: null, extendFolder: undefined })).toBe('/out');
+  });
+
+  it('is null when nothing is known', () => {
+    expect(cliOutputDir({})).toBeNull();
   });
 });
 

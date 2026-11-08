@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { jobStore } from '$lib/state/job.svelte';
 import { mascotHome } from '$lib/state/mascotHome.svelte';
+import { projectPick } from '$lib/state/projectPick.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { router } from '$lib/state/router.svelte';
 import { lastEventSource } from '../test-utils/eventSource';
@@ -18,6 +19,10 @@ const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
   getWorkspaceCoreContext: vi.fn<() => Promise<WorkspaceContext>>(),
 }));
+
+const projectApiMocks = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
+
+vi.mock('$lib/api/projects', () => projectApiMocks);
 
 vi.mock('$lib/api/config', () => ({
   getConfig: configApiMocks.getConfig,
@@ -85,6 +90,7 @@ describe('App startup routing', () => {
     workspaceApiMocks.getWorkspaceContext.mockReset();
     workspaceApiMocks.getWorkspaceCoreContext.mockReset();
     configApiMocks.getConfig.mockResolvedValue(makeConfig('config'));
+    projectApiMocks.listProjects.mockReset().mockResolvedValue([{ name: 'Night Bus', path: '/out/Night Bus' }]);
     target = document.createElement('div');
     document.body.appendChild(target);
   });
@@ -106,6 +112,15 @@ describe('App startup routing', () => {
     expect(workspaceApiMocks.getWorkspaceContext).not.toHaveBeenCalled();
     expect(workspaceApiMocks.getWorkspaceCoreContext).not.toHaveBeenCalled();
     expect(router.page).toBe('config');
+  });
+
+  it('reads the project list once at load', async () => {
+    const { projectsStore } = await import('$lib/state/projects.svelte');
+    app = flushSync(() => mount(App, { target }));
+    await settle();
+
+    expect(projectApiMocks.listProjects).toHaveBeenCalledOnce();
+    expect(projectsStore.list.map((project) => project.name)).toEqual(['Night Bus']);
   });
 
   it('ignores unsupported page query parameters', async () => {
@@ -149,7 +164,26 @@ describe('App startup routing', () => {
     source.emit('job_completed', { type: 'job_completed', outputs: [] });
     await settle();
     expect(mascotHome.placement).toMatchObject({ away: false, mood: 'cheerful' });
-    expect(toasts.map((toast) => toast.message)).toContain('Generation complete');
+    expect(toasts.map((toast) => toast.type)).toContain('success');
+    jobStore.clearJob();
+  });
+
+  it('names the project a job saved into when it is not the picked one, on a page other than the Workspace', async () => {
+    configApiMocks.getConfig.mockResolvedValue(makeConfig('gallery'));
+    projectPick.set('Night Bus');
+    app = flushSync(() => mount(App, { target }));
+    await settle();
+
+    jobStore.clearJob();
+    jobStore.startJob({ job_id: 'job-elsewhere', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+    const asset = { id: 'Feature Reel/a.png', url: '/media/Feature Reel/a.png', thumbnail_url: '/thumbs/a.png', filename: 'a.png', media_type: 'image', project: 'Feature Reel' };
+    lastEventSource().emit('job_completed', { type: 'job_completed', outputs: [asset] });
+    await settle();
+
+    const finished = toasts.filter((toast) => toast.message.includes('Feature Reel'));
+    expect(finished).toHaveLength(1);
+    expect(finished[0].type).toBe('success');
+    projectPick.set(null);
     jobStore.clearJob();
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { AUDIO_MODELS, LYRICS, SA3_MUSIC, makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../test-utils/audio';
-import { audioModelLabel, audioRowOf, cutNote, hasNoWords, lyricLines, seekFraction, takeWords, tileWords, wordBlocks } from './audioAsset';
+import { audioFoot, audioModelLabel, audioRowOf, cutNote, hasNoWords, lyricLines, seekFraction, takeWords, tileWords, wordBlocks } from './audioAsset';
 import type { AudioModelOption } from '$lib/types';
 
 describe('the words of a take', () => {
@@ -77,5 +77,19 @@ describe('seekFraction', () => {
     expect(seekFraction(50, box)).toBe(0);
     expect(seekFraction(900, box)).toBe(1);
     expect(seekFraction(300, { left: 0, width: 0 })).toBe(0);
+  });
+});
+
+describe('the foot of an audio tile', () => {
+  it('reads the kind and the date, or says a file without settings has none', () => {
+    expect(audioFoot(makeSpeechAsset(), '11/8/2026')).toBe('speech · 11/8/2026');
+    expect(audioFoot(makeImportedAudio(), '11/8/2026')).toBe('audio · no settings');
+  });
+
+  it('leads with the project in place of the kind when asked to, and keeps the kind for a file in no project', () => {
+    expect(audioFoot(makeSpeechAsset({ project: 'Night Bus' }), '11/8/2026', true)).toBe('Night Bus · 11/8/2026');
+    expect(audioFoot(makeImportedAudio({ project: 'Night Bus' }), '11/8/2026', true)).toBe('Night Bus · no settings');
+    expect(audioFoot(makeSpeechAsset(), '11/8/2026', true)).toBe('speech · 11/8/2026');
+    expect(audioFoot(makeSpeechAsset({ project: 'Night Bus' }), '11/8/2026')).toBe('speech · 11/8/2026');
   });
 });

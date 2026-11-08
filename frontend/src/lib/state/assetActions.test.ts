@@ -14,6 +14,7 @@ function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
     thumbnail_url: '/media/out/a.png',
     filename: 'a.png',
     created_at: '2026-10-03T12:00:00Z',
+    project: null,
     workflow: 'txt2img',
     prompt: 'a fox',
     model: 'zit',

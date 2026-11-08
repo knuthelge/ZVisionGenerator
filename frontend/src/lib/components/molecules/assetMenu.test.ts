@@ -11,7 +11,7 @@ function option(factor: 2 | 4, overrides: Partial<AssetUpscaleFactor> = {}): Ass
 
 function makeAsset(upscale: GalleryAsset['upscale']): GalleryAsset {
   return {
-    id: 'out/a.png', url: '/media/out/a.png', thumbnail_url: '/media/out/a.png', filename: 'a.png', created_at: '2026-10-03T12:00:00Z',
+    id: 'out/a.png', url: '/media/out/a.png', thumbnail_url: '/media/out/a.png', filename: 'a.png', created_at: '2026-10-03T12:00:00Z', project: null,
     workflow: 'txt2img', prompt: 'a fox', model: 'zit', media_type: 'image', reuse_workspace_url: '', upscale,
   };
 }
@@ -176,5 +176,26 @@ describe('audioUseEntries', () => {
     expect(menu.map((entry) => (entry.kind === 'item' ? entry.id : entry.kind === 'heading' ? entry.label : entry.kind))).toEqual([
       'reuse', 'separator', 'Use as', 'use-audio-track', 'use-voice', 'separator', 'download', 'separator', 'delete',
     ]);
+  });
+});
+
+describe('assetMenuEntries Move', () => {
+  const ids = (entries: ReturnType<typeof assetMenuEntries>) => entries.map((entry) => (entry.kind === 'item' ? entry.id : entry.kind));
+
+  it('offers Move to project directly above Download, only when the owner can open the list', () => {
+    const asset = makeAsset(undefined);
+    const withMove = ids(assetMenuEntries(asset, { ondelete: vi.fn() }, false, {}, vi.fn()));
+    expect(withMove).toEqual(['move', 'download', 'separator', 'delete']);
+    expect(ids(assetMenuEntries(asset, { ondelete: vi.fn() }))).toEqual(['download', 'separator', 'delete']);
+  });
+
+  it('opens the project list when chosen, and is disabled while the file is being deleted', () => {
+    const openMove = vi.fn();
+    const [move] = assetMenuEntries(makeAsset(undefined), {}, false, {}, openMove);
+    if (move.kind === 'item') move.onselect?.();
+    expect(openMove).toHaveBeenCalledOnce();
+
+    const [busy] = assetMenuEntries(makeAsset(undefined), {}, true, {}, openMove);
+    expect(busy).toMatchObject({ id: 'move', disabled: true });
   });
 });

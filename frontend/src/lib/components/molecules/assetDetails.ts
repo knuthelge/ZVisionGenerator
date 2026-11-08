@@ -63,6 +63,7 @@ export function assetDetailSections(asset: GalleryAsset, audioModels?: readonly 
       generation.output_format ? { label: 'Format', value: generation.output_format.toUpperCase() } : null,
     ]),
     file: compact([
+      { label: 'Project', value: asset.project ?? 'No project', wide: true, wrap: true },
       generation.time ? { label: 'Generation time', value: formatSeconds(generation.time) } : null,
       { label: 'Created', value: new Date(asset.created_at).toLocaleString(), wide: !generation.time },
     ]),
@@ -89,6 +90,7 @@ function audioDetailSections(asset: GalleryAsset, audioModels: readonly AudioMod
       : [],
     postProcessing: [],
     file: compact([
+      { label: 'Project', value: asset.project ?? 'No project', wide: true, wrap: true },
       { label: 'Format', value: formatFact(asset), wide: true },
       asset.file_bytes != null ? { label: 'Size', value: sizeLabel(asset.file_bytes) } : null,
       { label: 'Created', value: new Date(asset.created_at).toLocaleString(), wide: asset.file_bytes == null },

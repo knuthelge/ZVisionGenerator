@@ -8,6 +8,8 @@
   import { downloadStore, type DownloadRequestResult } from '$lib/state/downloads.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { galleryStore } from '$lib/state/gallery.svelte';
+  import { inProject, projectPick } from '$lib/state/projectPick.svelte';
+  import { projectsStore } from '$lib/state/projects.svelte';
   import { router } from '$lib/state/router.svelte';
   import { hold } from '$lib/actions/hold';
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
@@ -18,7 +20,10 @@
   import { confirmDownloads } from '$lib/state/confirmDownloads';
   import { updateConfig } from '$lib/api/config';
   import { workspaceMemory } from '$lib/state/pageMemory';
+  import { emptySlotsHolding } from '$lib/state/assetRemoval';
   import { deleteAsset } from '$lib/api/gallery';
+  import { completionToast } from '$lib/state/completionToast';
+  import { moveAndReconcile } from '$lib/state/moveAndReconcile';
   import { audioTrackParams, canExtend, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { audioModelLabel, cutNote } from '$lib/state/audioAsset';
   import { formatClock } from '$lib/state/clock';
@@ -40,7 +45,7 @@
   import { compactUi } from '$lib/state/compactUi.svelte';
   import { failureToastText, isReviewing } from '$lib/state/jobView';
   import { first, jobSettingsPrefill } from '$lib/state/jobSettings';
-  import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
+  import { cliCommand, cliOutputDir, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { appliedPreset, presetDiffersFrom, presetSettingsFromDraft } from '$lib/state/presets';
   import { presetsStore } from '$lib/state/presets.svelte';
   import { extendGuard, extendModelSupport, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
@@ -169,7 +174,8 @@
   const MIN_OUTPUT_CELL_PX = 160;
   let outputAreaWidth = $state(0);
   let outputAreaHeight = $state(0);
-  const jobOutputs = $derived<GalleryAsset[]>(jobStore.current?.outputs ?? []);
+  // The stage and the lightbox show the pick's outputs only; the job card and queue stay global.
+  const jobOutputs = $derived<GalleryAsset[]>((jobStore.current?.outputs ?? []).filter((output) => inProject(output, projectPick.current)));
   const outputGrid = $derived(fitOutputGrid(
     jobOutputs.length,
     outputAreaWidth,
@@ -357,7 +363,8 @@
   // Surface successful batch items in History as soon as their SSE event lands.
   // The terminal refresh remains authoritative and reconciles the full inventory.
   $effect(() => {
-    const outputs = jobOutputs;
+    // The store keeps the pick's outputs only, so it gets them all.
+    const outputs = jobStore.current?.outputs ?? [];
     if (jobStore.isRunning && outputs.length > 0) {
       untrack(() => galleryStore.mergeOutputs(outputs));
     }
@@ -548,7 +555,7 @@
   const draftModel = $derived(draft.state.model);
   const loraGroups = $derived.by(() => {
     const model = context ? modelLoraFamily(context, selectedModel?.id ?? draftModel) : null;
-    return groupLorasForModel(loraOptions, model, recentLoraNames(galleryStore.assets, model?.family ?? null, loraOptions));
+    return groupLorasForModel(loraOptions, model, recentLoraNames(galleryStore.allRecent, model?.family ?? null, loraOptions));
   });
   const loraMenuItems = $derived.by<ActionMenuEntry[]>(() => {
     const { main, other } = loraGroups;
@@ -710,12 +717,22 @@
     return `${model.label} (${status ? status.toLowerCase() : 'not downloaded'})`;
   }
 
-  async function handleJobComplete(): Promise<void> {
+  async function handleJobComplete(outputs: GalleryAsset[]): Promise<void> {
     react('cheerful');
     refreshModelStatus();
     await galleryStore.refresh();
-    addToast('Generation complete', 'success');
+    completionToast(outputs, projectPick.current);
   }
+
+  // A new pick empties the stores' lists (`projectsStore.choose`); the strip and the recent list load again here, since the
+  // Gallery page loads its own and no other page shows them. The first run only records the pick.
+  let _shownPick = projectPick.current;
+  $effect(() => {
+    const pick = projectPick.current;
+    if (pick === _shownPick) return;
+    _shownPick = pick;
+    untrack(() => void galleryStore.refresh());
+  });
 
   function handleJobFailed(): void {
     react('sad');
@@ -983,18 +1000,22 @@
       jobStore.removeOutputs([asset.id]);
       galleryStore.removeAssets([asset]);
       // A slot pointing at the deleted file would fail the next run: it empties, and the workflow follows from what is left.
-      const path = asset.file_path;
-      if (path && draft.state.referenceImagePath === path) draft.setStartImage('image', null, context);
-      if (path && draft.state.firstFramePath === path) draft.setStartImage('video', null, context);
-      if (path && draft.state.endImagePath === path) draft.setLastFrame(null);
       // A reference row stays, flagged missing, so the prompt's "image 2" keeps meaning the same row.
-      if (path && draft.state.referenceImagePaths.includes(path)) void recheckImages();
+      if (emptySlotsHolding([asset.file_path], context)) void recheckImages();
       addToast('Deleted', 'success');
     } catch {
       addToast('Delete failed', 'error');
     } finally {
       deletingIds = new Set([...deletingIds].filter((id) => id !== asset.id));
     }
+  }
+
+  async function moveWorkspaceAsset(asset: GalleryAsset, project: string | null): Promise<void> {
+    if (deletingIds.has(asset.id)) return;
+    const moved = (await moveAndReconcile([asset], project, context))?.moved.find((move) => move.from === asset.id);
+    // The stage and the viewer follow a file that stays in the list under its new ID; one that left is stepped past.
+    if (moved && viewedId === asset.id) viewedId = moved.asset.id;
+    if (moved && viewerAssetId === asset.id) viewerAssetId = moved.asset.id;
   }
 
   function openCompletedOutputViewer(index: number, trigger: HTMLElement): void {
@@ -1245,10 +1266,17 @@
     });
   }
 
+  /** Name the picked project as the job's destination; All files sends no `project`. */
+  function withProject(formData: FormData): FormData {
+    const pick = projectPick.current;
+    if (pick !== null) formData.set('project', pick);
+    return formData;
+  }
+
   /** Collect the fields Generate submits; with `run`, that one prompt-file prompt replaces the form's prompt. */
   function buildFormData(form: HTMLFormElement, run: PendingPromptRun | null): FormData {
     // The Audio tab sends the fields of its open kind, built from the draft: the same ones Copy CLI reads.
-    if (audio?.active) return audioFormData(audio, draft.state);
+    if (audio?.active) return withProject(audioFormData(audio, draft.state));
     const formData = new FormData(form);
     // Send canonical workflow directly; backend accepts and normalises it.
     formData.set('mode', isImageMode ? 'image' : 'video');
@@ -1293,7 +1321,7 @@
     }
     // Outside an extension a blank scene is no scene: today's form data, without the field. An extension always sends it.
     finalizeSceneFields(formData, draft.state);
-    return formData;
+    return withProject(formData);
   }
 
   /** The settings a job is shown with: the form's fields, and never the speaker's tick (a job's settings carry none, as the server's record). */
@@ -1377,7 +1405,13 @@
     try {
       const extendSource = draft.extendSource ? { scene: draft.extendSource.scene, legacy: draft.extendSource.legacy } : null;
       const upscaleSharpenDefault = context ? settingDefaultsFor(context, draft.state).upscaleSharpen : undefined;
-      built = cliCommand(settings, { outputDir: context?.output_dir, promptFileOptionCount, extendSource, upscaleSharpenDefault });
+      // `draft.extendSource` outlives the Extend tab, so only that workflow's own source names the folder.
+      const outputDir = cliOutputDir({
+        root: context?.output_dir,
+        projectPath: projectsStore.currentPath,
+        extendFolder: draft.state.workflow === 'extend' ? draft.extendSource?.output_folder : null,
+      });
+      built = cliCommand(settings, { outputDir, promptFileOptionCount, extendSource, upscaleSharpenDefault });
     } catch (err) {
       addToast(errorText(err, 'Could not build the CLI command'), 'error');
       return;
@@ -1512,6 +1546,15 @@
     }
   }
 </script>
+
+<!-- Generate's label; on a phone with a project picked, the project's name is a second line, since Generate is where a wrong save costs. -->
+{#snippet generateText(label: string)}
+  {#if projectPick.current !== null}
+    <span class="generate-stack"><span>{label}</span><span class="generate-project" title={projectPick.current}>{projectPick.current}</span></span>
+  {:else}
+    {label}
+  {/if}
+{/snippet}
 
 {#snippet assetMeta(asset: GalleryAsset)}
   {#if asset.media_type === 'audio'}
@@ -1780,6 +1823,7 @@
                   onupscale={upscaleAsset}
                   {useAs}
                   ondelete={deleteWorkspaceAsset}
+                  onmove={moveWorkspaceAsset}
                 />
                 {@render assetMeta(output)}
               </div>
@@ -1798,6 +1842,7 @@
                         onuseaudio={useAudio}
                         {useAs}
                         ondelete={deleteWorkspaceAsset}
+                        onmove={moveWorkspaceAsset}
                       />
                       {@render assetMeta(output)}
                     </div>
@@ -1830,6 +1875,7 @@
                       onupscale={upscaleAsset}
                       {useAs}
                       ondelete={deleteWorkspaceAsset}
+                      onmove={moveWorkspaceAsset}
                     />
                   {/each}
                 </div>
@@ -1906,6 +1952,7 @@
               onupscale={upscaleAsset}
               {useAs}
               ondelete={deleteWorkspaceAsset}
+              onmove={moveWorkspaceAsset}
             />
             {@render assetMeta(latest)}
           </div>
@@ -1923,7 +1970,7 @@
               <p class="text-content text-text-secondary">Looking for your latest work…</p>
             {:else}
               <div>
-                <p class="ui-empty-title">No generated assets yet</p>
+                <p class="ui-empty-title">{projectPick.current === null ? 'No generated assets yet' : `Nothing in ${projectPick.current} yet`}</p>
                 <p class="mt-1 text-ui text-text-muted">Write a prompt and press Generate to get started</p>
               </div>
             {/if}
@@ -1961,6 +2008,7 @@
           onupscale={upscaleAsset}
           {useAs}
           ondelete={deleteWorkspaceAsset}
+          onmove={moveWorkspaceAsset}
         />
       {/if}
     </section>
@@ -1984,7 +2032,7 @@
             {audio}
             models={currentModels}
             quantizeOptions={supportsQuantize ? quantizeOptions : null}
-            lastSeed={galleryStore.assets[0]?.seed ?? null}
+            lastSeed={galleryStore.allRecent[0]?.seed ?? null}
             onModelChange={switchModel}
             onclose={() => { activeChip = null; }}
             ondiscover={() => { activeChip = null; openDiscover(); }}
@@ -2029,7 +2077,7 @@
                 {#if block.waiting}
                   <WaitingLabel waiting={block.waiting} compact />
                 {:else}
-                  <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
+                  <Icon name="bolt" size={16} />{@render generateText(busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate')}
                   {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
                 {/if}
               </button>
@@ -2059,7 +2107,7 @@
                 aria-describedby={composerReason ? 'ws-generate-reason-compact' : undefined}
                 aria-label={block.waiting ? waitFull : undefined}
                 title={block.waiting ? waitFull : undefined}
-              >{#if block.waiting}<WaitingLabel waiting={block.waiting} compact />{:else}<Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}{/if}</button>
+              >{#if block.waiting}<WaitingLabel waiting={block.waiting} compact />{:else}<Icon name="bolt" size={16} />{@render generateText(jobStore.jobsActive ? 'Queue' : 'Generate')}{/if}</button>
             </div>
           </div>
         </div>
@@ -2094,7 +2142,7 @@
           jobsActive={jobStore.jobsActive}
           queuedCount={jobStore.queuedJobs.length}
           submitError={generateError}
-          lastSeed={galleryStore.assets[0]?.seed ?? null}
+          lastSeed={galleryStore.allRecent[0]?.seed ?? null}
           {images}
           {audioTrack}
           {audio}
@@ -2112,7 +2160,7 @@
         jobsActive={jobStore.jobsActive}
         queuedCount={jobStore.queuedJobs.length}
         submitError={generateError}
-        lastSeed={galleryStore.assets[0]?.seed ?? null}
+        lastSeed={galleryStore.allRecent[0]?.seed ?? null}
         {images}
         {audioTrack}
         {audio}
@@ -2166,6 +2214,7 @@
   audioVocabulary={context?.audio_settings}
   onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}
+  onmove={moveWorkspaceAsset}
 />
 
 <style>
@@ -2235,6 +2284,8 @@
   .composer-split { display: flex; flex: none; gap: 1px; }
   .composer-generate { flex: none; height: 44px; padding: 0 14px 0 16px; border-radius: var(--radius-md) 0 0 var(--radius-md); font-size: 14px; }
   .composer-more { flex: none; width: 32px; height: 44px; padding: 0; border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+  .generate-stack { display: flex; flex-direction: column; min-width: 64px; max-width: 96px; line-height: 16px; text-align: left; }
+  .generate-project { overflow: hidden; font-family: var(--font-sans); font-size: var(--text-meta); font-weight: 700; line-height: 13px; text-overflow: ellipsis; white-space: nowrap; }
   .composer-q { font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 500; opacity: 0.85; }
   .composer-pane[hidden] { display: none; }
   .composer-pane :global(.compose-pane) { max-height: 56dvh; padding: 4px 0 0; border-bottom: 0; }

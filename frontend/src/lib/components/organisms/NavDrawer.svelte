@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Icon, Wordmark } from '$lib/components/atoms';
+  import ProjectPicker from '$lib/components/molecules/ProjectPicker.svelte';
   import { portal } from '$lib/actions/portal';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { pan, rubberBand, type PanEnd } from '$lib/actions/pan';
@@ -90,6 +91,7 @@
       tabindex="-1"
     >
       <h1 class="drawer-brand"><img src={logoSrc} alt="" class="h-6 w-6"><Wordmark height={13.4} /><span class="sr-only">Z-Vision</span></h1>
+      <ProjectPicker variant="drawer" onpicked={onclose} />
       <nav class="drawer-pages" aria-label="Pages">
         {#each PAGES as page (page.id)}
           <button type="button" class="drawer-item" class:active={page.id === currentPage} aria-current={page.id === currentPage ? 'page' : undefined} onclick={() => go(page.id)}>

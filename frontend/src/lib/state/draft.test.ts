@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed, enhancedStaleReason, rememberedParts } from './promptEnhance';
 import { presetDiffers } from './presets';
@@ -3530,5 +3530,78 @@ describe('settings kept per mode', () => {
     openTab('txt2img', ctx);
 
     expect(draft.state).toMatchObject({ model: 'krea', ...IMAGE, appliedPreset: 'image look' });
+  });
+
+  describe('retargetPaths', () => {
+    const moved = (pairs: Record<string, string>) => new Map(Object.entries(pairs));
+
+    it('points every slot that holds a moved file at its new path, and nothing else', () => {
+      draft.patch({
+        referenceImagePath: '/o/a.png', firstFramePath: '/o/a.png', endImagePath: '/o/a.png', referenceImagePaths: ['/o/a.png', '/o/other.png'],
+        audioTrackPath: '/o/t.wav', audioTrackStart: 4, extendAudioTrackPath: '/o/t.wav', extendAudioTrackStart: 7, voicePath: '/o/t.wav',
+        missingReferencePaths: ['/o/a.png'], prompt: 'a fox',
+      });
+
+      draft.retargetPaths(moved({ '/o/a.png': '/o/Bus/a.png', '/o/t.wav': '/o/Bus/t.wav' }));
+
+      expect(draft.state).toMatchObject({
+        referenceImagePath: '/o/Bus/a.png', firstFramePath: '/o/Bus/a.png', endImagePath: '/o/Bus/a.png',
+        referenceImagePaths: ['/o/Bus/a.png', '/o/other.png'], missingReferencePaths: [],
+        audioTrackPath: '/o/Bus/t.wav', audioTrackStart: 4, extendAudioTrackPath: '/o/Bus/t.wav', extendAudioTrackStart: 7, voicePath: '/o/Bus/t.wav',
+        prompt: 'a fox',
+      });
+    });
+
+    it('keeps the flags of the files that did not move', () => {
+      draft.patch({ referenceImagePaths: ['/o/a.png', '/o/gone.png'], missingReferencePaths: ['/o/a.png', '/o/gone.png'] });
+
+      draft.retargetPaths(moved({ '/o/a.png': '/o/Bus/a.png' }));
+
+      expect(draft.state.referenceImagePaths).toEqual(['/o/Bus/a.png', '/o/gone.png']);
+      expect(draft.state.missingReferencePaths).toEqual(['/o/gone.png']);
+    });
+
+    it('does not rewrite or save a draft that holds no moved file', () => {
+      draft.patch({ referenceImagePath: '/o/keep.png' });
+      const held = draft.state;
+      const save = vi.spyOn(draft, 'saveDraft');
+
+      expect(draft.retargetPaths(moved({ '/o/a.png': '/o/Bus/a.png' }))).toBe(false);
+
+      expect(draft.state).toBe(held);
+      expect(save).not.toHaveBeenCalled();
+      save.mockRestore();
+    });
+
+    it('leaves slots that hold other files, and reports no extend source moved', () => {
+      draft.patch({ referenceImagePath: '/o/keep.png', extendSourcePath: '/o/clip.mp4' });
+
+      expect(draft.retargetPaths(moved({ '/o/a.png': '/o/Bus/a.png' }))).toBe(false);
+      expect(draft.state).toMatchObject({ referenceImagePath: '/o/keep.png', extendSourcePath: '/o/clip.mp4' });
+    });
+
+    it('follows a moved extend source without losing its prefill, and says so', () => {
+      draft.patch({
+        extendSourcePath: '/o/clip.mp4', scene: 'Rain.', appliedPreset: 'look',
+        extendPrefill: { path: '/o/clip.mp4', scene: 'Rain.', prompt: '', audioTrack: { path: '/o/t.wav', start: 2 } },
+        enhancedFrom: { prompt: 'p', scene: 's', mode: 'video', sourceVideoPath: '/o/clip.mp4' },
+      });
+
+      expect(draft.retargetPaths(moved({ '/o/clip.mp4': '/o/Bus/clip.mp4', '/o/t.wav': '/o/Bus/t.wav' }))).toBe(true);
+
+      expect(draft.state).toMatchObject({
+        extendSourcePath: '/o/Bus/clip.mp4', scene: 'Rain.', appliedPreset: 'look',
+        extendPrefill: { path: '/o/Bus/clip.mp4', scene: 'Rain.', audioTrack: { path: '/o/Bus/t.wav', start: 2 } },
+        enhancedFrom: { sourceVideoPath: '/o/Bus/clip.mp4' },
+      });
+    });
+
+    it('follows a file moved on and back to its first path', () => {
+      draft.patch({ referenceImagePath: '/o/a.png' });
+      draft.retargetPaths(moved({ '/o/a.png': '/o/Bus/a.png' }));
+      draft.retargetPaths(moved({ '/o/Bus/a.png': '/o/a.png' }));
+
+      expect(draft.state.referenceImagePath).toBe('/o/a.png');
+    });
   });
 });

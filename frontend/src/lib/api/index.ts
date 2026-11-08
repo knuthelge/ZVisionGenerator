@@ -13,3 +13,4 @@ export * from './presets';
 export * from './recentPrompts';
 export * from './discover';
 export * from './audioTrack';
+export * from './projects';

@@ -1620,11 +1620,11 @@ describe('WorkspacePage extend', () => {
       flushSync();
     }
 
-    it('lists Extend, then Download and Delete, in a history tile\'s menu', async () => {
+    it('lists Extend, then Move, Download and Delete, in a history tile\'s menu', async () => {
       const asset = clip();
       await mountWithClip(asset);
       openMenu(asset);
-      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'download', 'delete']);
+      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'move', 'download', 'delete']);
     });
 
     it('turns the Workspace to Extend with the clip as source, its scene in the boxes, and checks it', async () => {

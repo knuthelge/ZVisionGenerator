@@ -2,6 +2,15 @@
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('$lib/state/layoutMode.svelte', () => ({ layout: { compact: true, mode: 'compact', coarse: true } }));
+vi.mock('$lib/api/projects', () => ({
+  listProjects: vi.fn().mockResolvedValue([{ name: 'Night Bus', path: '/out/Night Bus' }]),
+  createProject: vi.fn(),
+}));
+vi.mock('$lib/api/gallery', () => ({ getGallery: vi.fn().mockResolvedValue({ assets: [], page: 1, total_pages: 1, total_count: 0 }) }));
+
+import { projectPick } from '$lib/state/projectPick.svelte';
+import { settle } from '../../../test-utils/mount';
 import NavDrawer from './NavDrawer.svelte';
 
 describe('NavDrawer', () => {
@@ -60,5 +69,53 @@ describe('NavDrawer', () => {
     (document.body.querySelector('button[aria-label="Close menu"]') as HTMLButtonElement).click();
     expect(onclose).toHaveBeenCalledTimes(2);
     expect(onnavigate).not.toHaveBeenCalled();
+  });
+
+  describe('project row', () => {
+    const projectRow = () => document.body.querySelector<HTMLButtonElement>('.drawer-project')!;
+
+    beforeEach(() => {
+      localStorage.clear();
+      projectPick.set(null);
+    });
+
+    it('sits between the brand and the pages, naming the pick', () => {
+      projectPick.set('Night Bus');
+      app = flushSync(() => mount(NavDrawer, { target, props: { open: true, currentPage: 'workspace', onnavigate: vi.fn(), onclose: vi.fn() } }));
+
+      const drawer = document.body.querySelector('[role="dialog"]')!;
+      expect(Array.from(drawer.children).map((child) => child.tagName)).toEqual(['H1', 'BUTTON', 'NAV']);
+      expect(projectRow().getAttribute('aria-label')).toBe('Project: Night Bus');
+    });
+
+    it('opens the list as a sheet, and a pick changes the project and closes the drawer', async () => {
+      const onclose = vi.fn();
+      app = flushSync(() => mount(NavDrawer, { target, props: { open: true, currentPage: 'workspace', onnavigate: vi.fn(), onclose } }));
+
+      projectRow().click();
+      await settle();
+      expect(document.body.querySelector('[data-testid="action-sheet"]')).not.toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+
+      document.body.querySelector<HTMLElement>('[data-action="project:Night Bus"]')!.click();
+      await settle();
+
+      expect(projectPick.current).toBe('Night Bus');
+      expect(onclose).toHaveBeenCalledOnce();
+    });
+
+    it('leaves the drawer open when the sheet closes without a pick', async () => {
+      const onclose = vi.fn();
+      app = flushSync(() => mount(NavDrawer, { target, props: { open: true, currentPage: 'workspace', onnavigate: vi.fn(), onclose } }));
+
+      projectRow().click();
+      await settle();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+
+      expect(projectPick.current).toBeNull();
+      expect(onclose).not.toHaveBeenCalled();
+      expect(document.body.querySelector('[data-testid="nav-drawer"]')).not.toBeNull();
+    });
   });
 });

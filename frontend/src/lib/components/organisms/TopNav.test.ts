@@ -2,8 +2,11 @@
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('$lib/api/projects', () => ({ listProjects: vi.fn().mockResolvedValue([]), createProject: vi.fn() }));
+
 import { draft } from '$lib/state/draft.svelte';
 import { jobStore } from '$lib/state/job.svelte';
+import { projectPick } from '$lib/state/projectPick.svelte';
 import type { Workflow, WorkspaceWorkflow } from '$lib/types';
 
 import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
@@ -179,5 +182,62 @@ describe('TopNav job log button', () => {
     app = flushSync(() => mount(TopNav, { target, props: { currentPage: 'gallery', onjoblog } }));
     (target.querySelector('button[aria-label="Job log"]') as HTMLButtonElement).click();
     expect(onjoblog).toHaveBeenCalledOnce();
+  });
+});
+
+describe('TopNav project picker', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    projectPick.set(null);
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) { await unmount(app); app = null; }
+    target.remove();
+    document.body.innerHTML = '';
+  });
+
+  const picker = () => target.querySelector<HTMLButtonElement>('.nav-workflows .project-trigger');
+
+  it('sits straight after the brand on every page', () => {
+    for (const page of ['workspace', 'prompts', 'gallery', 'models', 'config'] as const) {
+      app = flushSync(() => mount(TopNav, { target, props: { currentPage: page } }));
+
+      const group = target.querySelector('.nav-workflows')!;
+      expect(picker(), page).not.toBeNull();
+      expect(group.children[0].tagName).toBe('H1');
+      expect(group.children[1]).toBe(picker());
+      flushSync(() => unmount(app!));
+      app = null;
+    }
+  });
+
+  it('comes before the workflow tabs on the Workspace', () => {
+    app = flushSync(() => mount(TopNav, { target, props: { currentPage: 'workspace' } }));
+
+    const group = target.querySelector('.nav-workflows')!;
+    expect(Array.from(group.children).map((child) => child.tagName)).toEqual(['H1', 'BUTTON', 'NAV']);
+  });
+
+  it('caps its width to the workflow tabs only on the Workspace', () => {
+    app = flushSync(() => mount(TopNav, { target, props: { currentPage: 'workspace' } }));
+    expect(picker()?.classList.contains('tight')).toBe(true);
+    flushSync(() => unmount(app!));
+
+    app = flushSync(() => mount(TopNav, { target, props: { currentPage: 'gallery' } }));
+    expect(picker()?.classList.contains('tight')).toBe(false);
+  });
+
+  it('shows the picked project on the trigger', () => {
+    projectPick.set('Night Bus');
+    app = flushSync(() => mount(TopNav, { target, props: { currentPage: 'prompts' } }));
+
+    expect(picker()?.getAttribute('aria-label')).toBe('Project: Night Bus');
+    expect(picker()?.classList.contains('ui-btn-on')).toBe(true);
   });
 });

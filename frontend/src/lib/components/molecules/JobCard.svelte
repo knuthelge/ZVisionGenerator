@@ -17,6 +17,7 @@
   import { requestConfirm } from './confirm.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
   import JobPhaseLog from './JobPhaseLog.svelte';
+  import SaveProject from './SaveProject.svelte';
 
   type ControlCallback = (jobId: string) => void | Promise<unknown>;
 
@@ -257,6 +258,10 @@
         {/if}
       </span>
     </div>
+    {#if job.save_project}
+      <!-- Where the job saves, on a row of its own so it never takes room from the status label or the title. -->
+      <SaveProject name={job.save_project} testid="job-project" />
+    {/if}
     {#if headerSteps}
       <!-- Between steps (getting ready, or saving after the last one) the bar sweeps so the job never looks stuck. -->
       <StepProgress

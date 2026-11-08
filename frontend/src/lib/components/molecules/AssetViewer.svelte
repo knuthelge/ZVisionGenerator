@@ -29,6 +29,7 @@
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
   import { assetMenuEntries, audioUseEntries, referenceEntries, upscaleEntries } from './assetMenu';
+  import MoveMenu from './MoveMenu.svelte';
   import AudioPlayer from './AudioPlayer.svelte';
   import { viewerShortcutsFor, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
   import { layout } from '$lib/state/layoutMode.svelte';
@@ -82,6 +83,7 @@
     onupscale,
     onuseaudio,
     ondelete,
+    onmove,
   }: Props = $props();
 
   // The open asset is found by id. When it leaves the list (a delete), the viewer stays on the place it had, which is
@@ -119,6 +121,10 @@
   let referenceButton = $state<HTMLButtonElement | null>(null);
   let upscaleOpen = $state(false);
   let upscaleButton = $state<HTMLButtonElement | null>(null);
+  // The Move list. The toolbar button anchors it where there is one; the ⋯ menu closes before it opens, which clears its
+  // pointer position, and the phone's ⋯ button anchors it there.
+  let moveOpen = $state(false);
+  let moveButton = $state<HTMLButtonElement | null>(null);
   let closeButton = $state<HTMLButtonElement | null>(null);
   let downloadLink = $state<HTMLAnchorElement | null>(null);
   let helpOpen = $state(false);
@@ -157,7 +163,7 @@
   let moreButton = $state<HTMLButtonElement | null>(null);
   const moreItems = $derived.by<ActionMenuEntry[]>(() => {
     if (!asset) return [];
-    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs);
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, onuseaudio, ondelete }, deleting, useAs, onmove ? () => { moveOpen = true; } : undefined);
     const copyable = copyableText(asset);
     if (!copyable) return entries;
     const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(copyable) };
@@ -639,7 +645,7 @@
       // While a menu is open, keys belong to it.
       // A focused video keeps its own keys: arrows seek, Space plays.
       const mediaKey = e.target instanceof HTMLMediaElement && (e.key.startsWith('Arrow') || e.key === ' ');
-      if (e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || isTyping(e.target) || mediaKey) {
+      if (e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || moveOpen || isTyping(e.target) || mediaKey) {
         upscaleWaitingSince = null;
         return;
       }
@@ -741,6 +747,18 @@
           title="Upscale (X then {upscaleKeys})"
           onclick={() => { upscaleOpen = !upscaleOpen; }}
         ><Icon name="expand" size={14} /><span class="viewer-btn-label">Upscale</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
+      {/if}
+      {#if onmove}
+        <button
+          type="button"
+          bind:this={moveButton}
+          class="viewer-btn ui-btn"
+          data-action="move"
+          aria-haspopup="menu"
+          aria-expanded={moveOpen}
+          title="Move to project"
+          onclick={() => { moveOpen = !moveOpen; }}
+        ><Icon name="folder" size={14} /><span class="viewer-btn-label">Move</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}
       <a
         bind:this={downloadLink}
@@ -1002,6 +1020,16 @@
       label="Use as"
       onclose={() => { referenceOpen = false; }}
     />
+    {#if onmove && asset}
+      <MoveMenu
+        open={moveOpen}
+        anchor={compact ? moreButton : moveButton}
+        align={compact ? 'end' : 'start'}
+        current={asset.project}
+        onmove={(project) => onmove(asset, project)}
+        onclose={() => { moveOpen = false; }}
+      />
+    {/if}
     <ActionMenu
       open={upscaleOpen}
       anchor={upscaleButton}
@@ -1133,7 +1161,7 @@
   .asset-viewer[data-compact='true'][data-details='true'] .viewer-film { display: none; }
   .asset-viewer[data-compact='true'] .viewer-details-body { padding: 4px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
   /* Below a full desktop the labelled buttons show their icons only, so the title keeps its room; the tooltip names them. */
-  @media (max-width: 1023px) {
+  @media (max-width: 1099px) {
     .viewer-btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   }
   .asset-viewer[data-compact='true'] .viewer-film { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }

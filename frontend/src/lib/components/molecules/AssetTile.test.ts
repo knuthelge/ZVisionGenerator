@@ -7,7 +7,7 @@ import type { GalleryAsset } from '$lib/types';
 
 import AssetTile from './AssetTile.svelte';
 import { makeAudioAsset, makeImportedAudio, makeSpeechAsset } from '../../../test-utils/audio';
-import { mountComponent } from '../../../test-utils/mount';
+import { mountComponent, settle } from '../../../test-utils/mount';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -16,6 +16,7 @@ function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
     thumbnail_url: '/media/out/a-thumb.png',
     filename: 'a.png',
     created_at: '2026-10-03T12:00:00Z',
+    project: null,
     workflow: 'txt2img',
     prompt: 'a fox',
     model: 'zit',
@@ -31,8 +32,9 @@ function menuActions(): string[] {
   return Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action') ?? '');
 }
 
-const mocks = vi.hoisted(() => ({ getAudioPeaks: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getAudioPeaks: vi.fn(), listProjects: vi.fn(), createProject: vi.fn() }));
 vi.mock('$lib/api/gallery', () => ({ getAudioPeaks: mocks.getAudioPeaks }));
+vi.mock('$lib/api/projects', () => ({ listProjects: mocks.listProjects, createProject: mocks.createProject }));
 
 describe('AssetTile', () => {
   let page: ReturnType<typeof mountComponent>;
@@ -47,6 +49,34 @@ describe('AssetTile', () => {
     (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
     flushSync();
   }
+
+  describe('meta line with showProject', () => {
+    const foot = () => target.querySelector('.asset-tile-foot p:nth-child(2)')?.textContent ?? '';
+    const date = new Date(makeAsset().created_at).toLocaleDateString();
+
+    it('leads with the project in place of the workflow word', () => {
+      mountTile({ asset: makeAsset({ project: 'Night Bus' }), showProject: true });
+      expect(foot()).toBe(`Night Bus · ${date}`);
+    });
+
+    it('keeps the workflow word for a file in no project, and without the prop', () => {
+      mountTile({ asset: makeAsset(), showProject: true });
+      expect(foot()).toBe(`txt2img · ${date}`);
+      page.unmount();
+      mountTile({ asset: makeAsset({ project: 'Night Bus' }) });
+      expect(foot()).toBe(`txt2img · ${date}`);
+    });
+
+    it('leads an audio tile\'s foot with the project', () => {
+      mountTile({ asset: makeSpeechAsset({ project: 'Night Bus' }), showProject: true });
+      expect(foot()).toContain('Night Bus · ');
+    });
+
+    it('gives a strip tile no foot', () => {
+      mountTile({ asset: makeAsset({ project: 'Night Bus' }), density: 'compact', showProject: true });
+      expect(target.querySelector('.asset-tile-foot')).toBeNull();
+    });
+  });
 
   it('puts the checkerboard on the image of a transparent asset only', () => {
     mountTile({ asset: makeAsset({ transparent: true }) });
@@ -416,5 +446,106 @@ describe('AssetTile with audio', () => {
     mountTile({ asset: makeImportedAudio(), onreuse: vi.fn() });
 
     expect(target.querySelector<HTMLButtonElement>('button[aria-label="Reusable settings unavailable"]')?.disabled).toBe(true);
+  });
+});
+
+describe('AssetTile Move', () => {
+  let page: ReturnType<typeof mountComponent>;
+  let target: HTMLElement;
+
+  function mountTile(props: Record<string, unknown>): void {
+    page = mountComponent(AssetTile, props);
+    target = page.target;
+  }
+
+  function openMenu(asset: GalleryAsset): void {
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+  }
+
+  const NIGHT_BUS = { name: 'Night Bus', path: '/out/Night Bus' };
+  const ZOO = { name: 'Zoo', path: '/out/Zoo' };
+  const moveRows = () => Array.from(document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitemradio"]'));
+
+  async function chooseMove(asset: GalleryAsset): Promise<void> {
+    openMenu(asset);
+    document.querySelector<HTMLElement>('[data-action="move"]')!.click();
+    await settle();
+  }
+
+  beforeEach(() => mocks.listProjects.mockReset().mockResolvedValue([NIGHT_BUS, ZOO]));
+
+  it('lists Move to project in the menu only with an onmove handler', () => {
+    const asset = makeAsset();
+    mountTile({ asset });
+    openMenu(asset);
+    expect(menuActions()).not.toContain('move');
+    page.unmount();
+    mountTile({ asset, onmove: vi.fn() });
+    openMenu(asset);
+    expect(menuActions().indexOf('move')).toBe(menuActions().indexOf('download') - 1);
+  });
+
+  it('opens the project list after the menu closes, with the current location checked and disabled', async () => {
+    const asset = makeAsset({ project: 'Night Bus' });
+    mountTile({ asset, onmove: vi.fn() });
+    await chooseMove(asset);
+
+    expect(document.querySelector('[role="menu"][aria-label="Move to project"]')).not.toBeNull();
+    expect(document.querySelectorAll('[role="menu"]')).toHaveLength(1);
+    expect(document.querySelector('.action-menu-heading')?.textContent).toBe('Move to');
+    const rows = moveRows();
+    expect(rows.map((row) => row.textContent?.trim())).toEqual(['No project', 'Night Bus', 'Zoo']);
+    const current = rows.find((row) => row.getAttribute('aria-checked') === 'true')!;
+    expect(current.textContent?.trim()).toBe('Night Bus');
+    expect(current.getAttribute('aria-disabled')).toBe('true');
+    expect(target.querySelector('.asset-tile')?.getAttribute('data-menu-open')).toBe('true');
+  });
+
+  it('checks No project for a file at the top level', async () => {
+    const asset = makeAsset();
+    mountTile({ asset, onmove: vi.fn() });
+    await chooseMove(asset);
+
+    const current = moveRows().find((row) => row.getAttribute('aria-checked') === 'true')!;
+    expect(current.textContent?.trim()).toBe('No project');
+  });
+
+  it('moves the asset to the chosen project, or out of every project', async () => {
+    const onmove = vi.fn();
+    const asset = makeAsset({ project: 'Night Bus' });
+    mountTile({ asset, onmove });
+    await chooseMove(asset);
+
+    moveRows().find((row) => row.textContent?.trim() === 'Zoo')!.click();
+    await settle();
+    expect(onmove).toHaveBeenCalledWith(asset, 'Zoo');
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+
+    await chooseMove(asset);
+    moveRows().find((row) => row.textContent?.trim() === 'No project')!.click();
+    await settle();
+    expect(onmove).toHaveBeenLastCalledWith(asset, null);
+  });
+
+  it('creates a project and moves the file into it from New project', async () => {
+    const onmove = vi.fn();
+    mocks.createProject.mockResolvedValue({ name: 'Bridges', path: '/out/Bridges' });
+    const asset = makeAsset();
+    mountTile({ asset, onmove });
+    await chooseMove(asset);
+
+    document.querySelector<HTMLElement>('[data-action="project-new"]')!.click();
+    await settle();
+    const field = document.querySelector<HTMLInputElement>('#project-name')!;
+    field.value = 'Bridges';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(document.querySelector('[data-action="create-project"]')?.textContent).toContain('Create and move');
+    document.querySelector<HTMLButtonElement>('[data-action="create-project"]')!.click();
+    await settle();
+
+    expect(mocks.createProject).toHaveBeenCalledWith('Bridges');
+    expect(onmove).toHaveBeenCalledWith(asset, 'Bridges');
   });
 });

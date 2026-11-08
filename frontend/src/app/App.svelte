@@ -8,6 +8,9 @@
   import { mascotHome } from '$lib/state/mascotHome.svelte';
   import type { MascotReaction } from '$lib/state/mascot';
   import { addToast } from '$lib/state/toasts.svelte';
+  import { completionToast } from '$lib/state/completionToast';
+  import { projectPick } from '$lib/state/projectPick.svelte';
+  import { projectsStore } from '$lib/state/projects.svelte';
   import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
   import type { JobLogEntry, PageId, WorkspaceWorkflow } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
@@ -44,6 +47,9 @@
     router.navigate('workspace');
   }
 
+  // The project list is read once at load; the picker reads it again whenever it opens.
+  onMount(() => { void projectsStore.load(); });
+
   const baseTitle = document.title;
   $effect(() => {
     document.title = documentTitle(baseTitle, isReviewing(jobStore.current));
@@ -60,7 +66,7 @@
   onMount(() => {
     const stopJobSync = jobStore.startSync();
     const unsubscribeLifecycle = jobStore.subscribeLifecycle({
-      onComplete: () => jobEndedElsewhere('cheerful', () => addToast('Generation complete', 'success')),
+      onComplete: (outputs) => jobEndedElsewhere('cheerful', () => completionToast(outputs, projectPick.current)),
       onFailed: () => jobEndedElsewhere('sad', () => addToast(failureToastText(jobStore.current?.message, jobStore.queuedJobs.length > 0), 'error')),
       onCancelled: () => jobEndedElsewhere('surprised'),
       onLost: () => jobEndedElsewhere('surprised'),

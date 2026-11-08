@@ -1,20 +1,25 @@
 <script lang="ts">
-  import { onDestroy, onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { errorText } from '$lib/api/client';
   import { keepLoadedTail } from '$lib/state/pageMerge';
   import { galleryMemory, workspaceMemory } from '$lib/state/pageMemory';
+  import { emptySlotsHolding } from '$lib/state/assetRemoval';
+  import { projectPick } from '$lib/state/projectPick.svelte';
+  import { moveAndReconcile } from '$lib/state/moveAndReconcile';
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
-  import { galleryStore, type GalleryQuery, type MediaFilter, type SortOrder } from '$lib/state/gallery.svelte';
+  import { galleryStore, type GalleryQuery, type SortOrder } from '$lib/state/gallery.svelte';
+  import type { MediaFilter } from '$lib/state/galleryFilter';
+  import { belongsToView } from '$lib/state/viewMoves';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
   import { audioTrackParams, extendParams, referenceParams, reuseParams, useAsState, voiceParams, type AudioUseTarget, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { requestReference } from '$lib/state/pendingReference.svelte';
   import { startUpscale } from '$lib/state/upscale';
-  import type { GalleryAsset, UpscaleFactor, UpscaleMethod } from '$lib/types';
+  import type { GalleryAsset, MoveResult, UpscaleFactor, UpscaleMethod } from '$lib/types';
   import { Button, Spinner } from '$lib/components/atoms';
-  import { Alert, AssetTile, AssetViewer, EmptyState, PageHeader, Select, requestConfirm } from '$lib/components/molecules';
+  import { Alert, AssetTile, AssetViewer, EmptyState, MoveMenu, PageHeader, Select, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
@@ -45,6 +50,11 @@
   let selected = $state<Set<string>>(new Set());
   let deletingIds = $state<Set<string>>(new Set());
   let bulkDeleteRuns = $state(0);
+  // The moves started and not yet answered (they run in turn); the bulk Move button's list is anchored at the button in the header or the select bar.
+  let movesPending = $state(0);
+  const moving = $derived(movesPending > 0);
+  let bulkMoveOpen = $state(false);
+  let bulkMoveAnchor = $state<HTMLElement | null>(null);
 
   let selectedAsset = $state<GalleryAsset | null>(null);
   let lightboxOpen = $state(false);
@@ -54,9 +64,37 @@
   const deletableSelectedCount = $derived(
     Array.from(selected).filter((id) => !deletingIds.has(id)).length
   );
+  const movableSelection = $derived(assets.filter((asset) => selected.has(asset.id) && !deletingIds.has(asset.id)));
+  // Where the selected files sit when they share it; undefined for a mix, which checks no row.
+  const selectionProject = $derived.by<string | null | undefined>(() => {
+    const first = movableSelection[0];
+    return first && movableSelection.every((asset) => asset.project === first.project) ? first.project : undefined;
+  });
   const hasMore = $derived(page < totalPages);
   const emptyState = $derived(assets.length === 0 && !loading && !error);
   const filteredEmptyState = $derived(emptyState && mediaFilter !== 'all');
+  // Not in a project lists the files no project holds; it is offered with All files only, since a project's files are all in it.
+  const mediaOptions = $derived([
+    { value: 'all', label: 'All media' },
+    { value: 'image', label: 'Images only' },
+    { value: 'video', label: 'Videos only' },
+    { value: 'audio', label: 'Audio only' },
+    ...(projectPick.current === null ? [{ value: 'no_project', label: 'Not in a project' }] : []),
+  ]);
+  /** Whether the view shown keeps a moved file. */
+  function inView(asset: GalleryAsset): boolean {
+    return belongsToView(asset, mediaFilter, projectPick.current);
+  }
+  const emptyTitle = $derived(
+    filteredEmptyState ? 'No matching assets'
+      : projectPick.current !== null ? `Nothing in ${projectPick.current} yet`
+      : 'No generated assets yet'
+  );
+  const emptyBody = $derived(
+    filteredEmptyState ? (mediaFilter === 'no_project' ? 'Every file is in a project.' : `No ${mediaFilter} assets match the current gallery filter.`)
+      : projectPick.current !== null ? 'New work saves here. To add existing files, switch to All files and use Move to project.'
+      : 'Generated outputs appear here after a job completes.'
+  );
 
 
   // View changes and mutations are independent commit authorities. Every request
@@ -78,9 +116,10 @@
     // behind it; the first visit loads into placeholder tiles.
     const visit = galleryMemory.get();
     if (visit) {
-      mediaFilter = visit.filter;
+      // A project picked elsewhere since the visit has no files outside a project to show.
+      mediaFilter = visit.filter === 'no_project' && projectPick.current !== null ? 'all' : visit.filter;
       sortOrder = visit.sort;
-      shownQuery = { filter: visit.filter, sort: visit.sort };
+      shownQuery = { filter: mediaFilter, sort: visit.sort };
     }
     // The store may already hold this view: from the last visit, or the strip's list on the first one.
     const known = galleryStore.view({ filter: mediaFilter, sort: sortOrder }).assets.length > 0;
@@ -152,7 +191,7 @@
     // from an invalidated replacement request keep hiding those assets.
     error = null;
     try {
-      const result = await getGallery(1, filter, sort);
+      const result = await getGallery(1, filter, sort, projectPick.current);
       if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) return;
       const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
       const pageOne = result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
@@ -207,7 +246,7 @@
     const requestedSort = sortOrder;
     loadingMore = true;
     try {
-      const result = await getGallery(requestedPage, requestedFilter, requestedSort);
+      const result = await getGallery(requestedPage, requestedFilter, requestedSort, projectPick.current);
       if (!requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort)) return;
       // Page one can reset pagination depth without changing the query. Do not
       // append a response that would leave a gap in the current page sequence.
@@ -244,6 +283,19 @@
     _viewGeneration += 1;
     void loadPageOne(filter, sort, _viewGeneration, _mutationRevision);
   }
+
+  // A new pick replaces the view like a filter change does (selection cleared, viewer closed, responses from the old
+  // project dropped) and starts at the top; filter and sort stay. The first run only records the pick.
+  let _shownPick = projectPick.current;
+  $effect(() => {
+    const pick = projectPick.current;
+    if (pick === _shownPick) return;
+    _shownPick = pick;
+    untrack(() => {
+      beginReplacementView(pick !== null && mediaFilter === 'no_project' ? 'all' : mediaFilter, sortOrder);
+      if (scrollRegion) scrollRegion.scrollTop = 0;
+    });
+  });
 
   function onFilterChange(value: MediaFilter): void {
     beginReplacementView(value, sortOrder);
@@ -346,6 +398,77 @@
     }
   }
 
+  function moveSingle(asset: GalleryAsset, project: string | null): Promise<void> {
+    return moveFiles([asset], project);
+  }
+
+  async function moveFiles(targets: GalleryAsset[], project: string | null): Promise<void> {
+    const movable = targets.filter((asset) => !deletingIds.has(asset.id) && !_successfullyDeletedIds.has(asset.id));
+    if (movable.length === 0) return;
+    movesPending += 1;
+    try {
+      // The position the viewer steps from if its file leaves: read before the move changes the list.
+      const activeIndex = selectedAsset ? Math.max(0, assets.findIndex((asset) => asset.id === selectedAsset!.id)) : 0;
+      // A move started while another runs waits its turn. A file that left the list or was deleted meanwhile is the
+      // server's to answer: it reports that file as failed and moves the rest.
+      const result = await moveAndReconcile(movable, project, workspaceMemory.get());
+      if (result) reconcileMoves(movable, result, activeIndex);
+    } finally {
+      movesPending -= 1;
+    }
+  }
+
+  /**
+   * Bring the page in line with a move the shared state already took in. A moved file keeps its place under its new ID where
+   * it still belongs to the view and leaves where it does not. Moved IDs are never recorded as deleted: a file moved back
+   * regains its old ID and must show. Files already in the target are done with and leave the selection; failed ones stay.
+   */
+  function reconcileMoves(targets: readonly GalleryAsset[], result: MoveResult, activeIndex: number): void {
+    const moves = result.moved;
+    const failedIds = new Set(result.failed.map((failure) => failure.id));
+    const settledIds = new Set(targets.map((asset) => asset.id).filter((id) => !failedIds.has(id)));
+    const visibleIds = new Set(assets.map((asset) => asset.id));
+    selected = new Set(Array.from(selected).filter((id) => !settledIds.has(id) && visibleIds.has(id)));
+    if (moves.length === 0) return;
+    const movedFrom = new Set(moves.map((move) => move.from));
+
+    // The viewer follows a file that stays under its new ID.
+    let viewerLeft = false;
+    if (selectedAsset && movedFrom.has(selectedAsset.id)) {
+      const current = moves.find((move) => move.from === selectedAsset!.id)!.asset;
+      const stays = assets.find((asset) => asset.id === current.id);
+      if (stays) selectAsset(stays);
+      else viewerLeft = true;
+    }
+
+    // Only a project view loses files to a move; there the list refills, as after a delete.
+    afterListShrank(activeIndex, viewerLeft, moves.some((move) => !inView(move.asset)));
+  }
+
+  /**
+   * Settle the page after files left the list. The viewer, when its file left, moves to the neighbour at its old position
+   * and closes with none. With *refill*, a mutation invalidates every earlier replacement, pagination and refill, and page
+   * one loads again at once, or once the viewer closes: refilling replaces the list, which would pull the viewer back off
+   * later pages.
+   */
+  function afterListShrank(activeIndex: number, viewerLeft: boolean, refill: boolean): void {
+    if (viewerLeft) {
+      const next = assets[Math.min(activeIndex, assets.length - 1)] ?? null;
+      if (lightboxOpen && next) selectAsset(next);
+      else clearActiveAsset();
+    }
+    if (!refill) return;
+    // The refill deliberately captures the latest query, not the query at click time.
+    _mutationRevision += 1;
+    _viewGeneration += 1;
+    if (lightboxOpen) {
+      _refillAfterViewer = true;
+      _pagesShifted = true;
+      return;
+    }
+    refillAfterMutation();
+  }
+
   function markDeleting(ids: string[], pending: boolean): void {
     const next = new Set(deletingIds);
     for (const id of ids) {
@@ -365,42 +488,16 @@
     // The store takes them out of every list and count: this view, the strip, and any other query loaded.
     galleryStore.removeAssets(newlyDeleted);
     jobStore.removeOutputs(deletedIds);
-    // A workspace reference pointing at a deleted file would fail the next run.
-    // Without a context the model's capabilities are unknown, so the start image is assumed usable.
-    if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.referenceImagePath)) {
-      draft.setStartImage('image', null, null);
-    }
-    if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.firstFramePath)) {
-      draft.setStartImage('video', null, null);
-    }
-    if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.endImagePath)) {
-      draft.setLastFrame(null);
-    }
-    // A reference row stays, as in the Workspace; the Workspace flags it missing when it next checks its images.
+    // A workspace slot pointing at a deleted file would fail the next run. Without a context the model's capabilities
+    // are unknown, so the start image is assumed usable. A reference row stays, as in the Workspace; the Workspace
+    // flags it missing when it next checks its images.
+    emptySlotsHolding(newlyDeleted.map((asset) => asset.file_path), null);
     const visibleIds = new Set(assets.map((asset) => asset.id));
     selected = new Set(
       Array.from(selected).filter((id) => !deletedIds.has(id) && visibleIds.has(id))
     );
 
-    // The viewer moves on to the neighbouring asset; with nothing left it closes.
-    if (selectedAsset && deletedIds.has(selectedAsset.id)) {
-      const next = assets[Math.min(deletedIndex, assets.length - 1)] ?? null;
-      if (lightboxOpen && next) selectAsset(next);
-      else clearActiveAsset();
-    }
-
-    // A mutation invalidates every earlier replacement/pagination/refill. The
-    // new refill deliberately captures the latest query, not the query at click time.
-    _mutationRevision += 1;
-    _viewGeneration += 1;
-    // Refilling replaces the list with page one, which would pull the viewer back off later pages.
-    // While the viewer is open the local removal stands, and the refill runs once it closes.
-    if (lightboxOpen) {
-      _refillAfterViewer = true;
-      _pagesShifted = true;
-      return;
-    }
-    refillAfterMutation();
+    afterListShrank(deletedIndex, selectedAsset !== null && deletedIds.has(selectedAsset.id), true);
   }
 
   function refillAfterMutation(): void {
@@ -526,19 +623,14 @@
 <div id="gallery-view" class="flex min-h-0 flex-1 flex-col bg-bg-base">
   <PageHeader
     title="Gallery"
-    description="Browsing {assets.length} loaded asset{assets.length !== 1 ? 's' : ''} of {totalCount}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first."
+    description="{projectPick.current === null ? '' : `${projectPick.current} · `}Browsing {assets.length} loaded asset{assets.length !== 1 ? 's' : ''} of {totalCount}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first."
   >
     {#snippet actions()}
       <Select
         ariaLabel="Filter gallery media"
         class={compact ? 'min-w-0 flex-1' : 'w-36'}
         value={mediaFilter}
-        options={[
-          { value: 'all', label: 'All media' },
-          { value: 'image', label: 'Images only' },
-          { value: 'video', label: 'Videos only' },
-          { value: 'audio', label: 'Audio only' },
-        ]}
+        options={mediaOptions}
         onchange={(next) => onFilterChange(next as MediaFilter)}
       />
       <Select
@@ -555,6 +647,15 @@
         <Button aria-pressed={selectMode} onclick={() => { selectMode = !selectMode; if (!selectMode) selected = new Set(); }}>{selectMode ? 'Done' : 'Select'}</Button>
       {:else}
         <span class="text-ui text-text-muted">{selectedCount} selected</span>
+        <span class="inline-flex" bind:this={bulkMoveAnchor}>
+          <Button
+            aria-haspopup="menu"
+            aria-expanded={bulkMoveOpen}
+            aria-label={layout.mode === 'tall' ? 'Move selected' : undefined}
+            disabled={movableSelection.length === 0 || moving}
+            onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}
+          >{moving ? 'Moving…' : layout.mode === 'tall' ? 'Move' : 'Move selected'}</Button>
+        </span>
         <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
           {bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'}
         </Button>
@@ -573,8 +674,8 @@
     {:else if error}
       <Alert tone="error" live>{error}</Alert>
     {:else if emptyState}
-      <EmptyState title={filteredEmptyState ? 'No matching assets' : 'No generated assets yet'} class="min-h-96 justify-center">
-        <p>{filteredEmptyState ? `No ${mediaFilter} assets match the current gallery filter.` : 'Generated outputs appear here after a job completes.'}</p>
+      <EmptyState title={emptyTitle} class="min-h-96 justify-center">
+        <p>{emptyBody}</p>
         {#snippet actions()}
           {#if filteredEmptyState}
             <Button onclick={clearMediaFilter}>Show all media</Button>
@@ -590,6 +691,7 @@
           <AssetTile
             {asset}
             density="card"
+            showProject={projectPick.current === null}
             selected={selected.has(asset.id)}
             deleting={deletingIds.has(asset.id)}
             onselect={compact && !selectMode ? undefined : toggleSelect}
@@ -601,6 +703,7 @@
             onextend={extendAsset}
             onupscale={upscaleAsset}
             ondelete={deleteSingle}
+            onmove={moveSingle}
           />
         {/each}
       </div>
@@ -628,12 +731,27 @@
       <span>{selectedCount} selected</span>
       <span class="flex-1"></span>
       <Button onclick={() => { selected = new Set(assets.map((asset) => asset.id)); }}>Select all</Button>
+      <span class="inline-flex" bind:this={bulkMoveAnchor}>
+        <Button aria-haspopup="menu" aria-expanded={bulkMoveOpen} disabled={movableSelection.length === 0 || moving} onclick={() => { bulkMoveOpen = !bulkMoveOpen; }}>
+          {moving ? 'Moving…' : 'Move'}
+        </Button>
+      </span>
       <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
         {bulkDeleteRuns > 0 ? 'Deleting…' : selectedCount > 0 ? `Delete ${selectedCount}` : 'Delete'}
       </Button>
     </div>
   {/if}
 </div>
+
+<MoveMenu
+  open={bulkMoveOpen}
+  anchor={bulkMoveAnchor}
+  align="end"
+  count={movableSelection.length}
+  current={selectionProject}
+  onmove={(project) => void moveFiles(movableSelection, project)}
+  onclose={() => { bulkMoveOpen = false; }}
+/>
 
 <AssetViewer
   {assets}
@@ -654,6 +772,7 @@
   onextend={extendAsset}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}
+  onmove={moveSingle}
 />
 
 <style>

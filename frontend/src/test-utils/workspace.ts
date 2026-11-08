@@ -285,6 +285,7 @@ export function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
     thumbnail_url: '/media/output/result.png',
     filename: 'result.png',
     created_at: '2026-04-30T12:00:00Z',
+    project: null,
     workflow: 'txt2img',
     prompt: 'Test completed output',
     model: 'zit',

@@ -56,7 +56,7 @@
       {/snippet}
     </Select>
     <button type="button" class="strip-status" data-tone={status.tone} data-testid="strip-status" onclick={onstatus}>
-      <i class="strip-dot" aria-hidden="true"></i>{status.text}
+      <i class="strip-dot" aria-hidden="true"></i><span class="truncate">{status.text}</span>
     </button>
     <button type="button" class="strip-btn" aria-label="Gallery" onclick={() => router.navigate('gallery')}><Icon name="grid" size={20} /></button>
   {:else}
@@ -65,7 +65,7 @@
     <h1 class="strip-title"><button type="button" class="strip-title-btn" onclick={ontitle}>{PAGE_TITLES[currentPage]}</button></h1>
     {#if status.tone !== 'idle'}
       <button type="button" class="strip-status" data-tone={status.tone} onclick={() => router.navigate('workspace')}>
-        <i class="strip-dot" aria-hidden="true"></i>{status.text}
+        <i class="strip-dot" aria-hidden="true"></i><span class="truncate">{status.text}</span>
       </button>
     {/if}
   {/if}

@@ -12,9 +12,14 @@ const browseApiMocks = vi.hoisted(() => ({
 }));
 const layoutMock = vi.hoisted(() => ({ compact: false, mode: 'wide', coarse: false }));
 
+const projectApiMocks = vi.hoisted(() => ({ listProjects: vi.fn(), createProject: vi.fn() }));
+
 vi.mock('$lib/api/browse', () => browseApiMocks);
+vi.mock('$lib/api/projects', () => projectApiMocks);
 vi.mock('$lib/state/layoutMode.svelte', () => ({ layout: layoutMock }));
 
+import { projectPick } from '$lib/state/projectPick.svelte';
+import { projectsStore } from '$lib/state/projects.svelte';
 import { formatBytes, formatModified, formatModifiedShort, readBrowseView, readRecentPaths, SORT_CHOICES } from '$lib/state/pathBrowser';
 import { mountComponent, settle } from '../../../test-utils/mount';
 import { placesFor, stubBrowseInfo, stubBrowseMediaUrl, stubBrowsePreviewUrl } from '../../../test-utils/pathBrowser';
@@ -33,6 +38,7 @@ const FOLDERS: Record<string, BrowseListing> = {
   '/models': listing('/models', [entry('loras', '/models', 'directory'), entry('base.safetensors', '/models')]),
   '/models/loras': listing('/models/loras', [entry('ink.safetensors', '/models/loras'), entry('notes.txt', '/models/loras', 'file', false)], { hidden_count: 2 }),
   '/': listing('/', [entry('models', '/', 'directory')]),
+  '/out/Night Bus': listing('/out/Night Bus', [entry('bus.png', '/out/Night Bus')]),
 };
 
 describe('PathBrowser', () => {
@@ -73,6 +79,41 @@ describe('PathBrowser', () => {
     expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('lora_file', '', { hidden: false, all: false });
     expect(rowNames()).toEqual(['ink.safetensors', 'notes.txt']);
     expect(document.body.textContent).toContain('2 other files hidden');
+  });
+
+  describe('in a project', () => {
+    beforeEach(async () => {
+      projectApiMocks.listProjects.mockResolvedValue([{ name: 'Night Bus', path: '/out/Night Bus' }]);
+      await projectsStore.load();
+      projectPick.set('Night Bus');
+    });
+
+    afterEach(() => projectPick.set(null));
+
+    it('opens an empty media field in the picked project\'s folder', async () => {
+      await open({ purpose: 'reference_image' });
+
+      expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('reference_image', '/out/Night Bus', expect.anything());
+    });
+
+    it('opens a field that has a value at that value', async () => {
+      await open({ purpose: 'source_video', initialPath: '/models' });
+
+      expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('source_video', '/models', expect.anything());
+    });
+
+    it('leaves a purpose that holds no project media at its own place', async () => {
+      await open({ purpose: 'prompt_file' });
+
+      expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('prompt_file', '', expect.anything());
+    });
+
+    it('opens at the purpose\'s place with All files', async () => {
+      projectPick.set(null);
+      await open({ purpose: 'reference_image' });
+
+      expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('reference_image', '', expect.anything());
+    });
   });
 
   it('chooses a file by double-click, closes and remembers it', async () => {

@@ -23,6 +23,11 @@ const COMPLETION_LIMIT = 8;
 // Absolute host paths: POSIX, home-relative, Windows drive or UNC.
 const ABSOLUTE_RE = /^(\/|~|[A-Za-z]:[\\/]|\\\\)/;
 
+/** Return the folder a picker opens in when its field is empty: the picked project's folder for media a project holds, else null (the purpose's own place). */
+export function pickerStart(purpose: BrowsePurposeName, projectPath: string | null): string | null {
+  return purpose === 'reference_image' || purpose === 'audio_track' || purpose === 'source_video' ? projectPath : null;
+}
+
 /** Split typed text into the folder to list and the name prefix to match, or null when it isn't an absolute path yet. */
 export function completionTarget(text: string): CompletionTarget | null {
   if (text === '~') return { dir: '~/', prefix: '' };

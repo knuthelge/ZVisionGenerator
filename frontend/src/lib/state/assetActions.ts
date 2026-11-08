@@ -29,6 +29,8 @@ export interface AssetActionHandlers {
   onuseaudio?: (asset: GalleryAsset, target: AudioUseTarget) => void;
   onupscale?: (asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod) => void;
   ondelete?: (asset: GalleryAsset, options?: DeleteOptions) => void;
+  /** Move the asset to a project, or out of every project with null. */
+  onmove?: (asset: GalleryAsset, project: string | null) => void;
 }
 
 /** The Use as hints of the audio targets. */

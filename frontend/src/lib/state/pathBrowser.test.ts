@@ -15,6 +15,7 @@ import {
   matchCompletions,
   middleTruncate,
   orderAfterClick,
+  pickerStart,
   previewFacts,
   readBrowseView,
   readRecentPaths,
@@ -356,5 +357,23 @@ describe('previewFacts', () => {
   it('reads a dash for the facts the server has not sent', () => {
     expect(facts('video', null)).toMatchObject({ Length: '—', Frames: '—', 'Frame rate': '—', Pixels: '—' });
     expect(facts('image', null).Pixels).toBe('—');
+  });
+});
+
+describe('pickerStart', () => {
+  it('opens the media pickers in the project folder', () => {
+    for (const purpose of ['reference_image', 'audio_track', 'source_video'] as const) {
+      expect(pickerStart(purpose, '/out/Night Bus')).toBe('/out/Night Bus');
+    }
+  });
+
+  it('leaves every other purpose at its own place', () => {
+    for (const purpose of ['prompt_file', 'prompt_file_folder', 'output_directory', 'checkpoint_file', 'lora_file'] as const) {
+      expect(pickerStart(purpose, '/out/Night Bus')).toBeNull();
+    }
+  });
+
+  it('has no start without a project', () => {
+    expect(pickerStart('reference_image', null)).toBeNull();
   });
 });

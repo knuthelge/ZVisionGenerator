@@ -1,15 +1,22 @@
 import { api } from './client';
-import type { GalleryPage, JobContext, JobDownloadPlan, UpscaleFactor, UpscaleMethod } from '$lib/types';
+import type { GalleryPage, JobContext, JobDownloadPlan, MoveResult, UpscaleFactor, UpscaleMethod } from '$lib/types';
 
-export function getGallery(page: number = 1, filter?: string, sortOrder?: string): Promise<GalleryPage> {
+/** One page of the Gallery; `project` narrows it to that project's files, and null or absent lists everything. */
+export function getGallery(page: number = 1, filter?: string, sortOrder?: string, project?: string | null): Promise<GalleryPage> {
   const params = new URLSearchParams({ page: String(page) });
   if (filter && filter !== 'all') params.set('filter', filter);
   if (sortOrder) params.set('sort_order', sortOrder);
+  if (project) params.set('project', project);
   return api.get<GalleryPage>(`/api/gallery?${params}`);
 }
 
 export function deleteAsset(assetId: string): Promise<void> {
   return api.delete(`/api/gallery/${encodeURIComponent(assetId)}`);
+}
+
+/** Move files into a project, or to the top of the output folder with null; reports what moved (with its new ID) and what failed. */
+export function moveAssets(assetIds: string[], project: string | null): Promise<MoveResult> {
+  return api.post<MoveResult>('/api/gallery/move', { asset_ids: assetIds, project });
 }
 
 /** Queue a job that upscales an existing image; resolves to the job, like a generate. */

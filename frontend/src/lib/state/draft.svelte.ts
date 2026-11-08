@@ -1145,6 +1145,50 @@ export const draft = {
     this.saveDraft();
   },
 
+  /**
+   * Point every place the draft holds a file by path at the file's new path after a move: the start image, first and last
+   * frame, the reference rows, the Video and Extend audio tracks, the voice and the extend source. Nothing else changes, so
+   * the Start at of a track, the text and the settings stay, and the extend source keeps its prefill. A moved file exists, so
+   * its path leaves the missing-file flags; the row at its new path is checked afresh with the others. A draft that holds
+   * none of the moved paths is left as it is.
+   *
+   * @param moved Each moved file's old path mapped to its new one.
+   * @returns Whether the extend source moved, so the caller can inspect it again: the folder it saves beside is part of what
+   *   the server reported.
+   */
+  retargetPaths(moved: ReadonlyMap<string, string>): boolean {
+    const before = _draft;
+    const held = [
+      ...slotPaths(before), before.audioTrackPath, before.extendAudioTrackPath, before.voicePath, before.extendSourcePath,
+      before.extendPrefill?.path, before.extendPrefill?.audioTrack?.path, before.enhancedFrom?.sourceVideoPath,
+    ];
+    if (!held.some((path) => path && moved.has(path))) return false;
+    const to = (path: string | null): string | null => (path === null ? null : (moved.get(path) ?? path));
+    const toPath = (path: string): string => moved.get(path) ?? path;
+    const extendSourcePath = to(before.extendSourcePath);
+    const prefill = before.extendPrefill;
+    _draft = {
+      ...before,
+      referenceImagePath: to(before.referenceImagePath),
+      firstFramePath: to(before.firstFramePath),
+      endImagePath: to(before.endImagePath),
+      referenceImagePaths: before.referenceImagePaths.map(toPath),
+      missingReferencePaths: before.missingReferencePaths.filter((path) => !moved.has(path)),
+      audioTrackPath: to(before.audioTrackPath),
+      extendAudioTrackPath: to(before.extendAudioTrackPath),
+      voicePath: to(before.voicePath),
+      extendSourcePath,
+      extendPrefill: prefill === null ? null : {
+        ...prefill,
+        path: toPath(prefill.path),
+        audioTrack: prefill.audioTrack ? { ...prefill.audioTrack, path: toPath(prefill.audioTrack.path) } : prefill.audioTrack,
+      },
+      enhancedFrom: before.enhancedFrom?.sourceVideoPath ? { ...before.enhancedFrom, sourceVideoPath: toPath(before.enhancedFrom.sourceVideoPath) } : before.enhancedFrom,
+    };
+    this.saveDraft();
+    return extendSourcePath !== before.extendSourcePath;
+  },
+
   /** Forget the extend source's facts, for example when its file is gone; the chosen path stays. */
   clearExtendSource(): void {
     _extendSource = null;
