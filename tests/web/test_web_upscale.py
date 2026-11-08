@@ -803,7 +803,8 @@ def _video_asset_json(tmp_path, name, data, web_config=None):
         return _asset_json(tmp_path, name, web_config or _web_config(tmp_path, seedvr2=_video_setup()))
 
 
-def test_gallery_video_offers_one_2x_option_at_the_recorded_size(tmp_path, video_gallery):
+def test_gallery_video_offers_one_2x_option_at_the_recorded_size(tmp_path, video_gallery, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.sys.platform", "linux")
     config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "width": 768, "height": 448, "frame_count": 121}
 
     payload = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(config, size=(1536, 896)))
