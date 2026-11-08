@@ -66,7 +66,7 @@ In one test session, a person and an agent made five short films and music video
 **Making a timeline:**
 
 - Studio is a page in the top navigation, with a list of the project's timelines to open.
-- **New timeline** asks for a name, a size (16:9, 9:16 or 1:1) and a frame rate (24 fps), and saves it in the current [project](projects.md) folder. A project can hold several timelines. With no project picked, New timeline asks for one first.
+- **New timeline** asks for a name, a size (16:9, 9:16 or 1:1) and a frame rate (24 fps), and saves it in the current [project](archive/projects.md) folder. A project can hold several timelines. With no project picked, New timeline asks for one first.
 - Everything generated from a timeline is saved in the timeline's project, whatever project is picked in the top bar.
 
 **The frame:**
@@ -245,12 +245,14 @@ Moving a clip that follows the audio takes it out of sync with that audio. The c
 
 The Studio needs two proposals that aren't built yet:
 
-- **[Projects](projects.md):** a timeline lives in a project folder. A project can hold several timelines.
+- **[Projects](archive/projects.md):** a timeline lives in a project folder. A project can hold several timelines.
 - **[Grabbing a frame](video-frame-grab.md):** taking an exact frame out of a clip, here for use as a first or last frame as well.
 
 **Genuinely new:**
 
 - **The timeline file.** What is on which lane and when, which take is picked, and which job fills which slot.
+  - It stores the paths of the files it uses relative to the project folder, so renaming the folder in a file manager doesn't break the timeline.
+  - Move to project renames a file, so the design must decide what Move does to a file a timeline uses: the timeline follows the file, Move is refused with the reason, or the timeline shows the item as missing.
 - **The sound under a range.** The ticked lanes for the range are mixed into one file that becomes the clip's audio track. When the range sits inside a single item on a single ticked lane, that item's file and start are used directly.
   - The mixed files and grabbed frames are saved in a hidden working folder next to the timeline, so a retake can use them again.
   - The gallery skips that folder, so they don't show up as outputs. This differs from a frame grabbed by hand in the viewer, which is an output in its own right.
